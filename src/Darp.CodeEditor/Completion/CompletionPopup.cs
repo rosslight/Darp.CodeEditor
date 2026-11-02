@@ -64,7 +64,8 @@ internal sealed class CompletionPopup
         ApplyTheme(EditorTheme.Default);
     }
 
-    public bool IsOpen => _session is not null;
+    /// <summary>True while a list is shown; not during the invisible warm-up, which must not take any keys.</summary>
+    public bool IsOpen => _session is { IsWarmUp: false };
 
     /// <summary>Raised when a session ends, by commit, cancellation or because the caret left the word.</summary>
     public event EventHandler? Closed;
@@ -99,10 +100,69 @@ internal sealed class CompletionPopup
         TextArea textArea = _editor.TextArea;
         textArea.Caret.PositionChanged += OnCaretPositionChanged;
         textArea.LostFocus += OnLostFocus;
+        // A warm-up may have been interrupted while the content was invisible.
+        _content.Opacity = 1;
+        _content.IsHitTestVisible = true;
         PlaceDescription(startOffset);
         ShowDescription();
         _popup.Show(startOffset);
         return true;
+    }
+
+    /// <summary>
+    /// Does the first-use work of the popup while the UI is idle, so the first list a user opens is as fast as later
+    /// ones: JIT compilation in JIT hosts, the first layout and text rendering of list and description. The first list
+    /// took 25-30 ms otherwise. Each step is a separate dispatcher job behind input and rendering, none over 5 ms.
+    /// </summary>
+    public async Task WarmUpAsync()
+    {
+        TextView textView = _editor.TextArea.TextView;
+        if (_session is not null || !textView.VisualLinesValid || textView.VisualLines.Count == 0)
+            return;
+        int offset = textView.VisualLines[0].FirstDocumentLine.Offset;
+        TextDocument document = _editor.Document;
+        var session = new Session(
+            s_warmUpItems,
+            CreateAnchor(document, offset, AnchorMovementType.BeforeInsertion),
+            CreateAnchor(document, offset, AnchorMovementType.AfterInsertion),
+            closeWhenCaretAtStart: false,
+            _ => new TextBlock { Text = "Warm-up", TextWrapping = TextWrapping.Wrap, FontFamily = _editor.FontFamily }
+        )
+        {
+            IsWarmUp = true,
+        };
+        _session = session;
+        _view.SetItems(session.Items);
+        // Every path of the matcher (prefix, ignoring case, word parts, substring, no match), often enough for the
+        // runtime to compile it fully before the first real list.
+        foreach (string query in (string[])["", "Warm", "warm", "wu", "mup", "zz"])
+            Filter(session, query);
+        if (!await YieldAsync(session))
+            return;
+        PlaceDescription(offset);
+        ShowDescription();
+        _content.Measure(Size.Infinity);
+        if (!await YieldAsync(session))
+            return;
+
+        // Shown invisibly for one frame: hit testing off, fully transparent.
+        _content.Opacity = 0;
+        _content.IsHitTestVisible = false;
+        try
+        {
+            _popup.Show(offset);
+            var rendered = new TaskCompletionSource();
+            TopLevel.GetTopLevel(textView)?.RequestAnimationFrame(_ => rendered.TrySetResult());
+            await rendered.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            await YieldAsync(session);
+        }
+        finally
+        {
+            if (_session == session)
+                Hide();
+            _content.Opacity = 1;
+            _content.IsHitTestVisible = true;
+        }
     }
 
     public void Hide()
@@ -117,7 +177,7 @@ internal sealed class CompletionPopup
     /// <summary>Replaces the word with the selected item.</summary>
     public void Commit()
     {
-        if (_session is not { } session || _view.SelectedItem is not { } index)
+        if (_session is not { IsWarmUp: false } session || _view.SelectedItem is not { } index)
             return;
         int start = session.Start.Offset;
         int length = session.End.Offset - start;
@@ -171,6 +231,13 @@ internal sealed class CompletionPopup
         return anchor;
     }
 
+    /// <summary>Lets input and rendering run. Returns false when a real session replaced the warm-up meanwhile.</summary>
+    private async Task<bool> YieldAsync(Session warmUp)
+    {
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
+        return _session == warmUp;
+    }
+
     private void OnClosed()
     {
         if (_session is null)
@@ -199,22 +266,29 @@ internal sealed class CompletionPopup
             return session.Matches.Length > 0;
         // Typing on narrows the previous matches; anything else starts from all items.
         IReadOnlyList<CompletionItem> items = session.Items;
-        IEnumerable<int> candidates =
+        int[]? candidates =
             session.Query is { Length: > 0 } previous && query.StartsWith(previous, StringComparison.Ordinal)
                 ? session.Matches
-                : Enumerable.Range(0, items.Count);
-        session.Matches =
-        [
-            .. candidates
-                .Select(index => (Index: index, Score: CompletionMatcher.Score(items[index].FilterText, query)))
-                .Where(m => m.Score > 0)
-                .OrderByDescending(m => m.Score)
-                .ThenBy(m => m.Index)
-                .Select(m => m.Index),
-        ];
+                : null;
+        int count = candidates?.Length ?? items.Count;
+        // One sortable key per match: the score inverted in the high bits, the item index in the low bits.
+        long[] keys = new long[count];
+        int found = 0;
+        for (int i = 0; i < count; i++)
+        {
+            int index = candidates?[i] ?? i;
+            int score = CompletionMatcher.Score(items[index].FilterText, query);
+            if (score > 0)
+                keys[found++] = ((long)(CompletionMatcher.MaxScore - score) << 32) | (uint)index;
+        }
+        Array.Sort(keys, 0, found);
+        int[] matches = new int[found];
+        for (int i = 0; i < found; i++)
+            matches[i] = (int)keys[i];
+        session.Matches = matches;
         session.Query = query;
-        _view.SetMatches(session.Matches);
-        return session.Matches.Length > 0;
+        _view.SetMatches(matches);
+        return found > 0;
     }
 
     private void OnCaretPositionChanged(object? sender, EventArgs e)
@@ -293,6 +367,13 @@ internal sealed class CompletionPopup
         _popup.HorizontalOffset = dock == Dock.Left ? -(listShift + width) : -listShift;
     }
 
+    private static readonly CompletionItem[] s_warmUpItems =
+    [
+        .. Enumerable
+            .Range(0, 40)
+            .Select(i => new CompletionItem($"WarmUp{i}", $"WarmUp{i}", $"WarmUp{i}", CompletionItemKind.Method, "()")),
+    ];
+
     private sealed class Session(
         IReadOnlyList<CompletionItem> items,
         TextAnchor start,
@@ -306,6 +387,7 @@ internal sealed class CompletionPopup
         public TextAnchor End { get; } = end;
         public bool CloseWhenCaretAtStart { get; } = closeWhenCaretAtStart;
         public Func<int, Control> CreateDescription { get; } = createDescription;
+        public bool IsWarmUp { get; init; }
         public Dictionary<int, Control> Descriptions { get; } = [];
         public string? Query { get; set; }
         public int[] Matches { get; set; } = [];

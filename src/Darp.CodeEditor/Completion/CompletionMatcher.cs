@@ -3,13 +3,15 @@ namespace Darp.CodeEditor.Completion;
 /// <summary>Scores how well a completion item matches what the user typed, with ordinal comparisons only.</summary>
 internal static class CompletionMatcher
 {
-    /// <returns>Higher is better; 0 means the item does not match.</returns>
+    public const int MaxScore = 100;
+
+    /// <returns>Higher is better, up to <see cref="MaxScore"/>; 0 means the item does not match.</returns>
     public static int Score(string text, string query)
     {
         if (query.Length == 0)
             return 1;
         if (text.StartsWith(query, StringComparison.Ordinal))
-            return text.Length == query.Length ? 100 : 90;
+            return text.Length == query.Length ? MaxScore : 90;
         if (text.StartsWith(query, StringComparison.OrdinalIgnoreCase))
             return text.Length == query.Length ? 85 : 80;
         if (IsWordPartMatch(text, query))

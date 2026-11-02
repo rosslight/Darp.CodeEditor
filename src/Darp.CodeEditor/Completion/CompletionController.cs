@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using Avalonia.Threading;
 using AvaloniaEdit.Document;
 using Darp.CodeEditor.LanguageServices;
 using Darp.CodeEditor.Theming;
@@ -19,7 +20,7 @@ internal sealed class CompletionController
 {
     private readonly CodeEditor _editor;
     private readonly LanguageFeatures _features;
-    private readonly CompletionPopup _popup;
+    private CompletionPopup? _popup;
     private Session? _session;
 
     public CompletionController(CodeEditor editor, LanguageFeatures features)
@@ -30,12 +31,26 @@ internal sealed class CompletionController
         editor.TextArea.TextEntered += OnTextEntered;
         editor.DocumentChanged += (_, _) => Cancel();
         editor.AddHandler(InputElement.KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
-        _popup = new CompletionPopup(editor);
-        _popup.Closed += (_, _) => OnPopupClosed();
+        editor.TextArea.TextView.VisualLinesChanged += OnFirstLayout;
     }
 
     /// <summary>True while the completion list is shown; it takes the navigation keys then.</summary>
-    public bool IsOpen => _popup.IsOpen;
+    public bool IsOpen => _popup?.IsOpen == true;
+
+    /// <summary>Created after the first frame, so it adds nothing to the time until the editor shows text.</summary>
+    private CompletionPopup Popup
+    {
+        get
+        {
+            if (_popup is null)
+            {
+                _popup = new CompletionPopup(_editor);
+                _popup.ApplyTheme(_editor.EditorTheme);
+                _popup.Closed += (_, _) => OnPopupClosed();
+            }
+            return _popup;
+        }
+    }
 
     public void Cancel()
     {
@@ -43,10 +58,28 @@ internal sealed class CompletionController
             return;
         _session = null;
         session.Cancellation.Cancel();
-        _popup.Hide();
+        _popup?.Hide();
     }
 
-    public void ApplyTheme(EditorTheme theme) => _popup.ApplyTheme(theme);
+    public void ApplyTheme(EditorTheme theme) => _popup?.ApplyTheme(theme);
+
+    private void OnFirstLayout(object? sender, EventArgs e)
+    {
+        _editor.TextArea.TextView.VisualLinesChanged -= OnFirstLayout;
+        Dispatcher.UIThread.Post(() => _ = WarmUpAsync(), DispatcherPriority.Background);
+    }
+
+    private async Task WarmUpAsync()
+    {
+        try
+        {
+            await Popup.WarmUpAsync();
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceWarning($"Warming up the completion list failed: {exception}");
+        }
+    }
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
@@ -147,7 +180,7 @@ internal sealed class CompletionController
         }
 
         long uiStart = Stopwatch.GetTimestamp();
-        bool shown = _popup.Open(
+        bool shown = Popup.Open(
             list.Items,
             wordStart,
             Math.Max(caret, wordEnd),
