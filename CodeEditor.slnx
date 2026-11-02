@@ -19,5 +19,8 @@
     <Project Path="tests/Darp.CodeEditor.Tests/Darp.CodeEditor.Tests.csproj" />
     <Project Path="tests/Darp.CodeEditor.CSharp.Server.Tests/Darp.CodeEditor.CSharp.Server.Tests.csproj" />
     <Project Path="tests/Darp.CodeEditor.CSharp.TestGlobals/Darp.CodeEditor.CSharp.TestGlobals.csproj" />
+    <Project Path="tests/Darp.CodeEditor.CSharp.Execution.Tests/Darp.CodeEditor.CSharp.Execution.Tests.csproj" />
+    <Project Path="tests/Darp.CodeEditor.CSharp.Execution.TestApi/Darp.CodeEditor.CSharp.Execution.TestApi.csproj" />
+    <Project Path="tests/Darp.CodeEditor.CSharp.Execution.TestHost/Darp.CodeEditor.CSharp.Execution.TestHost.csproj" />
   </Folder>
 </Solution>
