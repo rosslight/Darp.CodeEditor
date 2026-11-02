@@ -44,6 +44,10 @@ public static class LspMethods
     public static RequestType<SemanticTokensRangeParams, SemanticTokens> SemanticTokensRange { get; } =
         new("textDocument/semanticTokens/range", Json.SemanticTokensRangeParams, Json.SemanticTokens);
 
+    /// <summary>The tokens of the whole document; answers null when there are none.</summary>
+    public static RequestType<SemanticTokensParams, SemanticTokens> SemanticTokensFull { get; } =
+        new("textDocument/semanticTokens/full", Json.SemanticTokensParams, Json.SemanticTokens);
+
     public static NotificationType<PublishDiagnosticsParams> PublishDiagnostics { get; } =
         new("textDocument/publishDiagnostics", Json.PublishDiagnosticsParams);
 

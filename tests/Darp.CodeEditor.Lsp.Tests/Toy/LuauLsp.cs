@@ -119,6 +119,12 @@ internal sealed class LuauLsp : IAsyncDisposable
                     },
                     Hover = new HoverClientCapabilities { ContentFormat = [MarkupKind.Markdown, MarkupKind.PlainText] },
                     PublishDiagnostics = new PublishDiagnosticsClientCapabilities { VersionSupport = true },
+                    SemanticTokens = new SemanticTokensClientCapabilities(
+                        new SemanticTokensRequests(Range: true, Full: true),
+                        ["namespace", "type", "class", "function", "method", "property", "variable", "parameter"],
+                        ["readonly", "defaultLibrary"],
+                        ["relative"]
+                    ),
                 },
             }
         )

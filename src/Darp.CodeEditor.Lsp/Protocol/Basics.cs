@@ -72,6 +72,9 @@ public enum DiagnosticTag
 
 public sealed record SemanticTokensRangeParams(TextDocumentIdentifier TextDocument, DocumentRange Range);
 
+/// <summary>Parameters of <c>textDocument/semanticTokens/full</c>, for servers that classify only whole documents.</summary>
+public sealed record SemanticTokensParams(TextDocumentIdentifier TextDocument);
+
 /// <param name="Data">
 /// Five integers per token: line and start character relative to the previous token, length, index into
 /// <see cref="SemanticTokensLegend.TokenTypes"/>, and modifier bits.

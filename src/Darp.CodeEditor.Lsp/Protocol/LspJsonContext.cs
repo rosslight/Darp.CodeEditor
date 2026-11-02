@@ -30,6 +30,7 @@ namespace Darp.CodeEditor.Lsp.Protocol;
 [JsonSerializable(typeof(SignatureHelp))]
 [JsonSerializable(typeof(PublishDiagnosticsParams))]
 [JsonSerializable(typeof(SemanticTokensRangeParams))]
+[JsonSerializable(typeof(SemanticTokensParams))]
 [JsonSerializable(typeof(SemanticTokens))]
 [JsonSerializable(typeof(CancelParams))]
 [JsonSerializable(typeof(LogMessageParams))]
