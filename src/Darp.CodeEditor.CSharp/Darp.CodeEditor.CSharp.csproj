@@ -3,6 +3,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <!-- Roslyn Workspaces/Features compose their services with System.Composition (reflection): JIT only. -->
     <IsAotCompatible>false</IsAotCompatible>
+    <Description>C# script language service for Darp.CodeEditor, built on Roslyn. Needs the JIT.</Description>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Darp.CodeEditor\Darp.CodeEditor.csproj" />
