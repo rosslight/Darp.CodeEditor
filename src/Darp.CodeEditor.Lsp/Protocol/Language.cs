@@ -143,8 +143,11 @@ public enum InsertTextFormat
 
 public sealed record HoverParams(TextDocumentIdentifier TextDocument, Position Position);
 
-/// <remarks>Reads markup content only, not the deprecated marked strings.</remarks>
-public sealed record Hover(MarkupContent Contents, DocumentRange? Range = null);
+/// <param name="Contents">Also read from a plain string, a marked string in Markdown; arrays of them are not read.</param>
+public sealed record Hover(
+    [property: JsonConverter(typeof(HoverContentsConverter))] MarkupContent Contents,
+    DocumentRange? Range = null
+);
 
 public sealed record SignatureHelpParams(
     TextDocumentIdentifier TextDocument,

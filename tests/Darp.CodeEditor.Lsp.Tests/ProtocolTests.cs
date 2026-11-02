@@ -101,6 +101,16 @@ public sealed class ProtocolTests
             );
     }
 
+    [Theory]
+    [InlineData("""{"kind":"plaintext","value":"x"}""", "plaintext")]
+    [InlineData("\"**x**\"", "markdown")]
+    public void Hover_contents_are_read_from_markup_content_or_a_plain_string(string contents, string kind)
+    {
+        Hover? hover = JsonSerializer.Deserialize($$"""{"contents":{{contents}}}""", Json.Hover);
+
+        hover.ShouldNotBeNull().Contents.Kind.ShouldBe(kind);
+    }
+
     [Fact]
     public void Parameter_labels_round_trip_as_text_or_offsets()
     {

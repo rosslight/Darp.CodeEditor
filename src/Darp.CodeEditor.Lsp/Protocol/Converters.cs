@@ -17,6 +17,18 @@ internal sealed class MarkupContentConverter : JsonConverter<MarkupContent>
         JsonSerializer.Serialize(writer, value, LspJsonContext.Default.MarkupContent);
 }
 
+/// <summary>Reads hover contents as a marked string, which is Markdown, or as markup content. Writes markup content.</summary>
+internal sealed class HoverContentsConverter : JsonConverter<MarkupContent>
+{
+    public override MarkupContent Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        reader.TokenType == JsonTokenType.String
+            ? new MarkupContent(MarkupKind.Markdown, reader.GetString() ?? "")
+            : Json.Read(ref reader, LspJsonContext.Default.MarkupContent);
+
+    public override void Write(Utf8JsonWriter writer, MarkupContent value, JsonSerializerOptions options) =>
+        JsonSerializer.Serialize(writer, value, LspJsonContext.Default.MarkupContent);
+}
+
 /// <summary>Reads <c>boolean | options</c> as whether the feature is supported. Writes a boolean.</summary>
 internal sealed class BooleanOrOptionsConverter : JsonConverter<bool?>
 {
