@@ -13,7 +13,8 @@ using Darp.CodeEditor.LspTesting;
 using Darp.CodeEditor.Samples;
 
 // Measures the C# script language server against the in-process service on the prototype's sample script:
-// process start to first completion, warm completion latency while typing, memory and payload sizes.
+// process start to first completion, completion latency while typing one request at a time, the same under
+// overlapping requests in two documents, memory and payload sizes.
 //
 //   dotnet run --project benchmarks/Darp.CodeEditor.CSharp.Server.Benchmark -c Release [-- --runs 5]
 //
@@ -29,42 +30,24 @@ int runs = args.SkipWhile(a => a != "--runs").Skip(1).Select(int.Parse).FirstOrD
 string repository = Benchmark.FindRepository();
 string output = Path.Combine(repository, "measurements", "csharp-server");
 Directory.CreateDirectory(output);
+string loadBefore = Benchmark.LoadAverage();
 
 Console.WriteLine("Publishing the server...");
-string rid = RuntimeInformation.RuntimeIdentifier;
+Benchmark.Published framework = Benchmark.Publish(repository, Path.Combine(output, "publish-fdd"), []);
+Benchmark.Published readyToRun = Benchmark.Publish(
+    repository,
+    Path.Combine(output, "publish-r2r"),
+    ["-r", RuntimeInformation.RuntimeIdentifier, "--self-contained", "false", "-p:PublishReadyToRun=true"]
+);
+
+// By default the server filters lists of more than 1,000 items by the typed text and keeps the 1,000 best matches.
 Variant[] variants =
 [
-    new("server", Benchmark.Publish(repository, Path.Combine(output, "publish-fdd"), []), []),
-    new(
-        "server R2R",
-        Benchmark.Publish(
-            repository,
-            Path.Combine(output, "publish-r2r"),
-            ["-r", rid, "--self-contained", "false", "-p:PublishReadyToRun=true"]
-        ),
-        []
-    ),
-];
-variants =
-[
-    .. variants,
-    variants[1] with
-    {
-        Name = "server R2R, no warm-up",
-        ServerArguments = ["--no-warm-up"],
-    },
-    // An editor usually sits idle for a while after opening a script; warm-up runs in that time.
-    variants[1] with
-    {
-        Name = "server R2R, 2 s idle",
-        Idle = TimeSpan.FromSeconds(2),
-    },
-    variants[1] with
-    {
-        Name = "server R2R, no warm-up, 2 s idle",
-        ServerArguments = ["--no-warm-up"],
-        Idle = TimeSpan.FromSeconds(2),
-    },
+    new("server", framework, []),
+    new("server R2R", readyToRun, []),
+    new("R2R, unfiltered", readyToRun, ["--completion-filter-above", "1000000"]),
+    new("R2R, filtered, no max", readyToRun, ["--completion-limit", "1000000"]),
+    new("R2R, 300 max", readyToRun, ["--completion-limit", "300"]),
 ];
 
 var results = new List<RunResult>();
@@ -79,63 +62,298 @@ for (int run = 1; run <= runs; run++)
     }
 }
 
-string report = Report.Create(results, variants, runs);
+string report = Report.Create(results, variants, runs, loadBefore, Benchmark.LoadAverage());
 await File.WriteAllTextAsync(Path.Combine(output, "report.md"), report);
 await File.WriteAllTextAsync(
     Path.Combine(output, "results.json"),
-    JsonSerializer.Serialize(results, new JsonSerializerOptions { WriteIndented = true, IncludeFields = true })
+    JsonSerializer.Serialize(results, new JsonSerializerOptions { WriteIndented = true })
 );
 Console.WriteLine(report);
 return 0;
 
 /// <summary>A published server and the arguments it runs with.</summary>
-/// <param name="Idle">How long to wait after opening the script before the first completion request.</param>
-internal sealed record Variant(string Name, Benchmark.Published Published, string[] ServerArguments)
-{
-    public TimeSpan Idle { get; init; }
-}
+internal sealed record Variant(string Name, Benchmark.Published Published, string[] ServerArguments);
 
 /// <param name="FirstMs">Process start to the first non-empty completion list.</param>
-/// <param name="FirstRequestMs">The first completion request alone: sent to parsed.</param>
-/// <param name="WarmMs">Request to response, parsed, while typing: completion lists after the first two rounds.</param>
-/// <param name="WarmTransportMs">Request to the last byte of the response, before parsing (server only).</param>
+/// <param name="WarmMemberMs">Member lists while typing one request at a time, after the first rounds.</param>
+/// <param name="WarmRefineMs">
+/// Requests for an incomplete word list again while the word is typed; only servers that filter send them.
+/// </param>
 internal sealed record RunResult(
     string Name,
     bool FirstIsMember,
     double FirstMs,
-    double FirstRequestMs,
     int FirstItems,
     double InitializeMs,
     List<double> WarmMemberMs,
     List<double> WarmWordMs,
-    List<double> WarmMemberTransportMs,
-    List<double> WarmWordTransportMs,
+    List<double> WarmRefineMs,
     int MemberItems,
     int WordItems,
     int MemberBytes,
     int WordBytes,
+    OverlapResult Overlap,
+    OverlapResult Stress,
     double RssMiB,
     double PeakRssMiB
 );
 
-/// <summary>What the benchmark types after the first completion, in chunks, 40 ms apart.</summary>
+/// <param name="FreshCompletionMs">Completion requests the client did not cancel: request to parsed response.</param>
+/// <param name="FreshTokensMs">Semantic token requests the client did not cancel.</param>
+/// <param name="Superseded">Requests the client cancelled because newer ones replaced them.</param>
+/// <param name="SupersededWithResult">Of those, the ones answered with a full result instead of a cancellation.</param>
+/// <param name="RecoveryMs">
+/// The last keystroke to the answer of a fresh word list asked for right after it, behind any backlog.
+/// </param>
+/// <param name="RecoveryItems">The items of that word list.</param>
+/// <param name="DrainMs">The last keystroke to the answer of the last outstanding request.</param>
+internal sealed record OverlapResult(
+    List<double> FreshCompletionMs,
+    List<double> FreshTokensMs,
+    int Requests,
+    int Superseded,
+    int SupersededWithResult,
+    double RecoveryMs,
+    int RecoveryItems,
+    double DrainMs
+);
+
+/// <param name="Cancelled">The request was answered as cancelled.</param>
+/// <param name="Bytes">The size of the response message; 0 in-process.</param>
+internal sealed record Outcome(bool Cancelled, int Items, bool Incomplete, int Bytes, double Ms);
+
+/// <summary>A request in flight.</summary>
+internal sealed class Request
+{
+    private readonly Func<Task> _cancel;
+
+    public Request(Task<Outcome> result, Func<Task> cancel)
+    {
+        Result = result;
+        _cancel = cancel;
+    }
+
+    public Task<Outcome> Result { get; }
+
+    /// <summary>The client cancelled the request because a newer one replaced it.</summary>
+    public bool Superseded { get; private set; }
+
+    public Task CancelAsync()
+    {
+        Superseded = true;
+        return _cancel();
+    }
+}
+
+internal enum CompletionKind
+{
+    /// <summary>The first letter of a word was typed: the client invokes completion.</summary>
+    Word,
+
+    /// <summary>"." was typed.</summary>
+    Member,
+
+    /// <summary>The list is incomplete and the user typed another letter of the word.</summary>
+    Refine,
+}
+
+/// <summary>The language features the benchmark uses, from the server or the in-process service.</summary>
+internal interface IScriptService
+{
+    Task OpenAsync(string document, string text);
+
+    /// <summary>Appends <paramref name="typed"/> to the document.</summary>
+    Task TypeAsync(string document, string typed);
+
+    /// <summary>Requests completion at the end of the document.</summary>
+    Request Complete(string document, CompletionKind kind);
+
+    /// <summary>Requests semantic tokens for the 40 lines before the end of the document.</summary>
+    Request Tokens(string document);
+
+    /// <summary>Requests signature help at the end of the document.</summary>
+    Request SignatureHelp(string document);
+}
+
+/// <summary>The typing both services go through.</summary>
 internal static class Typing
 {
+    public const string MainDocument = "main";
     public const int Rounds = 20;
     public const int SkippedRounds = 2;
+    public const string SecondDocument = "second";
+    public const int OverlapKeystrokes = 150;
     public static readonly TimeSpan Delay = TimeSpan.FromMilliseconds(40);
+
+    /// <summary>The cadence of the stress phase: faster than the server answers, so requests pile up.</summary>
+    public static readonly TimeSpan StressDelay = TimeSpan.FromMilliseconds(10);
+
+    /// <summary>What the overlap typists type, one character per keystroke, over and over.</summary>
+    private const string Statement = "\nDevice.ReadTemperature();";
 
     /// <summary>The script with a line that ends where the first completion is requested.</summary>
     public static string Initial(bool member) => SampleDocuments.CSharpScript + (member ? "\nDevice." : "\nD");
 
-    /// <summary>Completes the statement the first completion was requested in.</summary>
-    public static string Finish(bool member) => member ? "ReadTemperature();" : "evice.ReadTemperature();";
+    /// <summary>
+    /// One request at a time, 40 ms between chunks: <c>\nD</c> (word list), each letter of <c>evice</c> (asking
+    /// again while the list is incomplete), <c>.</c> (member list) and <c>ReadTemperature();</c>.
+    /// </summary>
+    public static async Task<SequentialResult> RunSequentialAsync(IScriptService service, bool firstWasMember)
+    {
+        var member = new List<double>();
+        var word = new List<double>();
+        var refine = new List<double>();
+        Outcome? lastMember = null;
+        Outcome? lastWord = null;
+        await TypeAsync(firstWasMember ? "ReadTemperature();" : "evice.ReadTemperature();");
+        for (int round = 0; round < Rounds; round++)
+        {
+            bool measured = round >= SkippedRounds;
+            await TypeAsync("\nD");
+            lastWord = await service.Complete(MainDocument, CompletionKind.Word).Result;
+            if (measured)
+                word.Add(lastWord.Ms);
+            bool incomplete = lastWord.Incomplete;
+            foreach (char letter in "evice")
+            {
+                await TypeAsync(letter.ToString());
+                if (!incomplete)
+                    continue;
+                Outcome again = await service.Complete(MainDocument, CompletionKind.Refine).Result;
+                incomplete = again.Incomplete;
+                if (measured)
+                    refine.Add(again.Ms);
+            }
+            await TypeAsync(".");
+            lastMember = await service.Complete(MainDocument, CompletionKind.Member).Result;
+            if (measured)
+                member.Add(lastMember.Ms);
+            await TypeAsync("ReadTemperature();");
+        }
+        return new SequentialResult(
+            member,
+            word,
+            refine,
+            lastMember ?? throw new InvalidOperationException("No rounds."),
+            lastWord ?? throw new InvalidOperationException("No rounds.")
+        );
+
+        async Task TypeAsync(string typed)
+        {
+            await Task.Delay(Delay);
+            await service.TypeAsync(MainDocument, typed);
+        }
+    }
+
+    /// <summary>
+    /// Types at a fixed cadence without waiting for answers, as an editor does: a keystroke every
+    /// <paramref name="cadence"/> in the main document and every <paramref name="secondEvery"/>th in the second one.
+    /// Each keystroke asks for semantic tokens; word starts, dots and letters of incomplete lists ask for completion;
+    /// "(" asks for signature help. A newer request of a kind cancels the older one of the same document.
+    /// </summary>
+    public static async Task<OverlapResult> RunOverlapAsync(IScriptService service, TimeSpan cadence, int secondEvery)
+    {
+        var typists = new Dictionary<string, Typist> { [MainDocument] = new(), [SecondDocument] = new() };
+        var tracked = new List<(string Kind, Request Request)>();
+
+        long start = Stopwatch.GetTimestamp();
+        for (int tick = 0; tick < OverlapKeystrokes; tick++)
+        {
+            TimeSpan wait = TimeSpan.FromTicks(cadence.Ticks * tick) - Stopwatch.GetElapsedTime(start);
+            if (wait > TimeSpan.Zero)
+                await Task.Delay(wait);
+            await KeystrokeAsync(MainDocument);
+            if (tick % secondEvery == 0)
+                await KeystrokeAsync(SecondDocument);
+        }
+        long burstEnd = Stopwatch.GetTimestamp();
+        // End the statement the typist is in, then start a word on a new line.
+        await service.TypeAsync(MainDocument, ";\nD");
+        Outcome recovery = await service.Complete(MainDocument, CompletionKind.Word).Result;
+        double recoveryMs = Stopwatch.GetElapsedTime(burstEnd).TotalMilliseconds;
+        await Task.WhenAll(tracked.Select(t => t.Request.Result));
+        double drain = Stopwatch.GetElapsedTime(burstEnd).TotalMilliseconds;
+
+        List<(string Kind, Outcome Outcome, bool Superseded)> outcomes =
+        [
+            .. tracked.Select(t => (t.Kind, t.Request.Result.Result, t.Request.Superseded)),
+        ];
+        return new OverlapResult(
+            [.. outcomes.Where(o => o.Kind == "completion" && !o.Superseded).Select(o => o.Outcome.Ms)],
+            [.. outcomes.Where(o => o.Kind == "tokens" && !o.Superseded).Select(o => o.Outcome.Ms)],
+            outcomes.Count,
+            outcomes.Count(o => o.Superseded),
+            outcomes.Count(o => o.Superseded && !o.Outcome.Cancelled),
+            recoveryMs,
+            recovery.Items,
+            drain
+        );
+
+        async Task KeystrokeAsync(string document)
+        {
+            Typist typist = typists[document];
+            char previous = Statement[(typist.Index + Statement.Length - 1) % Statement.Length];
+            char typed = Statement[typist.Index++ % Statement.Length];
+            await service.TypeAsync(document, typed.ToString());
+
+            CompletionKind? completion =
+                typed == 'D' && previous == '\n' ? CompletionKind.Word
+                : typed == '.' ? CompletionKind.Member
+                : char.IsLetter(typed) && typist.ListIncomplete ? CompletionKind.Refine
+                : null;
+            if (!char.IsLetter(typed))
+                typist.ListIncomplete = false;
+            if (completion is { } kind)
+            {
+                Request request = Start(typist, "completion", () => service.Complete(document, kind));
+                _ = request.Result.ContinueWith(
+                    t =>
+                    {
+                        // The newest list decides whether letters ask again.
+                        if (typist.Latest("completion") == request)
+                            typist.ListIncomplete = t.Result.Incomplete;
+                    },
+                    TaskScheduler.Default
+                );
+            }
+            if (typed == '(')
+                Start(typist, "signature", () => service.SignatureHelp(document));
+            Start(typist, "tokens", () => service.Tokens(document));
+        }
+
+        Request Start(Typist typist, string kind, Func<Request> send)
+        {
+            if (typist.Latest(kind) is { } older && !older.Result.IsCompleted)
+                _ = older.CancelAsync();
+            Request request = send();
+            typist.Requests[kind] = request;
+            tracked.Add((kind, request));
+            return request;
+        }
+    }
+
+    private sealed class Typist
+    {
+        public int Index { get; set; }
+
+        public bool ListIncomplete { get; set; }
+
+        public Dictionary<string, Request> Requests { get; } = [];
+
+        public Request? Latest(string kind) => Requests.GetValueOrDefault(kind);
+    }
 }
+
+internal sealed record SequentialResult(
+    List<double> Member,
+    List<double> Word,
+    List<double> Refine,
+    Outcome LastMember,
+    Outcome LastWord
+);
 
 internal static class ServerRun
 {
-    private const string Uri = "file:///benchmark/script.csx";
-
     public static async Task<RunResult> MeasureAsync(Variant variant, bool member)
     {
         await using LspClient client = LspClient.Start(variant.Published.ServerDll, variant.ServerArguments);
@@ -145,77 +363,26 @@ internal static class ServerRun
             {
                 ["processId"] = Environment.ProcessId,
                 ["rootUri"] = null,
-                ["capabilities"] = Capabilities(),
+                ["capabilities"] = LspScriptService.Capabilities(),
                 ["initializationOptions"] = CSharpScriptInitializationOptions.Create(Benchmark.Environment),
             }
         );
         double initializeMs = Stopwatch.GetElapsedTime(client.StartTimestamp).TotalMilliseconds;
         await client.NotifyAsync("initialized", new JsonObject());
 
-        string text = Typing.Initial(member);
-        int version = 1;
-        await client.NotifyAsync(
-            "textDocument/didOpen",
-            new JsonObject
-            {
-                ["textDocument"] = new JsonObject
-                {
-                    ["uri"] = Uri,
-                    ["languageId"] = "csharp",
-                    ["version"] = version,
-                    ["text"] = text,
-                },
-            }
-        );
-        await Task.Delay(variant.Idle);
-        (LspResponse first, double firstRequestMs, _) = await CompleteAsync(client, text, member);
+        var service = new LspScriptService(client);
+        await service.OpenAsync(Typing.MainDocument, Typing.Initial(member));
+        Outcome first = await service
+            .Complete(Typing.MainDocument, member ? CompletionKind.Member : CompletionKind.Word)
+            .Result;
         double firstMs = Stopwatch.GetElapsedTime(client.StartTimestamp).TotalMilliseconds;
-        int firstItems = first.Result?["items"]?.AsArray().Count ?? 0;
+        if (first.Items == 0)
+            throw new InvalidOperationException($"No first completion list.\n{client.StandardError}");
 
-        var memberMs = new List<double>();
-        var wordMs = new List<double>();
-        var memberTransportMs = new List<double>();
-        var wordTransportMs = new List<double>();
-        LspResponse? lastMember = null;
-        LspResponse? lastWord = null;
-        async Task TypeAsync(string typed)
-        {
-            await Task.Delay(Typing.Delay);
-            JsonObject end = Position(text, text.Length);
-            text += typed;
-            version++;
-            await client.NotifyAsync(
-                "textDocument/didChange",
-                new JsonObject
-                {
-                    ["textDocument"] = new JsonObject { ["uri"] = Uri, ["version"] = version },
-                    ["contentChanges"] = new JsonArray(
-                        new JsonObject
-                        {
-                            ["range"] = new JsonObject { ["start"] = end, ["end"] = end.DeepClone() },
-                            ["text"] = typed,
-                        }
-                    ),
-                }
-            );
-        }
-
-        await TypeAsync(Typing.Finish(member));
-        for (int round = 0; round < Typing.Rounds; round++)
-        {
-            await TypeAsync("\nD");
-            (lastWord, double wordTotal, double wordTransport) = await CompleteAsync(client, text, member: false);
-            await TypeAsync("evice");
-            await TypeAsync(".");
-            (lastMember, double memberTotal, double memberTransport) = await CompleteAsync(client, text, member: true);
-            await TypeAsync("ReadTemperature();");
-            if (round < Typing.SkippedRounds)
-                continue;
-            wordMs.Add(wordTotal);
-            memberMs.Add(memberTotal);
-            wordTransportMs.Add(wordTransport);
-            memberTransportMs.Add(memberTransport);
-        }
+        SequentialResult sequential = await Typing.RunSequentialAsync(service, member);
+        await service.OpenAsync(Typing.SecondDocument, SampleDocuments.CSharpScript);
+        OverlapResult overlap = await Typing.RunOverlapAsync(service, Typing.Delay, secondEvery: 3);
+        OverlapResult stress = await Typing.RunOverlapAsync(service, Typing.StressDelay, secondEvery: 1);
 
         await Task.Delay(TimeSpan.FromSeconds(1));
         client.Process.Refresh();
@@ -226,59 +393,32 @@ internal static class ServerRun
             variant.Name,
             member,
             firstMs,
-            firstRequestMs,
-            firstItems,
+            first.Items,
             initializeMs,
-            memberMs,
-            wordMs,
-            memberTransportMs,
-            wordTransportMs,
-            lastMember?.Result?["items"]?.AsArray().Count ?? 0,
-            lastWord?.Result?["items"]?.AsArray().Count ?? 0,
-            lastMember?.ContentLength ?? 0,
-            lastWord?.ContentLength ?? 0,
+            sequential.Member,
+            sequential.Word,
+            sequential.Refine,
+            sequential.LastMember.Items,
+            sequential.LastWord.Items,
+            sequential.LastMember.Bytes,
+            sequential.LastWord.Bytes,
+            overlap,
+            stress,
             rss,
             peak
         );
     }
+}
 
-    /// <summary>Requests completion at the end of <paramref name="text"/>: after "." for members, else invoked.</summary>
-    /// <returns>
-    /// The response, the time from sending the request to having parsed the response, and the time to having read it.
-    /// </returns>
-    private static async Task<(LspResponse Response, double TotalMs, double TransportMs)> CompleteAsync(
-        LspClient client,
-        string text,
-        bool member
-    )
-    {
-        var parameters = new JsonObject
-        {
-            ["textDocument"] = new JsonObject { ["uri"] = Uri },
-            ["position"] = Position(text, text.Length),
-            ["context"] = member
-                ? new JsonObject { ["triggerKind"] = 2, ["triggerCharacter"] = "." }
-                : new JsonObject { ["triggerKind"] = 1 },
-        };
-        long start = Stopwatch.GetTimestamp();
-        LspResponse response = await client.Send("textDocument/completion", parameters).Response;
-        double total = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
-        if (response.Result?["items"]?.AsArray().Count is null or 0)
-            throw new InvalidOperationException(
-                $"No completion list: {response.Error?.Message}\n{client.StandardError}"
-            );
-        return (response, total, Stopwatch.GetElapsedTime(start, response.ReceivedTimestamp).TotalMilliseconds);
-    }
+/// <summary>The server over LSP, with what VS Code's client declares for the features used.</summary>
+internal sealed class LspScriptService : IScriptService
+{
+    private readonly LspClient _client;
+    private readonly Dictionary<string, (string Text, int Version)> _documents = [];
 
-    private static JsonObject Position(string text, int offset)
-    {
-        int line = text.AsSpan(0, offset).Count('\n');
-        int character = offset - (text.LastIndexOf('\n', offset - 1) + 1);
-        return new JsonObject { ["line"] = line, ["character"] = character };
-    }
+    public LspScriptService(LspClient client) => _client = client;
 
-    /// <summary>What VS Code's client declares for the features the server uses.</summary>
-    private static JsonNode Capabilities() =>
+    public static JsonNode Capabilities() =>
         JsonNode.Parse(
             """
             {
@@ -298,9 +438,220 @@ internal static class ServerRun
             }
             """
         ) ?? throw new InvalidOperationException();
+
+    public Task OpenAsync(string document, string text)
+    {
+        _documents[document] = (text, 1);
+        return _client.NotifyAsync(
+            "textDocument/didOpen",
+            new JsonObject
+            {
+                ["textDocument"] = new JsonObject
+                {
+                    ["uri"] = Uri(document),
+                    ["languageId"] = "csharp",
+                    ["version"] = 1,
+                    ["text"] = text,
+                },
+            }
+        );
+    }
+
+    public Task TypeAsync(string document, string typed)
+    {
+        (string text, int version) = _documents[document];
+        JsonObject end = Position(text, text.Length);
+        _documents[document] = (text + typed, version + 1);
+        return _client.NotifyAsync(
+            "textDocument/didChange",
+            new JsonObject
+            {
+                ["textDocument"] = new JsonObject { ["uri"] = Uri(document), ["version"] = version + 1 },
+                ["contentChanges"] = new JsonArray(
+                    new JsonObject
+                    {
+                        ["range"] = new JsonObject { ["start"] = end, ["end"] = end.DeepClone() },
+                        ["text"] = typed,
+                    }
+                ),
+            }
+        );
+    }
+
+    public Request Complete(string document, CompletionKind kind) =>
+        Send(
+            "textDocument/completion",
+            document,
+            kind switch
+            {
+                CompletionKind.Word => new JsonObject { ["triggerKind"] = 1 },
+                CompletionKind.Member => new JsonObject { ["triggerKind"] = 2, ["triggerCharacter"] = "." },
+                _ => new JsonObject { ["triggerKind"] = 3 },
+            }
+        );
+
+    public Request Tokens(string document)
+    {
+        string text = _documents[document].Text;
+        int line = text.AsSpan().Count('\n');
+        var parameters = new JsonObject
+        {
+            ["textDocument"] = new JsonObject { ["uri"] = Uri(document) },
+            ["range"] = new JsonObject
+            {
+                ["start"] = new JsonObject { ["line"] = Math.Max(0, line - 40), ["character"] = 0 },
+                ["end"] = Position(text, text.Length),
+            },
+        };
+        return Track("textDocument/semanticTokens/range", parameters);
+    }
+
+    public Request SignatureHelp(string document) => Send("textDocument/signatureHelp", document, null);
+
+    private Request Send(string method, string document, JsonObject? context)
+    {
+        string text = _documents[document].Text;
+        var parameters = new JsonObject
+        {
+            ["textDocument"] = new JsonObject { ["uri"] = Uri(document) },
+            ["position"] = Position(text, text.Length),
+        };
+        if (context is not null)
+            parameters["context"] = context;
+        return Track(method, parameters);
+    }
+
+    private Request Track(string method, JsonObject parameters)
+    {
+        long start = Stopwatch.GetTimestamp();
+        PendingRequest pending = _client.Send(method, parameters);
+        return new Request(
+            pending.Response.ContinueWith(
+                t =>
+                {
+                    LspResponse response = t.Result;
+                    JsonArray? items = response.Result?["items"]?.AsArray();
+                    return new Outcome(
+                        response.Error?.Code == -32800,
+                        items?.Count ?? 0,
+                        response.Result?["isIncomplete"]?.GetValue<bool>() ?? false,
+                        response.ContentLength,
+                        Stopwatch.GetElapsedTime(start).TotalMilliseconds
+                    );
+                },
+                TaskScheduler.Default
+            ),
+            () => _client.CancelAsync(pending.Id)
+        );
+    }
+
+    private static string Uri(string document) => $"file:///benchmark/{document}.csx";
+
+    private static JsonObject Position(string text, int offset)
+    {
+        int line = text.AsSpan(0, offset).Count('\n');
+        int character = offset - (text.LastIndexOf('\n', Math.Max(0, offset - 1)) + 1);
+        return new JsonObject { ["line"] = line, ["character"] = character };
+    }
 }
 
-/// <summary>The prototype's in-process service, measured in a child process the same way as the server.</summary>
+/// <summary>The prototype's in-process service; cancelling a request cancels its token.</summary>
+internal sealed class InProcessScriptService : IScriptService
+{
+    private readonly CSharpScriptLanguageService _service;
+    private readonly Dictionary<string, (string Text, int Version)> _documents = [];
+
+    public InProcessScriptService(CSharpScriptLanguageService service) => _service = service;
+
+    public Task OpenAsync(string document, string text)
+    {
+        _documents[document] = (text, 1);
+        return Task.CompletedTask;
+    }
+
+    public Task TypeAsync(string document, string typed)
+    {
+        (string text, int version) = _documents[document];
+        _documents[document] = (text + typed, version + 1);
+        return Task.CompletedTask;
+    }
+
+    public Request Complete(string document, CompletionKind kind) =>
+        Run(
+            document,
+            async (snapshot, token) =>
+            {
+                CompletionList? list = await _service.GetCompletionsAsync(
+                    snapshot,
+                    snapshot.Text.Length,
+                    kind switch
+                    {
+                        // The editor asks on the first letter of a word.
+                        CompletionKind.Word => new CompletionTrigger(CompletionTriggerKind.Insertion, 'D'),
+                        CompletionKind.Member => new CompletionTrigger(CompletionTriggerKind.TriggerCharacter, '.'),
+                        _ => new CompletionTrigger(CompletionTriggerKind.Invoke),
+                    },
+                    token
+                );
+                return list?.Items.Count ?? 0;
+            }
+        );
+
+    public Request Tokens(string document) =>
+        Run(
+            document,
+            async (snapshot, token) =>
+            {
+                int end = snapshot.Text.Length;
+                int start = end;
+                for (int lines = 0; lines < 40 && start > 0; start--)
+                {
+                    if (snapshot.Text[start - 1] == '\n')
+                        lines++;
+                }
+                return (
+                    await _service.GetClassificationsAsync(snapshot, TextRange.FromBounds(start, end), token)
+                ).Count;
+            }
+        );
+
+    public Request SignatureHelp(string document) =>
+        Run(
+            document,
+            async (snapshot, token) =>
+                (await _service.GetSignatureHelpAsync(snapshot, snapshot.Text.Length, token))?.Signatures.Count ?? 0
+        );
+
+    private Request Run(string document, Func<DocumentSnapshot, CancellationToken, Task<int>> request)
+    {
+        (string text, int version) = _documents[document];
+        var snapshot = new DocumentSnapshot(document, version, text);
+        var cancellation = new CancellationTokenSource();
+        long start = Stopwatch.GetTimestamp();
+        Task<Outcome> result = Task.Run(async () =>
+        {
+            try
+            {
+                int items = await request(snapshot, cancellation.Token);
+                return new Outcome(false, items, false, 0, Stopwatch.GetElapsedTime(start).TotalMilliseconds);
+            }
+            catch (OperationCanceledException)
+            {
+                return new Outcome(true, 0, false, 0, Stopwatch.GetElapsedTime(start).TotalMilliseconds);
+            }
+        });
+        return new Request(
+            result,
+            () =>
+            {
+                cancellation.Cancel();
+                return Task.CompletedTask;
+            }
+        );
+    }
+}
+
+/// <summary>The in-process service, measured in a child process the same way as the server.</summary>
 internal static class InProcess
 {
     public static async Task<RunResult> RunChildAsync(bool member)
@@ -318,75 +669,30 @@ internal static class InProcess
         string json = await process.StandardOutput.ReadToEndAsync();
         await process.WaitForExitAsync();
         RunResult result = JsonSerializer.Deserialize<RunResult>(json) ?? throw new InvalidOperationException(json);
-        string[] parts = first.Split(' ');
-        return result with
-        {
-            FirstMs = firstMs,
-            FirstItems = int.Parse(parts[0], CultureInfo.InvariantCulture),
-            FirstRequestMs = double.Parse(parts[1], CultureInfo.InvariantCulture),
-        };
+        return result with { FirstMs = firstMs, FirstItems = int.Parse(first, CultureInfo.InvariantCulture) };
     }
 
     public static async Task MeasureAsync(bool member)
     {
-        using CSharpScriptLanguageService service = await CSharpScriptLanguageService.CreateAsync(
+        using CSharpScriptLanguageService languageService = await CSharpScriptLanguageService.CreateAsync(
             new CSharpScriptOptions(
                 typeof(ScriptGlobals),
                 [typeof(Enumerable).Assembly, typeof(List<>).Assembly, typeof(StringBuilder).Assembly],
                 ["System", "System.Collections.Generic", "System.Linq", "System.Threading.Tasks"]
             )
         );
-        string text = Typing.Initial(member);
-        int version = 1;
-        long firstStart = Stopwatch.GetTimestamp();
-        CompletionList first = await CompleteAsync(member);
-        // The service warmed up while it was created, so this is the request after warm-up.
-        Console.WriteLine(
-            string.Create(
-                CultureInfo.InvariantCulture,
-                $"{first.Items.Count} {Stopwatch.GetElapsedTime(firstStart).TotalMilliseconds:F1}"
-            )
-        );
+        var service = new InProcessScriptService(languageService);
+        await service.OpenAsync(Typing.MainDocument, Typing.Initial(member));
+        Outcome first = await service
+            .Complete(Typing.MainDocument, member ? CompletionKind.Member : CompletionKind.Word)
+            .Result;
+        Console.WriteLine(first.Items.ToString(CultureInfo.InvariantCulture));
         Console.Out.Flush();
 
-        var memberMs = new List<double>();
-        var wordMs = new List<double>();
-        CompletionList? lastMember = null;
-        CompletionList? lastWord = null;
-        async Task TypeAsync(string typed)
-        {
-            await Task.Delay(Typing.Delay);
-            text += typed;
-            version++;
-        }
-        async Task<CompletionList> CompleteAsync(bool isMember) =>
-            await service.GetCompletionsAsync(
-                new DocumentSnapshot("benchmark", version, text),
-                text.Length,
-                isMember
-                    ? new CompletionTrigger(CompletionTriggerKind.TriggerCharacter, '.')
-                    : new CompletionTrigger(CompletionTriggerKind.Insertion, 'D'),
-                CancellationToken.None
-            ) ?? throw new InvalidOperationException("No completion list.");
-
-        await TypeAsync(Typing.Finish(member));
-        for (int round = 0; round < Typing.Rounds; round++)
-        {
-            await TypeAsync("\nD");
-            long start = Stopwatch.GetTimestamp();
-            lastWord = await CompleteAsync(isMember: false);
-            double word = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
-            await TypeAsync("evice");
-            await TypeAsync(".");
-            start = Stopwatch.GetTimestamp();
-            lastMember = await CompleteAsync(isMember: true);
-            double memberTime = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
-            await TypeAsync("ReadTemperature();");
-            if (round < Typing.SkippedRounds)
-                continue;
-            wordMs.Add(word);
-            memberMs.Add(memberTime);
-        }
+        SequentialResult sequential = await Typing.RunSequentialAsync(service, member);
+        await service.OpenAsync(Typing.SecondDocument, SampleDocuments.CSharpScript);
+        OverlapResult overlap = await Typing.RunOverlapAsync(service, Typing.Delay, secondEvery: 3);
+        OverlapResult stress = await Typing.RunOverlapAsync(service, Typing.StressDelay, secondEvery: 1);
 
         await Task.Delay(TimeSpan.FromSeconds(1));
         using var self = Process.GetCurrentProcess();
@@ -398,15 +704,15 @@ internal static class InProcess
                     0,
                     0,
                     0,
-                    0,
-                    memberMs,
-                    wordMs,
-                    [],
-                    [],
-                    lastMember?.Items.Count ?? 0,
-                    lastWord?.Items.Count ?? 0,
+                    sequential.Member,
+                    sequential.Word,
+                    sequential.Refine,
+                    sequential.LastMember.Items,
+                    sequential.LastWord.Items,
                     0,
                     0,
+                    overlap,
+                    stress,
                     self.WorkingSet64 / 1048576.0,
                     self.PeakWorkingSet64 / 1048576.0
                 )
@@ -449,6 +755,12 @@ internal static class Benchmark
         throw new InvalidOperationException("Run the benchmark from the repository's build output.");
     }
 
+    /// <summary>The 1, 5 and 15 minute load averages, where the OS reports them.</summary>
+    public static string LoadAverage() =>
+        File.Exists("/proc/loadavg")
+            ? string.Join(" ", File.ReadAllText("/proc/loadavg").Split(' ').Take(3))
+            : "not available";
+
     public static Published Publish(string repository, string directory, string[] arguments)
     {
         if (System.IO.Directory.Exists(directory))
@@ -489,7 +801,13 @@ internal static class Benchmark
 
 internal static class Report
 {
-    public static string Create(List<RunResult> results, Variant[] variants, int runs)
+    public static string Create(
+        List<RunResult> results,
+        Variant[] variants,
+        int runs,
+        string loadBefore,
+        string loadAfter
+    )
     {
         string[] columns = ["in-process", .. variants.Select(v => v.Name)];
         var report = new StringBuilder();
@@ -497,34 +815,33 @@ internal static class Report
         report.AppendLine();
         report.AppendLine(
             $"{DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC, {RuntimeInformation.FrameworkDescription}, {RuntimeInformation.OSDescription}, "
-                + $"{RuntimeInformation.ProcessArchitecture}, {Environment.ProcessorCount} logical cores; {runs} cold starts per cell; "
-                + $"warm: {Typing.Rounds - Typing.SkippedRounds} rounds per run after {Typing.SkippedRounds} skipped."
+                + $"{RuntimeInformation.ProcessArchitecture}, {Environment.ProcessorCount} logical cores, load average "
+                + $"{loadBefore} before and {loadAfter} after; {runs} cold starts per cell; one request at a time: "
+                + $"{Typing.Rounds - Typing.SkippedRounds} rounds per run after {Typing.SkippedRounds} skipped; typing and "
+                + $"stress: {Typing.OverlapKeystrokes} keystrokes every {Typing.Delay.TotalMilliseconds:F0} ms, with every third "
+                + $"also in a second document, then every {Typing.StressDelay.TotalMilliseconds:F0} ms in both, per run."
         );
         report.AppendLine();
         report.AppendLine(
-            "Process start → first list includes the 2 s idle in the idle columns. In-process, the service warms up "
-                + "while it is created, before the first request."
+            "By default the server cuts lists of more than 1,000 items to the 1,000 that match the typed text best, "
+                + "and marks them incomplete, so the client asks again for each letter. \"Unfiltered\" sends every item; "
+                + "\"filtered, no max\" sends every matching item. In-process, the service warms up while it is created, "
+                + "before the first request."
         );
         report.AppendLine();
         report.AppendLine($"| | {string.Join(" | ", columns)} |");
         report.AppendLine($"|---|{string.Concat(columns.Select(_ => "---:|"))}");
         Row("process start → first member list, median (min–max)", c => Cold(c, member: true));
         Row("process start → first word list, median (min–max)", c => Cold(c, member: false));
-        Row(
-            "first request alone (sent → parsed): member / word, median",
-            c =>
-                $"{Median(Pick(c).Where(r => r.FirstIsMember).Select(r => r.FirstRequestMs)):F0} / {Median(Pick(c).Where(r => !r.FirstIsMember).Select(r => r.FirstRequestMs)):F0} ms"
-        );
         Row("items: member / word list", c => $"{Pick(c).Max(r => r.MemberItems)} / {Pick(c).Max(r => r.WordItems)}");
-        Row("warm member list p50 / p95", c => Warm(c, r => r.WarmMemberMs));
-        Row("warm word list p50 / p95", c => Warm(c, r => r.WarmWordMs));
+        Row("one at a time: member list p50 / p95", c => Times(Pick(c).SelectMany(r => r.WarmMemberMs)));
+        Row("one at a time: word list p50 / p95", c => Times(Pick(c).SelectMany(r => r.WarmWordMs)));
         Row(
-            "warm p50 without client JSON parsing: member / word",
-            c =>
-                c == "in-process"
-                    ? "–"
-                    : $"{Percentile(Pick(c).SelectMany(r => r.WarmMemberTransportMs), 0.5):F1} / {Percentile(Pick(c).SelectMany(r => r.WarmWordTransportMs), 0.5):F1} ms"
+            "one at a time: word list asked again per letter p50 / p95 (count)",
+            c => Times(Pick(c).SelectMany(r => r.WarmRefineMs), count: true)
         );
+        OverlapRows("typing", r => r.Overlap);
+        OverlapRows("stress", r => r.Stress);
         Row(
             "RSS after typing, median (peak)",
             c => $"{Median(Pick(c).Select(r => r.RssMiB)):F0} MiB ({Median(Pick(c).Select(r => r.PeakRssMiB)):F0})"
@@ -552,6 +869,33 @@ internal static class Report
         void Row(string name, Func<string, string> cell) =>
             report.AppendLine($"| {name} | {string.Join(" | ", columns.Select(cell))} |");
 
+        void OverlapRows(string phase, Func<RunResult, OverlapResult> select)
+        {
+            Row(
+                $"{phase}: fresh completion p50 / p95",
+                c => Times(Pick(c).SelectMany(r => select(r).FreshCompletionMs))
+            );
+            Row(
+                $"{phase}: fresh semantic tokens p50 / p95",
+                c => Times(Pick(c).SelectMany(r => select(r).FreshTokensMs))
+            );
+            Row(
+                $"{phase}: requests cancelled by the client / of them answered in full",
+                c =>
+                    $"{Pick(c).Sum(r => select(r).Superseded)} of {Pick(c).Sum(r => select(r).Requests)} / {Pick(c).Sum(r => select(r).SupersededWithResult)}"
+            );
+            Row(
+                $"{phase}: last keystroke → fresh word list answered, median (max); items",
+                c =>
+                    $"{Median(Pick(c).Select(r => select(r).RecoveryMs)):F0} ms ({Pick(c).Max(r => select(r).RecoveryMs):F0}); {Pick(c).Min(r => select(r).RecoveryItems)}"
+            );
+            Row(
+                $"{phase}: last keystroke → every request answered, median (max)",
+                c =>
+                    $"{Median(Pick(c).Select(r => select(r).DrainMs)):F0} ms ({Pick(c).Max(r => select(r).DrainMs):F0})"
+            );
+        }
+
         IEnumerable<RunResult> Pick(string column) => results.Where(r => r.Name == column);
 
         string Cold(string column, bool member)
@@ -560,10 +904,13 @@ internal static class Report
             return $"{Median(times):F0} ms ({times.Min():F0}–{times.Max():F0})";
         }
 
-        string Warm(string column, Func<RunResult, List<double>> select)
+        static string Times(IEnumerable<double> values, bool count = false)
         {
-            double[] times = [.. Pick(column).SelectMany(select)];
-            return $"{Percentile(times, 0.5):F1} / {Percentile(times, 0.95):F1} ms";
+            double[] times = [.. values];
+            if (times.Length == 0)
+                return "–";
+            string text = $"{Percentile(times, 0.5):F1} / {Percentile(times, 0.95):F1} ms";
+            return count ? $"{text} ({times.Length})" : text;
         }
     }
 
