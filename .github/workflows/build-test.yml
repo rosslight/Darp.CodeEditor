@@ -1,0 +1,61 @@
+name: Build and test .NET
+
+on:
+  push:
+    branches: [main]
+  # Every pull request, whatever its target branch, so that each layer of a stack is checked.
+  pull_request:
+
+permissions:
+  contents: read
+
+# Actions minutes of a private repository are billed: a new push to a pull request cancels the run it replaces.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+
+jobs:
+  build-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-24.04
+            rid: linux-x64
+          - name: Windows x64
+            os: windows-latest
+            rid: win-x64
+
+    name: Build and test on ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: git configure long path
+        if: runner.os == 'Windows'
+        run: git config --global core.longpaths true
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Restore dependencies
+        run: dotnet restore
+      - name: Build warning-free
+        run: dotnet build --no-restore -c Release -warnaserror
+      - name: Test
+        run: dotnet test --no-build -c Release --no-progress
+
+      # A build does not run the NativeAOT compiler. Publishing the AOT demo reports the trim and AOT warnings of
+      # everything it uses, the editor library included.
+      - name: Publish the AOT demo with Native AOT
+        run: >-
+          dotnet publish samples/Darp.CodeEditor.Demo.Aot/Darp.CodeEditor.Demo.Aot.csproj
+          -c Release -r ${{ matrix.rid }} -o ./artifacts/aot-demo -warnaserror

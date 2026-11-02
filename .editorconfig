@@ -153,10 +153,6 @@ charset = utf-8
 [*.{xaml,axaml}]
 indent_size = 4
 
-# FluentAvalonia resolves these NavigationView theme overrides inside its packaged control template.
-[src/AvaloniaExampleProject/Shell/MainView.axaml]
-resharper_xaml_redundant_resource_highlighting = none
-
 # Xml files
 [*.{xml,stylecop,resx,ruleset,manifest,props,targets,config,nuspec}]
 indent_size = 2
