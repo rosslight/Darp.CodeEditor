@@ -120,8 +120,10 @@ public sealed class ResolvedScriptEnvironment
 
     /// <summary>Creates a script in this environment.</summary>
     /// <param name="globalsType">
-    /// The runtime type of the globals, loaded in the host. It must be the type the environment names.
+    /// The runtime type of the globals, loaded in the host. It must be the type the environment names, from an
+    /// assembly with the identity of the environment's globals assembly: name, version, culture and public key token.
     /// </param>
+    /// <exception cref="ArgumentException">The globals type is not the one the environment names.</exception>
     public Script<object> CreateScript(string code, Type? globalsType, ScriptOptions options)
     {
         CSharpScriptGlobals? globals = Environment.Globals;
@@ -134,22 +136,28 @@ public sealed class ResolvedScriptEnvironment
                 nameof(globalsType)
             );
         }
-        if (
-            globals is not null
-            && globalsType is not null
-            && (
-                globalsType.FullName != globals.TypeName
-                || globalsType.Assembly.GetName().Name != AssemblyName.GetAssemblyName(globals.AssemblyPath).Name
-            )
-        )
+        if (globals is not null && globalsType is not null)
         {
-            throw new ArgumentException(
-                $"The globals type {globalsType.AssemblyQualifiedName} is not {globals.TypeName} from {globals.AssemblyPath}.",
-                nameof(globalsType)
-            );
+            AssemblyName contract = AssemblyName.GetAssemblyName(globals.AssemblyPath);
+            AssemblyName loaded = globalsType.Assembly.GetName();
+            // Roslyn finds the globals type by its assembly's identity among the references.
+            if (globalsType.FullName != globals.TypeName || !HaveSameIdentity(contract, loaded))
+            {
+                throw new ArgumentException(
+                    $"The globals type is {globalsType.FullName} from {loaded.FullName}, but the environment names "
+                        + $"{globals.TypeName} from {contract.FullName} ({globals.AssemblyPath}).",
+                    nameof(globalsType)
+                );
+            }
         }
         return CSharpScript.Create(code, options, globalsType);
     }
+
+    private static bool HaveSameIdentity(AssemblyName a, AssemblyName b) =>
+        string.Equals(a.Name, b.Name, StringComparison.OrdinalIgnoreCase)
+        && a.Version == b.Version
+        && string.Equals(a.CultureName ?? "", b.CultureName ?? "", StringComparison.OrdinalIgnoreCase)
+        && (a.GetPublicKeyToken() ?? []).AsSpan().SequenceEqual(b.GetPublicKeyToken() ?? []);
 
     private static ImmutableArray<string> ResolveReferences(CSharpScriptEnvironment environment)
     {

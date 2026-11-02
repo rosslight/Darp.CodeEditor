@@ -51,7 +51,10 @@ public sealed record CSharpScriptEnvironment
 
 /// <summary>The globals type, loaded by path and name from a managed contract assembly.</summary>
 /// <param name="AssemblyPath">
-/// The absolute path of the managed assembly that defines the type. NativeAOT hosts ship it as a file.
+/// The absolute path of the managed assembly that defines the type. NativeAOT hosts ship it as a file. It may be the
+/// implementation assembly or a reference assembly built from it; either way its identity (name, version, culture
+/// and public key token) must be the identity of the assembly the host loads the type from, because the compiler
+/// finds the globals type by that identity.
 /// </param>
 /// <param name="TypeName">The full name of the type, such as "MyApp.ScriptGlobals".</param>
 public sealed record CSharpScriptGlobals(string AssemblyPath, string TypeName);
