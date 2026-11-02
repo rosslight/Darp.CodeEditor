@@ -161,12 +161,12 @@ internal sealed class LspClient : IAsyncDisposable
         var output = new BufferedStream(_process.StandardOutput.BaseStream, 1 << 16);
         try
         {
-            while (await ReadMessageAsync(output).ConfigureAwait(false) is ({ } message, int length))
+            while (await ReadMessageAsync(output).ConfigureAwait(false) is ({ } message, int length, long received))
             {
                 if (message["method"] is null && message["id"] is { } id)
                 {
                     if (_pending.TryRemove(id.GetValue<int>(), out TaskCompletionSource<LspResponse>? response))
-                        response.SetResult(ToResponse(message, length));
+                        response.SetResult(ToResponse(message, length, received));
                 }
                 else if (message["id"] is not null)
                 {
@@ -188,12 +188,18 @@ internal sealed class LspClient : IAsyncDisposable
         }
     }
 
-    private static LspResponse ToResponse(JsonObject message, int length) =>
+    private static LspResponse ToResponse(JsonObject message, int length, long received) =>
         message["error"] is JsonObject error
-            ? new LspResponse(null, new LspError((int?)error["code"] ?? 0, (string?)error["message"] ?? ""), length)
-            : new LspResponse(message["result"], null, length);
+            ? new LspResponse(
+                null,
+                new LspError((int?)error["code"] ?? 0, (string?)error["message"] ?? ""),
+                length,
+                received
+            )
+            : new LspResponse(message["result"], null, length, received);
 
-    private static async Task<(JsonObject Message, int Length)?> ReadMessageAsync(Stream stream)
+    /// <returns>The message, its size and the <see cref="Stopwatch"/> timestamp when it was read, before parsing.</returns>
+    private static async Task<(JsonObject Message, int Length, long Received)?> ReadMessageAsync(Stream stream)
     {
         int contentLength = -1;
         while (true)
@@ -208,9 +214,10 @@ internal sealed class LspClient : IAsyncDisposable
         }
         byte[] body = new byte[contentLength];
         await stream.ReadExactlyAsync(body).ConfigureAwait(false);
+        long received = Stopwatch.GetTimestamp();
         JsonObject message =
             JsonNode.Parse(body)?.AsObject() ?? throw new InvalidDataException("The server sent a null message.");
-        return (message, contentLength);
+        return (message, contentLength, received);
     }
 
     private static async Task<string?> ReadHeaderLineAsync(Stream stream)
@@ -232,7 +239,8 @@ internal sealed class LspClient : IAsyncDisposable
 internal sealed record PendingRequest(int Id, Task<LspResponse> Response);
 
 /// <param name="ContentLength">The size of the response message in bytes.</param>
-internal sealed record LspResponse(JsonNode? Result, LspError? Error, int ContentLength);
+/// <param name="ReceivedTimestamp">When the message was read, before it was parsed (<see cref="Stopwatch.GetTimestamp"/>).</param>
+internal sealed record LspResponse(JsonNode? Result, LspError? Error, int ContentLength, long ReceivedTimestamp);
 
 internal sealed record LspError(int Code, string Message);
 
