@@ -169,6 +169,33 @@ public sealed class LspCompletionTests
     }
 
     [Fact]
+    public async Task Long_word_lists_are_filtered_by_the_text_before_the_caret()
+    {
+        await using LspClient client = await TestServer.StartAsync();
+        const string text = "var x = 1;\nConZZZ";
+        await client.OpenAsync(Uri, text);
+
+        JsonNode? list = await client.RequestAsync("textDocument/completion", TestServer.At(Uri, text, "ConZZZ", 3));
+
+        // "ZZZ" after the caret matches nothing, so filtering by the whole word would drop "Console".
+        Labels(list).ShouldContain("Console");
+        Labels(list).ShouldAllBe(label => CompletionFilter.Score(label, "Con") > 0);
+    }
+
+    [Fact]
+    public async Task Long_word_lists_without_any_match_return_an_empty_list()
+    {
+        await using LspClient client = await TestServer.StartAsync();
+        const string text = "var x = 1;\nZzzNoSuchCompletion";
+        await client.OpenAsync(Uri, text);
+
+        JsonNode? list = await client.RequestAsync("textDocument/completion", TestServer.AtEnd(Uri, text));
+
+        list.GetArray("items").Count.ShouldBe(0);
+        list.Get("isIncomplete").GetValue<bool>().ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task Resolving_an_item_keeps_the_edits_of_its_list_after_another_document_completed()
     {
         // Roslyn shares the items of types from other namespaces between lists and moves them to the newest list.

@@ -160,7 +160,12 @@ internal sealed class CompletionHandler : IJsonHandler
         ];
         if (roslynItems.Length == 0)
             return null;
-        (int[] ranks, bool incomplete) = Select(roslynItems, snapshot.Text.ToString(roslynList.Span), limits);
+        // Filter by what was typed before the caret; text after it (as in "Con|ZZZ") is still replaced on commit.
+        var typed = TextSpan.FromBounds(
+            roslynList.Span.Start,
+            Math.Clamp(position, roslynList.Span.Start, roslynList.Span.End)
+        );
+        (int[] ranks, bool incomplete) = Select(roslynItems, snapshot.Text.ToString(typed), limits);
 
         long resultId = results.NextId();
         // In suggestion mode, such as when naming a new variable, typing must not commit an item.
@@ -435,7 +440,8 @@ internal sealed class CompletionHandler : IJsonHandler
         ClientFeatures client
     )
     {
-        var buffer = new ArrayBufferWriter<byte>(items.Count * 128);
+        // The filter can keep no items at all; the buffer still needs room for an empty list.
+        var buffer = new ArrayBufferWriter<byte>(Math.Max(items.Count, 1) * 128);
         using (var json = new Utf8JsonWriter(buffer))
         {
             json.WriteStartObject();
