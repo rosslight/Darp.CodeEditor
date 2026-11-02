@@ -43,7 +43,8 @@ internal sealed class SignatureHelpController
         };
         _popup = new TextPopup(editor, _border, above: true);
         _popup.Closed += (_, _) => Detach();
-        ApplyTheme(EditorTheme.Default);
+        ApplyTheme(editor.EditorTheme);
+        editor.EditorThemeChanged += (_, _) => ApplyTheme(editor.EditorTheme);
         editor.TextArea.TextEntered += OnTextEntered;
         editor.DocumentChanged += (_, _) => Close();
         editor.AddHandler(InputElement.KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
@@ -56,7 +57,7 @@ internal sealed class SignatureHelpController
         _popup.Hide();
     }
 
-    public void ApplyTheme(EditorTheme theme)
+    private void ApplyTheme(EditorTheme theme)
     {
         _border.Background = theme.WidgetBackground;
         _border.BorderBrush = theme.WidgetBorder;

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Styling;
 using AvaloniaEdit;
 using AvaloniaEdit.Rendering;
 using Darp.CodeEditor.Instrumentation;
@@ -9,6 +10,13 @@ namespace Darp.CodeEditor.Samples;
 
 internal static class Ui
 {
+    /// <summary>Switches the app between its dark and light theme variant; editors follow.</summary>
+    public static void ToggleThemeVariant()
+    {
+        Application app = Application.Current ?? throw new InvalidOperationException("No application.");
+        app.RequestedThemeVariant = app.ActualThemeVariant == ThemeVariant.Dark ? ThemeVariant.Light : ThemeVariant.Dark;
+    }
+
     public static Task NextFrameAsync(TopLevel topLevel)
     {
         var completion = new TaskCompletionSource();

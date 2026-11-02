@@ -1,13 +1,11 @@
 using System.Diagnostics;
 using Avalonia.Media;
-using Avalonia.Media.Immutable;
 using Avalonia.Threading;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Rendering;
 using TextMateSharp.Grammars;
 using TextMateSharp.Internal.Grammars;
-using TextMateSharp.Registry;
-using TextMateSharp.Themes;
+using Darp.CodeEditor.Theming;
 
 namespace Darp.CodeEditor.Highlighting;
 
@@ -52,16 +50,19 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
     private const int LinesBeyondViewport = 40;
     private const int DefaultForegroundId = 1;
     private static readonly TimeSpan s_lineTimeLimit = TimeSpan.FromMilliseconds(200);
-    private static readonly long s_frameBudgetTicks = Stopwatch.Frequency * 4 / 1000;
+    private static readonly TimeSpan s_frameBudget = TimeSpan.FromMilliseconds(4);
+    private static readonly long s_frameBudgetTicks = (long)(s_frameBudget.TotalSeconds * Stopwatch.Frequency);
 
     /// <summary>Lines that compile the most common expressions when the document is still empty while loading.</summary>
     private static readonly string[] s_warmUpLines = ["x = f(1, \"s\") // c", "{ [ ] } /* c */ 'c' 0.5"];
 
     private readonly CodeEditor _editor;
-    private readonly IRegistryOptions _registryOptions;
     private readonly List<LineEntry> _lines = [];
     private TextDocument? _document;
-    private Grammar? _grammar;
+    private GrammarSource? _source;
+    private Task<LoadedTheme>? _theme;
+    private LoadedTheme? _appliedTheme;
+    private TextMateGrammar? _grammar;
     private Task<LoadedGrammar>? _loading;
     private ITextSource? _loadingText;
     private int _generation;
@@ -71,10 +72,15 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
     private int _firstEditedSinceRequest = int.MaxValue;
     private long _frameDeadline;
 
-    public BackgroundTextMateHighlighter(CodeEditor editor, IRegistryOptions registryOptions)
+    /// <summary>
+    /// The editor's text color after a theme was applied at the start of this layout pass: AvaloniaEdit read the
+    /// previous one for the pass already, so lines built in it get the new one explicitly.
+    /// </summary>
+    private IBrush? _foregroundOverride;
+
+    public BackgroundTextMateHighlighter(CodeEditor editor)
     {
         _editor = editor;
-        _registryOptions = registryOptions;
         TextView textView = editor.TextArea.TextView;
         textView.VisualLineConstructionStarting += (_, _) => OnLayoutStarting();
         textView.VisualLinesChanged += (_, _) => Schedule();
@@ -82,22 +88,77 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         AttachDocument();
     }
 
-    /// <summary>Loads the grammar on the thread pool; highlighting starts once it is loaded.</summary>
-    /// <param name="scopeName">A scope from the registry options, such as "source.cs".</param>
-    /// <param name="grammarFile">Or a .tmLanguage.json file.</param>
-    public async void SetGrammar(string? scopeName, string? grammarFile)
+    /// <summary>
+    /// Raised on the UI thread when tokens start using a theme's colors, so the editor shows the theme's other colors
+    /// in the same frame.
+    /// </summary>
+    public event EventHandler<LoadedTheme>? ThemeApplied;
+
+    /// <summary>
+    /// Loads the grammar on the thread pool, with the theme from <see cref="SetTheme"/>; highlighting starts once it
+    /// is loaded.
+    /// </summary>
+    public void SetGrammar(GrammarSource source)
     {
+        _source = source;
         // Results of requests with the previous grammar are dropped.
         _generation++;
         _grammar = null;
         Invalidate();
-        long start = Stopwatch.GetTimestamp();
-        // The first screen is tokenized with the text as it is when the grammar has loaded.
-        _loadingText = _document?.CreateSnapshot();
-        IRegistryOptions options = _registryOptions;
-        Task<LoadedGrammar> loading = Task.Run(() =>
+        if (_theme is { } theme)
+            Load(source, theme);
+    }
+
+    /// <summary>
+    /// Switches to the colors of a theme, which may still be loading. The current colors stay until the grammar has
+    /// loaded with the new theme, then tokens and <see cref="ThemeApplied"/> switch in the same frame.
+    /// </summary>
+    public async void SetTheme(Task<LoadedTheme> theme)
+    {
+        _theme = theme;
+        if (_source is { } source)
         {
-            LoadedGrammar loaded = Load(options, scopeName, grammarFile, () => Volatile.Read(ref _loadingText));
+            Load(source, theme);
+            return;
+        }
+        try
+        {
+            LoadedTheme loaded = await theme;
+            if (_theme == theme)
+                ApplyTheme(loaded);
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceWarning($"Loading the theme failed: {exception}");
+        }
+    }
+
+    /// <summary>Loads theme, grammar and the first lines' tokens on the thread pool, without returning in between.</summary>
+    private async void Load(GrammarSource source, Task<LoadedTheme> pendingTheme)
+    {
+        long start = Stopwatch.GetTimestamp();
+        // A grammar another editor loaded applies at once; the next layout tokenizes the lines it shows.
+        if (
+            pendingTheme.IsCompletedSuccessfully
+            && TextMateCatalog.TryGetLoadedGrammar(source, pendingTheme.Result, out TextMateGrammar? loadedGrammar)
+        )
+        {
+            Adopt(new LoadedGrammar(loadedGrammar, pendingTheme.Result, 0, [], null));
+            _editor.TextArea.TextView.Redraw();
+            return;
+        }
+        // The lines in view, or the first screen, are tokenized with the text as it is when the grammar has loaded.
+        _loadingText = _document?.CreateSnapshot();
+        TextView textView = _editor.TextArea.TextView;
+        int firstLine =
+            textView.VisualLinesValid && textView.VisualLines.Count > 0
+                ? textView.VisualLines[0].FirstDocumentLine.LineNumber - 1
+                : 0;
+        Task<LoadedGrammar> loading = Task.Run(async () =>
+        {
+            LoadedTheme theme = await pendingTheme.ConfigureAwait(false);
+            TextMateGrammar? grammar = await TextMateCatalog.GetGrammarAsync(source, theme).ConfigureAwait(false);
+            LoadedGrammar loaded = Prepare(grammar, theme, firstLine, () => Volatile.Read(ref _loadingText));
             _editor.ReportTimingFromAnyThread("textmate-grammar-load-thread-pool", Stopwatch.GetElapsedTime(start));
             return loaded;
         });
@@ -105,7 +166,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         try
         {
             LoadedGrammar loaded = await loading;
-            // A newer grammar replaced this one, or a layout took it already.
+            // A newer grammar or theme replaced this one, or a layout took it already.
             if (_loading != loading)
                 return;
             Adopt(loaded);
@@ -114,6 +175,8 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         }
         catch (Exception exception)
         {
+            if (_loading == loading)
+                _loading = null;
             Trace.TraceWarning($"Loading the TextMate grammar failed: {exception}");
         }
     }
@@ -122,13 +185,14 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
     public int CountVisibleLinesWithoutTokens()
     {
         TextView textView = _editor.TextArea.TextView;
-        if (!textView.VisualLinesValid || _grammar is null)
+        if (!textView.VisualLinesValid || _source is null)
             return 0;
         int count = 0;
         foreach (VisualLine line in textView.VisualLines)
         {
             int index = line.FirstDocumentLine.LineNumber - 1;
-            if (index < _lines.Count && _lines[index].Tokens is null && line.FirstDocumentLine.Length > 0)
+            bool colored = _grammar is not null && index < _lines.Count && _lines[index].Tokens is not null;
+            if (!colored && line.FirstDocumentLine.Length > 0)
                 count++;
         }
         return count;
@@ -140,6 +204,8 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         if (_grammar is not { } grammar || index >= _lines.Count)
             return;
         LineEntry entry = _lines[index];
+        if (_foregroundOverride is { } textColor && line.Length > 0)
+            ChangeLinePart(line.Offset, line.EndOffset, e => e.TextRunProperties.SetForegroundBrush(textColor));
         if (!entry.IsValid)
             TokenizeNow(grammar, line, index, entry);
         if (entry.Tokens is not { } tokens)
@@ -174,21 +240,41 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         _frameDeadline = Stopwatch.GetTimestamp() + s_frameBudgetTicks;
         // Results that are ready are used in this frame, without waiting for their continuations to be scheduled. No
         // line of this pass is built yet, so lines built earlier can be rebuilt.
-        if (_grammar is null && _loading is { IsCompletedSuccessfully: true } loading)
-        {
-            Adopt(loading.Result);
-            _editor.TextArea.TextView.Redraw();
-        }
+        LoadedTheme? themeBefore = _appliedTheme;
+        AdoptIfLoaded();
+        _foregroundOverride = _appliedTheme != themeBefore ? _editor.Foreground : null;
         if (_request is { Results.IsCompletedSuccessfully: true } request)
             Apply(request);
+    }
+
+    /// <summary>Takes a grammar that finished loading, without waiting for its continuation.</summary>
+    private void AdoptIfLoaded()
+    {
+        if (_loading is not { IsCompletedSuccessfully: true } loading)
+            return;
+        Adopt(loading.Result);
+        _editor.TextArea.TextView.Redraw();
     }
 
     private void Adopt(LoadedGrammar loaded)
     {
         _loading = null;
         _loadingText = null;
+        if (_grammar is not null && _grammar != loaded.Grammar)
+        {
+            // Tokens of another grammar or theme: their color ids mean other colors now.
+            _generation++;
+            foreach (LineEntry entry in _lines)
+            {
+                entry.Tokens = null;
+                entry.EndState = null;
+                entry.IsValid = false;
+            }
+            _firstInvalid = 0;
+        }
         _grammar = loaded.Grammar;
-        // The first screen tokenized while loading still applies if the text has not changed since.
+        // The lines tokenized while loading still apply if the text has not changed since. Lines from the start of the
+        // document are exact; lines further down started from a guessed state.
         if (
             loaded.Version is { } version
             && _document?.Version is { } current
@@ -196,24 +282,33 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
             && version.CompareAge(current) == 0
         )
         {
-            for (int i = 0; i < loaded.FirstLines.Length && i < _lines.Count; i++)
+            for (int i = 0; i < loaded.Lines.Length && loaded.FirstLine + i < _lines.Count; i++)
             {
-                LineEntry entry = _lines[i];
-                entry.Tokens = loaded.FirstLines[i].Tokens;
-                entry.EndState = loaded.FirstLines[i].EndState;
-                entry.IsValid = true;
+                LineEntry entry = _lines[loaded.FirstLine + i];
+                entry.Tokens = loaded.Lines[i].Tokens;
+                entry.EndState = loaded.Lines[i].EndState;
+                entry.IsValid = loaded.FirstLine == 0;
             }
         }
+        ApplyTheme(loaded.Theme);
         Schedule();
+    }
+
+    private void ApplyTheme(LoadedTheme theme)
+    {
+        if (theme == _appliedTheme)
+            return;
+        _appliedTheme = theme;
+        ThemeApplied?.Invoke(this, theme);
     }
 
     /// <summary>
     /// Tokenizes an invalid line on the UI thread while the layout pass has budget left, so it shows colors in this
     /// frame. Without a known start state, only a line that has no colors at all is tokenized, from a guessed state.
     /// </summary>
-    private void TokenizeNow(Grammar grammar, DocumentLine line, int index, LineEntry entry)
+    private void TokenizeNow(TextMateGrammar grammar, DocumentLine line, int index, LineEntry entry)
     {
-        if (line.Length > MaxSyncLineLength || _document is not { } document)
+        if (line.Length > MaxSyncLineLength || grammar.TooSlowForUiThread || _document is not { } document)
             return;
         LineEntry? previous = index > 0 ? _lines[index - 1] : null;
         bool exact = previous is null || previous.IsValid;
@@ -222,8 +317,8 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         long now = Stopwatch.GetTimestamp();
         if (now >= _frameDeadline)
             return;
-        // The background pass holds the grammar for one line at a time.
-        if (!Monitor.TryEnter(grammar.Gate, Stopwatch.GetElapsedTime(now, _frameDeadline)))
+        // The background pass holds the grammar for one line at a time, and lets the UI thread go next.
+        if (!grammar.TryEnterOnUiThread(Stopwatch.GetElapsedTime(now, _frameDeadline)))
         {
             _frameDeadline = 0;
             return;
@@ -233,7 +328,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         long tokenizeStart = Stopwatch.GetTimestamp();
         try
         {
-            result = grammar.TextMateGrammar.TokenizeLine2(
+            result = grammar.Grammar.TokenizeLine2(
                 new LineText(document.GetText(line).AsMemory()),
                 previous?.EndState,
                 limit
@@ -241,12 +336,16 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         }
         finally
         {
-            Monitor.Exit(grammar.Gate);
+            grammar.ExitOnUiThread();
         }
         // TextMate stops at the time limit without saying so: a result that took that long may be incomplete.
-        if (Stopwatch.GetElapsedTime(tokenizeStart) >= limit)
+        TimeSpan elapsed = Stopwatch.GetElapsedTime(tokenizeStart);
+        if (elapsed >= limit)
         {
             _frameDeadline = 0;
+            // It checks the limit only between regex searches; one search ran far past it.
+            if (elapsed >= limit + s_frameBudget)
+                grammar.TooSlowForUiThread = true;
             return;
         }
         bool endStateChanged = !Equals(entry.EndState, result.RuleStack);
@@ -291,9 +390,8 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         if (_document is not { } document)
             return;
         // A grammar that finished loading before the text arrived starts tokenizing it now, before the first layout.
-        if (_loading is { IsCompletedSuccessfully: true } loaded)
-            Adopt(loaded.Result);
-        else if (_loading is not null)
+        AdoptIfLoaded();
+        if (_loading is not null)
             _loadingText = document.CreateSnapshot();
         // Keep one entry per line: entries right after the changed line are inserted or removed, so the entries of
         // all following lines keep their tokens and states.
@@ -334,8 +432,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
 
     private void RequestTokenization()
     {
-        if (_grammar is null && _loading is { IsCompletedSuccessfully: true } loading)
-            Adopt(loading.Result);
+        AdoptIfLoaded();
         if (_request is not null || _grammar is not { } grammar || _document is not { } document)
             return;
         while (_firstInvalid < _lines.Count && _lines[_firstInvalid].IsValid)
@@ -414,7 +511,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         Schedule();
     }
 
-    private static LineResult[] Tokenize(Grammar grammar, IStateStack? state, string[] texts)
+    private static LineResult[] Tokenize(TextMateGrammar grammar, IStateStack? state, string[] texts)
     {
         var results = new LineResult[texts.Length];
         for (int i = 0; i < texts.Length; i++)
@@ -425,67 +522,57 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
                 results[i] = new LineResult(state, null);
                 continue;
             }
-            ITokenizeLineResult2 result;
-            lock (grammar.Gate)
-                result = grammar.TextMateGrammar.TokenizeLine2(new LineText(texts[i].AsMemory()), state, s_lineTimeLimit);
+            ITokenizeLineResult2 result = grammar.TokenizeInBackground(texts[i], state, s_lineTimeLimit);
             state = result.RuleStack;
             results[i] = new LineResult(state, result.Tokens);
         }
         return results;
     }
 
-    private static LoadedGrammar Load(
-        IRegistryOptions options,
-        string? scopeName,
-        string? grammarFile,
+    /// <summary>
+    /// Tokenizes the lines in view, from <paramref name="firstLine"/>, with a grammar just loaded: this compiles the
+    /// expressions they need here instead of on the UI thread.
+    /// </summary>
+    private static LoadedGrammar Prepare(
+        TextMateGrammar? grammar,
+        LoadedTheme theme,
+        int firstLine,
         Func<ITextSource?> currentText
     )
     {
-        var registry = new Registry(options);
-        IGrammar textMateGrammar = grammarFile is not null
-            ? registry.LoadGrammarFromPathSync(grammarFile, 0, null)
-            : registry.LoadGrammar(scopeName);
-        Theme theme = registry.GetTheme();
-        ICollection<string> colors = theme.GetColorMap();
-        var brushes = new IBrush?[colors.Count + 1];
-        foreach (string color in colors)
-        {
-            int id = theme.GetColorId(color);
-            if (id >= 0 && id < brushes.Length)
-                brushes[id] = new ImmutableSolidColorBrush(CodeEditor.ParseThemeColor(color));
-        }
-        var grammar = new Grammar(textMateGrammar, brushes);
-
-        // Tokenizing the first screen compiles the expressions it needs, here instead of on the UI thread. The text may
-        // change meanwhile, typically from empty to a whole file: then once more.
+        if (grammar is null)
+            return new LoadedGrammar(null, theme, 0, [], null);
+        // The text may change meanwhile, typically from empty to a whole file: then once more.
         ITextSource? text = null;
-        LineResult[] firstLines = [];
+        LineResult[] lines = [];
         for (int attempt = 0; attempt < 3 && currentText() is { } current && current != text; attempt++)
         {
             text = current;
-            var lines = new List<string>(FirstScreenLines);
+            var texts = new List<string>(FirstScreenLines);
             using TextReader reader = text.CreateReader();
-            while (lines.Count < FirstScreenLines && reader.ReadLine() is { } line)
-                lines.Add(line);
-            firstLines = Tokenize(grammar, null, [.. lines]);
+            for (int skipped = 0; skipped < firstLine && reader.ReadLine() is not null; skipped++) { }
+            while (texts.Count < FirstScreenLines && reader.ReadLine() is { } line)
+                texts.Add(line);
+            lines = Tokenize(grammar, null, [.. texts]);
         }
         // Without text yet, compile at least the expressions most lines need.
-        if (firstLines.Length == 0)
+        if (lines.Length == 0)
         {
             foreach (string line in s_warmUpLines)
                 Tokenize(grammar, null, [line]);
         }
-        return new LoadedGrammar(grammar, firstLines, text?.Version);
+        return new LoadedGrammar(grammar, theme, firstLine, lines, text?.Version);
     }
 
-    /// <param name="Gate">Held while tokenizing: a grammar compiles and caches its expressions as it goes.</param>
-    private sealed record Grammar(IGrammar TextMateGrammar, IBrush?[] Brushes)
-    {
-        public object Gate { get; } = new();
-    }
-
-    /// <param name="FirstLines">The first lines of the text at <paramref name="Version"/>.</param>
-    private sealed record LoadedGrammar(Grammar Grammar, LineResult[] FirstLines, ITextSourceVersion? Version);
+    /// <param name="Grammar">Null when there is no grammar for the language.</param>
+    /// <param name="Lines">Lines from <paramref name="FirstLine"/> of the text at <paramref name="Version"/>.</param>
+    private sealed record LoadedGrammar(
+        TextMateGrammar? Grammar,
+        LoadedTheme Theme,
+        int FirstLine,
+        LineResult[] Lines,
+        ITextSourceVersion? Version
+    );
 
     private readonly record struct LineResult(IStateStack? EndState, int[]? Tokens);
 

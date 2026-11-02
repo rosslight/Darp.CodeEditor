@@ -8,6 +8,7 @@ public sealed partial class MainWindow : Window, IBenchHost
     public MainWindow()
     {
         InitializeComponent();
+        ThemeButton.Click += (_, _) => Ui.ToggleThemeVariant();
         LuauEditor.Text = SampleDocuments.LuauScript;
         JsonEditor.Text = SampleDocuments.Json.Replace("\"file\": null", "\"file\": null,");
         CSharpEditor.Text = SampleDocuments.CSharpScript;

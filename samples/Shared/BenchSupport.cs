@@ -20,7 +20,8 @@ internal sealed record DemoOptions(
     bool NoLanguageService,
     bool SkipHighlightingBench,
     string? OutputPath,
-    string? E2eOutput
+    string? E2eOutput,
+    bool Light
 )
 {
     public bool Measure => Smoke || Bench;
@@ -35,7 +36,8 @@ internal sealed record DemoOptions(
             args.Contains("--no-language-service"),
             args.Contains("--skip-highlighting-bench"),
             Value(args, "--out"),
-            Value(args, "--e2e")
+            Value(args, "--e2e"),
+            args.Contains("--light")
         );
     }
 

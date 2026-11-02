@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using Darp.CodeEditor.Instrumentation;
 
@@ -14,6 +15,8 @@ public sealed class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            if (Program.Options.Light)
+                RequestedThemeVariant = ThemeVariant.Light;
             // Start probing before the window exists, so startup work on the UI thread is measured too.
             UiStallProbe? probe = Program.Options.Measure
                 ? new UiStallProbe(Dispatcher.UIThread, TimeSpan.FromMilliseconds(2))

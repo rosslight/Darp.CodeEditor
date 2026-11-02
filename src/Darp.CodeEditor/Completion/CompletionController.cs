@@ -6,7 +6,6 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using AvaloniaEdit.Document;
 using Darp.CodeEditor.LanguageServices;
-using Darp.CodeEditor.Theming;
 using CompletionList = Darp.CodeEditor.LanguageServices.CompletionList;
 
 namespace Darp.CodeEditor.Completion;
@@ -32,6 +31,7 @@ internal sealed class CompletionController
         editor.DocumentChanged += (_, _) => Cancel();
         editor.AddHandler(InputElement.KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
         editor.TextArea.TextView.VisualLinesChanged += OnFirstLayout;
+        editor.EditorThemeChanged += (_, _) => _popup?.ApplyTheme(editor.EditorTheme);
     }
 
     /// <summary>True while the completion list is shown; it takes the navigation keys then.</summary>
@@ -60,8 +60,6 @@ internal sealed class CompletionController
         session.Cancellation.Cancel();
         _popup?.Hide();
     }
-
-    public void ApplyTheme(EditorTheme theme) => _popup?.ApplyTheme(theme);
 
     private void OnFirstLayout(object? sender, EventArgs e)
     {

@@ -88,6 +88,10 @@ internal static class DemoRun
         if (!options.Bench)
             return;
 
+        await window.ShowTabAsync(0);
+        await EditorScenarios.RunThemeSwitchAsync(window, editor, probe, report);
+        await window.ShowTabAsync(1);
+
         probe.BeginPhase("JSON: typing burst with word completion");
         json.Select(json.Document.GetLineByNumber(4).EndOffset, 0);
         await Ui.TypeAsync(json, "\n    \"serial\": \"sensor-temperature-7\", \"enabled\": false,", 40);

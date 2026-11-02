@@ -8,7 +8,9 @@ measured numbers; it is not the product. "Darp.CodeEditor" is a working name.
 ```
 Darp.CodeEditor            NativeAOT-compatible; no Roslyn, no MEF
   CodeEditor               AvaloniaEdit TextEditor + TextMate highlighting + search panel
-  Highlighting/            TextMate tokenization on the thread pool; rendering reads a per-line cache
+  Highlighting/            TextMate: visible lines tokenized in the frame (≤ 4 ms), the rest on the thread pool
+  Theming/                 VS Code themes (Dark+/Light+ or a file) following the app's light/dark variant
+  Popups/                  completion, signature help and hover, drawn on the window's overlay layer
   LanguageServices/        ILanguageService: async only, snapshot + version + CancellationToken, plain DTOs
   LanguageFeatures         calls the service via Task.Run, debounces, drops or maps forward stale results
   Completion/              one fetch per session, local ordinal filtering, lazy descriptions, sync commit
@@ -99,6 +101,7 @@ Command line flags of both demos:
 | `--skip-highlighting-bench` | Skips the highlighting scenarios of `--bench`. |
 | `--no-language-service` | JIT demo only: starts without the C# service, to attribute startup stalls. |
 | `--low-latency-gc` | JIT demo only: sets `GCLatencyMode.SustainedLowLatency`. |
+| `--light` | Starts with the light theme variant. The status bar's button switches between light and dark at run time. |
 | `--e2e <file>` | Writes where line 1 of a C# document without language features ends on screen, for `Probe latency`, and stays open. |
 
 ## Measure from outside

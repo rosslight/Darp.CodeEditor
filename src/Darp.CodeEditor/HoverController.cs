@@ -38,12 +38,13 @@ internal sealed class HoverController
         };
         // Below the hovered line, or above it: a popup over the pointer would end the hover that opened it.
         _popup = new TextPopup(editor, _border, above: false);
-        ApplyTheme(EditorTheme.Default);
+        ApplyTheme(editor.EditorTheme);
+        editor.EditorThemeChanged += (_, _) => ApplyTheme(editor.EditorTheme);
         editor.PointerHover += OnPointerHover;
         editor.PointerHoverStopped += (_, _) => Close();
     }
 
-    public void ApplyTheme(EditorTheme theme)
+    private void ApplyTheme(EditorTheme theme)
     {
         _border.Background = theme.WidgetBackground;
         _border.BorderBrush = theme.WidgetBorder;

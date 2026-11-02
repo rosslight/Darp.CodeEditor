@@ -96,6 +96,7 @@ internal static class DemoRun
 
         if (!options.Bench)
             return;
+        await EditorScenarios.RunThemeSwitchAsync(window, editor, probe, report);
         if (service is not null)
             await LanguageServiceScenarios.RunAsync(window, editor, probe, report);
         if (!options.SkipHighlightingBench)

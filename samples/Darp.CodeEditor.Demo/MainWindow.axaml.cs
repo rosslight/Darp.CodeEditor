@@ -13,6 +13,7 @@ public sealed partial class MainWindow : Window, IBenchHost
     public MainWindow(bool noLanguageService)
     {
         InitializeComponent();
+        ThemeButton.Click += (_, _) => Ui.ToggleThemeVariant();
         CSharpEditor.Text = SampleDocuments.CSharpScript;
         LuauEditor.Text = SampleDocuments.LuauScript;
         JsonEditor.Text = SampleDocuments.Json;
