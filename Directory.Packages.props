@@ -11,10 +11,13 @@
     <PackageVersion Include="Avalonia.Headless.XUnit" Version="12.1.5" />
     <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.5" />
     <PackageVersion Include="AvaloniaEdit.TextMate" Version="12.0.0" />
+    <PackageVersion Include="EmmyLua.LanguageServer.Framework" Version="0.9.2" />
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Features" Version="5.9.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="5.9.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
     <PackageVersion Include="Shouldly" Version="4.3.0" />
+    <PackageVersion Include="System.Reflection.MetadataLoadContext" Version="10.0.0" />
     <PackageVersion Include="TextMateSharp" Version="2.0.4" />
     <PackageVersion Include="TextMateSharp.Grammars" Version="2.0.4" />
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
