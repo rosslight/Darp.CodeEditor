@@ -21,6 +21,7 @@ internal sealed record DemoOptions(
     bool Scene,
     bool NoLanguageService,
     bool SkipHighlightingBench,
+    bool RunScript,
     string? OutputPath
 )
 {
@@ -39,6 +40,7 @@ internal sealed record DemoOptions(
             args.Contains("--scene"),
             args.Contains("--no-language-service"),
             args.Contains("--skip-highlighting-bench"),
+            args.Contains("--run-script"),
             output
         );
     }
