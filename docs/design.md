@@ -1,6 +1,6 @@
 # Darp.CodeEditor: design and decision log
 
-Status as of 2026-11-02. The repository is private. This document condenses the design conversation (questions Q1–Q38), the research reports and the WebView bake-off report. The sources are listed in [section 7](#7-sources). Accepted plans are distinguished from prototype behavior. Unresolved product choices are marked **Open:**. Measurements are historical source reports, not new verification runs.
+Status as of 2026-11-02. The repository is private. This document condenses the design conversation (questions Q1–Q44), the research reports and the WebView bake-off report. The sources are listed in [section 7](#7-sources). Accepted plans are distinguished from prototype behavior. Unresolved product choices are marked **Open:**. Measurements are historical source reports, not new verification runs.
 
 Terms used below:
 
@@ -49,7 +49,7 @@ Status against the budgets, from the measurements in [section 4](#4-key-measurem
 
 | Budget | Measured | Status |
 |---|---|---|
-| Highlighted text ≤ 100 ms | AOT on Linux: 99 ms in-process milestone, 102 ms on screen (bake-off); 83 ms to visible text. JIT on Linux: 701–878 ms. AOT on Windows: 225 ms. JIT on Windows: 1,123 ms | Near target only in Linux AOT. These process-start measurements do not establish the editor-creation budget. **Open:** Should the 100 ms clock start at editor creation or process launch? |
+| Highlighted text ≤ 100 ms | AOT on Linux: 99 ms in-process milestone, 102 ms on screen (bake-off); 83 ms to visible text. JIT on Linux: 701–878 ms. AOT on Windows: 225 ms. JIT on Windows: 1,123 ms | Near target only in Linux AOT. The budget clock starts when the editor is created (#42); these process-start numbers include app startup. |
 | UI thread ≤ 16 ms | Linux prototype typing p99 1.1 ms; bake-off with C# and in-window popups 1.7 ms. Windows baseline p99 40 ms; investigation 41 → 3 ms. A 27 ms first-completion stall remains on Windows | Typical typing is below target with in-window popups; percentiles do not certify the maximum-stall budget. Windows first completion exceeds it |
 | C# ready ≤ 1.5 s | Prototype JIT: 1.75 s without ReadyToRun; bake-off 2.011 s. Isolated server start to first member list: 0.729 s with ReadyToRun. Windows JIT prototype: 2.68 s | Integrated demos miss target. The isolated server result excludes editor startup and does not certify app readiness |
 | Completion ≤ 50 ms p95 | Member list p95 10–20 ms. Prototype word list (~3,300 items) p95 25–36 ms on Linux; server-only p95 30.7–36.5 ms. Windows laptop word list p50 36 ms | Met on Linux. At risk for word lists on Windows |
@@ -58,7 +58,7 @@ Status against the budgets, from the measurements in [section 4](#4-key-measurem
 
 **In v1:** highlighting, completion, signature help, quick info (hover), compiler diagnostics, find and replace (match case, whole word, regex, literal replace, all matches highlighted), and basic editing helpers (auto-indent, bracket matching, auto-closing brackets and quotes, toggle comment, Tab and Shift+Tab indentation). Search is a v1 priority (#8); #14 confirms the editing helpers.
 
-**Not in v1:** Luau, rename, quick fixes, refactorings, find usages, format-as-you-type, analyzer diagnostics, go-to-line, `$1` capture groups in replace, `#r` and `#load` directives, cross-file scripts. Regular single-file C# support is open (section 5).
+**Not in v1:** Luau, rename, quick fixes, refactorings, find usages, format-as-you-type, analyzer diagnostics, go-to-line, `$1` capture groups in replace, `#r` and `#load` directives, cross-file scripts. Regular C# files: scripts only for now (#39).
 
 **Design targets:** scripts up to about 5,000 lines and a handful of open editors. One language-server Roslyn instance per app, shared by all editors (#5, #10, #15); the separate runner also needs Roslyn (#36). Above about 20,000 lines, the agreed fallback is C# features off and TextMate only (#5); this is a design target, not a verified implementation limit.
 
@@ -109,10 +109,10 @@ Host app (JIT or AOT)
 ### 2.4 Packaging and the bundled runtime
 
 - The language server and the script runner each run on a .NET runtime that ships with the app (#31, #36). Measured sizes: the helper is 34.9 MiB framework-dependent, 73.9 MiB with ReadyToRun and 113.7 MiB self-contained. The runner spike measured 100–122 MiB on disk with its runtime and 175–183 MiB of RAM.
-- The current server builds are framework-dependent and need .NET 10 at run time: 27 MiB published, 10 MiB zipped; with ReadyToRun, 68 MiB and 29 MiB. Bundling the runtime is decided; whether to publish self-contained or share a runtime folder, and whether to enable ReadyToRun in the shipped server, remain packaging details.
+- The current server builds are framework-dependent and need .NET 10 at run time: 27 MiB published, 10 MiB zipped; with ReadyToRun, 68 MiB and 29 MiB. The language server and the runner share one bundled runtime folder and ship with ReadyToRun (server start 1.12 s → 0.73 s on Linux; the Windows laptop is about 2× slower).
 - No SDK is needed on user machines (#28, #31). NuGet packages that an app already ships are passed to scripts as references by the host (#22).
-- AOT apps ship the script API (globals type and the types scripts use) as separate DLLs next to the app (#29). A package-provided MSBuild copy target was proposed in the conversation, not confirmed or built. The runner needs executable API implementations/proxies with matching identities; metadata-only reference assemblies suffice only for compilation. Framework libraries such as System.Text.Json come from the bundled runtime.
-- Conditional MSBuild switch in the host project to copy hover XML documentation (#38). Copying the SDK's English docs and the app's script DLL docs was proposed. **Open:** Should the hover-docs switch be off by default?
+- AOT apps ship the script API (globals type and the types scripts use) as separate DLLs next to the app (#29). The C# package provides an MSBuild switch on package and project references; publish copies the managed DLLs of the marked references next to the app (#44, not built yet). The runner needs executable API implementations/proxies with matching identities; metadata-only reference assemblies suffice only for compilation. Framework libraries such as System.Text.Json come from the bundled runtime.
+- Conditional MSBuild switch in the host project to copy hover XML documentation (#38). Off by default; when on, it copies .NET's English docs from the build machine's SDK and the docs of the app's script DLLs (#40).
 
 ### 2.5 Current state, 2026-11-02
 
@@ -125,7 +125,7 @@ Host app (JIT or AOT)
 | Editor LSP client | none | Not started. Demos still use the in-process C# service |
 | Luau | none | Follow-up |
 | WebView editor | `feat/webview-bakeoff` | Record only, not merged |
-| Repository setup (CI, releases, feed) | in flight | Not in the repository yet |
+| Repository setup (CI, releases, feed) | `main` (PR #2) | Merged |
 | Greenfield test app | none | Planned (#24) |
 
 ## 3. Decision log
@@ -137,20 +137,20 @@ Question numbers are from the design conversation. Later answers replace earlier
 | 1 | C# in AOT apps | First answer: v1 has C# only in JIT apps. Long term, AOT apps get C# through a helper process | Rich editing APIs were demonstrated in a preserved ~121 MiB NativeAOT executable with warnings and untested paths; stock NativeAOT cannot execute emitted assemblies | superseded by #10 and #33 (AOT C# is now in scope) |
 | 2 | Luau | After C#, not in v1. Highlighting first, then luau-lsp as a separate process | A maintained MIT Luau grammar exists. luau-lsp provides completion, signature help, hover and diagnostics. An owned type checker was estimated to take weeks | decided |
 | 3 | Script definition | One description per script: references, imports, globals type, language version, nullable setting, script kind. Editor and runner both read it | Editor errors then match what runs. The first answer's "running stays in the app" is superseded by #33 | decided for shared definition; execution ownership superseded by #33 |
-| 4 | Performance budgets | Highlighted text within 100 ms without the language service. No language work over 16 ms on the UI thread (tests fail above 50 ms). C# ready within 1.5 s in JIT apps with ReadyToRun. The 100 ms target originally said "of creation"; clock origin remains open. Completion within 50 ms p95 | Revised from the first numbers (2 s to C# ready, 100 ms completion p95) after the C# hosting research | open (numeric targets decided; clock origin unconfirmed) |
+| 4 | Performance budgets | Highlighted text within 100 ms without the language service. No language work over 16 ms on the UI thread (tests fail above 50 ms). C# ready within 1.5 s in JIT apps with ReadyToRun. The 100 ms clock starts when the editor is created (#42). Completion within 50 ms p95 | Revised from the first numbers (2 s to C# ready, 100 ms completion p95) after the C# hosting research | decided |
 | 5 | Document size and count | Scripts up to ~5,000 lines, a handful of editors. One editor-side Roslyn shared per app (runner split added by #36). Above ~20,000 lines, C# features off, TextMate only | Product owner: "sounds reasonable" | decided |
 | 6 | Theming | VS Code theme files. Light and dark defaults. The app can pass its own file. Follows the app's Fluent light/dark variant. Semantic colors come from the same theme | TextMate and C# colors never clash | decided (only Dark+ is wired; semantic colors hard-coded in the prototype) |
 | 7 | Repository, name, visibility | Name `Darp.CodeEditor`. First planned as public on nuget.org | Changed to private, see #23 | superseded by #23 |
 | 8 | Search | Find and replace with match case, whole word and regex, all matches highlighted. Replace is literal. Go-to-line later | Literal replace is enough for v1. `$1` capture groups are a later patch | decided |
 | 9 | Highlighting off the UI thread | Own background TextMate tokenizer: one cache entry per line, results applied only to lines not edited since the request. Lines over 5,000 characters are not colored. Hybrid: visible lines colored synchronously within ~4 ms, the rest in the background | Stock AvaloniaEdit.TextMate stalls 2.5 s per keystroke on a 20,000-character line. The hybrid gives first-frame colors | decided (replaces stock TextMate choice; hybrid not built yet) |
 | 10 | Language service: contract and process model | Own small contract in the editor (`ILanguageService`, async, snapshot and version, offsets). LSP between processes. Every language runs in its own language-server process, in JIT and AOT hosts. Accepted refinements: incremental open, change and close; lazy completion resolve; per-item commit characters; classification for the visible range only; signature parameter offsets; structured text | One setup to maintain. Roslyn's memory work stays out of the UI process. The GC research did not reproduce pauses above 50 ms; isolation is a maintainability and robustness choice, not a proven GC necessity | decided |
-| 11 | Kinds of C# | Scripts first. Regular C# files too, where possible | Product owner: C if possible, A (scripts) more important | open (initial preference for both; later scripts-only question unanswered) |
+| 11 | Kinds of C# | Scripts first. Regular C# files too, where possible | Product owner: C if possible, A (scripts) more important | superseded by #39 (scripts only for now) |
 | 12 | Script definition contents | References, imports, globals type, language version, nullable setting, script kind. No `#r` or `#load` in v1. Each file is its own script | Host controls references, so editor and runner agree. Product owner: "keep it simple" | decided |
 | 13 | Diagnostics | Compiler diagnostics only. Analyzers can be opted in later | Analyzers add load time and memory | decided |
 | 14 | Editing helpers | Auto-indent, bracket matching, auto-closing brackets and quotes, toggle comment, Tab and Shift+Tab. No go-to-line | Cheap, and expected from any code editor | decided (not in `main` yet) |
 | 15 | When Roslyn starts | Planned: start when the first C# editor opens, with `PrewarmAsync()` to start earlier. One shared language-server instance per app | Apps that never open an editor pay nothing. Roslyn costs ~220 MiB once loaded | decided (planned host API; not implemented in the supplied prototype/server sources; server warms after environment loading) |
-| 16 | Pilot app and existing editor | First consumer is the greenfield test app (#24). The real app follows after the test app | Product owner: "greenfield test app for now" | open (pilot decided; freeze policy unanswered) |
-| 17 | Repository setup | Use the existing CI, release-please, NuGet publishing and changelog conventions | Proven setup | decided (not in the repository yet) |
+| 16 | Pilot app and existing editor | First consumer is the greenfield test app (#24). The real app follows after the test app | Product owner: "greenfield test app for now" | decided (existing editor left alone, #41) |
+| 17 | Repository setup | Use the existing CI, release-please, NuGet publishing and changelog conventions | Proven setup | decided (merged in PR #2) |
 | 18 | Helper runtime, long term | Separate helper on an installed .NET runtime; download a per-user runtime if none is installed | Supported setup. A crashing script cannot take the app down | superseded by #31 |
 | 19 | Popups | Completion, hover and signature help drawn inside the editor window, always | Native popups cost 10–30 ms to open or close on Linux. On Windows, in-window popups brought keystroke p99 from 41 ms to 3 ms | decided (default switch is in `feat/editor-polish`) |
 | 20 | Roslyn APIs | Public Roslyn APIs only, where possible. Completion resolve uses the public `GetChangeAsync` | Avoid fragile dependencies on Roslyn internals; the later out-of-process model owns its server dependencies | decided (public APIs where possible; server review found no hidden internal API calls; shared-item behavior remains an upgrade risk; prototype still uses an undocumented property) |
@@ -172,7 +172,13 @@ Question numbers are from the design conversation. Later answers replace earlier
 | 35 | High-frequency calls | Batching in the runner API from the start. No in-process mode | JIT caller, 100k synthetic packets: one call each takes 3.3 s; batches of 100 take 0.07 s (~1.5M packets/s); AOT caller: 3.87 s and 0.088 s | decided |
 | 36 | Processes | Two separate processes, language server and script runner, on the same bundled runtime | A hung or killed script must not take down completion. The runner must work with no editor open. Sharing was estimated to save ~150 MiB (not measured) | decided |
 | 37 | EmmyLua framework | Replace it with one small LSP layer (working name `Darp.CodeEditor.Lsp`), shared by the editor client and the server | EmmyLua needed a replaced scheduler for cancellation, fixed shutdown and hand-written completion lists. Its NativeAOT publish gave 100 warnings, and completion-list/plain-string-hover deserialization failed in the client probe | decided (not built; the server still uses EmmyLua) |
-| 38 | .NET docs for hover | Conditional MSBuild switch in the host project. SDK English docs and script-DLL docs were proposed as copy inputs; no SDK needed on user machines | Without docs, hover shows signatures but no descriptions. Product owner suggested making copying conditional | open (conditional switch accepted; default and exact copy scope unconfirmed) |
+| 38 | .NET docs for hover | Conditional MSBuild switch in the host project. SDK English docs and script-DLL docs were proposed as copy inputs; no SDK needed on user machines | Without docs, hover shows signatures but no descriptions. Product owner suggested making copying conditional | decided (#40: off by default; copies framework and script-API docs) |
+| 39 | Regular C# files | Scripts only for now. Regular files only if a use case appears | Keeps the server small; #27 and #30 were already moot | decided |
+| 40 | Hover docs default | The switch from #38 is off by default. When on, it copies .NET's English docs from the build machine's SDK and the docs of the app's script DLLs | Apps that want hover docs opt in; user machines need no SDK | decided |
+| 41 | Existing editor | Left alone; this project sets no policy for it | Product owner's choice | decided |
+| 42 | Budget clock | The 100 ms highlighting budget starts when the editor is created. Demo launch times are still reported | App startup is outside the library's control | decided |
+| 43 | Packages | `Darp.CodeEditor` (editor core), `Darp.CodeEditor.Lsp` (LSP layer and client), `Darp.CodeEditor.CSharp` (script environment, server launcher, runner API; ships the server, the runner and the bundled runtime). Later `Darp.CodeEditor.Luau`. The server and the runner are not separate packages | Few packages to maintain; one package per language for hosts | decided |
+| 44 | Script-visible DLLs in AOT apps | The C# package provides an MSBuild switch on package and project references. Publish copies the managed DLLs of the marked references next to the app | Hosts choose which assemblies scripts see. Iterate later if needed | decided (not built yet) |
 
 ## 4. Key measurements
 
@@ -203,24 +209,17 @@ Only the numbers that drove decisions. Source names refer to section 7.
 
 ### 5.1 Open questions
 
-1. **Regular C# files.** Are they needed, or scripts only? Initially preferred in #11; the renewed question after Q30 was not answered. The assistant recommended dropping them. (#11, #27, #30)
-2. **Final package split.** The names proposed in round 2 (`Darp.CodeEditor.CSharp`, `.CsharpAot`, `.Luau`) predate #10 and #36. The branch has `.Hosting`, `.Scripting` and `.Server`. **Open:** What is the final package list after the shared LSP and separate-runner decisions?
-3. **Release packaging.** Runtime bundling is decided. **Open:** Should server and runner share a runtime folder, and should the shipped server use ReadyToRun? The current framework-dependent benchmark builds do not settle deployment layout.
-4. **Roslyn compatibility (#20).** The accepted policy is public APIs where possible. The later server review found no hidden internal API calls; the shared-completion-item workaround relies on Roslyn behavior and needs upgrade tests. The prototype reads undocumented `Properties["InsertionText"]`.
-5. **Word lists.** The server takes about 2× the in-process time for ~3,300 items (22 ms against 11 ms p50). On the Windows laptop this may exceed the 50 ms budget. Options: filter on the server with `isIncomplete`, drop namespace labels, or bypass the framework's response copies. Not decided.
-6. **Windows first-completion stall.** A 27 ms UI stall on the first completion of a session. The reported local commit fixes popup typing cost; the 27 ms first-completion stall was still unresolved. Only the conversation summary is supplied.
-7. **Windows budgets.** Highlighted text (1,123 ms JIT) and C# ready (2.68 s) are over budget on the Windows laptop. The Windows re-run is not done.
-8. **Untested platforms.** arm64 and macOS are untested. The server is tested on Linux x64 only.
-9. **GC outliers.** The 57–167 ms pauses seen in the early prototype are unexplained. They were not reproduced in 40 runs.
-10. **Script runner.** The Windows process cleanup is documented, not tested. The batching numbers come from synthetic load. Real handler work and UI load at 1,000–10,000 packets per second are not measured.
-11. **Nullable in scripts.** `CSharpScript` has no public nullable option. The shared options builder accepts only `disable`; scripts can opt in with `#nullable enable`.
-12. **IME and accessibility.** Not tested. The test VM has no input-method engine.
-13. **Hover docs switch (#38). Open:** Should the switch default to off, and should it copy both framework and script-API docs? The conversation measured 31 MB unpacked for 107 framework XML files; compressed cost is unmeasured.
-14. **Theme model.** Only Dark+ is wired. Semantic colors are hard-coded.
-15. **Environment changes.** Changing the script definition requires a server restart.
-16. **Existing editor (#16). Open:** Should it be frozen except for critical fixes until replacement? Only the greenfield pilot was confirmed.
-17. **Budget clock (#4). Open:** Does the 100 ms highlighting target start at editor creation or process launch?
-18. **AOT DLL packaging (#29). Open:** Should the package provide the proposed MSBuild copy target, and how should hosts select script-visible assemblies? Separate managed API DLLs are decided.
+1. **Roslyn compatibility (#20).** The accepted policy is public APIs where possible. The later server review found no hidden internal API calls; the shared-completion-item workaround relies on Roslyn behavior and needs upgrade tests. The prototype reads undocumented `Properties["InsertionText"]`.
+2. **Word lists.** The server takes about 2× the in-process time for ~3,300 items (22 ms against 11 ms p50). On the Windows laptop this may exceed the 50 ms budget. Options: filter on the server with `isIncomplete`, drop namespace labels, or bypass the framework's response copies. Not decided.
+3. **Windows first-completion stall.** A 27 ms UI stall on the first completion of a session. The reported local commit fixes popup typing cost; the 27 ms first-completion stall was still unresolved. Only the conversation summary is supplied.
+4. **Windows budgets.** Highlighted text (1,123 ms JIT) and C# ready (2.68 s) are over budget on the Windows laptop. The Windows re-run is not done.
+5. **Untested platforms.** arm64 and macOS are untested. The server is tested on Linux x64 only.
+6. **GC outliers.** The 57–167 ms pauses seen in the early prototype are unexplained. They were not reproduced in 40 runs.
+7. **Script runner.** The Windows process cleanup is documented, not tested. The batching numbers come from synthetic load. Real handler work and UI load at 1,000–10,000 packets per second are not measured.
+8. **Nullable in scripts.** `CSharpScript` has no public nullable option. The shared options builder accepts only `disable`; scripts can opt in with `#nullable enable`.
+9. **IME and accessibility.** Not tested. The test VM has no input-method engine.
+10. **Theme model.** Only Dark+ is wired. Semantic colors are hard-coded.
+11. **Environment changes.** Changing the script definition requires a server restart.
 
 ### 5.2 Next steps (planned as of 2026-11-02)
 
@@ -243,9 +242,9 @@ Only the numbers that drove decisions. Source names refer to section 7.
 5. **#18 against #31.** Installed runtime with download was the answer for "lets go with A for now". The bundled runtime (#31) replaces it.
 6. **#3 against #33.** "Running stays in the app" is superseded: the package now owns a runner.
 7. **#22.** `#:package` was accepted and then dropped. The supplied current memory note agrees that restore was dropped; earlier assistant summaries retained the stale decision.
-8. **#11 and #27 against section 5.1, item 1.** "Yes" to regular files, but the later question whether they are needed was not answered.
+8. **#11 and #27.** "Yes" to regular files, later narrowed to scripts only for now (#39).
 9. **#20 against the code.** The user said "public only if possible". The prototype reads undocumented `Properties["InsertionText"]`. The server author described a behavioral dependency on shared items as "internals"; the later review found no hidden internal API calls. This is an upgrade risk, not evidence of internal API use.
-10. **Budget clock.** The budget says "within 100 ms of creation". The prototype measured from process start. Open: confirm the intended clock origin before declaring compliance.
+10. **Budget clock.** The budget says "within 100 ms of creation". The prototype measured from process start. Resolved by #42: the clock starts at editor creation.
 11. **83 ms.** The prototype summary in the conversation calls 83 ms "highlighted text". The bake-off report shows 83 ms for visible text and 99 ms for highlighted text in the same run. The report is used here.
 
 ## 7. Sources
