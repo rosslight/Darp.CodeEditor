@@ -5,4 +5,22 @@
     <Nullable>enable</Nullable>
     <WarningsAsErrors>Nullable;CS9124</WarningsAsErrors>
   </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Version of the packages. release-please updates it with every release. -->
+    <Version>0.0.0</Version>
+
+    <!-- NuGet packages. Which projects are packages is decided in Directory.Build.targets. -->
+    <Authors>rosslight GmbH</Authors>
+    <PackageProjectUrl>https://github.com/rosslight/Darp.CodeEditor</PackageProjectUrl>
+    <!-- GitHub Packages links a package to the repository named here, and the package inherits its visibility. -->
+    <RepositoryUrl>https://github.com/rosslight/Darp.CodeEditor</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- No license yet: the repository and its packages are private. Choose one before publishing anywhere public. -->
+
+    <!-- GitHub Packages does not take symbol packages, so the PDBs go into the package itself. -->
+    <AllowedOutputExtensionsInPackageBuildOutputFolder>$(AllowedOutputExtensionsInPackageBuildOutputFolder);.pdb</AllowedOutputExtensionsInPackageBuildOutputFolder>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
 </Project>
