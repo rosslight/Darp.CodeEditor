@@ -13,5 +13,9 @@
 .avalonia-build-tasks/
 artifacts/
 
+# Editor page bundles (built from src/Darp.CodeEditor.Web/web by the .NET build)
+node_modules/
+src/Darp.CodeEditor.Web/web/dist/
+
 # Measurement output
 measurements/

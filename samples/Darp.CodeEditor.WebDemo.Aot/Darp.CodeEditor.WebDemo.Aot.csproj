@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- Recommended Avalonia settings for Native AOT. -->
+    <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.Web\Darp.CodeEditor.Web.csproj" />
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.Lsp\Darp.CodeEditor.Lsp.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Shared\BenchSupport.cs;..\Shared\SampleDocuments.cs;..\Shared\E2eTarget.cs" LinkBase="Shared" />
+    <Compile Include="..\..\src\Darp.CodeEditor\Instrumentation\UiStallProbe.cs" LinkBase="Shared" />
+    <Compile Include="..\WebShared\**\*.cs" LinkBase="WebShared" />
+    <Compile Include="..\Darp.CodeEditor.Demo.Aot\JsonLanguageService.cs" LinkBase="Shared" />
+  </ItemGroup>
+</Project>

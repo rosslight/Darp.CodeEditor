@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- The XML docs of ScriptGlobals show up in completion descriptions and quick info. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Only ScriptGlobals needs documentation; the shared sample code documents selectively. -->
+    <NoWarn>$(NoWarn);CS1591;CS1572;CS1573</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.Web\Darp.CodeEditor.Web.csproj" />
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.Lsp\Darp.CodeEditor.Lsp.csproj" />
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp\Darp.CodeEditor.CSharp.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Shared\BenchSupport.cs;..\Shared\SampleDocuments.cs;..\Shared\E2eTarget.cs" LinkBase="Shared" />
+    <Compile Include="..\..\src\Darp.CodeEditor\Instrumentation\UiStallProbe.cs" LinkBase="Shared" />
+    <Compile Include="..\WebShared\**\*.cs" LinkBase="WebShared" />
+    <Compile Include="..\Darp.CodeEditor.Demo\ScriptGlobals.cs" LinkBase="Shared" />
+  </ItemGroup>
+</Project>

@@ -20,6 +20,15 @@ internal static class DemoRun
         int exitCode = 0;
         try
         {
+            if (options.E2eOutput is { } e2eOutput)
+            {
+                // A C# document without language features: the input latency probe types at the end of line 1.
+                await window.ShowTabAsync(2);
+                await Ui.WaitForVisibleAsync(window.CSharpEditor, highlighted: true);
+                await Task.Delay(500);
+                Ui.WriteE2eTarget(window.CSharpEditor, e2eOutput);
+                return;
+            }
             if (probe is null)
             {
                 // Scene for a screenshot: highlighting with the Luau grammar and the search panel open.
@@ -36,7 +45,7 @@ internal static class DemoRun
         }
         report.Save();
         probe?.Dispose();
-        if (!options.Hold)
+        if (!options.Hold && options.E2eOutput is null)
             desktop.Shutdown(exitCode);
     }
 

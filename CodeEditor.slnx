@@ -2,10 +2,15 @@
   <Folder Name="/src/">
     <Project Path="src/Darp.CodeEditor/Darp.CodeEditor.csproj" />
     <Project Path="src/Darp.CodeEditor.CSharp/Darp.CodeEditor.CSharp.csproj" />
+    <Project Path="src/Darp.CodeEditor.LanguageServices/Darp.CodeEditor.LanguageServices.csproj" />
+    <Project Path="src/Darp.CodeEditor.Lsp/Darp.CodeEditor.Lsp.csproj" />
+    <Project Path="src/Darp.CodeEditor.Web/Darp.CodeEditor.Web.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/Darp.CodeEditor.Demo/Darp.CodeEditor.Demo.csproj" />
     <Project Path="samples/Darp.CodeEditor.Demo.Aot/Darp.CodeEditor.Demo.Aot.csproj" />
+    <Project Path="samples/Darp.CodeEditor.WebDemo/Darp.CodeEditor.WebDemo.csproj" />
+    <Project Path="samples/Darp.CodeEditor.WebDemo.Aot/Darp.CodeEditor.WebDemo.Aot.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Darp.CodeEditor.Tests/Darp.CodeEditor.Tests.csproj" />

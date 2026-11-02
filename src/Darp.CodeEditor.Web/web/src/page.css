@@ -1,0 +1,3 @@
+html, body, #editor { margin: 0; height: 100%; overflow: hidden; }
+html[data-theme="dark"] body { background: #1e1e1e; color-scheme: dark; }
+html[data-theme="light"] body { background: #ffffff; color-scheme: light; }

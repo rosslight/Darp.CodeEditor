@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EditorPagesDirectory>$(MSBuildThisFileDirectory)web/</EditorPagesDirectory>
+    <EditorPagesOutput>$(EditorPagesDirectory)dist/</EditorPagesOutput>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Controls.WebView" />
+  </ItemGroup>
+
+  <!--
+    The editor pages are bundled from web/ with npm and esbuild (Node 22). The bundles are build output and not in git;
+    package-lock.json pins every package. Pass -p:SkipEditorPages=true to reuse an existing web/dist.
+  -->
+  <ItemGroup>
+    <EditorPageSource Include="web/src/**/*;web/build.mjs;web/package.json;web/package-lock.json" />
+  </ItemGroup>
+  <Target
+    Name="BuildEditorPages"
+    BeforeTargets="AssignTargetPaths"
+    Condition="'$(SkipEditorPages)' != 'true'"
+    Inputs="@(EditorPageSource)"
+    Outputs="$(EditorPagesOutput)monaco.js;$(EditorPagesOutput)codemirror.js"
+  >
+    <Exec
+      Command="npm ci --no-audit --no-fund"
+      WorkingDirectory="$(EditorPagesDirectory)"
+      Condition="!Exists('$(EditorPagesDirectory)node_modules/.package-lock.json')"
+    />
+    <Exec Command="npm run build" WorkingDirectory="$(EditorPagesDirectory)" />
+  </Target>
+  <Target Name="IncludeEditorPages" AfterTargets="BuildEditorPages" BeforeTargets="AssignTargetPaths">
+    <Error
+      Condition="!Exists('$(EditorPagesOutput)monaco.js')"
+      Text="The editor pages are missing: run 'npm ci &amp;&amp; npm run build' in $(EditorPagesDirectory)."
+    />
+    <ItemGroup>
+      <_EditorPage Include="$(EditorPagesOutput)**/*" />
+      <Content
+        Include="@(_EditorPage)"
+        Link="editor/%(_EditorPage.RecursiveDir)%(_EditorPage.Filename)%(_EditorPage.Extension)"
+        CopyToOutputDirectory="PreserveNewest"
+        CopyToPublishDirectory="PreserveNewest"
+      />
+    </ItemGroup>
+  </Target>
+</Project>
