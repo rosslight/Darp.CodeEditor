@@ -1,21 +1,23 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Media;
 using AvaloniaEdit;
 using AvaloniaEdit.Rendering;
 using Darp.CodeEditor.LanguageServices;
+using Darp.CodeEditor.Popups;
+using Darp.CodeEditor.Theming;
 
 namespace Darp.CodeEditor;
 
-/// <summary>Shows diagnostics and quick info for the text under the pointer.</summary>
+/// <summary>Shows diagnostics and quick info for the text under the pointer, below its line.</summary>
 internal sealed class HoverController
 {
     private readonly CodeEditor _editor;
     private readonly LanguageFeatures _features;
-    private readonly Popup _popup;
     private readonly TextBlock _text;
+    private readonly Border _border;
+    private readonly TextPopup _popup;
     private CancellationTokenSource? _cancellation;
 
     public HoverController(CodeEditor editor, LanguageFeatures features)
@@ -26,34 +28,34 @@ internal sealed class HoverController
         {
             MaxWidth = 600,
             TextWrapping = TextWrapping.Wrap,
-            Foreground = Brushes.Gainsboro,
             FontFamily = editor.FontFamily,
         };
-        _popup = new Popup
+        _border = new Border
         {
-            // Below the pointer: a popup under the pointer would end the hover that opened it.
-            Placement = PlacementMode.Pointer,
-            VerticalOffset = 18,
-            PlacementTarget = editor.TextArea,
-            Child = new Border
-            {
-                Background = new SolidColorBrush(Color.Parse("#252526")),
-                BorderBrush = new SolidColorBrush(Color.Parse("#454545")),
-                BorderThickness = new Thickness(1),
-                Padding = new Thickness(6, 4),
-                Child = _text,
-            },
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(6, 4),
+            Child = _text,
         };
-        editor.AddPopup(_popup);
+        // Below the hovered line, or above it: a popup over the pointer would end the hover that opened it.
+        _popup = new TextPopup(editor, _border, above: false);
+        ApplyTheme(EditorTheme.Default);
         editor.PointerHover += OnPointerHover;
         editor.PointerHoverStopped += (_, _) => Close();
+    }
+
+    public void ApplyTheme(EditorTheme theme)
+    {
+        _border.Background = theme.WidgetBackground;
+        _border.BorderBrush = theme.WidgetBorder;
+        _text.Foreground = theme.WidgetForeground;
     }
 
     private async void OnPointerHover(object? sender, PointerEventArgs e)
     {
         Close();
         TextView textView = _editor.TextArea.TextView;
-        TextViewPosition? position = textView.GetPositionFloor(e.GetPosition(textView) + textView.ScrollOffset);
+        Point pointer = e.GetPosition(textView);
+        TextViewPosition? position = textView.GetPositionFloor(pointer + textView.ScrollOffset);
         if (position is not { } p)
             return;
         int offset = _editor.Document.GetOffset(p.Location);
@@ -62,7 +64,7 @@ internal sealed class HoverController
             Environment.NewLine,
             _features.DiagnosticsAt(offset).Select(d => $"{d.Id}: {d.Message}")
         );
-        Show(diagnostics);
+        Show(diagnostics, offset, pointer.X);
 
         if (_features.Service is not { } service)
             return;
@@ -76,22 +78,24 @@ internal sealed class HoverController
         if (info is null || cancellation.IsCancellationRequested)
             return;
         Show(
-            diagnostics.Length == 0 ? info.Text : $"{info.Text}{Environment.NewLine}{Environment.NewLine}{diagnostics}"
+            diagnostics.Length == 0 ? info.Text : $"{info.Text}{Environment.NewLine}{Environment.NewLine}{diagnostics}",
+            offset,
+            pointer.X
         );
     }
 
-    private void Show(string text)
+    private void Show(string text, int offset, double x)
     {
         if (text.Length == 0)
             return;
         _text.Text = text;
-        _popup.IsOpen = true;
+        _popup.Show(offset, x);
     }
 
     private void Close()
     {
         _cancellation?.Cancel();
         _cancellation = null;
-        _popup.IsOpen = false;
+        _popup.Hide();
     }
 }

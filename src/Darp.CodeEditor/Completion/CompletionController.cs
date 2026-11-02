@@ -5,6 +5,7 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using AvaloniaEdit.Document;
 using Darp.CodeEditor.LanguageServices;
+using Darp.CodeEditor.Theming;
 using CompletionList = Darp.CodeEditor.LanguageServices.CompletionList;
 
 namespace Darp.CodeEditor.Completion;
@@ -18,6 +19,7 @@ internal sealed class CompletionController
 {
     private readonly CodeEditor _editor;
     private readonly LanguageFeatures _features;
+    private readonly CompletionPopup _popup;
     private Session? _session;
 
     public CompletionController(CodeEditor editor, LanguageFeatures features)
@@ -26,8 +28,14 @@ internal sealed class CompletionController
         _features = features;
         editor.TextArea.TextEntering += OnTextEntering;
         editor.TextArea.TextEntered += OnTextEntered;
+        editor.DocumentChanged += (_, _) => Cancel();
         editor.AddHandler(InputElement.KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
+        _popup = new CompletionPopup(editor);
+        _popup.Closed += (_, _) => OnPopupClosed();
     }
+
+    /// <summary>True while the completion list is shown; it takes the navigation keys then.</summary>
+    public bool IsOpen => _popup.IsOpen;
 
     public void Cancel()
     {
@@ -35,8 +43,10 @@ internal sealed class CompletionController
             return;
         _session = null;
         session.Cancellation.Cancel();
-        session.Window?.Hide();
+        _popup.Hide();
     }
+
+    public void ApplyTheme(EditorTheme theme) => _popup.ApplyTheme(theme);
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
@@ -45,19 +55,32 @@ internal sealed class CompletionController
             e.Handled = true;
             Start(service, new CompletionTrigger(CompletionTriggerKind.Invoke));
         }
+        else if (_popup is { IsOpen: true } popup && e.KeyModifiers == KeyModifiers.None && popup.HandleKey(e.Key))
+        {
+            e.Handled = true;
+        }
+    }
+
+    private void OnPopupClosed()
+    {
+        // The list closed itself (commit, Escape, caret left the word): end the session and its requests.
+        if (_session is not { } session || !session.Shown)
+            return;
+        _session = null;
+        session.Cancellation.Cancel();
     }
 
     private void OnTextEntering(object? sender, TextInputEventArgs e)
     {
-        if (_session is not { } session || e.Text is not [char c] || IsIdentifierPart(c))
+        if (_session is null || e.Text is not [char c] || IsIdentifierPart(c))
             return;
         if (
-            session.Window is { } window
+            _popup is { IsOpen: true } popup
             && _features.Service is { } service
             && service.Capabilities.CompletionCommitCharacters.Contains(c)
         )
         {
-            window.Commit();
+            popup.Commit();
         }
         Cancel();
     }
@@ -124,32 +147,20 @@ internal sealed class CompletionController
         }
 
         long uiStart = Stopwatch.GetTimestamp();
-        var window = new CompletionPopup(
-            _editor.TextArea,
+        bool shown = _popup.Open(
             list.Items,
+            wordStart,
+            Math.Max(caret, wordEnd),
+            closeWhenCaretAtStart: trigger.Kind == CompletionTriggerKind.Insertion,
             index => LoadDescription(session, new CompletionItemReference(snapshot.DocumentId, list.ResultId, index))
-        )
-        {
-            StartOffset = wordStart,
-            EndOffset = Math.Max(caret, wordEnd),
-            CloseWhenCaretAtBeginning = trigger.Kind == CompletionTriggerKind.Insertion,
-        };
-        window.Closed += (_, _) =>
-        {
-            if (_session != session)
-                return;
-            _session = null;
-            session.Cancellation.Cancel();
-        };
-        if (!window.Filter())
+        );
+        if (!shown)
         {
             _session = null;
-            window.Hide();
             _editor.ReportTiming("completion-dropped", Stopwatch.GetElapsedTime(start));
             return;
         }
-        session.Window = window;
-        window.Show();
+        session.Shown = true;
         _editor.ReportTiming("completion-ui", Stopwatch.GetElapsedTime(uiStart), list.Items.Count);
         _editor.ReportTiming("completion", Stopwatch.GetElapsedTime(start), list.Items.Count);
     }
@@ -161,7 +172,7 @@ internal sealed class CompletionController
             Text = "…",
             MaxWidth = 480,
             TextWrapping = TextWrapping.Wrap,
-            Foreground = Brushes.Gainsboro,
+            Foreground = _editor.EditorTheme.WidgetForeground,
             FontFamily = _editor.FontFamily,
         };
         if (_features.Service is { } service)
@@ -199,6 +210,8 @@ internal sealed class CompletionController
     private sealed class Session
     {
         public CancellationTokenSource Cancellation { get; } = new();
-        public CompletionPopup? Window { get; set; }
+
+        /// <summary>True once its list is shown; until then the popup may still show the previous session.</summary>
+        public bool Shown { get; set; }
     }
 }

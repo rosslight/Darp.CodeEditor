@@ -1,10 +1,10 @@
 using System.Diagnostics;
-using Avalonia.Controls.Primitives;
 using Avalonia.Media;
 using AvaloniaEdit;
 using AvaloniaEdit.TextMate;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.LanguageServices;
+using Darp.CodeEditor.Theming;
 using TextMateSharp.Grammars;
 using TextMateSharp.Registry;
 
@@ -50,6 +50,9 @@ public class CodeEditor : TextEditor
     /// visible lines on the UI thread; kept for comparison. Set it before the grammar.
     /// </summary>
     public bool UseBackgroundTokenization { get; init; } = true;
+
+    /// <summary>Colors of the editor's own UI: popups, squiggles and markers.</summary>
+    internal EditorTheme EditorTheme { get; private set; } = EditorTheme.Default;
 
     /// <summary>Diagnostics: rendered lines that background tokenization has not reached yet.</summary>
     public int VisibleLinesWithoutHighlighting => _highlighter?.CountVisibleLinesWithoutTokens() ?? 0;
@@ -117,8 +120,6 @@ public class CodeEditor : TextEditor
         Trace.TraceWarning($"Language service request failed: {exception}");
         LanguageServiceFailed?.Invoke(this, exception);
     }
-
-    internal void AddPopup(Popup popup) => LogicalChildren.Add(popup);
 
     /// <summary>Parses a TextMate theme color: #RRGGBB, or #RRGGBBAA where Avalonia expects #AARRGGBB.</summary>
     internal static Color ParseThemeColor(string color) =>

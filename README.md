@@ -96,7 +96,6 @@ Command line flags of both demos:
 | `--out <file>` | Also writes the results to a file. |
 | `--hold` | Keeps the window open after `--smoke` or `--bench`. |
 | `--scene` | Prepares a scene for a screenshot and stays open. |
-| `--overlay-popups` | Draws popups inside the window instead of native windows (Avalonia platform option). |
 | `--skip-highlighting-bench` | Skips the highlighting scenarios of `--bench`. |
 | `--no-language-service` | JIT demo only: starts without the C# service, to attribute startup stalls. |
 | `--low-latency-gc` | JIT demo only: sets `GCLatencyMode.SustainedLowLatency`. |
