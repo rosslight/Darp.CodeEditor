@@ -100,6 +100,7 @@ internal sealed class CompletionHandler : IJsonHandler
         int position,
         RoslynCompletionTrigger trigger,
         ClientFeatures client,
+        CompletionListLimits limits,
         CompletionResults results,
         CancellationToken cancellationToken
     )
@@ -122,6 +123,7 @@ internal sealed class CompletionHandler : IJsonHandler
                     position,
                     trigger,
                     client,
+                    limits,
                     results,
                     cancellationToken
                 )
@@ -140,6 +142,7 @@ internal sealed class CompletionHandler : IJsonHandler
         int position,
         RoslynCompletionTrigger trigger,
         ClientFeatures client,
+        CompletionListLimits limits,
         CompletionResults results,
         CancellationToken cancellationToken
     )
@@ -157,6 +160,7 @@ internal sealed class CompletionHandler : IJsonHandler
         ];
         if (roslynItems.Length == 0)
             return null;
+        (int[] ranks, bool incomplete) = Select(roslynItems, snapshot.Text.ToString(roslynList.Span), limits);
 
         long resultId = results.NextId();
         // In suggestion mode, such as when naming a new variable, typing must not commit an item.
@@ -166,8 +170,8 @@ internal sealed class CompletionHandler : IJsonHandler
             : ToStrings(roslynList.Rules.DefaultCommitCharacters);
         var commitCharacters = new Dictionary<ImmutableArray<CharacterSetModificationRule>, List<string>>();
         string rankFormat = "D" + roslynItems.Length.ToString(CultureInfo.InvariantCulture).Length;
-        var items = new List<Item>(roslynItems.Length);
-        for (int rank = 0; rank < roslynItems.Length; rank++)
+        var items = new List<Item>(ranks.Length);
+        foreach (int rank in ranks)
         {
             RoslynCompletionItem roslynItem = roslynItems[rank];
             string label = roslynItem.DisplayTextPrefix + roslynItem.DisplayText + roslynItem.DisplayTextSuffix;
@@ -200,15 +204,23 @@ internal sealed class CompletionHandler : IJsonHandler
                         && !itemCommitCharacters.SequenceEqual(s_defaultCommitCharacters)
                             ? itemCommitCharacters
                             : null,
-                    string.Create(CultureInfo.InvariantCulture, $"{resultId}:{rank}")
+                    string.Create(CultureInfo.InvariantCulture, $"{resultId}:{items.Count}")
                 )
             );
         }
         results.Set(
             snapshot.Owner,
-            new CompletionResult(resultId, document, lines, position, trigger, roslynList.Span, [.. roslynItems])
+            new CompletionResult(
+                resultId,
+                document,
+                lines,
+                position,
+                trigger,
+                roslynList.Span,
+                [.. ranks.Select(rank => roslynItems[rank])]
+            )
         );
-        return Write(items, roslynList.Span, defaultCommitCharacters, lines, client);
+        return Write(items, incomplete, roslynList.Span, defaultCommitCharacters, lines, client);
     }
 
     public static async Task<CompletionItem> ResolveAsync(
@@ -297,6 +309,7 @@ internal sealed class CompletionHandler : IJsonHandler
                             position,
                             trigger,
                             session.Client,
+                            session.Options.CompletionListLimits,
                             session.Completions,
                             cancellation.Token
                         )
@@ -385,8 +398,37 @@ internal sealed class CompletionHandler : IJsonHandler
         return (change.TextChange.Span, change.TextChange.NewText ?? "");
     }
 
+    /// <summary>
+    /// The ranks of the items to send. Long lists are cut to the items that match the typed text, best matches
+    /// first, as the editor's own filter would show them, and marked incomplete so the client asks again as the
+    /// user keeps typing.
+    /// </summary>
+    private static (int[] Ranks, bool Incomplete) Select(
+        RoslynCompletionItem[] items,
+        string typed,
+        CompletionListLimits limits
+    )
+    {
+        if (items.Length <= limits.FilterAbove)
+            return ([.. Enumerable.Range(0, items.Length)], false);
+        int[] matching =
+        [
+            .. Enumerable
+                .Range(0, items.Length)
+                .Select(rank => (Rank: rank, Score: CompletionFilter.Score(items[rank].FilterText, typed)))
+                .Where(match => match.Score > 0)
+                .OrderByDescending(match => match.Score)
+                .ThenBy(match => match.Rank)
+                .Take(limits.MaxItems)
+                .Select(match => match.Rank)
+                .Order(),
+        ];
+        return (matching, matching.Length < items.Length);
+    }
+
     private static JsonDocument Write(
         List<Item> items,
+        bool incomplete,
         TextSpan defaultSpan,
         List<string> defaultCommitCharacters,
         LineMap lines,
@@ -397,7 +439,7 @@ internal sealed class CompletionHandler : IJsonHandler
         using (var json = new Utf8JsonWriter(buffer))
         {
             json.WriteStartObject();
-            json.WriteBoolean("isIncomplete", false);
+            json.WriteBoolean("isIncomplete", incomplete);
             if (client.CompletionDefaultEditRange || client.CompletionDefaultCommitCharacters)
             {
                 json.WriteStartObject("itemDefaults");

@@ -33,6 +33,8 @@ internal sealed class ScriptSession : IDisposable
         _options = options;
     }
 
+    public ServerOptions Options => _options;
+
     public ClientFeatures Client { get; private set; } = ClientFeatures.From(new());
 
     public CompletionResults Completions { get; } = new();
@@ -57,7 +59,7 @@ internal sealed class ScriptSession : IDisposable
         _workspace = Task.Run(() => ScriptWorkspace.Load(resolved));
         Observe(ReportLoadFailureAsync(_workspace), "Reporting the environment");
         if (_options.WarmUp)
-            Observe(WarmUp.RunAsync(_workspace, Client), "Warm-up");
+            Observe(WarmUp.RunAsync(_workspace, Client, _options.CompletionListLimits), "Warm-up");
     }
 
     public void Open(DocumentUri uri, int version, string text)

@@ -112,6 +112,7 @@ public sealed class LspCompletionTests
         JsonNode? resolved = await client.RequestAsync("completionItem/resolve", item.DeepClone());
 
         item.GetInt("kind").ShouldBe(2); // Method
+        list.Get("isIncomplete").GetValue<bool>().ShouldBeFalse();
         list.Get("itemDefaults", "editRange")
             .ToJsonString()
             .ShouldBe(TestServer.Range(text, text.Length, text.Length).ToJsonString());
@@ -141,6 +142,30 @@ public sealed class LspCompletionTests
         JsonNode edit = resolved.GetArray("additionalTextEdits").ShouldHaveSingleItem().ShouldNotBeNull();
         edit.GetString("newText").ShouldBe("using System.Text;\n\n");
         edit.Get("range").ToJsonString().ShouldBe(TestServer.Range(text, 0, 0).ToJsonString());
+    }
+
+    [Fact]
+    public async Task Long_word_lists_keep_the_best_matches_and_ask_for_more_letters()
+    {
+        await using LspClient client = await TestServer.StartAsync();
+        const string text = "var x = 1;\nD";
+        await client.OpenAsync(Uri, text);
+
+        JsonNode? first = await client.RequestAsync("textDocument/completion", TestServer.AtEnd(Uri, text));
+        await client.ChangeAsync(Uri, 2, TestServer.Range(text, text.Length, text.Length), "ev");
+        JsonObject again = TestServer.AtEnd(Uri, text + "ev");
+        again["context"] = new JsonObject { ["triggerKind"] = 3 }; // TriggerForIncompleteCompletions
+        JsonNode? second = await client.RequestAsync("textDocument/completion", again);
+
+        // The list has over 1,000 items, so the server keeps those that match "D", at most 1,000, and the client
+        // asks again as the word grows.
+        first.Get("isIncomplete").GetValue<bool>().ShouldBeTrue();
+        first.GetArray("items").Count.ShouldBeLessThanOrEqualTo(1000);
+        // Kept items match as the editor's own filter matches: prefix, word parts ("DebuggerVisualizer") or substring.
+        Labels(first).ShouldAllBe(label => CompletionFilter.Score(label, "D") > 0);
+        Labels(second).Length.ShouldBeLessThan(Labels(first).Length);
+        Labels(second).ShouldAllBe(label => CompletionFilter.Score(label, "Dev") > 0);
+        Labels(second).ShouldContain("Device");
     }
 
     [Fact]
@@ -215,6 +240,13 @@ public sealed class LspCompletionTests
             .ToJsonString()
             .ShouldBe(TestServer.Range(text, text.Length - 3, text.Length).ToJsonString());
     }
+
+    /// <summary>The texts the client filters the items by.</summary>
+    private static string[] Labels(JsonNode? list) => [.. list.GetArray("items").Select(FilterText)];
+
+    /// <summary>The text the client filters an item by: its filter text, or else its label.</summary>
+    private static string FilterText(JsonNode? item) =>
+        item.ShouldNotBeNull()["filterText"]?.GetValue<string>() ?? item.GetString("label");
 
     private static JsonNode Item(JsonNode? list, string label) =>
         list.GetArray("items").Single(i => i.GetString("label") == label).ShouldNotBeNull();

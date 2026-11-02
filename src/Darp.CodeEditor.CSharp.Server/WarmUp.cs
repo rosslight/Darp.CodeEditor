@@ -18,7 +18,11 @@ internal static class WarmUp
         numbers.
         """;
 
-    public static async Task RunAsync(Task<ScriptWorkspace> workspaceTask, ClientFeatures client)
+    public static async Task RunAsync(
+        Task<ScriptWorkspace> workspaceTask,
+        ClientFeatures client,
+        CompletionListLimits limits
+    )
     {
         ScriptWorkspace workspace = await workspaceTask.ConfigureAwait(false);
         var script = new OpenDocument("<warm-up>", "<warm-up>", 1, SourceText.From(Text));
@@ -34,6 +38,7 @@ internal static class WarmUp
                 Text.Length,
                 RoslynCompletionTrigger.CreateInsertionTrigger('.'),
                 client,
+                limits,
                 results,
                 none
             )
@@ -45,6 +50,7 @@ internal static class WarmUp
                 Text.IndexOf("numbers.Add", StringComparison.Ordinal) + 1,
                 RoslynCompletionTrigger.Invoke,
                 client,
+                limits,
                 results,
                 none
             )
