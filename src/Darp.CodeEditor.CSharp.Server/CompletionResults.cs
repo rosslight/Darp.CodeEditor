@@ -1,6 +1,8 @@
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Completion;
+using Microsoft.CodeAnalysis.Text;
 using RoslynCompletionItem = Microsoft.CodeAnalysis.Completion.CompletionItem;
 
 namespace Darp.CodeEditor.CSharp.Server;
@@ -50,10 +52,15 @@ internal sealed class CompletionResults
     }
 }
 
+/// <param name="Position">Where the list was requested.</param>
+/// <param name="Span">The list's span: the text the items replace.</param>
 /// <param name="Items">The Roslyn items, at the index each LSP item's data names.</param>
 internal sealed record CompletionResult(
     long Id,
     Document Document,
     LineMap Lines,
+    int Position,
+    CompletionTrigger Trigger,
+    TextSpan Span,
     ImmutableArray<RoslynCompletionItem> Items
 );

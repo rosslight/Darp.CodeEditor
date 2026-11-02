@@ -4,6 +4,7 @@ using System.Text.Json;
 using Darp.CodeEditor.CSharp.Hosting;
 using Darp.CodeEditor.CSharp.Scripting;
 using EmmyLua.LanguageServer.Framework.Protocol.JsonRpc;
+using EmmyLua.LanguageServer.Framework.Protocol.Message.Client.ShowMessage;
 using EmmyLua.LanguageServer.Framework.Protocol.Message.Initialize;
 using EmmyLua.LanguageServer.Framework.Protocol.Model;
 using EmmyLua.LanguageServer.Framework.Protocol.Model.TextDocument;
@@ -54,7 +55,7 @@ internal sealed class ScriptSession : IDisposable
         // Resolving only reads file headers; errors here answer the initialize request.
         ResolvedScriptEnvironment resolved = ResolvedScriptEnvironment.Resolve(environment);
         _workspace = Task.Run(() => ScriptWorkspace.Load(resolved));
-        Observe(_workspace, "Loading the script environment");
+        Observe(ReportLoadFailureAsync(_workspace), "Reporting the environment");
         if (_options.WarmUp)
             Observe(WarmUp.RunAsync(_workspace, Client), "Warm-up");
     }
@@ -126,6 +127,28 @@ internal sealed class ScriptSession : IDisposable
             TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default
         );
+
+    /// <summary>Tells the user when the environment cannot be loaded, such as when the globals type does not exist.</summary>
+    private async Task ReportLoadFailureAsync(Task<ScriptWorkspace> workspace)
+    {
+        try
+        {
+            await workspace.ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"Loading the script environment failed: {exception}");
+            await _server
+                .Client.ShowMessage(
+                    new ShowMessageParams
+                    {
+                        Type = MessageType.Error,
+                        Message = $"The C# script environment could not be loaded: {exception.Message}",
+                    }
+                )
+                .ConfigureAwait(false);
+        }
+    }
 
     /// <summary>Publishes compiler diagnostics for <paramref name="snapshot"/> once the text stayed unchanged for a while.</summary>
     private void ScheduleDiagnostics(DocumentSnapshot snapshot) =>

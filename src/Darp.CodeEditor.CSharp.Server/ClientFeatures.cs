@@ -11,6 +11,7 @@ internal sealed record ClientFeatures(
     bool CompletionLabelDetails,
     bool CompletionSnippets,
     bool CompletionResolvesAdditionalTextEdits,
+    bool CompletionResolvesTextEdit,
     bool CompletionMarkdown,
     bool HoverMarkdown,
     bool SignatureLabelOffsets,
@@ -23,6 +24,7 @@ internal sealed record ClientFeatures(
         var completion = capabilities.TextDocument?.Completion;
         var completionItem = completion?.CompletionItem;
         List<string> itemDefaults = completion?.CompletionList?.ItemDefaults ?? [];
+        List<string> resolves = completionItem?.ResolveSupport?.Properties ?? [];
         var signature = capabilities.TextDocument?.SignatureHelp?.SignatureInformation;
         return new ClientFeatures(
             CompletionDefaultEditRange: itemDefaults.Contains("editRange"),
@@ -30,9 +32,8 @@ internal sealed record ClientFeatures(
             CompletionCommitCharacters: completionItem?.CommitCharactersSupport == true,
             CompletionLabelDetails: completionItem?.LabelDetailsSupport == true,
             CompletionSnippets: completionItem?.SnippetSupport == true,
-            CompletionResolvesAdditionalTextEdits: completionItem?.ResolveSupport?.Properties?.Contains(
-                "additionalTextEdits"
-            ) == true,
+            CompletionResolvesAdditionalTextEdits: resolves.Contains("additionalTextEdits"),
+            CompletionResolvesTextEdit: resolves.Contains("textEdit"),
             CompletionMarkdown: completionItem?.DocumentationFormat?.Contains(MarkupKind.Markdown.Value) == true,
             HoverMarkdown: capabilities.TextDocument?.Hover?.ContentFormat?.Contains(MarkupKind.Markdown) == true,
             SignatureLabelOffsets: signature?.ParameterInformation?.LabelOffsetSupport == true,

@@ -50,6 +50,22 @@ public sealed class LspLifecycleTests
     }
 
     [Fact]
+    public async Task A_globals_type_that_does_not_exist_is_reported_to_the_user()
+    {
+        await using LspClient client = await TestServer.StartAsync(
+            TestEnvironments.Device with
+            {
+                Globals = new CSharpScriptGlobals(typeof(TestServer).Assembly.Location, "Missing.Globals"),
+            }
+        );
+
+        JsonObject message = await client.WaitForNotificationAsync("window/showMessage");
+
+        ((int?)message["params"]?["type"]).ShouldBe(1); // Error
+        ((string?)message["params"]?["message"] ?? "").ShouldContain("Missing.Globals");
+    }
+
+    [Fact]
     public async Task Initialize_fails_for_an_unknown_environment_version()
     {
         await using LspClient client = TestServer.Start();
@@ -119,6 +135,69 @@ public sealed class LspCompletionTests
             resolved["additionalTextEdits"]?.AsArray().ShouldHaveSingleItem() ?? throw new InvalidOperationException();
         ((string?)edit["newText"]).ShouldBe("using System.Text;\n\n");
         edit["range"]?.ToJsonString().ShouldBe(TestServer.Range(text, 0, 0).ToJsonString());
+    }
+
+    [Fact]
+    public async Task Resolving_an_item_keeps_the_edits_of_its_list_after_another_document_completed()
+    {
+        // Roslyn shares the items of types from other namespaces between lists and moves them to the newest list.
+        await using LspClient client = await TestServer.StartAsync();
+        const string first = "var s = new StringB";
+        const string second =
+            "// A longer script, so its list is further into the text.\nvar x = 1;\nvar t = new StringB";
+        await client.OpenAsync(Uri, first);
+        await client.OpenAsync("file:///scripts/other.csx", second);
+
+        JsonNode list =
+            await client.RequestAsync("textDocument/completion", TestServer.AtEnd(Uri, first))
+            ?? throw new InvalidOperationException();
+        await client.RequestAsync("textDocument/completion", TestServer.AtEnd("file:///scripts/other.csx", second));
+        JsonNode item =
+            list["items"]?.AsArray().Single(i => (string?)i?["label"] == "StringBuilder")
+            ?? throw new InvalidOperationException();
+        JsonNode resolved =
+            await client.RequestAsync("completionItem/resolve", item.DeepClone())
+            ?? throw new InvalidOperationException();
+
+        JsonNode edit =
+            resolved["additionalTextEdits"]?.AsArray().ShouldHaveSingleItem() ?? throw new InvalidOperationException();
+        ((string?)edit["newText"]).ShouldStartWith("using System.Text;");
+        edit["range"]?.ToJsonString().ShouldBe(TestServer.Range(first, 0, 0).ToJsonString());
+    }
+
+    [Fact]
+    public async Task Snippets_expand_on_resolve_for_clients_that_resolve_text_edits()
+    {
+        const string text = "var x = 1;\nfo";
+        JsonObject capabilities = TestServer.FullCapabilities();
+        capabilities["textDocument"]
+            ?["completion"]?["completionItem"]?["resolveSupport"]?["properties"]?.AsArray()
+            .Add("textEdit");
+        await using LspClient resolving = await TestServer.StartAsync(capabilities: capabilities);
+        await using LspClient other = await TestServer.StartAsync();
+        await resolving.OpenAsync(Uri, text);
+        await other.OpenAsync(Uri, text);
+
+        JsonNode list =
+            await resolving.RequestAsync("textDocument/completion", TestServer.AtEnd(Uri, text))
+            ?? throw new InvalidOperationException();
+        JsonNode? otherList = await other.RequestAsync("textDocument/completion", TestServer.AtEnd(Uri, text));
+        JsonNode snippet =
+            list["items"]?.AsArray().Single(i => (string?)i?["label"] == "for" && (int?)i?["kind"] == 15)
+            ?? throw new InvalidOperationException();
+        JsonNode resolved =
+            await resolving.RequestAsync("completionItem/resolve", snippet.DeepClone())
+            ?? throw new InvalidOperationException();
+
+        string newText = (string?)resolved["textEdit"]?["newText"] ?? "";
+        ((int?)resolved["insertTextFormat"]).ShouldBe(2); // Snippet
+        newText.ShouldStartWith("for (int i = 0; i < length; i++)");
+        newText.ShouldContain("$0");
+        resolved["textEdit"]
+            ?["range"]?.ToJsonString()
+            .ShouldBe(TestServer.Range(text, text.Length - 2, text.Length).ToJsonString());
+        int[] otherKinds = [.. otherList?["items"]?.AsArray().Select(i => (int?)i?["kind"] ?? 0) ?? []];
+        otherKinds.ShouldNotContain(15);
     }
 
     [Fact]

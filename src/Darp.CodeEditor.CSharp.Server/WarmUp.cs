@@ -1,3 +1,4 @@
+using EmmyLua.LanguageServer.Framework.Protocol.Message.Completion;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 using RoslynCompletionTrigger = Microsoft.CodeAnalysis.Completion.CompletionTrigger;
@@ -38,24 +39,23 @@ internal static class WarmUp
                 none
             )
             .ConfigureAwait(false);
-        if (
-            await CompletionHandler
-                .GetCompletionsAsync(
-                    document,
-                    lines,
-                    Text.IndexOf("numbers.Add", StringComparison.Ordinal) + 1,
-                    RoslynCompletionTrigger.Invoke,
-                    client,
-                    results,
-                    "",
-                    none
-                )
-                .ConfigureAwait(false)
-                is { Items: [var item, ..] }
-            && results.TryGetLatest("", out CompletionResult? result)
-        )
+        await CompletionHandler
+            .GetCompletionsAsync(
+                document,
+                lines,
+                Text.IndexOf("numbers.Add", StringComparison.Ordinal) + 1,
+                RoslynCompletionTrigger.Invoke,
+                client,
+                results,
+                "",
+                none
+            )
+            .ConfigureAwait(false);
+        if (results.TryGetLatest("", out CompletionResult? result))
         {
-            await CompletionHandler.ResolveAsync(item, result, result.Items[0], client, none).ConfigureAwait(false);
+            await CompletionHandler
+                .ResolveAsync(new CompletionItem { Label = "" }, result, result.Items[0], client, none)
+                .ConfigureAwait(false);
         }
         await SemanticTokensHandler
             .GetTokensAsync(document, lines, new TextSpan(0, Text.Length), none)
