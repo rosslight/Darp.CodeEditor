@@ -22,16 +22,16 @@ public sealed class LspLifecycleTests
         );
         await client.NotifyAsync("initialized", new JsonObject());
 
-        JsonNode capabilities = result?["capabilities"] ?? throw new InvalidOperationException("No capabilities.");
-        ((int?)capabilities["textDocumentSync"]?["change"]).ShouldBe(2); // incremental
-        ((bool?)capabilities["completionProvider"]?["resolveProvider"]).ShouldBe(true);
-        ((bool?)capabilities["hoverProvider"]).ShouldBe(true);
-        capabilities["signatureHelpProvider"]
-            ?["triggerCharacters"]?.AsArray()
-            .Select(c => (string?)c)
+        JsonNode capabilities = result.Get("capabilities");
+        capabilities.GetInt("textDocumentSync", "change").ShouldBe(2); // incremental
+        capabilities.Get("completionProvider", "resolveProvider").GetValue<bool>().ShouldBeTrue();
+        capabilities.Get("hoverProvider").GetValue<bool>().ShouldBeTrue();
+        capabilities
+            .GetArray("signatureHelpProvider", "triggerCharacters")
+            .Select(c => c?.GetValue<string>())
             .ShouldBe(["(", ","]);
-        ((bool?)capabilities["semanticTokensProvider"]?["range"]).ShouldBe(true);
-        ((string?)result?["serverInfo"]?["name"]).ShouldBe("Darp.CodeEditor.CSharp.Server");
+        capabilities.Get("semanticTokensProvider", "range").GetValue<bool>().ShouldBeTrue();
+        result.GetString("serverInfo", "name").ShouldBe("Darp.CodeEditor.CSharp.Server");
         (await client.ShutdownAsync()).ShouldBe(0);
     }
 
@@ -50,6 +50,22 @@ public sealed class LspLifecycleTests
     }
 
     [Fact]
+    public async Task The_server_exits_when_the_client_process_exits_while_its_input_stays_open()
+    {
+        // Stands in for the client process: one the test can end while it keeps the server's input open itself.
+        await using LspClient standIn = TestServer.Start();
+        await using LspClient client = TestServer.Start();
+        JsonObject parameters = TestServer.InitializeParams(TestEnvironments.Device);
+        parameters["processId"] = standIn.Process.Id;
+        await client.RequestAsync("initialize", parameters);
+        await client.NotifyAsync("initialized", new JsonObject());
+
+        standIn.Process.Kill();
+
+        (await client.WaitForExitAsync()).ShouldBe(1);
+    }
+
+    [Fact]
     public async Task A_globals_type_that_does_not_exist_is_reported_to_the_user()
     {
         await using LspClient client = await TestServer.StartAsync(
@@ -61,8 +77,8 @@ public sealed class LspLifecycleTests
 
         JsonObject message = await client.WaitForNotificationAsync("window/showMessage");
 
-        ((int?)message["params"]?["type"]).ShouldBe(1); // Error
-        ((string?)message["params"]?["message"] ?? "").ShouldContain("Missing.Globals");
+        message.GetInt("params", "type").ShouldBe(1); // Error
+        message.GetString("params", "message").ShouldContain("Missing.Globals");
     }
 
     [Fact]
@@ -91,23 +107,20 @@ public sealed class LspCompletionTests
 
         JsonObject parameters = TestServer.AtEnd(Uri, text);
         parameters["context"] = new JsonObject { ["triggerKind"] = 2, ["triggerCharacter"] = "." };
-        JsonNode list =
-            await client.RequestAsync("textDocument/completion", parameters) ?? throw new InvalidOperationException();
-        JsonNode item =
-            list["items"]?.AsArray().Single(i => (string?)i?["label"] == "ReadTemperature")
-            ?? throw new InvalidOperationException();
-        JsonNode resolved =
-            await client.RequestAsync("completionItem/resolve", item.DeepClone())
-            ?? throw new InvalidOperationException();
+        JsonNode? list = await client.RequestAsync("textDocument/completion", parameters);
+        JsonNode item = Item(list, "ReadTemperature");
+        JsonNode? resolved = await client.RequestAsync("completionItem/resolve", item.DeepClone());
 
-        ((int?)item["kind"]).ShouldBe(2); // Method
-        list["itemDefaults"]
-            ?["editRange"]?.ToJsonString()
+        item.GetInt("kind").ShouldBe(2); // Method
+        list.Get("itemDefaults", "editRange")
+            .ToJsonString()
             .ShouldBe(TestServer.Range(text, text.Length, text.Length).ToJsonString());
-        ((string?)resolved["documentation"]?["kind"]).ShouldBe("markdown");
-        ((string?)resolved["documentation"]?["value"]).ShouldBe(
-            "```csharp\ndouble Darp.CodeEditor.CSharp.TestGlobals.TestDevice.ReadTemperature()\n```\n\nReads the current temperature in degrees Celsius."
-        );
+        resolved.GetString("documentation", "kind").ShouldBe("markdown");
+        resolved
+            .GetString("documentation", "value")
+            .ShouldBe(
+                "```csharp\ndouble Darp.CodeEditor.CSharp.TestGlobals.TestDevice.ReadTemperature()\n```\n\nReads the current temperature in degrees Celsius."
+            );
     }
 
     [Fact]
@@ -117,24 +130,17 @@ public sealed class LspCompletionTests
         const string text = "var x = 1;\nvar s = new StringB";
         await client.OpenAsync(Uri, text);
 
-        JsonNode list =
-            await client.RequestAsync("textDocument/completion", TestServer.AtEnd(Uri, text))
-            ?? throw new InvalidOperationException();
-        JsonNode item =
-            list["items"]?.AsArray().Single(i => (string?)i?["label"] == "StringBuilder")
-            ?? throw new InvalidOperationException();
-        JsonNode resolved =
-            await client.RequestAsync("completionItem/resolve", item.DeepClone())
-            ?? throw new InvalidOperationException();
+        JsonNode? list = await client.RequestAsync("textDocument/completion", TestServer.AtEnd(Uri, text));
+        JsonNode item = Item(list, "StringBuilder");
+        JsonNode? resolved = await client.RequestAsync("completionItem/resolve", item.DeepClone());
 
-        list["itemDefaults"]
-            ?["editRange"]?.ToJsonString()
+        list.Get("itemDefaults", "editRange")
+            .ToJsonString()
             .ShouldBe(TestServer.Range(text, text.Length - "StringB".Length, text.Length).ToJsonString());
-        ((string?)item["labelDetails"]?["description"]).ShouldBe("System.Text");
-        JsonNode edit =
-            resolved["additionalTextEdits"]?.AsArray().ShouldHaveSingleItem() ?? throw new InvalidOperationException();
-        ((string?)edit["newText"]).ShouldBe("using System.Text;\n\n");
-        edit["range"]?.ToJsonString().ShouldBe(TestServer.Range(text, 0, 0).ToJsonString());
+        item.GetString("labelDetails", "description").ShouldBe("System.Text");
+        JsonNode edit = resolved.GetArray("additionalTextEdits").ShouldHaveSingleItem().ShouldNotBeNull();
+        edit.GetString("newText").ShouldBe("using System.Text;\n\n");
+        edit.Get("range").ToJsonString().ShouldBe(TestServer.Range(text, 0, 0).ToJsonString());
     }
 
     [Fact]
@@ -148,21 +154,16 @@ public sealed class LspCompletionTests
         await client.OpenAsync(Uri, first);
         await client.OpenAsync("file:///scripts/other.csx", second);
 
-        JsonNode list =
-            await client.RequestAsync("textDocument/completion", TestServer.AtEnd(Uri, first))
-            ?? throw new InvalidOperationException();
+        JsonNode? list = await client.RequestAsync("textDocument/completion", TestServer.AtEnd(Uri, first));
         await client.RequestAsync("textDocument/completion", TestServer.AtEnd("file:///scripts/other.csx", second));
-        JsonNode item =
-            list["items"]?.AsArray().Single(i => (string?)i?["label"] == "StringBuilder")
-            ?? throw new InvalidOperationException();
-        JsonNode resolved =
-            await client.RequestAsync("completionItem/resolve", item.DeepClone())
-            ?? throw new InvalidOperationException();
+        JsonNode? resolved = await client.RequestAsync(
+            "completionItem/resolve",
+            Item(list, "StringBuilder").DeepClone()
+        );
 
-        JsonNode edit =
-            resolved["additionalTextEdits"]?.AsArray().ShouldHaveSingleItem() ?? throw new InvalidOperationException();
-        ((string?)edit["newText"]).ShouldStartWith("using System.Text;");
-        edit["range"]?.ToJsonString().ShouldBe(TestServer.Range(first, 0, 0).ToJsonString());
+        JsonNode edit = resolved.GetArray("additionalTextEdits").ShouldHaveSingleItem().ShouldNotBeNull();
+        edit.GetString("newText").ShouldStartWith("using System.Text;");
+        edit.Get("range").ToJsonString().ShouldBe(TestServer.Range(first, 0, 0).ToJsonString());
     }
 
     [Fact]
@@ -170,58 +171,53 @@ public sealed class LspCompletionTests
     {
         const string text = "var x = 1;\nfo";
         JsonObject capabilities = TestServer.FullCapabilities();
-        capabilities["textDocument"]
-            ?["completion"]?["completionItem"]?["resolveSupport"]?["properties"]?.AsArray()
+        capabilities
+            .GetArray("textDocument", "completion", "completionItem", "resolveSupport", "properties")
             .Add("textEdit");
         await using LspClient resolving = await TestServer.StartAsync(capabilities: capabilities);
         await using LspClient other = await TestServer.StartAsync();
         await resolving.OpenAsync(Uri, text);
         await other.OpenAsync(Uri, text);
 
-        JsonNode list =
-            await resolving.RequestAsync("textDocument/completion", TestServer.AtEnd(Uri, text))
-            ?? throw new InvalidOperationException();
+        JsonNode? list = await resolving.RequestAsync("textDocument/completion", TestServer.AtEnd(Uri, text));
         JsonNode? otherList = await other.RequestAsync("textDocument/completion", TestServer.AtEnd(Uri, text));
-        JsonNode snippet =
-            list["items"]?.AsArray().Single(i => (string?)i?["label"] == "for" && (int?)i?["kind"] == 15)
-            ?? throw new InvalidOperationException();
-        JsonNode resolved =
-            await resolving.RequestAsync("completionItem/resolve", snippet.DeepClone())
-            ?? throw new InvalidOperationException();
+        JsonNode snippet = list.GetArray("items")
+            .Single(i => i.GetString("label") == "for" && i.GetInt("kind") == 15)
+            .ShouldNotBeNull();
+        JsonNode? resolved = await resolving.RequestAsync("completionItem/resolve", snippet.DeepClone());
 
-        string newText = (string?)resolved["textEdit"]?["newText"] ?? "";
-        ((int?)resolved["insertTextFormat"]).ShouldBe(2); // Snippet
+        string newText = resolved.GetString("textEdit", "newText");
+        resolved.GetInt("insertTextFormat").ShouldBe(2); // Snippet
         newText.ShouldStartWith("for (int i = 0; i < length; i++)");
         newText.ShouldContain("$0");
-        resolved["textEdit"]
-            ?["range"]?.ToJsonString()
+        resolved
+            .Get("textEdit", "range")
+            .ToJsonString()
             .ShouldBe(TestServer.Range(text, text.Length - 2, text.Length).ToJsonString());
-        int[] otherKinds = [.. otherList?["items"]?.AsArray().Select(i => (int?)i?["kind"] ?? 0) ?? []];
-        otherKinds.ShouldNotContain(15);
+        otherList.GetArray("items").Select(i => i.GetInt("kind")).ShouldNotContain(15);
     }
 
     [Fact]
     public async Task Clients_without_item_defaults_get_a_text_edit_per_item()
     {
         JsonObject capabilities = TestServer.FullCapabilities();
-        capabilities["textDocument"]?["completion"]?.AsObject().Remove("completionList");
+        capabilities.Get("textDocument", "completion").AsObject().Remove("completionList").ShouldBeTrue();
         await using LspClient client = await TestServer.StartAsync(capabilities: capabilities);
         const string text = "var t = Device.Rea";
         await client.OpenAsync(Uri, text);
 
-        JsonNode list =
-            await client.RequestAsync("textDocument/completion", TestServer.AtEnd(Uri, text))
-            ?? throw new InvalidOperationException();
+        JsonNode? list = await client.RequestAsync("textDocument/completion", TestServer.AtEnd(Uri, text));
 
-        list["itemDefaults"].ShouldBeNull();
-        JsonNode item =
-            list["items"]?.AsArray().Single(i => (string?)i?["label"] == "ReadAsync")
-            ?? throw new InvalidOperationException();
-        ((string?)item["textEdit"]?["newText"]).ShouldBe("ReadAsync");
-        item["textEdit"]
-            ?["range"]?.ToJsonString()
+        list.ShouldNotBeNull()["itemDefaults"].ShouldBeNull();
+        JsonNode item = Item(list, "ReadAsync");
+        item.GetString("textEdit", "newText").ShouldBe("ReadAsync");
+        item.Get("textEdit", "range")
+            .ToJsonString()
             .ShouldBe(TestServer.Range(text, text.Length - 3, text.Length).ToJsonString());
     }
+
+    private static JsonNode Item(JsonNode? list, string label) =>
+        list.GetArray("items").Single(i => i.GetString("label") == label).ShouldNotBeNull();
 }
 
 public sealed class LspLanguageFeatureTests
@@ -235,17 +231,21 @@ public sealed class LspLanguageFeatureTests
         const string text = "var t = Device.ReadTemperature();";
         await client.OpenAsync(Uri, text);
 
-        JsonNode hover =
-            await client.RequestAsync("textDocument/hover", TestServer.At(Uri, text, "ReadTemperature", 2))
-            ?? throw new InvalidOperationException();
-
-        ((string?)hover["contents"]?["kind"]).ShouldBe("markdown");
-        ((string?)hover["contents"]?["value"]).ShouldBe(
-            "```csharp\ndouble Darp.CodeEditor.CSharp.TestGlobals.TestDevice.ReadTemperature()\n```\n\nReads the current temperature in degrees Celsius."
+        JsonNode? hover = await client.RequestAsync(
+            "textDocument/hover",
+            TestServer.At(Uri, text, "ReadTemperature", 2)
         );
+
+        hover.GetString("contents", "kind").ShouldBe("markdown");
+        hover
+            .GetString("contents", "value")
+            .ShouldBe(
+                "```csharp\ndouble Darp.CodeEditor.CSharp.TestGlobals.TestDevice.ReadTemperature()\n```\n\nReads the current temperature in degrees Celsius."
+            );
         int start = text.IndexOf("ReadTemperature", StringComparison.Ordinal);
-        hover["range"]
-            ?.ToJsonString()
+        hover
+            .Get("range")
+            .ToJsonString()
             .ShouldBe(TestServer.Range(text, start, start + "ReadTemperature".Length).ToJsonString());
     }
 
@@ -256,16 +256,13 @@ public sealed class LspLanguageFeatureTests
         const string text = "Log(\"{0}\", 1, ";
         await client.OpenAsync(Uri, text);
 
-        JsonNode help =
-            await client.RequestAsync("textDocument/signatureHelp", TestServer.AtEnd(Uri, text))
-            ?? throw new InvalidOperationException();
+        JsonNode? help = await client.RequestAsync("textDocument/signatureHelp", TestServer.AtEnd(Uri, text));
 
-        JsonArray signatures = help["signatures"]?.AsArray() ?? throw new InvalidOperationException();
-        signatures.Count.ShouldBe(3);
-        JsonNode active = signatures[(int?)help["activeSignature"] ?? -1] ?? throw new InvalidOperationException();
-        ((string?)active["label"]).ShouldBe("void DeviceGlobals.Log(string format, params object[] args)");
-        ((int?)help["activeParameter"]).ShouldBe(1); // the params array takes every further argument
-        ((string?)active["documentation"]?["value"]).ShouldBe("Writes a formatted message to the script log.");
+        help.GetArray("signatures").Count.ShouldBe(3);
+        JsonNode active = help.Get("signatures", help.GetInt("activeSignature"));
+        active.GetString("label").ShouldBe("void DeviceGlobals.Log(string format, params object[] args)");
+        help.GetInt("activeParameter").ShouldBe(1); // the params array takes every further argument
+        active.GetString("documentation", "value").ShouldBe("Writes a formatted message to the script log.");
     }
 
     [Fact]
@@ -275,20 +272,15 @@ public sealed class LspLanguageFeatureTests
         const string text = "var block = await Device.ReadAsync(length: ";
         await client.OpenAsync(Uri, text);
 
-        JsonNode help =
-            await client.RequestAsync("textDocument/signatureHelp", TestServer.AtEnd(Uri, text))
-            ?? throw new InvalidOperationException();
+        JsonNode? help = await client.RequestAsync("textDocument/signatureHelp", TestServer.AtEnd(Uri, text));
 
-        JsonNode signature =
-            help["signatures"]?.AsArray().ShouldHaveSingleItem() ?? throw new InvalidOperationException();
-        string label = (string?)signature["label"] ?? "";
+        JsonNode signature = help.GetArray("signatures").ShouldHaveSingleItem().ShouldNotBeNull();
+        string label = signature.GetString("label");
         label.ShouldBe("Task<byte[]> TestDevice.ReadAsync(int register, int length)");
-        ((int?)signature["activeParameter"]).ShouldBe(1);
-        JsonNode parameter = signature["parameters"]?[1] ?? throw new InvalidOperationException();
-        int start = (int?)parameter["label"]?[0] ?? -1;
-        int end = (int?)parameter["label"]?[1] ?? -1;
-        label[start..end].ShouldBe("int length");
-        ((string?)parameter["documentation"]?["value"]).ShouldBe("How many bytes to read.");
+        signature.GetInt("activeParameter").ShouldBe(1);
+        JsonNode parameter = signature.Get("parameters", 1);
+        label[parameter.GetInt("label", 0)..parameter.GetInt("label", 1)].ShouldBe("int length");
+        parameter.GetString("documentation", "value").ShouldBe("How many bytes to read.");
     }
 
     [Fact]
@@ -308,18 +300,15 @@ public sealed class LspLanguageFeatureTests
             ["textDocument"] = new JsonObject { ["uri"] = Uri },
             ["range"] = TestServer.Range(text, 0, text.IndexOf('\n', StringComparison.Ordinal)),
         };
-        JsonNode tokens =
-            await client.RequestAsync("textDocument/semanticTokens/range", parameters)
-            ?? throw new InvalidOperationException();
+        JsonNode? tokens = await client.RequestAsync("textDocument/semanticTokens/range", parameters);
 
         string[] legend =
         [
             .. initialized
-                ?["capabilities"]?["semanticTokensProvider"]?["legend"]?["tokenTypes"]?.AsArray()
-                .Select(t => (string?)t ?? "")
-                ?? [],
+                .GetArray("capabilities", "semanticTokensProvider", "legend", "tokenTypes")
+                .Select(t => t.ShouldNotBeNull().GetValue<string>()),
         ];
-        uint[] data = [.. tokens["data"]?.AsArray().Select(n => (uint?)n ?? 0) ?? []];
+        uint[] data = [.. tokens.GetArray("data").Select(n => n.ShouldNotBeNull().GetValue<uint>())];
         var decoded = new List<(string Text, string Type)>();
         int line = 0;
         int character = 0;
@@ -342,6 +331,8 @@ public sealed class LspLanguageFeatureTests
 
 public sealed class LspDocumentSyncTests
 {
+    private const string DeviceHover = "```csharp\nDarp.CodeEditor.CSharp.TestGlobals.TestDevice Device { get; }";
+
     [Fact]
     public async Task Diagnostics_are_published_for_the_newest_version_after_incremental_changes()
     {
@@ -357,8 +348,8 @@ public sealed class LspDocumentSyncTests
         await client.ChangeAsync(uri, 3, TestServer.Range(v2, v2.Length, v2.Length), "Log(x);\n");
         JsonObject first = await client.WaitForNotificationAsync("textDocument/publishDiagnostics");
 
-        ((int?)first["params"]?["version"]).ShouldBe(3);
-        first["params"]?["diagnostics"]?.AsArray().ShouldBeEmpty();
+        first.GetInt("params", "version").ShouldBe(3);
+        first.GetArray("params", "diagnostics").ShouldBeEmpty();
 
         // Break the second line: "Log(x);" becomes "Log(x, );".
         const string v3 = "int x = 1;\nLog(x);\n";
@@ -366,13 +357,55 @@ public sealed class LspDocumentSyncTests
         await client.ChangeAsync(uri, 4, TestServer.Range(v3, argumentEnd, argumentEnd), ", ");
         JsonObject second = await client.WaitForNotificationAsync("textDocument/publishDiagnostics");
 
-        ((int?)second["params"]?["version"]).ShouldBe(4);
-        JsonNode diagnostic =
-            second["params"]?["diagnostics"]?.AsArray().ShouldHaveSingleItem() ?? throw new InvalidOperationException();
-        ((string?)diagnostic["code"]).ShouldBe("CS1525");
-        diagnostic["range"]
-            ?["start"]?.ToJsonString()
+        second.GetInt("params", "version").ShouldBe(4);
+        JsonNode diagnostic = second.GetArray("params", "diagnostics").ShouldHaveSingleItem().ShouldNotBeNull();
+        diagnostic.GetString("code").ShouldBe("CS1525");
+        diagnostic
+            .Get("range", "start")
+            .ToJsonString()
             .ShouldBe(new JsonObject { ["line"] = 1, ["character"] = 7 }.ToJsonString());
+    }
+
+    [Fact]
+    public async Task Changes_for_the_current_or_an_older_version_change_nothing_and_cancel_nothing()
+    {
+        const string uri = "file:///scripts/versions.csx";
+        await using LspClient client = await TestServer.StartAsync();
+        const string text = "var t = Device.ReadTemperature();";
+        await client.OpenAsync(uri, text, version: 2);
+
+        // The environment is still loading, so the hover is pending while the changes arrive.
+        PendingRequest hover = client.Send("textDocument/hover", TestServer.At(uri, text, "Device"));
+        await client.ChangeAsync(uri, 2, TestServer.Range(text, 0, 0), "// the same version\n");
+        await client.ChangeAsync(uri, 1, TestServer.Range(text, 0, 0), "// an older version\n");
+        LspResponse response = await hover.Response;
+        JsonNode? again = await client.RequestAsync("textDocument/hover", TestServer.At(uri, text, "Device"));
+        JsonObject published = await client.WaitForNotificationAsync("textDocument/publishDiagnostics");
+
+        response.Error.ShouldBeNull();
+        response.Result.GetString("contents", "value").ShouldStartWith(DeviceHover);
+        // The text is unchanged: the same position still shows Device, and diagnostics are for version 2.
+        again.GetString("contents", "value").ShouldStartWith(DeviceHover);
+        published.GetInt("params", "version").ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Closing_a_document_cancels_its_pending_completion()
+    {
+        const string uri = "file:///scripts/closed.csx";
+        await using LspClient client = await TestServer.StartAsync();
+        const string text = "var t = Device.";
+        await client.OpenAsync(uri, text);
+
+        // The environment is still loading, so the completion is pending when the document closes.
+        PendingRequest completion = client.Send("textDocument/completion", TestServer.AtEnd(uri, text));
+        await client.NotifyAsync(
+            "textDocument/didClose",
+            new JsonObject { ["textDocument"] = new JsonObject { ["uri"] = uri } }
+        );
+        LspResponse response = await completion.Response;
+
+        response.Error.ShouldNotBeNull().Code.ShouldBe(-32800); // RequestCancelled
     }
 
     [Fact]
@@ -403,17 +436,20 @@ public sealed class LspDocumentSyncTests
                     $"{d.Id} {TestServer.Range(text, d.Location.SourceSpan.Start, d.Location.SourceSpan.End).ToJsonString()}"
                 ),
         ];
-        ((string?)published["params"]?["uri"]).ShouldBe(uri);
-        published["params"]
-            ?["diagnostics"]?.AsArray()
-            .Select(d => $"{(string?)d?["code"]} {d?["range"]?.ToJsonString()}")
+        published.GetString("params", "uri").ShouldBe(uri);
+        published
+            .GetArray("params", "diagnostics")
+            .Select(d => $"{d.GetString("code")} {d.Get("range").ToJsonString()}")
             .ShouldBe(expected);
         expected.ShouldNotBeEmpty();
-        ((string?)cleared["params"]?["uri"]).ShouldBe(uri);
-        cleared["params"]?["diagnostics"]?.AsArray().ShouldBeEmpty();
+        cleared.GetString("params", "uri").ShouldBe(uri);
+        cleared.GetArray("params", "diagnostics").ShouldBeEmpty();
     }
 
-    [Fact]
+    [Fact(
+        Skip = "EmmyLua.LanguageServer.Framework 0.9.2 reads every $/cancelRequest id as 0 (CancelParams.Id has no "
+            + "setter), so no request is cancelled. Enable it when the server moves to Darp.CodeEditor.Lsp."
+    )]
     public async Task Cancelled_requests_answer_with_request_cancelled()
     {
         const string uri = "file:///scripts/cancel.csx";
@@ -426,7 +462,7 @@ public sealed class LspDocumentSyncTests
         await client.CancelAsync(hover.Id);
         LspResponse response = await hover.Response;
 
-        response.Error?.Code.ShouldBe(-32800); // RequestCancelled
+        response.Error.ShouldNotBeNull().Code.ShouldBe(-32800); // RequestCancelled
     }
 
     [Fact]
@@ -440,15 +476,12 @@ public sealed class LspDocumentSyncTests
         PendingRequest hover = client.Send("textDocument/hover", TestServer.At(uri, text, "Device"));
         await client.ChangeAsync(uri, 2, TestServer.Range(text, 0, 0), "// edited\n");
         LspResponse response = await hover.Response;
-
-        response.Error?.Code.ShouldBe(-32800);
-        // The new version is served.
         JsonNode? fresh = await client.RequestAsync(
             "textDocument/hover",
             TestServer.At(uri, "// edited\n" + text, "Device")
         );
-        ((string?)fresh?["contents"]?["value"]).ShouldStartWith(
-            "```csharp\nDarp.CodeEditor.CSharp.TestGlobals.TestDevice Device { get; }"
-        );
+
+        response.Error.ShouldNotBeNull().Code.ShouldBe(-32800); // RequestCancelled
+        fresh.GetString("contents", "value").ShouldStartWith(DeviceHover);
     }
 }

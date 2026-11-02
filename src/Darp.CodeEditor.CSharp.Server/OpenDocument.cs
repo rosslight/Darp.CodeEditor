@@ -11,6 +11,7 @@ namespace Darp.CodeEditor.CSharp.Server;
 internal sealed class OpenDocument
 {
     private readonly Lock _gate = new();
+    private readonly CancellationTokenSource _lifetime = new();
     private CancellationTokenSource _versionSource = new();
     private RoslynVersion? _roslyn;
 
@@ -29,6 +30,12 @@ internal sealed class OpenDocument
 
     public DocumentSnapshot Current { get; private set; }
 
+    /// <summary>
+    /// Cancelled when the document closes, or opens again as a new document. Work that may outlive a version, such as
+    /// completion, stops then.
+    /// </summary>
+    public CancellationToken Closed => _lifetime.Token;
+
     /// <summary>Moves to a new version. Work for older versions sees its <see cref="DocumentSnapshot.Changed"/> token cancelled.</summary>
     public DocumentSnapshot Update(int version, SourceText text)
     {
@@ -38,7 +45,11 @@ internal sealed class OpenDocument
         return Current;
     }
 
-    public void Close() => _versionSource.Cancel();
+    public void Close()
+    {
+        _versionSource.Cancel();
+        _lifetime.Cancel();
+    }
 
     /// <summary>
     /// The Roslyn document for <paramref name="snapshot"/>. Requests for the same version share one document and

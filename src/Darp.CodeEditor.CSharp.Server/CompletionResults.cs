@@ -20,16 +20,24 @@ internal sealed class CompletionResults
             return ++_lastId;
     }
 
-    public void Set(string documentKey, CompletionResult result)
+    /// <summary>Keeps <paramref name="result"/> as the newest list of <paramref name="document"/>.</summary>
+    /// <returns>False when the document closed, or opened again, since the list was requested; the list is dropped.</returns>
+    public bool Set(OpenDocument document, CompletionResult result)
     {
         lock (_gate)
         {
+            // Closing cancels the document, then removes its list under this lock, so a request that finishes after
+            // the close cannot bring its list back.
+            if (document.Closed.IsCancellationRequested)
+                return false;
             // A slow request that finishes late must not replace a newer list.
-            if (!_latest.TryGetValue(documentKey, out CompletionResult? existing) || existing.Id < result.Id)
-                _latest[documentKey] = result;
+            if (!_latest.TryGetValue(document.Key, out CompletionResult? existing) || existing.Id < result.Id)
+                _latest[document.Key] = result;
+            return true;
         }
     }
 
+    /// <summary>Forgets the list of a document that closed. Call it after <see cref="OpenDocument.Close"/>.</summary>
     public void Remove(string documentKey)
     {
         lock (_gate)

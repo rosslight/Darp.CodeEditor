@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Reflection;
 using EmmyLua.LanguageServer.Framework.Protocol.JsonRpc;
 using EmmyLua.LanguageServer.Framework.Server;
@@ -40,6 +42,8 @@ internal sealed class ScriptLanguageServer : LanguageServer
                     ?.InformationalVersion;
                 // Throws for invalid initialization options; the framework answers initialize with the error.
                 _session.Initialize(request);
+                if (request.ProcessId is { } processId)
+                    ScriptSession.Observe(ExitWhenClientExitsAsync(processId), "Watching the client process");
                 return Task.CompletedTask;
             }
         );
@@ -82,6 +86,30 @@ internal sealed class ScriptLanguageServer : LanguageServer
                 return true;
         }
         return base.BaseHandle(message);
+    }
+
+    /// <summary>
+    /// Ends the server when the client process ends. Its input usually ends with it, but not when another process,
+    /// such as a child of the client, still holds the pipe open.
+    /// </summary>
+    private static async Task ExitWhenClientExitsAsync(int processId)
+    {
+        try
+        {
+            using Process client = Process.GetProcessById(processId);
+            await client.WaitForExitAsync().ConfigureAwait(false);
+        }
+        catch (ArgumentException)
+        {
+            // The process ended before the server looked.
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
+        {
+            Console.Error.WriteLine($"Cannot watch the client process {processId}: {exception.Message}");
+            return;
+        }
+        Console.Error.WriteLine($"The client process {processId} ended; exiting.");
+        Environment.Exit(1);
     }
 
     protected override void Dispose(bool disposing)

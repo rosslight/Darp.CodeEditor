@@ -64,17 +64,29 @@ internal sealed class ScriptSession : IDisposable
     {
         string key = uri.Uri.AbsoluteUri;
         if (_documents.Remove(key, out OpenDocument? previous))
+        {
             previous.Close();
+            Completions.Remove(key);
+        }
         var document = new OpenDocument(key, uri.Uri.OriginalString, version, SourceText.From(text));
         _documents.Add(key, document);
         ScheduleDiagnostics(document.Current);
     }
 
+    /// <summary>Applies the changes of a newer version. Changes for the current or an older version are ignored.</summary>
     public void Change(DocumentUri uri, int version, IReadOnlyList<TextDocumentContentChangeEvent> changes)
     {
         if (!_documents.TryGetValue(uri.Uri.AbsoluteUri, out OpenDocument? document))
             return;
         DocumentSnapshot current = document.Current;
+        // Versions only grow; requests and cached Roslyn documents rely on one text per version.
+        if (version <= current.Version)
+        {
+            Console.Error.WriteLine(
+                $"Ignored a change of {document.ClientUri} to version {version}: the document is at version {current.Version}."
+            );
+            return;
+        }
         SourceText text = current.Text;
         LineMap lines = current.Lines;
         for (int i = 0; i < changes.Count; i++)

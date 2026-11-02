@@ -21,51 +21,56 @@ internal static class WarmUp
     public static async Task RunAsync(Task<ScriptWorkspace> workspaceTask, ClientFeatures client)
     {
         ScriptWorkspace workspace = await workspaceTask.ConfigureAwait(false);
-        SourceText text = SourceText.From(Text);
-        Document document = workspace.CreateDocument("<warm-up>").WithText(text);
-        LineMap lines = LineMap.Create(text);
+        var script = new OpenDocument("<warm-up>", "<warm-up>", 1, SourceText.From(Text));
+        DocumentSnapshot snapshot = script.Current;
+        Document document = script.GetDocument(workspace, snapshot);
         var results = new CompletionResults();
         CancellationToken none = CancellationToken.None;
 
         await CompletionHandler
             .GetCompletionsAsync(
-                document,
-                lines,
+                workspace,
+                snapshot,
                 Text.Length,
                 RoslynCompletionTrigger.CreateInsertionTrigger('.'),
                 client,
                 results,
-                "",
                 none
             )
             .ConfigureAwait(false);
         await CompletionHandler
             .GetCompletionsAsync(
-                document,
-                lines,
+                workspace,
+                snapshot,
                 Text.IndexOf("numbers.Add", StringComparison.Ordinal) + 1,
                 RoslynCompletionTrigger.Invoke,
                 client,
                 results,
-                "",
                 none
             )
             .ConfigureAwait(false);
-        if (results.TryGetLatest("", out CompletionResult? result))
+        if (results.TryGetLatest(script.Key, out CompletionResult? result))
         {
             await CompletionHandler
                 .ResolveAsync(new CompletionItem { Label = "" }, result, result.Items[0], client, none)
                 .ConfigureAwait(false);
         }
         await SemanticTokensHandler
-            .GetTokensAsync(document, lines, new TextSpan(0, Text.Length), none)
+            .GetTokensAsync(document, snapshot.Lines, new TextSpan(0, Text.Length), none)
             .ConfigureAwait(false);
         await ScriptDiagnostics.GetAsync(document, none).ConfigureAwait(false);
         await HoverHandler
-            .GetHoverAsync(document, lines, Text.IndexOf("Add", StringComparison.Ordinal), client.HoverMarkdown, none)
+            .GetHoverAsync(
+                document,
+                snapshot.Lines,
+                Text.IndexOf("Add", StringComparison.Ordinal),
+                client.HoverMarkdown,
+                none
+            )
             .ConfigureAwait(false);
         await SignatureHelpHandler
             .GetSignatureHelpAsync(document, Text.IndexOf("Add(", StringComparison.Ordinal) + 4, null, client, none)
             .ConfigureAwait(false);
+        script.Close();
     }
 }

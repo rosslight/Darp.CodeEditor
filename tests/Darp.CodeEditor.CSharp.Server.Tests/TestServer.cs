@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using Darp.CodeEditor.CSharp.Hosting;
 using Darp.CodeEditor.LspTesting;
+using Shouldly;
 
 namespace Darp.CodeEditor.CSharp.Server.Tests;
 
@@ -125,4 +126,30 @@ internal static class TestServer
 
     public static JsonObject Range(string text, int start, int end) =>
         new() { ["start"] = Position(text, start), ["end"] = Position(text, end) };
+
+    /// <summary>
+    /// The value at <paramref name="path"/>, property names and array indexes; fails the test when a part is missing,
+    /// so assertions on the value cannot pass without running.
+    /// </summary>
+    public static JsonNode Get(this JsonNode? node, params object[] path)
+    {
+        JsonNode current = node ?? throw new ShouldAssertException("The JSON value is null.");
+        foreach (object step in path)
+        {
+            JsonNode? next = step switch
+            {
+                string name => current[name],
+                int index => current.AsArray().Count > index ? current[index] : null,
+                _ => throw new ArgumentException($"{step} is neither a property name nor an index.", nameof(path)),
+            };
+            current = next ?? throw new ShouldAssertException($"{current.ToJsonString()} has no {step}.");
+        }
+        return current;
+    }
+
+    public static string GetString(this JsonNode? node, params object[] path) => node.Get(path).GetValue<string>();
+
+    public static int GetInt(this JsonNode? node, params object[] path) => node.Get(path).GetValue<int>();
+
+    public static JsonArray GetArray(this JsonNode? node, params object[] path) => node.Get(path).AsArray();
 }

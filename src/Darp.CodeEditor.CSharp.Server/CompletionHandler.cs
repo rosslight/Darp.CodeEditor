@@ -42,7 +42,7 @@ namespace Darp.CodeEditor.CSharp.Server;
 /// </para>
 /// <para>
 /// A completion request is not cancelled when the text changes: the client can still use the list while the user
-/// keeps typing the same word.
+/// keeps typing the same word. Closing the document cancels it.
 /// </para>
 /// </remarks>
 internal sealed class CompletionHandler : IJsonHandler
@@ -95,16 +95,16 @@ internal sealed class CompletionHandler : IJsonHandler
     /// <summary>Computes the completion list at <paramref name="position"/> as the JSON of an LSP <c>CompletionList</c>.</summary>
     /// <returns>Null when nothing applies.</returns>
     public static async Task<JsonDocument?> GetCompletionsAsync(
-        Document document,
-        LineMap lines,
+        ScriptWorkspace workspace,
+        DocumentSnapshot snapshot,
         int position,
         RoslynCompletionTrigger trigger,
         ClientFeatures client,
         CompletionResults results,
-        string documentKey,
         CancellationToken cancellationToken
     )
     {
+        Document document = snapshot.Owner.GetDocument(workspace, snapshot);
         CompletionService service = GetService(document);
         if (trigger.Kind == Microsoft.CodeAnalysis.Completion.CompletionTriggerKind.Insertion)
         {
@@ -118,12 +118,11 @@ internal sealed class CompletionHandler : IJsonHandler
             return await CreateListAsync(
                     service,
                     document,
-                    lines,
+                    snapshot,
                     position,
                     trigger,
                     client,
                     results,
-                    documentKey,
                     cancellationToken
                 )
                 .ConfigureAwait(false);
@@ -137,15 +136,15 @@ internal sealed class CompletionHandler : IJsonHandler
     private static async Task<JsonDocument?> CreateListAsync(
         CompletionService service,
         Document document,
-        LineMap lines,
+        DocumentSnapshot snapshot,
         int position,
         RoslynCompletionTrigger trigger,
         ClientFeatures client,
         CompletionResults results,
-        string documentKey,
         CancellationToken cancellationToken
     )
     {
+        LineMap lines = snapshot.Lines;
         RoslynCompletionList roslynList = await service
             .GetCompletionsAsync(document, position, trigger, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
@@ -206,7 +205,7 @@ internal sealed class CompletionHandler : IJsonHandler
             );
         }
         results.Set(
-            documentKey,
+            snapshot.Owner,
             new CompletionResult(resultId, document, lines, position, trigger, roslynList.Span, [.. roslynItems])
         );
         return Write(items, roslynList.Span, defaultCommitCharacters, lines, client);
@@ -289,16 +288,17 @@ internal sealed class CompletionHandler : IJsonHandler
         return Task.Run<JsonDocument?>(
             async () =>
             {
-                ScriptWorkspace workspace = await session.Workspace.WaitAsync(token).ConfigureAwait(false);
+                // Typing does not cancel completion, closing the document does.
+                using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(token, snapshot.Owner.Closed);
+                ScriptWorkspace workspace = await session.Workspace.WaitAsync(cancellation.Token).ConfigureAwait(false);
                 return await GetCompletionsAsync(
-                            snapshot.Owner.GetDocument(workspace, snapshot),
-                            snapshot.Lines,
+                            workspace,
+                            snapshot,
                             position,
                             trigger,
                             session.Client,
                             session.Completions,
-                            snapshot.Owner.Key,
-                            token
+                            cancellation.Token
                         )
                         .ConfigureAwait(false)
                     ?? s_noList;
