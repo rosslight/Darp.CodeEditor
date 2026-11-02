@@ -1,0 +1,138 @@
+<Project>
+  <!--
+    Puts the C# script runner next to the app. Import this file into the app project.
+
+      build     $(OutDir)helpers/csharp-runner/      the runner's build output; it runs on the runtime that runs the app
+      publish   $(PublishDir)helpers/csharp-runner/  the runner, framework-dependent and ReadyToRun for $(RuntimeIdentifier)
+                $(PublishDir)helpers/dotnet/         the .NET runtime it runs on, laid out as an installed runtime, so
+                                                     other helpers, such as the C# language server, can share it
+
+    NativeAOT apps also list the managed assemblies scripts compile against, which the app ships as files:
+
+      <CSharpScriptReference Include="MyApp.ScriptApi;StreamJsonRpc;PolyType" />
+  -->
+  <PropertyGroup>
+    <CSharpScriptRunnerProject Condition="'$(CSharpScriptRunnerProject)' == ''"
+      >$(MSBuildThisFileDirectory)..\..\Darp.CodeEditor.CSharp.Runner\Darp.CodeEditor.CSharp.Runner.csproj</CSharpScriptRunnerProject>
+    <_CSharpScriptRunnerOutput>helpers/csharp-runner/</_CSharpScriptRunnerOutput>
+    <_CSharpScriptRuntimeOutput>helpers/dotnet/</_CSharpScriptRuntimeOutput>
+    <!-- The runner is framework-dependent and published separately; the app may be self-contained or NativeAOT. -->
+    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
+    <!-- App publish settings must not reach the runner. -->
+    <_CSharpScriptRunnerRemovedProperties>PublishAot;PublishTrimmed;PublishSingleFile;PublishReadyToRun;SelfContained;PublishDir</_CSharpScriptRunnerRemovedProperties>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Restores and builds the runner with the app, for the app's RuntimeIdentifier. The app references nothing of it. -->
+    <ProjectReference
+      Include="$(CSharpScriptRunnerProject)"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      GlobalPropertiesToRemove="$(_CSharpScriptRunnerRemovedProperties)"
+    />
+  </ItemGroup>
+
+  <Target Name="_GetCSharpScriptRunnerProperties">
+    <PropertyGroup>
+      <_CSharpScriptRunnerProperties>Configuration=$(Configuration)</_CSharpScriptRunnerProperties>
+      <_CSharpScriptRunnerProperties Condition="'$(RuntimeIdentifier)' != ''"
+        >$(_CSharpScriptRunnerProperties);RuntimeIdentifier=$(RuntimeIdentifier)</_CSharpScriptRunnerProperties>
+    </PropertyGroup>
+  </Target>
+
+  <Target
+    Name="CopyCSharpScriptRunnerToOutputDirectory"
+    AfterTargets="CopyFilesToOutputDirectory"
+    DependsOnTargets="_GetCSharpScriptRunnerProperties"
+  >
+    <MSBuild
+      Projects="$(CSharpScriptRunnerProject)"
+      Targets="GetTargetPath"
+      Properties="$(_CSharpScriptRunnerProperties)"
+      RemoveProperties="$(_CSharpScriptRunnerRemovedProperties);TargetFramework"
+    >
+      <Output TaskParameter="TargetOutputs" ItemName="_CSharpScriptRunnerTargetPath" />
+    </MSBuild>
+    <ItemGroup>
+      <!-- The output is flat; subdirectories hold builds for other runtime identifiers. -->
+      <_CSharpScriptRunnerBuildFile Include="%(_CSharpScriptRunnerTargetPath.RootDir)%(Directory)*" />
+    </ItemGroup>
+    <Copy
+      SourceFiles="@(_CSharpScriptRunnerBuildFile)"
+      DestinationFolder="$(OutDir)$(_CSharpScriptRunnerOutput)"
+      SkipUnchangedFiles="true"
+    />
+  </Target>
+
+  <Target
+    Name="_AddCSharpScriptRunnerToPublish"
+    AfterTargets="ComputeResolvedFilesToPublishList"
+    DependsOnTargets="_GetCSharpScriptRunnerProperties"
+  >
+    <Error
+      Condition="'$(RuntimeIdentifier)' == ''"
+      Text="Publishing the C# script runner needs a RuntimeIdentifier, such as -r linux-x64, to bundle its .NET runtime."
+    />
+    <PropertyGroup>
+      <_CSharpScriptRunnerPublishDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'csharp-runner'))</_CSharpScriptRunnerPublishDir>
+    </PropertyGroup>
+    <MSBuild
+      Projects="$(CSharpScriptRunnerProject)"
+      Targets="Publish"
+      Properties="$(_CSharpScriptRunnerProperties);PublishDir=$(_CSharpScriptRunnerPublishDir)"
+      RemoveProperties="PublishAot;PublishTrimmed;PublishSingleFile;PublishReadyToRun;SelfContained;TargetFramework"
+    />
+    <MSBuild
+      Projects="$(CSharpScriptRunnerProject)"
+      Targets="GetBundledRuntimeFiles"
+      Properties="$(_CSharpScriptRunnerProperties);PublishDir=$(_CSharpScriptRunnerPublishDir)"
+      RemoveProperties="PublishAot;PublishTrimmed;PublishSingleFile;PublishReadyToRun;SelfContained;TargetFramework"
+    >
+      <Output TaskParameter="TargetOutputs" ItemName="_CSharpScriptRuntimeFile" />
+    </MSBuild>
+    <ItemGroup>
+      <_CSharpScriptRunnerPublishFile Include="$(_CSharpScriptRunnerPublishDir)**" />
+      <ResolvedFileToPublish
+        Include="@(_CSharpScriptRunnerPublishFile)"
+        RelativePath="$(_CSharpScriptRunnerOutput)%(_CSharpScriptRunnerPublishFile.RecursiveDir)%(_CSharpScriptRunnerPublishFile.Filename)%(_CSharpScriptRunnerPublishFile.Extension)"
+        CopyToPublishDirectory="PreserveNewest"
+      />
+      <_CSharpScriptHostFxr
+        Include="@(_CSharpScriptRuntimeFile)"
+        Condition="'%(_CSharpScriptRuntimeFile.Filename)' == 'hostfxr' or '%(_CSharpScriptRuntimeFile.Filename)' == 'libhostfxr'"
+      />
+      <ResolvedFileToPublish
+        Include="@(_CSharpScriptHostFxr)"
+        RelativePath="$(_CSharpScriptRuntimeOutput)host/fxr/%(_CSharpScriptHostFxr.RuntimeVersion)/%(_CSharpScriptHostFxr.Filename)%(_CSharpScriptHostFxr.Extension)"
+        CopyToPublishDirectory="PreserveNewest"
+      />
+      <ResolvedFileToPublish
+        Include="@(_CSharpScriptRuntimeFile)"
+        Exclude="@(_CSharpScriptHostFxr)"
+        RelativePath="$(_CSharpScriptRuntimeOutput)shared/Microsoft.NETCore.App/%(_CSharpScriptRuntimeFile.RuntimeVersion)/%(_CSharpScriptRuntimeFile.DestinationSubPath)"
+        CopyToPublishDirectory="PreserveNewest"
+      />
+    </ItemGroup>
+
+    <!-- NativeAOT compiles the app's managed assemblies into the executable; scripts need them as files. -->
+    <ItemGroup Condition="'$(PublishAot)' == 'true'">
+      <_CSharpScriptReferenceCandidate
+        Include="@(ReferenceCopyLocalPaths)"
+        Condition="'%(ReferenceCopyLocalPaths.Extension)' == '.dll'"
+        SourcePath="%(ReferenceCopyLocalPaths.FullPath)"
+      />
+      <_CSharpScriptReferenceByName Include="@(_CSharpScriptReferenceCandidate->'%(Filename)')" />
+      <_CSharpScriptReferenceUnlisted Include="@(_CSharpScriptReferenceByName)" Exclude="@(CSharpScriptReference)" />
+      <_CSharpScriptReferenceListed
+        Include="@(_CSharpScriptReferenceByName)"
+        Exclude="@(_CSharpScriptReferenceUnlisted)"
+      />
+      <_CSharpScriptReferenceFile Include="@(_CSharpScriptReferenceListed->'%(SourcePath)'->Distinct())" />
+      <ResolvedFileToPublish
+        Include="@(_CSharpScriptReferenceFile)"
+        RelativePath="%(_CSharpScriptReferenceFile.Filename)%(_CSharpScriptReferenceFile.Extension)"
+        CopyToPublishDirectory="PreserveNewest"
+      />
+    </ItemGroup>
+  </Target>
+</Project>

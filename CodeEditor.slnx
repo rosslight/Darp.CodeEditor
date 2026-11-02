@@ -4,6 +4,8 @@
     <Project Path="src/Darp.CodeEditor.CSharp/Darp.CodeEditor.CSharp.csproj" />
     <Project Path="src/Darp.CodeEditor.CSharp.Hosting/Darp.CodeEditor.CSharp.Hosting.csproj" />
     <Project Path="src/Darp.CodeEditor.CSharp.Scripting/Darp.CodeEditor.CSharp.Scripting.csproj" />
+    <Project Path="src/Darp.CodeEditor.CSharp.Execution/Darp.CodeEditor.CSharp.Execution.csproj" />
+    <Project Path="src/Darp.CodeEditor.CSharp.Runner/Darp.CodeEditor.CSharp.Runner.csproj" />
     <Project Path="src/Darp.CodeEditor.CSharp.Server/Darp.CodeEditor.CSharp.Server.csproj" />
   </Folder>
   <Folder Name="/samples/">
