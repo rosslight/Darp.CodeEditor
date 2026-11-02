@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- The demo's globals and the in-process service are the baseline the server is measured against. -->
+    <ProjectReference Include="..\..\samples\Darp.CodeEditor.Demo\Darp.CodeEditor.Demo.csproj" />
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp\Darp.CodeEditor.CSharp.csproj" />
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp.Hosting\Darp.CodeEditor.CSharp.Hosting.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\..\tests\Shared\LspClient.cs" Link="Shared\LspClient.cs" />
+    <Compile Include="..\..\samples\Shared\SampleDocuments.cs" Link="Shared\SampleDocuments.cs" />
+  </ItemGroup>
+</Project>
