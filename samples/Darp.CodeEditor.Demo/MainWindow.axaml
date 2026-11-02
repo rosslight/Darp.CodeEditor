@@ -1,0 +1,28 @@
+<Window
+    x:Class="Darp.CodeEditor.Demo.MainWindow"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:editor="using:Darp.CodeEditor"
+    Title="Code editor demo (JIT, C# scripting)"
+    Width="1200"
+    Height="800"
+    Background="#1E1E1E"
+>
+    <DockPanel>
+        <Border DockPanel.Dock="Bottom" Background="#007ACC" Padding="8,3">
+            <TextBlock x:Name="Status" Foreground="White" />
+        </Border>
+        <TabControl x:Name="Tabs">
+            <TabItem Header="script.csx">
+                <editor:CodeEditor x:Name="CSharpEditor" DocumentId="script.csx" LanguageId="csharp" />
+            </TabItem>
+            <TabItem Header="script.luau">
+                <editor:CodeEditor x:Name="LuauEditor" DocumentId="script.luau" />
+            </TabItem>
+            <TabItem Header="config.json">
+                <editor:CodeEditor x:Name="JsonEditor" DocumentId="config.json" LanguageId="json" />
+            </TabItem>
+            <TabItem x:Name="BenchTab" Header="bench" IsVisible="False" />
+        </TabControl>
+    </DockPanel>
+</Window>

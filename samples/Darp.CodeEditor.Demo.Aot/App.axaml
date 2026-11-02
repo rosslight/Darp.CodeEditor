@@ -1,0 +1,12 @@
+<Application
+    x:Class="Darp.CodeEditor.Demo.Aot.App"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    RequestedThemeVariant="Dark"
+>
+    <Application.Styles>
+        <FluentTheme />
+        <!-- Compiled XAML: a runtime StyleInclude would need reflection and is not trim-safe. -->
+        <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
+    </Application.Styles>
+</Application>

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- The XML docs of ScriptGlobals show up in completion descriptions and quick info. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Darp.CodeEditor\Darp.CodeEditor.csproj" />
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp\Darp.CodeEditor.CSharp.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Shared\**\*.cs" LinkBase="Shared" />
+    <None Include="..\Shared\Grammars\**" LinkBase="Grammars" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,32 @@
+<Window
+    x:Class="Darp.CodeEditor.Demo.Aot.MainWindow"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:editor="using:Darp.CodeEditor"
+    Title="Code editor demo (NativeAOT, highlighting and search)"
+    Width="1200"
+    Height="800"
+    Background="#1E1E1E"
+>
+    <DockPanel>
+        <Border DockPanel.Dock="Bottom" Background="#68217A" Padding="8,3">
+            <TextBlock
+                x:Name="Status"
+                Foreground="White"
+                Text="NativeAOT · Ctrl+F to search · JSON has word completion and parse errors"
+            />
+        </Border>
+        <TabControl x:Name="Tabs">
+            <TabItem Header="script.luau">
+                <editor:CodeEditor x:Name="LuauEditor" DocumentId="script.luau" />
+            </TabItem>
+            <TabItem Header="config.json">
+                <editor:CodeEditor x:Name="JsonEditor" DocumentId="config.json" LanguageId="json" />
+            </TabItem>
+            <TabItem Header="script.csx">
+                <editor:CodeEditor x:Name="CSharpEditor" DocumentId="script.csx" LanguageId="csharp" />
+            </TabItem>
+            <TabItem x:Name="BenchTab" Header="bench" IsVisible="False" />
+        </TabControl>
+    </DockPanel>
+</Window>
