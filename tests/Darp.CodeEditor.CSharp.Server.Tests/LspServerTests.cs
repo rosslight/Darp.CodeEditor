@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using Darp.CodeEditor.CSharp.Hosting;
 using Darp.CodeEditor.CSharp.Scripting;
+using Darp.CodeEditor.Lsp;
 using Darp.CodeEditor.LspTesting;
 using Darp.CodeEditor.Samples;
 using Microsoft.CodeAnalysis;
@@ -79,6 +80,44 @@ public sealed class LspLifecycleTests
 
         message.GetInt("params", "type").ShouldBe(1); // Error
         message.GetString("params", "message").ShouldContain("Missing.Globals");
+    }
+
+    [Fact]
+    public async Task A_failed_initialize_leaves_the_server_uninitialized_until_one_succeeds()
+    {
+        await using LspClient client = TestServer.Start();
+        JsonObject invalid = TestServer.InitializeParams(TestEnvironments.Device);
+        invalid["initializationOptions"] = new JsonObject { ["csharpScript"] = new JsonObject { ["version"] = 2 } };
+
+        LspException failed = await Should.ThrowAsync<LspException>(() => client.RequestAsync("initialize", invalid));
+        LspException early = await Should.ThrowAsync<LspException>(() =>
+            client.RequestAsync("textDocument/hover", TestServer.AtEnd("file:///a.csx", ""))
+        );
+        JsonNode? retried = await client.RequestAsync(
+            "initialize",
+            TestServer.InitializeParams(TestEnvironments.Device)
+        );
+
+        failed.Code.ShouldBe(ErrorCodes.InvalidParams);
+        early.Code.ShouldBe(ErrorCodes.ServerNotInitialized);
+        retried.Get("capabilities", "hoverProvider").GetValue<bool>().ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Initialize_after_shutdown_is_answered_with_an_error()
+    {
+        await using LspClient client = await TestServer.StartAsync();
+        await client.RequestAsync("shutdown", null);
+
+        LspException error = await Should.ThrowAsync<LspException>(() =>
+            client.RequestAsync(
+                "initialize",
+                TestServer.InitializeParams(TestEnvironments.Device),
+                TimeSpan.FromSeconds(10)
+            )
+        );
+
+        error.Code.ShouldBe(ErrorCodes.InvalidRequest);
     }
 
     [Fact]
@@ -162,9 +201,9 @@ public sealed class LspCompletionTests
         first.Get("isIncomplete").GetValue<bool>().ShouldBeTrue();
         first.GetArray("items").Count.ShouldBeLessThanOrEqualTo(1000);
         // Kept items match as the editor's own filter matches: prefix, word parts ("DebuggerVisualizer") or substring.
-        Labels(first).ShouldAllBe(label => CompletionFilter.Score(label, "D") > 0);
+        Labels(first).ShouldAllBe(label => CompletionMatcher.Score(label, "D") > 0);
         Labels(second).Length.ShouldBeLessThan(Labels(first).Length);
-        Labels(second).ShouldAllBe(label => CompletionFilter.Score(label, "Dev") > 0);
+        Labels(second).ShouldAllBe(label => CompletionMatcher.Score(label, "Dev") > 0);
         Labels(second).ShouldContain("Device");
     }
 
@@ -179,7 +218,7 @@ public sealed class LspCompletionTests
 
         // "ZZZ" after the caret matches nothing, so filtering by the whole word would drop "Console".
         Labels(list).ShouldContain("Console");
-        Labels(list).ShouldAllBe(label => CompletionFilter.Score(label, "Con") > 0);
+        Labels(list).ShouldAllBe(label => CompletionMatcher.Score(label, "Con") > 0);
     }
 
     [Fact]
@@ -449,7 +488,7 @@ public sealed class LspDocumentSyncTests
     }
 
     [Fact]
-    public async Task Closing_a_document_cancels_its_pending_completion()
+    public async Task Closing_a_document_ends_its_pending_completion_as_content_modified()
     {
         const string uri = "file:///scripts/closed.csx";
         await using LspClient client = await TestServer.StartAsync();
@@ -464,7 +503,7 @@ public sealed class LspDocumentSyncTests
         );
         LspResponse response = await completion.Response;
 
-        response.Error.ShouldNotBeNull().Code.ShouldBe(-32800); // RequestCancelled
+        response.Error.ShouldNotBeNull().Code.ShouldBe(ErrorCodes.ContentModified);
     }
 
     [Fact]
@@ -505,10 +544,7 @@ public sealed class LspDocumentSyncTests
         cleared.GetArray("params", "diagnostics").ShouldBeEmpty();
     }
 
-    [Fact(
-        Skip = "EmmyLua.LanguageServer.Framework 0.9.2 reads every $/cancelRequest id as 0 (CancelParams.Id has no "
-            + "setter), so no request is cancelled. Enable it when the server moves to Darp.CodeEditor.Lsp."
-    )]
+    [Fact]
     public async Task Cancelled_requests_answer_with_request_cancelled()
     {
         const string uri = "file:///scripts/cancel.csx";
@@ -521,11 +557,11 @@ public sealed class LspDocumentSyncTests
         await client.CancelAsync(hover.Id);
         LspResponse response = await hover.Response;
 
-        response.Error.ShouldNotBeNull().Code.ShouldBe(-32800); // RequestCancelled
+        response.Error.ShouldNotBeNull().Code.ShouldBe(ErrorCodes.RequestCancelled);
     }
 
     [Fact]
-    public async Task A_new_version_cancels_pending_requests_for_the_old_one()
+    public async Task A_new_version_ends_pending_requests_for_the_old_one_as_content_modified()
     {
         const string uri = "file:///scripts/stale.csx";
         await using LspClient client = await TestServer.StartAsync();
@@ -540,7 +576,8 @@ public sealed class LspDocumentSyncTests
             TestServer.At(uri, "// edited\n" + text, "Device")
         );
 
-        response.Error.ShouldNotBeNull().Code.ShouldBe(-32800); // RequestCancelled
+        // The server, not the client, ended the request: ContentModified, which clients drop silently.
+        response.Error.ShouldNotBeNull().Code.ShouldBe(ErrorCodes.ContentModified);
         fresh.GetString("contents", "value").ShouldStartWith(DeviceHover);
     }
 }

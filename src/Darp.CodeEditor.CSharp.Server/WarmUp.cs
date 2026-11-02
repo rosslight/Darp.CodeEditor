@@ -1,4 +1,4 @@
-using EmmyLua.LanguageServer.Framework.Protocol.Message.Completion;
+using Darp.CodeEditor.Lsp.Protocol;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 using RoslynCompletionTrigger = Microsoft.CodeAnalysis.Completion.CompletionTrigger;
@@ -25,7 +25,7 @@ internal static class WarmUp
     )
     {
         ScriptWorkspace workspace = await workspaceTask.ConfigureAwait(false);
-        var script = new OpenDocument("<warm-up>", "<warm-up>", 1, SourceText.From(Text));
+        var script = new OpenDocument("<warm-up>", 1, SourceText.From(Text));
         DocumentSnapshot snapshot = script.Current;
         Document document = script.GetDocument(workspace, snapshot);
         var results = new CompletionResults();
@@ -55,10 +55,10 @@ internal static class WarmUp
                 none
             )
             .ConfigureAwait(false);
-        if (results.TryGetLatest(script.Key, out CompletionResult? result))
+        if (results.TryGetLatest(script.Uri, out CompletionResult? result))
         {
             await CompletionHandler
-                .ResolveAsync(new CompletionItem { Label = "" }, result, result.Items[0], client, none)
+                .ResolveAsync(new CompletionItem(""), result, result.Items[0], client, none)
                 .ConfigureAwait(false);
         }
         await SemanticTokensHandler

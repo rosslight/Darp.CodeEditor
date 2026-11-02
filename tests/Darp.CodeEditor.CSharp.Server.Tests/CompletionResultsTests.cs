@@ -12,7 +12,7 @@ public sealed class CompletionResultsTests
     public void A_list_that_completes_after_its_document_closed_is_dropped()
     {
         var results = new CompletionResults();
-        var document = new OpenDocument("file:///a.csx", "file:///a.csx", 1, SourceText.From("D"));
+        var document = new OpenDocument("file:///a.csx", 1, SourceText.From("D"));
         using var workspace = new AdhocWorkspace();
         Document roslynDocument = workspace.AddDocument(
             workspace.AddProject("a", LanguageNames.CSharp).Id,
@@ -22,12 +22,12 @@ public sealed class CompletionResultsTests
 
         bool beforeClose = results.Set(document, Result(results.NextId(), roslynDocument));
         document.Close();
-        results.Remove(document.Key);
+        results.Remove(document.Uri);
         bool afterClose = results.Set(document, Result(results.NextId(), roslynDocument));
 
         beforeClose.ShouldBeTrue();
         afterClose.ShouldBeFalse();
-        results.TryGetLatest(document.Key, out _).ShouldBeFalse();
+        results.TryGetLatest(document.Uri, out _).ShouldBeFalse();
     }
 
     private static CompletionResult Result(long id, Document document) =>

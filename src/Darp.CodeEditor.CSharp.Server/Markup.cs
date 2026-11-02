@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 using System.Text;
-using EmmyLua.LanguageServer.Framework.Protocol.Model.Markup;
+using Darp.CodeEditor.Lsp.Protocol;
 using Microsoft.CodeAnalysis;
 
 namespace Darp.CodeEditor.CSharp.Server;
@@ -21,11 +21,7 @@ internal static class Markup
                 builder.Append("\n\n");
             builder.Append(markdown ? Escape(paragraph) : paragraph);
         }
-        return new MarkupContent
-        {
-            Kind = markdown ? MarkupKind.Markdown : MarkupKind.PlainText,
-            Value = builder.ToString(),
-        };
+        return new MarkupContent(markdown ? MarkupKind.Markdown : MarkupKind.PlainText, builder.ToString());
     }
 
     /// <summary>Joins tagged text, with line breaks as newlines.</summary>

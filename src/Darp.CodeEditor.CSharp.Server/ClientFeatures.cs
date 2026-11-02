@@ -1,5 +1,4 @@
-using EmmyLua.LanguageServer.Framework.Protocol.Capabilities.Client.ClientCapabilities;
-using EmmyLua.LanguageServer.Framework.Protocol.Model.Markup;
+using Darp.CodeEditor.Lsp.Protocol;
 
 namespace Darp.CodeEditor.CSharp.Server;
 
@@ -21,11 +20,14 @@ internal sealed record ClientFeatures(
 {
     public static ClientFeatures From(ClientCapabilities capabilities)
     {
-        var completion = capabilities.TextDocument?.Completion;
-        var completionItem = completion?.CompletionItem;
-        List<string> itemDefaults = completion?.CompletionList?.ItemDefaults ?? [];
-        List<string> resolves = completionItem?.ResolveSupport?.Properties ?? [];
-        var signature = capabilities.TextDocument?.SignatureHelp?.SignatureInformation;
+        CompletionClientCapabilities? completion = capabilities.TextDocument?.Completion;
+        CompletionItemClientCapabilities? completionItem = completion?.CompletionItem;
+        IReadOnlyList<string> itemDefaults = completion?.CompletionList?.ItemDefaults ?? [];
+        IReadOnlyList<string> resolves = completionItem?.ResolveSupport?.Properties ?? [];
+        SignatureInformationClientCapabilities? signature = capabilities
+            .TextDocument
+            ?.SignatureHelp
+            ?.SignatureInformation;
         return new ClientFeatures(
             CompletionDefaultEditRange: itemDefaults.Contains("editRange"),
             CompletionDefaultCommitCharacters: itemDefaults.Contains("commitCharacters"),
@@ -34,7 +36,7 @@ internal sealed record ClientFeatures(
             CompletionSnippets: completionItem?.SnippetSupport == true,
             CompletionResolvesAdditionalTextEdits: resolves.Contains("additionalTextEdits"),
             CompletionResolvesTextEdit: resolves.Contains("textEdit"),
-            CompletionMarkdown: completionItem?.DocumentationFormat?.Contains(MarkupKind.Markdown.Value) == true,
+            CompletionMarkdown: completionItem?.DocumentationFormat?.Contains(MarkupKind.Markdown) == true,
             HoverMarkdown: capabilities.TextDocument?.Hover?.ContentFormat?.Contains(MarkupKind.Markdown) == true,
             SignatureLabelOffsets: signature?.ParameterInformation?.LabelOffsetSupport == true,
             SignatureActiveParameter: signature?.ActiveParameterSupport == true,

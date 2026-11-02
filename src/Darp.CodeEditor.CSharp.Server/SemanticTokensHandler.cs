@@ -1,9 +1,5 @@
-using EmmyLua.LanguageServer.Framework.Protocol.Capabilities.Client.ClientCapabilities;
-using EmmyLua.LanguageServer.Framework.Protocol.Capabilities.Common;
-using EmmyLua.LanguageServer.Framework.Protocol.Capabilities.Server;
-using EmmyLua.LanguageServer.Framework.Protocol.Capabilities.Server.Options;
-using EmmyLua.LanguageServer.Framework.Protocol.Message.SemanticToken;
-using EmmyLua.LanguageServer.Framework.Server.Handler;
+using Darp.CodeEditor.Lsp;
+using Darp.CodeEditor.Lsp.Protocol;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Classification;
 using Microsoft.CodeAnalysis.Text;
@@ -15,7 +11,7 @@ namespace Darp.CodeEditor.CSharp.Server;
 /// Token types use LSP's standard names where one exists and C# names otherwise. Operators and punctuation are left
 /// to syntax highlighting. Tokens that span lines are split per line.
 /// </remarks>
-internal sealed class SemanticTokensHandler : SemanticTokensHandlerBase
+internal static class SemanticTokensHandler
 {
     private static readonly List<string> s_tokenTypes =
     [
@@ -44,52 +40,41 @@ internal sealed class SemanticTokensHandler : SemanticTokensHandlerBase
 
     private static readonly List<string> s_tokenModifiers = ["static"];
 
-    private readonly ScriptSession _session;
+    public static SemanticTokensOptions Options { get; } =
+        new(new SemanticTokensLegend(s_tokenTypes, s_tokenModifiers), Range: true, Full: false);
 
-    public SemanticTokensHandler(ScriptSession session) => _session = session;
+    public static void Register(JsonRpcConnection connection, ScriptSession session) =>
+        connection.OnRequest(LspMethods.SemanticTokensRange, (request, token) => HandleAsync(session, request, token));
 
-    public override void RegisterCapability(
-        ServerCapabilities serverCapabilities,
-        ClientCapabilities clientCapabilities
-    ) =>
-        serverCapabilities.SemanticTokensProvider = new SemanticTokensOptions
-        {
-            Legend = new SemanticTokensLegend { TokenTypes = s_tokenTypes, TokenModifiers = s_tokenModifiers },
-            Range = true,
-            Full = false,
-        };
-
-    protected override Task<SemanticTokens?> Handle(SemanticTokensRangeParams request, CancellationToken token)
+    private static async Task<SemanticTokens?> HandleAsync(
+        ScriptSession session,
+        SemanticTokensRangeParams request,
+        CancellationToken token
+    )
     {
-        if (!_session.TryGetSnapshot(request.TextDocument.Uri, out DocumentSnapshot? snapshot))
-            return Task.FromResult<SemanticTokens?>(null);
+        if (!session.TryGetSnapshot(request.TextDocument.Uri, out DocumentSnapshot? snapshot))
+            return null;
         TextSpan span = snapshot.Lines.GetSpan(request.Range);
-        ScriptSession session = _session;
-        return Task.Run(
-            async () =>
-            {
-                using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(token, snapshot.Changed);
-                ScriptWorkspace workspace = await session.Workspace.WaitAsync(cancellation.Token).ConfigureAwait(false);
-                return (SemanticTokens?)
+        // The snapshot is taken; the rest runs on the thread pool while later messages are dispatched.
+        await Task.Yield();
+        return await StaleWork
+            .RunAsync(
+                token,
+                snapshot.Changed,
+                async cancellationToken =>
                     await GetTokensAsync(
-                            snapshot.Owner.GetDocument(workspace, snapshot),
+                            snapshot.Owner.GetDocument(
+                                await session.Workspace.WaitAsync(cancellationToken).ConfigureAwait(false),
+                                snapshot
+                            ),
                             snapshot.Lines,
                             span,
-                            cancellation.Token
+                            cancellationToken
                         )
-                        .ConfigureAwait(false);
-            },
-            token
-        );
+                        .ConfigureAwait(false)
+            )
+            .ConfigureAwait(false);
     }
-
-    protected override Task<SemanticTokens?> Handle(SemanticTokensParams request, CancellationToken token) =>
-        Task.FromResult<SemanticTokens?>(null);
-
-    protected override Task<SemanticTokensDeltaResponse?> Handle(
-        SemanticTokensDeltaParams request,
-        CancellationToken token
-    ) => Task.FromResult<SemanticTokensDeltaResponse?>(null);
 
     public static async Task<SemanticTokens> GetTokensAsync(
         Document document,
@@ -115,7 +100,7 @@ internal sealed class SemanticTokensHandler : SemanticTokensHandlerBase
             (a, b) => a.Span.Start != b.Span.Start ? a.Span.Start - b.Span.Start : b.Span.Length - a.Span.Length
         );
 
-        var data = new List<uint>(tokens.Count * 5);
+        var data = new List<int>(tokens.Count * 5);
         int previousLine = 0;
         int previousStart = 0;
         int end = 0;
@@ -125,7 +110,7 @@ internal sealed class SemanticTokensHandler : SemanticTokensHandlerBase
             if (tokenSpan.Start < end || tokenSpan.IsEmpty)
                 continue;
             end = tokenSpan.End;
-            uint modifiers = staticSpans.Contains(tokenSpan) ? 1u : 0u;
+            int modifiers = staticSpans.Contains(tokenSpan) ? 1 : 0;
             for (int line = lines.GetLine(tokenSpan.Start); line < lines.LineCount; line++)
             {
                 int start = Math.Max(tokenSpan.Start, lines.GetLineStart(line));
@@ -135,16 +120,16 @@ internal sealed class SemanticTokensHandler : SemanticTokensHandlerBase
                 if (length <= 0)
                     continue;
                 int character = start - lines.GetLineStart(line);
-                data.Add((uint)(line - previousLine));
-                data.Add((uint)(line == previousLine ? character - previousStart : character));
-                data.Add((uint)length);
-                data.Add((uint)type);
+                data.Add(line - previousLine);
+                data.Add(line == previousLine ? character - previousStart : character);
+                data.Add(length);
+                data.Add(type);
                 data.Add(modifiers);
                 previousLine = line;
                 previousStart = character;
             }
         }
-        return new SemanticTokens { Data = data };
+        return new SemanticTokens([.. data]);
     }
 
     private static int? GetTokenType(string classificationType)

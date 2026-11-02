@@ -1,41 +1,50 @@
 using System.Collections.Immutable;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Text.Json;
+using System.Reflection;
 using Darp.CodeEditor.CSharp.Hosting;
 using Darp.CodeEditor.CSharp.Scripting;
-using EmmyLua.LanguageServer.Framework.Protocol.JsonRpc;
-using EmmyLua.LanguageServer.Framework.Protocol.Message.Client.ShowMessage;
-using EmmyLua.LanguageServer.Framework.Protocol.Message.Initialize;
-using EmmyLua.LanguageServer.Framework.Protocol.Model;
-using EmmyLua.LanguageServer.Framework.Protocol.Model.TextDocument;
+using Darp.CodeEditor.Lsp;
+using Darp.CodeEditor.Lsp.Protocol;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
-using LanguageServer = EmmyLua.LanguageServer.Framework.Server.LanguageServer;
-using LspDiagnostic = EmmyLua.LanguageServer.Framework.Protocol.Model.Diagnostic.Diagnostic;
+using Diagnostic = Microsoft.CodeAnalysis.Diagnostic;
+using LspDiagnostic = Darp.CodeEditor.Lsp.Protocol.Diagnostic;
 
 namespace Darp.CodeEditor.CSharp.Server;
 
 /// <summary>The server's state: the script workspace, the open documents and the diagnostics of each version.</summary>
 /// <remarks>
-/// Document state changes only on the thread that reads messages (see <see cref="InlineScheduler"/>). Background
-/// work receives immutable snapshots.
+/// Text synchronization runs <see cref="DispatchMode.Serial"/> on the connection's dispatch loop, so document state
+/// changes one message at a time, and requests read it there, before their first <c>await</c>. Background work
+/// receives immutable snapshots.
 /// </remarks>
-internal sealed class ScriptSession : IDisposable
+internal sealed class ScriptSession
 {
-    private readonly LanguageServer _server;
+    private static readonly ServerCapabilities s_capabilities = new(
+        TextDocumentSync: new TextDocumentSyncOptions(OpenClose: true, Change: TextDocumentSyncKind.Incremental),
+        CompletionProvider: CompletionHandler.Options,
+        HoverProvider: true,
+        SignatureHelpProvider: SignatureHelpHandler.Options,
+        SemanticTokensProvider: SemanticTokensHandler.Options
+    );
+
+    private static readonly ServerInfo s_serverInfo = new(
+        "Darp.CodeEditor.CSharp.Server",
+        typeof(ScriptSession).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+    );
+
     private readonly ServerOptions _options;
     private readonly Dictionary<string, OpenDocument> _documents = new(StringComparer.Ordinal);
+    private JsonRpcConnection? _connection;
     private Task<ScriptWorkspace>? _workspace;
 
-    public ScriptSession(LanguageServer server, ServerOptions options)
-    {
-        _server = server;
-        _options = options;
-    }
+    public ScriptSession(ServerOptions options) => _options = options;
 
     public ServerOptions Options => _options;
 
-    public ClientFeatures Client { get; private set; } = ClientFeatures.From(new());
+    public ClientFeatures Client { get; private set; } = ClientFeatures.From(new ClientCapabilities());
 
     public CompletionResults Completions { get; } = new();
 
@@ -43,49 +52,121 @@ internal sealed class ScriptSession : IDisposable
     public Task<ScriptWorkspace> Workspace =>
         _workspace ?? throw new InvalidOperationException("The server is not initialized.");
 
-    /// <exception cref="FormatException">The initialization options are invalid.</exception>
-    /// <exception cref="ArgumentException">The environment names files or values that do not exist.</exception>
-    public void Initialize(InitializeParams request)
+    private JsonRpcConnection Connection =>
+        _connection ?? throw new InvalidOperationException("The session is not connected.");
+
+    /// <summary>Registers the handlers on the server's connection, and keeps it for notifications to the client.</summary>
+    public void Connect(JsonRpcConnection connection)
     {
+        _connection = connection;
+        connection.OnNotification(LspMethods.Initialized, static (_, _) => Task.CompletedTask);
+        connection.OnNotification(
+            LspMethods.DidOpen,
+            (parameters, _) =>
+            {
+                Open(parameters.TextDocument);
+                return Task.CompletedTask;
+            }
+        );
+        connection.OnNotification(
+            LspMethods.DidChange,
+            (parameters, _) =>
+            {
+                Change(parameters.TextDocument, parameters.ContentChanges);
+                return Task.CompletedTask;
+            }
+        );
+        connection.OnNotification(
+            LspMethods.DidClose,
+            (parameters, _) =>
+            {
+                Close(parameters.TextDocument.Uri);
+                return Task.CompletedTask;
+            }
+        );
+        CompletionHandler.Register(connection, this);
+        HoverHandler.Register(connection, this);
+        SignatureHelpHandler.Register(connection, this);
+        SemanticTokensHandler.Register(connection, this);
+    }
+
+    /// <summary>Answers <c>initialize</c>: reads the environment and starts loading it in the background.</summary>
+    /// <exception cref="JsonRpcException">The options are invalid or name files or values that do not exist.</exception>
+    public Task<InitializeResult> InitializeAsync(InitializeParams request, CancellationToken cancellationToken)
+    {
+        ResolvedScriptEnvironment resolved;
+        try
+        {
+            CSharpScriptEnvironment environment =
+                (request.InitializationOptions is { } options ? CSharpScriptInitializationOptions.Read(options) : null)
+                ?? new CSharpScriptEnvironment();
+            // Resolving only reads file headers, so its errors can answer the request.
+            resolved = ResolvedScriptEnvironment.Resolve(environment);
+        }
+        catch (Exception exception) when (exception is FormatException or ArgumentException)
+        {
+            throw new JsonRpcException(ErrorCodes.InvalidParams, exception.Message);
+        }
         Client = ClientFeatures.From(request.Capabilities);
-        CSharpScriptEnvironment environment =
-            (
-                request.InitializationOptions is { } options
-                    ? CSharpScriptInitializationOptions.Read(options.RootElement)
-                    : null
-            ) ?? new CSharpScriptEnvironment();
-        // Resolving only reads file headers; errors here answer the initialize request.
-        ResolvedScriptEnvironment resolved = ResolvedScriptEnvironment.Resolve(environment);
         _workspace = Task.Run(() => ScriptWorkspace.Load(resolved));
         Observe(ReportLoadFailureAsync(_workspace), "Reporting the environment");
         if (_options.WarmUp)
             Observe(WarmUp.RunAsync(_workspace, Client, _options.CompletionListLimits), "Warm-up");
+        if (request.ProcessId is { } processId)
+            Observe(ExitWhenClientExitsAsync(processId), "Watching the client process");
+        return Task.FromResult(new InitializeResult(s_capabilities, s_serverInfo));
     }
 
-    public void Open(DocumentUri uri, int version, string text)
+    /// <summary>Stops pending diagnostics; the server answers no more requests.</summary>
+    public Task ShutdownAsync()
     {
-        string key = uri.Uri.AbsoluteUri;
-        if (_documents.Remove(key, out OpenDocument? previous))
+        foreach (OpenDocument document in _documents.Values)
+            document.Close();
+        return Task.CompletedTask;
+    }
+
+    public bool TryGetSnapshot(string uri, [NotNullWhen(true)] out DocumentSnapshot? snapshot)
+    {
+        snapshot = _documents.TryGetValue(uri, out OpenDocument? document) ? document.Current : null;
+        return snapshot is not null;
+    }
+
+    /// <summary>Logs failures of work nobody awaits.</summary>
+    public static void Observe(Task task, string what) =>
+        task.ContinueWith(
+            static (t, state) => Console.Error.WriteLine($"{state} failed: {t.Exception?.GetBaseException()}"),
+            what,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default
+        );
+
+    private void Open(TextDocumentItem item)
+    {
+        if (_documents.Remove(item.Uri, out OpenDocument? previous))
         {
             previous.Close();
-            Completions.Remove(key);
+            Completions.Remove(item.Uri);
         }
-        var document = new OpenDocument(key, uri.Uri.OriginalString, version, SourceText.From(text));
-        _documents.Add(key, document);
+        var document = new OpenDocument(item.Uri, item.Version, SourceText.From(item.Text));
+        _documents.Add(item.Uri, document);
         ScheduleDiagnostics(document.Current);
     }
 
     /// <summary>Applies the changes of a newer version. Changes for the current or an older version are ignored.</summary>
-    public void Change(DocumentUri uri, int version, IReadOnlyList<TextDocumentContentChangeEvent> changes)
+    private void Change(
+        VersionedTextDocumentIdentifier identifier,
+        IReadOnlyList<TextDocumentContentChangeEvent> changes
+    )
     {
-        if (!_documents.TryGetValue(uri.Uri.AbsoluteUri, out OpenDocument? document))
+        if (!_documents.TryGetValue(identifier.Uri, out OpenDocument? document))
             return;
         DocumentSnapshot current = document.Current;
         // Versions only grow; requests and cached Roslyn documents rely on one text per version.
-        if (version <= current.Version)
+        if (identifier.Version <= current.Version)
         {
             Console.Error.WriteLine(
-                $"Ignored a change of {document.ClientUri} to version {version}: the document is at version {current.Version}."
+                $"Ignored a change of {identifier.Uri} to version {identifier.Version}: the document is at version {current.Version}."
             );
             return;
         }
@@ -100,47 +181,18 @@ internal sealed class ScriptSession : IDisposable
             if (i < changes.Count - 1)
                 lines = LineMap.Create(text);
         }
-        ScheduleDiagnostics(document.Update(version, text));
+        ScheduleDiagnostics(document.Update(identifier.Version, text));
     }
 
-    public void Close(DocumentUri uri)
+    private void Close(string uri)
     {
-        if (!_documents.Remove(uri.Uri.AbsoluteUri, out OpenDocument? document))
+        if (!_documents.Remove(uri, out OpenDocument? document))
             return;
         document.Close();
-        Completions.Remove(document.Key);
+        Completions.Remove(uri);
         // Clients keep showing published diagnostics until they are replaced.
-        Observe(PublishAsync(document.ClientUri, null, []), "Clearing diagnostics");
+        Observe(PublishAsync(uri, null, []), "Clearing diagnostics");
     }
-
-    public bool TryGetSnapshot(DocumentUri uri, [NotNullWhen(true)] out DocumentSnapshot? snapshot)
-    {
-        snapshot = _documents.TryGetValue(uri.Uri.AbsoluteUri, out OpenDocument? document) ? document.Current : null;
-        return snapshot is not null;
-    }
-
-    /// <summary>Stops pending diagnostics; the server answers no more requests.</summary>
-    public void Shutdown()
-    {
-        foreach (OpenDocument document in _documents.Values)
-            document.Close();
-    }
-
-    public void Dispose()
-    {
-        if (_workspace is { IsCompletedSuccessfully: true } workspace)
-            workspace.Result.Dispose();
-    }
-
-    /// <summary>Logs failures of work nobody awaits.</summary>
-    public static void Observe(Task task, string what) =>
-        task.ContinueWith(
-            static (t, state) => Console.Error.WriteLine($"{state} failed: {t.Exception?.GetBaseException()}"),
-            what,
-            CancellationToken.None,
-            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default
-        );
 
     /// <summary>Tells the user when the environment cannot be loaded, such as when the globals type does not exist.</summary>
     private async Task ReportLoadFailureAsync(Task<ScriptWorkspace> workspace)
@@ -152,16 +204,40 @@ internal sealed class ScriptSession : IDisposable
         catch (Exception exception)
         {
             Console.Error.WriteLine($"Loading the script environment failed: {exception}");
-            await _server
-                .Client.ShowMessage(
-                    new ShowMessageParams
-                    {
-                        Type = MessageType.Error,
-                        Message = $"The C# script environment could not be loaded: {exception.Message}",
-                    }
+            await Connection
+                .SendNotificationAsync(
+                    LspMethods.ShowMessage,
+                    new LogMessageParams(
+                        MessageType.Error,
+                        $"The C# script environment could not be loaded: {exception.Message}"
+                    )
                 )
                 .ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Ends the server when the client process ends. Its input usually ends with it, but not when another process,
+    /// such as a child of the client, still holds the pipe open.
+    /// </summary>
+    private static async Task ExitWhenClientExitsAsync(int processId)
+    {
+        try
+        {
+            using Process client = Process.GetProcessById(processId);
+            await client.WaitForExitAsync().ConfigureAwait(false);
+        }
+        catch (ArgumentException)
+        {
+            // The process ended before the server looked.
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
+        {
+            Console.Error.WriteLine($"Cannot watch the client process {processId}: {exception.Message}");
+            return;
+        }
+        Console.Error.WriteLine($"The client process {processId} ended; exiting.");
+        Environment.Exit(1);
     }
 
     /// <summary>Publishes compiler diagnostics for <paramref name="snapshot"/> once the text stayed unchanged for a while.</summary>
@@ -181,7 +257,7 @@ internal sealed class ScriptSession : IDisposable
                 .ConfigureAwait(false);
             changed.ThrowIfCancellationRequested();
             await PublishAsync(
-                    snapshot.Owner.ClientUri,
+                    snapshot.Owner.Uri,
                     snapshot.Version,
                     ScriptDiagnostics.ToLsp(diagnostics, snapshot.Lines)
                 )
@@ -193,18 +269,9 @@ internal sealed class ScriptSession : IDisposable
         }
     }
 
-    /// <remarks>
-    /// Written with the client's URI string: the framework's <see cref="DocumentUri"/> writes
-    /// <see cref="Uri.ToString"/>, which unescapes, so URIs such as <c>file:///c%3A/a.csx</c> would not round-trip.
-    /// </remarks>
-    private Task PublishAsync(string clientUri, int? version, List<LspDiagnostic> diagnostics) =>
-        _server.SendNotification(
-            new NotificationMessage(
-                "textDocument/publishDiagnostics",
-                JsonSerializer.SerializeToDocument(
-                    new PublishDiagnosticsNotification(clientUri, version, diagnostics),
-                    _server.JsonSerializerOptions
-                )
-            )
+    private Task PublishAsync(string uri, int? version, List<LspDiagnostic> diagnostics) =>
+        Connection.SendNotificationAsync(
+            LspMethods.PublishDiagnostics,
+            new PublishDiagnosticsParams(uri, diagnostics, version)
         );
 }
