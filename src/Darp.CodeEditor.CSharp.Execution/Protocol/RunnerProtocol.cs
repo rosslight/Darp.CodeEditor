@@ -5,9 +5,9 @@ namespace Darp.CodeEditor.CSharp.Execution.Protocol;
 
 /// <summary>What the host calls on the runner.</summary>
 /// <remarks>
-/// Every request the host sends has the session's call deadline. Compiling runs no script code and can take longer, so
-/// <see cref="CompileAsync"/> answers at once and the runner reports the result with
-/// <see cref="IRunnerHost.CompiledAsync"/>; the host gives that the compile timeout.
+/// Every request the host sends has the session's call deadline, which is meant for script code. Compiling and releasing
+/// run none, so they are notifications: the runner reports a compile result with <see cref="IRunnerHost.CompiledAsync"/>,
+/// and the host gives that the compile timeout.
 /// </remarks>
 [JsonRpcContract, GenerateShape(IncludeMethods = MethodShapeFlags.PublicInstance)]
 internal partial interface IRunnerService
@@ -15,15 +15,12 @@ internal partial interface IRunnerService
     /// <summary>Loads the environment and attaches the host services. Answers with the runner's process ID.</summary>
     Task<int> StartAsync(RunnerStart start, CancellationToken cancellationToken);
 
-    /// <summary>
-    /// Starts compiling <paramref name="code"/> and answers; the result follows with
-    /// <see cref="IRunnerHost.CompiledAsync"/>.
-    /// </summary>
+    /// <summary>Compiles <paramref name="code"/>; the result follows with <see cref="IRunnerHost.CompiledAsync"/>.</summary>
     /// <param name="id">
-    /// Chosen by the host; identifies the script in <see cref="RunAsync"/> and <see cref="ReleaseAsync"/>.
+    /// Chosen by the host; identifies the script in <see cref="RunAsync"/> and <see cref="Release"/>.
     /// </param>
     /// <param name="handler">The type the script must return.</param>
-    Task CompileAsync(long id, string code, RunnerTypeName handler);
+    void Compile(long id, string code, RunnerTypeName handler);
 
     /// <summary>Runs a compiled script once and returns its result as a marshaled object of the handler type.</summary>
     /// <remarks>
@@ -34,14 +31,14 @@ internal partial interface IRunnerService
     Task<RunnerValue> RunAsync(long id, CancellationToken cancellationToken);
 
     /// <summary>Forgets a script that will not run, and stops compiling it.</summary>
-    Task ReleaseAsync(long id);
+    void Release(long id);
 }
 
 /// <summary>What the runner calls on the host, besides the host services.</summary>
 [JsonRpcContract, GenerateShape(IncludeMethods = MethodShapeFlags.PublicInstance)]
 internal partial interface IRunnerHost
 {
-    /// <summary>Reports the result of <see cref="IRunnerService.CompileAsync"/>.</summary>
+    /// <summary>Reports the result of <see cref="IRunnerService.Compile"/>.</summary>
     Task CompiledAsync(long id, CompileResult result);
 }
 

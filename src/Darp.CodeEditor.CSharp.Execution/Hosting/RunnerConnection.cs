@@ -102,7 +102,12 @@ internal sealed class RunnerConnection : IAsyncDisposable
         {
             // Ending fails the pending compiles; one added after that would wait for nothing.
             _endedToken.Token.ThrowIfCancellationRequested();
-            await _runner.CompileAsync(id, code, RunnerTypeName.Of(typeof(T))).ConfigureAwait(false);
+            await _rpc.NotifyAsync(
+                    nameof(IRunnerService.Compile),
+                    [id, code, RunnerTypeName.Of(typeof(T))],
+                    [typeof(long), typeof(string), typeof(RunnerTypeName)]
+                )
+                .ConfigureAwait(false);
             CompileResult result = await compiled
                 .Task.WaitAsync(_options.CompileTimeout, cancellationToken)
                 .ConfigureAwait(false);
@@ -181,15 +186,17 @@ internal sealed class RunnerConnection : IAsyncDisposable
         }
     }
 
+    /// <summary>Tells the runner to forget a script. Best effort: it never hides the failure that led here.</summary>
     private async Task ReleaseAsync(long id)
     {
         if (!IsAlive)
             return;
         try
         {
-            await _runner.ReleaseAsync(id).ConfigureAwait(false);
+            await _rpc.NotifyAsync(nameof(IRunnerService.Release), [id], [typeof(long)]).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is ConnectionLostException or ObjectDisposedException)
+        catch (Exception exception)
+            when (exception is ConnectionLostException or ObjectDisposedException or OperationCanceledException)
         {
             // The runner is gone, and the script with it.
         }

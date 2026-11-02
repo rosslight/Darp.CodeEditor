@@ -130,7 +130,10 @@
       />
       <_CSharpScriptReferenceByKey Include="@(_CSharpScriptReferenceCandidate->'%(Key)')" />
       <_CSharpScriptReferenceUnmarked Include="@(_CSharpScriptReferenceByKey)" Exclude="@(_CSharpScriptReferenceKey)" />
-      <_CSharpScriptReferenceMarked Include="@(_CSharpScriptReferenceByKey)" Exclude="@(_CSharpScriptReferenceUnmarked)" />
+      <_CSharpScriptReferenceMarked
+        Include="@(_CSharpScriptReferenceByKey)"
+        Exclude="@(_CSharpScriptReferenceUnmarked)"
+      />
       <_CSharpScriptReferenceFile Include="@(_CSharpScriptReferenceMarked->'%(SourcePath)'->Distinct())" />
       <ResolvedFileToPublish
         Include="@(_CSharpScriptReferenceFile)"

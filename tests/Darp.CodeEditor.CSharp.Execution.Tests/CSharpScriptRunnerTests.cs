@@ -167,7 +167,7 @@ public sealed class CSharpScriptRunnerTests
     public async Task Call_past_its_deadline_is_cancelled_and_the_runner_keeps_running()
     {
         await using CSharpScriptRunner runner = await StartAsync(
-            callTimeout: TimeSpan.FromMilliseconds(300),
+            callTimeout: TimeSpan.FromSeconds(1),
             gracePeriod: TimeSpan.FromSeconds(1)
         );
         int? processId = runner.ProcessId;
@@ -186,7 +186,7 @@ public sealed class CSharpScriptRunnerTests
         await Should.ThrowAsync<TimeoutException>(() => handler.HandleAsync(new Sample(0, []), Cancellation));
 
         // Past the grace period: the script honoured the cancellation, so nothing was killed.
-        await Task.Delay(TimeSpan.FromMilliseconds(1600), Cancellation);
+        await Task.Delay(TimeSpan.FromMilliseconds(2500), Cancellation);
         exited.IsCompleted.ShouldBeFalse();
         runner.ProcessId.ShouldBe(processId);
         (await handler.HandleAsync(new Sample(2, []), Cancellation)).ShouldBe(2);
@@ -195,7 +195,10 @@ public sealed class CSharpScriptRunnerTests
     [Fact]
     public async Task Busy_call_past_its_deadline_kills_the_runner_and_the_next_script_gets_a_new_one()
     {
-        await using CSharpScriptRunner runner = await StartAsync(callTimeout: TimeSpan.FromMilliseconds(300));
+        await using CSharpScriptRunner runner = await StartAsync(
+            callTimeout: TimeSpan.FromSeconds(1),
+            gracePeriod: TimeSpan.FromMilliseconds(500)
+        );
         int firstProcess = runner.ProcessId.ShouldNotBeNull();
         Task<ScriptRunnerExitedEventArgs> exited = runner.NextExitAsync();
         string code = Handler(

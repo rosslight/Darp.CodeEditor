@@ -30,14 +30,12 @@ internal sealed class ScriptRunnerService(JsonRpc rpc, ShapeProviders shapes, IR
         return Task.FromResult(Environment.ProcessId);
     }
 
-    public Task CompileAsync(long id, string code, RunnerTypeName handler)
+    public void Compile(long id, string code, RunnerTypeName handler)
     {
-        RunnerEnvironment environment = GetEnvironment();
         var pending = new PendingScript();
         if (!_scripts.TryAdd(id, pending))
             throw new ArgumentException($"Script {id} already exists.", nameof(id));
-        _ = CompileAndReportAsync(environment, id, code, handler, pending);
-        return Task.CompletedTask;
+        _ = CompileAndReportAsync(id, code, handler, pending);
     }
 
     public async Task<RunnerValue> RunAsync(long id, CancellationToken cancellationToken)
@@ -59,24 +57,19 @@ internal sealed class ScriptRunnerService(JsonRpc rpc, ShapeProviders shapes, IR
         return new RunnerValue(value, compiled.HandlerType);
     }
 
-    public Task ReleaseAsync(long id)
+    public void Release(long id)
     {
         if (_scripts.TryRemove(id, out PendingScript? pending))
             pending.Cancellation.Cancel();
-        return Task.CompletedTask;
     }
 
-    private async Task CompileAndReportAsync(
-        RunnerEnvironment environment,
-        long id,
-        string code,
-        RunnerTypeName handler,
-        PendingScript pending
-    )
+    /// <summary>Compiles on the thread pool and reports the result; every failure becomes part of the report.</summary>
+    private async Task CompileAndReportAsync(long id, string code, RunnerTypeName handler, PendingScript pending)
     {
         CompileResult result;
         try
         {
+            RunnerEnvironment environment = GetEnvironment();
             CancellationToken cancellationToken = pending.Cancellation.Token;
             (CompileResult compileResult, CompiledScript? compiled) = await Task.Run(
                     () => environment.Compile(code, handler, cancellationToken),
