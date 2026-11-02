@@ -64,6 +64,8 @@ Rules the code follows:
 | `tests/Darp.CodeEditor.CSharp.TestGlobals` | A globals contract assembly for the tests, including the demo's `ScriptGlobals`. |
 | `tests/Shared` | A small LSP client over stdio, used by the tests and the benchmark. |
 | `benchmarks/Darp.CodeEditor.CSharp.Server.Benchmark` | Server against in-process service: startup, completion latency, memory, sizes. |
+| `tools/Darp.CodeEditor.Probe` | Measures from outside the app: keystroke to changed pixels on screen, startup on screen, process-tree memory. |
+| `tools/measure` | Scripts that run the benchmarks and the probe for both demos on Linux and Windows. |
 
 ## Run
 
@@ -98,6 +100,15 @@ Command line flags of both demos:
 | `--skip-highlighting-bench` | Skips the highlighting scenarios of `--bench`. |
 | `--no-language-service` | JIT demo only: starts without the C# service, to attribute startup stalls. |
 | `--low-latency-gc` | JIT demo only: sets `GCLatencyMode.SustainedLowLatency`. |
+| `--e2e <file>` | Writes where line 1 of a C# document without language features ends on screen, for `Probe latency`, and stays open. |
+
+## Measure from outside
+
+`tools/measure/run-linux.sh` (X11, XTest) and `tools/measure/run-windows.ps1` (SendInput) run `--bench` for both demos,
+time highlighted text on screen after launch, and measure keystroke to changed pixels with the probe. The probe checks
+before its click that the demo owns the window under the pointer, and before every key that it owns the foreground
+window (on X11: the active window and the one with the input focus), and aborts the run otherwise. Check and key are
+not atomic, and on X11 a keyboard grab by another client is not detected, so do not use the machine while it runs.
 
 ## C# script language server
 

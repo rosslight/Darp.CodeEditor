@@ -21,6 +21,15 @@ internal static class DemoRun
         int exitCode = 0;
         try
         {
+            if (options.E2eOutput is { } e2eOutput)
+            {
+                // A C# document without language features: the input latency probe types at the end of line 1.
+                await window.ShowTabAsync(0);
+                await Ui.WaitForVisibleAsync(window.CSharpEditor, highlighted: true);
+                await Task.Delay(500);
+                Ui.WriteE2eTarget(window.CSharpEditor, e2eOutput);
+                return;
+            }
             if (probe is null)
                 await ShowSceneAsync(window);
             else
@@ -33,7 +42,7 @@ internal static class DemoRun
         }
         report.Save();
         probe?.Dispose();
-        if (!options.Hold && !options.Scene)
+        if (!options.Hold && !options.Scene && options.E2eOutput is null)
             desktop.Shutdown(exitCode);
     }
 

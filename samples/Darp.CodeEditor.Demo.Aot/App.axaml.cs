@@ -20,7 +20,7 @@ public sealed class App : Application
             probe?.BeginPhase("startup: until first highlighted frame");
             var window = new MainWindow();
             desktop.MainWindow = window;
-            if (probe is not null || Program.Options.Scene)
+            if (probe is not null || Program.Options.Scene || Program.Options.E2eOutput is not null)
                 DemoRun.Start(window, desktop, probe, Program.Options);
         }
         base.OnFrameworkInitializationCompleted();
