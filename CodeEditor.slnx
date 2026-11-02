@@ -14,6 +14,7 @@
     <Project Path="samples/Darp.CodeEditor.Demo.ScriptApi/Darp.CodeEditor.Demo.ScriptApi.csproj" />
   </Folder>
   <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Darp.CodeEditor.CSharp.Execution.Benchmark/Darp.CodeEditor.CSharp.Execution.Benchmark.csproj" />
     <Project Path="benchmarks/Darp.CodeEditor.CSharp.Server.Benchmark/Darp.CodeEditor.CSharp.Server.Benchmark.csproj" />
   </Folder>
   <Folder Name="/tests/">
