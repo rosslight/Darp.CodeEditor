@@ -55,5 +55,21 @@ public static class LspMethods
 
     public static NotificationType<CancelParams> CancelRequest { get; } = new("$/cancelRequest", Json.CancelParams);
 
+    /// <summary>Sent by the server; answers one setting per item, null where the client has none.</summary>
+    public static RequestType<ConfigurationParams, IReadOnlyList<JsonElement?>> WorkspaceConfiguration { get; } =
+        new("workspace/configuration", Json.ConfigurationParams, Json.IReadOnlyListNullableJsonElement);
+
+    /// <summary>Sent by the server; answers null.</summary>
+    public static RequestType<RegistrationParams, JsonElement?> RegisterCapability { get; } =
+        new("client/registerCapability", Json.RegistrationParams, Json.NullableJsonElement);
+
+    /// <summary>Sent by the server; answers null.</summary>
+    public static RequestType<UnregistrationParams, JsonElement?> UnregisterCapability { get; } =
+        new("client/unregisterCapability", Json.UnregistrationParams, Json.NullableJsonElement);
+
+    /// <summary>Sent by the server before it reports progress with <c>$/progress</c>; answers null.</summary>
+    public static RequestType<WorkDoneProgressCreateParams, JsonElement?> WorkDoneProgressCreate { get; } =
+        new("window/workDoneProgress/create", Json.WorkDoneProgressCreateParams, Json.NullableJsonElement);
+
     private static LspJsonContext Json => LspJsonContext.Default;
 }

@@ -163,6 +163,47 @@ public sealed class ProtocolTests
     }
 
     [Fact]
+    public void Requests_a_server_sends_its_client_read_as_luau_lsp_sends_them()
+    {
+        ConfigurationParams? configuration = JsonSerializer.Deserialize(
+            """{"items":[{"section":"luau-lsp"},{"scopeUri":"file:///a.luau","section":"files"}]}""",
+            Json.ConfigurationParams
+        );
+        RegistrationParams? registration = JsonSerializer.Deserialize(
+            """{"registrations":[{"id":"1","method":"workspace/didChangeWatchedFiles","registerOptions":{"watchers":[]}}]}""",
+            Json.RegistrationParams
+        );
+        UnregistrationParams? unregistration = JsonSerializer.Deserialize(
+            """{"unregisterations":[{"id":"1","method":"workspace/didChangeWatchedFiles"}]}""",
+            Json.UnregistrationParams
+        );
+        WorkDoneProgressCreateParams? progress = JsonSerializer.Deserialize(
+            """{"token":"luau-lsp/indexing"}""",
+            Json.WorkDoneProgressCreateParams
+        );
+
+        configuration
+            .ShouldNotBeNull()
+            .Items.ShouldBe([
+                new ConfigurationItem(Section: "luau-lsp"),
+                new ConfigurationItem("file:///a.luau", "files"),
+            ]);
+        registration.ShouldNotBeNull().Registrations.Single().Method.ShouldBe("workspace/didChangeWatchedFiles");
+        unregistration.ShouldNotBeNull().Unregistrations.Single().Id.ShouldBe("1");
+        progress.ShouldNotBeNull().Token.GetString().ShouldBe("luau-lsp/indexing");
+    }
+
+    [Fact]
+    public void A_configuration_answer_has_one_value_per_item_and_writes_missing_ones_as_null()
+    {
+        IReadOnlyList<JsonElement?> settings = [null, TestMethods.Json("""{"greeting":"Hi"}""")];
+
+        JsonSerializer
+            .Serialize(settings, Json.IReadOnlyListNullableJsonElement)
+            .ShouldBe("""[null,{"greeting":"Hi"}]""");
+    }
+
+    [Fact]
     public void Members_that_LSP_requires_must_be_present_and_not_null()
     {
         Should.Throw<JsonException>(() => JsonSerializer.Deserialize("""{"kind":1}""", Json.CompletionItem));
