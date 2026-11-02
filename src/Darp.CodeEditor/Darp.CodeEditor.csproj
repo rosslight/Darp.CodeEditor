@@ -12,6 +12,9 @@
     <PackageReference Include="TextMateSharp.Grammars" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Darp.CodeEditor.LanguageServices\Darp.CodeEditor.LanguageServices.csproj" />
+  </ItemGroup>
+  <ItemGroup>
     <InternalsVisibleTo Include="Darp.CodeEditor.Tests" />
   </ItemGroup>
 </Project>

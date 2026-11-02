@@ -5,7 +5,7 @@
     <IsAotCompatible>false</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Darp.CodeEditor\Darp.CodeEditor.csproj" />
+    <ProjectReference Include="..\Darp.CodeEditor.LanguageServices\Darp.CodeEditor.LanguageServices.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Features" />

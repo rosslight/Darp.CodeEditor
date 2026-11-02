@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- The language service contract: plain data, no UI. Shared by the editor, the services and the LSP adapter. -->
+    <RootNamespace>Darp.CodeEditor.LanguageServices</RootNamespace>
+  </PropertyGroup>
+</Project>
