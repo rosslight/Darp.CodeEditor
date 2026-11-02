@@ -65,6 +65,7 @@ internal static class DemoRun
         using var timings = new TimingLog(editor);
         Task<double> visible = Ui.WaitForVisibleAsync(editor, highlighted: false);
         Task<double> highlighted = Ui.WaitForVisibleAsync(editor, highlighted: true);
+        Task<int> uncoloredOnFirstFrame = Ui.LinesWithoutColorsOnFirstFrameAsync(editor);
         await highlighted;
         report.Add(probe.EndPhase());
         probe.BeginPhase("startup: first frame + 500 ms");
@@ -72,6 +73,7 @@ internal static class DemoRun
         report.Add(probe.EndPhase());
         report.Add($"  editor text visible:        {await visible, 7:F0} ms after process start");
         report.Add($"  editor text highlighted:    {await highlighted, 7:F0} ms");
+        report.Add($"  lines without colors on the first frame: {await uncoloredOnFirstFrame}");
         report.Add($"  startup timings: {timings.Summary()}");
 
         report.Add(EditorScenarios.CheckSearch(editor, "reading", "sample"));

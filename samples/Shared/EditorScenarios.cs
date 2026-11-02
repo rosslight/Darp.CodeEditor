@@ -39,11 +39,14 @@ internal static class EditorScenarios
             editor.LanguageId = languageId;
             editor.Text = large;
             await host.ShowAsync(editor);
+            Task<int> uncoloredOnFirstFrame = Ui.LinesWithoutColorsOnFirstFrameAsync(editor);
             double visible = await Ui.WaitForVisibleAsync(editor, highlighted);
             await Task.Delay(500);
             report.Add(probe.EndPhase());
             report.Add(
-                $"  {label}: {editor.Document.LineCount} lines visible{(highlighted ? " and highlighted" : "")} after {visible - start:F0} ms; {timings.Summary()}"
+                $"  {label}: {editor.Document.LineCount} lines visible{(highlighted ? " and highlighted" : "")} after {visible - start:F0} ms"
+                    + (highlighted ? $", {await uncoloredOnFirstFrame} lines without colors on the first frame" : "")
+                    + $"; {timings.Summary()}"
             );
 
             probe.BeginPhase($"{label}: scroll 10k lines");

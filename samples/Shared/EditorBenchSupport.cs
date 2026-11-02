@@ -73,6 +73,27 @@ internal static class Ui
         }
     }
 
+    /// <summary>
+    /// Completes when the editor first shows text, with how many of the shown lines had no colors in that frame. For
+    /// a highlighted language, 0 means colors on the first frame.
+    /// </summary>
+    public static Task<int> LinesWithoutColorsOnFirstFrameAsync(CodeEditor editor)
+    {
+        var completion = new TaskCompletionSource<int>();
+        TextView textView = editor.TextArea.TextView;
+        textView.VisualLinesChanged += Check;
+        Check(null, EventArgs.Empty);
+        return completion.Task;
+
+        void Check(object? sender, EventArgs e)
+        {
+            if (!textView.VisualLinesValid || textView.VisualLines.Count == 0)
+                return;
+            textView.VisualLinesChanged -= Check;
+            completion.TrySetResult(editor.VisibleLinesWithoutHighlighting);
+        }
+    }
+
     /// <summary>Writes where the end of line 1 is on screen, for the input latency probe (see <see cref="E2eTarget"/>).</summary>
     public static void WriteE2eTarget(CodeEditor editor, string path)
     {

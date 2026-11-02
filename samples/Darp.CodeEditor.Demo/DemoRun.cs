@@ -63,6 +63,7 @@ internal static class DemoRun
         // Subscribe to every milestone before the first frame.
         Task<double> visible = Ui.WaitForVisibleAsync(editor, highlighted: false);
         Task<double> highlighted = Ui.WaitForVisibleAsync(editor, highlighted: true);
+        Task<int> uncoloredOnFirstFrame = Ui.LinesWithoutColorsOnFirstFrameAsync(editor);
         Task<double> classified = timings.WhenFirstAsync("classification");
         Task<double> diagnosed = timings.WhenFirstAsync("diagnostics");
 
@@ -79,6 +80,7 @@ internal static class DemoRun
 
         report.Add($"  editor text visible:        {await visible, 7:F0} ms after process start");
         report.Add($"  editor text highlighted:    {await highlighted, 7:F0} ms");
+        report.Add($"  lines without colors on the first frame: {await uncoloredOnFirstFrame}");
         if (service is not null)
         {
             report.Add($"  C# service ready:           {ready, 7:F0} ms");
