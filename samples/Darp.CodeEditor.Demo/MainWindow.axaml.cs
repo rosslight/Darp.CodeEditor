@@ -63,6 +63,7 @@ public sealed partial class MainWindow : Window, IBenchHost
     {
         // TextMateSharp.Grammars has no Luau grammar; use the MIT-licensed one if it is next to the app, else Lua.
         string grammar = Path.Combine(AppContext.BaseDirectory, "Grammars", "Luau.tmLanguage.json");
+        LuauEditor.LanguageConfiguration = LuauLanguage.Configuration;
         if (File.Exists(grammar))
             LuauEditor.SetGrammarFile(grammar);
         else

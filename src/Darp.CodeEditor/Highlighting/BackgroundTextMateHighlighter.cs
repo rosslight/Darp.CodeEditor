@@ -5,6 +5,7 @@ using AvaloniaEdit.Document;
 using AvaloniaEdit.Rendering;
 using TextMateSharp.Grammars;
 using TextMateSharp.Internal.Grammars;
+using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Theming;
 
 namespace Darp.CodeEditor.Highlighting;
@@ -196,6 +197,26 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
                 count++;
         }
         return count;
+    }
+
+    /// <summary>Whether the character at <paramref name="offset"/> is code, comment or string, as last tokenized.</summary>
+    public TokenKind TokenKindAt(int offset)
+    {
+        if (_grammar is null || _document is not { } document || offset < 0 || offset >= document.TextLength)
+            return TokenKind.Code;
+        DocumentLine line = document.GetLineByOffset(offset);
+        if (line.LineNumber - 1 >= _lines.Count || _lines[line.LineNumber - 1].Tokens is not { } tokens)
+            return TokenKind.Code;
+        int column = offset - line.Offset;
+        int i = 0;
+        while (i + 2 < tokens.Length && tokens[i + 2] <= column)
+            i += 2;
+        return EncodedTokenAttributes.GetTokenType(tokens[i + 1]) switch
+        {
+            1 => TokenKind.Comment,
+            2 or 3 => TokenKind.String,
+            _ => TokenKind.Code,
+        };
     }
 
     protected override void ColorizeLine(DocumentLine line)

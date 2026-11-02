@@ -45,6 +45,14 @@ internal static class TextMateCatalog
             )
             .Value;
 
+    /// <summary>The comment tokens and brackets of a bundled language, or null when it has none.</summary>
+    public static async Task<LanguageConfiguration?> GetLanguageConfigurationAsync(string languageId)
+    {
+        RegistryOptions options = await Options.ConfigureAwait(false);
+        Language? language = options.GetAvailableLanguages().Find(l => l.Id == languageId);
+        return LanguageConfiguration.FromTextMate(language?.Configuration);
+    }
+
     /// <summary>A grammar loaded before, with its expressions compiled by earlier use.</summary>
     public static bool TryGetLoadedGrammar(GrammarSource source, LoadedTheme theme, out TextMateGrammar? grammar)
     {

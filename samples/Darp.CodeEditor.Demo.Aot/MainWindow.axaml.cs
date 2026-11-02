@@ -16,6 +16,7 @@ public sealed partial class MainWindow : Window, IBenchHost
         JsonEditor.LanguageService = new JsonLanguageService();
 
         string grammar = Path.Combine(AppContext.BaseDirectory, "Grammars", "Luau.tmLanguage.json");
+        LuauEditor.LanguageConfiguration = LuauLanguage.Configuration;
         if (File.Exists(grammar))
             LuauEditor.SetGrammarFile(grammar);
         else

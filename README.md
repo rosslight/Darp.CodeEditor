@@ -11,6 +11,7 @@ Darp.CodeEditor            NativeAOT-compatible; no Roslyn, no MEF
   Highlighting/            TextMate: visible lines tokenized in the frame (≤ 4 ms), the rest on the thread pool
   Theming/                 VS Code themes (Dark+/Light+ or a file) following the app's light/dark variant
   Popups/                  completion, signature help and hover, drawn on the window's overlay layer
+  Editing/                 auto-indent, bracket matching, auto-closing pairs, toggle comment (LanguageConfiguration)
   LanguageServices/        ILanguageService: async only, snapshot + version + CancellationToken, plain DTOs
   LanguageFeatures         calls the service via Task.Run, debounces, drops or maps forward stale results
   Completion/              one fetch per session, local ordinal filtering, lazy descriptions, sync commit
@@ -61,7 +62,7 @@ Rules the code follows:
 | `samples/Darp.CodeEditor.Demo` | JIT desktop app: C# script with completion, diagnostics, semantic colors, quick info, signature help; Luau and JSON with highlighting. |
 | `samples/Darp.CodeEditor.Demo.Aot` | `PublishAot=true`, references only `Darp.CodeEditor`: Luau, JSON and C# highlighting, search, and a small AOT-safe JSON language service (word completion, parse errors). |
 | `samples/Shared` | Sample documents, measurement scenarios and the Luau grammar shared by both demos. |
-| `tests/Darp.CodeEditor.Tests` | Contract tests for the C# service and the completion matcher. |
+| `tests/Darp.CodeEditor.Tests` | Contract tests for the C# service and the completion matcher; headless tests of the editing helpers. |
 | `tests/Darp.CodeEditor.CSharp.Server.Tests` | Compiler-parity tests against `CSharpScript`, and tests that drive the server process over stdio. |
 | `tests/Darp.CodeEditor.CSharp.TestGlobals` | A globals contract assembly for the tests, including the demo's `ScriptGlobals`. |
 | `tests/Shared` | A small LSP client over stdio, used by the tests and the benchmark. |

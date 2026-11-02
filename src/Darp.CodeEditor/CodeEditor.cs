@@ -7,6 +7,7 @@ using Avalonia.Styling;
 using AvaloniaEdit;
 using AvaloniaEdit.Rendering;
 using AvaloniaEdit.TextMate;
+using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.LanguageServices;
 using Darp.CodeEditor.Theming;
@@ -38,6 +39,8 @@ public class CodeEditor : TextEditor
     private CodeEditorTheme _lightTheme = CodeEditorTheme.LightPlus;
     private CodeEditorTheme? _requestedTheme;
     private Task<LoadedTheme>? _theme;
+    private LanguageConfiguration _languageConfiguration = LanguageConfiguration.Default;
+    private bool _languageConfigurationSet;
 
     public CodeEditor()
     {
@@ -49,6 +52,9 @@ public class CodeEditor : TextEditor
         ThemeVariant variant = Application.Current?.ActualThemeVariant ?? ThemeVariant.Dark;
         ApplyColors(EditorTheme.Fallback(IsDark(variant)));
         _languageFeatures = new LanguageFeatures(this);
+        // After the language features, so completion sees typed characters first and can commit with them.
+        _ = new EditingHelpers(this);
+        TextArea.TextView.BackgroundRenderers.Add(new BracketHighlighter(this));
         ActualThemeVariantChanged += (_, _) => SelectTheme(ActualThemeVariant);
         SelectTheme(variant);
     }
@@ -102,8 +108,24 @@ public class CodeEditor : TextEditor
             if (value == _languageId)
                 return;
             _languageId = value;
-            if (value is not null)
-                SetGrammar(new GrammarSource(value, null));
+            if (value is null)
+                return;
+            SetGrammar(new GrammarSource(value, null));
+            LoadLanguageConfiguration(value);
+        }
+    }
+
+    /// <summary>
+    /// Comment tokens and brackets for the editing helpers: auto-indent, bracket matching, auto-closing pairs and
+    /// toggle comment. Taken from the bundled grammar of <see cref="LanguageId"/> unless set; set it for a grammar file.
+    /// </summary>
+    public LanguageConfiguration LanguageConfiguration
+    {
+        get => _languageConfiguration;
+        set
+        {
+            _languageConfiguration = value;
+            _languageConfigurationSet = true;
         }
     }
 
@@ -187,6 +209,23 @@ public class CodeEditor : TextEditor
                 return false;
         }
         return false;
+    }
+
+    /// <summary>Whether a position is code, comment or string, as far as highlighting knows; code when unknown.</summary>
+    internal TokenKind TokenKindAt(int offset) => _highlighter?.TokenKindAt(offset) ?? TokenKind.Code;
+
+    private async void LoadLanguageConfiguration(string languageId)
+    {
+        try
+        {
+            LanguageConfiguration? configuration = await TextMateCatalog.GetLanguageConfigurationAsync(languageId);
+            if (configuration is not null && languageId == _languageId && !_languageConfigurationSet)
+                _languageConfiguration = configuration;
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceWarning($"Loading the language configuration of {languageId} failed: {exception}");
+        }
     }
 
     /// <summary>Loads the theme for a variant on the thread pool; it applies with the grammar's tokens.</summary>
