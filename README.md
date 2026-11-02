@@ -17,6 +17,18 @@ Darp.CodeEditor            NativeAOT-compatible; no Roslyn, no MEF
 
 Darp.CodeEditor.CSharp     JIT only; Roslyn Workspaces + Features (no EditorFeatures, no VS editor, no VS-MEF)
   CSharpScriptLanguageService   script submissions with a globals type, created and warmed up on the thread pool
+
+Darp.CodeEditor.LanguageServices   the ILanguageService contract on its own (plain data, no UI)
+```
+
+A second editor surface is built for comparison (see [docs/webview-bakeoff.md](docs/webview-bakeoff.md)):
+
+```
+Darp.CodeEditor.Web        NativeAOT-compatible; Avalonia's NativeWebView hosting Monaco or CodeMirror 6
+  WebCodeEditor            serves the pages from the app (app:// on WebKitGTK, a virtual host on WebView2), relays LSP
+  web/                     the editor pages (TypeScript, bundled with esbuild); their LSP clients talk to the host
+
+Darp.CodeEditor.Lsp        NativeAOT-compatible; serves an ILanguageService as an LSP server (in-process for now)
 ```
 
 Rules the code follows:
@@ -39,12 +51,22 @@ Rules the code follows:
 | `src/Darp.CodeEditor.CSharp` | C# script language service on Roslyn (JIT only). |
 | `samples/Darp.CodeEditor.Demo` | JIT desktop app: C# script with completion, diagnostics, semantic colors, quick info, signature help; Luau and JSON with highlighting. |
 | `samples/Darp.CodeEditor.Demo.Aot` | `PublishAot=true`, references only `Darp.CodeEditor`: Luau, JSON and C# highlighting, search, and a small AOT-safe JSON language service (word completion, parse errors). |
-| `samples/Shared` | Sample documents, measurement scenarios and the Luau grammar shared by both demos. |
+| `src/Darp.CodeEditor.LanguageServices` | The language service contract. |
+| `src/Darp.CodeEditor.Lsp` | LSP server adapter over `ILanguageService` (`IsAotCompatible`). |
+| `src/Darp.CodeEditor.Web` | WebView editor control and the Monaco and CodeMirror pages (`IsAotCompatible`). |
+| `samples/Darp.CodeEditor.WebDemo` | JIT WebView demo: the C# script through the LSP adapter, Luau and JSON with highlighting. |
+| `samples/Darp.CodeEditor.WebDemo.Aot` | NativeAOT WebView demo without Roslyn: Luau, C#, and JSON with the small JSON service over LSP. |
+| `samples/Shared` | Sample documents, measurement scenarios and the Luau grammar shared by the demos. |
+| `samples/WebShared` | Window and measurement orchestration of the WebView demos. |
+| `tools/Darp.CodeEditor.Probe` | Measures from outside the app: input-to-screen latency, startup on screen, process-tree memory. |
+| `tools/bakeoff` | Scripts that run the whole comparison on Linux and Windows, and the integration checks. |
 | `tests/Darp.CodeEditor.Tests` | Contract tests for the C# service and the completion matcher. |
 
 ## Run
 
-Requires the .NET 10 SDK.
+Requires the .NET 10 SDK. The WebView projects also need Node 22 with npm: the build runs `npm ci` and `npm run build`
+in `src/Darp.CodeEditor.Web/web` when the page sources change. At run time they need the platform web engine:
+WebKitGTK 4.1 on Linux (`libwebkit2gtk-4.1-0`), the WebView2 runtime on Windows.
 
 ```bash
 # JIT demo
@@ -53,6 +75,10 @@ dotnet run --project samples/Darp.CodeEditor.Demo -c Release
 # NativeAOT demo
 dotnet publish samples/Darp.CodeEditor.Demo.Aot -c Release -r linux-x64
 samples/Darp.CodeEditor.Demo.Aot/bin/Release/net10.0/linux-x64/publish/Darp.CodeEditor.Demo.Aot
+
+# WebView demos (Monaco by default, --editor codemirror for CodeMirror)
+dotnet run --project samples/Darp.CodeEditor.WebDemo -c Release -- --editor codemirror
+dotnet publish samples/Darp.CodeEditor.WebDemo.Aot -c Release -r linux-x64
 
 # Tests
 dotnet test --project tests/Darp.CodeEditor.Tests
@@ -74,6 +100,19 @@ Command line flags of both demos:
 | `--skip-highlighting-bench` | Skips the highlighting scenarios of `--bench`. |
 | `--no-language-service` | JIT demo only: starts without the C# service, to attribute startup stalls. |
 | `--low-latency-gc` | JIT demo only: sets `GCLatencyMode.SustainedLowLatency`. |
+| `--e2e <file>` | Writes where line 1 of a C# document without language features ends on screen, for `Probe latency`, and stays open. |
+
+The WebView demos take `--smoke`, `--bench`, `--out`, `--hold`, `--e2e`, `--no-language-service` and
+`--skip-highlighting-bench` too, and:
+
+| Flag | Effect |
+| --- | --- |
+| `--editor monaco\|codemirror` | Which browser editor to run. |
+| `--light` | Starts with the light theme. |
+| `--close-after <ms>` | Closes the window after that time, while the page may still be loading. |
+| `--devtools` | Allows the web inspector. |
+| `--webview-info` | Prints the web engine's own GPU and rendering report and exits. |
+| `--page-query <a=b>` | Extra query parameters for the editor pages, for experiments. |
 
 ## Third-party content
 
