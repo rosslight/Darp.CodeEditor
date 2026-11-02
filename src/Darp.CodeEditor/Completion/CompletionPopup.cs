@@ -7,6 +7,7 @@ using Avalonia.Media.Immutable;
 using AvaloniaEdit.CodeCompletion;
 using AvaloniaEdit.Editing;
 using Darp.CodeEditor.LanguageServices;
+using Darp.CodeEditor.Lsp;
 
 namespace Darp.CodeEditor.Completion;
 
