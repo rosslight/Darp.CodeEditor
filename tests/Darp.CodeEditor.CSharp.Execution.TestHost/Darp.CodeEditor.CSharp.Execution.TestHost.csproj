@@ -13,10 +13,8 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp.Execution\Darp.CodeEditor.CSharp.Execution.csproj" />
-    <ProjectReference Include="..\Darp.CodeEditor.CSharp.Execution.TestApi\Darp.CodeEditor.CSharp.Execution.TestApi.csproj" />
-  </ItemGroup>
-  <ItemGroup>
-    <CSharpScriptReference Include="Darp.CodeEditor.CSharp.Execution.TestApi;StreamJsonRpc;PolyType" />
+    <!-- Scripts compile against the script API; NativeAOT ships it as a file next to the app. -->
+    <ProjectReference Include="..\Darp.CodeEditor.CSharp.Execution.TestApi\Darp.CodeEditor.CSharp.Execution.TestApi.csproj" CSharpScriptReference="true" />
   </ItemGroup>
   <Import Project="..\..\src\Darp.CodeEditor.CSharp.Execution\build\Darp.CodeEditor.CSharp.Execution.targets" />
 </Project>

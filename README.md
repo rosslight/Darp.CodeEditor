@@ -356,7 +356,7 @@ The runtime is shared by every helper, so it ships once:
 
 ```
 MyApp(.exe)
-MyApp.ScriptApi.dll, StreamJsonRpc.dll, PolyType.dll   files scripts compile against
+MyApp.ScriptApi.dll, StreamJsonRpc.dll, PolyType.dll   what scripts compile against; NativeAOT apps mark it
 helpers/
   dotnet/                       the .NET runtime, laid out as an installed one:
     host/fxr/<version>/         hostfxr
@@ -377,11 +377,15 @@ the build machine beyond NuGet. Import the targets into the app project:
 
 ```xml
 <Import Project="path/to/src/Darp.CodeEditor.CSharp.Execution/build/Darp.CodeEditor.CSharp.Execution.targets" />
-<!-- NativeAOT only: the managed files scripts compile against, shipped next to the app. -->
 <ItemGroup>
-  <CSharpScriptReference Include="MyApp.ScriptApi;StreamJsonRpc;PolyType" />
+  <!-- NativeAOT: publish copies the DLLs of marked references next to the app, with StreamJsonRpc and PolyType. -->
+  <ProjectReference Include="..\MyApp.ScriptApi\MyApp.ScriptApi.csproj" CSharpScriptReference="true" />
+  <PackageReference Include="MyApp.Devices" CSharpScriptReference="true" />
 </ItemGroup>
 ```
+
+Mark every reference whose types scripts use, including the ones those types expose. JIT apps have all their DLLs next
+to them already.
 
 - `dotnet build`: the runner's build output goes to `helpers/csharp-runner`, and it runs on the runtime that runs the
   app, so `dotnet run` works without publishing.
