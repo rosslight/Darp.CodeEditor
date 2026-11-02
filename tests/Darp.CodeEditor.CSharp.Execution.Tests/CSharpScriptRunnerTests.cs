@@ -49,6 +49,19 @@ public sealed class CSharpScriptRunnerTests
     }
 
     [Fact]
+    public async Task Start_fails_when_the_globals_need_a_service_the_app_does_not_provide()
+    {
+        InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(() =>
+            CSharpScriptRunner.StartAsync(
+                new CSharpScriptRunnerOptions { Environment = TestEnvironment.Create() },
+                Cancellation
+            )
+        );
+
+        exception.Message.ShouldContain(typeof(ITestHost).FullName!);
+    }
+
+    [Fact]
     public async Task Compile_errors_are_the_diagnostics_the_editor_shows()
     {
         const string code = """

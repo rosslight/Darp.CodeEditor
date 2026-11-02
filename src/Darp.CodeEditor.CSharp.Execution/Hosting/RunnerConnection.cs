@@ -156,10 +156,20 @@ internal sealed class RunnerConnection : IAsyncDisposable
         string environment = CSharpScriptInitializationOptions.Create(_options.Environment).ToJsonString();
         string[] services = [.. _options.Services.Select(s => s.ServiceType.FullName ?? "")];
         // Starting has its own timeout: request deadlines and the watchdog apply from here on.
-        await _runner
-            .StartAsync(new RunnerStart(environment, services), cancellationToken)
-            .WaitAsync(_options.StartTimeout, cancellationToken)
-            .ConfigureAwait(false);
+        try
+        {
+            await _runner
+                .StartAsync(new RunnerStart(environment, services), cancellationToken)
+                .WaitAsync(_options.StartTimeout, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (ScriptException exception)
+        {
+            throw new InvalidOperationException(
+                $"The runner could not load the script environment: {exception.Message}",
+                exception
+            );
+        }
         if (_options.CallTimeout != Timeout.InfiniteTimeSpan)
         {
             _rpc.OutboundRequestTimeout = _options.CallTimeout;

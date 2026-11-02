@@ -46,7 +46,10 @@ public sealed class CSharpScriptRunner : IAsyncDisposable
 
     /// <summary>Starts a runner and loads the environment into it.</summary>
     /// <exception cref="FileNotFoundException">The runner is not next to the app.</exception>
-    /// <exception cref="RemoteInvocationException">The runner could not load the environment.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The runner could not load the environment, for example because the globals type needs a service the options do
+    /// not provide.
+    /// </exception>
     public static async Task<CSharpScriptRunner> StartAsync(
         CSharpScriptRunnerOptions options,
         CancellationToken cancellationToken = default

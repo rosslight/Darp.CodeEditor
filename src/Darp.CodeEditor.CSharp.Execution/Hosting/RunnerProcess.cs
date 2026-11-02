@@ -49,8 +49,8 @@ internal sealed class RunnerProcess : IDisposable
     /// <summary>The last lines the runner wrote to standard error.</summary>
     public async Task<string> GetStandardErrorAsync()
     {
-        // The pipe closes when the process exits; the rest of its output follows shortly.
-        await _standardErrorDrained.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        // The pipe closes when the process exits, unless a process the script started still holds it.
+        await Task.WhenAny(_standardErrorDrained, Task.Delay(TimeSpan.FromSeconds(1))).ConfigureAwait(false);
         return string.Join('\n', _standardError);
     }
 
@@ -135,7 +135,15 @@ internal sealed class RunnerProcess : IDisposable
             _standardError.Enqueue(line);
             while (_standardError.Count > StandardErrorLines)
                 _standardError.TryDequeue(out _);
-            output?.Invoke(line);
+            try
+            {
+                output?.Invoke(line);
+            }
+            catch (Exception exception)
+            {
+                // A failing callback must not stop the draining, or the runner blocks on a full pipe.
+                Trace.TraceError($"CSharpScriptRunnerOptions.Output failed: {exception}");
+            }
         }
     }
 
