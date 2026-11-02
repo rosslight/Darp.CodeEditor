@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Darp.CodeEditor/Darp.CodeEditor.csproj" />
     <Project Path="src/Darp.CodeEditor.CSharp/Darp.CodeEditor.CSharp.csproj" />
+    <Project Path="src/Darp.CodeEditor.Lsp/Darp.CodeEditor.Lsp.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/Darp.CodeEditor.Demo/Darp.CodeEditor.Demo.csproj" />
@@ -9,5 +10,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Darp.CodeEditor.Tests/Darp.CodeEditor.Tests.csproj" />
+    <Project Path="tests/Darp.CodeEditor.Lsp.Tests/Darp.CodeEditor.Lsp.Tests.csproj" />
+    <Project Path="tests/Darp.CodeEditor.Lsp.AotSmoke/Darp.CodeEditor.Lsp.AotSmoke.csproj" />
   </Folder>
 </Solution>

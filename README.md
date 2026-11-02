@@ -19,6 +19,13 @@ Darp.CodeEditor.CSharp     JIT only; Roslyn Workspaces + Features (no EditorFeat
   CSharpScriptLanguageService   script submissions with a globals type, created and warmed up on the thread pool
 ```
 
+```
+Darp.CodeEditor.Lsp        NativeAOT-compatible; only the shared framework
+  JsonRpcConnection        JSON-RPC 2.0 with Content-Length framing, for both ends of a connection
+  LanguageServer           the server lifecycle: initialize, shutdown, exit
+  Protocol/                source-generated DTOs for the subset of LSP the editor and its servers use
+```
+
 Rules the code follows:
 
 1. The editor works fully without a language service (typing, TextMate colors, search). Setting
@@ -41,6 +48,9 @@ Rules the code follows:
 | `samples/Darp.CodeEditor.Demo.Aot` | `PublishAot=true`, references only `Darp.CodeEditor`: Luau, JSON and C# highlighting, search, and a small AOT-safe JSON language service (word completion, parse errors). |
 | `samples/Shared` | Sample documents, measurement scenarios and the Luau grammar shared by both demos. |
 | `tests/Darp.CodeEditor.Tests` | Contract tests for the C# service and the completion matcher. |
+| `src/Darp.CodeEditor.Lsp` | JSON-RPC and LSP layer for language servers and the editor's LSP client (`IsAotCompatible`). |
+| `tests/Darp.CodeEditor.Lsp.Tests` | Tests of the LSP layer, a toy server and client, and an interop test against luau-lsp. |
+| `tests/Darp.CodeEditor.Lsp.AotSmoke` | NativeAOT build of the toy server and client, and of the luau-lsp check. |
 
 ## Run
 
@@ -56,6 +66,18 @@ samples/Darp.CodeEditor.Demo.Aot/bin/Release/net10.0/linux-x64/publish/Darp.Code
 
 # Tests
 dotnet test --project tests/Darp.CodeEditor.Tests
+```
+
+The LSP layer has its own tests. The luau-lsp interop test is skipped until the script downloaded luau-lsp to
+`.tools/`; the NativeAOT check runs it too.
+
+```bash
+tests/Darp.CodeEditor.Lsp.Tests/fetch-luau-lsp.sh
+dotnet test --project tests/Darp.CodeEditor.Lsp.Tests
+
+# Fails on any trim or AOT warning
+dotnet publish tests/Darp.CodeEditor.Lsp.AotSmoke -c Release -r linux-x64
+tests/Darp.CodeEditor.Lsp.AotSmoke/bin/Release/net10.0/linux-x64/publish/Darp.CodeEditor.Lsp.AotSmoke
 ```
 
 On a Linux machine without a display, run the demos on a virtual X server (for example `xvfb-run` or any X server
@@ -74,6 +96,20 @@ Command line flags of both demos:
 | `--skip-highlighting-bench` | Skips the highlighting scenarios of `--bench`. |
 | `--no-language-service` | JIT demo only: starts without the C# service, to attribute startup stalls. |
 | `--low-latency-gc` | JIT demo only: sets `GCLatencyMode.SustainedLowLatency`. |
+
+## LSP layer
+
+`Darp.CodeEditor.Lsp` dispatches the messages it receives as follows:
+
+1. One loop reads the input. Responses and `$/cancelRequest` take effect as they are read, and every request gets its
+   cancellation token on receipt, so a request can be cancelled while it is queued.
+2. Requests and notifications are dispatched in arrival order. A `DispatchMode.Serial` handler (the default for
+   notifications, such as `textDocument/didChange`) runs to completion before the next message. A
+   `DispatchMode.Concurrent` handler (the default for requests) runs until its first incomplete `await`, so it reads
+   the state that all earlier messages left behind, and then runs alongside later messages.
+3. A request whose token was cancelled by the time its handler returned answers `RequestCancelled`, whatever the
+   handler returned. Handlers throw `JsonRpcException`, for example with `ContentModified`, to answer other errors.
+4. Writes are serialized; null results are written as `"result": null`; document URIs are kept as sent.
 
 ## Third-party content
 
