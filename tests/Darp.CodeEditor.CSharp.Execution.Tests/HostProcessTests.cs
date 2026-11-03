@@ -78,6 +78,13 @@ public sealed class HostProcessTests
             runLog.ShouldContain("result 42 batch 3,4");
             // The globals use a private dependency two levels deep; publish must ship it and the runner must find it.
             runLog.ShouldContain("globals from MetadataLoadContext");
+            // Satellite assemblies ship in their culture directories, like in a build.
+            File.Exists(Path.Combine(output, "en", "Darp.CodeEditor.CSharp.Execution.TestDependency.resources.dll"))
+                .ShouldBeTrue();
+            // What scripts compile against ships; what the runner already has, the same assembly, does not.
+            File.Exists(Path.Combine(output, "StreamJsonRpc.dll")).ShouldBeTrue();
+            File.Exists(Path.Combine(output, "PolyType.dll")).ShouldBeTrue();
+            File.Exists(Path.Combine(output, "Nerdbank.MessagePack.dll")).ShouldBeFalse();
         }
         finally
         {
