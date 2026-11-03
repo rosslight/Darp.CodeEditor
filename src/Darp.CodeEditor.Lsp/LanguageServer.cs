@@ -5,8 +5,9 @@ namespace Darp.CodeEditor.Lsp;
 
 /// <summary>The server end of LSP: a <see cref="JsonRpcConnection"/> with the lifecycle of the protocol.</summary>
 /// <remarks>
-/// Until an <c>initialize</c> request succeeds, requests answer with <see cref="ErrorCodes.ServerNotInitialized"/> and
-/// notifications are dropped. A second <c>initialize</c> answers with <see cref="ErrorCodes.InvalidRequest"/>, as does
+/// Until an <c>initialize</c> request is answered with its result, requests answer with
+/// <see cref="ErrorCodes.ServerNotInitialized"/> and notifications are dropped; a failed or cancelled initialize does
+/// not count. A second <c>initialize</c> answers with <see cref="ErrorCodes.InvalidRequest"/>, as does
 /// every request after <c>shutdown</c>. The <c>exit</c> notification ends the connection. Lifecycle messages run
 /// <see cref="DispatchMode.Serial"/>, so the messages after them see their outcome.
 /// </remarks>
@@ -20,19 +21,32 @@ public sealed class LanguageServer : IAsyncDisposable
     /// <param name="initialize">Answers <c>initialize</c>; an exception answers it with an error.</param>
     /// <param name="shutdown">Runs on <c>shutdown</c>, before it is answered.</param>
     /// <param name="log">Receives protocol errors and handler failures.</param>
+    /// <param name="limits">How much the client may send; <see cref="JsonRpcLimits"/>' defaults when null.</param>
     public LanguageServer(
         Stream input,
         Stream output,
         Func<InitializeParams, CancellationToken, Task<InitializeResult>> initialize,
         Func<Task>? shutdown = null,
-        Action<string>? log = null
+        Action<string>? log = null,
+        JsonRpcLimits? limits = null
     )
     {
         _initialize = initialize;
         _shutdown = shutdown;
-        Connection = new JsonRpcConnection(input, output, log) { Filter = Admit };
-        Connection.OnRequest(LspMethods.Initialize, InitializeAsync, DispatchMode.Serial);
-        Connection.OnRequest(LspMethods.Shutdown, ShutdownAsync, DispatchMode.Serial);
+        Connection = new JsonRpcConnection(input, output, log, limits) { Filter = Admit };
+        // The state changes only when the response is the result: a cancelled initialize does not count.
+        Connection.OnRequest(
+            LspMethods.Initialize,
+            InitializeAsync,
+            DispatchMode.Serial,
+            answered: () => _state = State.Initialized
+        );
+        Connection.OnRequest(
+            LspMethods.Shutdown,
+            ShutdownAsync,
+            DispatchMode.Serial,
+            answered: () => _state = State.ShutDown
+        );
         Connection.OnNotification(LspMethods.Exit, ExitAsync, DispatchMode.Serial);
     }
 
@@ -80,14 +94,11 @@ public sealed class LanguageServer : IAsyncDisposable
         CancellationToken cancellationToken
     )
     {
-        InitializeResult result = await _initialize(parameters, cancellationToken).ConfigureAwait(false);
-        _state = State.Initialized;
-        return result;
+        return await _initialize(parameters, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<JsonElement?> ShutdownAsync(JsonElement parameters, CancellationToken cancellationToken)
     {
-        _state = State.ShutDown;
         if (_shutdown is not null)
             await _shutdown().ConfigureAwait(false);
         return null;

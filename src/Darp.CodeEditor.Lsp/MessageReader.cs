@@ -7,38 +7,53 @@ namespace Darp.CodeEditor.Lsp;
 internal sealed class MessageReader
 {
     private readonly Stream _input;
+    private readonly JsonRpcLimits _limits;
     private readonly Action<string> _log;
     private byte[] _buffer = new byte[64 * 1024];
     private int _start;
     private int _end;
 
-    public MessageReader(Stream input, Action<string> log)
+    public MessageReader(Stream input, JsonRpcLimits limits, Action<string> log)
     {
         _input = input;
+        _limits = limits;
         _log = log;
     }
 
     private static ReadOnlySpan<byte> HeaderEnd => "\r\n\r\n"u8;
+
+    private static ReadOnlySpan<byte> ContentLength => "Content-Length:"u8;
+
+    private ReadOnlySpan<byte> Unread => _buffer.AsSpan(_start, _end - _start);
 
     /// <summary>Returns the next message body, valid until the next call, or null when the input ended.</summary>
     /// <remarks>
     /// A read that the stream does not cancel, such as from a console stream, is abandoned when
     /// <paramref name="cancellationToken"/> fires; this reader must not be used afterwards.
     /// </remarks>
+    /// <exception cref="InvalidDataException">A message is longer than <see cref="JsonRpcLimits.MaxMessageLength"/>.</exception>
     public async ValueTask<ReadOnlyMemory<byte>?> ReadAsync(CancellationToken cancellationToken)
     {
         while (true)
         {
             int headerLength;
-            while ((headerLength = _buffer.AsSpan(_start, _end - _start).IndexOf(HeaderEnd)) < 0)
+            while ((headerLength = Unread.IndexOf(HeaderEnd)) < 0)
             {
+                if (_end - _start > _limits.MaxHeaderLength)
+                    SkipGarbage();
                 if (!await FillAsync(cancellationToken).ConfigureAwait(false))
                     return null;
             }
-            if (ParseContentLength(_buffer.AsSpan(_start, headerLength)) is not int length)
+            if (ParseContentLength(Unread[..headerLength]) is not int length)
             {
-                _start += Resynchronize(_buffer.AsSpan(_start, headerLength));
+                _start += Resynchronize(Unread[..headerLength]);
                 continue;
+            }
+            if (length > _limits.MaxMessageLength)
+            {
+                throw new InvalidDataException(
+                    $"A message of {length} bytes is longer than the limit of {_limits.MaxMessageLength} bytes."
+                );
             }
             _start += headerLength + HeaderEnd.Length;
             while (_end - _start < length)
@@ -85,8 +100,18 @@ internal sealed class MessageReader
     private int Resynchronize(ReadOnlySpan<byte> header)
     {
         _log($"Skipped a malformed message header: {Encoding.ASCII.GetString(header[..Math.Min(header.Length, 200)])}");
-        int next = header.Length > 0 ? header[1..].IndexOf("Content-Length:"u8) : -1;
+        int next = header.Length > 0 ? header[1..].IndexOf(ContentLength) : -1;
         return next >= 0 ? next + 1 : header.Length + HeaderEnd.Length;
+    }
+
+    /// <summary>Drops input that is too long for a header, up to its last <c>Content-Length</c> if it has one.</summary>
+    private void SkipGarbage()
+    {
+        int next = Unread.LastIndexOf(ContentLength);
+        // Without a header start, keeps the bytes that may begin the end of a header.
+        int skipped = next > 0 ? next : _end - _start - (HeaderEnd.Length - 1);
+        _log($"Skipped {skipped} bytes of input without a message header.");
+        _start += skipped;
     }
 
     /// <returns>False when the input ended.</returns>

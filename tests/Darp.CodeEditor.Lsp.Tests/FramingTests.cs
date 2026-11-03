@@ -140,6 +140,73 @@ public sealed class FramingTests : IAsyncLifetime
             _log.ShouldContain(m => m.StartsWith("Skipped a malformed message header", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task A_body_that_is_not_utf8_answers_parse_error()
+    {
+        byte[] frame = Wire.Frame("""{"jsonrpc":"2.0","id":1,"method":"X"}""");
+        frame[Array.IndexOf(frame, (byte)'X')] = 0xff;
+        await _wire.SendRawAsync(frame);
+        await _wire.RequestAsync(2, "echo", "[]");
+
+        JsonObject error = await _wire.ReceiveAsync();
+        JsonObject next = await _wire.ReceiveAsync();
+
+        error.ErrorCode().ShouldBe(ErrorCodes.ParseError);
+        error["id"].ShouldBeNull();
+        ((int?)next["id"]).ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Input_without_a_header_end_beyond_the_limit_is_skipped_and_reading_continues()
+    {
+        var skipped = new TaskCompletionSource();
+        var wire = new Wire();
+        await using var connection = new JsonRpcConnection(
+            wire.Input,
+            wire.Output,
+            m =>
+            {
+                if (m.StartsWith("Skipped", StringComparison.Ordinal))
+                    skipped.TrySetResult();
+            },
+            new JsonRpcLimits(MaxHeaderLength: 100)
+        );
+        connection.OnRequest(TestMethods.Request("echo"), (p, _) => Task.FromResult(p));
+        connection.Start();
+
+        await wire.SendRawAsync(new string('x', 1000));
+        await skipped.Task.WaitAsync(Wire.Timeout);
+        await wire.RequestAsync(1, "echo", "[]");
+
+        ((int?)(await wire.ReceiveAsync())["id"]).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_message_longer_than_the_limit_ends_the_connection()
+    {
+        var wire = new Wire();
+        await using var connection = new JsonRpcConnection(
+            wire.Input,
+            wire.Output,
+            limits: new JsonRpcLimits(MaxMessageLength: 1000)
+        );
+        connection.Start();
+
+        await wire.SendRawAsync("Content-Length: 1001\r\n\r\n{");
+
+        await connection.Completion.WaitAsync(Wire.Timeout);
+    }
+
+    [Fact]
+    public async Task The_end_of_the_input_inside_a_message_ends_the_connection()
+    {
+        await _wire.SendRawAsync("Content-Length: 100\r\n\r\n{");
+
+        _wire.CloseInput();
+
+        await _connection.Completion.WaitAsync(Wire.Timeout);
+    }
+
     [Theory]
     [InlineData("[1, 2]")]
     [InlineData("""{"jsonrpc":"2.0"}""")]

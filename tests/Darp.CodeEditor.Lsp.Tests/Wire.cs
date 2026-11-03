@@ -133,3 +133,61 @@ internal static class TestMethods
     public static JsonElement Json(string json) =>
         JsonSerializer.Deserialize(json, Protocol.LspJsonContext.Default.JsonElement);
 }
+
+/// <summary>An output that stops at one write until resumed, like a peer that stops reading.</summary>
+internal sealed class GatedStream : Stream
+{
+    private readonly Stream _inner;
+    private readonly TaskCompletionSource _resume = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _writes;
+    private int _pauseAt = -1;
+
+    public GatedStream(Stream inner) => _inner = inner;
+
+    /// <summary>Completes when the paused write is waiting.</summary>
+    public TaskCompletionSource Paused { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public override bool CanRead => false;
+
+    public override bool CanSeek => false;
+
+    public override bool CanWrite => true;
+
+    public override long Length => throw new NotSupportedException();
+
+    public override long Position
+    {
+        get => throw new NotSupportedException();
+        set => throw new NotSupportedException();
+    }
+
+    /// <summary>Pauses the write with this index, counted from 0. A frame is two writes: the header, then the body.</summary>
+    public void PauseAt(int write) => _pauseAt = write;
+
+    public void Resume() => _resume.TrySetResult();
+
+    public override async ValueTask WriteAsync(
+        ReadOnlyMemory<byte> buffer,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (_writes++ == _pauseAt)
+        {
+            Paused.TrySetResult();
+            await _resume.Task.WaitAsync(cancellationToken);
+        }
+        await _inner.WriteAsync(buffer, cancellationToken);
+    }
+
+    public override Task FlushAsync(CancellationToken cancellationToken) => _inner.FlushAsync(cancellationToken);
+
+    public override void Flush() => _inner.Flush();
+
+    public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+    public override void SetLength(long value) => throw new NotSupportedException();
+
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+}

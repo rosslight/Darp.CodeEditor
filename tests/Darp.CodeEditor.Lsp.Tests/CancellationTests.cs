@@ -103,6 +103,24 @@ public sealed class CancellationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_cancel_with_a_string_id_or_an_unknown_id_cancels_nothing()
+    {
+        await _wire.RequestAsync(1, "ignore");
+        CancellationToken token = await _started.Task.WaitAsync(Wire.Timeout);
+        await _wire.NotifyAsync("$/cancelRequest", """{"id":"1"}""");
+        await _wire.CancelAsync(999);
+        // The read loop handles messages in order, so the cancels took effect once this response was read.
+        Task<JsonElement> barrier = _connection.SendRequestAsync(TestMethods.Request("barrier"), default, Wire.Timeout);
+        JsonObject request = await _wire.ReceiveAsync();
+        await _wire.SendAsync($$"""{"jsonrpc":"2.0","id":{{request["id"]}},"result":null}""");
+        await barrier;
+
+        token.IsCancellationRequested.ShouldBeFalse();
+        _release.SetResult();
+        ((string?)(await _wire.ReceiveResponseAsync(1))["result"]).ShouldBe("full result");
+    }
+
+    [Fact]
     public async Task A_cancel_after_the_response_changes_nothing()
     {
         await _wire.RequestAsync(1, "work");

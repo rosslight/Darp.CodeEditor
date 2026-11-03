@@ -97,6 +97,39 @@ public sealed class LifecycleTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_cancelled_initialize_does_not_count_even_when_the_initializer_returned()
+    {
+        var wire = new Wire();
+        var started = new TaskCompletionSource<CancellationToken>();
+        var release = new TaskCompletionSource();
+        await using var server = new LanguageServer(
+            wire.Input,
+            wire.Output,
+            async (_, token) =>
+            {
+                // Ignores its token, so it returns a result after the cancel.
+                started.SetResult(token);
+                await release.Task;
+                return new InitializeResult(new ServerCapabilities());
+            }
+        );
+        Task<int> run = server.RunAsync();
+        await wire.RequestAsync(1, "initialize", Initialize);
+        CancellationToken token = await started.Task.WaitAsync(Wire.Timeout);
+        var cancelled = new TaskCompletionSource();
+        using CancellationTokenRegistration registration = token.Register(cancelled.SetResult);
+        await wire.CancelAsync(1);
+        await cancelled.Task.WaitAsync(Wire.Timeout);
+        // Queued behind initialize, which runs serially, so it sees the outcome.
+        await wire.RequestAsync(2, "unknown/method");
+        release.SetResult();
+
+        (await wire.ReceiveResponseAsync(1)).ErrorCode().ShouldBe(ErrorCodes.RequestCancelled);
+        (await wire.ReceiveResponseAsync(2)).ErrorCode().ShouldBe(ErrorCodes.ServerNotInitialized);
+        run.IsCompleted.ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task A_second_initialize_answers_invalid_request()
     {
         await _wire.RequestAsync(1, "initialize", Initialize);
