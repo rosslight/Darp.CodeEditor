@@ -103,6 +103,19 @@ public sealed class LuauLspFetchTests : IDisposable
             File.GetUnixFileMode(unpacked).HasFlag(UnixFileMode.UserExecute).ShouldBeTrue(unpacked);
     }
 
+    [Theory]
+    [InlineData("freebsd-x64")]
+    [InlineData("linux-musl-x64")]
+    [InlineData("ubuntu.24.04-x64")]
+    [InlineData("win-x86")]
+    public async Task A_runtime_identifier_without_a_luau_lsp_build_fails_the_build(string runtimeIdentifier)
+    {
+        (int exitCode, string output) = await MsBuildInAsync(_directory.FullName, runtimeIdentifier);
+
+        exitCode.ShouldNotBe(0, output);
+        output.ShouldContain($"has no build for the runtime identifier '{runtimeIdentifier}'");
+    }
+
     public void Dispose() => _directory.Delete(recursive: true);
 
     private static void WriteProject(string directory) =>

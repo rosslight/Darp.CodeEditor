@@ -652,7 +652,7 @@ asks once per version and cuts out the visible range.
 ### luau-lsp binaries
 
 `Darp.CodeEditor.Luau.targets` puts luau-lsp 1.70.1 next to the app on build and publish, for the app's runtime
-identifier (or the SDK's when the build has none):
+identifier (or the SDK's portable one when the build has none):
 
 | Runtime identifier | Release asset |
 | --- | --- |
@@ -662,10 +662,11 @@ identifier (or the SDK's when the build has none):
 | `linux-arm64` | `luau-lsp-linux-arm64.zip` |
 | `osx-x64`, `osx-arm64` | `luau-lsp-macos.zip`, one universal binary |
 
-Linux builds need glibc; musl and other identifiers fail the build with a message. The archive is downloaded from the
-GitHub release once into `.tools/luau-lsp/` and checked on every build against its SHA-256, which the targets pin per
-asset; a download that does not match is deleted and fails the build. Builds unpack it into `obj/` and copy the
-executable to `helpers/luau-lsp/`, with the base configurations; the grammar goes to `Grammars/`.
+Linux builds need glibc. Other identifiers, such as `linux-musl-x64` or `freebsd-x64`, fail the build with a message.
+The archive is downloaded from the GitHub release once into `.tools/luau-lsp/` and checked on every build against its
+SHA-256, which the targets pin per asset; a download that does not match is deleted and fails the build. Builds unpack
+it into `obj/` and copy the executable to `helpers/luau-lsp/`, with the base configurations; the grammar goes to
+`Grammars/`.
 
 | Property | Effect |
 | --- | --- |

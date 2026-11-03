@@ -16,7 +16,8 @@
       LuauLspCacheDirectory   where downloads are kept; default .tools/luau-lsp/ in this repository
       LuauLspDownloadUrl      a mirror of the release's zip
 
-    Windows arm64 gets the x64 build, which runs under emulation: luau-lsp has no arm64 build for Windows.
+    Windows arm64 gets the x64 build, which runs under emulation: luau-lsp has no arm64 build for Windows. Runtime
+    identifiers other than win-x64, win-arm64, linux-x64, linux-arm64, osx-x64 and osx-arm64 fail the build.
 
     TODO: the NuGet package is to carry luau-lsp per runtime identifier instead of downloading it at build time, laid
     out like the other helpers. LuauLspExecutable here and LuauLanguageServerOptions.ServerPath at run time are the
@@ -28,7 +29,9 @@
       >$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '..', '..', '.tools', 'luau-lsp'))</LuauLspCacheDirectory>
     <LuauLspCacheDirectory>$([MSBuild]::EnsureTrailingSlash('$(LuauLspCacheDirectory)'))</LuauLspCacheDirectory>
     <_LuauLspVersion>1.70.1</_LuauLspVersion>
+    <!-- Without one, the SDK's: its portable one, since source-built SDKs report others such as ubuntu.24.04-x64. -->
     <_LuauLspRid>$(RuntimeIdentifier)</_LuauLspRid>
+    <_LuauLspRid Condition="'$(_LuauLspRid)' == ''">$(NETCoreSdkPortableRuntimeIdentifier)</_LuauLspRid>
     <_LuauLspRid Condition="'$(_LuauLspRid)' == ''">$(NETCoreSdkRuntimeIdentifier)</_LuauLspRid>
   </PropertyGroup>
 
@@ -42,14 +45,14 @@
     <_LuauLspAsset>macos</_LuauLspAsset>
     <_LuauLspSha256>7d3936e8dec6dc77547abd061d2e950da392562a5f94858b880f23dba50d84cd</_LuauLspSha256>
   </PropertyGroup>
-  <!-- glibc Linux; also SDK identifiers of distributions, such as ubuntu.24.04-x64. musl has no build. -->
-  <PropertyGroup Condition="'$(_LuauLspAsset)' == '' and !$(_LuauLspRid.StartsWith('win')) and !$(_LuauLspRid.StartsWith('osx')) and !$(_LuauLspRid.Contains('musl'))">
-    <_LuauLspAsset Condition="$(_LuauLspRid.EndsWith('-x64'))">linux-x86_64</_LuauLspAsset>
-    <_LuauLspSha256 Condition="$(_LuauLspRid.EndsWith('-x64'))"
-      >1a2ea1ae4f98f8946cefd970a4b54853e11ab4775e6932faa7f60cf920346567</_LuauLspSha256>
-    <_LuauLspAsset Condition="$(_LuauLspRid.EndsWith('-arm64'))">linux-arm64</_LuauLspAsset>
-    <_LuauLspSha256 Condition="$(_LuauLspRid.EndsWith('-arm64'))"
-      >6062345b95124ca937b8c324b74bc3fddb1d6919ba133c58f8b17945ce1acbc2</_LuauLspSha256>
+  <!-- glibc Linux. musl, other Unix systems and other identifiers have no build. -->
+  <PropertyGroup Condition="'$(_LuauLspRid)' == 'linux-x64'">
+    <_LuauLspAsset>linux-x86_64</_LuauLspAsset>
+    <_LuauLspSha256>1a2ea1ae4f98f8946cefd970a4b54853e11ab4775e6932faa7f60cf920346567</_LuauLspSha256>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(_LuauLspRid)' == 'linux-arm64'">
+    <_LuauLspAsset>linux-arm64</_LuauLspAsset>
+    <_LuauLspSha256>6062345b95124ca937b8c324b74bc3fddb1d6919ba133c58f8b17945ce1acbc2</_LuauLspSha256>
   </PropertyGroup>
   <PropertyGroup>
     <_LuauLspFileName>luau-lsp</_LuauLspFileName>
