@@ -1,9 +1,5 @@
-using Avalonia.Controls;
-using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
-using Avalonia.Threading;
-using AvaloniaEdit.Editing;
 using Shouldly;
 
 namespace Darp.CodeEditor.Tests;
@@ -16,12 +12,15 @@ public sealed class EditingHelpersTests
 {
     private static readonly LanguageConfiguration s_cLike = LanguageConfiguration.Default with { LineComment = "//" };
 
+    /// <summary>What Enter inserts in a document without line breaks yet: the platform's.</summary>
+    private static readonly string s_newLine = Environment.NewLine;
+
     [AvaloniaFact]
     public void Enter_keeps_the_indentation_of_the_line()
     {
         using var editor = new EditorUnderTest("    a|b");
         editor.Press(Key.Enter);
-        editor.Text.ShouldBe("    a\n    |b");
+        editor.Text.ShouldBe($"    a{s_newLine}    |b");
     }
 
     [AvaloniaFact]
@@ -29,7 +28,7 @@ public sealed class EditingHelpersTests
     {
         using var editor = new EditorUnderTest("  if (x) {|");
         editor.Press(Key.Enter);
-        editor.Text.ShouldBe("  if (x) {\n      |");
+        editor.Text.ShouldBe($"  if (x) {{{s_newLine}      |");
     }
 
     [AvaloniaFact]
@@ -37,7 +36,17 @@ public sealed class EditingHelpersTests
     {
         using var editor = new EditorUnderTest("  call({|})");
         editor.Press(Key.Enter);
-        editor.Text.ShouldBe("  call({\n      |\n  })");
+        editor.Text.ShouldBe($"  call({{{s_newLine}      |{s_newLine}  }})");
+    }
+
+    [AvaloniaTheory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public void Enter_keeps_the_line_breaks_of_the_document(string newLine)
+    {
+        using var editor = new EditorUnderTest($"a{newLine}  {{|}}");
+        editor.Press(Key.Enter);
+        editor.Text.ShouldBe($"a{newLine}  {{{newLine}      |{newLine}  }}");
     }
 
     [AvaloniaFact]
@@ -191,75 +200,5 @@ public sealed class EditingHelpersTests
         editor.Press(Key.Tab, KeyModifiers.Shift);
         editor.Press(Key.Tab, KeyModifiers.Shift);
         editor.Text.ShouldBe("«a\nb»\nc");
-    }
-
-    /// <summary>A shown, focused editor with text, caret and selection from marked text.</summary>
-    private sealed class EditorUnderTest : IDisposable
-    {
-        private readonly Window _window;
-
-        public EditorUnderTest(string marked, LanguageConfiguration? configuration = null)
-        {
-            Editor = new CodeEditor();
-            if (configuration is not null)
-                Editor.LanguageConfiguration = configuration;
-            _window = new Window
-            {
-                Width = 600,
-                Height = 400,
-                Content = Editor,
-            };
-            _window.Show();
-            Editor.TextArea.Focus();
-            int selectionStart = marked.IndexOf('«');
-            string text = marked.Replace("«", "").Replace("»", "").Replace("|", "");
-            Editor.Text = text;
-            if (selectionStart >= 0)
-            {
-                int selectionEnd = marked.IndexOf('»') - 1;
-                Editor.TextArea.Selection = Selection.Create(Editor.TextArea, selectionStart, selectionEnd);
-                Editor.CaretOffset = selectionEnd;
-            }
-            else
-            {
-                Editor.CaretOffset = marked.IndexOf('|');
-            }
-            Dispatcher.UIThread.RunJobs();
-        }
-
-        public CodeEditor Editor { get; }
-
-        /// <summary>The text with the caret and selection marked.</summary>
-        public string Text
-        {
-            get
-            {
-                string text = Editor.Text;
-                if (Editor.TextArea.Selection.IsEmpty)
-                    return text.Insert(Editor.CaretOffset, "|");
-                int start = Editor.SelectionStart;
-                int end = start + Editor.SelectionLength;
-                return text.Insert(end, "»").Insert(start, "«");
-            }
-        }
-
-        public string Plain => Editor.Text;
-
-        public void Type(string text)
-        {
-            foreach (char c in text)
-                _window.KeyTextInput(c.ToString());
-            Dispatcher.UIThread.RunJobs();
-        }
-
-        public void Press(Key key, KeyModifiers modifiers = KeyModifiers.None, string? symbol = null)
-        {
-            var raw = (RawInputModifiers)modifiers;
-            _window.KeyPress(key, raw, PhysicalKey.None, symbol);
-            _window.KeyRelease(key, raw, PhysicalKey.None, symbol);
-            Dispatcher.UIThread.RunJobs();
-        }
-
-        public void Dispose() => _window.Close();
     }
 }
