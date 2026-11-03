@@ -70,7 +70,10 @@ internal sealed class EditorUnderTest : IDisposable
         {
             if (Editor.LanguageConfiguration.LineComment == lineComment && Editor.VisibleLinesWithoutHighlighting == 0)
             {
-                Editor.Highlighter.ShouldNotBeNull().ContextTimeLimit = TimeSpan.FromSeconds(30);
+                Highlighting.BackgroundTextMateHighlighter highlighter = Editor.Highlighter.ShouldNotBeNull();
+                highlighter.ContextTimeLimit = TimeSpan.FromSeconds(30);
+                // A headless input can run another layout after this wait and mark the shared grammar too slow.
+                highlighter.AllowSlowContext = true;
                 return;
             }
             await Task.Delay(10);

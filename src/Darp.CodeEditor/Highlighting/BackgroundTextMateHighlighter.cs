@@ -95,6 +95,9 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
     /// <summary>How long finding the context of a typed character may take; it is one line, usually well under 1 ms.</summary>
     public TimeSpan ContextTimeLimit { get; set; } = TimeSpan.FromMilliseconds(2);
 
+    /// <summary>Whether context lookup may use a grammar that exceeded the layout budget.</summary>
+    public bool AllowSlowContext { get; set; }
+
     /// <summary>
     /// Raised on the UI thread when tokens start using a theme's colors, so the editor shows the theme's other colors
     /// in the same frame.
@@ -253,7 +256,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
             return TokenKind.Unknown;
         TimeSpan limit = ContextTimeLimit;
         if (
-            grammar.TooSlowForUiThread
+            (grammar.TooSlowForUiThread && !AllowSlowContext)
             || column > MaxSyncLineLength
             || (index > 0 && _lines[index - 1].EndState is null)
             || !grammar.TryEnterOnUiThread(limit)
