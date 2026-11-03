@@ -12,9 +12,9 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Darp.CodeEditor.CSharp.Scripting\Darp.CodeEditor.CSharp.Scripting.csproj" />
+    <ProjectReference Include="..\Darp.CodeEditor.Lsp\Darp.CodeEditor.Lsp.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="EmmyLua.LanguageServer.Framework" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Features" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />
     <PackageReference Include="System.Reflection.MetadataLoadContext" />

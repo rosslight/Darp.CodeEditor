@@ -30,7 +30,7 @@ Darp.CodeEditor.CSharp.Scripting  JIT only; Roslyn Scripting
                                   ScriptOptions for hosts, the same options for the server
 
 Darp.CodeEditor.CSharp.Server     JIT only, framework-dependent .NET 10 console app: LSP over stdio
-  EmmyLua.LanguageServer.Framework  protocol layer
+  Darp.CodeEditor.Lsp             protocol layer and lifecycle
   ScriptWorkspace                 one script submission per document, globals type loaded as metadata only
 ```
 
@@ -40,6 +40,7 @@ Darp.CodeEditor.Lsp        NativeAOT-compatible; only the shared framework
   LanguageServer           the server lifecycle: initialize, shutdown, exit
   Protocol/                source-generated DTOs for the subset of LSP the editor and its servers use
 ```
+
 The C# script language server is the path forward: every language goes through an out-of-process LSP server, for JIT
 and NativeAOT hosts alike. `Darp.CodeEditor.CSharp` stays as the in-process baseline until the editor's LSP client
 exists.
@@ -194,7 +195,7 @@ dotnet artifacts/csharp-server/Darp.CodeEditor.CSharp.Server.dll
 | `--completion-limit <items>` | The most items a filtered list keeps, the best matches first. Default 1000. |
 
 Other arguments, such as `--stdio`, are ignored. The server exits when its input ends, after `exit`, or when the
-process named by `processId` in `initialize` ends.
+process named by `processId` in the answered `initialize` ends.
 
 ### Script environment
 
@@ -252,18 +253,20 @@ editor and in the host. `#:package` comes later.
 
 | Feature | Notes |
 | --- | --- |
-| `initialize`, `initialized`, `shutdown`, `exit` | Requests before `initialize` fail with `ServerNotInitialized`, requests after `shutdown` with `InvalidRequest`. Exit code 0 after `shutdown`, else 1. `initialize` answers right away; the environment loads in the background and requests wait for it. |
+| `initialize`, `initialized`, `shutdown`, `exit` | Requests before `initialize` fail with `ServerNotInitialized`, requests after `shutdown` with `InvalidRequest`. A failed or cancelled `initialize`, such as one with invalid options, leaves the server uninitialized and starts nothing, so the client can try again. Exit code 0 after `shutdown`, else 1. `initialize` answers right away; the environment starts loading on `initialized` (or the first `didOpen`, for clients that skip it), and requests wait for it. |
 | `didOpen`, `didChange` (incremental), `didClose` | Versions are kept per document; a change for the current or an older version is ignored. Each script is its own submission. |
-| `$/cancelRequest` | Not effective yet: the protocol framework reads every cancel id as 0. It works once the server moves to `Darp.CodeEditor.Lsp`. |
-| `completion`, `completionItem/resolve` | Edits from Roslyn's `CompletionService.GetChangeAsync`, per-item commit characters from Roslyn's rules, `itemDefaults` when the client supports them. Lists of more than 1,000 items, such as a word list after its first letter, keep the 1,000 items that match the typed text best (by the editor's rules: prefix, word parts, substring) and are marked `isIncomplete`, so the client asks again for each further letter. Types from namespaces that are not imported insert their name; resolve adds the `using` as `additionalTextEdits` (clients that cannot resolve those lazily do not get these items). Snippets such as `for` expand on resolve, for clients that list `textEdit` in `resolveSupport`, and are left out for others. `data` is opaque. |
+| `$/cancelRequest` | Answered with `RequestCancelled`; a request cancelled while it is queued does not run. |
+| `completion`, `completionItem/resolve` | Edits from Roslyn's `CompletionService.GetChangeAsync`, per-item commit characters from Roslyn's rules, `itemDefaults` when the client supports them. Lists of more than 1,000 items, such as a word list after its first letter, keep the 1,000 items that match the text before the caret best, scored by the editor's own `CompletionMatcher` and are marked `isIncomplete`, so the client asks again for each further letter. Types from namespaces that are not imported insert their name; resolve adds the `using` as `additionalTextEdits` (clients that cannot resolve those lazily do not get these items). Snippets such as `for` expand on resolve, for clients that list `textEdit` in `resolveSupport`, and are left out for others. `data` is opaque. |
 | `hover` | Markdown: the signature as C#, then the documentation. |
 | `signatureHelp` | Every accessible overload; the best one for the typed arguments, or the one the call binds to; the active parameter, also for named arguments and `params`; parameter documentation; label offsets. |
 | `publishDiagnostics` | Compiler diagnostics only, 200 ms after the last change, tagged with the document version. |
 | `semanticTokens/range` | Roslyn's classifier. Token types use LSP's names where one exists (`namespace`, `class`, `method`, `property`, `variable`, `keyword`, ...) and C# names otherwise (`delegate`, `extensionMethod`, `field`, `constant`, `label`); modifier `static`. |
 
-A new document version cancels hover, signature help and semantic tokens for the old one (`RequestCancelled`) and
-drops pending diagnostics. Completion requests are not cancelled by new versions: the client can keep filtering the
-list while the user types the same word. Closing or reopening the document cancels them.
+A new document version drops pending diagnostics but ends no request: each request answers for the text it was sent
+for. LSP 3.17 asks servers not to answer `ContentModified` for changes in messages they have yet to process, since the
+result may still be of use; the client cancels what it no longer needs, and a completion list stays useful while the
+user types the same word. Closing or reopening the document answers its pending requests with `null`, as for any
+document the server does not know.
 
 ### Benchmark
 
@@ -291,33 +294,41 @@ Both go through the same typing schedule. Each run measures:
 It writes `report.md` and `results.json` to `measurements/csharp-server/`, which git ignores. (On one shared machine,
 `dotnet run --project` of the benchmark was stopped while it published; the build output runs it reliably.)
 
-Results on 2026-11-02, Linux x64, 8 cores, .NET 10.0.13, 5 cold starts per cell. The machine ran other agents (load
-average 2–4), so the numbers are indicative. Medians and percentiles; one-at-a-time values over 90 lists per cell.
+Results on 2026-11-03, Linux x64, 8 cores, .NET 10.0.13, with the server on `Darp.CodeEditor.Lsp`, 5 cold starts per
+cell. The machine ran other agents (load average 3–4.5), so the numbers are indicative. Medians and percentiles;
+one-at-a-time values over 90 lists per cell. "Fresh" latencies are of requests the client kept that were answered with
+a result; answers are counted as result / `RequestCancelled` / `ContentModified` / other error.
 
 | | in-process | server | server, ReadyToRun | R2R, unfiltered | R2R, filtered, no max |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| process start → first member list (9 items) | 1416 ms | 1104 ms | 703 ms | 701 ms | 698 ms |
-| process start → first word list | 1354 ms | 1003 ms | 636 ms | 634 ms | 628 ms |
+| process start → first member list (9 items) | 1387 ms | 1068 ms | 720 ms | 740 ms | 699 ms |
+| process start → first word list | 1400 ms | 1065 ms | 631 ms | 678 ms | 698 ms |
 | word list items after "D" | 3282 | 1000 | 1000 | 3288 | 1431 |
-| one at a time: member list p50 / p95 | 2.7 / 8.9 ms | 3.7 / 9.1 ms | 4.9 / 7.3 ms | 4.3 / 8.0 ms | 4.8 / 8.2 ms |
-| one at a time: word list p50 / p95 | 7.1 / 21.0 ms | 12.7 / 26.6 ms | 15.2 / 20.4 ms | 17.8 / 25.6 ms | 16.9 / 23.0 ms |
-| one at a time: asked again per further letter p50 / p95 | – | 8.4 / 18.3 ms | 11.7 / 16.8 ms | – | 12.0 / 17.9 ms |
-| typing (40 ms): fresh completion p50 / p95 | 3.6 / 8.8 ms | 4.6 / 10.7 ms | 6.7 / 14.1 ms | 7.5 / 13.7 ms | 7.2 / 15.7 ms |
-| typing: last keystroke → fresh word list answered | 4 ms | 6 ms | 7 ms | 9 ms | 7 ms |
-| stress (10 ms): cancelled by the client / answered in full anyway | 17 / 1 | 105 / 64 | 54 / 48 | 147 / 59 | 40 / 30 |
-| stress: last keystroke → fresh word list answered | 4 ms | 5 ms | 6 ms | 9 ms | 7 ms |
-| RSS after typing | 248 MiB¹ | 281 MiB | 292 MiB | 298 MiB | 293 MiB |
-| word list response | – | 127 KiB | 127 KiB | 414 KiB | 185 KiB |
-| published files / zipped | – | 27 / 10 MiB | 68 / 29 MiB | 68 / 29 MiB | 68 / 29 MiB |
+| one at a time: member list p50 / p95 | 2.8 / 9.3 ms | 3.5 / 9.6 ms | 4.8 / 10.6 ms | 4.6 / 9.8 ms | 5.1 / 9.2 ms |
+| one at a time: word list p50 / p95 | 7.7 / 20.0 ms | 8.8 / 31.8 ms | 14.2 / 23.8 ms | 16.0 / 25.4 ms | 15.7 / 22.7 ms |
+| one at a time: asked again per further letter p50 / p95 | – | 6.8 / 18.5 ms | 11.9 / 20.3 ms | – | 12.4 / 18.1 ms |
+| typing (40 ms): fresh completion p50 / p95 | 3.8 / 10.6 ms | 4.5 / 11.0 ms | 7.4 / 19.8 ms | 6.6 / 12.7 ms | 8.3 / 23.0 ms |
+| typing: last keystroke → fresh word list answered | 4 ms | 5 ms | 6 ms | 8 ms | 9 ms |
+| stress (10 ms): fresh completion p50 / p95 | 4.1 / 23.4 ms | 5.4 / 9.7 ms | 6.5 / 14.9 ms | 8.4 / 31.4 ms | 6.9 / 19.8 ms |
+| stress: fresh semantic tokens p50 / p95 | 3.2 / 6.4 ms | 3.0 / 6.1 ms | 4.5 / 8.2 ms | 4.3 / 8.2 ms | 4.8 / 8.6 ms |
+| stress: answers to requests the client kept | 3313 / 0 / 0 / 0 | 3777 / 0 / 0 / 0 | 3566 / 0 / 0 / 0 | 3015 / 0 / 0 / 0 | 3387 / 0 / 0 / 0 |
+| stress: answers to requests the client cancelled | 1 / 26 / 0 / 0 | 23 / 43 / 0 / 0 | 66 / 184 / 0 / 0 | 109 / 216 / 0 / 0 | 122 / 277 / 0 / 0 |
+| stress: last keystroke → fresh word list answered | 5 ms | 5 ms | 7 ms | 8 ms | 7 ms |
+| RSS after typing | 249 MiB¹ | 273 MiB | 282 MiB | 281 MiB | 277 MiB |
+| word list response | – | 126 KiB | 126 KiB | 412 KiB | 184 KiB |
+| published files / zipped | – | 26 / 10 MiB | 65 / 29 MiB | 65 / 29 MiB | 65 / 29 MiB |
 
 ¹ Without the demo's UI. In-process, the service warms up while it is created, before the first request.
 
-- Server-side filtering brings the warm word list's p95 to the in-process value; its median stays about twice the
-  in-process one, which needs no protocol. Filtering without a maximum gives less (p95 23 ms); a maximum of 300 gives
-  13.0 / 17.3 ms. Of a word list, Roslyn's completion takes about 6–10 ms in both.
+- Server-side filtering keeps the warm word list's p95 near the in-process value (24 vs 20 ms here; 18 vs 20 ms in a
+  quieter run the day before); its median stays about twice the in-process one, which needs no protocol. Filtering
+  without a maximum gives less (p95 23 ms); a maximum of 300 gives 12.8 / 19.0 ms. Of a word list, Roslyn's
+  completion takes about 6–10 ms in both.
 - At 40 ms per keystroke nothing piles up: fresh answers stay within milliseconds of one request at a time. At 10 ms,
-  most requests the client cancels are still answered in full, because `$/cancelRequest` has no effect yet (see
-  Protocol); the backlog still clears within a few milliseconds of the last keystroke.
+  the server answers most requests the client cancels with `RequestCancelled`; the ones with a result had finished
+  before the cancel arrived. No request is answered with `ContentModified` or another error. One ReadyToRun run fell
+  behind under load, with 132 of its 366 requests cancelled, about half of that column's. The backlog clears within a
+  few milliseconds of the last keystroke.
 - Warm-up: an earlier run measured the first request after a 2 s idle at 37 / 44 ms (member / word) with warm-up and
   about 195 ms without; when the first request comes right after start, warm-up costs it up to about 50 ms.
 
@@ -327,5 +338,4 @@ average 2–4), so the numbers are indicative. Medians and percentiles; one-at-a
 [JohnnyMorganz/Luau.tmLanguage](https://github.com/JohnnyMorganz/Luau.tmLanguage), MIT license; see the license file
 next to it.
 
-The C# script language server uses [EmmyLua.LanguageServer.Framework](https://github.com/CppCXY/LanguageServer.Framework)
-(MIT) and Roslyn (MIT).
+The C# script language server uses Roslyn (MIT).

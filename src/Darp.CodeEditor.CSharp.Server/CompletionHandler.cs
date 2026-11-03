@@ -2,25 +2,18 @@ using System.Buffers;
 using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
-using EmmyLua.LanguageServer.Framework;
-using EmmyLua.LanguageServer.Framework.Protocol.Capabilities.Client.ClientCapabilities;
-using EmmyLua.LanguageServer.Framework.Protocol.Capabilities.Server;
-using EmmyLua.LanguageServer.Framework.Protocol.Capabilities.Server.Options;
-using EmmyLua.LanguageServer.Framework.Protocol.JsonRpc;
-using EmmyLua.LanguageServer.Framework.Protocol.Message.Completion;
-using EmmyLua.LanguageServer.Framework.Protocol.Model;
-using EmmyLua.LanguageServer.Framework.Protocol.Model.Kind;
-using EmmyLua.LanguageServer.Framework.Protocol.Model.TextEdit;
-using EmmyLua.LanguageServer.Framework.Protocol.Model.Union;
-using EmmyLua.LanguageServer.Framework.Server.Handler;
+using Darp.CodeEditor.Lsp;
+using Darp.CodeEditor.Lsp.Protocol;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Completion;
 using Microsoft.CodeAnalysis.Tags;
 using Microsoft.CodeAnalysis.Text;
-using CompletionItem = EmmyLua.LanguageServer.Framework.Protocol.Message.Completion.CompletionItem;
-using CompletionItemKind = EmmyLua.LanguageServer.Framework.Protocol.Message.Completion.CompletionItemKind;
-using LanguageServer = EmmyLua.LanguageServer.Framework.Server.LanguageServer;
+using CompletionItem = Darp.CodeEditor.Lsp.Protocol.CompletionItem;
+using CompletionItemKind = Darp.CodeEditor.Lsp.Protocol.CompletionItemKind;
+using CompletionTriggerKind = Darp.CodeEditor.Lsp.Protocol.CompletionTriggerKind;
+using LspCompletionOptions = Darp.CodeEditor.Lsp.Protocol.CompletionOptions;
 using RoslynCompletionItem = Microsoft.CodeAnalysis.Completion.CompletionItem;
 using RoslynCompletionList = Microsoft.CodeAnalysis.Completion.CompletionList;
 using RoslynCompletionTrigger = Microsoft.CodeAnalysis.Completion.CompletionTrigger;
@@ -37,22 +30,32 @@ namespace Darp.CodeEditor.CSharp.Server;
 /// expanding them costs milliseconds each, and word lists have thousands of items.
 /// </para>
 /// <para>
-/// Lists are written straight to JSON: word lists have thousands of items, and the framework's model writes fields
-/// the server does not use. Items are sorted as Roslyn sorts them; <c>sortText</c> is the item's rank.
+/// Lists are written straight to JSON, since word lists have up to a thousand items and writing them is a large part of
+/// answering. Items are sorted as Roslyn sorts them; <c>sortText</c> is the item's rank.
 /// </para>
 /// <para>
-/// A completion request is not cancelled when the text changes: the client can still use the list while the user
-/// keeps typing the same word. Closing the document cancels it.
+/// Like every request, a completion request goes on when the text changes: the client can still use the list while
+/// the user keeps typing the same word. Closing the document answers it with null.
 /// </para>
 /// </remarks>
-internal sealed class CompletionHandler : IJsonHandler
+internal static class CompletionHandler
 {
     private static readonly List<string> s_defaultCommitCharacters = ToStrings(
         CompletionRules.Default.DefaultCommitCharacters
     );
 
-    /// <summary>The result of a request with no completion list. A null document would leave out the result.</summary>
-    private static readonly JsonDocument s_noList = JsonDocument.Parse("null");
+    /// <summary><c>textDocument/completion</c>, answered with the list as <see cref="Write"/> wrote it.</summary>
+    private static readonly RequestType<CompletionParams, CompletionListJson> s_completion = new(
+        LspMethods.Completion.Method,
+        LspMethods.Completion.Params,
+        ServerJsonContext.Default.CompletionListJson
+    );
+
+    /// <summary>Relaxed escaping, as the connection writes: the output is no HTML page.</summary>
+    private static readonly JsonWriterOptions s_writerOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
 
     /// <summary>
     /// Serializes Roslyn's completion lists with computing the changes of their items. Roslyn shares some item objects,
@@ -61,40 +64,18 @@ internal sealed class CompletionHandler : IJsonHandler
     /// </summary>
     private static readonly SemaphoreSlim s_sharedItems = new(1, 1);
 
-    private readonly ScriptSession _session;
+    public static LspCompletionOptions Options { get; } =
+        new(TriggerCharacters: ["."], AllCommitCharacters: s_defaultCommitCharacters, ResolveProvider: true);
 
-    public CompletionHandler(ScriptSession session) => _session = session;
-
-    public void RegisterHandler(LSPCommunicationBase lspCommunication)
+    public static void Register(JsonRpcConnection connection, ScriptSession session)
     {
-        JsonSerializerOptions options = lspCommunication.JsonSerializerOptions;
-        lspCommunication.AddRequestHandler(
-            "textDocument/completion",
-            (message, token) => Handle(ReadParams<CompletionParams>(message, options), token)
-        );
-        lspCommunication.AddRequestHandler(
-            "completionItem/resolve",
-            async (message, token) =>
-                JsonSerializer.SerializeToDocument(
-                    await Resolve(ReadParams<CompletionItem>(message, options), token).ConfigureAwait(false),
-                    options
-                )
-        );
+        connection.OnRequest(s_completion, (request, token) => HandleAsync(session, request, token));
+        connection.OnRequest(LspMethods.CompletionResolve, (item, token) => ResolveRequestAsync(session, item, token));
     }
-
-    public void RegisterCapability(ServerCapabilities serverCapabilities, ClientCapabilities clientCapabilities) =>
-        serverCapabilities.CompletionProvider = new CompletionOptions
-        {
-            TriggerCharacters = ["."],
-            AllCommitCharacters = s_defaultCommitCharacters,
-            ResolveProvider = true,
-        };
-
-    public void RegisterDynamicCapability(LanguageServer server, ClientCapabilities clientCapabilities) { }
 
     /// <summary>Computes the completion list at <paramref name="position"/> as the JSON of an LSP <c>CompletionList</c>.</summary>
     /// <returns>Null when nothing applies.</returns>
-    public static async Task<JsonDocument?> GetCompletionsAsync(
+    public static async Task<CompletionListJson?> GetCompletionsAsync(
         ScriptWorkspace workspace,
         DocumentSnapshot snapshot,
         int position,
@@ -135,7 +116,7 @@ internal sealed class CompletionHandler : IJsonHandler
         }
     }
 
-    private static async Task<JsonDocument?> CreateListAsync(
+    private static async Task<CompletionListJson?> CreateListAsync(
         CompletionService service,
         Document document,
         DocumentSnapshot snapshot,
@@ -241,7 +222,10 @@ internal sealed class CompletionHandler : IJsonHandler
             .GetDescriptionAsync(result.Document, roslynItem, cancellationToken)
             .ConfigureAwait(false);
         if (description is { TaggedParts.Length: > 0 })
-            item.Documentation = Markup.FromDescription(description.TaggedParts, client.CompletionMarkdown);
+            item = item with
+            {
+                Documentation = Markup.FromDescription(description.TaggedParts, client.CompletionMarkdown),
+            };
 
         EditKind? edit = GetEditKind(roslynItem, client);
         if (edit is EditKind.Change)
@@ -253,6 +237,7 @@ internal sealed class CompletionHandler : IJsonHandler
             // Snippets such as "for" expand to several lines; with snippet syntax the caret lands where Roslyn puts it.
             TextChange textChange = change.TextChange;
             string newText = textChange.NewText ?? "";
+            InsertTextFormat? format = null;
             if (client.CompletionSnippets)
             {
                 int caret = Math.Clamp(
@@ -261,83 +246,88 @@ internal sealed class CompletionHandler : IJsonHandler
                     newText.Length
                 );
                 newText = EscapeSnippet(newText[..caret]) + "$0" + EscapeSnippet(newText[caret..]);
-                item.InsertTextFormat = InsertTextFormat.Snippet;
+                format = InsertTextFormat.Snippet;
             }
-            item.TextEditText = null;
-            item.TextEdit = new TextEditOrInsertReplaceEdit(
-                new TextEdit { Range = result.Lines.GetRange(textChange.Span), NewText = newText }
-            );
-            return item;
+            return item with
+            {
+                InsertTextFormat = format,
+                TextEditText = null,
+                TextEdit = new CompletionTextEdit(newText, result.Lines.GetRange(textChange.Span)),
+            };
         }
         // The item inserted its display text; everything else in the change, such as a using directive, is extra.
-        List<AnnotatedTextEdit> additional =
+        List<TextEdit> additional =
         [
             .. change
                 .TextChanges.Where(c => c.NewText != roslynItem.DisplayText)
-                .Select(c => new AnnotatedTextEdit
-                {
-                    Range = result.Lines.GetRange(c.Span),
-                    NewText = c.NewText ?? "",
-                }),
+                .Select(c => new TextEdit(result.Lines.GetRange(c.Span), c.NewText ?? "")),
         ];
-        if (additional.Count < change.TextChanges.Length)
-            item.AdditionalTextEdits = additional;
-        else
+        if (additional.Count == change.TextChanges.Length)
+        {
             Console.Error.WriteLine(
                 $"Completion item {roslynItem.DisplayText}: its change does not insert its display text."
             );
-        return item;
+            return item;
+        }
+        return item with { AdditionalTextEdits = additional };
     }
 
-    private Task<JsonDocument?> Handle(CompletionParams request, CancellationToken token)
+    private static async Task<CompletionListJson?> HandleAsync(
+        ScriptSession session,
+        CompletionParams request,
+        CancellationToken token
+    )
     {
-        if (!_session.TryGetSnapshot(request.TextDocument.Uri, out DocumentSnapshot? snapshot))
-            return Task.FromResult<JsonDocument?>(s_noList);
+        if (!session.TryGetSnapshot(request.TextDocument.Uri, out DocumentSnapshot? snapshot))
+            return null;
         int position = snapshot.Lines.GetOffset(request.Position);
         RoslynCompletionTrigger trigger = request.Context
-            is {
-                TriggerKind.Value: 2, // TriggerCharacter
-                TriggerCharacter: [char character],
-            }
+            is { TriggerKind: CompletionTriggerKind.TriggerCharacter, TriggerCharacter: [char character] }
             ? RoslynCompletionTrigger.CreateInsertionTrigger(character)
             : RoslynCompletionTrigger.Invoke;
-        ScriptSession session = _session;
-        return Task.Run<JsonDocument?>(
-            async () =>
-            {
-                // Typing does not cancel completion, closing the document does.
-                using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(token, snapshot.Owner.Closed);
-                ScriptWorkspace workspace = await session.Workspace.WaitAsync(cancellation.Token).ConfigureAwait(false);
-                return await GetCompletionsAsync(
-                            workspace,
+        ClientFeatures client = session.Client;
+        // The snapshot is taken; the rest runs on the thread pool while later messages are dispatched.
+        await Task.Yield();
+        return await DocumentWork
+            .RunAsync(
+                token,
+                snapshot.Owner,
+                async cancellationToken =>
+                    await GetCompletionsAsync(
+                            await session.Workspace.WaitAsync(cancellationToken).ConfigureAwait(false),
                             snapshot,
                             position,
                             trigger,
-                            session.Client,
+                            client,
                             session.Options.CompletionListLimits,
                             session.Completions,
-                            cancellation.Token
+                            cancellationToken
                         )
                         .ConfigureAwait(false)
-                    ?? s_noList;
-            },
-            token
-        );
+            )
+            .ConfigureAwait(false);
     }
 
-    private Task<CompletionItem> Resolve(CompletionItem item, CancellationToken token)
+    /// <summary>Resolves an item of the newest list of its document; items of older or closed lists come back as they are.</summary>
+    /// <remarks>It goes on when the document changes or closes meanwhile: the item is for the text of its list.</remarks>
+    private static async Task<CompletionItem?> ResolveRequestAsync(
+        ScriptSession session,
+        CompletionItem item,
+        CancellationToken token
+    )
     {
         if (
-            item.Data?.Value is not string data
-            || !TryParseData(data, out long resultId, out int index)
-            || !_session.Completions.TryGet(resultId, out CompletionResult? result)
+            item.Data is not { ValueKind: JsonValueKind.String } data
+            || !TryParseData(data.GetString() ?? "", out long resultId, out int index)
+            || !session.Completions.TryGet(resultId, out CompletionResult? result)
             || index >= result.Items.Length
         )
         {
-            return Task.FromResult(item);
+            return item;
         }
-        ClientFeatures client = _session.Client;
-        return Task.Run(() => ResolveAsync(item, result, result.Items[index], client, token), token);
+        ClientFeatures client = session.Client;
+        await Task.Yield();
+        return await ResolveAsync(item, result, result.Items[index], client, token).ConfigureAwait(false);
     }
 
     /// <summary>How the edit of an item is computed, or null when the client cannot apply it.</summary>
@@ -404,8 +394,8 @@ internal sealed class CompletionHandler : IJsonHandler
     }
 
     /// <summary>
-    /// The ranks of the items to send. Long lists are cut to the items that match the typed text, best matches
-    /// first, as the editor's own filter would show them, and marked incomplete so the client asks again as the
+    /// The ranks of the items to send. Long lists are cut to the items that match the typed text, best matches first,
+    /// with the editor's own <see cref="CompletionMatcher"/>, and marked incomplete so the client asks again as the
     /// user keeps typing.
     /// </summary>
     private static (int[] Ranks, bool Incomplete) Select(
@@ -420,7 +410,7 @@ internal sealed class CompletionHandler : IJsonHandler
         [
             .. Enumerable
                 .Range(0, items.Length)
-                .Select(rank => (Rank: rank, Score: CompletionFilter.Score(items[rank].FilterText, typed)))
+                .Select(rank => (Rank: rank, Score: CompletionMatcher.Score(items[rank].FilterText, typed)))
                 .Where(match => match.Score > 0)
                 .OrderByDescending(match => match.Score)
                 .ThenBy(match => match.Rank)
@@ -431,7 +421,7 @@ internal sealed class CompletionHandler : IJsonHandler
         return (matching, matching.Length < items.Length);
     }
 
-    private static JsonDocument Write(
+    private static CompletionListJson Write(
         List<Item> items,
         bool incomplete,
         TextSpan defaultSpan,
@@ -442,7 +432,7 @@ internal sealed class CompletionHandler : IJsonHandler
     {
         // The filter can keep no items at all; the buffer still needs room for an empty list.
         var buffer = new ArrayBufferWriter<byte>(Math.Max(items.Count, 1) * 128);
-        using (var json = new Utf8JsonWriter(buffer))
+        using (var json = new Utf8JsonWriter(buffer, s_writerOptions))
         {
             json.WriteStartObject();
             json.WriteBoolean("isIncomplete", incomplete);
@@ -492,7 +482,7 @@ internal sealed class CompletionHandler : IJsonHandler
             json.WriteEndArray();
             json.WriteEndObject();
         }
-        return JsonDocument.Parse(buffer.WrittenMemory);
+        return new CompletionListJson(buffer.WrittenMemory);
     }
 
     private static void WriteRange(Utf8JsonWriter json, string name, DocumentRange range)
@@ -551,11 +541,6 @@ internal sealed class CompletionHandler : IJsonHandler
     private static CompletionService GetService(Document document) =>
         CompletionService.GetService(document)
         ?? throw new InvalidOperationException("Roslyn did not provide a completion service.");
-
-    private static T ReadParams<T>(RequestMessage message, JsonSerializerOptions options) =>
-        message.Params is { } parameters
-            ? parameters.Deserialize<T>(options) ?? throw new JsonException($"{message.Method} has null parameters.")
-            : throw new JsonException($"{message.Method} has no parameters.");
 
     private static bool TryParseData(string data, out long resultId, out int index)
     {

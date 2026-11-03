@@ -5,8 +5,8 @@ namespace Darp.CodeEditor.CSharp.Server;
 
 /// <summary>A document the client opened: its newest text and the Roslyn document for it.</summary>
 /// <remarks>
-/// <see cref="Update"/> and <see cref="Close"/> run on the thread that reads messages. Requests read
-/// <see cref="Current"/> on that thread too and do their work on a <see cref="DocumentSnapshot"/>.
+/// <see cref="Update"/> and <see cref="Close"/> run on the dispatch loop, one message at a time. Requests read
+/// <see cref="Current"/> there too, before their first <c>await</c>, and do their work on that snapshot.
 /// </remarks>
 internal sealed class OpenDocument
 {
@@ -15,24 +15,20 @@ internal sealed class OpenDocument
     private CancellationTokenSource _versionSource = new();
     private RoslynVersion? _roslyn;
 
-    public OpenDocument(string key, string clientUri, int version, SourceText text)
+    public OpenDocument(string uri, int version, SourceText text)
     {
-        Key = key;
-        ClientUri = clientUri;
+        Uri = uri;
         Current = new DocumentSnapshot(this, version, text, _versionSource.Token);
     }
 
-    /// <summary>The normalized URI the server identifies the document by.</summary>
-    public string Key { get; }
-
-    /// <summary>The URI exactly as the client sent it, for notifications about the document.</summary>
-    public string ClientUri { get; }
+    /// <summary>The URI exactly as the client sent it.</summary>
+    public string Uri { get; }
 
     public DocumentSnapshot Current { get; private set; }
 
     /// <summary>
-    /// Cancelled when the document closes, or opens again as a new document. Work that may outlive a version, such as
-    /// completion, stops then.
+    /// Cancelled when the document closes, or opens again as a new document. Requests on it stop then and answer null;
+    /// a newer version does not stop them.
     /// </summary>
     public CancellationToken Closed => _lifetime.Token;
 
@@ -61,7 +57,7 @@ internal sealed class OpenDocument
         {
             if (_roslyn is not { } latest || latest.Workspace != workspace)
             {
-                Document created = workspace.CreateDocument(Key).WithText(snapshot.Text);
+                Document created = workspace.CreateDocument(Uri).WithText(snapshot.Text);
                 _roslyn = new RoslynVersion(workspace, snapshot.Version, created);
                 return created;
             }
@@ -97,7 +93,7 @@ internal sealed class DocumentSnapshot
 
     public SourceText Text { get; }
 
-    /// <summary>Cancelled when the document moves to a newer version or closes.</summary>
+    /// <summary>Cancelled when the document moves to a newer version or closes; pending diagnostics stop then.</summary>
     public CancellationToken Changed { get; }
 
     public LineMap Lines => _lines ??= LineMap.Create(Text);

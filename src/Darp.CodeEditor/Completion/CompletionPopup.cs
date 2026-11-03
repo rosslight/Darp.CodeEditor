@@ -9,6 +9,7 @@ using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
 using Darp.CodeEditor.LanguageServices;
+using Darp.CodeEditor.Lsp;
 using Darp.CodeEditor.Popups;
 using Darp.CodeEditor.Theming;
 

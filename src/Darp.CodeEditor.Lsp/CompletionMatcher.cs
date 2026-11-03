@@ -1,7 +1,11 @@
-namespace Darp.CodeEditor.Completion;
+namespace Darp.CodeEditor.Lsp;
 
 /// <summary>Scores how well a completion item matches what the user typed, with ordinal comparisons only.</summary>
-internal static class CompletionMatcher
+/// <remarks>
+/// The editor filters completion lists with it, and servers that cut long lists to their best matches use it too, so
+/// a cut list keeps the items the editor would show first.
+/// </remarks>
+public static class CompletionMatcher
 {
     public const int MaxScore = 100;
 
