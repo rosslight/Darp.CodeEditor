@@ -316,6 +316,9 @@ Every call crosses processes, so the API follows these rules:
 - No generic methods.
 - Data is copied, never shared: changing an argument changes the copy, and objects have no identity across calls.
 - No streams.
+- Script API assemblies, and what they use, need no shared framework but `Microsoft.NETCore.App`.
+- The runner uses invariant globalization: scripts format with the invariant culture, and localized resources fall
+  back to the neutral ones.
 - Scripts must not write to the process's standard output directly. `Console.Out` goes to the runner's standard
   error, which the app receives through `CSharpScriptRunnerOptions.Output`.
 
@@ -326,6 +329,7 @@ Every call crosses processes, so the API follows these rules:
 | The script does not compile | `ScriptCompilationException` with every diagnostic and its position | keeps running |
 | Script code threw | `ScriptException` with the script's exception type, message and stack trace | keeps running; the handler keeps working |
 | A call passed `CallTimeout` | `TimeoutException`; the runner is asked to cancel the call | is killed if the call has not ended `CancellationGracePeriod` later: `RunnerExited` with `Killed` |
+| The runner did not take or compile a script within `CompileTimeout` | `TimeoutException` | is killed: `RunnerExited` with `Killed` |
 | The runner crashed or was killed | `ConnectionLostException` for calls in flight, `ObjectDisposedException` for later calls on its handlers | `RunnerExited` with `Crashed`, the exit code and its last lines of standard error |
 | The environment cannot load, or the script API next to the app is another build than the app's | `InvalidOperationException` from `StartAsync` (or `EvaluateAsync` for a handler type), naming both builds | is not started |
 
@@ -396,8 +400,12 @@ the build machine beyond NuGet. Import the targets into the app project:
 ```
 
 Mark the references whose types scripts use. Publish also ships what the marked assemblies need at run time, found
-by their assembly references among the app's own assemblies, and the runner loads those from the app's directory. JIT
-apps have all their DLLs next to them already.
+by their assembly references among the app's own assemblies, with their satellite assemblies; the runner loads those
+from the app's directory. Assemblies the runner ships itself, with the same identity, stay out. JIT apps have all their
+DLLs next to them already.
+
+The runner has `Microsoft.NETCore.App` only. When a marked reference, or something it uses, needs another shared
+framework, such as `Microsoft.AspNetCore.App`, the build fails and names the reference and the framework.
 
 - `dotnet build`: the runner's build output goes to `helpers/csharp-runner`, and it runs on the runtime that runs the
   app, so `dotnet run` works without publishing.
