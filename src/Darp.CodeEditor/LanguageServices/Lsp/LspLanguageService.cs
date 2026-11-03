@@ -273,9 +273,16 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
                         open.Identifier,
                         open.Text.GetPosition(position),
                         new SignatureHelpContext(
-                            trigger.Kind == SignatureHelpTriggerKind.TriggerCharacter
-                                ? Protocol.SignatureHelpTriggerKind.TriggerCharacter
-                                : Protocol.SignatureHelpTriggerKind.Invoked,
+                            trigger.Kind switch
+                            {
+                                SignatureHelpTriggerKind.TriggerCharacter => Protocol
+                                    .SignatureHelpTriggerKind
+                                    .TriggerCharacter,
+                                SignatureHelpTriggerKind.ContentChange => Protocol
+                                    .SignatureHelpTriggerKind
+                                    .ContentChange,
+                                _ => Protocol.SignatureHelpTriggerKind.Invoked,
+                            },
                             trigger.IsRetrigger,
                             trigger.Kind == SignatureHelpTriggerKind.TriggerCharacter
                                 ? trigger.Character.ToString()

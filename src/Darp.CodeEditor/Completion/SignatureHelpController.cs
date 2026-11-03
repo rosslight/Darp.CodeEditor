@@ -25,8 +25,18 @@ internal sealed class SignatureHelpController
     private readonly TextBlock _documentation = new() { TextWrapping = TextWrapping.Wrap, IsVisible = false };
     private readonly Border _border;
     private readonly TextPopup _popup;
+    private readonly DispatcherTimer _refreshTimer = new(DispatcherPriority.Background)
+    {
+        Interval = TimeSpan.FromMilliseconds(100),
+    };
     private CancellationTokenSource? _cancellation;
     private Shown? _shown;
+
+    /// <summary>An edit made the shown or requested help stale; it is asked again once typing pauses.</summary>
+    private bool _stale;
+
+    /// <summary>A trigger character's request, sent once the keystroke's own edits, such as a closing ')', are done.</summary>
+    private SignatureHelpTrigger? _triggered;
 
     public SignatureHelpController(CodeEditor editor, LanguageFeatures features)
     {
@@ -46,7 +56,9 @@ internal sealed class SignatureHelpController
         ApplyTheme(editor.EditorTheme);
         editor.EditorThemeChanged += (_, _) => ApplyTheme(editor.EditorTheme);
         editor.TextArea.TextEntered += OnTextEntered;
+        editor.TextChanged += (_, _) => OnTextChanged();
         editor.DocumentChanged += (_, _) => Close();
+        _refreshTimer.Tick += (_, _) => Refresh();
         editor.AddHandler(InputElement.KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
     }
 
@@ -54,7 +66,39 @@ internal sealed class SignatureHelpController
     {
         _cancellation?.Cancel();
         _cancellation = null;
+        _refreshTimer.Stop();
+        _stale = false;
+        _triggered = null;
         _popup.Hide();
+    }
+
+    /// <summary>
+    /// An edit cancels the request in flight, which tells the server so; help that was shown or requested is asked
+    /// again when typing pauses. Trigger characters ask at once, right after this.
+    /// </summary>
+    private void OnTextChanged()
+    {
+        if (_cancellation is null && _shown is null)
+            return;
+        _cancellation?.Cancel();
+        _cancellation = null;
+        // A trigger character's request follows anyway, with the text as the keystroke left it.
+        if (_triggered is not null)
+            return;
+        _stale = true;
+        _refreshTimer.Stop();
+        _refreshTimer.Start();
+    }
+
+    private void Refresh()
+    {
+        _refreshTimer.Stop();
+        if (!_stale || _features.Service is not { } service)
+            return;
+        Request(
+            service,
+            new SignatureHelpTrigger(SignatureHelpTriggerKind.ContentChange, IsRetrigger: _shown is not null)
+        );
     }
 
     private void ApplyTheme(EditorTheme theme)
@@ -72,12 +116,25 @@ internal sealed class SignatureHelpController
         if (_features.Service is not { } service || e.Text is not [char c])
             return;
         if (service.Capabilities.SignatureHelpTriggerCharacters.Contains(c))
-            Request(
-                service,
-                new SignatureHelpTrigger(SignatureHelpTriggerKind.TriggerCharacter, c, _shown is not null)
-            );
+        {
+            // After the keystroke's own edits, such as the ')' that closes the '(': they would cancel the request.
+            bool posted = _triggered is not null;
+            _triggered = new SignatureHelpTrigger(SignatureHelpTriggerKind.TriggerCharacter, c, _shown is not null);
+            _refreshTimer.Stop();
+            if (!posted)
+                Dispatcher.UIThread.Post(RequestTriggered, DispatcherPriority.Background);
+        }
         else if (c == ')')
             Close();
+    }
+
+    private void RequestTriggered()
+    {
+        if (_triggered is not { } trigger)
+            return;
+        _triggered = null;
+        if (_features.Service is { } service)
+            Request(service, trigger);
     }
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
@@ -107,6 +164,8 @@ internal sealed class SignatureHelpController
 
     private async void Request(ILanguageService service, SignatureHelpTrigger trigger)
     {
+        _refreshTimer.Stop();
+        _stale = false;
         // The older request is no longer needed: cancelling it tells the server so.
         _cancellation?.Cancel();
         var cancellation = new CancellationTokenSource();
@@ -118,8 +177,10 @@ internal sealed class SignatureHelpController
             () => service.GetSignatureHelpAsync(version, position, trigger, cancellation.Token),
             cancellation.Token
         );
-        if (cancellation.IsCancellationRequested)
+        // An edit since the request cancelled it; a response for an older version is dropped all the same.
+        if (cancellation.IsCancellationRequested || _features.CreateSnapshot().Document.Version != version.Version)
             return;
+        _cancellation = null;
         if (help is null || help.Signatures.Count == 0)
         {
             Close();

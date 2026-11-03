@@ -218,6 +218,9 @@ public enum SignatureHelpTriggerKind
 
     /// <summary>The user typed one of <see cref="LanguageServiceCapabilities.SignatureHelpTriggerCharacters"/>.</summary>
     TriggerCharacter,
+
+    /// <summary>The text changed while signature help was shown or requested.</summary>
+    ContentChange,
 }
 
 /// <param name="IsRetrigger">Signature help is already shown and updates.</param>
