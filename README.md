@@ -31,6 +31,12 @@ Darp.CodeEditor.CSharp.Server     JIT only, framework-dependent .NET 10 console 
   ScriptWorkspace                 one script submission per document, globals type loaded as metadata only
 ```
 
+```
+Darp.CodeEditor.Lsp        NativeAOT-compatible; only the shared framework
+  JsonRpcConnection        JSON-RPC 2.0 with Content-Length framing, for both ends of a connection
+  LanguageServer           the server lifecycle: initialize, shutdown, exit
+  Protocol/                source-generated DTOs for the subset of LSP the editor and its servers use
+```
 The C# script language server is the path forward: every language goes through an out-of-process LSP server, for JIT
 and NativeAOT hosts alike. `Darp.CodeEditor.CSharp` stays as the in-process baseline until the editor's LSP client
 exists.
@@ -60,6 +66,9 @@ Rules the code follows:
 | `samples/Darp.CodeEditor.Demo.Aot` | `PublishAot=true`, references only `Darp.CodeEditor`: Luau, JSON and C# highlighting, search, and a small AOT-safe JSON language service (word completion, parse errors). |
 | `samples/Shared` | Sample documents, measurement scenarios and the Luau grammar shared by both demos. |
 | `tests/Darp.CodeEditor.Tests` | Contract tests for the C# service and the completion matcher. |
+| `src/Darp.CodeEditor.Lsp` | JSON-RPC and LSP layer for language servers and the editor's LSP client (`IsAotCompatible`). |
+| `tests/Darp.CodeEditor.Lsp.Tests` | Tests of the LSP layer, a toy server and client, and an interop test against luau-lsp. |
+| `tests/Darp.CodeEditor.Lsp.AotSmoke` | NativeAOT build of the toy server and client, and of the luau-lsp check. |
 | `tests/Darp.CodeEditor.CSharp.Server.Tests` | Compiler-parity tests against `CSharpScript`, and tests that drive the server process over stdio. |
 | `tests/Darp.CodeEditor.CSharp.TestGlobals` | A globals contract assembly for the tests, including the demo's `ScriptGlobals`. |
 | `tests/Shared` | A small LSP client over stdio, used by the tests and the benchmark. |
@@ -82,6 +91,18 @@ dotnet test --project tests/Darp.CodeEditor.Tests
 dotnet test --project tests/Darp.CodeEditor.CSharp.Server.Tests
 ```
 
+The LSP layer has its own tests. The luau-lsp interop test is skipped until the script downloaded luau-lsp to
+`.tools/`; the NativeAOT check runs it too.
+
+```bash
+tests/Darp.CodeEditor.Lsp.Tests/fetch-luau-lsp.sh
+dotnet test --project tests/Darp.CodeEditor.Lsp.Tests
+
+# Fails on any trim or AOT warning
+dotnet publish tests/Darp.CodeEditor.Lsp.AotSmoke -c Release -r linux-x64
+tests/Darp.CodeEditor.Lsp.AotSmoke/bin/Release/net10.0/linux-x64/publish/Darp.CodeEditor.Lsp.AotSmoke
+```
+
 On a Linux machine without a display, run the demos on a virtual X server (for example `xvfb-run` or any X server
 with `DISPLAY` set).
 
@@ -98,6 +119,30 @@ Command line flags of both demos:
 | `--skip-highlighting-bench` | Skips the highlighting scenarios of `--bench`. |
 | `--no-language-service` | JIT demo only: starts without the C# service, to attribute startup stalls. |
 | `--low-latency-gc` | JIT demo only: sets `GCLatencyMode.SustainedLowLatency`. |
+
+## LSP layer
+
+`Darp.CodeEditor.Lsp` dispatches the messages it receives as follows:
+
+1. One loop reads the input. Responses and `$/cancelRequest` take effect as they are read, and every request gets its
+   cancellation token on receipt, so a request can be cancelled while it is queued.
+2. Requests and notifications are dispatched in arrival order. A `DispatchMode.Serial` handler (the default for
+   notifications, such as `textDocument/didChange`) runs to completion before the next message. A
+   `DispatchMode.Concurrent` handler (the default for requests) runs until its first incomplete `await`, so it reads
+   the state that all earlier messages left behind, and then runs alongside later messages. It must therefore capture
+   the state it works on, such as the document text and version, before that first `await`. A `Serial` handler must
+   not await a request to the peer that the peer can only answer after a request of its own was dispatched here: that
+   deadlocks.
+3. A request whose token was cancelled by the time its handler returned answers `RequestCancelled`, whatever the
+   handler returned. Handlers throw `JsonRpcException`, for example with `ContentModified`, to answer other errors.
+4. Sending only queues a message. One write loop serializes and writes messages in the order they were sent, so
+   callers never wait for serialization or a slow peer. A request cancelled before it went out is left out; otherwise
+   `$/cancelRequest` follows it. Disposing drops what was not written yet. A failed write ends the connection, since
+   part of the frame may be on the stream; messages that fail to serialize fail only their own send. The send queue
+   has no bound: callers that send many large messages, such as document changes, await each send to get
+   back-pressure.
+5. `JsonRpcLimits` caps headers and messages; a longer message ends the connection. Null results are written as
+   `"result": null`, and document URIs are kept as sent.
 
 ## C# script language server
 
