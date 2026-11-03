@@ -41,6 +41,7 @@ internal sealed class ScriptSession
     private JsonRpcConnection? _connection;
     private InitializeAttempt? _attempt;
     private Task<ScriptWorkspace>? _workspace;
+    private bool _watching;
 
     /// <param name="clientExited">Runs when the client process that <c>initialize</c> named ends.</param>
     public ScriptSession(ServerOptions options, Action<int> clientExited)
@@ -154,9 +155,20 @@ internal sealed class ScriptSession
             TaskScheduler.Default
         );
 
-    /// <summary>
-    /// Starts loading the environment of the answered <c>initialize</c>, the warm-up and watching the client process.
-    /// </summary>
+    /// <summary>Watches the client process that the answered <c>initialize</c> named, and reports when it ends.</summary>
+    /// <remarks>
+    /// Runs when an <c>initialize</c> result became the answer, not with loading on <c>initialized</c>: a client that
+    /// ends before sending that must still end the server. A cancelled <c>initialize</c> never gets here.
+    /// </remarks>
+    public void WatchClient()
+    {
+        if (_watching || _attempt?.ProcessId is not { } processId)
+            return;
+        _watching = true;
+        Observe(WatchClientAsync(processId), "Watching the client process");
+    }
+
+    /// <summary>Starts loading the environment of the answered <c>initialize</c> and the warm-up.</summary>
     /// <remarks>
     /// Runs on <c>initialized</c>, which the client sends once it has the result, and on <c>didOpen</c>, for clients
     /// that skip it. The connection admits both only after an <c>initialize</c> was answered with its result, and runs
@@ -171,8 +183,6 @@ internal sealed class ScriptSession
         Observe(ReportLoadFailureAsync(_workspace), "Reporting the environment");
         if (_options.WarmUp)
             Observe(WarmUp.RunAsync(_workspace, Client, _options.CompletionListLimits), "Warm-up");
-        if (attempt.ProcessId is { } processId)
-            Observe(WatchClientAsync(processId), "Watching the client process");
     }
 
     private void Open(TextDocumentItem item)

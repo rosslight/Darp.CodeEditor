@@ -22,13 +22,18 @@ public sealed class LanguageServer : IAsyncDisposable
     /// <param name="shutdown">Runs on <c>shutdown</c>, before it is answered.</param>
     /// <param name="log">Receives protocol errors and handler failures.</param>
     /// <param name="limits">How much the client may send; <see cref="JsonRpcLimits"/>' defaults when null.</param>
+    /// <param name="initializeAnswered">
+    /// Runs once an <c>initialize</c> was answered with its result, before the next message is dispatched; not for a
+    /// failed or cancelled one. For work that must not wait for the client's <c>initialized</c>.
+    /// </param>
     public LanguageServer(
         Stream input,
         Stream output,
         Func<InitializeParams, CancellationToken, Task<InitializeResult>> initialize,
         Func<Task>? shutdown = null,
         Action<string>? log = null,
-        JsonRpcLimits? limits = null
+        JsonRpcLimits? limits = null,
+        Action? initializeAnswered = null
     )
     {
         _initialize = initialize;
@@ -39,7 +44,11 @@ public sealed class LanguageServer : IAsyncDisposable
             LspMethods.Initialize,
             InitializeAsync,
             DispatchMode.Serial,
-            answered: () => _state = State.Initialized
+            answered: () =>
+            {
+                _state = State.Initialized;
+                initializeAnswered?.Invoke();
+            }
         );
         Connection.OnRequest(
             LspMethods.Shutdown,

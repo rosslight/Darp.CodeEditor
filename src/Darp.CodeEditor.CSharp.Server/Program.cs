@@ -15,7 +15,14 @@ var session = new ScriptSession(
         Environment.Exit(1);
     }
 );
-var server = new LanguageServer(input, output, session.InitializeAsync, session.ShutdownAsync, Console.Error.WriteLine);
+var server = new LanguageServer(
+    input,
+    output,
+    session.InitializeAsync,
+    session.ShutdownAsync,
+    Console.Error.WriteLine,
+    initializeAnswered: session.WatchClient
+);
 session.Connect(server.Connection);
 
 // Not disposed: disposing waits for the read loop, which never ends while the client keeps its end of the pipe open.

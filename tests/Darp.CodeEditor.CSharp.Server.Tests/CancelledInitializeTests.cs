@@ -31,6 +31,26 @@ public sealed class CancelledInitializeTests
     }
 
     [Fact]
+    public async Task The_client_process_is_watched_once_initialize_is_answered_even_without_initialized()
+    {
+        // Stands in for the client process: one the test can end.
+        await using LspClient client = TestServer.Start();
+        int clientId = client.Process.Id;
+        await using var server = new InProcessServer(holdFirstInitialize: false);
+        await server.Client.SendRequestAsync(
+            LspMethods.Initialize,
+            InProcessServer.InitializeParams(TestEnvironments.Device, clientId),
+            InProcessServer.Timeout
+        );
+
+        // The client ends before it sends initialized, while something else keeps the server's input open.
+        client.Process.Kill();
+        int exited = await server.ExitedClients.ReadAsync(InProcessServer.Timeout);
+
+        exited.ShouldBe(clientId);
+    }
+
+    [Fact]
     public async Task A_cancelled_initialize_does_not_watch_its_client_process()
     {
         // Stand in for client processes: ones the test can end.

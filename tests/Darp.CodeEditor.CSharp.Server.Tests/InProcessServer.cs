@@ -23,10 +23,13 @@ internal sealed class InProcessServer : IAsyncDisposable
     private readonly Channel<string> _messages = Channel.CreateUnbounded<string>();
     private readonly Channel<PublishDiagnosticsParams> _diagnostics =
         Channel.CreateUnbounded<PublishDiagnosticsParams>();
+    private readonly bool _holdFirstInitialize;
     private int _initializeCount;
 
-    public InProcessServer()
+    /// <param name="holdFirstInitialize">False to answer every <c>initialize</c> right away.</param>
+    public InProcessServer(bool holdFirstInitialize = true)
     {
+        _holdFirstInitialize = holdFirstInitialize;
         var toServer = new Pipe();
         var toClient = new Pipe();
         var session = new ScriptSession(
@@ -41,7 +44,8 @@ internal sealed class InProcessServer : IAsyncDisposable
             toServer.Reader.AsStream(),
             toClient.Writer.AsStream(),
             (parameters, cancellationToken) => InitializeAsync(session, parameters, cancellationToken),
-            session.ShutdownAsync
+            session.ShutdownAsync,
+            initializeAnswered: session.WatchClient
         );
         session.Connect(_server.Connection);
         _running = _server.RunAsync();
@@ -99,7 +103,7 @@ internal sealed class InProcessServer : IAsyncDisposable
     )
     {
         InitializeResult result = await session.InitializeAsync(parameters, cancellationToken);
-        if (Interlocked.Increment(ref _initializeCount) == 1)
+        if (Interlocked.Increment(ref _initializeCount) == 1 && _holdFirstInitialize)
         {
             _firstInitializeHeld.SetResult();
             try
