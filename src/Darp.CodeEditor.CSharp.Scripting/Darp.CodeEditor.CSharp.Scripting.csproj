@@ -3,6 +3,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <!-- Compiling and running scripts needs the JIT. -->
     <IsAotCompatible>false</IsAotCompatible>
+    <!-- Used by the language server and the runner, which ship inside the Darp.CodeEditor.CSharp package. -->
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Darp.CodeEditor.CSharp.Hosting\Darp.CodeEditor.CSharp.Hosting.csproj" />

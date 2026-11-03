@@ -22,10 +22,10 @@
   <ItemGroup>
     <AssemblyMetadata
       Include="LuauTargets"
-      Value="$(MSBuildThisFileDirectory)..\..\src\Darp.CodeEditor.Luau\build\Darp.CodeEditor.Luau.targets"
+      Value="$(MSBuildThisFileDirectory)..\..\src\Darp.CodeEditor.Luau\buildTransitive\Darp.CodeEditor.Luau.targets"
     />
     <AssemblyMetadata Include="LuauLspCacheDirectory" Value="$(LuauLspCacheDirectory)" />
   </ItemGroup>
   <!-- Puts luau-lsp next to the tests: they run against the real server. -->
-  <Import Project="..\..\src\Darp.CodeEditor.Luau\build\Darp.CodeEditor.Luau.targets" />
+  <Import Project="..\..\src\Darp.CodeEditor.Luau\buildTransitive\Darp.CodeEditor.Luau.targets" />
 </Project>

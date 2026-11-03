@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using Darp.CodeEditor.CSharp.Execution.Protocol;
 using Darp.CodeEditor.CSharp.Hosting;
+using Darp.CodeEditor.Lsp.Hosting;
 using PolyType;
 using PolyType.Abstractions;
 using StreamJsonRpc;
@@ -15,8 +17,11 @@ internal sealed class RunnerConnection : IAsyncDisposable
     /// <summary>How long a killed runner may take to exit before its exit code is given up on.</summary>
     private static readonly TimeSpan s_exitTimeout = TimeSpan.FromSeconds(2);
 
+    /// <summary>How long the runner's standard error may stay open after it exited, held by a process it started.</summary>
+    private static readonly TimeSpan s_standardErrorTimeout = TimeSpan.FromSeconds(1);
+
     private readonly CSharpScriptRunnerOptions _options;
-    private readonly RunnerProcess _process;
+    private readonly ChildProcess _process;
     private readonly ShapeProviders _shapes;
     private readonly HostRpc _rpc;
     private readonly IRunnerService _runner;
@@ -29,14 +34,14 @@ internal sealed class RunnerConnection : IAsyncDisposable
     private int _ending;
     private long _nextScriptId;
 
-    private RunnerConnection(CSharpScriptRunnerOptions options, RunnerProcess process)
+    private RunnerConnection(CSharpScriptRunnerOptions options, ChildProcess process)
     {
         _options = options;
         _process = process;
         _shapes = new ShapeProviders();
         foreach (CSharpScriptService service in options.Services)
             _shapes.Add(service.Shapes);
-        _rpc = new HostRpc(RunnerRpc.CreateMessageHandler(process.Output, process.Input, _shapes));
+        _rpc = new HostRpc(RunnerRpc.CreateMessageHandler(process.StandardInput, process.StandardOutput, _shapes));
         foreach (CSharpScriptService service in options.Services)
         {
             _rpc.AddLocalRpcTarget(
@@ -75,10 +80,20 @@ internal sealed class RunnerConnection : IAsyncDisposable
         CancellationToken cancellationToken
     )
     {
-        RunnerLocation location = RunnerLocation.Find(options.RunnerDirectory);
-        RunnerProcess process = await RunnerProcess
-            .StartAsync(location, options.RunnerEnvironmentVariables, options.Output)
-            .ConfigureAwait(false);
+        string runner = CSharpHelper.Find(
+            Path.GetFullPath(options.RunnerDirectory ?? CSharpHelper.DefaultDirectory("csharp-runner")),
+            CSharpHelper.RunnerName,
+            "Reference the Darp.CodeEditor.CSharp package from the app project, or set "
+                + "CSharpScriptRunnerOptions.RunnerDirectory."
+        );
+        ProcessStartInfo start = CSharpHelper.CreateStartInfo(
+            runner,
+            dotNetPath: null,
+            options.RunnerEnvironmentVariables
+        );
+        start.ArgumentList.Add(RunnerNames.ParentProcessIdArgument);
+        start.ArgumentList.Add(Environment.ProcessId.ToString(CultureInfo.InvariantCulture));
+        ChildProcess process = await ChildProcess.StartAsync(start, options.Output).ConfigureAwait(false);
         var connection = new RunnerConnection(options, process);
         try
         {
@@ -211,7 +226,7 @@ internal sealed class RunnerConnection : IAsyncDisposable
         }
         catch (TimeoutException) { }
         await _ended.Task.ConfigureAwait(false);
-        _process.Dispose();
+        await _process.DisposeAsync().ConfigureAwait(false);
     }
 
     private async Task InitializeAsync(CancellationToken cancellationToken)
@@ -278,8 +293,10 @@ internal sealed class RunnerConnection : IAsyncDisposable
             await _process.Exited.WaitAsync(s_exitTimeout).ConfigureAwait(false);
         }
         catch (TimeoutException) { }
-        string standardError = await _process.GetStandardErrorAsync().ConfigureAwait(false);
-        _ended.TrySetResult(new ScriptRunnerExitedEventArgs(reason, _process.ExitCode, standardError));
+        // The pipe closes when the process exits, unless a process the script started still holds it.
+        await Task.WhenAny(_process.StandardErrorEnded, Task.Delay(s_standardErrorTimeout)).ConfigureAwait(false);
+        int? exitCode = _process.Exited.IsCompletedSuccessfully ? _process.Exited.Result : null;
+        _ended.TrySetResult(new ScriptRunnerExitedEventArgs(reason, exitCode, _process.StandardErrorTail));
     }
 
     private void Stop()

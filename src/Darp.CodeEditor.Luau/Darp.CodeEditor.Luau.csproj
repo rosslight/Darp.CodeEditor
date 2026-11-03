@@ -2,7 +2,8 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <IsAotCompatible>true</IsAotCompatible>
-    <Description>Luau script editing for Darp.CodeEditor: starts luau-lsp with the app's Luau API and gives editors the Luau grammar. NativeAOT compatible.</Description>
+    <Description>Luau script editing for Darp.CodeEditor: starts luau-lsp with the app's Luau API and gives editors the Luau grammar. Ships luau-lsp for Windows, Linux and macOS and puts it next to the app. NativeAOT compatible.</Description>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);_AddLuauLspToPackage</TargetsForTfmSpecificContentInPackage>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Darp.CodeEditor\Darp.CodeEditor.csproj" />
@@ -10,4 +11,29 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Darp.CodeEditor.Luau.Tests" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="buildTransitive\**" Pack="true" PackagePath="buildTransitive/" />
+    <None Include="Grammars\**" Pack="true" PackagePath="Grammars/" />
+    <!-- One per luau-lsp build: win64 serves both Windows identifiers, macos (universal) both macOS ones. -->
+    <_LuauLspPackRuntimeIdentifier Include="win-x64;linux-x64;linux-arm64;osx-arm64" />
+  </ItemGroup>
+
+  <!-- The pinned release's builds, downloaded and checked like in an app's build, in tools/luau-lsp/<asset>/. -->
+  <Target Name="_AddLuauLspToPackage">
+    <MSBuild
+      Projects="$(MSBuildProjectFullPath)"
+      Targets="ResolveLuauLsp"
+      Properties="_LuauLspRid=%(_LuauLspPackRuntimeIdentifier.Identity)"
+    >
+      <Output TaskParameter="TargetOutputs" ItemName="_LuauLspToPack" />
+    </MSBuild>
+    <ItemGroup>
+      <TfmSpecificPackageFile
+        Include="@(_LuauLspToPack)"
+        PackagePath="tools/luau-lsp/%(_LuauLspToPack.Asset)/"
+      />
+    </ItemGroup>
+  </Target>
+
+  <Import Project="buildTransitive\Darp.CodeEditor.Luau.targets" />
 </Project>

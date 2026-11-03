@@ -14,9 +14,11 @@ internal static class ExitCodes
 
 /// <summary>Ends the runner when the host dies, even while a script is busy.</summary>
 /// <remarks>
-/// Every platform: the runner exits when its input closes, which happens when the host dies. That needs a responsive
-/// runtime, so Linux also asks the kernel for <c>SIGKILL</c> when the host thread that started the runner ends, and
-/// macOS polls the parent process ID. On Windows the host's job object kills the runner.
+/// The host starts the runner as a <c>ChildProcess</c>, which ties it to the host: on Windows through a job object, on
+/// Linux through <c>setpriv --pdeathsig</c>. This is the runner's own guard on top. Every platform: the runner exits
+/// when its input closes, which happens when the host dies; that needs a responsive runtime. Linux also asks the kernel
+/// for <c>SIGKILL</c> when the host thread that started the runner ends, which covers hosts without <c>setpriv</c>, and
+/// macOS polls the parent process ID.
 /// </remarks>
 internal static partial class ParentProcess
 {

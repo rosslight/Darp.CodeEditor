@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Text;
+using Darp.CodeEditor.Testing;
 using Shouldly;
 using static Darp.CodeEditor.CSharp.Execution.Tests.TestRunners;
 
@@ -69,10 +69,11 @@ public sealed class HostProcessTests
                     SearchOption.AllDirectories
                 )
                 .ShouldNotBeEmpty();
-            (int runExitCode, string runLog) = await RunAsync(
+            (int runExitCode, string runLog) = await CommandLine.RunAsync(
                 Path.Combine(output, HostName + (OperatingSystem.IsWindows() ? ".exe" : "")),
                 ["run"],
-                TimeSpan.FromMinutes(1)
+                TimeSpan.FromMinutes(1),
+                Cancellation
             );
             runExitCode.ShouldBe(0, runLog);
             runLog.ShouldContain("result 42 batch 3,4");
@@ -122,7 +123,7 @@ public sealed class HostProcessTests
                 <Project Sdk="Microsoft.NET.Sdk">
                   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework></PropertyGroup>
                   <ItemGroup><ProjectReference Include="../Api/Api.csproj" CSharpScriptReference="true" /></ItemGroup>
-                  <Import Project="{GetMetadata("ExecutionTargets")}" />
+                  <Import Project="{GetMetadata("CSharpTargets")}" />
                 </Project>
                 """
             );
@@ -180,55 +181,6 @@ public sealed class HostProcessTests
         throw new InvalidOperationException($"The host ended without writing \"{prefix}\".");
     }
 
-    /// <summary>
-    /// Runs the dotnet CLI with build processes of its own: MSBuild nodes and compiler servers are shared by every
-    /// build of the user, and a reused one outside this test can end the test's process.
-    /// </summary>
     private static Task<(int ExitCode, string Output)> DotNetAsync(IEnumerable<string> arguments) =>
-        RunAsync(
-            Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet",
-            [.. arguments, "-nodeReuse:false", "-p:UseSharedCompilation=false"],
-            TimeSpan.FromMinutes(8),
-            new Dictionary<string, string> { ["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0" }
-        );
-
-    private static async Task<(int ExitCode, string Output)> RunAsync(
-        string fileName,
-        IEnumerable<string> arguments,
-        TimeSpan timeout,
-        IReadOnlyDictionary<string, string>? environment = null
-    )
-    {
-        var start = new ProcessStartInfo(fileName, arguments)
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        foreach ((string name, string value) in environment ?? new Dictionary<string, string>())
-            start.Environment[name] = value;
-        using Process process = Process.Start(start)!;
-        var output = new StringBuilder();
-        Task stdout = CopyAsync(process.StandardOutput, output);
-        Task stderr = CopyAsync(process.StandardError, output);
-        try
-        {
-            await process.WaitForExitAsync(Cancellation).WaitAsync(timeout, Cancellation);
-        }
-        finally
-        {
-            if (!process.HasExited)
-                process.Kill(entireProcessTree: true);
-        }
-        await Task.WhenAll(stdout, stderr);
-        return (process.ExitCode, output.ToString());
-    }
-
-    private static async Task CopyAsync(StreamReader reader, StringBuilder output)
-    {
-        while (await reader.ReadLineAsync() is { } line)
-        {
-            lock (output)
-                output.AppendLine(line);
-        }
-    }
+        CommandLine.DotNetAsync(arguments, TimeSpan.FromMinutes(8), Cancellation);
 }

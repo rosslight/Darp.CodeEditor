@@ -6,6 +6,8 @@
     <!-- Measured as a JIT app and published with NativeAOT, which bundles the runner's runtime. -->
     <IsAotCompatible>true</IsAotCompatible>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Restore then fetches the ReadyToRun compiler for the C# helpers. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp.Execution\Darp.CodeEditor.CSharp.Execution.csproj" />
@@ -18,5 +20,5 @@
       Link="Shared\TestEnvironment.cs"
     />
   </ItemGroup>
-  <Import Project="..\..\src\Darp.CodeEditor.CSharp.Execution\build\Darp.CodeEditor.CSharp.Execution.targets" />
+  <Import Project="..\..\src\Darp.CodeEditor.CSharp\buildTransitive\Darp.CodeEditor.CSharp.targets" />
 </Project>
