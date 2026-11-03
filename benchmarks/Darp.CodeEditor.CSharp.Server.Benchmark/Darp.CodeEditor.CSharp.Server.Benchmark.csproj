@@ -6,10 +6,14 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
   <ItemGroup>
-    <!-- The demo's globals and the in-process service are the baseline the server is measured against. -->
-    <ProjectReference Include="..\..\samples\Darp.CodeEditor.Demo\Darp.CodeEditor.Demo.csproj" />
-    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp\Darp.CodeEditor.CSharp.csproj" />
+    <!-- The demo's globals; the in-process service in InProcess/ is the baseline the server is measured against. -->
+    <ProjectReference Include="..\..\samples\Darp.CodeEditor.Demo.Globals\Darp.CodeEditor.Demo.Globals.csproj" />
+    <ProjectReference Include="..\..\src\Darp.CodeEditor\Darp.CodeEditor.csproj" />
     <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp.Hosting\Darp.CodeEditor.CSharp.Hosting.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Features" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\..\tests\Shared\LspClient.cs" Link="Shared\LspClient.cs" />

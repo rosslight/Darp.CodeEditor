@@ -12,8 +12,7 @@ namespace Darp.CodeEditor.Completion;
 
 /// <summary>
 /// The completion popup. It filters the items it was created with whenever the typed word changes, with ordinal
-/// matching (well under a millisecond for thousands of items), and commits by replacing the word with precomputed
-/// text.
+/// matching (well under a millisecond for thousands of items), and hands the selected item to its owner to commit.
 /// </summary>
 /// <remarks>
 /// Positioning, keyboard routing and offset tracking come from AvaloniaEdit's <see cref="CompletionWindowBase"/>.
@@ -25,6 +24,7 @@ internal sealed class CompletionPopup : CompletionWindowBase
 
     private readonly IReadOnlyList<CompletionItem> _items;
     private readonly Func<int, Control> _createDescription;
+    private readonly Action<int, int, int> _commit;
     private readonly Dictionary<int, Control> _descriptions = [];
     private readonly CompletionListView _view;
     private readonly Popup _descriptionPopup;
@@ -33,11 +33,18 @@ internal sealed class CompletionPopup : CompletionWindowBase
     private string? _query;
 
     /// <param name="createDescription">Creates the description view for the item at an index, loading lazily.</param>
-    public CompletionPopup(TextArea textArea, IReadOnlyList<CompletionItem> items, Func<int, Control> createDescription)
+    /// <param name="commit">Commits the item at an index over the word from a start to an end offset.</param>
+    public CompletionPopup(
+        TextArea textArea,
+        IReadOnlyList<CompletionItem> items,
+        Func<int, Control> createDescription,
+        Action<int, int, int> commit
+    )
         : base(textArea)
     {
         _items = items;
         _createDescription = createDescription;
+        _commit = commit;
         _view = new CompletionListView(items, textArea.FontFamily, textArea.FontSize);
         _view.SelectionChanged += (_, _) => ShowDescription();
         _view.ItemActivated += (_, _) => Commit();
@@ -67,6 +74,9 @@ internal sealed class CompletionPopup : CompletionWindowBase
         Opened += (_, _) => ShowDescription();
         TextArea.Caret.PositionChanged += OnCaretPositionChanged;
     }
+
+    /// <summary>The selected item, which typing a commit character commits.</summary>
+    public CompletionItem? SelectedItem => _view.SelectedItem is { } index ? _items[index] : null;
 
     /// <summary>Closes the popup when the caret moves back to <see cref="CompletionWindowBase.StartOffset"/>.</summary>
     public bool CloseWhenCaretAtBeginning { get; init; }
@@ -101,9 +111,9 @@ internal sealed class CompletionPopup : CompletionWindowBase
         if (_view.SelectedItem is not { } index)
             return;
         int start = StartOffset;
-        int length = EndOffset - StartOffset;
+        int end = EndOffset;
         Hide();
-        TextArea.Document.Replace(start, length, _items[index].InsertText);
+        _commit(index, start, end);
     }
 
     protected override void OnKeyDown(KeyEventArgs e)

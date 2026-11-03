@@ -14,6 +14,9 @@ internal static class ProcessClock
 }
 
 /// <summary>Command line flags shared by the demos.</summary>
+/// <param name="CSharpServer">The C# server's .dll or app host, instead of the one next to the app.</param>
+/// <param name="DotNet">The dotnet executable that runs the C# server.</param>
+/// <param name="ServerLog">Writes the C# server's log to standard error.</param>
 internal sealed record DemoOptions(
     bool Smoke,
     bool Bench,
@@ -21,26 +24,32 @@ internal sealed record DemoOptions(
     bool Scene,
     bool NoLanguageService,
     bool SkipHighlightingBench,
-    string? OutputPath
+    string? OutputPath,
+    string? CSharpServer = null,
+    string? DotNet = null,
+    bool ServerLog = false
 )
 {
     public bool Measure => Smoke || Bench;
 
-    public static DemoOptions Parse(string[] args)
-    {
-        string? output = null;
-        int outIndex = Array.IndexOf(args, "--out");
-        if (outIndex >= 0 && outIndex + 1 < args.Length)
-            output = args[outIndex + 1];
-        return new DemoOptions(
+    public static DemoOptions Parse(string[] args) =>
+        new(
             args.Contains("--smoke"),
             args.Contains("--bench"),
             args.Contains("--hold"),
             args.Contains("--scene"),
             args.Contains("--no-language-service"),
             args.Contains("--skip-highlighting-bench"),
-            output
+            Value(args, "--out"),
+            Value(args, "--csharp-server"),
+            Value(args, "--dotnet"),
+            args.Contains("--server-log")
         );
+
+    private static string? Value(string[] args, string name)
+    {
+        int index = Array.IndexOf(args, name);
+        return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
     }
 }
 
@@ -205,9 +214,12 @@ internal sealed class TimingLog : IDisposable
     }
 
     /// <summary>Completes with <see cref="ProcessClock.ElapsedMs"/> when the first timing of that name arrives.</summary>
-    public async Task<double> WhenFirstAsync(string name)
+    public Task<double> WhenFirstAsync(string name) => WhenFirstAsync(t => t.Name == name);
+
+    /// <summary>Completes with <see cref="ProcessClock.ElapsedMs"/> when the first matching timing arrives.</summary>
+    public async Task<double> WhenFirstAsync(Func<EditorTiming, bool> match)
     {
-        await NextAsync(t => t.Name == name);
+        await NextAsync(match);
         return ProcessClock.ElapsedMs;
     }
 

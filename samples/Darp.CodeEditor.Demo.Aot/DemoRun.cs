@@ -54,15 +54,32 @@ internal static class DemoRun
         );
         CodeEditor editor = window.LuauEditor;
         using var timings = new TimingLog(editor);
+        using var csharpTimings = new TimingLog(window.CSharpEditor);
+        window.CSharpEditor.LanguageServiceFailed += (_, exception) =>
+            report.Add($"LANGUAGE SERVICE FAILED: {exception}");
         Task<double> visible = Ui.WaitForVisibleAsync(editor, highlighted: false);
         Task<double> highlighted = Ui.WaitForVisibleAsync(editor, highlighted: true);
+        CSharpBench? csharp = window.CSharp is { } service ? new CSharpBench(service, csharpTimings) : null;
         await highlighted;
         report.Add(probe.EndPhase());
-        probe.BeginPhase("startup: first frame + 500 ms");
+        probe.BeginPhase("startup: until C# ready (C# tab in the background) + 500 ms");
+        if (csharp is not null)
+            await csharp.WaitUntilReadyAsync();
         await Task.Delay(500);
         report.Add(probe.EndPhase());
-        report.Add($"  editor text visible:        {await visible, 7:F0} ms after process start");
-        report.Add($"  editor text highlighted:    {await highlighted, 7:F0} ms");
+        double created = window.EditorsCreatedMs;
+        report.Add($"  editors created:            {created, 7:F0} ms after process start");
+        report.Add(
+            $"  editor text visible:        {await visible, 7:F0} ms after process start, {await visible - created:F0} ms after editor creation"
+        );
+        report.Add(
+            $"  editor text highlighted:    {await highlighted, 7:F0} ms after process start, {await highlighted - created:F0} ms after editor creation"
+        );
+        if (csharp is not null)
+        {
+            await csharp.ReportAsync(report, created);
+            report.Add($"  idle {csharp.DescribeMemory()}");
+        }
         report.Add($"  startup timings: {timings.Summary()}");
 
         report.Add(EditorScenarios.CheckSearch(editor, "reading", "sample"));
@@ -85,6 +102,12 @@ internal static class DemoRun
         report.Add("  " + Ui.TakeKeystrokeSummary());
         report.Add($"  timings: {jsonTimings.Summary()}");
 
-        await EditorScenarios.RunHighlightingAsync(window, probe, report);
+        if (csharp is not null)
+        {
+            await LanguageServiceScenarios.RunAsync(window, MainWindow.CSharpTab, window.CSharpEditor, probe, report);
+            report.Add($"  after typing, {csharp.DescribeMemory()}");
+        }
+        if (!options.SkipHighlightingBench)
+            await EditorScenarios.RunHighlightingAsync(window, probe, report);
     }
 }

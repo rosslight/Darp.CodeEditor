@@ -1,6 +1,6 @@
-using System.Diagnostics;
 using Avalonia.Controls;
-using Darp.CodeEditor.CSharp;
+using Avalonia.Threading;
+using Darp.CodeEditor.LanguageServices;
 using Darp.CodeEditor.Samples;
 
 namespace Darp.CodeEditor.Demo;
@@ -8,22 +8,36 @@ namespace Darp.CodeEditor.Demo;
 public sealed partial class MainWindow : Window, IBenchHost
 {
     public MainWindow()
-        : this(noLanguageService: false) { }
+        : this(DemoOptions.Parse([])) { }
 
-    public MainWindow(bool noLanguageService)
+    internal MainWindow(DemoOptions options)
     {
+        EditorsCreatedMs = ProcessClock.ElapsedMs;
         InitializeComponent();
         CSharpEditor.Text = SampleDocuments.CSharpScript;
         LuauEditor.Text = SampleDocuments.LuauScript;
         JsonEditor.Text = SampleDocuments.Json;
         SetLuauGrammar();
+        if (options.NoLanguageService)
+            return;
 
-        // The editors are fully usable now. C# features switch on once the service finished loading.
-        CSharpReady = noLanguageService ? Task.FromResult<CSharpScriptLanguageService?>(null) : StartCSharpAsync();
+        // The editors are fully usable now. Opening the C# document starts the C# server in the background.
+        LspLanguageService csharp = DemoCSharp.CreateService(options);
+        CSharp = csharp;
+        csharp.StateChanged += (_, _) =>
+        {
+            double at = ProcessClock.ElapsedMs;
+            Dispatcher.UIThread.Post(() => Status.Text = DemoCSharp.Describe(csharp, at));
+        };
+        CSharpEditor.LanguageService = csharp;
+        Closed += (_, _) => _ = csharp.DisposeAsync().AsTask();
     }
 
-    /// <summary>Completes once the C# service is attached to the C# editor (null when disabled).</summary>
-    public Task<CSharpScriptLanguageService?> CSharpReady { get; }
+    /// <summary>When the window started to create its editors, in milliseconds since the process started.</summary>
+    public double EditorsCreatedMs { get; }
+
+    /// <summary>The C# language service, shared by the C# editors; null with <c>--no-language-service</c>.</summary>
+    public LspLanguageService? CSharp { get; }
 
     TopLevel IBenchHost.TopLevel => this;
 
@@ -39,23 +53,6 @@ public sealed partial class MainWindow : Window, IBenchHost
     {
         Tabs.SelectedIndex = index;
         return Ui.NextFrameAsync(this);
-    }
-
-    private async Task<CSharpScriptLanguageService?> StartCSharpAsync()
-    {
-        Status.Text = "Loading the C# language service…";
-        long start = Stopwatch.GetTimestamp();
-        CSharpScriptLanguageService service = await CSharpScriptLanguageService.CreateAsync(
-            new CSharpScriptOptions(
-                typeof(ScriptGlobals),
-                [typeof(Enumerable).Assembly, typeof(List<>).Assembly, typeof(System.Text.StringBuilder).Assembly],
-                ["System", "System.Collections.Generic", "System.Linq", "System.Threading.Tasks"]
-            )
-        );
-        CSharpEditor.LanguageService = service;
-        Closed += (_, _) => service.Dispose();
-        Status.Text = $"C# language service ready after {Stopwatch.GetElapsedTime(start).TotalMilliseconds:F0} ms";
-        return service;
     }
 
     private void SetLuauGrammar()

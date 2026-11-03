@@ -10,9 +10,10 @@ using CompletionList = Darp.CodeEditor.LanguageServices.CompletionList;
 namespace Darp.CodeEditor.Completion;
 
 /// <summary>
-/// Runs completion sessions. A session fetches its list once, off the UI thread. While the user keeps typing the
-/// word, <see cref="CompletionPopup"/> filters that list locally. Descriptions load lazily for the selected item,
-/// and commit replaces the word with text the service already computed.
+/// Runs completion sessions. A session fetches its list off the UI thread and <see cref="CompletionPopup"/> filters it
+/// locally while the user keeps typing the word; a list the service marked incomplete is fetched again for each
+/// further letter and replaces the shown one when it arrives. The selected item is resolved lazily for its description
+/// and additional edits, and commit inserts text the service already computed.
 /// </summary>
 internal sealed class CompletionController
 {
@@ -26,6 +27,7 @@ internal sealed class CompletionController
         _features = features;
         editor.TextArea.TextEntering += OnTextEntering;
         editor.TextArea.TextEntered += OnTextEntered;
+        editor.DocumentChanged += (_, _) => Cancel();
         editor.AddHandler(InputElement.KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
     }
 
@@ -52,9 +54,9 @@ internal sealed class CompletionController
         if (_session is not { } session || e.Text is not [char c] || IsIdentifierPart(c))
             return;
         if (
-            session.Window is { } window
+            session.Window is { SelectedItem: { } item } window
             && _features.Service is { } service
-            && service.Capabilities.CompletionCommitCharacters.Contains(c)
+            && (item.CommitCharacters ?? service.Capabilities.CompletionCommitCharacters).Contains(c)
         )
         {
             window.Commit();
@@ -66,11 +68,15 @@ internal sealed class CompletionController
     {
         if (_features.Service is not { } service || e.Text is not [char c])
             return;
-        if (_session is not null)
+        if (_session is { } session)
         {
-            // Typing on in the same word keeps the session; the list is filtered locally.
+            // Typing on in the same word keeps the session; the list is filtered locally, or fetched again.
             if (IsIdentifierPart(c))
+            {
+                if (session.Shown?.List.IsIncomplete == true)
+                    _ = ShowListAsync(service, session, new CompletionTrigger(CompletionTriggerKind.IncompleteList, c));
                 return;
+            }
             Cancel();
         }
         if (service.Capabilities.CompletionTriggerCharacters.Contains(c))
@@ -83,78 +89,170 @@ internal sealed class CompletionController
         }
     }
 
-    private async void Start(ILanguageService service, CompletionTrigger trigger)
+    private void Start(ILanguageService service, CompletionTrigger trigger)
     {
         Cancel();
-        var session = new Session();
+        var session = new Session(trigger.Kind);
         _session = session;
-        (DocumentSnapshot snapshot, ITextSourceVersion checkpoint) = _features.CreateSnapshot();
+        _ = ShowListAsync(service, session, trigger);
+    }
+
+    /// <summary>Fetches a list and shows it in place of the session's current one.</summary>
+    private async Task ShowListAsync(ILanguageService service, Session session, CompletionTrigger trigger)
+    {
+        // A newer request for an incomplete list replaces an older one.
+        session.Request?.Cancel();
+        var request = CancellationTokenSource.CreateLinkedTokenSource(session.Cancellation.Token);
+        session.Request = request;
+        CancellationToken cancellationToken = request.Token;
+        (DocumentVersion document, ITextSourceVersion checkpoint) = _features.CreateSnapshot();
         int position = _editor.CaretOffset;
         long start = Stopwatch.GetTimestamp();
-        CancellationToken cancellationToken = session.Cancellation.Token;
 
         CompletionList? list = await _features.RequestAsync(
-            () => service.GetCompletionsAsync(snapshot, position, trigger, cancellationToken),
+            () => service.GetCompletionsAsync(document, position, trigger, cancellationToken),
             cancellationToken
         );
-        if (_session != session)
+        if (_session != session || cancellationToken.IsCancellationRequested)
             return;
         if (list is null || list.Items.Count == 0)
         {
-            _session = null;
-            _editor.ReportTiming("completion-empty", Stopwatch.GetElapsedTime(start));
+            // A refined list that found nothing leaves the shown one to the local filter.
+            if (session.Window is null)
+                End(session, "completion-empty", start);
             return;
         }
 
         // The user may have typed on while the list was computed: map the word forward and keep the session only
         // while the caret is still in that word.
-        TextDocument document = _editor.Document;
+        TextDocument text = _editor.Document;
         int wordStart = checkpoint.MoveOffsetTo(
-            document.Version,
+            text.Version,
             list.ApplicableRange.Start,
             AnchorMovementType.BeforeInsertion
         );
-        int wordEnd = checkpoint.MoveOffsetTo(document.Version, list.ApplicableRange.End, AnchorMovementType.Default);
+        int wordEnd = checkpoint.MoveOffsetTo(text.Version, list.ApplicableRange.End, AnchorMovementType.Default);
         int caret = _editor.CaretOffset;
-        if (caret < wordStart || !IsIdentifierRun(document, wordStart, caret))
+        if (caret < wordStart || !IsIdentifierRun(text, wordStart, caret))
         {
-            _session = null;
-            _editor.ReportTiming("completion-dropped", Stopwatch.GetElapsedTime(start));
+            if (session.Window is null)
+                End(session, "completion-dropped", start);
             return;
         }
 
         long uiStart = Stopwatch.GetTimestamp();
+        var shown = new ShownList(service, _features, list, checkpoint, document.DocumentId);
         var window = new CompletionPopup(
             _editor.TextArea,
             list.Items,
-            index => LoadDescription(session, new CompletionItemReference(snapshot.DocumentId, list.ResultId, index))
+            index => LoadDescription(shown, index),
+            (index, from, to) => Commit(shown, index, from, to)
         )
         {
             StartOffset = wordStart,
             EndOffset = Math.Max(caret, wordEnd),
-            CloseWhenCaretAtBeginning = trigger.Kind == CompletionTriggerKind.Insertion,
+            CloseWhenCaretAtBeginning = session.Kind == CompletionTriggerKind.Insertion,
         };
         window.Closed += (_, _) =>
         {
-            if (_session != session)
+            // Replacing an incomplete list closes the old window; that does not end the session.
+            if (_session != session || session.Window != window)
                 return;
             _session = null;
             session.Cancellation.Cancel();
         };
         if (!window.Filter())
         {
-            _session = null;
             window.Hide();
-            _editor.ReportTiming("completion-dropped", Stopwatch.GetElapsedTime(start));
+            if (session.Window is null)
+                End(session, "completion-dropped", start);
             return;
         }
+        CompletionPopup? previous = session.Window;
+        session.Shown = shown;
         session.Window = window;
         window.Show();
-        _editor.ReportTiming("completion-ui", Stopwatch.GetElapsedTime(uiStart), list.Items.Count);
-        _editor.ReportTiming("completion", Stopwatch.GetElapsedTime(start), list.Items.Count);
+        previous?.Hide();
+        string name = trigger.Kind == CompletionTriggerKind.IncompleteList ? "completion-refined" : "completion";
+        _editor.ReportTiming($"{name}-ui", Stopwatch.GetElapsedTime(uiStart), list.Items.Count);
+        _editor.ReportTiming(name, Stopwatch.GetElapsedTime(start), list.Items.Count);
     }
 
-    private TextBlock LoadDescription(Session session, CompletionItemReference reference)
+    private void End(Session session, string timing, long start)
+    {
+        _session = null;
+        session.Cancellation.Cancel();
+        _editor.ReportTiming(timing, Stopwatch.GetElapsedTime(start));
+    }
+
+    /// <summary>
+    /// Replaces the word with the item's text, and applies its additional edits, such as a <c>using</c> directive:
+    /// at once when the item is resolved, otherwise when the resolve arrives.
+    /// </summary>
+    private void Commit(ShownList shown, int index, int wordStart, int wordEnd)
+    {
+        CompletionItem item = shown.List.Items[index];
+        TextDocument document = _editor.Document;
+        if (!shown.Checkpoint.BelongsToSameDocumentAs(document.Version))
+            return;
+        if (item.Range is { } range)
+        {
+            int itemStart = shown.Checkpoint.MoveOffsetTo(
+                document.Version,
+                range.Start,
+                AnchorMovementType.BeforeInsertion
+            );
+            wordStart = Math.Min(wordStart, itemStart);
+        }
+        Task<CompletionItemDetails?> details = shown.Resolve(index);
+        document.BeginUpdate();
+        try
+        {
+            document.Replace(wordStart, wordEnd - wordStart, item.InsertText);
+            if (details.IsCompleted)
+                ApplyEdits(details.Result?.AdditionalEdits ?? item.AdditionalEdits, shown.Checkpoint);
+        }
+        finally
+        {
+            document.EndUpdate();
+        }
+        if (!details.IsCompleted)
+            _ = ApplyEditsWhenResolvedAsync(details, item, shown.Checkpoint);
+    }
+
+    private async Task ApplyEditsWhenResolvedAsync(
+        Task<CompletionItemDetails?> details,
+        CompletionItem item,
+        ITextSourceVersion checkpoint
+    )
+    {
+        IReadOnlyList<TextEdit>? edits = (await details)?.AdditionalEdits ?? item.AdditionalEdits;
+        if (edits is not { Count: > 0 } || !checkpoint.BelongsToSameDocumentAs(_editor.Document.Version))
+            return;
+        _editor.Document.BeginUpdate();
+        try
+        {
+            ApplyEdits(edits, checkpoint);
+        }
+        finally
+        {
+            _editor.Document.EndUpdate();
+        }
+    }
+
+    /// <summary>Applies edits in the coordinates of the list's version, each mapped to the current text.</summary>
+    private void ApplyEdits(IReadOnlyList<TextEdit>? edits, ITextSourceVersion checkpoint)
+    {
+        TextDocument document = _editor.Document;
+        foreach (TextEdit edit in edits ?? [])
+        {
+            int start = checkpoint.MoveOffsetTo(document.Version, edit.Range.Start, AnchorMovementType.BeforeInsertion);
+            int end = checkpoint.MoveOffsetTo(document.Version, edit.Range.End, AnchorMovementType.BeforeInsertion);
+            document.Replace(start, Math.Max(0, end - start), edit.NewText);
+        }
+    }
+
+    private TextBlock LoadDescription(ShownList shown, int index)
     {
         var block = new TextBlock
         {
@@ -162,20 +260,17 @@ internal sealed class CompletionController
             MaxWidth = 480,
             TextWrapping = TextWrapping.Wrap,
             Foreground = Brushes.Gainsboro,
-            FontFamily = _editor.FontFamily,
         };
-        if (_features.Service is { } service)
-            _ = LoadAsync(service);
+        _ = LoadAsync();
         return block;
 
-        async Task LoadAsync(ILanguageService service)
+        async Task LoadAsync()
         {
-            CancellationToken cancellationToken = session.Cancellation.Token;
-            string? description = await _features.RequestAsync(
-                () => service.GetCompletionDescriptionAsync(reference, cancellationToken),
-                cancellationToken
-            );
-            block.Text = description ?? "";
+            CompletionItemDetails? details = await shown.Resolve(index);
+            if (details is { Description.Count: > 0 })
+                MarkupText.Show(block, details.Description, _editor.FontFamily);
+            else
+                block.Text = "";
         }
     }
 
@@ -196,9 +291,53 @@ internal sealed class CompletionController
 
     private static bool IsIdentifierPart(char c) => char.IsLetterOrDigit(c) || c == '_';
 
-    private sealed class Session
+    /// <param name="kind">How the session started; refining an incomplete list keeps it.</param>
+    private sealed class Session(CompletionTriggerKind kind)
     {
+        public CompletionTriggerKind Kind { get; } = kind;
+
         public CancellationTokenSource Cancellation { get; } = new();
+
+        /// <summary>The request in flight, for the first list or a refined one.</summary>
+        public CancellationTokenSource? Request { get; set; }
+
+        /// <summary>The list on screen and its window; null until the first list arrived.</summary>
+        public ShownList? Shown { get; set; }
+
         public CompletionPopup? Window { get; set; }
+    }
+
+    /// <summary>A list on screen, with the version it was computed for and its items' resolves.</summary>
+    private sealed class ShownList(
+        ILanguageService service,
+        LanguageFeatures features,
+        CompletionList list,
+        ITextSourceVersion checkpoint,
+        string documentId
+    )
+    {
+        private readonly ILanguageService _service = service;
+        private readonly LanguageFeatures _features = features;
+        private readonly string _documentId = documentId;
+        private readonly Dictionary<int, Task<CompletionItemDetails?>> _details = [];
+
+        public CompletionList List { get; } = list;
+
+        public ITextSourceVersion Checkpoint { get; } = checkpoint;
+
+        /// <summary>Resolves an item once. Not cancelled with the session: a commit may still need its edits.</summary>
+        public Task<CompletionItemDetails?> Resolve(int index)
+        {
+            if (!_details.TryGetValue(index, out Task<CompletionItemDetails?>? details))
+            {
+                var reference = new CompletionItemReference(_documentId, List.ResultId, index);
+                details = _features.RequestAsync(
+                    () => _service.ResolveCompletionItemAsync(reference, CancellationToken.None),
+                    CancellationToken.None
+                );
+                _details[index] = details;
+            }
+            return details;
+        }
     }
 }

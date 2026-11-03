@@ -18,14 +18,19 @@ using ParameterInfo = Darp.CodeEditor.LanguageServices.ParameterInfo;
 using QuickInfo = Darp.CodeEditor.LanguageServices.QuickInfo;
 using RoslynCompletion = Microsoft.CodeAnalysis.Completion;
 using SignatureHelp = Darp.CodeEditor.LanguageServices.SignatureHelp;
+using TextChange = Microsoft.CodeAnalysis.Text.TextChange;
 
-namespace Darp.CodeEditor.CSharp;
+namespace Darp.CodeEditor.CSharp.Server.Benchmark.InProcess;
 
 /// <summary>
-/// C# script language features from Roslyn's Workspaces and Features layers. Every document is its own script
-/// submission with the configured globals type, references and imports.
+/// C# script language features from Roslyn's Workspaces and Features layers, in the calling process. Every document is
+/// its own script submission with the configured globals type, references and imports.
 /// </summary>
-public sealed class CSharpScriptLanguageService : ILanguageService, IDisposable
+/// <remarks>
+/// The editor's first C# service, before every language moved to a language server. It stays as the baseline the
+/// server is measured against; it uses the editor's result types but no longer implements its contract.
+/// </remarks>
+public sealed class CSharpScriptLanguageService : IDisposable
 {
     private const string WarmUpDocumentId = "<warm-up>";
 
@@ -215,7 +220,12 @@ public sealed class CSharpScriptLanguageService : ILanguageService, IDisposable
         if (item is null)
             return null;
         string text = string.Join(Environment.NewLine, item.Sections.Select(s => s.Text).Where(t => t.Length > 0));
-        return text.Length == 0 ? null : new QuickInfo(new TextRange(item.Span.Start, item.Span.Length), text);
+        return text.Length == 0
+            ? null
+            : new QuickInfo(
+                new TextRange(item.Span.Start, item.Span.Length),
+                [new MarkupBlock(MarkupBlockKind.Paragraph, text)]
+            );
     }
 
     /// <remarks>

@@ -27,6 +27,7 @@ public class CodeEditor : TextEditor
     private BackgroundTextMateHighlighter? _highlighter;
     private TextMate.Installation? _textMate;
     private string? _languageId;
+    private string _documentId = Guid.NewGuid().ToString("N");
 
     public CodeEditor()
     {
@@ -78,12 +79,23 @@ public class CodeEditor : TextEditor
         SetGrammar(null, path);
     }
 
-    /// <summary>Identifies the document in requests to <see cref="LanguageService"/>.</summary>
-    public string DocumentId { get; set; } = Guid.NewGuid().ToString("N");
+    /// <summary>Identifies the document in <see cref="LanguageService"/>; changing it opens the document again.</summary>
+    public string DocumentId
+    {
+        get => _documentId;
+        set
+        {
+            if (value == _documentId)
+                return;
+            _documentId = value;
+            _languageFeatures.OnDocumentIdChanged();
+        }
+    }
 
     /// <summary>
-    /// The language features for this document, or null for highlighting and search only. Can be set at any time,
-    /// for example once a language service finished loading in the background.
+    /// The language features for this document, or null for highlighting and search only. Can be set at any time; the
+    /// document is opened in the service then, and closed when it is set to null or another service. One service can
+    /// serve many editors.
     /// </summary>
     public ILanguageService? LanguageService
     {

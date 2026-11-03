@@ -27,7 +27,6 @@ internal sealed class HoverController
             MaxWidth = 600,
             TextWrapping = TextWrapping.Wrap,
             Foreground = Brushes.Gainsboro,
-            FontFamily = editor.FontFamily,
         };
         _popup = new Popup
         {
@@ -47,6 +46,8 @@ internal sealed class HoverController
         editor.AddPopup(_popup);
         editor.PointerHover += OnPointerHover;
         editor.PointerHoverStopped += (_, _) => Close();
+        // Typing makes the information stale; cancelling the request tells the server it is no longer needed.
+        editor.TextChanged += (_, _) => Close();
     }
 
     private async void OnPointerHover(object? sender, PointerEventArgs e)
@@ -58,33 +59,33 @@ internal sealed class HoverController
             return;
         int offset = _editor.Document.GetOffset(p.Location);
 
-        string diagnostics = string.Join(
-            Environment.NewLine,
-            _features.DiagnosticsAt(offset).Select(d => $"{d.Id}: {d.Message}")
-        );
+        MarkupBlock[] diagnostics =
+        [
+            .. _features
+                .DiagnosticsAt(offset)
+                .Select(d => new MarkupBlock(MarkupBlockKind.Paragraph, $"{d.Id}: {d.Message}")),
+        ];
         Show(diagnostics);
 
         if (_features.Service is not { } service)
             return;
         var cancellation = new CancellationTokenSource();
         _cancellation = cancellation;
-        (DocumentSnapshot snapshot, _) = _features.CreateSnapshot();
+        (DocumentVersion document, _) = _features.CreateSnapshot();
         QuickInfo? info = await _features.RequestAsync(
-            () => service.GetQuickInfoAsync(snapshot, offset, cancellation.Token),
+            () => service.GetQuickInfoAsync(document, offset, cancellation.Token),
             cancellation.Token
         );
         if (info is null || cancellation.IsCancellationRequested)
             return;
-        Show(
-            diagnostics.Length == 0 ? info.Text : $"{info.Text}{Environment.NewLine}{Environment.NewLine}{diagnostics}"
-        );
+        Show([.. info.Content, .. diagnostics]);
     }
 
-    private void Show(string text)
+    private void Show(IReadOnlyList<MarkupBlock> content)
     {
-        if (text.Length == 0)
+        if (content.Count == 0)
             return;
-        _text.Text = text;
+        MarkupText.Show(_text, content, _editor.FontFamily);
         _popup.IsOpen = true;
     }
 

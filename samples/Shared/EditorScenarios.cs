@@ -11,6 +11,9 @@ internal interface IBenchHost
 
     /// <summary>Shows the editor in place of the current content and returns once it is laid out.</summary>
     Task ShowAsync(CodeEditor editor);
+
+    /// <summary>Selects a tab and returns at the next frame.</summary>
+    Task ShowTabAsync(int index);
 }
 
 /// <summary>Scenarios that need no language service. They run with and without TextMate to attribute stalls.</summary>

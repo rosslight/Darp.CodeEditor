@@ -37,21 +37,25 @@ internal sealed class SignatureHelpController
         if (_features.Service is not { } service || e.Text is not [char c])
             return;
         if (service.Capabilities.SignatureHelpTriggerCharacters.Contains(c))
-            Request(service);
+            Request(
+                service,
+                new SignatureHelpTrigger(SignatureHelpTriggerKind.TriggerCharacter, c, _window is not null)
+            );
         else if (c == ')')
             Close();
     }
 
-    private async void Request(ILanguageService service)
+    private async void Request(ILanguageService service, SignatureHelpTrigger trigger)
     {
+        // The older request is no longer needed: cancelling it tells the server so.
         _cancellation?.Cancel();
         var cancellation = new CancellationTokenSource();
         _cancellation = cancellation;
-        (DocumentSnapshot snapshot, ITextSourceVersion checkpoint) = _features.CreateSnapshot();
+        (DocumentVersion version, ITextSourceVersion checkpoint) = _features.CreateSnapshot();
         int position = _editor.CaretOffset;
         long start = Stopwatch.GetTimestamp();
         SignatureHelp? help = await _features.RequestAsync(
-            () => service.GetSignatureHelpAsync(snapshot, position, cancellation.Token),
+            () => service.GetSignatureHelpAsync(version, position, trigger, cancellation.Token),
             cancellation.Token
         );
         if (cancellation.IsCancellationRequested)
@@ -105,7 +109,11 @@ internal sealed class SignatureHelpController
 
         public string CurrentIndexText => $"{_selectedIndex + 1} of {Count}";
 
-        public object CurrentHeader => CreateHeader(_help.Signatures[_selectedIndex], _help.ActiveParameter);
+        public object CurrentHeader =>
+            CreateHeader(
+                _help.Signatures[_selectedIndex],
+                _help.Signatures[_selectedIndex].ActiveParameter ?? _help.ActiveParameter
+            );
 
         public object CurrentContent => _help.Signatures[_selectedIndex].Documentation ?? "";
 
@@ -118,11 +126,14 @@ internal sealed class SignatureHelpController
             int searchFrom = 0;
             for (int i = 0; i < signature.Parameters.Count; i++)
             {
-                string parameter = signature.Parameters[i].Label;
-                int index = label.IndexOf(parameter, searchFrom, StringComparison.Ordinal);
-                if (index < 0)
+                ParameterInfo parameter = signature.Parameters[i];
+                // The service's offsets, or else the label's next occurrence.
+                int index =
+                    parameter.LabelRange?.Start ?? label.IndexOf(parameter.Label, searchFrom, StringComparison.Ordinal);
+                int length = parameter.LabelRange?.Length ?? parameter.Label.Length;
+                if (index < searchFrom || index + length > label.Length)
                     break;
-                searchFrom = index + parameter.Length;
+                searchFrom = index + length;
                 if (i != activeParameter)
                     continue;
                 inlines.Add(new Run(label[..index]));
