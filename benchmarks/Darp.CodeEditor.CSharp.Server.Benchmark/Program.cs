@@ -162,7 +162,12 @@ internal sealed record AnswerCounts(int Results, int Cancelled, int ContentModif
     }
 
     public static AnswerCounts operator +(AnswerCounts a, AnswerCounts b) =>
-        new(a.Results + b.Results, a.Cancelled + b.Cancelled, a.ContentModified + b.ContentModified, a.Failed + b.Failed);
+        new(
+            a.Results + b.Results,
+            a.Cancelled + b.Cancelled,
+            a.ContentModified + b.ContentModified,
+            a.Failed + b.Failed
+        );
 
     public override string ToString() => $"{Results} / {Cancelled} / {ContentModified} / {Failed}";
 }

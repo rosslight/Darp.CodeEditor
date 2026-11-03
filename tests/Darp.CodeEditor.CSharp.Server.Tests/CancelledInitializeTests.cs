@@ -40,7 +40,11 @@ public sealed class CancelledInitializeTests
         int clientId = client.Process.Id;
         await using var server = new InProcessServer();
 
-        await InitializeTwiceAsync(server, InProcessServer.InitializeParams(TestEnvironments.Device, cancelledId), clientId);
+        await InitializeTwiceAsync(
+            server,
+            InProcessServer.InitializeParams(TestEnvironments.Device, cancelledId),
+            clientId
+        );
         cancelledClient.Process.Kill();
         await cancelledClient.Process.WaitForExitAsync(InProcessServer.Timeout);
         client.Process.Kill();

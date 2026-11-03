@@ -21,7 +21,8 @@ internal sealed class InProcessServer : IAsyncDisposable
     );
     private readonly Channel<int> _exitedClients = Channel.CreateUnbounded<int>();
     private readonly Channel<string> _messages = Channel.CreateUnbounded<string>();
-    private readonly Channel<PublishDiagnosticsParams> _diagnostics = Channel.CreateUnbounded<PublishDiagnosticsParams>();
+    private readonly Channel<PublishDiagnosticsParams> _diagnostics =
+        Channel.CreateUnbounded<PublishDiagnosticsParams>();
     private int _initializeCount;
 
     public InProcessServer()
@@ -29,7 +30,11 @@ internal sealed class InProcessServer : IAsyncDisposable
         var toServer = new Pipe();
         var toClient = new Pipe();
         var session = new ScriptSession(
-            ServerOptions.Default with { DiagnosticsDelay = TimeSpan.FromMilliseconds(50), WarmUp = false },
+            ServerOptions.Default with
+            {
+                DiagnosticsDelay = TimeSpan.FromMilliseconds(50),
+                WarmUp = false,
+            },
             clientExited: processId => _exitedClients.Writer.TryWrite(processId)
         );
         _server = new LanguageServer(

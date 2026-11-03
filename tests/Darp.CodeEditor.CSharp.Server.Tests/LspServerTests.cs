@@ -599,7 +599,10 @@ public sealed class LspDocumentSyncTests
 
         foreach ((string method, LspResponse response) in responses)
             response.Error.ShouldBeNull(method);
-        responses["completion"].Result.GetArray("items").Select(i => i.GetString("label")).ShouldContain("ReadTemperature");
+        responses["completion"]
+            .Result.GetArray("items")
+            .Select(i => i.GetString("label"))
+            .ShouldContain("ReadTemperature");
         responses["signatureHelp"].Result.GetArray("signatures").ShouldNotBeEmpty();
         responses["semanticTokens"].Result.GetArray("data").ShouldNotBeEmpty();
         // The hover is for the text it was sent for, where Device is on the first line.
@@ -615,7 +618,10 @@ public sealed class LspDocumentSyncTests
         const string text = EveryRequestText;
         return
         [
-            ("completion", client.Send("textDocument/completion", TestServer.At(uri, text, "Device.", "Device.".Length))),
+            (
+                "completion",
+                client.Send("textDocument/completion", TestServer.At(uri, text, "Device.", "Device.".Length))
+            ),
             ("hover", client.Send("textDocument/hover", TestServer.At(uri, text, "Device"))),
             ("signatureHelp", client.Send("textDocument/signatureHelp", TestServer.AtEnd(uri, text))),
             (

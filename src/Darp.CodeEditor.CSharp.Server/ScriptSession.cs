@@ -310,5 +310,9 @@ internal sealed class ScriptSession
         );
 
     /// <summary>What an <c>initialize</c> read, to start once its result became the answer.</summary>
-    private sealed record InitializeAttempt(ResolvedScriptEnvironment Environment, ClientFeatures Client, int? ProcessId);
+    private sealed record InitializeAttempt(
+        ResolvedScriptEnvironment Environment,
+        ClientFeatures Client,
+        int? ProcessId
+    );
 }
