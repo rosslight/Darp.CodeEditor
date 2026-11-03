@@ -141,6 +141,7 @@ internal sealed class GatedStream : Stream
     private readonly TaskCompletionSource _resume = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _writes;
     private int _pauseAt = -1;
+    private int _failAt = -1;
 
     public GatedStream(Stream inner) => _inner = inner;
 
@@ -166,11 +167,22 @@ internal sealed class GatedStream : Stream
 
     public void Resume() => _resume.TrySetResult();
 
+    /// <summary>Fails the write with this index with an <see cref="IOException"/>, like a broken pipe.</summary>
+    public void FailAt(int write) => _failAt = write;
+
+    /// <summary>How many writes were attempted, the failed one included.</summary>
+    public int Writes => Volatile.Read(ref _writes);
+
     public override async ValueTask WriteAsync(
         ReadOnlyMemory<byte> buffer,
         CancellationToken cancellationToken = default
     )
     {
+        if (_writes == _failAt)
+        {
+            _writes++;
+            throw new IOException("The pipe is broken.");
+        }
         if (_writes++ == _pauseAt)
         {
             Paused.TrySetResult();

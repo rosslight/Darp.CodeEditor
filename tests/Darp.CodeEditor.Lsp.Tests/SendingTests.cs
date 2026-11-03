@@ -120,6 +120,64 @@ public sealed class SendingTests : IAsyncLifetime
         }
     }
 
+    [Fact]
+    public async Task A_failed_write_ends_the_connection_and_fails_pending_and_later_sends()
+    {
+        Task<JsonElement> pending = _connection.SendRequestAsync(
+            TestMethods.Request("answered-never"),
+            default,
+            TestContext.Current.CancellationToken
+        );
+        await _wire.ReceiveAsync();
+        // The next frame's header goes out, then its body fails: the stream now ends inside a frame.
+        _output.FailAt(3);
+
+        Task broken = _connection.SendNotificationAsync(TestMethods.Notification("broken"), default);
+
+        await Should.ThrowAsync<IOException>(broken.WaitAsync(s_prompt, TestContext.Current.CancellationToken));
+        await _connection.Completion.WaitAsync(s_prompt, TestContext.Current.CancellationToken);
+        await Should.ThrowAsync<IOException>(pending.WaitAsync(s_prompt, TestContext.Current.CancellationToken));
+        await Should.ThrowAsync<IOException>(
+            _connection
+                .SendNotificationAsync(TestMethods.Notification("after"), default)
+                .WaitAsync(s_prompt, TestContext.Current.CancellationToken)
+        );
+        _output.Writes.ShouldBe(4);
+    }
+
+    [Fact]
+    public async Task A_message_that_fails_to_serialize_fails_only_its_own_send()
+    {
+        var failing = new NotificationType<string>(
+            "failing",
+            (JsonTypeInfo<string>)
+                new JsonSerializerOptions
+                {
+                    Converters = { new ThrowingConverter() },
+                    TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+                }.GetTypeInfo(typeof(string))
+        );
+
+        Task failed = _connection.SendNotificationAsync(failing, "value");
+        Task next = _connection.SendNotificationAsync(TestMethods.Notification("next"), default);
+
+        await Should.ThrowAsync<InvalidOperationException>(
+            failed.WaitAsync(s_prompt, TestContext.Current.CancellationToken)
+        );
+        await next.WaitAsync(s_prompt, TestContext.Current.CancellationToken);
+        ((string?)(await _wire.ReceiveAsync())["method"]).ShouldBe("next");
+        _connection.Completion.IsCompleted.ShouldBeFalse();
+    }
+
+    private sealed class ThrowingConverter : JsonConverter<string>
+    {
+        public override string Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+            reader.GetString() ?? "";
+
+        public override void Write(Utf8JsonWriter writer, string value, JsonSerializerOptions options) =>
+            throw new InvalidOperationException("This value cannot be serialized.");
+    }
+
     /// <summary>Serializes a string only once released, like a large document that takes long to serialize.</summary>
     private sealed class BlockingConverter : JsonConverter<string>
     {
