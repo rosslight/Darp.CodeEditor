@@ -225,7 +225,9 @@ settings requests answered by the `Settings` hook.
 3. Diagnostics are pushed: the editor shows those of its current version and drops older ones.
 4. Completion lists keep their incompleteness, per-item commit characters and edit ranges. Resolve loads descriptions
    and additional edits, such as a `using` directive, which commit applies in the same undo step: at once, or when a
-   late resolve arrives while the document is still as the commit left it; after any other edit they are dropped.
+   late resolve arrives while the document is still as the commit left it and the commit's undo step is the last;
+   after any other edit or undo step they are dropped. Signature help that an edit made stale is asked again once
+   typing pauses for 100 ms.
 5. The server runs as a `ChildProcess`: on Windows in a job object that kills it when the app dies, on Linux with
    `PR_SET_PDEATHSIG` armed through `setpriv` from a launcher thread that never ends. When it crashes, a `Supervisor`
    starts it again after 0.5 s, doubling up to 30 s while it keeps failing, and opens the documents again. Meanwhile
