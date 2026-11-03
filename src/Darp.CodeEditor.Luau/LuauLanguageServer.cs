@@ -141,9 +141,12 @@ public static class LuauLanguageServer
     /// published diagnostics by this exact text; <see cref="Uri"/> would keep <c>C:</c> and <c>(</c>, which luau-lsp
     /// writes as <c>c%3A</c> and <c>%28</c>.
     /// </summary>
-    internal static string ToFileUri(string path)
+    internal static string ToFileUri(string path) => ToFileUri(path, OperatingSystem.IsWindows());
+
+    /// <param name="windows">Whether <paramref name="path"/> is a Windows path, with backslashes as separators.</param>
+    internal static string ToFileUri(string path, bool windows)
     {
-        string slashed = path.Replace('\\', '/');
+        string slashed = windows ? path.Replace('\\', '/') : path;
         var uri = new StringBuilder("file://");
         if (slashed.StartsWith("//", StringComparison.Ordinal))
         {

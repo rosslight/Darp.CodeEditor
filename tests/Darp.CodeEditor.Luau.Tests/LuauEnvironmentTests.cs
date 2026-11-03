@@ -99,9 +99,15 @@ public sealed class LuauEnvironmentTests
 
     [Theory]
     [InlineData("/home/user/My Scripts (1)/a+b.luau", "file:///home/user/My%20Scripts%20%281%29/a%2Bb.luau")]
+    [InlineData("/home/user/Skripte/Grüße.luau", "file:///home/user/Skripte/Gr%C3%BC%C3%9Fe.luau")]
+    // A backslash is part of a Unix file name.
+    [InlineData(@"/home/user/a\b.luau", "file:///home/user/a%5Cb.luau")]
+    public void Unix_paths_are_written_as_luau_lsp_writes_them(string path, string uri) =>
+        LuauLanguageServer.ToFileUri(path, windows: false).ShouldBe(uri);
+
+    [Theory]
     [InlineData(@"C:\Users\user\Scripts\main.luau", "file:///c%3A/Users/user/Scripts/main.luau")]
     [InlineData(@"\\server\share\main.luau", "file://server/share/main.luau")]
-    [InlineData("/home/user/Skripte/Grüße.luau", "file:///home/user/Skripte/Gr%C3%BC%C3%9Fe.luau")]
-    public void File_URIs_are_written_as_luau_lsp_writes_them(string path, string uri) =>
-        LuauLanguageServer.ToFileUri(path).ShouldBe(uri);
+    public void Windows_paths_are_written_as_luau_lsp_writes_them(string path, string uri) =>
+        LuauLanguageServer.ToFileUri(path, windows: true).ShouldBe(uri);
 }
