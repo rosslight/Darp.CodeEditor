@@ -4,8 +4,12 @@
     <TargetFramework>net10.0</TargetFramework>
     <!-- Roslyn Workspaces/Features compose their services with System.Composition (reflection): JIT only. -->
     <IsAotCompatible>false</IsAotCompatible>
-    <!-- Framework-dependent: runs on an installed or per-user .NET runtime. -->
+    <!--
+      Framework-dependent and portable: the Darp.CodeEditor.CSharp package ships this build output, and an app's publish
+      compiles it with ReadyToRun and gives it an app host that runs on the runtime in helpers/dotnet.
+    -->
     <SelfContained>false</SelfContained>
+    <UseAppHost>false</UseAppHost>
     <InvariantGlobalization>true</InvariantGlobalization>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <ServerGarbageCollection>false</ServerGarbageCollection>

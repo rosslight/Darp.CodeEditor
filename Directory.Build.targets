@@ -1,10 +1,8 @@
 <Project>
   <!--
     Packages are the libraries under src/. Executables under src/ and everything outside it (samples, tests, benchmarks,
-    tools) are not packed, unless a project sets IsPackable itself.
-
-    TODO: the C# server and the script runner are executables that ship inside a host-facing package. How that package
-    takes them in is still being designed; until then they are not packed.
+    tools) are not packed, unless a project sets IsPackable itself. The C# language server and the script runner are
+    executables that ship inside the Darp.CodeEditor.CSharp package, with the libraries only they and that package use.
   -->
   <PropertyGroup>
     <_IsUnderSrc>$(MSBuildProjectDirectory.StartsWith($([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', 'src'))))</_IsUnderSrc>

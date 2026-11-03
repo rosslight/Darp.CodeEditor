@@ -1,14 +1,18 @@
 <Project>
   <!--
     Puts luau-lsp, its base configurations and the Luau grammar next to the app, where LuauLanguageServer and
-    LuauLanguage find them by default. Import this file into the app project.
+    LuauLanguage find them by default. The Darp.CodeEditor.Luau package imports this file into every project that
+    references it, and it acts in apps (OutputType Exe or WinExe); projects in this repository import it from source.
 
       helpers/luau-lsp/luau-lsp(.exe)     the pinned luau-lsp release for the app's runtime identifier
       helpers/luau-lsp/luaurc/*.luaurc    one base configuration per LuauMode
       Grammars/Luau.tmLanguage.json       the TextMate grammar
 
-    The release comes from GitHub once and is kept in LuauLspCacheDirectory. Every build checks the archive against
-    the SHA-256 below before it is used; a download that does not match is deleted and fails the build.
+    luau-lsp is native code with one build per platform, so the package carries the pinned release's four builds in
+    tools/luau-lsp/<asset>/ and the app's build copies the one for its runtime identifier; nothing is downloaded. In
+    this repository, and to pack the package, the release comes from GitHub once and is kept in LuauLspCacheDirectory.
+    Every build checks the archive against the SHA-256 below before it is used; a download that does not match is
+    deleted and fails the build.
 
       IncludeLuauLsp          false: no luau-lsp; the app brings its own (LuauLanguageServerOptions.ServerPath)
       LuauLspExecutable       a luau-lsp to copy instead of the pinned release; it is not checked
@@ -18,13 +22,12 @@
 
     Windows arm64 gets the x64 build, which runs under emulation: luau-lsp has no arm64 build for Windows. Runtime
     identifiers other than win-x64, win-arm64, linux-x64, linux-arm64, osx-x64 and osx-arm64 fail the build.
-
-    TODO: the NuGet package is to carry luau-lsp per runtime identifier instead of downloading it at build time, laid
-    out like the other helpers. LuauLspExecutable here and LuauLanguageServerOptions.ServerPath at run time are the
-    seam for that.
   -->
   <PropertyGroup>
-    <IncludeLuauLsp Condition="'$(IncludeLuauLsp)' == ''">true</IncludeLuauLsp>
+    <_LuauLspPackageDirectory>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', 'tools', 'luau-lsp'))</_LuauLspPackageDirectory>
+    <_LuauLspFromPackage Condition="Exists('$(_LuauLspPackageDirectory)')">true</_LuauLspFromPackage>
+    <_LuauIsApp Condition="'$(OutputType)' == 'Exe' or '$(OutputType)' == 'WinExe'">true</_LuauIsApp>
+    <IncludeLuauLsp Condition="'$(IncludeLuauLsp)' == '' and '$(_LuauIsApp)' == 'true'">true</IncludeLuauLsp>
     <LuauLspCacheDirectory Condition="'$(LuauLspCacheDirectory)' == ''"
       >$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '..', '..', '.tools', 'luau-lsp'))</LuauLspCacheDirectory>
     <LuauLspCacheDirectory>$([MSBuild]::EnsureTrailingSlash('$(LuauLspCacheDirectory)'))</LuauLspCacheDirectory>
@@ -63,7 +66,7 @@
       >https://github.com/JohnnyMorganz/luau-lsp/releases/download/$(_LuauLspVersion)/luau-lsp-$(_LuauLspAsset).zip</LuauLspDownloadUrl>
   </PropertyGroup>
 
-  <ItemGroup>
+  <ItemGroup Condition="'$(_LuauIsApp)' == 'true'">
     <None
       Include="$(MSBuildThisFileDirectory)luaurc\*.luaurc"
       Link="helpers\luau-lsp\luaurc\%(Filename)%(Extension)"
@@ -133,20 +136,51 @@
     </ItemGroup>
   </Target>
 
-  <!-- Sets LuauLspPath to the luau-lsp for the app: LuauLspExecutable, or the pinned release, checked and unpacked. -->
-  <Target Name="ResolveLuauLsp" DependsOnTargets="_UnpackLuauLsp">
+  <!--
+    Sets LuauLspPath to the luau-lsp for the app: LuauLspExecutable, the package's build, or the pinned release, checked
+    and unpacked. Returns it with the release asset it is, which packing the package uses.
+  -->
+  <Target
+    Name="ResolveLuauLsp"
+    DependsOnTargets="_CopyLuauLspFromPackage;_UnpackLuauLsp"
+    Returns="@(_ResolvedLuauLsp)"
+  >
     <PropertyGroup>
       <LuauLspPath Condition="'$(LuauLspExecutable)' != ''"
         >$([System.IO.Path]::GetFullPath('$(LuauLspExecutable)'))</LuauLspPath>
     </PropertyGroup>
     <Error Condition="!Exists('$(LuauLspPath)')" Text="luau-lsp is not at '$(LuauLspPath)'." />
+    <ItemGroup>
+      <_ResolvedLuauLsp Include="$(LuauLspPath)" Asset="$(_LuauLspAsset)" />
+    </ItemGroup>
   </Target>
 
-  <Target Name="_GetLuauLspArchive" Condition="'$(LuauLspExecutable)' == ''">
+  <Target Name="_CheckLuauLspAsset">
     <Error
       Condition="'$(_LuauLspAsset)' == ''"
       Text="luau-lsp $(_LuauLspVersion) has no build for the runtime identifier '$(_LuauLspRid)'. Set LuauLspExecutable to a luau-lsp built for it, or IncludeLuauLsp to false."
     />
+  </Target>
+
+  <!-- The package's build for the app, copied: NuGet does not keep the executable bit. -->
+  <Target
+    Name="_CopyLuauLspFromPackage"
+    DependsOnTargets="_CheckLuauLspAsset"
+    Condition="'$(LuauLspExecutable)' == '' and '$(_LuauLspFromPackage)' == 'true'"
+  >
+    <PropertyGroup>
+      <_LuauLspUnpacked>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'luau-lsp', '$(_LuauLspVersion)', '$(_LuauLspAsset)'))</_LuauLspUnpacked>
+      <LuauLspPath>$(_LuauLspUnpacked)$(_LuauLspFileName)</LuauLspPath>
+    </PropertyGroup>
+    <Copy
+      SourceFiles="$(_LuauLspPackageDirectory)$(_LuauLspAsset)/$(_LuauLspFileName)"
+      DestinationFolder="$(_LuauLspUnpacked)"
+      SkipUnchangedFiles="true"
+    />
+    <MakeLuauLspExecutable Executable="$(LuauLspPath)" Condition="!$([MSBuild]::IsOSPlatform('Windows'))" />
+  </Target>
+
+  <Target Name="_GetLuauLspArchive" Condition="'$(LuauLspExecutable)' == ''" DependsOnTargets="_CheckLuauLspAsset">
     <PropertyGroup>
       <_LuauLspArchive>$(LuauLspArchive)</_LuauLspArchive>
       <_LuauLspArchive Condition="'$(_LuauLspArchive)' == ''"
@@ -199,7 +233,7 @@
   <Target
     Name="_UnpackLuauLsp"
     DependsOnTargets="_GetLuauLspArchive;_DownloadLuauLsp"
-    Condition="'$(LuauLspExecutable)' == ''"
+    Condition="'$(LuauLspExecutable)' == '' and '$(_LuauLspFromPackage)' != 'true'"
   >
     <GetFileHash Files="$(_LuauLspArchive)" Algorithm="SHA256">
       <Output TaskParameter="Hash" PropertyName="_LuauLspArchiveHash" />

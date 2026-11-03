@@ -1,0 +1,525 @@
+<Project>
+  <!--
+    Puts the C# helpers next to the app: the C# script language server, the C# script runner and, on publish, the .NET
+    runtime both run on. The Darp.CodeEditor.CSharp package imports this file into every project that references it, and
+    it acts in apps (OutputType Exe or WinExe); projects in this repository import it from source.
+
+      build     $(OutDir)helpers/csharp-server/       the server and the runner as portable IL; they run with dotnet on
+                $(OutDir)helpers/csharp-runner/       the runtime that runs the app, so dotnet run works as it is
+      publish   $(PublishDir)helpers/dotnet/          the .NET runtime of $(RuntimeIdentifier), laid out as an installed
+                                                      one: host/fxr/<version>/ and shared/Microsoft.NETCore.App/<version>/
+                $(PublishDir)helpers/csharp-server/   ReadyToRun for $(RuntimeIdentifier), each with an app host that
+                $(PublishDir)helpers/csharp-runner/   looks for .NET in ../dotnet and nowhere else
+
+    The helpers ship in the package as portable IL. Publish compiles them with ReadyToRun and creates their app hosts with
+    the SDK's own tasks, and copies the runtime from the runtime pack, so one package serves every runtime identifier and
+    the build machine needs nothing but NuGet. Publishing needs a RuntimeIdentifier and PublishReadyToRun=true in the app
+    project, NativeAOT apps included: restore then fetches the runtime pack and the ReadyToRun compiler.
+    CSharpHelpersReadyToRun=false publishes the helpers as IL instead, which start slower.
+
+    NativeAOT apps compile their managed assemblies into the executable. Mark the references whose assemblies scripts
+    use; publish copies their DLLs next to the app, with StreamJsonRpc and PolyType, which script API assemblies use,
+    and what those need at run time that the runner does not ship itself, satellite assemblies included:
+
+      <ProjectReference Include="..\MyApp.ScriptApi\MyApp.ScriptApi.csproj" CSharpScriptReference="true" />
+      <PackageReference Include="MyApp.Devices" CSharpScriptReference="true" />
+
+    The runner runs on Microsoft.NETCore.App only: the build fails when a marked reference needs another shared
+    framework, such as Microsoft.AspNetCore.App.
+  -->
+  <PropertyGroup>
+    <_CSharpHelpersPackageDirectory>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', 'tools'))</_CSharpHelpersPackageDirectory>
+    <_CSharpHelpersFromPackage Condition="Exists('$(_CSharpHelpersPackageDirectory)csharp-server')">true</_CSharpHelpersFromPackage>
+    <IncludeCSharpHelpers Condition="'$(IncludeCSharpHelpers)' == '' and ('$(OutputType)' == 'Exe' or '$(OutputType)' == 'WinExe')">true</IncludeCSharpHelpers>
+    <CSharpHelpersReadyToRun Condition="'$(CSharpHelpersReadyToRun)' == ''">true</CSharpHelpersReadyToRun>
+    <_CSharpHelpersOutput>helpers/</_CSharpHelpersOutput>
+  </PropertyGroup>
+
+  <!--
+    In this repository the helpers are built from source, as portable IL, with the app. The app references nothing of
+    them. The package project builds them the same way to pack them.
+  -->
+  <PropertyGroup Condition="'$(_CSharpHelpersFromPackage)' != 'true'">
+    <CSharpLanguageServerProject Condition="'$(CSharpLanguageServerProject)' == ''"
+      >$(MSBuildThisFileDirectory)..\..\Darp.CodeEditor.CSharp.Server\Darp.CodeEditor.CSharp.Server.csproj</CSharpLanguageServerProject>
+    <CSharpScriptRunnerProject Condition="'$(CSharpScriptRunnerProject)' == ''"
+      >$(MSBuildThisFileDirectory)..\..\Darp.CodeEditor.CSharp.Runner\Darp.CodeEditor.CSharp.Runner.csproj</CSharpScriptRunnerProject>
+    <!-- The helpers are framework-dependent executables; the app may be self-contained or NativeAOT. -->
+    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
+    <!-- One portable build of each helper serves every configuration of the app. -->
+    <_CSharpHelpersRemovedProperties>RuntimeIdentifier;SelfContained;PublishAot;PublishTrimmed;PublishSingleFile;PublishReadyToRun;PublishDir;_IsPublishing</_CSharpHelpersRemovedProperties>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(_CSharpHelpersFromPackage)' != 'true' and ('$(IncludeCSharpHelpers)' == 'true' or '$(PackCSharpHelpers)' == 'true')">
+    <_CSharpHelperProject Include="$(CSharpLanguageServerProject)" Helper="csharp-server" />
+    <_CSharpHelperProject Include="$(CSharpScriptRunnerProject)" Helper="csharp-runner" />
+    <ProjectReference
+      Include="@(_CSharpHelperProject)"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      PrivateAssets="all"
+      GlobalPropertiesToRemove="$(_CSharpHelpersRemovedProperties)"
+    />
+  </ItemGroup>
+
+  <!--
+    The helpers' files as the package ships them, with Helper (csharp-server or csharp-runner) and HelperPath (the path in
+    the helper's directory). From source: the build output of each helper, without what a build leaves behind there.
+  -->
+  <Target Name="GetCSharpHelperFiles" Returns="@(_CSharpHelperFile)">
+    <ItemGroup Condition="'$(_CSharpHelpersFromPackage)' == 'true'">
+      <_CSharpHelperSourceFile Include="$(_CSharpHelpersPackageDirectory)csharp-server/**" Helper="csharp-server" />
+      <_CSharpHelperSourceFile Include="$(_CSharpHelpersPackageDirectory)csharp-runner/**" Helper="csharp-runner" />
+    </ItemGroup>
+    <MSBuild
+      Condition="'$(_CSharpHelpersFromPackage)' != 'true'"
+      Projects="$(CSharpLanguageServerProject)"
+      Targets="GetTargetPath"
+      Properties="Configuration=$(Configuration)"
+      RemoveProperties="$(_CSharpHelpersRemovedProperties);TargetFramework"
+    >
+      <Output TaskParameter="TargetOutputs" ItemName="_CSharpLanguageServerTargetPath" />
+    </MSBuild>
+    <MSBuild
+      Condition="'$(_CSharpHelpersFromPackage)' != 'true'"
+      Projects="$(CSharpScriptRunnerProject)"
+      Targets="GetTargetPath"
+      Properties="Configuration=$(Configuration)"
+      RemoveProperties="$(_CSharpHelpersRemovedProperties);TargetFramework"
+    >
+      <Output TaskParameter="TargetOutputs" ItemName="_CSharpScriptRunnerTargetPath" />
+    </MSBuild>
+    <ItemGroup Condition="'$(_CSharpHelpersFromPackage)' != 'true'">
+      <_CSharpHelperOutputDirectory
+        Include="@(_CSharpLanguageServerTargetPath->'%(RootDir)%(Directory)')"
+        Helper="csharp-server"
+      />
+      <_CSharpHelperOutputDirectory
+        Include="@(_CSharpScriptRunnerTargetPath->'%(RootDir)%(Directory)')"
+        Helper="csharp-runner"
+      />
+      <!--
+        Assemblies, their symbols, deps.json and runtimeconfig.json, and runtimes/ with assets for some platforms only;
+        not an app host that an earlier build may have left behind.
+      -->
+      <_CSharpHelperSourceFile
+        Include="%(_CSharpHelperOutputDirectory.Identity)*.dll;%(_CSharpHelperOutputDirectory.Identity)*.pdb;%(_CSharpHelperOutputDirectory.Identity)*.json"
+        Helper="%(_CSharpHelperOutputDirectory.Helper)"
+      />
+      <_CSharpHelperSourceFile
+        Include="%(_CSharpHelperOutputDirectory.Identity)runtimes/**"
+        Helper="%(_CSharpHelperOutputDirectory.Helper)"
+        SubDirectory="runtimes/"
+      />
+    </ItemGroup>
+    <ItemGroup>
+      <_CSharpHelperFile
+        Include="@(_CSharpHelperSourceFile)"
+        HelperPath="%(_CSharpHelperSourceFile.SubDirectory)%(_CSharpHelperSourceFile.RecursiveDir)%(_CSharpHelperSourceFile.Filename)%(_CSharpHelperSourceFile.Extension)"
+      />
+    </ItemGroup>
+  </Target>
+
+  <Target
+    Name="CopyCSharpHelpersToOutputDirectory"
+    AfterTargets="CopyFilesToOutputDirectory"
+    DependsOnTargets="GetCSharpHelperFiles"
+    Condition="'$(IncludeCSharpHelpers)' == 'true'"
+  >
+    <Copy
+      SourceFiles="@(_CSharpHelperFile)"
+      DestinationFiles="@(_CSharpHelperFile->'$(OutDir)$(_CSharpHelpersOutput)%(Helper)/%(HelperPath)')"
+      SkipUnchangedFiles="true"
+      Retries="$(CopyRetryCount)"
+      RetryDelayMilliseconds="$(CopyRetryDelayMilliseconds)"
+    >
+      <Output TaskParameter="DestinationFiles" ItemName="FileWrites" />
+    </Copy>
+  </Target>
+
+  <!--
+    Publish: the runtime, the helpers compiled with ReadyToRun and their app hosts. Added after the app's own files went
+    through trimming and ReadyToRun, which must not touch them, and kept out of single-file bundles.
+  -->
+  <Target
+    Name="_AddCSharpHelpersToPublish"
+    AfterTargets="CreateReadyToRunImages"
+    Condition="'$(IncludeCSharpHelpers)' == 'true'"
+    DependsOnTargets="GetCSharpHelperFiles;_ResolveCSharpHelpersRuntime;_CompileCSharpHelpers;_CreateCSharpHelperAppHosts"
+  >
+    <ItemGroup>
+      <_CSharpHelperPublishFile Include="@(_CSharpHelperFile)" />
+      <_CSharpHelperPublishFile Remove="@(_CSharpHelperReadyToRunCompile)" />
+      <_CSharpHelperPublishFile Include="@(_CSharpHelperReadyToRunFile);@(_CSharpHelperAppHost)" />
+      <ResolvedFileToPublish
+        Include="@(_CSharpHelperPublishFile)"
+        RelativePath="$(_CSharpHelpersOutput)%(_CSharpHelperPublishFile.Helper)/%(_CSharpHelperPublishFile.HelperPath)"
+        CopyToPublishDirectory="PreserveNewest"
+        ExcludeFromSingleFile="true"
+      />
+      <ResolvedFileToPublish
+        Include="@(_CSharpHelpersHostFxr)"
+        RelativePath="$(_CSharpHelpersOutput)dotnet/host/fxr/$(_CSharpHelpersRuntimeVersion)/%(_CSharpHelpersHostFxr.Filename)%(_CSharpHelpersHostFxr.Extension)"
+        CopyToPublishDirectory="PreserveNewest"
+        ExcludeFromSingleFile="true"
+      />
+      <ResolvedFileToPublish
+        Include="@(_CSharpHelpersRuntimeFile)"
+        Exclude="@(_CSharpHelpersHostFxr)"
+        RelativePath="$(_CSharpHelpersOutput)dotnet/shared/Microsoft.NETCore.App/$(_CSharpHelpersRuntimeVersion)/%(_CSharpHelpersRuntimeFile.DestinationSubPath)"
+        CopyToPublishDirectory="PreserveNewest"
+        ExcludeFromSingleFile="true"
+      />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    The .NET runtime the helpers run on: the runtime pack's files by their path in a shared framework directory, the
+    framework's deps.json and runtimeconfig.json, and hostfxr.
+  -->
+  <Target Name="_ResolveCSharpHelpersRuntime" DependsOnTargets="ResolveFrameworkReferences;ResolveRuntimePackAssets">
+    <Error
+      Condition="'$(RuntimeIdentifier)' == ''"
+      Text="Publishing the C# helpers needs a RuntimeIdentifier, such as -r linux-x64: they run on a .NET runtime for it that publish puts into $(_CSharpHelpersOutput)dotnet."
+    />
+    <ItemGroup>
+      <_CSharpHelpersRuntimePack Include="@(ResolvedRuntimePack)" Condition="'%(FrameworkName)' == 'Microsoft.NETCore.App'" />
+    </ItemGroup>
+    <Error
+      Condition="'@(_CSharpHelpersRuntimePack)' == ''"
+      Text="The .NET runtime pack for $(RuntimeIdentifier) was not restored, so the C# helpers have no runtime to run on. Set PublishReadyToRun=true in the app project, NativeAOT apps included, so that restore fetches it."
+    />
+    <PropertyGroup>
+      <_CSharpHelpersRuntimePackId>@(_CSharpHelpersRuntimePack->'%(NuGetPackageId)')</_CSharpHelpersRuntimePackId>
+      <_CSharpHelpersRuntimePackDirectory>@(_CSharpHelpersRuntimePack->'%(PackageDirectory)')</_CSharpHelpersRuntimePackDirectory>
+      <_CSharpHelpersRuntimeVersion>@(_CSharpHelpersRuntimePack->'%(NuGetPackageVersion)')</_CSharpHelpersRuntimeVersion>
+    </PropertyGroup>
+    <ItemGroup>
+      <_CSharpHelpersRuntimeFile
+        Include="@(RuntimePackAsset)"
+        Condition="'%(RuntimePackAsset.NuGetPackageId)' == '$(_CSharpHelpersRuntimePackId)' and '%(RuntimePackAsset.AssetType)' != 'pgodata'"
+      />
+      <_CSharpHelpersRuntimeJson Include="$(_CSharpHelpersRuntimePackDirectory)/runtimes/*/lib/*/Microsoft.NETCore.App.*.json" />
+      <_CSharpHelpersRuntimeFile
+        Include="@(_CSharpHelpersRuntimeJson)"
+        DestinationSubPath="%(_CSharpHelpersRuntimeJson.Filename)%(_CSharpHelpersRuntimeJson.Extension)"
+      />
+      <_CSharpHelpersHostFxr
+        Include="@(_CSharpHelpersRuntimeFile)"
+        Condition="'%(_CSharpHelpersRuntimeFile.Filename)' == 'hostfxr' or '%(_CSharpHelpersRuntimeFile.Filename)' == 'libhostfxr'"
+      />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    ReadyToRun: the helpers' assemblies are compiled for $(RuntimeIdentifier) against the runtime they run on, with the
+    SDK's tasks, as PublishReadyToRun compiles an app's own assemblies. Assemblies under runtimes/ stay IL.
+  -->
+  <Target
+    Name="_CompileCSharpHelpers"
+    Condition="'$(CSharpHelpersReadyToRun)' == 'true'"
+    DependsOnTargets="_PrepareCSharpHelpersReadyToRun;_CreateCSharpHelperReadyToRunImages"
+  >
+    <Error
+      Condition="'@(_CSharpHelperReadyToRunFailure)' != ''"
+      Text="ReadyToRun compilation of the C# helpers failed for @(_CSharpHelperReadyToRunFailure->'%(Filename)', ', ')."
+    />
+  </Target>
+
+  <Target Name="_CheckCSharpHelpersReadyToRunCompiler">
+    <Error
+      Condition="'@(ResolvedCrossgen2Pack)' == ''"
+      Text="The ReadyToRun compiler for the C# helpers was not restored. Set PublishReadyToRun=true in the app project, NativeAOT apps included, so that restore fetches it, or set CSharpHelpersReadyToRun=false to publish the helpers as IL, which start slower."
+    />
+  </Target>
+
+  <Target
+    Name="_PrepareCSharpHelpersReadyToRun"
+    DependsOnTargets="_ResolveCSharpHelpersRuntime;_CheckCSharpHelpersReadyToRunCompiler;ResolveReadyToRunCompilers"
+  >
+    <ItemGroup>
+      <_CSharpHelperReadyToRunInput
+        Include="@(_CSharpHelperFile)"
+        Condition="'%(Extension)' == '.dll' and '%(HelperPath)' == '%(Filename)%(Extension)'"
+        RelativePath="%(Helper)/%(HelperPath)"
+      />
+      <!-- References only: the runtime, once per helper, so that each helper compiles against its own closure. -->
+      <_CSharpHelpersRuntimeAssembly
+        Include="@(_CSharpHelpersRuntimeFile)"
+        Condition="'%(_CSharpHelpersRuntimeFile.AssetType)' == 'runtime' and '%(_CSharpHelpersRuntimeFile.Extension)' == '.dll'"
+      />
+      <_CSharpHelperReadyToRunInput Include="@(_CSharpHelpersRuntimeAssembly)" ReferenceOnly="true" Helper="csharp-server" />
+      <_CSharpHelperReadyToRunInput Include="@(_CSharpHelpersRuntimeAssembly)" ReferenceOnly="true" Helper="csharp-runner" />
+      <_CSharpHelperReadyToRunMain
+        Include="@(_CSharpHelperFile)"
+        Condition="'%(_CSharpHelperFile.HelperPath)' == 'Darp.CodeEditor.CSharp.Server.dll'"
+      />
+      <_CSharpHelpersReadyToRunPgo
+        Include="@(RuntimePackAsset)"
+        Condition="'%(RuntimePackAsset.NuGetPackageId)' == '$(_CSharpHelpersRuntimePackId)' and '%(RuntimePackAsset.AssetType)' == 'pgodata' and '%(RuntimePackAsset.Extension)' == '.mibc'"
+      />
+    </ItemGroup>
+    <PrepareForReadyToRunCompilation
+      Crossgen2Tool="@(Crossgen2Tool)"
+      OutputPath="$(IntermediateOutputPath)csharp-helpers/r2r"
+      MainAssembly="@(_CSharpHelperReadyToRunMain)"
+      Assemblies="@(_CSharpHelperReadyToRunInput)"
+      EmitSymbols="false"
+      IncludeSymbolsInSingleFile="false"
+      ReadyToRunUseCrossgen2="true"
+      Crossgen2Composite="false"
+    >
+      <Output TaskParameter="ReadyToRunCompileList" ItemName="_CSharpHelperReadyToRunCompile" />
+      <Output TaskParameter="ReadyToRunFilesToPublish" ItemName="_CSharpHelperReadyToRunFile" />
+      <Output TaskParameter="ReadyToRunAssembliesToReference" ItemName="_CSharpHelperReadyToRunReference" />
+    </PrepareForReadyToRunCompilation>
+    <ItemGroup>
+      <FileWrites Include="@(_CSharpHelperReadyToRunCompile->'%(OutputR2RImage)')" />
+    </ItemGroup>
+  </Target>
+
+  <Target
+    Name="_CreateCSharpHelperReadyToRunImages"
+    Inputs="@(_CSharpHelperReadyToRunCompile);@(_CSharpHelpersReadyToRunPgo)"
+    Outputs="%(_CSharpHelperReadyToRunCompile.OutputR2RImage)"
+  >
+    <PropertyGroup>
+      <_CSharpHelperReadyToRunHelper>%(_CSharpHelperReadyToRunCompile.Helper)</_CSharpHelperReadyToRunHelper>
+    </PropertyGroup>
+    <ItemGroup>
+      <_CSharpHelperReadyToRunHelperReference Remove="@(_CSharpHelperReadyToRunHelperReference)" />
+      <_CSharpHelperReadyToRunHelperReference
+        Include="@(_CSharpHelperReadyToRunReference)"
+        Condition="'%(_CSharpHelperReadyToRunReference.Helper)' == '$(_CSharpHelperReadyToRunHelper)'"
+      />
+    </ItemGroup>
+    <RunReadyToRunCompiler
+      Crossgen2Tool="@(Crossgen2Tool)"
+      UseCrossgen2="true"
+      Crossgen2PgoFiles="@(_CSharpHelpersReadyToRunPgo)"
+      ImplementationAssemblyReferences="@(_CSharpHelperReadyToRunHelperReference)"
+      ShowCompilerWarnings="false"
+      CompilationEntry="@(_CSharpHelperReadyToRunCompile)"
+      ContinueOnError="ErrorAndContinue"
+    >
+      <Output TaskParameter="ExitCode" PropertyName="_CSharpHelperReadyToRunExitCode" />
+    </RunReadyToRunCompiler>
+    <ItemGroup>
+      <_CSharpHelperReadyToRunFailure
+        Include="@(_CSharpHelperReadyToRunCompile)"
+        Condition="'$(_CSharpHelperReadyToRunExitCode)' != '' and '$(_CSharpHelperReadyToRunExitCode)' != '0'"
+      />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    App hosts that run the helpers on the runtime in ../dotnet and never on another one. NativeAOT apps have no app host
+    of their own when they publish; the SDK ships the one of its own platform, and others come from an app host pack an
+    earlier restore fetched.
+  -->
+  <Target Name="_CreateCSharpHelperAppHosts" DependsOnTargets="_ResolveCSharpHelpersRuntime">
+    <PropertyGroup>
+      <_CSharpHelpersAppHostName>apphost$(_NativeExecutableExtension)</_CSharpHelpersAppHostName>
+      <_CSharpHelpersAppHostSource>$(AppHostSourcePath)</_CSharpHelpersAppHostSource>
+      <_CSharpHelpersAppHostSource Condition="'$(_CSharpHelpersAppHostSource)' == '' or !Exists('$(_CSharpHelpersAppHostSource)')"
+        >$([MSBuild]::NormalizePath('$(NetCoreTargetingPackRoot)', 'Microsoft.NETCore.App.Host.$(RuntimeIdentifier)', '$(BundledNETCoreAppPackageVersion)', 'runtimes', '$(RuntimeIdentifier)', 'native', '$(_CSharpHelpersAppHostName)'))</_CSharpHelpersAppHostSource>
+      <_CSharpHelpersAppHostSource Condition="!Exists('$(_CSharpHelpersAppHostSource)') and '$(NuGetPackageRoot)' != ''"
+        >$([MSBuild]::NormalizePath('$(NuGetPackageRoot)', 'microsoft.netcore.app.host.$(RuntimeIdentifier.ToLowerInvariant())', '$(BundledNETCoreAppPackageVersion)', 'runtimes', '$(RuntimeIdentifier)', 'native', '$(_CSharpHelpersAppHostName)'))</_CSharpHelpersAppHostSource>
+      <_CSharpHelpersMacOSCodeSign Condition="$(RuntimeIdentifier.StartsWith('osx'))">true</_CSharpHelpersMacOSCodeSign>
+      <_CSharpHelpersDisableCetCompat Condition="'$(CetCompat)' == 'false'">true</_CSharpHelpersDisableCetCompat>
+    </PropertyGroup>
+    <Error
+      Condition="!Exists('$(_CSharpHelpersAppHostSource)')"
+      Text="The .NET app host pack for $(RuntimeIdentifier) was not restored, so the C# helpers cannot get their app hosts. A NativeAOT app that publishes for another platform than the SDK's sets UseAppHost=true, so that restore fetches it; the app still publishes as one native executable."
+    />
+    <ItemGroup>
+      <_CSharpHelperAppHost
+        Include="@(_CSharpHelperFile->'$(IntermediateOutputPath)csharp-helpers/apphost/%(Helper)/%(Filename)$(_NativeExecutableExtension)')"
+        Condition="'%(HelperPath)' == 'Darp.CodeEditor.CSharp.Server.dll' or '%(HelperPath)' == 'Darp.CodeEditor.CSharp.Runner.dll'"
+        HelperPath="%(Filename)$(_NativeExecutableExtension)"
+        AppBinaryName="%(Filename)%(Extension)"
+        MainAssembly="%(FullPath)"
+      />
+      <FileWrites Include="@(_CSharpHelperAppHost)" />
+    </ItemGroup>
+    <MakeDir Directories="@(_CSharpHelperAppHost->'%(RootDir)%(Directory)')" />
+    <CreateAppHost
+      AppHostSourcePath="$(_CSharpHelpersAppHostSource)"
+      AppHostDestinationPath="%(_CSharpHelperAppHost.FullPath)"
+      AppBinaryName="%(_CSharpHelperAppHost.AppBinaryName)"
+      IntermediateAssembly="%(_CSharpHelperAppHost.MainAssembly)"
+      WindowsGraphicalUserInterface="false"
+      Retries="$(CopyRetryCount)"
+      RetryDelayMilliseconds="$(CopyRetryDelayMilliseconds)"
+      EnableMacOSCodeSign="$(_CSharpHelpersMacOSCodeSign)"
+      DisableCetCompat="$(_CSharpHelpersDisableCetCompat)"
+      DotNetSearchLocations="AppRelative"
+      AppRelativeDotNet="../dotnet"
+    />
+  </Target>
+
+  <!--
+    The references the app marked for scripts: project references as they are written, packages by ID, and StreamJsonRpc
+    and PolyType, which every script API assembly uses. Their dependencies come from the app's own managed assemblies;
+    runtime packs stay out, since the runner has its own runtime.
+  -->
+  <Target Name="_ResolveCSharpScriptReferences" DependsOnTargets="ResolveReferences">
+    <ItemGroup>
+      <_CSharpScriptReferenceKey Include="@(ProjectReference->WithMetadataValue('CSharpScriptReference', 'true'))" />
+      <_CSharpScriptReferenceKey Include="@(PackageReference->WithMetadataValue('CSharpScriptReference', 'true'))" />
+      <_CSharpScriptReferenceKey Include="StreamJsonRpc;PolyType" Condition="'@(_CSharpScriptReferenceKey)' != ''" />
+      <_CSharpScriptReferenceCandidate
+        Include="@(ReferenceCopyLocalPaths)"
+        Condition="'%(ReferenceCopyLocalPaths.Extension)' == '.dll' and '%(ReferenceCopyLocalPaths.DestinationSubDirectory)' == '' and !$([System.String]::new('%(ReferenceCopyLocalPaths.NuGetPackageId)').Contains('.App.Runtime.'))"
+        SourcePath="%(ReferenceCopyLocalPaths.FullPath)"
+        Key="%(ReferenceCopyLocalPaths.ProjectReferenceOriginalItemSpec)%(ReferenceCopyLocalPaths.NuGetPackageId)"
+      />
+      <_CSharpScriptReferenceByKey Include="@(_CSharpScriptReferenceCandidate->'%(Key)')" />
+      <_CSharpScriptReferenceUnmarked Include="@(_CSharpScriptReferenceByKey)" Exclude="@(_CSharpScriptReferenceKey)" />
+      <_CSharpScriptReferenceMarked
+        Include="@(_CSharpScriptReferenceByKey)"
+        Exclude="@(_CSharpScriptReferenceUnmarked)"
+      />
+      <_CSharpScriptReferenceRoot Include="@(_CSharpScriptReferenceMarked->'%(SourcePath)'->Distinct())" />
+      <!-- Assemblies of shared frameworks other than the one the runner has. -->
+      <_CSharpScriptOtherFrameworkAssembly
+        Include="@(ReferencePath)"
+        Condition="'%(ReferencePath.FrameworkReferenceName)' != '' and '%(ReferencePath.FrameworkReferenceName)' != 'Microsoft.NETCore.App'"
+      />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    A marked reference that needs another shared framework would build and then fail in the runner, so the build fails
+    and names the reference and the framework. Runs once per marked reference.
+  -->
+  <Target
+    Name="CheckCSharpScriptReferenceFrameworks"
+    AfterTargets="ResolveReferences"
+    DependsOnTargets="_ResolveCSharpScriptReferences"
+    Outputs="%(_CSharpScriptReferenceRoot.Identity)"
+  >
+    <ItemGroup>
+      <_CSharpScriptFrameworkClosure Remove="@(_CSharpScriptFrameworkClosure)" />
+      <_CSharpScriptFrameworkUnused Remove="@(_CSharpScriptFrameworkUnused)" />
+      <_CSharpScriptFrameworkUsed Remove="@(_CSharpScriptFrameworkUsed)" />
+    </ItemGroup>
+    <ResolveAssemblyReference
+      Condition="'@(_CSharpScriptReferenceRoot)' != '' and '@(_CSharpScriptOtherFrameworkAssembly)' != ''"
+      AssemblyFiles="@(_CSharpScriptReferenceRoot)"
+      CandidateAssemblyFiles="@(_CSharpScriptReferenceCandidate);@(_CSharpScriptOtherFrameworkAssembly)"
+      SearchPaths="{CandidateAssemblyFiles}"
+      AllowedAssemblyExtensions=".dll"
+      FindDependencies="true"
+      FindSatellites="false"
+      FindSerializationAssemblies="false"
+      FindRelatedFiles="false"
+      AutoUnify="true"
+      Silent="true"
+    >
+      <Output TaskParameter="ResolvedDependencyFiles" ItemName="_CSharpScriptFrameworkClosure" />
+    </ResolveAssemblyReference>
+    <ItemGroup>
+      <_CSharpScriptFrameworkUnused
+        Include="@(_CSharpScriptOtherFrameworkAssembly)"
+        Exclude="@(_CSharpScriptFrameworkClosure)"
+      />
+      <_CSharpScriptFrameworkUsed
+        Include="@(_CSharpScriptOtherFrameworkAssembly)"
+        Exclude="@(_CSharpScriptFrameworkUnused)"
+      />
+    </ItemGroup>
+    <Error
+      Condition="'@(_CSharpScriptFrameworkUsed)' != ''"
+      Text="The script reference %(_CSharpScriptReferenceRoot.Filename) needs the shared framework @(_CSharpScriptFrameworkUsed->'%(FrameworkReferenceName)'->Distinct()), through @(_CSharpScriptFrameworkUsed->'%(Filename)', ', '). The C# script runner runs on Microsoft.NETCore.App only, so scripts could not load it. Remove the CSharpScriptReference mark or that dependency."
+    />
+  </Target>
+
+  <!--
+    NativeAOT compiles the app's managed assemblies into the executable. Scripts compile against the marked ones, so
+    those ship as files, read by the language server and loaded by the runner from the app's directory; the runner
+    loads what they need at run time from there too, so that ships, with its satellite assemblies, unless the runner
+    has the very same assembly. JIT apps have all of these next to them already.
+  -->
+  <Target
+    Name="_AddCSharpScriptReferencesToPublish"
+    AfterTargets="ComputeResolvedFilesToPublishList"
+    Condition="'$(PublishAot)' == 'true' and '$(IncludeCSharpHelpers)' == 'true'"
+    DependsOnTargets="GetCSharpHelperFiles;_ResolveCSharpScriptReferences"
+  >
+    <ResolveAssemblyReference
+      Condition="'@(_CSharpScriptReferenceRoot)' != ''"
+      AssemblyFiles="@(_CSharpScriptReferenceRoot)"
+      CandidateAssemblyFiles="@(_CSharpScriptReferenceCandidate)"
+      SearchPaths="{CandidateAssemblyFiles}"
+      AllowedAssemblyExtensions=".dll"
+      FindDependencies="true"
+      FindSatellites="false"
+      FindSerializationAssemblies="false"
+      FindRelatedFiles="false"
+      AutoUnify="true"
+      Silent="true"
+    >
+      <Output TaskParameter="ResolvedFiles" ItemName="_CSharpScriptReferenceResolvedRoot" />
+      <Output TaskParameter="ResolvedDependencyFiles" ItemName="_CSharpScriptReferenceDependency" />
+    </ResolveAssemblyReference>
+    <ItemGroup>
+      <_CSharpScriptRunnerAssemblyFile
+        Include="@(_CSharpHelperFile)"
+        Condition="'%(Helper)' == 'csharp-runner' and '%(Extension)' == '.dll' and '%(HelperPath)' == '%(Filename)%(Extension)'"
+      />
+    </ItemGroup>
+    <ResolveAssemblyReference
+      Condition="'@(_CSharpScriptReferenceRoot)' != ''"
+      AssemblyFiles="@(_CSharpScriptRunnerAssemblyFile)"
+      SearchPaths="{RawFileName}"
+      FindDependencies="false"
+      FindSatellites="false"
+      FindSerializationAssemblies="false"
+      FindRelatedFiles="false"
+      Silent="true"
+    >
+      <Output TaskParameter="ResolvedFiles" ItemName="_CSharpScriptRunnerAssembly" />
+    </ResolveAssemblyReference>
+    <ItemGroup>
+      <!-- Compared by full assembly name: name, version, culture and public key token. -->
+      <_CSharpScriptRunnerIdentity Include="@(_CSharpScriptRunnerAssembly->'%(FusionName)')" />
+      <_CSharpScriptClosure
+        Include="@(_CSharpScriptReferenceResolvedRoot)"
+        SourcePath="%(_CSharpScriptReferenceResolvedRoot.FullPath)"
+      />
+      <_CSharpScriptClosure
+        Include="@(_CSharpScriptReferenceDependency)"
+        SourcePath="%(_CSharpScriptReferenceDependency.FullPath)"
+      />
+      <_CSharpScriptClosureByIdentity Include="@(_CSharpScriptClosure->'%(FusionName)')" />
+      <_CSharpScriptClosureLoaded
+        Include="@(_CSharpScriptClosureByIdentity)"
+        Exclude="@(_CSharpScriptRunnerIdentity)"
+      />
+      <_CSharpScriptLoadedFile Include="@(_CSharpScriptClosureLoaded->'%(SourcePath)')" />
+      <_CSharpScriptReferenceFile Include="@(_CSharpScriptReferenceRoot);@(_CSharpScriptLoadedFile)" />
+      <ResolvedFileToPublish
+        Include="@(_CSharpScriptReferenceFile->Distinct())"
+        RelativePath="%(_CSharpScriptReferenceFile.Filename)%(_CSharpScriptReferenceFile.Extension)"
+        CopyToPublishDirectory="PreserveNewest"
+      />
+
+      <!-- Satellite assemblies of what the runner loads from the app, in their culture directories. -->
+      <_CSharpScriptSatelliteCandidate
+        Include="@(ReferenceCopyLocalPaths)"
+        Condition="'%(ReferenceCopyLocalPaths.Extension)' == '.dll' and '%(ReferenceCopyLocalPaths.DestinationSubDirectory)' != '' and $([System.String]::new('%(ReferenceCopyLocalPaths.Filename)').EndsWith('.resources'))"
+        SourcePath="%(ReferenceCopyLocalPaths.FullPath)"
+        RelativePath="%(ReferenceCopyLocalPaths.DestinationSubDirectory)%(ReferenceCopyLocalPaths.Filename)%(ReferenceCopyLocalPaths.Extension)"
+        Key="$([System.IO.Path]::GetFileNameWithoutExtension('%(ReferenceCopyLocalPaths.Filename)'))"
+      />
+      <_CSharpScriptSatelliteByKey Include="@(_CSharpScriptSatelliteCandidate->'%(Key)')" />
+      <_CSharpScriptLoadedName Include="@(_CSharpScriptLoadedFile->'%(Filename)')" />
+      <_CSharpScriptSatelliteUnused Include="@(_CSharpScriptSatelliteByKey)" Exclude="@(_CSharpScriptLoadedName)" />
+      <_CSharpScriptSatellite Include="@(_CSharpScriptSatelliteByKey)" Exclude="@(_CSharpScriptSatelliteUnused)" />
+      <ResolvedFileToPublish
+        Include="@(_CSharpScriptSatellite->'%(SourcePath)')"
+        CopyToPublishDirectory="PreserveNewest"
+      />
+    </ItemGroup>
+  </Target>
+</Project>

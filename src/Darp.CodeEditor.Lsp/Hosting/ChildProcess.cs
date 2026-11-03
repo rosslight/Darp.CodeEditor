@@ -27,6 +27,9 @@ public sealed class ChildProcess : IAsyncDisposable
     /// <summary>The exit code of the Linux check when this process was gone before the child could bind to it.</summary>
     public const int ParentGoneExitCode = 125;
 
+    /// <summary>The longest line of standard error that is passed on; longer ones are cut and end with "…".</summary>
+    public const int MaxStandardErrorLineLength = OutputLines.MaxLength;
+
     private const int StandardErrorLines = 50;
     private static readonly TimeSpan s_exitTimeout = TimeSpan.FromSeconds(5);
 
@@ -58,12 +61,22 @@ public sealed class ChildProcess : IAsyncDisposable
     /// <summary>The last lines the child wrote to standard error.</summary>
     public string StandardErrorTail => string.Join('\n', _standardErrorTail);
 
+    /// <summary>
+    /// Completes when the child's standard error ended and every line of it was passed on. A process the child started
+    /// can keep the pipe open after the child exited, so wait for it with a timeout.
+    /// </summary>
+    public Task StandardErrorEnded => _standardErrorDrained;
+
     /// <summary>Starts a process with redirected standard streams, without blocking the calling thread.</summary>
     /// <param name="startInfo">
     /// The program, its <see cref="ProcessStartInfo.ArgumentList"/>, environment and working directory. Redirection,
     /// shell execution and window settings are set here.
     /// </param>
-    /// <param name="standardError">Receives each line the child writes to standard error, on a thread-pool thread.</param>
+    /// <param name="standardError">
+    /// Receives each line the child writes to standard error, on a thread-pool thread. Lines longer than
+    /// <see cref="MaxStandardErrorLineLength"/> characters are cut and end with "…". Exceptions it throws are traced and
+    /// ignored.
+    /// </param>
     public static async Task<ChildProcess> StartAsync(ProcessStartInfo startInfo, Action<string>? standardError = null)
     {
         ArgumentNullException.ThrowIfNull(startInfo);
@@ -97,29 +110,36 @@ public sealed class ChildProcess : IAsyncDisposable
 
     private async Task DrainStandardErrorAsync(Stream stream)
     {
-        // Keeps reading, so a child that writes much never blocks on a full pipe.
+        var lines = new OutputLines(line =>
+        {
+            _standardErrorTail.Enqueue(line);
+            while (_standardErrorTail.Count > StandardErrorLines)
+                _standardErrorTail.TryDequeue(out _);
+            try
+            {
+                _standardError?.Invoke(line);
+            }
+            catch (Exception exception)
+            {
+                // A failing handler must not stop the draining, or the child blocks on a full pipe.
+                Trace.TraceError($"Handling the standard error of process {Id} failed: {exception}");
+            }
+        });
+        // Keeps reading, so a child that writes much never blocks on a full pipe, and reads in chunks rather than
+        // lines, so a line without an end cannot grow without bound.
         using var reader = new StreamReader(stream, Encoding.UTF8);
+        char[] buffer = new char[4096];
         try
         {
-            while (await reader.ReadLineAsync().ConfigureAwait(false) is { } line)
-            {
-                _standardErrorTail.Enqueue(line);
-                while (_standardErrorTail.Count > StandardErrorLines)
-                    _standardErrorTail.TryDequeue(out _);
-                try
-                {
-                    _standardError?.Invoke(line);
-                }
-                catch (Exception exception)
-                {
-                    Trace.TraceError($"Handling the standard error of process {Id} failed: {exception}");
-                }
-            }
+            int read;
+            while ((read = await reader.ReadAsync(buffer.AsMemory()).ConfigureAwait(false)) > 0)
+                lines.Write(buffer.AsSpan(0, read));
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException)
         {
             // The pipe was closed by disposal.
         }
+        lines.Complete();
     }
 
     /// <summary>A started process with the platform's ownership in place.</summary>
