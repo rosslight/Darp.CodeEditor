@@ -5,9 +5,9 @@ using Shouldly;
 namespace Darp.CodeEditor.Packaging.Tests;
 
 /// <summary>
-/// An app that references only the packages completes a C# script through the language server and runs a script in
-/// the runner. Published, both helpers run with ReadyToRun on the .NET runtime the app ships, with no SDK and no
-/// installed .NET in reach; built, they run on the .NET that runs the app.
+/// An app that references only the packages completes a C# script through the language server, runs a script in the
+/// runner, and completes a Luau script through luau-lsp. Published, both C# helpers run with ReadyToRun on the .NET
+/// runtime the app ships, with no SDK and no installed .NET in reach; built, they run on the .NET that runs the app.
 /// </summary>
 public sealed class PackagingTests : IClassFixture<PackagedApp>
 {
@@ -62,6 +62,7 @@ public sealed class PackagingTests : IClassFixture<PackagedApp>
         Directory.Exists(Path.Combine(output, "helpers", "dotnet")).ShouldBeFalse();
         Value(log, "completion: ").Split(", ").ShouldContain("AddAsync", log);
         Value(log, "handler: ").ShouldBe("42", log);
+        Value(log, "luau completion: ").Split(", ").ShouldContain("format", log);
     }
 
     private static async Task RunsOnTheBundledRuntimeAsync(string output)
@@ -102,6 +103,7 @@ public sealed class PackagingTests : IClassFixture<PackagedApp>
         );
         Value(log, "server runtime: ").ShouldEndWith(bundled, Case.Insensitive, log);
         Value(log, "runner runtime: ").ShouldEndWith(bundled, Case.Insensitive, log);
+        Value(log, "luau completion: ").Split(", ").ShouldContain("format", log);
     }
 
     /// <summary>

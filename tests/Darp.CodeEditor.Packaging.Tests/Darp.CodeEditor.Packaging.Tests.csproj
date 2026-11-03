@@ -13,8 +13,9 @@
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup>
-    <!-- The packages under test, built before the tests pack them. Darp.CodeEditor.CSharp builds the others. -->
+    <!-- The packages under test, built before the tests pack them; these two build the others. -->
     <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp\Darp.CodeEditor.CSharp.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.Luau\Darp.CodeEditor.Luau.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <ItemGroup>
     <!-- The app that uses the packages; the tests copy it out of this repository and build it there. -->

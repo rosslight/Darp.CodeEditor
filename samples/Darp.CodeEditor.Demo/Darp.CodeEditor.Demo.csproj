@@ -28,7 +28,7 @@
     <None Include="..\Shared\Luau\**" LinkBase="Luau" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <!-- Puts luau-lsp and the Luau grammar next to the app. -->
-  <Import Project="..\..\src\Darp.CodeEditor.Luau\build\Darp.CodeEditor.Luau.targets" />
+  <Import Project="..\..\src\Darp.CodeEditor.Luau\buildTransitive\Darp.CodeEditor.Luau.targets" />
   <!-- Puts the C# helpers next to the app, as the Darp.CodeEditor.CSharp package does. -->
   <Import Project="..\..\src\Darp.CodeEditor.CSharp\buildTransitive\Darp.CodeEditor.CSharp.targets" />
 </Project>

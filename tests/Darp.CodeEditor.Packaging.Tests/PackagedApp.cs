@@ -11,7 +11,13 @@ namespace Darp.CodeEditor.Packaging.Tests;
 /// </summary>
 public sealed class PackagedApp : IAsyncLifetime
 {
-    private static readonly string[] s_packages = ["Darp.CodeEditor.Lsp", "Darp.CodeEditor", "Darp.CodeEditor.CSharp"];
+    private static readonly string[] s_packages =
+    [
+        "Darp.CodeEditor.Lsp",
+        "Darp.CodeEditor",
+        "Darp.CodeEditor.CSharp",
+        "Darp.CodeEditor.Luau",
+    ];
     private static readonly TimeSpan s_buildTimeout = TimeSpan.FromMinutes(10);
 
     private readonly string _root = Directory.CreateTempSubdirectory("codeeditor-packages-").FullName;
@@ -57,6 +63,7 @@ public sealed class PackagedApp : IAsyncLifetime
               <PropertyGroup><ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally></PropertyGroup>
               <ItemGroup>
                 <PackageVersion Include="Darp.CodeEditor.CSharp" Version="{_version}" />
+                <PackageVersion Include="Darp.CodeEditor.Luau" Version="{_version}" />
                 <PackageVersion Include="StreamJsonRpc" Version="{RepositoryPackageVersion(repository, "StreamJsonRpc")}" />
               </ItemGroup>
             </Project>

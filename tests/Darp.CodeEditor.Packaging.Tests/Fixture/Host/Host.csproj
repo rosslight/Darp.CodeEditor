@@ -13,6 +13,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Darp.CodeEditor.CSharp" />
+    <PackageReference Include="Darp.CodeEditor.Luau" />
     <!-- Scripts compile against the script API; NativeAOT ships it as a file next to the app. -->
     <ProjectReference Include="..\ScriptApi\ScriptApi.csproj" CSharpScriptReference="true" />
   </ItemGroup>

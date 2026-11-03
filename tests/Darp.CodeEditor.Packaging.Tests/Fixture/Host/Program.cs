@@ -3,17 +3,19 @@ using Darp.CodeEditor.CSharp;
 using Darp.CodeEditor.CSharp.Execution;
 using Darp.CodeEditor.CSharp.Hosting;
 using Darp.CodeEditor.LanguageServices;
+using Darp.CodeEditor.Luau;
 using ScriptApi;
 
-// A host that uses only the packages: it completes a script through the C# language server, runs a script in the
-// runner and calls the handler it returns, and reports which .NET runtime each helper runs on.
+// A host that uses only the packages: it completes a C# script through the C# language server, runs a script in the
+// runner and calls the handler it returns, reports which .NET runtime each helper runs on, and completes a Luau script
+// through luau-lsp.
 using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
 var environment = new CSharpScriptEnvironment
 {
     // NativeAOT apps ship the script API as a file next to the app; JIT apps have it there anyway.
     Globals = new CSharpScriptGlobals(
         Path.Combine(AppContext.BaseDirectory, "ScriptApi.dll"),
-        typeof(Globals).FullName!
+        typeof(Globals).FullName ?? throw new InvalidOperationException("Globals has no full name.")
     ),
     Imports = ["System", "System.Threading", "System.Threading.Tasks", "ScriptApi"],
 };
@@ -52,10 +54,12 @@ await using CSharpScriptRunner runner = await CSharpScriptRunner.StartAsync(
 );
 using IHandler handler = await runner.EvaluateAsync<IHandler>(
     """
-    class Handler(ICalculator calculator) : IHandler
+    class Handler : IHandler
     {
+        private readonly ICalculator _calculator;
+        public Handler(ICalculator calculator) => _calculator = calculator;
         public Task<int> HandleAsync(int value, CancellationToken cancellationToken) =>
-            calculator.AddAsync(value, 2, cancellationToken);
+            _calculator.AddAsync(value, 2, cancellationToken);
         public Task<string> GetRuntimeDirectoryAsync(CancellationToken cancellationToken) =>
             Task.FromResult(System.IO.Path.GetDirectoryName(typeof(object).Assembly.Location) ?? "");
         public void Dispose() { }
@@ -66,6 +70,28 @@ using IHandler handler = await runner.EvaluateAsync<IHandler>(
 );
 Console.WriteLine($"handler: {await handler.HandleAsync(40, timeout.Token)}");
 Console.WriteLine($"runner runtime: {await handler.GetRuntimeDirectoryAsync(timeout.Token)}");
+
+LspLanguageService luau = LuauLanguageServer.CreateService(
+    new LuauEnvironment(),
+    new LuauLanguageServerOptions { ResponseTimeout = TimeSpan.FromMinutes(1), Log = Console.Error.WriteLine }
+);
+try
+{
+    await luau.PrewarmAsync(timeout.Token);
+    const string text = "local text = string.";
+    luau.OpenDocument(new DocumentSnapshot("main.luau", 1, text));
+    CompletionList? completions = await luau.GetCompletionsAsync(
+        new DocumentVersion("main.luau", 1),
+        text.Length,
+        new CompletionTrigger(CompletionTriggerKind.TriggerCharacter, '.'),
+        timeout.Token
+    );
+    Console.WriteLine($"luau completion: {string.Join(", ", completions?.Items.Select(i => i.DisplayText) ?? [])}");
+}
+finally
+{
+    await luau.DisposeAsync();
+}
 return 0;
 
 /// <summary>The directory of the .NET runtime a process runs on, where its CoreCLR library was loaded from.</summary>
