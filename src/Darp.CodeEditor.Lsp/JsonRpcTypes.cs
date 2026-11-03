@@ -31,6 +31,14 @@ public enum DispatchMode
     Concurrent,
 }
 
+/// <summary>How much a peer may send. A peer that sends more is treated as broken.</summary>
+/// <param name="MaxHeaderLength">Input without a complete header beyond this many bytes is skipped as garbage.</param>
+/// <param name="MaxMessageLength">
+/// The largest message body in bytes. A larger message ends the connection: skipping it would lose a request or a
+/// change without notice.
+/// </param>
+public sealed record JsonRpcLimits(int MaxHeaderLength = 4 * 1024, int MaxMessageLength = 64 * 1024 * 1024);
+
 /// <summary>The id of a JSON-RPC request: a number or a string.</summary>
 [JsonConverter(typeof(RequestIdConverter))]
 public readonly record struct RequestId

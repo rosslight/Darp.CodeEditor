@@ -109,7 +109,11 @@ Command line flags of both demos:
    the state that all earlier messages left behind, and then runs alongside later messages.
 3. A request whose token was cancelled by the time its handler returned answers `RequestCancelled`, whatever the
    handler returned. Handlers throw `JsonRpcException`, for example with `ContentModified`, to answer other errors.
-4. Writes are serialized; null results are written as `"result": null`; document URIs are kept as sent.
+4. Sending only queues a message. One write loop serializes and writes messages in the order they were sent, so
+   callers never wait for serialization or a slow peer. A request cancelled before it went out is left out; otherwise
+   `$/cancelRequest` follows it. Disposing drops what was not written yet.
+5. `JsonRpcLimits` caps headers and messages; a longer message ends the connection. Null results are written as
+   `"result": null`, and document URIs are kept as sent.
 
 ## Third-party content
 
