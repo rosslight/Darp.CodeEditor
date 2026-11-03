@@ -168,7 +168,7 @@ dotnet artifacts/csharp-server/Darp.CodeEditor.CSharp.Server.dll
 | `--completion-limit <items>` | The most items a filtered list keeps, the best matches first. Default 1000. |
 
 Other arguments, such as `--stdio`, are ignored. The server exits when its input ends, after `exit`, or when the
-process named by `processId` in `initialize` ends.
+process named by `processId` in the answered `initialize` ends.
 
 ### Script environment
 
@@ -226,7 +226,7 @@ editor and in the host. `#:package` comes later.
 
 | Feature | Notes |
 | --- | --- |
-| `initialize`, `initialized`, `shutdown`, `exit` | Requests before `initialize` fail with `ServerNotInitialized`, requests after `shutdown` with `InvalidRequest`. A failed `initialize`, such as one with invalid options, leaves the server uninitialized, so the client can try again. Exit code 0 after `shutdown`, else 1. `initialize` answers right away; the environment loads in the background and requests wait for it. |
+| `initialize`, `initialized`, `shutdown`, `exit` | Requests before `initialize` fail with `ServerNotInitialized`, requests after `shutdown` with `InvalidRequest`. A failed or cancelled `initialize`, such as one with invalid options, leaves the server uninitialized and starts nothing, so the client can try again. Exit code 0 after `shutdown`, else 1. `initialize` answers right away; the environment starts loading on `initialized` (or the first `didOpen`, for clients that skip it), and requests wait for it. |
 | `didOpen`, `didChange` (incremental), `didClose` | Versions are kept per document; a change for the current or an older version is ignored. Each script is its own submission. |
 | `$/cancelRequest` | Answered with `RequestCancelled`; a request cancelled while it is queued does not run. |
 | `completion`, `completionItem/resolve` | Edits from Roslyn's `CompletionService.GetChangeAsync`, per-item commit characters from Roslyn's rules, `itemDefaults` when the client supports them. Lists of more than 1,000 items, such as a word list after its first letter, keep the 1,000 items that match the text before the caret best, scored by the editor's own `CompletionMatcher` and are marked `isIncomplete`, so the client asks again for each further letter. Types from namespaces that are not imported insert their name; resolve adds the `using` as `additionalTextEdits` (clients that cannot resolve those lazily do not get these items). Snippets such as `for` expand on resolve, for clients that list `textEdit` in `resolveSupport`, and are left out for others. `data` is opaque. |

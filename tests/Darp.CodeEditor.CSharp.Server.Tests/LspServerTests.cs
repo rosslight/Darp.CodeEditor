@@ -104,6 +104,18 @@ public sealed class LspLifecycleTests
     }
 
     [Fact]
+    public async Task A_client_that_skips_initialized_gets_diagnostics_for_its_documents()
+    {
+        await using LspClient client = TestServer.Start();
+        await client.RequestAsync("initialize", TestServer.InitializeParams(TestEnvironments.Device));
+
+        await client.OpenAsync("file:///scripts/a.csx", "Log(");
+        JsonObject published = await client.WaitForNotificationAsync("textDocument/publishDiagnostics");
+
+        published.GetArray("params", "diagnostics").ShouldNotBeEmpty();
+    }
+
+    [Fact]
     public async Task Initialize_after_shutdown_is_answered_with_an_error()
     {
         await using LspClient client = await TestServer.StartAsync();

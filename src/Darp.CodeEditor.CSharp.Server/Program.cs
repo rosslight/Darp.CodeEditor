@@ -6,7 +6,15 @@ Stream input = Console.OpenStandardInput();
 Stream output = Console.OpenStandardOutput();
 Console.SetOut(Console.Error);
 
-var session = new ScriptSession(ServerOptions.Parse(args));
+var session = new ScriptSession(
+    ServerOptions.Parse(args),
+    // The client's process ended, but another process, such as a child of the client, still holds the input open.
+    clientExited: processId =>
+    {
+        Console.Error.WriteLine($"The client process {processId} ended; exiting.");
+        Environment.Exit(1);
+    }
+);
 var server = new LanguageServer(input, output, session.InitializeAsync, session.ShutdownAsync, Console.Error.WriteLine);
 session.Connect(server.Connection);
 

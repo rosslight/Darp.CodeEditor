@@ -36,11 +36,18 @@ internal sealed class ScriptSession
     );
 
     private readonly ServerOptions _options;
+    private readonly Action<int> _clientExited;
     private readonly Dictionary<string, OpenDocument> _documents = new(StringComparer.Ordinal);
     private JsonRpcConnection? _connection;
+    private InitializeAttempt? _attempt;
     private Task<ScriptWorkspace>? _workspace;
 
-    public ScriptSession(ServerOptions options) => _options = options;
+    /// <param name="clientExited">Runs when the client process that <c>initialize</c> named ends.</param>
+    public ScriptSession(ServerOptions options, Action<int> clientExited)
+    {
+        _options = options;
+        _clientExited = clientExited;
+    }
 
     public ServerOptions Options => _options;
 
@@ -59,7 +66,14 @@ internal sealed class ScriptSession
     public void Connect(JsonRpcConnection connection)
     {
         _connection = connection;
-        connection.OnNotification(LspMethods.Initialized, static (_, _) => Task.CompletedTask);
+        connection.OnNotification(
+            LspMethods.Initialized,
+            (_, _) =>
+            {
+                Start();
+                return Task.CompletedTask;
+            }
+        );
         connection.OnNotification(
             LspMethods.DidOpen,
             (parameters, _) =>
@@ -90,10 +104,15 @@ internal sealed class ScriptSession
         SemanticTokensHandler.Register(connection, this);
     }
 
-    /// <summary>Answers <c>initialize</c>: reads the environment and starts loading it in the background.</summary>
+    /// <summary>Answers <c>initialize</c>: reads the environment, which loads once the client has the answer.</summary>
+    /// <remarks>
+    /// Nothing starts here. The client can cancel the request after it ran, and then a retry owns the session; only
+    /// the attempt whose result became the answer is followed by <c>initialized</c>, which <see cref="Start"/>s it.
+    /// </remarks>
     /// <exception cref="JsonRpcException">The options are invalid or name files or values that do not exist.</exception>
     public Task<InitializeResult> InitializeAsync(InitializeParams request, CancellationToken cancellationToken)
     {
+        _attempt = null;
         ResolvedScriptEnvironment resolved;
         try
         {
@@ -107,13 +126,7 @@ internal sealed class ScriptSession
         {
             throw new JsonRpcException(ErrorCodes.InvalidParams, exception.Message);
         }
-        Client = ClientFeatures.From(request.Capabilities);
-        _workspace = Task.Run(() => ScriptWorkspace.Load(resolved));
-        Observe(ReportLoadFailureAsync(_workspace), "Reporting the environment");
-        if (_options.WarmUp)
-            Observe(WarmUp.RunAsync(_workspace, Client, _options.CompletionListLimits), "Warm-up");
-        if (request.ProcessId is { } processId)
-            Observe(ExitWhenClientExitsAsync(processId), "Watching the client process");
+        _attempt = new InitializeAttempt(resolved, ClientFeatures.From(request.Capabilities), request.ProcessId);
         return Task.FromResult(new InitializeResult(s_capabilities, s_serverInfo));
     }
 
@@ -141,8 +154,30 @@ internal sealed class ScriptSession
             TaskScheduler.Default
         );
 
+    /// <summary>
+    /// Starts loading the environment of the answered <c>initialize</c>, the warm-up and watching the client process.
+    /// </summary>
+    /// <remarks>
+    /// Runs on <c>initialized</c>, which the client sends once it has the result, and on <c>didOpen</c>, for clients
+    /// that skip it. The connection admits both only after an <c>initialize</c> was answered with its result, and runs
+    /// them and <c>initialize</c> one at a time, so <see cref="_attempt"/> is the answered one.
+    /// </remarks>
+    private void Start()
+    {
+        if (_workspace is not null || _attempt is not { } attempt)
+            return;
+        Client = attempt.Client;
+        _workspace = Task.Run(() => ScriptWorkspace.Load(attempt.Environment));
+        Observe(ReportLoadFailureAsync(_workspace), "Reporting the environment");
+        if (_options.WarmUp)
+            Observe(WarmUp.RunAsync(_workspace, Client, _options.CompletionListLimits), "Warm-up");
+        if (attempt.ProcessId is { } processId)
+            Observe(WatchClientAsync(processId), "Watching the client process");
+    }
+
     private void Open(TextDocumentItem item)
     {
+        Start();
         if (_documents.Remove(item.Uri, out OpenDocument? previous))
         {
             previous.Close();
@@ -217,10 +252,10 @@ internal sealed class ScriptSession
     }
 
     /// <summary>
-    /// Ends the server when the client process ends. Its input usually ends with it, but not when another process,
+    /// Tells the server when the client process ends. Its input usually ends with it, but not when another process,
     /// such as a child of the client, still holds the pipe open.
     /// </summary>
-    private static async Task ExitWhenClientExitsAsync(int processId)
+    private async Task WatchClientAsync(int processId)
     {
         try
         {
@@ -236,8 +271,7 @@ internal sealed class ScriptSession
             Console.Error.WriteLine($"Cannot watch the client process {processId}: {exception.Message}");
             return;
         }
-        Console.Error.WriteLine($"The client process {processId} ended; exiting.");
-        Environment.Exit(1);
+        _clientExited(processId);
     }
 
     /// <summary>Publishes compiler diagnostics for <paramref name="snapshot"/> once the text stayed unchanged for a while.</summary>
@@ -274,4 +308,7 @@ internal sealed class ScriptSession
             LspMethods.PublishDiagnostics,
             new PublishDiagnosticsParams(uri, diagnostics, version)
         );
+
+    /// <summary>What an <c>initialize</c> read, to start once its result became the answer.</summary>
+    private sealed record InitializeAttempt(ResolvedScriptEnvironment Environment, ClientFeatures Client, int? ProcessId);
 }
