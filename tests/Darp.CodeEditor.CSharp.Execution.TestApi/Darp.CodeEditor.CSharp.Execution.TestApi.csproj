@@ -8,4 +8,7 @@
   <ItemGroup>
     <PackageReference Include="StreamJsonRpc" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Darp.CodeEditor.CSharp.Execution.TestDependency\Darp.CodeEditor.CSharp.Execution.TestDependency.csproj" />
+  </ItemGroup>
 </Project>

@@ -28,6 +28,7 @@ using ITestHandler handler = await runner.EvaluateAsync<ITestHandler>(
             Task.FromResult(samples.Select(s => s.Payload.Length).ToArray());
         public void Dispose() { }
     }
+    await Host.LogAsync($"globals from {Origin}");
     new Handler(Host)
     """
 );

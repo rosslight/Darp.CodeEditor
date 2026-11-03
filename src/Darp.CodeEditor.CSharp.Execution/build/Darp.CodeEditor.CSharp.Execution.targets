@@ -8,7 +8,8 @@
                                                      other helpers, such as the C# language server, can share it
 
     NativeAOT apps compile their managed assemblies into the executable. Mark the references whose assemblies scripts
-    use; publish copies their DLLs next to the app, with StreamJsonRpc and PolyType, which script API assemblies use:
+    use; publish copies their DLLs next to the app, with StreamJsonRpc and PolyType, which script API assemblies use,
+    and every managed assembly those need at run time:
 
       <ProjectReference Include="..\MyApp.ScriptApi\MyApp.ScriptApi.csproj" CSharpScriptReference="true" />
       <PackageReference Include="MyApp.Devices" CSharpScriptReference="true" />
@@ -116,7 +117,11 @@
       />
     </ItemGroup>
 
-    <!-- NativeAOT compiles the app's managed assemblies into the executable; scripts need the marked ones as files. -->
+    <!--
+      NativeAOT compiles the app's managed assemblies into the executable; scripts need the marked ones as files, and the
+      runner needs everything they use at run time: their managed dependencies, transitively, from the app's own
+      assemblies. The app's runtime pack stays out; the runner has its own runtime.
+    -->
     <ItemGroup Condition="'$(PublishAot)' == 'true'">
       <!-- What the app marked: project references as they are written, packages by ID. -->
       <_CSharpScriptReferenceKey Include="@(ProjectReference->WithMetadataValue('CSharpScriptReference', 'true'))" />
@@ -124,7 +129,7 @@
       <_CSharpScriptReferenceKey Include="StreamJsonRpc;PolyType" Condition="'@(_CSharpScriptReferenceKey)' != ''" />
       <_CSharpScriptReferenceCandidate
         Include="@(ReferenceCopyLocalPaths)"
-        Condition="'%(ReferenceCopyLocalPaths.Extension)' == '.dll' and '%(ReferenceCopyLocalPaths.DestinationSubDirectory)' == ''"
+        Condition="'%(ReferenceCopyLocalPaths.Extension)' == '.dll' and '%(ReferenceCopyLocalPaths.DestinationSubDirectory)' == '' and !$([System.String]::new('%(ReferenceCopyLocalPaths.NuGetPackageId)').Contains('.App.Runtime.'))"
         SourcePath="%(ReferenceCopyLocalPaths.FullPath)"
         Key="%(ReferenceCopyLocalPaths.ProjectReferenceOriginalItemSpec)%(ReferenceCopyLocalPaths.NuGetPackageId)"
       />
@@ -134,9 +139,28 @@
         Include="@(_CSharpScriptReferenceByKey)"
         Exclude="@(_CSharpScriptReferenceUnmarked)"
       />
-      <_CSharpScriptReferenceFile Include="@(_CSharpScriptReferenceMarked->'%(SourcePath)'->Distinct())" />
+      <_CSharpScriptReferenceRoot Include="@(_CSharpScriptReferenceMarked->'%(SourcePath)'->Distinct())" />
+    </ItemGroup>
+    <ResolveAssemblyReference
+      Condition="'@(_CSharpScriptReferenceRoot)' != ''"
+      AssemblyFiles="@(_CSharpScriptReferenceRoot)"
+      CandidateAssemblyFiles="@(_CSharpScriptReferenceCandidate)"
+      SearchPaths="{CandidateAssemblyFiles}"
+      AllowedAssemblyExtensions=".dll"
+      FindDependencies="true"
+      FindSatellites="false"
+      FindSerializationAssemblies="false"
+      FindRelatedFiles="false"
+      AutoUnify="true"
+      Silent="true"
+    >
+      <Output TaskParameter="ResolvedDependencyFiles" ItemName="_CSharpScriptReferenceDependency" />
+    </ResolveAssemblyReference>
+    <ItemGroup Condition="'$(PublishAot)' == 'true'">
+      <_CSharpScriptReferenceFile Include="@(_CSharpScriptReferenceRoot);@(_CSharpScriptReferenceDependency->'%(FullPath)')" />
+      <_CSharpScriptReferenceFile Remove="@(_CSharpScriptReferenceFile)" Condition="'%(Extension)' != '.dll'" />
       <ResolvedFileToPublish
-        Include="@(_CSharpScriptReferenceFile)"
+        Include="@(_CSharpScriptReferenceFile->Distinct())"
         RelativePath="%(_CSharpScriptReferenceFile.Filename)%(_CSharpScriptReferenceFile.Extension)"
         CopyToPublishDirectory="PreserveNewest"
       />

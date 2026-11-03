@@ -102,7 +102,9 @@ internal sealed class RunnerEnvironment
     }
 
     /// <summary>A new globals object for one script run, or null when the environment has no globals.</summary>
-    public object? CreateGlobals() => _globalsConstructor?.Invoke(_services);
+    /// <remarks>Exceptions of the constructor, such as a missing dependency, surface as they are.</remarks>
+    public object? CreateGlobals() =>
+        _globalsConstructor?.Invoke(BindingFlags.DoNotWrapExceptions, binder: null, _services, culture: null);
 
     /// <summary>
     /// Compiles a script and reports the diagnostics the editor shows for it: every compiler diagnostic that is not
@@ -161,22 +163,37 @@ internal sealed class RunnerEnvironment
     }
 
     /// <summary>
-    /// Lets scripts load the files they were compiled against. Assemblies the runner ships itself, such as
+    /// Lets scripts load the files they were compiled against, and what those use at run time from the same
+    /// directories: the app ships its script API with its dependencies. Assemblies the runner ships itself, such as
     /// StreamJsonRpc, load from the runner.
     /// </summary>
     private static void LoadReferencesOnDemand(ImmutableArray<string> referencePaths)
     {
         string runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory();
         var paths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var directories = new List<string>();
         foreach (string path in referencePaths)
         {
-            if (!path.StartsWith(runtimeDirectory, StringComparison.Ordinal))
-                paths.TryAdd(Path.GetFileNameWithoutExtension(path), path);
+            if (path.StartsWith(runtimeDirectory, StringComparison.Ordinal))
+                continue;
+            paths.TryAdd(Path.GetFileNameWithoutExtension(path), path);
+            if (Path.GetDirectoryName(path) is { } directory && !directories.Contains(directory))
+                directories.Add(directory);
         }
         AssemblyLoadContext.Default.Resolving += (context, name) =>
-            name.Name is { } simpleName && paths.TryGetValue(simpleName, out string? path)
-                ? context.LoadFromAssemblyPath(path)
-                : null;
+        {
+            if (name.Name is not { } simpleName)
+                return null;
+            if (paths.TryGetValue(simpleName, out string? path))
+                return context.LoadFromAssemblyPath(path);
+            foreach (string directory in directories)
+            {
+                string candidate = Path.Combine(directory, simpleName + ".dll");
+                if (File.Exists(candidate))
+                    return context.LoadFromAssemblyPath(candidate);
+            }
+            return null;
+        };
     }
 
     private static ScriptDiagnostic ToScriptDiagnostic(Diagnostic diagnostic, LineStarts lines)

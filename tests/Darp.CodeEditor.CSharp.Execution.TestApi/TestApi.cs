@@ -6,12 +6,22 @@ using StreamJsonRpc;
 namespace Darp.CodeEditor.CSharp.Execution.TestApi;
 
 /// <summary>What test scripts use without qualification.</summary>
-public sealed class TestGlobals(ITestHost host)
+public sealed class TestGlobals
 {
-    private readonly ITestHost _host = host;
+    private readonly ITestHost _host;
+
+    public TestGlobals(ITestHost host)
+    {
+        _host = host;
+        // A private dependency, two levels deep: the runner must find it although scripts never see it.
+        Origin = TestDependency.TestDependency.Describe();
+    }
 
     /// <summary>The app, which scripts call back into.</summary>
     public ITestHost Host => _host;
+
+    /// <summary>What the private dependency reported.</summary>
+    public string Origin { get; }
 }
 
 /// <summary>A host service: scripts call it, the app implements it.</summary>

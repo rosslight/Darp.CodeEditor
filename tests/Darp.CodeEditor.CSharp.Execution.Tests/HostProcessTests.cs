@@ -80,6 +80,8 @@ public sealed class HostProcessTests
             );
             runExitCode.ShouldBe(0, runLog);
             runLog.ShouldContain("result 42 batch 3,4");
+            // The globals use a private dependency two levels deep; publish must ship it and the runner must find it.
+            runLog.ShouldContain("globals from MetadataLoadContext");
         }
         finally
         {

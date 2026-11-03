@@ -384,8 +384,9 @@ the build machine beyond NuGet. Import the targets into the app project:
 </ItemGroup>
 ```
 
-Mark every reference whose types scripts use, including the ones those types expose. JIT apps have all their DLLs next
-to them already.
+Mark the references whose types scripts use. Publish also ships what the marked assemblies need at run time, found
+by their assembly references among the app's own assemblies, and the runner loads those from the app's directory. JIT
+apps have all their DLLs next to them already.
 
 - `dotnet build`: the runner's build output goes to `helpers/csharp-runner`, and it runs on the runtime that runs the
   app, so `dotnet run` works without publishing.
