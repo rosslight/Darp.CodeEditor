@@ -261,15 +261,17 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
         await using LspLanguageService service = servers.CreateService(TimeSpan.FromMilliseconds(500));
         await service.PrewarmAsync(Timeout);
         service.OpenDocument(new DocumentSnapshot("a", 1, Text));
+        ChannelReader<LanguageServerState> states = RecordStates(service);
 
         // The toy answers a hover over "slow" only when it is cancelled, and nothing cancels this one.
         var waited = Stopwatch.StartNew();
         QuickInfo? hung = await service.GetQuickInfoAsync(new DocumentVersion("a", 1), 13, Timeout);
         waited.Stop();
-        await Wait.UntilAsync(() => servers.Starts == 2 && service.State == LanguageServerState.Running);
+        await RestartedAsync(states);
 
         hung.ShouldBeNull();
         waited.Elapsed.ShouldBeInRange(TimeSpan.FromMilliseconds(450), TimeSpan.FromSeconds(10));
+        servers.Starts.ShouldBe(2);
         (await service.GetQuickInfoAsync(new DocumentVersion("a", 1), 1, Timeout))
             .ShouldNotBeNull()
             .Text.ShouldBe("Hi, alpha");
@@ -284,17 +286,54 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
         service.OpenDocument(new DocumentSnapshot("a", 1, Text));
         // A round trip, so that the document reached the server before it stops reading.
         (await service.GetQuickInfoAsync(new DocumentVersion("a", 1), 1, Timeout)).ShouldNotBeNull();
+        ChannelReader<LanguageServerState> states = RecordStates(service);
         servers.BlockWrites();
 
         var call = Stopwatch.StartNew();
         service.ChangeDocument(new DocumentChange("a", 2, new TextChange(0, 0, "x")));
         call.Stop();
-        await Wait.UntilAsync(() => servers.Starts == 2 && service.State == LanguageServerState.Running);
+        await RestartedAsync(states);
 
         call.Elapsed.ShouldBeLessThan(TimeSpan.FromMilliseconds(100));
+        servers.Starts.ShouldBe(2);
         (await service.GetQuickInfoAsync(new DocumentVersion("a", 2), 1, Timeout))
             .ShouldNotBeNull()
             .Text.ShouldBe("Hi, xalpha");
+    }
+
+    [Fact]
+    public async Task The_state_leaves_Running_before_the_next_server_starts_while_a_handler_holds_the_service()
+    {
+        var servers = new ToyServers();
+        var atStart = new List<LanguageServerState>();
+        LspLanguageService? service = null;
+        await using LspLanguageService created = servers.CreateService(configure: options =>
+            options with
+            {
+                StartServer = cancellationToken =>
+                {
+                    atStart.Add(service!.State);
+                    return options.StartServer(cancellationToken);
+                },
+            }
+        );
+        service = created;
+        await service.PrewarmAsync(Timeout);
+        service.OpenDocument(new DocumentSnapshot("a", 1, Text));
+        (await service.GetQuickInfoAsync(new DocumentVersion("a", 1), 1, Timeout)).ShouldNotBeNull();
+        // An editor that takes its time with the cleared diagnostics holds the service's loop.
+        using var held = new ManualResetEventSlim();
+        service.DiagnosticsChanged += (_, e) =>
+        {
+            if (e.Diagnostics.Count == 0)
+                held.Wait(Timeout);
+        };
+
+        await servers.CrashAsync();
+        await Wait.UntilAsync(() => servers.Starts == 2);
+        held.Set();
+
+        atStart.ShouldBe([LanguageServerState.Starting, LanguageServerState.Restarting]);
     }
 
     [Fact]
@@ -399,4 +438,19 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
                 version
             )
         );
+
+    /// <summary>Records each state the service enters, from now on.</summary>
+    private static ChannelReader<LanguageServerState> RecordStates(LspLanguageService service)
+    {
+        var states = Channel.CreateUnbounded<LanguageServerState>();
+        service.StateChanged += (_, _) => states.Writer.TryWrite(service.State);
+        return states.Reader;
+    }
+
+    /// <summary>Waits until the server restarted: the state went to Restarting and then back to Running.</summary>
+    private static async Task RestartedAsync(ChannelReader<LanguageServerState> states)
+    {
+        while (await states.ReadAsync(Timeout) != LanguageServerState.Restarting) { }
+        while (await states.ReadAsync(Timeout) != LanguageServerState.Running) { }
+    }
 }

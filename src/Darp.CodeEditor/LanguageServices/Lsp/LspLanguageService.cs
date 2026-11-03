@@ -81,7 +81,14 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
             _tokenTypes[name] = kind;
         _supervisor = new Supervisor<LanguageClient>(StartClientAsync, client => client.Completion, options.Restart);
         _supervisor.Started += client => Post(() => OnStartedAsync(client));
-        _supervisor.Failed += (client, exception) => Post(() => OnFailed(client, exception));
+        _supervisor.Failed += (client, exception) =>
+        {
+            if (client is not null)
+                ClearFeatures(client);
+            Post(() => OnFailed(client, exception));
+            // At once, before the supervisor starts the next server: the state never says Running for an ended one.
+            SetState(LanguageServerState.Restarting);
+        };
         _loop = Task.Run(RunAsync);
     }
 
@@ -472,7 +479,14 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
         foreach (ServerDocument document in _documents.Values)
             await NotifyAsync(client, LspMethods.DidOpen, document.CreateOpenParams(_options.LanguageId))
                 .ConfigureAwait(false);
-        SetState(LanguageServerState.Running);
+        // A server that ended meanwhile stays Restarting; OnFailed follows.
+        if (!HasEnded(client))
+        {
+            SetState(LanguageServerState.Running);
+            // If it ended in between, its failure may have said Restarting before this said Running.
+            if (HasEnded(client))
+                SetState(LanguageServerState.Restarting);
+        }
         Invalidated?.Invoke(this, EventArgs.Empty);
     }
 
@@ -708,10 +722,12 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
     /// <summary>Ends a server that stopped answering or reading; the supervisor starts a new one.</summary>
     private void Abort(LanguageClient client, string reason)
     {
-        if (_features.Client != client)
+        // The first to find it hung ends it; the state says so at once.
+        if (!ClearFeatures(client))
             return;
         Log($"The language server is hung: {reason}. It is ended and restarts.");
         _ = AbortAsync();
+        SetState(LanguageServerState.Restarting);
 
         async Task AbortAsync()
         {
@@ -915,13 +931,32 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
                 : "file:///" + Uri.EscapeDataString(documentId)
         );
 
+    /// <summary>Takes the features of <paramref name="client"/> away, on any thread.</summary>
+    /// <returns>False when they were not its features, such as when it ended before.</returns>
+    private bool ClearFeatures(LanguageClient client)
+    {
+        ServerFeatures features = _features;
+        return features.Client == client
+            && Interlocked.CompareExchange(ref _features, ServerFeatures.None, features) == features;
+    }
+
+    /// <summary>Whether <paramref name="client"/> ended or was found hung, which may not have reached the loop yet.</summary>
+    private bool HasEnded(LanguageClient client) => _features.Client != client || client.Completion.IsCompleted;
+
+    /// <summary>Sets the state on any thread; the last call wins, and nothing follows Disposed.</summary>
     private void SetState(LanguageServerState state)
     {
         int current = Volatile.Read(ref _state);
-        if (current == (int)state || current == (int)LanguageServerState.Disposed)
-            return;
-        if (Interlocked.CompareExchange(ref _state, (int)state, current) == current)
-            StateChanged?.Invoke(this, EventArgs.Empty);
+        while (current != (int)state && current != (int)LanguageServerState.Disposed)
+        {
+            int seen = Interlocked.CompareExchange(ref _state, (int)state, current);
+            if (seen == current)
+            {
+                StateChanged?.Invoke(this, EventArgs.Empty);
+                return;
+            }
+            current = seen;
+        }
     }
 
     private void Log(string message) => _options.Log?.Invoke(message);

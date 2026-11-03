@@ -42,27 +42,32 @@ internal sealed class ToyServers
 
     /// <summary>A service of these servers, which restart after 10 ms.</summary>
     /// <param name="responseTimeout">After how long a server that answers or reads nothing counts as hung.</param>
-    public LspLanguageService CreateService(TimeSpan? responseTimeout = null) =>
-        new(
-            new LspLanguageServiceOptions(StartAsync, "toy")
+    /// <param name="configure">Changes further options.</param>
+    public LspLanguageService CreateService(
+        TimeSpan? responseTimeout = null,
+        Func<LspLanguageServiceOptions, LspLanguageServiceOptions>? configure = null
+    )
+    {
+        var options = new LspLanguageServiceOptions(StartAsync, "toy")
+        {
+            Settings = item =>
             {
-                Settings = item =>
-                {
-                    // A test holds the client's dispatch here with BlockSettings.
-                    if (item.Section == "block")
-                        _settings.Wait(TimeSpan.FromSeconds(30));
-                    return item.Section == "toy" ? ToyServer.ToJson("""{"greeting":"Hi"}""") : null;
-                },
-                // The toy's words and numbers, colored as locals and constants.
-                TokenTypes = new Dictionary<string, ClassificationKind?>
-                {
-                    ["word"] = ClassificationKind.Local,
-                    ["number"] = ClassificationKind.Constant,
-                },
-                Restart = new SupervisorOptions { FirstDelay = TimeSpan.FromMilliseconds(10) },
-                ResponseTimeout = responseTimeout ?? TimeSpan.FromSeconds(10),
-            }
-        );
+                // A test holds the client's dispatch here with BlockSettings.
+                if (item.Section == "block")
+                    _settings.Wait(TimeSpan.FromSeconds(30));
+                return item.Section == "toy" ? ToyServer.ToJson("""{"greeting":"Hi"}""") : null;
+            },
+            // The toy's words and numbers, colored as locals and constants.
+            TokenTypes = new Dictionary<string, ClassificationKind?>
+            {
+                ["word"] = ClassificationKind.Local,
+                ["number"] = ClassificationKind.Constant,
+            },
+            Restart = new SupervisorOptions { FirstDelay = TimeSpan.FromMilliseconds(10) },
+            ResponseTimeout = responseTimeout ?? TimeSpan.FromSeconds(10),
+        };
+        return new LspLanguageService(configure is null ? options : configure(options));
+    }
 
     /// <summary>The messages of a method the client sent.</summary>
     public IReadOnlyList<JsonObject> SentOf(string method) => [.. Sent.Where(m => (string?)m["method"] == method)];
