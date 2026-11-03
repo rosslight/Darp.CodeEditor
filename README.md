@@ -48,6 +48,11 @@ Darp.CodeEditor.CSharp.Execution  NativeAOT-compatible; no Roslyn; StreamJsonRpc
   build/*.targets                 puts the runner and its .NET runtime next to the app
 
 Darp.CodeEditor.CSharp.Runner     JIT only, framework-dependent helper: compiles and runs scripts, RPC over stdio
+
+Darp.CodeEditor.Luau       NativeAOT-compatible
+  LuauLanguageServer       the LspLanguageService of luau-lsp for an environment: the app's Luau API
+  LuauLanguage             the Luau grammar and editing helpers for an editor
+  build/                   Darp.CodeEditor.Luau.targets: puts luau-lsp and the grammar next to the app
 ```
 
 Every language goes through an out-of-process LSP server, for JIT and NativeAOT hosts alike: C# through the C# script
@@ -79,14 +84,16 @@ Rules the code follows:
 | `src/Darp.CodeEditor.CSharp.Execution` | `IsAotCompatible`: runs scripts in the runner; the MSBuild targets that ship it. |
 | `src/Darp.CodeEditor.CSharp.Runner` | The runner: a helper process that compiles and runs scripts. |
 | `src/Darp.CodeEditor.Lsp` | JSON-RPC and LSP layer for language servers and the editor's LSP client (`IsAotCompatible`). |
-| `samples/Darp.CodeEditor.Demo` | JIT desktop app: C# script through the C# server with completion, diagnostics, semantic colors, quick info, signature help; Luau and JSON with highlighting; Run (F5) runs packet.csx in the script runner. |
-| `samples/Darp.CodeEditor.Demo.Aot` | `PublishAot=true`, without Roslyn: the same C# features through the same server, Luau and JSON highlighting, search, a small in-process JSON language service (word completion, parse errors), and Run (F5) for packet.csx through the script runner. |
+| `src/Darp.CodeEditor.Luau` | `IsAotCompatible`: Luau editing through luau-lsp with the app's Luau API, the Luau grammar, and the targets that put luau-lsp next to an app. |
+| `samples/Darp.CodeEditor.Demo` | JIT desktop app: C# script through the C# server and Luau through luau-lsp, each with completion, diagnostics, semantic colors, quick info, signature help; JSON with highlighting; Run (F5) runs packet.csx in the script runner. |
+| `samples/Darp.CodeEditor.Demo.Aot` | `PublishAot=true`, without Roslyn: the same C# and Luau features through the same servers, JSON highlighting, search, a small in-process JSON language service (word completion, parse errors), and Run (F5) for packet.csx through the script runner. |
 | `samples/Darp.CodeEditor.Demo.Globals` | The globals of script.csx; the C# server reads the assembly as a file, also next to the AOT demo. |
 | `samples/Darp.CodeEditor.Demo.ScriptApi` | The demos' script API: globals, a service the app implements, the handler scripts return. |
-| `samples/Shared` | Sample documents, measurement scenarios, the Run action and the Luau grammar shared by both demos. |
-| `tests/Darp.CodeEditor.Tests` | The LSP client against the layer's toy server, luau-lsp and the C# server; the completion matcher; headless tests of the editing helpers. |
+| `samples/Shared` | Sample documents, measurement scenarios, the Run action and the Luau API (`Luau/`) shared by both demos. |
+| `tests/Darp.CodeEditor.Tests` | The LSP client against the layer's toy server and the C# server; the completion matcher; headless tests of the editing helpers. |
 | `tests/Darp.CodeEditor.Lsp.Tests` | Tests of the LSP layer, a toy server and client, and an interop test against luau-lsp. |
 | `tests/Darp.CodeEditor.Lsp.AotSmoke` | NativeAOT build of the toy server and client, and of the luau-lsp check. |
+| `tests/Darp.CodeEditor.Luau.Tests` | Luau through the editor's LSP client and luau-lsp with a host API; the checksum checks of the luau-lsp download. |
 | `tests/Darp.CodeEditor.Lsp.TestProcess` | A child process for the tests of `ChildProcess`, including one that dies with its host. |
 | `tests/Darp.CodeEditor.CSharp.Server.Tests` | Compiler-parity tests against `CSharpScript`, and tests that drive the server process over stdio. |
 | `tests/Darp.CodeEditor.CSharp.TestGlobals` | A globals contract assembly for the tests, including the demo's `ScriptGlobals`. |
@@ -115,13 +122,13 @@ samples/Darp.CodeEditor.Demo.Aot/bin/Release/net10.0/linux-x64/publish/Darp.Code
 dotnet test --project tests/Darp.CodeEditor.Tests
 dotnet test --project tests/Darp.CodeEditor.CSharp.Server.Tests
 dotnet test --project tests/Darp.CodeEditor.CSharp.Execution.Tests
+dotnet test --project tests/Darp.CodeEditor.Luau.Tests
 ```
 
-The LSP layer has its own tests. The luau-lsp interop test is skipped until the script downloaded luau-lsp to
-`.tools/`; the NativeAOT check runs it too.
+The LSP layer has its own tests, with an interop test against luau-lsp; the NativeAOT check runs it too. The build
+downloads luau-lsp for them, as for the demos (see [Luau](#luau)).
 
 ```bash
-tests/Darp.CodeEditor.Lsp.Tests/fetch-luau-lsp.sh
 dotnet test --project tests/Darp.CodeEditor.Lsp.Tests
 
 # Fails on any trim or AOT warning
@@ -130,9 +137,9 @@ tests/Darp.CodeEditor.Lsp.AotSmoke/bin/Release/net10.0/linux-x64/publish/Darp.Co
 ```
 
 Both demos start the C# script language server from `helpers/csharp-server/` next to them, which
-`Darp.CodeEditor.CSharp.targets` fills on build and publish, with `dotnet` on the installed .NET 10 runtime. On a Linux
-machine without a display, run the demos on a virtual X server (for example `xvfb-run` or any X server with `DISPLAY`
-set).
+`Darp.CodeEditor.CSharp.targets` fills on build and publish, with `dotnet` on the installed .NET 10 runtime, and
+luau-lsp from `helpers/luau-lsp/`, which `Darp.CodeEditor.Luau.targets` fills. On a Linux machine without a display, run
+the demos on a virtual X server (for example `xvfb-run` or any X server with `DISPLAY` set).
 
 Command line flags of both demos:
 
@@ -145,10 +152,11 @@ Command line flags of both demos:
 | `--scene` | Prepares a scene for a screenshot and stays open. |
 | `--run-script` | Runs packet.csx through the script runner once the window opens, prints the output and exits. |
 | `--skip-highlighting-bench` | Skips the highlighting scenarios of `--bench`. |
-| `--no-language-service` | Starts without the C# server, to attribute startup stalls. |
+| `--no-language-service` | Starts without the C# server and luau-lsp, to attribute startup stalls. |
 | `--csharp-server <path>` | The C# server's `.dll` or app host, instead of the one next to the demo. |
 | `--dotnet <path>` | The `dotnet` executable that runs the C# server. |
-| `--server-log` | Writes the C# server's standard error and log messages to standard error. |
+| `--luau-lsp <path>` | The luau-lsp executable, instead of the one next to the demo. |
+| `--server-log` | Writes the standard error and log messages of the C# server and luau-lsp to standard error. |
 | `--low-latency-gc` | JIT demo only: sets `GCLatencyMode.SustainedLowLatency`. |
 | `--light` | Starts with the light theme variant. The status bar's button switches between light and dark at run time. |
 | `--e2e <file>` | Writes where line 1 of a C# document without language features ends on screen, for `Probe latency`, and stays open. |
@@ -213,8 +221,8 @@ await csharp.DisposeAsync();        // shutdown and exit, then the process ends
 `CSharpLanguageServerOptions` sets the server (`ServerPath`: its `.dll`, run with `dotnet`, or its app host), the
 `dotnet` executable (`DotNetPath`) and the runtime an app host runs on (`DotNetRoot`), which is where a runtime bundled
 with the app plugs in. Any other server runs through `LspLanguageServiceOptions` with a start function, such as
-`LanguageServerTransport.StartProcessAsync`; luau-lsp works this way, with whole-document semantic tokens and its
-settings requests answered by the `Settings` hook.
+`LanguageServerTransport.StartProcessAsync`; `Darp.CodeEditor.Luau` starts luau-lsp this way, with whole-document
+semantic tokens and its settings requests answered by the `Settings` hook.
 
 1. The editor opens, changes and closes documents and makes requests on the UI thread; the service only queues them.
    One loop keeps a copy of each document, converts offsets to UTF-16 positions, and sends changes before the requests
@@ -586,11 +594,103 @@ values are p50 per call or per batch):
 Published runners are ReadyToRun on the bundled runtime; the build output is IL on the installed runtime.
 ReadyToRun halves the time to the first result.
 
+## Luau
+
+Luau scripts get completion, hover, signature help, diagnostics and semantic colors from
+[luau-lsp](https://github.com/JohnnyMorganz/luau-lsp), set up like C#: an out-of-process language server behind the
+editor's LSP client, one server for all Luau editors of an app, restarted when it crashes. The host describes what its
+scripts see:
+
+```csharp
+var environment = new LuauEnvironment
+{
+    Definitions = [new LuauDefinitions("app", Path.Combine(AppContext.BaseDirectory, "app.d.luau"))],
+    DocumentationFiles = [Path.Combine(AppContext.BaseDirectory, "app.docs.json")],
+    Mode = LuauMode.Strict,
+};
+LspLanguageService luau = LuauLanguageServer.CreateService(environment);
+LuauLanguage.Configure(editor);     // the Luau grammar and editing helpers
+editor.LanguageService = luau;      // opens the document; the first open document starts luau-lsp
+await luau.DisposeAsync();          // shutdown and exit, then the process ends
+```
+
+| Part | Meaning |
+| --- | --- |
+| `Definitions` | Luau definition files: the app's globals, functions and types, the equivalent of C#'s globals. Each is loaded under a name, here `@app`. |
+| `DocumentationFiles` | JSON documentation for the declarations, keyed by symbol: `@app/global/log`, `@app/global/limits.maxTemperature`, `@app/globaltype/Device.setLed`, and `@app/globaltype/Device.setLed/param/1` for a parameter (`self` is 0; `param/0` for functions). Completion, hover and signature help show them. `---` comments in a definition file document its declarations too. |
+| `Mode` | `Strict`, `Nonstrict` (Luau's default) or `NoCheck`, for scripts without a `--!strict`, `--!nonstrict` or `--!nocheck` comment; passed to luau-lsp as its base `.luaurc`. |
+| `Settings` | Further luau-lsp settings, merged over the package's: the contents of the `luau-lsp` section, such as `{ "types": { "disabledGlobals": ["os.exit"] } }`. |
+
+A definition file in current Luau syntax (`declare class` is now `declare extern type ... with`):
+
+```luau
+declare function log(message: string): ()
+
+declare extern type Device with
+    name: string
+    function readTemperature(self): number
+    function setLed(self, on: boolean): ()
+end
+
+declare device: Device
+declare limits: { maxTemperature: number }
+```
+
+luau-lsp gets the definitions and documentation as `--definitions` and `--docs` and the mode as `--base-luaurc`; it
+reads them at startup, so a changed environment needs a new service. Its settings go out as answers to
+`workspace/configuration`: the standard platform instead of luau-lsp's default, Roblox (no Roblox globals, types or
+sourcemaps), and completions that insert names without parentheses, since the editor has no snippets and `(` brings
+signature help. `initializationOptions` of luau-lsp 1.70.1 carry only Luau flags, which
+`LuauLanguageServerOptions.Arguments` sets as `--flag:Name=Value`.
+
+Documents live in a luau-lsp workspace folder: `LuauLanguageServerOptions.WorkspaceDirectory`, where scripts can
+`require` each other and `.luaurc` files apply, or by default a folder that does not exist, so each script stands
+alone and document ids are names such as `script.luau`. Their URIs are written the way luau-lsp writes them back
+(`file:///c%3A/...`), so its diagnostics find their documents. luau-lsp classifies whole documents only; the service
+asks once per version and cuts out the visible range.
+
+### luau-lsp binaries
+
+`Darp.CodeEditor.Luau.targets` puts luau-lsp 1.70.1 next to the app on build and publish, for the app's runtime
+identifier (or the SDK's when the build has none):
+
+| Runtime identifier | Release asset |
+| --- | --- |
+| `win-x64` | `luau-lsp-win64.zip` |
+| `win-arm64` | the same x64 build, which Windows on Arm runs under emulation: luau-lsp has no Windows arm64 build |
+| `linux-x64` | `luau-lsp-linux-x86_64.zip` |
+| `linux-arm64` | `luau-lsp-linux-arm64.zip` |
+| `osx-x64`, `osx-arm64` | `luau-lsp-macos.zip`, one universal binary |
+
+Linux builds need glibc; musl and other identifiers fail the build with a message. The archive is downloaded from the
+GitHub release once into `.tools/luau-lsp/` and checked on every build against its SHA-256, which the targets pin per
+asset; a download that does not match is deleted and fails the build. Builds unpack it into `obj/` and copy the
+executable to `helpers/luau-lsp/`, with the base configurations; the grammar goes to `Grammars/`.
+
+| Property | Effect |
+| --- | --- |
+| `LuauLspArchive` | The release's zip on disk, for offline builds; it is checked like a download. |
+| `LuauLspCacheDirectory` | Where downloads are kept, such as a shared cache. A filled cache needs no network. |
+| `LuauLspDownloadUrl` | A mirror of the release's zip. |
+| `LuauLspExecutable` | Another luau-lsp to ship, such as a native Windows arm64 build; it is not checked. |
+| `IncludeLuauLsp` | `false`: no luau-lsp; the app brings its own (`LuauLanguageServerOptions.ServerPath`). |
+
+The download is a stand-in for development: the NuGet package is to carry the binaries per runtime identifier, laid out
+like the other helpers. `LuauLspExecutable` and `LuauLanguageServerOptions.ServerPath` are where that plugs in.
+
+In the NativeAOT demo on Linux x64 (2026-11-03, 8 cores, shared machine), luau-lsp answered `initialize` 87 ms after
+process start, and the Luau editor showed semantic colors and diagnostics 52 ms after it was created. Warm completion
+through the editor took 1 ms at p50 and p95 for the word list (55 items) and 1 / 3 ms for members; luau-lsp used
+12–13 MiB.
+
 ## Third-party content
 
-`samples/Shared/Grammars/Luau.tmLanguage.json` is from
+`src/Darp.CodeEditor.Luau/Grammars/Luau.tmLanguage.json` is from
 [JohnnyMorganz/Luau.tmLanguage](https://github.com/JohnnyMorganz/Luau.tmLanguage), MIT license; see the license file
 next to it.
+
+luau-lsp (MIT) is downloaded from [its releases](https://github.com/JohnnyMorganz/luau-lsp/releases) at build time and
+ships next to apps that use `Darp.CodeEditor.Luau`.
 
 The C# script language server uses Roslyn (MIT). The script runner uses
 [StreamJsonRpc](https://github.com/microsoft/vs-streamjsonrpc) (MIT), Roslyn and the .NET runtime (MIT), which published
