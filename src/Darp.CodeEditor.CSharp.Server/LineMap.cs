@@ -1,5 +1,5 @@
 using System.Buffers;
-using EmmyLua.LanguageServer.Framework.Protocol.Model;
+using Darp.CodeEditor.Lsp.Protocol;
 using Microsoft.CodeAnalysis.Text;
 
 namespace Darp.CodeEditor.CSharp.Server;

@@ -3,12 +3,8 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
-using EmmyLua.LanguageServer.Framework.Protocol.Capabilities.Client.ClientCapabilities;
-using EmmyLua.LanguageServer.Framework.Protocol.Capabilities.Server;
-using EmmyLua.LanguageServer.Framework.Protocol.Capabilities.Server.Options;
-using EmmyLua.LanguageServer.Framework.Protocol.Message.SignatureHelp;
-using EmmyLua.LanguageServer.Framework.Protocol.Model.Union;
-using EmmyLua.LanguageServer.Framework.Server.Handler;
+using Darp.CodeEditor.Lsp;
+using Darp.CodeEditor.Lsp.Protocol;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -21,7 +17,7 @@ namespace Darp.CodeEditor.CSharp.Server;
 /// the called member, the parameter the caret is in (also for named arguments), and the best overload for the
 /// arguments typed so far.
 /// </remarks>
-internal sealed partial class SignatureHelpHandler : SignatureHelpHandlerBase
+internal static partial class SignatureHelpHandler
 {
     private const SymbolDisplayMiscellaneousOptions DisplayOptions =
         SymbolDisplayMiscellaneousOptions.UseSpecialTypes
@@ -54,45 +50,43 @@ internal sealed partial class SignatureHelpHandler : SignatureHelpHandlerBase
         miscellaneousOptions: DisplayOptions
     );
 
-    private readonly ScriptSession _session;
+    public static SignatureHelpOptions Options { get; } =
+        new(TriggerCharacters: ["(", ","], RetriggerCharacters: [")"]);
 
-    public SignatureHelpHandler(ScriptSession session) => _session = session;
+    public static void Register(JsonRpcConnection connection, ScriptSession session) =>
+        connection.OnRequest(LspMethods.SignatureHelp, (request, token) => HandleAsync(session, request, token));
 
-    public override void RegisterCapability(
-        ServerCapabilities serverCapabilities,
-        ClientCapabilities clientCapabilities
-    ) =>
-        serverCapabilities.SignatureHelpProvider = new SignatureHelpOptions
-        {
-            TriggerCharacters = ["(", ","],
-            RetriggerCharacters = [")"],
-        };
-
-    /// <remarks>Answers with no signatures, rather than null, when the caret is not in an argument list.</remarks>
-    protected override Task<SignatureHelp> Handle(SignatureHelpParams request, CancellationToken token)
+    private static async Task<SignatureHelp?> HandleAsync(
+        ScriptSession session,
+        SignatureHelpParams request,
+        CancellationToken token
+    )
     {
-        if (!_session.TryGetSnapshot(request.TextDocument.Uri, out DocumentSnapshot? snapshot))
-            return Task.FromResult(new SignatureHelp { Signatures = [] });
+        if (!session.TryGetSnapshot(request.TextDocument.Uri, out DocumentSnapshot? snapshot))
+            return null;
         int position = snapshot.Lines.GetOffset(request.Position);
         SignatureHelp? previous = request.Context?.ActiveSignatureHelp;
-        ScriptSession session = _session;
-        return Task.Run(
-            async () =>
-            {
-                using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(token, snapshot.Changed);
-                ScriptWorkspace workspace = await session.Workspace.WaitAsync(cancellation.Token).ConfigureAwait(false);
-                return await GetSignatureHelpAsync(
-                            snapshot.Owner.GetDocument(workspace, snapshot),
+        ClientFeatures client = session.Client;
+        // The snapshot is taken; the rest runs on the thread pool while later messages are dispatched.
+        await Task.Yield();
+        return await DocumentWork
+            .RunAsync(
+                token,
+                snapshot.Owner,
+                async cancellationToken =>
+                    await GetSignatureHelpAsync(
+                            snapshot.Owner.GetDocument(
+                                await session.Workspace.WaitAsync(cancellationToken).ConfigureAwait(false),
+                                snapshot
+                            ),
                             position,
                             previous,
-                            session.Client,
-                            cancellation.Token
+                            client,
+                            cancellationToken
                         )
                         .ConfigureAwait(false)
-                    ?? new SignatureHelp { Signatures = [] };
-            },
-            token
-        );
+            )
+            .ConfigureAwait(false);
     }
 
     /// <param name="previous">The help the client shows, whose overload stays selected while it still fits.</param>
@@ -147,15 +141,11 @@ internal sealed partial class SignatureHelpHandler : SignatureHelpHandlerBase
             previous,
             cancellationToken
         );
-        return new SignatureHelp
-        {
-            Signatures = signatures,
-            ActiveSignature = (uint)active,
-            ActiveParameter = (uint)OutsideIfMissing(
-                GetParameterIndex(methods[active], argumentIndex, argumentName),
-                methods[active]
-            ),
-        };
+        return new SignatureHelp(
+            signatures,
+            active,
+            OutsideIfMissing(GetParameterIndex(methods[active], argumentIndex, argumentName), methods[active])
+        );
     }
 
     private static ImmutableArray<IMethodSymbol> GetCandidates(
@@ -216,7 +206,7 @@ internal sealed partial class SignatureHelpHandler : SignatureHelpHandlerBase
             && previousIndex < previousSignatures.Count
         )
         {
-            string label = previousSignatures[(int)previousIndex].Label;
+            string label = previousSignatures[previousIndex].Label;
             int same = signatures.FindIndex(s => s.Label == label);
             if (same >= 0 && scores[same] >= 0)
                 return same;
@@ -292,25 +282,21 @@ internal sealed partial class SignatureHelpHandler : SignatureHelpHandlerBase
             string text = parameter.ToDisplayString(s_parameterFormat);
             label.Append(text);
             parameters.Add(
-                new ParameterInformation
-                {
-                    Label = client.SignatureLabelOffsets ? ((uint)start, (uint)label.Length) : text,
-                    Documentation = parameterDocs.TryGetValue(parameter.Name, out string? doc)
-                        ? new StringOrMarkupContent(Markup.Create(null, [doc], client.SignatureMarkdown))
-                        : null,
-                }
+                new ParameterInformation(
+                    client.SignatureLabelOffsets ? new ParameterLabel(start, label.Length) : new ParameterLabel(text),
+                    parameterDocs.TryGetValue(parameter.Name, out string? doc)
+                        ? Markup.Create(null, [doc], client.SignatureMarkdown)
+                        : null
+                )
             );
         }
         label.Append(')');
-        return new SignatureInformation
-        {
-            Label = label.ToString(),
-            Documentation = summary is null
-                ? null
-                : new StringOrMarkupContent(Markup.Create(null, [summary], client.SignatureMarkdown)),
-            Parameters = parameters,
-            ActiveParameter = client.SignatureActiveParameter ? (uint)OutsideIfMissing(activeParameter, method) : null,
-        };
+        return new SignatureInformation(
+            label.ToString(),
+            summary is null ? null : Markup.Create(null, [summary], client.SignatureMarkdown),
+            parameters,
+            client.SignatureActiveParameter ? OutsideIfMissing(activeParameter, method) : null
+        );
     }
 
     /// <summary>The parameter an argument goes to: by name, by position, or the params array.</summary>

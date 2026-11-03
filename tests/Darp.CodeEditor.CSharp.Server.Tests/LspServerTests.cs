@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using Darp.CodeEditor.CSharp.Hosting;
 using Darp.CodeEditor.CSharp.Scripting;
+using Darp.CodeEditor.Lsp;
 using Darp.CodeEditor.LspTesting;
 using Darp.CodeEditor.Samples;
 using Microsoft.CodeAnalysis;
@@ -79,6 +80,56 @@ public sealed class LspLifecycleTests
 
         message.GetInt("params", "type").ShouldBe(1); // Error
         message.GetString("params", "message").ShouldContain("Missing.Globals");
+    }
+
+    [Fact]
+    public async Task A_failed_initialize_leaves_the_server_uninitialized_until_one_succeeds()
+    {
+        await using LspClient client = TestServer.Start();
+        JsonObject invalid = TestServer.InitializeParams(TestEnvironments.Device);
+        invalid["initializationOptions"] = new JsonObject { ["csharpScript"] = new JsonObject { ["version"] = 2 } };
+
+        LspException failed = await Should.ThrowAsync<LspException>(() => client.RequestAsync("initialize", invalid));
+        LspException early = await Should.ThrowAsync<LspException>(() =>
+            client.RequestAsync("textDocument/hover", TestServer.AtEnd("file:///a.csx", ""))
+        );
+        JsonNode? retried = await client.RequestAsync(
+            "initialize",
+            TestServer.InitializeParams(TestEnvironments.Device)
+        );
+
+        failed.Code.ShouldBe(ErrorCodes.InvalidParams);
+        early.Code.ShouldBe(ErrorCodes.ServerNotInitialized);
+        retried.Get("capabilities", "hoverProvider").GetValue<bool>().ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task A_client_that_skips_initialized_gets_diagnostics_for_its_documents()
+    {
+        await using LspClient client = TestServer.Start();
+        await client.RequestAsync("initialize", TestServer.InitializeParams(TestEnvironments.Device));
+
+        await client.OpenAsync("file:///scripts/a.csx", "Log(");
+        JsonObject published = await client.WaitForNotificationAsync("textDocument/publishDiagnostics");
+
+        published.GetArray("params", "diagnostics").ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public async Task Initialize_after_shutdown_is_answered_with_an_error()
+    {
+        await using LspClient client = await TestServer.StartAsync();
+        await client.RequestAsync("shutdown", null);
+
+        LspException error = await Should.ThrowAsync<LspException>(() =>
+            client.RequestAsync(
+                "initialize",
+                TestServer.InitializeParams(TestEnvironments.Device),
+                TimeSpan.FromSeconds(10)
+            )
+        );
+
+        error.Code.ShouldBe(ErrorCodes.InvalidRequest);
     }
 
     [Fact]
@@ -162,9 +213,9 @@ public sealed class LspCompletionTests
         first.Get("isIncomplete").GetValue<bool>().ShouldBeTrue();
         first.GetArray("items").Count.ShouldBeLessThanOrEqualTo(1000);
         // Kept items match as the editor's own filter matches: prefix, word parts ("DebuggerVisualizer") or substring.
-        Labels(first).ShouldAllBe(label => CompletionFilter.Score(label, "D") > 0);
+        Labels(first).ShouldAllBe(label => CompletionMatcher.Score(label, "D") > 0);
         Labels(second).Length.ShouldBeLessThan(Labels(first).Length);
-        Labels(second).ShouldAllBe(label => CompletionFilter.Score(label, "Dev") > 0);
+        Labels(second).ShouldAllBe(label => CompletionMatcher.Score(label, "Dev") > 0);
         Labels(second).ShouldContain("Device");
     }
 
@@ -179,7 +230,7 @@ public sealed class LspCompletionTests
 
         // "ZZZ" after the caret matches nothing, so filtering by the whole word would drop "Console".
         Labels(list).ShouldContain("Console");
-        Labels(list).ShouldAllBe(label => CompletionFilter.Score(label, "Con") > 0);
+        Labels(list).ShouldAllBe(label => CompletionMatcher.Score(label, "Con") > 0);
     }
 
     [Fact]
@@ -392,6 +443,9 @@ public sealed class LspDocumentSyncTests
 {
     private const string DeviceHover = "```csharp\nDarp.CodeEditor.CSharp.TestGlobals.TestDevice Device { get; }";
 
+    /// <summary>Text that every feature request of <see cref="SendEveryRequest"/> has an answer for.</summary>
+    private const string EveryRequestText = "var t = Device.ReadTemperature();\nLog(";
+
     [Fact]
     public async Task Diagnostics_are_published_for_the_newest_version_after_incremental_changes()
     {
@@ -449,22 +503,26 @@ public sealed class LspDocumentSyncTests
     }
 
     [Fact]
-    public async Task Closing_a_document_cancels_its_pending_completion()
+    public async Task Closing_a_document_answers_its_pending_requests_with_null()
     {
         const string uri = "file:///scripts/closed.csx";
         await using LspClient client = await TestServer.StartAsync();
-        const string text = "var t = Device.";
-        await client.OpenAsync(uri, text);
+        await client.OpenAsync(uri, EveryRequestText);
 
-        // The environment is still loading, so the completion is pending when the document closes.
-        PendingRequest completion = client.Send("textDocument/completion", TestServer.AtEnd(uri, text));
+        // The environment is still loading, so the requests are pending when the document closes.
+        (string Method, PendingRequest Request)[] requests = SendEveryRequest(client, uri);
         await client.NotifyAsync(
             "textDocument/didClose",
             new JsonObject { ["textDocument"] = new JsonObject { ["uri"] = uri } }
         );
-        LspResponse response = await completion.Response;
 
-        response.Error.ShouldNotBeNull().Code.ShouldBe(-32800); // RequestCancelled
+        // As for any document the server does not know.
+        foreach ((string method, PendingRequest request) in requests)
+        {
+            LspResponse response = await request.Response;
+            response.Error.ShouldBeNull(method);
+            response.Result.ShouldBeNull(method);
+        }
     }
 
     [Fact]
@@ -505,10 +563,7 @@ public sealed class LspDocumentSyncTests
         cleared.GetArray("params", "diagnostics").ShouldBeEmpty();
     }
 
-    [Fact(
-        Skip = "EmmyLua.LanguageServer.Framework 0.9.2 reads every $/cancelRequest id as 0 (CancelParams.Id has no "
-            + "setter), so no request is cancelled. Enable it when the server moves to Darp.CodeEditor.Lsp."
-    )]
+    [Fact]
     public async Task Cancelled_requests_answer_with_request_cancelled()
     {
         const string uri = "file:///scripts/cancel.csx";
@@ -521,26 +576,65 @@ public sealed class LspDocumentSyncTests
         await client.CancelAsync(hover.Id);
         LspResponse response = await hover.Response;
 
-        response.Error.ShouldNotBeNull().Code.ShouldBe(-32800); // RequestCancelled
+        response.Error.ShouldNotBeNull().Code.ShouldBe(ErrorCodes.RequestCancelled);
     }
 
     [Fact]
-    public async Task A_new_version_cancels_pending_requests_for_the_old_one()
+    public async Task A_new_version_leaves_pending_requests_to_answer_for_the_text_they_were_sent_for()
     {
-        const string uri = "file:///scripts/stale.csx";
+        const string uri = "file:///scripts/edited.csx";
         await using LspClient client = await TestServer.StartAsync();
-        const string text = "var t = Device.ReadTemperature();";
-        await client.OpenAsync(uri, text);
+        await client.OpenAsync(uri, EveryRequestText);
 
-        PendingRequest hover = client.Send("textDocument/hover", TestServer.At(uri, text, "Device"));
-        await client.ChangeAsync(uri, 2, TestServer.Range(text, 0, 0), "// edited\n");
-        LspResponse response = await hover.Response;
+        // The environment is still loading, so the requests are pending when the change arrives.
+        (string Method, PendingRequest Request)[] requests = SendEveryRequest(client, uri);
+        await client.ChangeAsync(uri, 2, TestServer.Range(EveryRequestText, 0, 0), "// edited\n");
+        Dictionary<string, LspResponse> responses = [];
+        foreach ((string method, PendingRequest request) in requests)
+            responses[method] = await request.Response;
         JsonNode? fresh = await client.RequestAsync(
             "textDocument/hover",
-            TestServer.At(uri, "// edited\n" + text, "Device")
+            TestServer.At(uri, "// edited\n" + EveryRequestText, "Device")
         );
 
-        response.Error.ShouldNotBeNull().Code.ShouldBe(-32800); // RequestCancelled
-        fresh.GetString("contents", "value").ShouldStartWith(DeviceHover);
+        foreach ((string method, LspResponse response) in responses)
+            response.Error.ShouldBeNull(method);
+        responses["completion"]
+            .Result.GetArray("items")
+            .Select(i => i.GetString("label"))
+            .ShouldContain("ReadTemperature");
+        responses["signatureHelp"].Result.GetArray("signatures").ShouldNotBeEmpty();
+        responses["semanticTokens"].Result.GetArray("data").ShouldNotBeEmpty();
+        // The hover is for the text it was sent for, where Device is on the first line.
+        responses["hover"].Result.GetString("contents", "value").ShouldStartWith(DeviceHover);
+        responses["hover"].Result.GetInt("range", "start", "line").ShouldBe(0);
+        fresh.GetInt("range", "start", "line").ShouldBe(1);
+    }
+
+    /// <summary>Sends completion after <c>Device.</c>, hover on <c>Device</c>, signature help in <c>Log(</c> and
+    /// semantic tokens for <see cref="EveryRequestText"/>.</summary>
+    private static (string Method, PendingRequest Request)[] SendEveryRequest(LspClient client, string uri)
+    {
+        const string text = EveryRequestText;
+        return
+        [
+            (
+                "completion",
+                client.Send("textDocument/completion", TestServer.At(uri, text, "Device.", "Device.".Length))
+            ),
+            ("hover", client.Send("textDocument/hover", TestServer.At(uri, text, "Device"))),
+            ("signatureHelp", client.Send("textDocument/signatureHelp", TestServer.AtEnd(uri, text))),
+            (
+                "semanticTokens",
+                client.Send(
+                    "textDocument/semanticTokens/range",
+                    new JsonObject
+                    {
+                        ["textDocument"] = new JsonObject { ["uri"] = uri },
+                        ["range"] = TestServer.Range(text, 0, text.Length),
+                    }
+                )
+            ),
+        ];
     }
 }

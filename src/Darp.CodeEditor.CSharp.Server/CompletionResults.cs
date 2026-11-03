@@ -31,8 +31,8 @@ internal sealed class CompletionResults
             if (document.Closed.IsCancellationRequested)
                 return false;
             // A slow request that finishes late must not replace a newer list.
-            if (!_latest.TryGetValue(document.Key, out CompletionResult? existing) || existing.Id < result.Id)
-                _latest[document.Key] = result;
+            if (!_latest.TryGetValue(document.Uri, out CompletionResult? existing) || existing.Id < result.Id)
+                _latest[document.Uri] = result;
             return true;
         }
     }

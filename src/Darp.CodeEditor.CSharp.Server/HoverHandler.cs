@@ -1,49 +1,45 @@
-using EmmyLua.LanguageServer.Framework.Protocol.Capabilities.Client.ClientCapabilities;
-using EmmyLua.LanguageServer.Framework.Protocol.Capabilities.Server;
-using EmmyLua.LanguageServer.Framework.Protocol.Message.Hover;
-using EmmyLua.LanguageServer.Framework.Server.Handler;
+using Darp.CodeEditor.Lsp;
+using Darp.CodeEditor.Lsp.Protocol;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.QuickInfo;
 
 namespace Darp.CodeEditor.CSharp.Server;
 
 /// <summary><c>textDocument/hover</c> from Roslyn's quick info: the signature as C# code, then the documentation.</summary>
-internal sealed class HoverHandler : HoverHandlerBase
+internal static class HoverHandler
 {
-    private readonly ScriptSession _session;
+    public static void Register(JsonRpcConnection connection, ScriptSession session) =>
+        connection.OnRequest(LspMethods.Hover, (request, token) => HandleAsync(session, request, token));
 
-    public HoverHandler(ScriptSession session) => _session = session;
-
-    public override void RegisterCapability(
-        ServerCapabilities serverCapabilities,
-        ClientCapabilities clientCapabilities
-    ) => serverCapabilities.HoverProvider = true;
-
-    protected override Task<HoverResponse?> Handle(HoverParams request, CancellationToken token)
+    private static async Task<Hover?> HandleAsync(ScriptSession session, HoverParams request, CancellationToken token)
     {
-        if (!_session.TryGetSnapshot(request.TextDocument.Uri, out DocumentSnapshot? snapshot))
-            return Task.FromResult<HoverResponse?>(null);
+        if (!session.TryGetSnapshot(request.TextDocument.Uri, out DocumentSnapshot? snapshot))
+            return null;
         int position = snapshot.Lines.GetOffset(request.Position);
-        ScriptSession session = _session;
-        return Task.Run(
-            async () =>
-            {
-                using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(token, snapshot.Changed);
-                ScriptWorkspace workspace = await session.Workspace.WaitAsync(cancellation.Token).ConfigureAwait(false);
-                return await GetHoverAsync(
-                        snapshot.Owner.GetDocument(workspace, snapshot),
-                        snapshot.Lines,
-                        position,
-                        session.Client.HoverMarkdown,
-                        cancellation.Token
-                    )
-                    .ConfigureAwait(false);
-            },
-            token
-        );
+        bool markdown = session.Client.HoverMarkdown;
+        // The snapshot is taken; the rest runs on the thread pool while later messages are dispatched.
+        await Task.Yield();
+        return await DocumentWork
+            .RunAsync(
+                token,
+                snapshot.Owner,
+                async cancellationToken =>
+                    await GetHoverAsync(
+                            snapshot.Owner.GetDocument(
+                                await session.Workspace.WaitAsync(cancellationToken).ConfigureAwait(false),
+                                snapshot
+                            ),
+                            snapshot.Lines,
+                            position,
+                            markdown,
+                            cancellationToken
+                        )
+                        .ConfigureAwait(false)
+            )
+            .ConfigureAwait(false);
     }
 
-    public static async Task<HoverResponse?> GetHoverAsync(
+    public static async Task<Hover?> GetHoverAsync(
         Document document,
         LineMap lines,
         int position,
@@ -62,10 +58,6 @@ internal sealed class HoverHandler : HoverHandlerBase
         IEnumerable<string> paragraphs = item
             .Sections.Where(s => s.Kind != QuickInfoSectionKinds.Description)
             .Select(s => Markup.ToText(s.TaggedParts));
-        return new HoverResponse
-        {
-            Contents = Markup.Create(signature, paragraphs, markdown),
-            Range = lines.GetRange(item.Span),
-        };
+        return new Hover(Markup.Create(signature, paragraphs, markdown), lines.GetRange(item.Span));
     }
 }
