@@ -98,10 +98,12 @@ internal sealed record RunResult(
     double PeakRssMiB
 );
 
-/// <param name="FreshCompletionMs">Completion requests the client did not cancel: request to parsed response.</param>
-/// <param name="FreshTokensMs">Semantic token requests the client did not cancel.</param>
-/// <param name="Superseded">Requests the client cancelled because newer ones replaced them.</param>
-/// <param name="SupersededWithResult">Of those, the ones answered with a full result instead of a cancellation.</param>
+/// <param name="FreshCompletionMs">
+/// Completion requests the client did not cancel and that were answered with a result: request to parsed response.
+/// </param>
+/// <param name="FreshTokensMs">Semantic token requests the client did not cancel, answered with a result.</param>
+/// <param name="Kept">How the requests the client did not cancel were answered.</param>
+/// <param name="Superseded">How the requests the client cancelled, because newer ones replaced them, were answered.</param>
 /// <param name="RecoveryMs">
 /// The last keystroke to the answer of a fresh word list asked for right after it, behind any backlog.
 /// </param>
@@ -111,16 +113,59 @@ internal sealed record OverlapResult(
     List<double> FreshCompletionMs,
     List<double> FreshTokensMs,
     int Requests,
-    int Superseded,
-    int SupersededWithResult,
+    AnswerCounts Kept,
+    AnswerCounts Superseded,
     double RecoveryMs,
     int RecoveryItems,
     double DrainMs
 );
 
-/// <param name="Cancelled">The request was answered as cancelled.</param>
 /// <param name="Bytes">The size of the response message; 0 in-process.</param>
-internal sealed record Outcome(bool Cancelled, int Items, bool Incomplete, int Bytes, double Ms);
+internal sealed record Outcome(Answer Answer, int Items, bool Incomplete, int Bytes, double Ms)
+{
+    /// <summary>This outcome, for a request whose result is measured.</summary>
+    /// <exception cref="InvalidOperationException">The request was answered with an error.</exception>
+    public Outcome WithResult(string what) =>
+        Answer == Answer.Result ? this : throw new InvalidOperationException($"{what} was answered with {Answer}.");
+}
+
+/// <summary>How a request was answered.</summary>
+internal enum Answer
+{
+    /// <summary>A result, which may be null.</summary>
+    Result,
+
+    /// <summary><c>RequestCancelled</c>, or cancelled in-process.</summary>
+    Cancelled,
+
+    /// <summary><c>ContentModified</c>: the server found the result stale.</summary>
+    ContentModified,
+
+    /// <summary>Any other error.</summary>
+    Failed,
+}
+
+/// <summary>How many requests were answered in each way.</summary>
+internal sealed record AnswerCounts(int Results, int Cancelled, int ContentModified, int Failed)
+{
+    public static AnswerCounts Zero { get; } = new(0, 0, 0, 0);
+
+    public static AnswerCounts Of(IEnumerable<Answer> answers)
+    {
+        Answer[] all = [.. answers];
+        return new AnswerCounts(
+            all.Count(a => a == Answer.Result),
+            all.Count(a => a == Answer.Cancelled),
+            all.Count(a => a == Answer.ContentModified),
+            all.Count(a => a == Answer.Failed)
+        );
+    }
+
+    public static AnswerCounts operator +(AnswerCounts a, AnswerCounts b) =>
+        new(a.Results + b.Results, a.Cancelled + b.Cancelled, a.ContentModified + b.ContentModified, a.Failed + b.Failed);
+
+    public override string ToString() => $"{Results} / {Cancelled} / {ContentModified} / {Failed}";
+}
 
 /// <summary>A request in flight.</summary>
 internal sealed class Request
@@ -210,7 +255,7 @@ internal static class Typing
         {
             bool measured = round >= SkippedRounds;
             await TypeAsync("\nD");
-            lastWord = await service.Complete(MainDocument, CompletionKind.Word).Result;
+            lastWord = (await service.Complete(MainDocument, CompletionKind.Word).Result).WithResult("A word list");
             if (measured)
                 word.Add(lastWord.Ms);
             bool incomplete = lastWord.Incomplete;
@@ -219,13 +264,17 @@ internal static class Typing
                 await TypeAsync(letter.ToString());
                 if (!incomplete)
                     continue;
-                Outcome again = await service.Complete(MainDocument, CompletionKind.Refine).Result;
+                Outcome again = (await service.Complete(MainDocument, CompletionKind.Refine).Result).WithResult(
+                    "A word list asked for again"
+                );
                 incomplete = again.Incomplete;
                 if (measured)
                     refine.Add(again.Ms);
             }
             await TypeAsync(".");
-            lastMember = await service.Complete(MainDocument, CompletionKind.Member).Result;
+            lastMember = (await service.Complete(MainDocument, CompletionKind.Member).Result).WithResult(
+                "A member list"
+            );
             if (measured)
                 member.Add(lastMember.Ms);
             await TypeAsync("ReadTemperature();");
@@ -269,7 +318,9 @@ internal static class Typing
         long burstEnd = Stopwatch.GetTimestamp();
         // End the statement the typist is in, then start a word on a new line.
         await service.TypeAsync(MainDocument, ";\nD");
-        Outcome recovery = await service.Complete(MainDocument, CompletionKind.Word).Result;
+        Outcome recovery = (await service.Complete(MainDocument, CompletionKind.Word).Result).WithResult(
+            "The word list after typing"
+        );
         double recoveryMs = Stopwatch.GetElapsedTime(burstEnd).TotalMilliseconds;
         await Task.WhenAll(tracked.Select(t => t.Request.Result));
         double drain = Stopwatch.GetElapsedTime(burstEnd).TotalMilliseconds;
@@ -279,15 +330,20 @@ internal static class Typing
             .. tracked.Select(t => (t.Kind, t.Request.Result.Result, t.Request.Superseded)),
         ];
         return new OverlapResult(
-            [.. outcomes.Where(o => o.Kind == "completion" && !o.Superseded).Select(o => o.Outcome.Ms)],
-            [.. outcomes.Where(o => o.Kind == "tokens" && !o.Superseded).Select(o => o.Outcome.Ms)],
+            [.. Fresh("completion")],
+            [.. Fresh("tokens")],
             outcomes.Count,
-            outcomes.Count(o => o.Superseded),
-            outcomes.Count(o => o.Superseded && !o.Outcome.Cancelled),
+            AnswerCounts.Of(outcomes.Where(o => !o.Superseded).Select(o => o.Outcome.Answer)),
+            AnswerCounts.Of(outcomes.Where(o => o.Superseded).Select(o => o.Outcome.Answer)),
             recoveryMs,
             recovery.Items,
             drain
         );
+
+        IEnumerable<double> Fresh(string kind) =>
+            outcomes
+                .Where(o => o.Kind == kind && !o.Superseded && o.Outcome.Answer == Answer.Result)
+                .Select(o => o.Outcome.Ms);
 
         async Task KeystrokeAsync(string document)
         {
@@ -532,7 +588,13 @@ internal sealed class LspScriptService : IScriptService
                     LspResponse response = t.Result;
                     JsonArray? items = response.Result?["items"]?.AsArray();
                     return new Outcome(
-                        response.Error?.Code == -32800,
+                        response.Error?.Code switch
+                        {
+                            null => Answer.Result,
+                            -32800 => Answer.Cancelled,
+                            -32801 => Answer.ContentModified,
+                            _ => Answer.Failed,
+                        },
                         items?.Count ?? 0,
                         response.Result?["isIncomplete"]?.GetValue<bool>() ?? false,
                         response.ContentLength,
@@ -633,11 +695,11 @@ internal sealed class InProcessScriptService : IScriptService
             try
             {
                 int items = await request(snapshot, cancellation.Token);
-                return new Outcome(false, items, false, 0, Stopwatch.GetElapsedTime(start).TotalMilliseconds);
+                return new Outcome(Answer.Result, items, false, 0, Stopwatch.GetElapsedTime(start).TotalMilliseconds);
             }
             catch (OperationCanceledException)
             {
-                return new Outcome(true, 0, false, 0, Stopwatch.GetElapsedTime(start).TotalMilliseconds);
+                return new Outcome(Answer.Cancelled, 0, false, 0, Stopwatch.GetElapsedTime(start).TotalMilliseconds);
             }
         });
         return new Request(
@@ -880,9 +942,12 @@ internal static class Report
                 c => Times(Pick(c).SelectMany(r => select(r).FreshTokensMs))
             );
             Row(
-                $"{phase}: requests cancelled by the client / of them answered in full",
-                c =>
-                    $"{Pick(c).Sum(r => select(r).Superseded)} of {Pick(c).Sum(r => select(r).Requests)} / {Pick(c).Sum(r => select(r).SupersededWithResult)}"
+                $"{phase}: requests the client kept, answered with result / RequestCancelled / ContentModified / other error",
+                c => Pick(c).Select(r => select(r).Kept).Aggregate(AnswerCounts.Zero, (a, b) => a + b).ToString()
+            );
+            Row(
+                $"{phase}: requests the client cancelled, answered with result / RequestCancelled / ContentModified / other error",
+                c => Pick(c).Select(r => select(r).Superseded).Aggregate(AnswerCounts.Zero, (a, b) => a + b).ToString()
             );
             Row(
                 $"{phase}: last keystroke → fresh word list answered, median (max); items",
