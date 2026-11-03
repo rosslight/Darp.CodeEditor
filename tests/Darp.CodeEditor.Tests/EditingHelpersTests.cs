@@ -147,12 +147,47 @@ public sealed class EditingHelpersTests
     [AvaloniaFact]
     public async Task A_quote_typed_late_in_a_long_comment_line_does_not_close()
     {
-        // Past the length tokenized on the UI thread, the context comes from the line's tokens.
+        // Past the length tokenized on the UI thread, the context comes from the line's tokens before the quote.
         string comment = "// " + new string('x', 1000) + " ";
         using var editor = new EditorUnderTest(comment + "|", languageId: "csharp");
         await editor.WaitForLanguageAsync("//");
         editor.Type("\"");
         editor.Text.ShouldBe(comment + "\"|");
+    }
+
+    [AvaloniaFact]
+    public async Task A_quote_typed_late_in_a_long_code_line_closes()
+    {
+        // The context comes from the line's tokens before the quote: typing it changed only what follows.
+        string code = "x = " + new string('a', 1000) + " ";
+        using var editor = new EditorUnderTest(code + "|", languageId: "csharp");
+        await editor.WaitForLanguageAsync("//");
+        editor.Type("\"");
+        editor.Text.ShouldBe(code + "\"|\"");
+    }
+
+    [AvaloniaFact]
+    public async Task A_quote_typed_in_a_string_does_not_close_when_its_context_takes_too_long_to_find()
+    {
+        // As on a slow machine: TextMate stops at the time limit and calls the rest of the line code.
+        using var editor = new EditorUnderTest("Log(\"a |", languageId: "csharp");
+        await editor.WaitForLanguageAsync("//");
+        editor.Editor.Highlighter.ShouldNotBeNull().ContextTimeLimit = TimeSpan.FromTicks(1);
+        editor.Type("\"");
+        editor.Text.ShouldBe("Log(\"a \"|");
+    }
+
+    [AvaloniaFact]
+    public async Task A_quote_typed_where_the_line_changed_since_it_was_tokenized_does_not_close()
+    {
+        // The line is too long to tokenize on the UI thread, and its tokens say code where a string starts now.
+        string rest = new string('a', 1000) + " ";
+        using var editor = new EditorUnderTest("x = " + rest + "|", languageId: "csharp");
+        await editor.WaitForLanguageAsync("//");
+        editor.Editor.Document.Insert(4, "\"");
+        // Typed at once: no layout or background pass tokenizes the line in between.
+        editor.Editor.TextArea.PerformTextInput("\"");
+        editor.Text.ShouldBe("x = \"" + rest + "\"|");
     }
 
     [AvaloniaFact]

@@ -3,6 +3,7 @@ using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Threading;
 using AvaloniaEdit.Editing;
+using Shouldly;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -58,13 +59,23 @@ internal sealed class EditorUnderTest : IDisposable
 
     public string Plain => Editor.Text;
 
-    /// <summary>Waits until the language's configuration is loaded and every shown line has tokens.</summary>
+    /// <summary>
+    /// Waits until the language's configuration is loaded and every shown line has tokens. Typing then finds the
+    /// context of a character however long that takes, rather than within the few milliseconds of real use, so that
+    /// a slow machine does not change what is auto-closed.
+    /// </summary>
     public async Task WaitForLanguageAsync(string lineComment)
     {
         for (int i = 0; i < 1000; i++)
         {
             if (Editor.LanguageConfiguration.LineComment == lineComment && Editor.VisibleLinesWithoutHighlighting == 0)
+            {
+                Highlighting.BackgroundTextMateHighlighter highlighter = Editor.Highlighter.ShouldNotBeNull();
+                highlighter.ContextTimeLimit = TimeSpan.FromSeconds(30);
+                // A headless input can run another layout after this wait and mark the shared grammar too slow.
+                highlighter.AllowSlowContext = true;
                 return;
+            }
             await Task.Delay(10);
         }
         throw new TimeoutException("The language did not load.");

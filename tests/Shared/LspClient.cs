@@ -129,10 +129,18 @@ internal sealed class LspClient : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (!_process.HasExited)
+        bool killed = !_process.HasExited;
+        if (killed)
             _process.Kill();
         await _process.WaitForExitAsync().ConfigureAwait(false);
-        await _reader.ConfigureAwait(false);
+        try
+        {
+            await _reader.ConfigureAwait(false);
+        }
+        catch (EndOfStreamException) when (killed)
+        {
+            // Killed while it wrote a message, such as diagnostics it published late: its output ends inside it.
+        }
         _process.Dispose();
     }
 

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
@@ -56,6 +57,7 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
     private readonly Dictionary<string, ClassificationKind?> _tokenTypes;
     private readonly Supervisor<LanguageClient> _supervisor;
     private readonly HangTimeout _timeout;
+    private readonly TimeProvider _time;
     private readonly Channel<Work> _work = Channel.CreateUnbounded<Work>(
         new UnboundedChannelOptions { SingleReader = true }
     );
@@ -72,8 +74,14 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
     private int _state;
 
     public LspLanguageService(LspLanguageServiceOptions options)
+        : this(options, TimeProvider.System) { }
+
+    /// <param name="options">How to start the server and talk to it.</param>
+    /// <param name="time">The clock of the hang timeouts.</param>
+    internal LspLanguageService(LspLanguageServiceOptions options, TimeProvider time)
     {
         _options = options;
+        _time = time;
         _tokenTypes = new Dictionary<string, ClassificationKind?>(s_tokenTypes, StringComparer.Ordinal);
         foreach (
             (string name, ClassificationKind? kind) in options.TokenTypes
@@ -83,7 +91,8 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
         _timeout = new HangTimeout(
             options.ResponseTimeout,
             options.MaxResponseTimeout,
-            (options.Restart ?? new SupervisorOptions()).StableAfter
+            (options.Restart ?? new SupervisorOptions()).StableAfter,
+            time
         );
         _supervisor = new Supervisor<LanguageClient>(StartClientAsync, client => client.Completion, options.Restart);
         _supervisor.Started += client => Post(() => OnStartedAsync(client));
@@ -361,8 +370,8 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
         };
         // A server that never answers initialize counts as a failed start, which is retried.
         TimeSpan timeout = _timeout.Of(null);
-        using var initializing = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        initializing.CancelAfter(timeout);
+        using var timer = new CancellationTokenSource(timeout, _time);
+        using var initializing = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timer.Token);
         try
         {
             return await LanguageClient.StartAsync(transport, options, initializing.Token).ConfigureAwait(false);
@@ -371,9 +380,7 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
         {
             // A hang like any other: the next start waits longer, so that a server that starts slowly gets to run.
             _timeout.Ended(null, hung: true);
-            throw new TimeoutException(
-                $"The language server did not answer initialize within {timeout.TotalSeconds:0.#} s."
-            );
+            throw new TimeoutException($"The language server did not answer initialize within {Seconds(timeout)}.");
         }
     }
 
@@ -699,11 +706,14 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
         TimeSpan timeout = _timeout.Of(client);
         try
         {
-            await client.Connection.SendNotificationAsync(type, parameters).WaitAsync(timeout).ConfigureAwait(false);
+            await client
+                .Connection.SendNotificationAsync(type, parameters)
+                .WaitAsync(timeout, _time)
+                .ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
-            Abort(client, $"it read nothing for {timeout.TotalSeconds:0.#} s");
+            Abort(client, $"it read nothing for {Seconds(timeout)}");
         }
         catch (IOException)
         {
@@ -722,16 +732,20 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
         T? answer;
         try
         {
-            answer = await response.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
+            answer = await response.WaitAsync(timeout, _time, cancellationToken).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
-            Abort(client, $"it answered nothing for {timeout.TotalSeconds:0.#} s");
+            Abort(client, $"it answered nothing for {Seconds(timeout)}");
             throw new IOException("The language server stopped answering.");
         }
         _timeout.Answered(client);
         return answer;
     }
+
+    /// <summary>A timeout for the log, such as "0.4 s": in English like the rest of the message.</summary>
+    private static string Seconds(TimeSpan timeout) =>
+        timeout.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture) + " s";
 
     /// <summary>Ends a server that stopped answering or reading; the supervisor starts a new one.</summary>
     private void Abort(LanguageClient client, string reason)

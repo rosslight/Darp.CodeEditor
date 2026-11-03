@@ -54,7 +54,7 @@ public sealed class HostProcessTests
                 "Release",
                 "-r",
                 PortableRuntimeIdentifier,
-                "-p:PublishAot=true",
+                "-p:TestHostPublishAot=true",
                 "-o",
                 output,
             ]);
