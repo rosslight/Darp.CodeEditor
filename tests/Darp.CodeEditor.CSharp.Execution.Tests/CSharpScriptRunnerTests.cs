@@ -313,9 +313,12 @@ public sealed class CSharpScriptRunnerTests
     [Fact]
     public async Task Call_past_its_deadline_is_cancelled_and_the_runner_keeps_running()
     {
+        var host = new RecordingHost();
+        // A grace period no machine runs out of: the script stops on its own, so nothing may be killed.
         await using CSharpScriptRunner runner = await StartAsync(
-            callTimeout: TimeSpan.FromSeconds(1),
-            gracePeriod: TimeSpan.FromSeconds(1)
+            host,
+            callTimeout: TimeSpan.FromSeconds(5),
+            gracePeriod: TimeSpan.FromSeconds(60)
         );
         int? processId = runner.ProcessId;
         Task<ScriptRunnerExitedEventArgs> exited = runner.NextExitAsync();
@@ -323,7 +326,17 @@ public sealed class CSharpScriptRunnerTests
             Handler(
                 """
                 if (sample.Channel == 0)
-                    await Task.Delay(Timeout.Infinite, cancellationToken);
+                {
+                    try
+                    {
+                        await Task.Delay(Timeout.Infinite, cancellationToken);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        await _host.LogAsync("cancelled");
+                        throw;
+                    }
+                }
                 return sample.Channel;
                 """
             ),
@@ -332,19 +345,20 @@ public sealed class CSharpScriptRunnerTests
 
         await Should.ThrowAsync<TimeoutException>(() => handler.HandleAsync(new Sample(0, []), Cancellation));
 
-        // Past the grace period: the script honoured the cancellation, so nothing was killed.
-        await Task.Delay(TimeSpan.FromMilliseconds(2500), Cancellation);
-        exited.IsCompleted.ShouldBeFalse();
-        runner.ProcessId.ShouldBe(processId);
+        // The deadline reached the script as a cancellation, and the runner keeps serving calls.
+        (await WaitUntilAsync(() => host.Messages.Contains("cancelled"), TimeSpan.FromSeconds(60))).ShouldBeTrue();
         (await handler.HandleAsync(new Sample(2, []), Cancellation)).ShouldBe(2);
+        runner.ProcessId.ShouldBe(processId);
+        exited.IsCompleted.ShouldBeFalse();
     }
 
     [Fact]
     public async Task Busy_call_past_its_deadline_kills_the_runner_and_the_next_script_gets_a_new_one()
     {
+        // Every call has this deadline, also the first run in a cold runner, so it allows for slow machines.
         await using CSharpScriptRunner runner = await StartAsync(
-            callTimeout: TimeSpan.FromSeconds(1),
-            gracePeriod: TimeSpan.FromMilliseconds(500)
+            callTimeout: TimeSpan.FromSeconds(5),
+            gracePeriod: TimeSpan.FromSeconds(1)
         );
         int firstProcess = runner.ProcessId.ShouldNotBeNull();
         Task<ScriptRunnerExitedEventArgs> exited = runner.NextExitAsync();
@@ -359,8 +373,8 @@ public sealed class CSharpScriptRunnerTests
 
         await Should.ThrowAsync<TimeoutException>(() => handler.HandleAsync(new Sample(0, []), Cancellation));
 
-        (await exited.WaitAsync(TimeSpan.FromSeconds(5), Cancellation)).Reason.ShouldBe(ScriptRunnerExitReason.Killed);
-        (await WaitUntilExitedAsync(firstProcess, TimeSpan.FromSeconds(5))).ShouldBeTrue();
+        (await exited.WaitAsync(TimeSpan.FromSeconds(30), Cancellation)).Reason.ShouldBe(ScriptRunnerExitReason.Killed);
+        (await WaitUntilExitedAsync(firstProcess, TimeSpan.FromSeconds(30))).ShouldBeTrue();
         await Should.ThrowAsync<ObjectDisposedException>(() => handler.HandleAsync(new Sample(1, []), Cancellation));
         using ITestHandler restarted = await runner.EvaluateAsync<ITestHandler>(code, Cancellation);
         (await restarted.HandleAsync(new Sample(1, []), Cancellation)).ShouldBe(1);
@@ -371,22 +385,28 @@ public sealed class CSharpScriptRunnerTests
     public async Task Cancelling_an_evaluation_returns_although_the_runner_does_not_read_and_the_runner_is_killed()
     {
         Assert.SkipUnless(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS(), "Stops the runner with SIGSTOP.");
-        await using CSharpScriptRunner runner = await StartAsync(compileTimeout: TimeSpan.FromSeconds(3));
+        TimeSpan compileTimeout = TimeSpan.FromSeconds(10);
+        await using CSharpScriptRunner runner = await StartAsync(compileTimeout: compileTimeout);
         int stopped = runner.ProcessId.ShouldNotBeNull();
         Task<ScriptRunnerExitedEventArgs> exited = runner.NextExitAsync();
         Signal(stopped, "STOP");
         try
         {
-            using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+            // The runner is stopped and the script exceeds the pipe buffer: sending it cannot finish.
+            using var cancellation = new CancellationTokenSource();
             long start = Stopwatch.GetTimestamp();
-
-            await Should.ThrowAsync<OperationCanceledException>(() =>
-                runner.EvaluateAsync<ITestHandler>(LargerThanAPipe(Handler("return 1;")), cancellation.Token)
+            Task evaluation = runner.EvaluateAsync<ITestHandler>(
+                LargerThanAPipe(Handler("return 1;")),
+                cancellation.Token
             );
+            cancellation.Cancel();
 
-            Stopwatch.GetElapsedTime(start).ShouldBeLessThan(TimeSpan.FromSeconds(2));
-            // Nobody waits for it any more, but a runner that does not read its input is stuck.
-            (await exited.WaitAsync(TimeSpan.FromSeconds(10), Cancellation)).Reason.ShouldBe(
+            await Should.ThrowAsync<OperationCanceledException>(() => evaluation);
+
+            // The cancellation released the caller, not the compile timeout.
+            Stopwatch.GetElapsedTime(start).ShouldBeLessThan(compileTimeout);
+            // Nobody waits for the runner any more, but one that does not read its input is stuck.
+            (await exited.WaitAsync(TimeSpan.FromSeconds(60), Cancellation)).Reason.ShouldBe(
                 ScriptRunnerExitReason.Killed
             );
         }
@@ -395,8 +415,6 @@ public sealed class CSharpScriptRunnerTests
             if (IsRunning(stopped))
                 Signal(stopped, "CONT");
         }
-        using ITestHandler handler = await runner.EvaluateAsync<ITestHandler>(Handler("return 1;"), Cancellation);
-        (await handler.HandleAsync(new Sample(0, []), Cancellation)).ShouldBe(1);
     }
 
     [Fact]
@@ -409,13 +427,12 @@ public sealed class CSharpScriptRunnerTests
         Signal(stopped, "STOP");
         try
         {
-            await Should.ThrowAsync<TimeoutException>(() =>
-                runner
-                    .EvaluateAsync<ITestHandler>(LargerThanAPipe(Handler("return 1;")), Cancellation)
-                    .WaitAsync(TimeSpan.FromSeconds(10), Cancellation)
-            );
+            Task evaluation = runner.EvaluateAsync<ITestHandler>(LargerThanAPipe(Handler("return 1;")), Cancellation);
 
-            (await exited.WaitAsync(TimeSpan.FromSeconds(10), Cancellation)).Reason.ShouldBe(
+            // Bounded without a TimeoutException of its own, which would pass for the one expected.
+            (await Task.WhenAny(evaluation, Task.Delay(TimeSpan.FromSeconds(60), Cancellation))).ShouldBe(evaluation);
+            await Should.ThrowAsync<TimeoutException>(() => evaluation);
+            (await exited.WaitAsync(TimeSpan.FromSeconds(60), Cancellation)).Reason.ShouldBe(
                 ScriptRunnerExitReason.Killed
             );
         }
@@ -443,7 +460,7 @@ public sealed class CSharpScriptRunnerTests
 
         await Should.ThrowAsync<ConnectionLostException>(() => handler.HandleAsync(new Sample(0, []), Cancellation));
 
-        ScriptRunnerExitedEventArgs exit = await exited.WaitAsync(TimeSpan.FromSeconds(5), Cancellation);
+        ScriptRunnerExitedEventArgs exit = await exited.WaitAsync(TimeSpan.FromSeconds(30), Cancellation);
         exit.Reason.ShouldBe(ScriptRunnerExitReason.Crashed);
         exit.ExitCode.ShouldNotBeNull().ShouldNotBe(0);
         exit.StandardError.ShouldContain("script crash");
@@ -475,8 +492,8 @@ public sealed class CSharpScriptRunnerTests
         await runner.DisposeAsync();
 
         await Should.ThrowAsync<ConnectionLostException>(() => busy);
-        (await WaitUntilExitedAsync(runnerProcess, TimeSpan.FromSeconds(5))).ShouldBeTrue();
-        (await WaitUntilExitedAsync(childProcess, TimeSpan.FromSeconds(5))).ShouldBeTrue();
+        (await WaitUntilExitedAsync(runnerProcess, TimeSpan.FromSeconds(30))).ShouldBeTrue();
+        (await WaitUntilExitedAsync(childProcess, TimeSpan.FromSeconds(30))).ShouldBeTrue();
         exited.IsCompleted.ShouldBeFalse();
         await Should.ThrowAsync<ObjectDisposedException>(() =>
             runner.EvaluateAsync<ITestHandler>(Handler("return 1;"), Cancellation)

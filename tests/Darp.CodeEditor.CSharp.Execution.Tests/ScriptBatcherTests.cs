@@ -15,24 +15,28 @@ public sealed class ScriptBatcherTests
         await using CSharpScriptRunner runner = await StartAsync();
         using ITestHandler handler = await runner.EvaluateAsync<ITestHandler>(Handler("return 0;"), Cancellation);
         var batchSizes = new ConcurrentQueue<int>();
+        var submitted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var batcher = new ScriptBatcher<Sample, int>(
-            samples =>
+            async samples =>
             {
+                // The first batch waits until every item is queued, so the ones after it fill up to the limit.
+                await submitted.Task;
                 batchSizes.Enqueue(samples.Length);
-                return handler.HandleBatchAsync(samples, Cancellation);
+                return await handler.HandleBatchAsync(samples, Cancellation);
             },
             new ScriptBatcherOptions { MaxBatchSize = 64 }
         );
 
-        int[] results = await Task.WhenAll(
-            Enumerable.Range(0, 1000).Select(i => batcher.SubmitAsync(new Sample(i, []), Cancellation))
-        );
+        Task<int>[] results =
+        [
+            .. Enumerable.Range(0, 1000).Select(i => batcher.SubmitAsync(new Sample(i, []), Cancellation)),
+        ];
+        submitted.SetResult();
 
-        results.ShouldBe(Enumerable.Range(0, 1000).Select(i => i * 2));
+        (await Task.WhenAll(results)).ShouldBe(Enumerable.Range(0, 1000).Select(i => i * 2));
         batchSizes.Sum().ShouldBe(1000);
-        batchSizes.Max().ShouldBeLessThanOrEqualTo(64);
-        // Items queue while a batch is in flight, so far fewer calls than items cross to the runner.
-        batchSizes.Count.ShouldBeLessThan(100);
+        batchSizes.ShouldAllBe(size => size <= 64);
+        batchSizes.Skip(1).SkipLast(1).ShouldAllBe(size => size == 64);
     }
 
     [Fact]

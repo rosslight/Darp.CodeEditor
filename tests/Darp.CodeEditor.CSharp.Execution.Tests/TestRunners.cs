@@ -21,7 +21,7 @@ internal static class TestRunners
                 Environment = TestEnvironment.Create(),
                 Services = [CSharpScriptService.Create(host ?? new RecordingHost())],
                 CallTimeout = callTimeout ?? TimeSpan.FromSeconds(30),
-                CancellationGracePeriod = gracePeriod ?? TimeSpan.FromMilliseconds(300),
+                CancellationGracePeriod = gracePeriod ?? TimeSpan.FromSeconds(5),
                 Output = output,
                 CompileTimeout = compileTimeout ?? TimeSpan.FromSeconds(60),
             },

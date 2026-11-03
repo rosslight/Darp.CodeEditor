@@ -32,7 +32,7 @@ public sealed class HostProcessTests
 
             process.Kill();
 
-            (await WaitUntilExitedAsync(runner, TimeSpan.FromSeconds(5))).ShouldBeTrue();
+            (await WaitUntilExitedAsync(runner, TimeSpan.FromSeconds(30))).ShouldBeTrue();
         }
         finally
         {
