@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <!-- Measured as a JIT app and published with NativeAOT, which bundles the runner's runtime. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp.Execution\Darp.CodeEditor.CSharp.Execution.csproj" />
+    <!-- Scripts compile against the script API; NativeAOT ships it as a file next to the app. -->
+    <ProjectReference Include="..\..\tests\Darp.CodeEditor.CSharp.Execution.TestApi\Darp.CodeEditor.CSharp.Execution.TestApi.csproj" CSharpScriptReference="true" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile
+      Include="..\..\tests\Darp.CodeEditor.CSharp.Execution.TestHost\TestEnvironment.cs"
+      Link="Shared\TestEnvironment.cs"
+    />
+  </ItemGroup>
+  <Import Project="..\..\src\Darp.CodeEditor.CSharp.Execution\build\Darp.CodeEditor.CSharp.Execution.targets" />
+</Project>

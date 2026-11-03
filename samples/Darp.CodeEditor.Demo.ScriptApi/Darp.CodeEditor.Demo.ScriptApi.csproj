@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- The demos' script API: used by both apps, NativeAOT included, and loaded by the runner. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- The XML docs show up in the editor once it edits packet scripts. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="StreamJsonRpc" />
+  </ItemGroup>
+</Project>

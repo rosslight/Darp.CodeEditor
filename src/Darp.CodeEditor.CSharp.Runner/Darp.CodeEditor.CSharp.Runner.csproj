@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- Compiles and runs scripts: needs the JIT. -->
+    <IsAotCompatible>false</IsAotCompatible>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Framework-dependent: it runs on the runtime the app ships in helpers/dotnet. -->
+    <SelfContained>false</SelfContained>
+    <!-- On publish, the app host looks for that runtime only, next to the runner's directory. -->
+    <AppHostRelativeDotNet>../dotnet</AppHostRelativeDotNet>
+    <!-- Precompiled code roughly halves the time to the first script result. -->
+    <PublishReadyToRun Condition="'$(RuntimeIdentifier)' != ''">true</PublishReadyToRun>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Darp.CodeEditor.CSharp.Execution\Darp.CodeEditor.CSharp.Execution.csproj" />
+    <ProjectReference Include="..\Darp.CodeEditor.CSharp.Scripting\Darp.CodeEditor.CSharp.Scripting.csproj" />
+  </ItemGroup>
+
+  <!--
+    The .NET runtime the runner runs on, for the RuntimeIdentifier it is published for: the runtime pack's files by
+    their path in a shared framework directory, the framework's deps.json and runtimeconfig.json, and hostfxr.
+    Darp.CodeEditor.CSharp.Execution.targets lays them out as an installed runtime in helpers/dotnet.
+  -->
+  <Target Name="GetBundledRuntimeFiles" DependsOnTargets="ResolveRuntimePackAssets" Returns="@(_BundledRuntimeFile)">
+    <Error
+      Condition="'@(RuntimePackAsset)' == ''"
+      Text="The .NET runtime pack for '$(RuntimeIdentifier)' was not restored. Restore with -r $(RuntimeIdentifier)."
+    />
+    <ItemGroup>
+      <_BundledRuntimePack Include="@(ResolvedRuntimePack)" Condition="'%(FrameworkName)' == 'Microsoft.NETCore.App'" />
+    </ItemGroup>
+    <PropertyGroup>
+      <_BundledRuntimePackDirectory>@(_BundledRuntimePack->'%(PackageDirectory)')</_BundledRuntimePackDirectory>
+      <_BundledRuntimeVersion>@(_BundledRuntimePack->'%(NuGetPackageVersion)')</_BundledRuntimeVersion>
+    </PropertyGroup>
+    <ItemGroup>
+      <_BundledRuntimeFile
+        Include="@(RuntimePackAsset)"
+        Condition="'%(RuntimePackAsset.NuGetPackageId)' == '@(_BundledRuntimePack)' and '%(RuntimePackAsset.AssetType)' != 'pgodata'"
+      />
+      <_BundledRuntimeJson Include="$(_BundledRuntimePackDirectory)/runtimes/$(RuntimeIdentifier)/lib/$(TargetFramework)/Microsoft.NETCore.App.*.json" />
+      <_BundledRuntimeFile
+        Include="@(_BundledRuntimeJson)"
+        DestinationSubPath="%(_BundledRuntimeJson.Filename)%(_BundledRuntimeJson.Extension)"
+      />
+      <_BundledRuntimeFile Update="@(_BundledRuntimeFile)" RuntimeVersion="$(_BundledRuntimeVersion)" />
+    </ItemGroup>
+  </Target>
+</Project>

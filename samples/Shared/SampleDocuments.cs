@@ -38,6 +38,40 @@ internal static class SampleDocuments
 
         """;
 
+    /// <summary>A script for the Run action: it returns a handler the app calls for each packet.</summary>
+    public const string PacketScript = """
+        // Packet script: press Run (F5). It runs in a separate process and returns a handler that the app
+        // calls for every packet; App calls back into the app.
+        class Decoder : IPacketHandler
+        {
+            private readonly IDeviceApp _app;
+
+            public Decoder(IDeviceApp app) => _app = app;
+
+            public async Task<Reading> HandleAsync(Packet packet, CancellationToken cancellationToken)
+            {
+                double offset = await _app.ReadTemperatureAsync(cancellationToken) - 21.5;
+                return Decode(packet, offset);
+            }
+
+            // One call, and one call back into the app, for a whole batch of packets.
+            public async Task<Reading[]> HandleBatchAsync(Packet[] packets, CancellationToken cancellationToken)
+            {
+                double offset = await _app.ReadTemperatureAsync(cancellationToken) - 21.5;
+                return packets.Select(packet => Decode(packet, offset)).ToArray();
+            }
+
+            public void Dispose() { }
+
+            private static Reading Decode(Packet packet, double offset) =>
+                new(packet.Channel, BitConverter.ToInt16(packet.Payload) / 100.0 + offset, "°C");
+        }
+
+        await App.LogAsync("Decoder ready");
+        new Decoder(App)
+
+        """;
+
     public const string LuauScript = """
         --!strict
         -- Luau script with type annotations

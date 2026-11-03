@@ -11,8 +11,11 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Darp.CodeEditor\Darp.CodeEditor.csproj" />
     <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp\Darp.CodeEditor.CSharp.csproj" />
-    <!-- The C# server reads the scripts' globals from this assembly's file. -->
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp.Execution\Darp.CodeEditor.CSharp.Execution.csproj" />
+    <!-- The script.csx globals; the C# server reads the assembly as a file. -->
     <ProjectReference Include="..\Darp.CodeEditor.Demo.Globals\Darp.CodeEditor.Demo.Globals.csproj" />
+    <!-- The packet.csx script API, which the runner loads and the C# server reads. -->
+    <ProjectReference Include="..\Darp.CodeEditor.Demo.ScriptApi\Darp.CodeEditor.Demo.ScriptApi.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\Shared\**\*.cs" LinkBase="Shared" />
@@ -20,4 +23,6 @@
   </ItemGroup>
   <!-- Puts the C# script language server next to the app. -->
   <Import Project="..\..\src\Darp.CodeEditor.CSharp\build\Darp.CodeEditor.CSharp.targets" />
+  <!-- Puts the C# script runner next to the app, for the Run action. -->
+  <Import Project="..\..\src\Darp.CodeEditor.CSharp.Execution\build\Darp.CodeEditor.CSharp.Execution.targets" />
 </Project>

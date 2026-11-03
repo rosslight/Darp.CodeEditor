@@ -15,8 +15,19 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Darp.CodeEditor\Darp.CodeEditor.csproj" />
     <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp\Darp.CodeEditor.CSharp.csproj" />
-    <!-- The C# server reads the scripts' globals from this assembly's file; see PublishScriptGlobals. -->
-    <ProjectReference Include="..\Darp.CodeEditor.Demo.Globals\Darp.CodeEditor.Demo.Globals.csproj" />
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp.Execution\Darp.CodeEditor.CSharp.Execution.csproj" />
+    <!--
+      Script-visible assemblies: NativeAOT ships them as files next to the app, where the runner loads them and the C#
+      server reads them. The script.csx globals, and the packet.csx script API.
+    -->
+    <ProjectReference
+      Include="..\Darp.CodeEditor.Demo.Globals\Darp.CodeEditor.Demo.Globals.csproj"
+      CSharpScriptReference="true"
+    />
+    <ProjectReference
+      Include="..\Darp.CodeEditor.Demo.ScriptApi\Darp.CodeEditor.Demo.ScriptApi.csproj"
+      CSharpScriptReference="true"
+    />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\Shared\**\*.cs" LinkBase="Shared" />
@@ -27,20 +38,8 @@
       CopyToPublishDirectory="PreserveNewest"
     />
   </ItemGroup>
-  <!--
-    NativeAOT compiles referenced assemblies into the executable, but the C# server needs the globals assembly as a
-    file. A switch on references in the C# package will do this for apps (design decision #44).
-  -->
-  <Target Name="PublishScriptGlobals" AfterTargets="ComputeResolvedFilesToPublishList">
-    <ItemGroup>
-      <ResolvedFileToPublish
-        Include="@(ReferenceCopyLocalPaths)"
-        Condition="'%(ReferenceCopyLocalPaths.Filename)' == 'Darp.CodeEditor.Demo.Globals' and '%(ReferenceCopyLocalPaths.Extension)' != '.pdb'"
-        RelativePath="%(Filename)%(Extension)"
-        CopyToPublishDirectory="PreserveNewest"
-      />
-    </ItemGroup>
-  </Target>
   <!-- Puts the C# script language server next to the app. -->
   <Import Project="..\..\src\Darp.CodeEditor.CSharp\build\Darp.CodeEditor.CSharp.targets" />
+  <!-- Puts the C# script runner and its .NET runtime next to the app, for the Run action. -->
+  <Import Project="..\..\src\Darp.CodeEditor.CSharp.Execution\build\Darp.CodeEditor.CSharp.Execution.targets" />
 </Project>

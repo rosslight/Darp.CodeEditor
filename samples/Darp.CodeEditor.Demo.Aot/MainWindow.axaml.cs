@@ -23,6 +23,7 @@ public sealed partial class MainWindow : Window, IBenchHost
         CSharpEditor.Text = SampleDocuments.CSharpScript;
         // A small in-process language service: word completion and JSON parse errors.
         JsonEditor.LanguageService = new JsonLanguageService();
+        PacketScriptRun.Attach(this, RunButton, RunOutput, PacketEditor, () => Tabs.SelectedItem = PacketTab, options);
 
         string grammar = Path.Combine(AppContext.BaseDirectory, "Grammars", "Luau.tmLanguage.json");
         LuauEditor.LanguageConfiguration = LuauLanguage.Configuration;

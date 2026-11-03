@@ -8,6 +8,9 @@
     Height="800"
 >
     <DockPanel>
+        <Border DockPanel.Dock="Top" Background="#2D2D30" Padding="6,4">
+            <Button x:Name="RunButton" Content="Run packet.csx (F5)" />
+        </Border>
         <Border DockPanel.Dock="Bottom" Background="#68217A" Padding="8,3">
             <DockPanel>
                 <Button x:Name="ThemeButton" DockPanel.Dock="Right" Padding="8,0" Content="Light / dark" />
@@ -18,6 +21,16 @@
                 />
             </DockPanel>
         </Border>
+        <TextBox
+            x:Name="RunOutput"
+            DockPanel.Dock="Bottom"
+            Height="150"
+            IsReadOnly="True"
+            FontFamily="monospace"
+            Background="#252526"
+            Foreground="#CCCCCC"
+            PlaceholderText="Run the packet script to see its output here"
+        />
         <TabControl x:Name="Tabs">
             <TabItem Header="script.luau">
                 <editor:CodeEditor x:Name="LuauEditor" DocumentId="script.luau" />
@@ -27,6 +40,9 @@
             </TabItem>
             <TabItem Header="script.csx">
                 <editor:CodeEditor x:Name="CSharpEditor" DocumentId="script.csx" LanguageId="csharp" />
+            </TabItem>
+            <TabItem x:Name="PacketTab" Header="packet.csx">
+                <editor:CodeEditor x:Name="PacketEditor" DocumentId="packet.csx" LanguageId="csharp" />
             </TabItem>
             <TabItem x:Name="BenchTab" Header="bench" IsVisible="False" />
         </TabControl>

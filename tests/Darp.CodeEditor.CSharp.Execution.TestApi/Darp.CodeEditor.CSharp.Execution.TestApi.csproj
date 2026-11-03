@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <!-- A script API assembly as an app ships it: used by the host, NativeAOT included, and loaded by the runner. -->
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="StreamJsonRpc" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Darp.CodeEditor.CSharp.Execution.TestDependency\Darp.CodeEditor.CSharp.Execution.TestDependency.csproj" />
+  </ItemGroup>
+</Project>

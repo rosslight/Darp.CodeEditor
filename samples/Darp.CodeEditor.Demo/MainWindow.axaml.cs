@@ -19,6 +19,7 @@ public sealed partial class MainWindow : Window, IBenchHost
         LuauEditor.Text = SampleDocuments.LuauScript;
         JsonEditor.Text = SampleDocuments.Json;
         SetLuauGrammar();
+        PacketScriptRun.Attach(this, RunButton, RunOutput, PacketEditor, () => Tabs.SelectedItem = PacketTab, options);
         if (options.NoLanguageService)
             return;
 

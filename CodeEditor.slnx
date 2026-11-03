@@ -5,14 +5,18 @@
     <Project Path="src/Darp.CodeEditor.Lsp/Darp.CodeEditor.Lsp.csproj" />
     <Project Path="src/Darp.CodeEditor.CSharp.Hosting/Darp.CodeEditor.CSharp.Hosting.csproj" />
     <Project Path="src/Darp.CodeEditor.CSharp.Scripting/Darp.CodeEditor.CSharp.Scripting.csproj" />
+    <Project Path="src/Darp.CodeEditor.CSharp.Execution/Darp.CodeEditor.CSharp.Execution.csproj" />
+    <Project Path="src/Darp.CodeEditor.CSharp.Runner/Darp.CodeEditor.CSharp.Runner.csproj" />
     <Project Path="src/Darp.CodeEditor.CSharp.Server/Darp.CodeEditor.CSharp.Server.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/Darp.CodeEditor.Demo/Darp.CodeEditor.Demo.csproj" />
     <Project Path="samples/Darp.CodeEditor.Demo.Aot/Darp.CodeEditor.Demo.Aot.csproj" />
     <Project Path="samples/Darp.CodeEditor.Demo.Globals/Darp.CodeEditor.Demo.Globals.csproj" />
+    <Project Path="samples/Darp.CodeEditor.Demo.ScriptApi/Darp.CodeEditor.Demo.ScriptApi.csproj" />
   </Folder>
   <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Darp.CodeEditor.CSharp.Execution.Benchmark/Darp.CodeEditor.CSharp.Execution.Benchmark.csproj" />
     <Project Path="benchmarks/Darp.CodeEditor.CSharp.Server.Benchmark/Darp.CodeEditor.CSharp.Server.Benchmark.csproj" />
   </Folder>
   <Folder Name="/tools/">
@@ -25,5 +29,9 @@
     <Project Path="tests/Darp.CodeEditor.Lsp.TestProcess/Darp.CodeEditor.Lsp.TestProcess.csproj" />
     <Project Path="tests/Darp.CodeEditor.CSharp.Server.Tests/Darp.CodeEditor.CSharp.Server.Tests.csproj" />
     <Project Path="tests/Darp.CodeEditor.CSharp.TestGlobals/Darp.CodeEditor.CSharp.TestGlobals.csproj" />
+    <Project Path="tests/Darp.CodeEditor.CSharp.Execution.Tests/Darp.CodeEditor.CSharp.Execution.Tests.csproj" />
+    <Project Path="tests/Darp.CodeEditor.CSharp.Execution.TestApi/Darp.CodeEditor.CSharp.Execution.TestApi.csproj" />
+    <Project Path="tests/Darp.CodeEditor.CSharp.Execution.TestDependency/Darp.CodeEditor.CSharp.Execution.TestDependency.csproj" />
+    <Project Path="tests/Darp.CodeEditor.CSharp.Execution.TestHost/Darp.CodeEditor.CSharp.Execution.TestHost.csproj" />
   </Folder>
 </Solution>

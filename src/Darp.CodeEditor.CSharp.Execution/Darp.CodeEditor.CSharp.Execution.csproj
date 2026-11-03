@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- Host apps run scripts through this library, including NativeAOT apps. It holds no Roslyn. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Attach<T>() calls are replaced by the generated proxies, so the host needs no reflection. -->
+    <EnableStreamJsonRpcInterceptors>true</EnableStreamJsonRpcInterceptors>
+    <InterceptorsNamespaces>$(InterceptorsNamespaces);StreamJsonRpc.Generated</InterceptorsNamespaces>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Darp.CodeEditor.CSharp.Hosting\Darp.CodeEditor.CSharp.Hosting.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="StreamJsonRpc" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The runner implements the protocol. -->
+    <InternalsVisibleTo Include="Darp.CodeEditor.CSharp.Runner" />
+    <InternalsVisibleTo Include="Darp.CodeEditor.CSharp.Execution.Tests" />
+  </ItemGroup>
+</Project>
