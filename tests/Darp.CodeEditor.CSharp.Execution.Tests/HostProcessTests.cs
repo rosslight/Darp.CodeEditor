@@ -47,21 +47,17 @@ public sealed class HostProcessTests
         string output = Directory.CreateTempSubdirectory("csharp-runner-aot-").FullName;
         try
         {
-            (int exitCode, string log) = await RunAsync(
-                Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet",
-                [
-                    "publish",
-                    GetMetadata("TestHostProject"),
-                    "-c",
-                    "Release",
-                    "-r",
-                    RuntimeInformation.RuntimeIdentifier,
-                    "-p:PublishAot=true",
-                    "-o",
-                    output,
-                ],
-                TimeSpan.FromMinutes(8)
-            );
+            (int exitCode, string log) = await DotNetAsync([
+                "publish",
+                GetMetadata("TestHostProject"),
+                "-c",
+                "Release",
+                "-r",
+                PortableRuntimeIdentifier,
+                "-p:PublishAot=true",
+                "-o",
+                output,
+            ]);
             exitCode.ShouldBe(0, log);
             log.ShouldNotContain("warning", Case.Insensitive, log);
 
@@ -89,6 +85,19 @@ public sealed class HostProcessTests
         }
     }
 
+    /// <summary>
+    /// The portable runtime identifier of this machine, such as linux-x64. <see cref="RuntimeInformation.RuntimeIdentifier"/>
+    /// is a distribution's own identifier on runtimes the distribution built.
+    /// </summary>
+    private static string PortableRuntimeIdentifier =>
+        (
+            OperatingSystem.IsWindows() ? "win"
+            : OperatingSystem.IsMacOS() ? "osx"
+            : "linux"
+        )
+        + "-"
+        + RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant();
+
     private static string GetMetadata(string key) =>
         typeof(HostProcessTests)
             .Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
@@ -108,10 +117,23 @@ public sealed class HostProcessTests
         throw new InvalidOperationException($"The host ended without writing \"{prefix}\".");
     }
 
+    /// <summary>
+    /// Runs the dotnet CLI with build processes of its own: MSBuild nodes and compiler servers are shared by every
+    /// build of the user, and a reused one outside this test can end the test's process.
+    /// </summary>
+    private static Task<(int ExitCode, string Output)> DotNetAsync(IEnumerable<string> arguments) =>
+        RunAsync(
+            Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet",
+            [.. arguments, "-nodeReuse:false", "-p:UseSharedCompilation=false"],
+            TimeSpan.FromMinutes(8),
+            new Dictionary<string, string> { ["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0" }
+        );
+
     private static async Task<(int ExitCode, string Output)> RunAsync(
         string fileName,
         IEnumerable<string> arguments,
-        TimeSpan timeout
+        TimeSpan timeout,
+        IReadOnlyDictionary<string, string>? environment = null
     )
     {
         var start = new ProcessStartInfo(fileName, arguments)
@@ -119,6 +141,8 @@ public sealed class HostProcessTests
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
+        foreach ((string name, string value) in environment ?? new Dictionary<string, string>())
+            start.Environment[name] = value;
         using Process process = Process.Start(start)!;
         var output = new StringBuilder();
         Task stdout = CopyAsync(process.StandardOutput, output);
