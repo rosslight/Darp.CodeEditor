@@ -12,6 +12,9 @@ internal static class ProcessClock
 }
 
 /// <summary>Command line flags shared by the demos.</summary>
+/// <param name="CSharpServer">The C# server's .dll or app host, instead of the one next to the app.</param>
+/// <param name="DotNet">The dotnet executable that runs the C# server.</param>
+/// <param name="ServerLog">Writes the C# server's log to standard error.</param>
 internal sealed record DemoOptions(
     bool Smoke,
     bool Bench,
@@ -22,7 +25,10 @@ internal sealed record DemoOptions(
     bool RunScript,
     string? OutputPath,
     string? E2eOutput,
-    bool Light
+    bool Light,
+    string? CSharpServer = null,
+    string? DotNet = null,
+    bool ServerLog = false
 )
 {
     public bool Measure => Smoke || Bench;
@@ -39,7 +45,10 @@ internal sealed record DemoOptions(
             args.Contains("--run-script"),
             Value(args, "--out"),
             Value(args, "--e2e"),
-            args.Contains("--light")
+            args.Contains("--light"),
+            Value(args, "--csharp-server"),
+            Value(args, "--dotnet"),
+            args.Contains("--server-log")
         );
     }
 

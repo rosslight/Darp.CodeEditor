@@ -3,7 +3,7 @@
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:editor="using:Darp.CodeEditor"
-    Title="Code editor demo (NativeAOT, highlighting and search)"
+    Title="Code editor demo (NativeAOT, C# through the language server)"
     Width="1200"
     Height="800"
 >
@@ -17,7 +17,7 @@
                 <TextBlock
                     x:Name="Status"
                     Foreground="White"
-                    Text="NativeAOT · Ctrl+F to search · JSON has word completion and parse errors"
+                    Text="NativeAOT · Ctrl+F to search · C# through the C# server · JSON has word completion and parse errors"
                 />
             </DockPanel>
         </Border>

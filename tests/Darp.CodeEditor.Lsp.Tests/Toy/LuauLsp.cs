@@ -44,13 +44,13 @@ internal sealed class LuauLsp : IAsyncDisposable
         _process.ErrorDataReceived += (_, e) => Log($"stderr: {e.Data}");
         _process.BeginErrorReadLine();
         Connection = new JsonRpcConnection(_process.StandardOutput.BaseStream, _process.StandardInput.BaseStream, Log);
-        // Requests that luau-lsp sends to its client.
-        Connection.OnRequest(Request("workspace/configuration"), (p, _) => Task.FromResult(NullPerItem(p)));
-        Connection.OnRequest(Request("client/registerCapability"), (_, _) => Task.FromResult(default(JsonElement)));
+        // Requests that luau-lsp sends to its client. A null setting makes it use its default.
         Connection.OnRequest(
-            Request("window/workDoneProgress/create"),
-            (_, _) => Task.FromResult(default(JsonElement))
+            LspMethods.WorkspaceConfiguration,
+            (p, _) => Task.FromResult<IReadOnlyList<JsonElement?>?>([.. p.Items.Select(_ => (JsonElement?)null)])
         );
+        Connection.OnRequest(LspMethods.RegisterCapability, (_, _) => Task.FromResult<JsonElement?>(null));
+        Connection.OnRequest(LspMethods.WorkDoneProgressCreate, (_, _) => Task.FromResult<JsonElement?>(null));
         Connection.OnNotification(
             LspMethods.PublishDiagnostics,
             (p, token) => Diagnostics.Writer.WriteAsync(p, token).AsTask()
@@ -119,6 +119,12 @@ internal sealed class LuauLsp : IAsyncDisposable
                     },
                     Hover = new HoverClientCapabilities { ContentFormat = [MarkupKind.Markdown, MarkupKind.PlainText] },
                     PublishDiagnostics = new PublishDiagnosticsClientCapabilities { VersionSupport = true },
+                    SemanticTokens = new SemanticTokensClientCapabilities(
+                        new SemanticTokensRequests(Range: true, Full: true),
+                        ["namespace", "type", "class", "function", "method", "property", "variable", "parameter"],
+                        ["readonly", "defaultLibrary"],
+                        ["relative"]
+                    ),
                 },
             }
         )
@@ -142,19 +148,6 @@ internal sealed class LuauLsp : IAsyncDisposable
         await _process.WaitForExitAsync();
         await Connection.DisposeAsync();
         _process.Dispose();
-    }
-
-    private static RequestType<JsonElement, JsonElement> Request(string method) =>
-        new(method, LspJsonContext.Default.JsonElement, LspJsonContext.Default.JsonElement);
-
-    /// <summary>Answers <c>workspace/configuration</c> with null for every item: luau-lsp then uses its defaults.</summary>
-    private static JsonElement NullPerItem(JsonElement parameters)
-    {
-        int count = parameters.TryGetProperty("items", out JsonElement items) ? items.GetArrayLength() : 0;
-        return JsonSerializer.Deserialize(
-            $"[{string.Join(',', Enumerable.Repeat("null", count))}]",
-            LspJsonContext.Default.JsonElement
-        );
     }
 
     private void Log(string? message)

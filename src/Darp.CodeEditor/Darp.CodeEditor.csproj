@@ -13,6 +13,7 @@
     <PackageReference Include="TextMateSharp.Grammars" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Language features come from language servers over LSP. -->
     <ProjectReference Include="..\Darp.CodeEditor.Lsp\Darp.CodeEditor.Lsp.csproj" />
   </ItemGroup>
   <ItemGroup>

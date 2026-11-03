@@ -8,7 +8,7 @@ namespace Darp.CodeEditor.Lsp.Tests;
 public sealed class LuauLspTests
 {
     [Fact]
-    public async Task Initialize_open_completion_hover_and_shutdown_work_against_luau_lsp()
+    public async Task Initialize_open_completion_hover_semantic_tokens_and_shutdown_work_against_luau_lsp()
     {
         string executable =
             LuauLsp.FindExecutable()
@@ -49,6 +49,11 @@ public sealed class LuauLspTests
                 new HoverParams(document, LuauLsp.Call),
                 Wire.Timeout
             );
+            SemanticTokens? tokens = await rpc.SendRequestAsync(
+                LspMethods.SemanticTokensFull,
+                new SemanticTokensParams(document),
+                Wire.Timeout
+            );
             await rpc.SendRequestAsync(LspMethods.Shutdown, default, Wire.Timeout);
             await rpc.SendNotificationAsync(LspMethods.Exit, default);
 
@@ -58,6 +63,10 @@ public sealed class LuauLspTests
                 .ShouldNotBeNull()
                 .Items.ShouldContain(i => i.Label == "format" && i.Kind == CompletionItemKind.Function);
             hover.ShouldNotBeNull().Contents.Value.ShouldContain("greet");
+            // luau-lsp classifies whole documents only.
+            initialized.Capabilities.SemanticTokensProvider.ShouldNotBeNull().Full.ShouldBe(true);
+            tokens.ShouldNotBeNull().Data.Length.ShouldBeGreaterThan(0);
+            (tokens.Data.Length % 5).ShouldBe(0);
             (await luau.WaitForExitAsync(Wire.Timeout)).ShouldBe(0);
         }
         catch (Exception exception) when (exception is not Xunit.Sdk.SkipException)

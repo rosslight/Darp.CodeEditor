@@ -1,6 +1,6 @@
 using System.Reflection;
 
-namespace Darp.CodeEditor.CSharp;
+namespace Darp.CodeEditor.CSharp.Server.Benchmark.InProcess;
 
 /// <summary>Describes the environment C# scripts run in.</summary>
 /// <param name="GlobalsType">

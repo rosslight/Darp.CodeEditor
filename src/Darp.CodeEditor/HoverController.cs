@@ -24,12 +24,8 @@ internal sealed class HoverController
     {
         _editor = editor;
         _features = features;
-        _text = new TextBlock
-        {
-            MaxWidth = 600,
-            TextWrapping = TextWrapping.Wrap,
-            FontFamily = editor.FontFamily,
-        };
+        // Paragraphs in the UI font; code blocks in the editor's font.
+        _text = new TextBlock { MaxWidth = 600, TextWrapping = TextWrapping.Wrap };
         _border = new Border
         {
             BorderThickness = new Thickness(1),
@@ -42,6 +38,8 @@ internal sealed class HoverController
         editor.EditorThemeChanged += (_, _) => ApplyTheme(editor.EditorTheme);
         editor.PointerHover += OnPointerHover;
         editor.PointerHoverStopped += (_, _) => Close();
+        // Typing makes the information stale; cancelling the request tells the server it is no longer needed.
+        editor.TextChanged += (_, _) => Close();
     }
 
     private void ApplyTheme(EditorTheme theme)
@@ -61,35 +59,33 @@ internal sealed class HoverController
             return;
         int offset = _editor.Document.GetOffset(p.Location);
 
-        string diagnostics = string.Join(
-            Environment.NewLine,
-            _features.DiagnosticsAt(offset).Select(d => $"{d.Id}: {d.Message}")
-        );
+        MarkupBlock[] diagnostics =
+        [
+            .. _features
+                .DiagnosticsAt(offset)
+                .Select(d => new MarkupBlock(MarkupBlockKind.Paragraph, $"{d.Id}: {d.Message}")),
+        ];
         Show(diagnostics, offset, pointer.X);
 
         if (_features.Service is not { } service)
             return;
         var cancellation = new CancellationTokenSource();
         _cancellation = cancellation;
-        (DocumentSnapshot snapshot, _) = _features.CreateSnapshot();
+        (DocumentVersion document, _) = _features.CreateSnapshot();
         QuickInfo? info = await _features.RequestAsync(
-            () => service.GetQuickInfoAsync(snapshot, offset, cancellation.Token),
+            () => service.GetQuickInfoAsync(document, offset, cancellation.Token),
             cancellation.Token
         );
         if (info is null || cancellation.IsCancellationRequested)
             return;
-        Show(
-            diagnostics.Length == 0 ? info.Text : $"{info.Text}{Environment.NewLine}{Environment.NewLine}{diagnostics}",
-            offset,
-            pointer.X
-        );
+        Show([.. info.Content, .. diagnostics], offset, pointer.X);
     }
 
-    private void Show(string text, int offset, double x)
+    private void Show(IReadOnlyList<MarkupBlock> content, int offset, double x)
     {
-        if (text.Length == 0)
+        if (content.Count == 0)
             return;
-        _text.Text = text;
+        MarkupText.Show(_text, content, _editor.FontFamily);
         _popup.Show(offset, x);
     }
 

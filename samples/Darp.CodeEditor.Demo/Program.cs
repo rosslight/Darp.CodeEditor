@@ -18,9 +18,5 @@ internal static class Program
     }
 
     // Entry point for the Avalonia designer.
-    public static AppBuilder BuildAvaloniaApp() =>
-        AppBuilder
-            .Configure<App>()
-            .UsePlatformDetect()
-            .LogToTrace();
+    public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<App>().UsePlatformDetect().LogToTrace();
 }

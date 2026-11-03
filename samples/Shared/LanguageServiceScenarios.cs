@@ -1,7 +1,6 @@
 using Darp.CodeEditor.Instrumentation;
-using Darp.CodeEditor.Samples;
 
-namespace Darp.CodeEditor.Demo;
+namespace Darp.CodeEditor.Samples;
 
 /// <summary>Scenarios with the C# language service: completion latency and a typing burst.</summary>
 internal static class LanguageServiceScenarios
@@ -9,9 +8,16 @@ internal static class LanguageServiceScenarios
     private const int TypingDelayMs = 40;
     private static readonly TimeSpan s_completionTimeout = TimeSpan.FromSeconds(10);
 
-    public static async Task RunAsync(MainWindow window, CodeEditor editor, UiStallProbe probe, BenchReport report)
+    /// <param name="tab">The tab of the C# editor.</param>
+    public static async Task RunAsync(
+        IBenchHost host,
+        int tab,
+        CodeEditor editor,
+        UiStallProbe probe,
+        BenchReport report
+    )
     {
-        await window.ShowTabAsync(0);
+        await host.ShowTabAsync(tab);
         using var timings = new TimingLog(editor);
 
         // One session at a time, so each latency is one request: an identifier start and a member access.

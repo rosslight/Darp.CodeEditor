@@ -17,5 +17,14 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Darp.CodeEditor\Darp.CodeEditor.csproj" />
     <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp\Darp.CodeEditor.CSharp.csproj" />
+    <!-- The smoke test's script globals, read by the real C# server. -->
+    <ProjectReference Include="..\..\samples\Darp.CodeEditor.Demo.Globals\Darp.CodeEditor.Demo.Globals.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- The LSP layer's toy server, which the client tests run in-process. -->
+    <Compile Include="..\Darp.CodeEditor.Lsp.Tests\Toy\ToyServer.cs" Link="Toy\ToyServer.cs" />
+    <Compile Include="..\..\samples\Shared\SampleDocuments.cs" Link="Shared\SampleDocuments.cs" />
+  </ItemGroup>
+  <!-- Puts the C# script language server next to the tests, for the smoke test. -->
+  <Import Project="..\..\src\Darp.CodeEditor.CSharp\build\Darp.CodeEditor.CSharp.targets" />
 </Project>

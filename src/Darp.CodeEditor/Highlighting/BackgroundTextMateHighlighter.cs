@@ -3,10 +3,10 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Rendering;
-using TextMateSharp.Grammars;
-using TextMateSharp.Internal.Grammars;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Theming;
+using TextMateSharp.Grammars;
+using TextMateSharp.Internal.Grammars;
 
 namespace Darp.CodeEditor.Highlighting;
 

@@ -12,6 +12,9 @@ internal interface IBenchHost
 
     /// <summary>Shows the editor in place of the current content and returns once it is laid out.</summary>
     Task ShowAsync(CodeEditor editor);
+
+    /// <summary>Selects a tab and returns at the next frame.</summary>
+    Task ShowTabAsync(int index);
 }
 
 /// <summary>Scenarios that need no language service. They run with and without TextMate to attribute stalls.</summary>
@@ -99,7 +102,12 @@ internal static class EditorScenarios
     /// Switches the app between light and dark three times. For each switch: when the editor showed the new theme,
     /// and how many of the shown lines had no colors in that frame.
     /// </summary>
-    public static async Task RunThemeSwitchAsync(IBenchHost host, CodeEditor editor, UiStallProbe probe, BenchReport report)
+    public static async Task RunThemeSwitchAsync(
+        IBenchHost host,
+        CodeEditor editor,
+        UiStallProbe probe,
+        BenchReport report
+    )
     {
         probe.BeginPhase("theme: switch light/dark 6 times");
         using var timings = new TimingLog(editor);

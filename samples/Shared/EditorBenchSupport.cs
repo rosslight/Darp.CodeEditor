@@ -14,7 +14,8 @@ internal static class Ui
     public static void ToggleThemeVariant()
     {
         Application app = Application.Current ?? throw new InvalidOperationException("No application.");
-        app.RequestedThemeVariant = app.ActualThemeVariant == ThemeVariant.Dark ? ThemeVariant.Light : ThemeVariant.Dark;
+        app.RequestedThemeVariant =
+            app.ActualThemeVariant == ThemeVariant.Dark ? ThemeVariant.Light : ThemeVariant.Dark;
     }
 
     public static Task NextFrameAsync(TopLevel topLevel)
@@ -205,9 +206,12 @@ internal sealed class TimingLog : IDisposable
     }
 
     /// <summary>Completes with <see cref="ProcessClock.ElapsedMs"/> when the first timing of that name arrives.</summary>
-    public async Task<double> WhenFirstAsync(string name)
+    public Task<double> WhenFirstAsync(string name) => WhenFirstAsync(t => t.Name == name);
+
+    /// <summary>Completes with <see cref="ProcessClock.ElapsedMs"/> when the first matching timing arrives.</summary>
+    public async Task<double> WhenFirstAsync(Func<EditorTiming, bool> match)
     {
-        await NextAsync(t => t.Name == name);
+        await NextAsync(match);
         return ProcessClock.ElapsedMs;
     }
 

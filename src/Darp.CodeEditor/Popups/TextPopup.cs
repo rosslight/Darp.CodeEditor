@@ -106,7 +106,8 @@ internal sealed class TextPopup
         double above = anchor.Top;
         bool fitsPreferred = size.Height <= (_preferAbove ? above : below);
         bool fitsOther = size.Height <= (_preferAbove ? below : above);
-        bool placeAbove = fitsPreferred ? _preferAbove
+        bool placeAbove =
+            fitsPreferred ? _preferAbove
             : fitsOther ? !_preferAbove
             : above > below;
         _content.MaxHeight = Math.Max(0, placeAbove ? above : below);

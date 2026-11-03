@@ -21,7 +21,7 @@ public sealed class App : Application
                 ? new UiStallProbe(Dispatcher.UIThread, TimeSpan.FromMilliseconds(2))
                 : null;
             probe?.BeginPhase("startup: until first highlighted frame");
-            var window = new MainWindow();
+            var window = new MainWindow(Program.Options);
             desktop.MainWindow = window;
             if (probe is not null || Program.Options.Scene || Program.Options.E2eOutput is not null)
                 DemoRun.Start(window, desktop, probe, Program.Options);

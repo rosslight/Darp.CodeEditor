@@ -12,6 +12,7 @@
   <Folder Name="/samples/">
     <Project Path="samples/Darp.CodeEditor.Demo/Darp.CodeEditor.Demo.csproj" />
     <Project Path="samples/Darp.CodeEditor.Demo.Aot/Darp.CodeEditor.Demo.Aot.csproj" />
+    <Project Path="samples/Darp.CodeEditor.Demo.Globals/Darp.CodeEditor.Demo.Globals.csproj" />
     <Project Path="samples/Darp.CodeEditor.Demo.ScriptApi/Darp.CodeEditor.Demo.ScriptApi.csproj" />
   </Folder>
   <Folder Name="/benchmarks/">
@@ -25,6 +26,7 @@
     <Project Path="tests/Darp.CodeEditor.Tests/Darp.CodeEditor.Tests.csproj" />
     <Project Path="tests/Darp.CodeEditor.Lsp.Tests/Darp.CodeEditor.Lsp.Tests.csproj" />
     <Project Path="tests/Darp.CodeEditor.Lsp.AotSmoke/Darp.CodeEditor.Lsp.AotSmoke.csproj" />
+    <Project Path="tests/Darp.CodeEditor.Lsp.TestProcess/Darp.CodeEditor.Lsp.TestProcess.csproj" />
     <Project Path="tests/Darp.CodeEditor.CSharp.Server.Tests/Darp.CodeEditor.CSharp.Server.Tests.csproj" />
     <Project Path="tests/Darp.CodeEditor.CSharp.TestGlobals/Darp.CodeEditor.CSharp.TestGlobals.csproj" />
     <Project Path="tests/Darp.CodeEditor.CSharp.Execution.Tests/Darp.CodeEditor.CSharp.Execution.Tests.csproj" />

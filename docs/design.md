@@ -49,10 +49,10 @@ Status against the budgets, from the measurements in [section 4](#4-key-measurem
 
 | Budget | Measured | Status |
 |---|---|---|
-| Highlighted text ≤ 100 ms | AOT on Linux: 99 ms in-process milestone, 102 ms on screen (bake-off); 83 ms to visible text. JIT on Linux: 701–878 ms. AOT on Windows: 225 ms. JIT on Windows: 1,123 ms | Near target only in Linux AOT. The budget clock starts when the editor is created (#42); these process-start numbers include app startup. |
-| UI thread ≤ 16 ms | Linux prototype typing p99 1.1 ms; bake-off with C# and in-window popups 1.7 ms. Windows baseline p99 40 ms; investigation 41 → 3 ms. A 27 ms first-completion stall remains on Windows | Typical typing is below target with in-window popups; percentiles do not certify the maximum-stall budget. Windows first completion exceeds it |
-| C# ready ≤ 1.5 s | Prototype JIT: 1.75 s without ReadyToRun; bake-off 2.011 s. Isolated server start to first member list: 0.729 s with ReadyToRun. Windows JIT prototype: 2.68 s | Integrated demos miss target. The isolated server result excludes editor startup and does not certify app readiness |
-| Completion ≤ 50 ms p95 | Member list p95 10–20 ms. Prototype word list (~3,300 items) p95 25–36 ms on Linux; server-only p95 30.7–36.5 ms. Windows laptop word list p50 36 ms | Met on Linux. At risk for word lists on Windows |
+| Highlighted text ≤ 100 ms | AOT on Linux: 99 ms in-process milestone, 102 ms on screen (bake-off); 83 ms to visible text. JIT on Linux: 701–878 ms. AOT on Windows: 225 ms. JIT on Windows: 1,123 ms. With C# on the server (`feat/lsp-client`, Linux): AOT demo 56 ms after editor creation (110 ms after process start), JIT demo 472 ms (799 ms) | Near target only in Linux AOT. The budget clock starts when the editor is created (#42); these process-start numbers include app startup. |
+| UI thread ≤ 16 ms | Linux prototype typing p99 1.1 ms; bake-off with C# and in-window popups 1.7 ms. Windows baseline p99 40 ms; investigation 41 → 3 ms. A 27 ms first-completion stall remains on Windows. With C# on the server and in-window popups: keystroke p99 0.5–1.1 ms (AOT, after the editor polish) and 2.5–4.6 ms (JIT), no stall over 16 ms while typing in the AOT demo | Typical typing is below target with in-window popups; percentiles do not certify the maximum-stall budget. Windows first completion exceeds it |
+| C# ready ≤ 1.5 s | Prototype JIT: 1.75 s without ReadyToRun; bake-off 2.011 s. Isolated server start to first member list: 0.729 s with ReadyToRun. Windows JIT prototype: 2.68 s. On the server without ReadyToRun (`feat/lsp-client`, Linux, semantic colors and diagnostics shown): JIT demo 1.77 s against 1.86 s in-process on the same VM; AOT demo 1.13 s | Integrated demos miss target. The isolated server result excludes editor startup and does not certify app readiness |
+| Completion ≤ 50 ms p95 | Member list p95 10–20 ms. Prototype word list (~3,300 items) p95 25–36 ms on Linux; server-only p95 30.7–36.5 ms. Windows laptop word list p50 36 ms. Through the editor's LSP client: word list (519 items after the server's filter) p95 23–35 ms, member list p95 11–21 ms | Met on Linux. At risk for word lists on Windows |
 
 ### 1.5 Scope
 
@@ -77,7 +77,7 @@ Host app (JIT or AOT)
 │    │
 │    │  ILanguageService (async; document snapshot, version, cancellation)
 │    ▼
-│  LSP client  (planned: Darp.CodeEditor.Lsp, working name)
+│  LSP client  (LspLanguageService on Darp.CodeEditor.Lsp)
 │    │ LSP over stdio                         │ LSP over stdio
 │    ▼                                        ▼
 │  C# language server (Roslyn 5.9.0)       luau-lsp (follow-up)
@@ -92,7 +92,7 @@ Host app (JIT or AOT)
 ### 2.2 Components
 
 - **Editor core (`Darp.CodeEditor`, AOT-safe).** AvaloniaEdit 12.0.0 is the text surface. TextMateSharp 2.0.4 supplies grammars. The background highlighter is ours. Completion, hover and signature help are our own controls, drawn inside the editor window (#19). Search uses AvaloniaEdit's search panel.
-- **Language service contract (`ILanguageService`).** Six async methods: completions, completion description, diagnostics, classifications (for the visible range), quick info and signature help. A document is `DocumentSnapshot(DocumentId, Version, Text)`. Every request carries a cancellation token. The editor always calls the service through `Task.Run`. A keystroke cancels requests for the document. Stale non-completion results are dropped; completion can map forward while the same word is typed, and cached markers move with the text until new results arrive.
+- **Language service contract (`ILanguageService`).** Documents are opened, changed (incrementally) and closed; requests name a document version: completions (incomplete lists, per-item commit characters and edit ranges), lazy completion resolve (description and additional edits), classifications for the visible range, quick info (code blocks and paragraphs), signature help (parameter offsets, active overload and parameter). Diagnostics are pushed per version. The editor calls the service on the UI thread and the service only queues; `LspLanguageService` implements it over LSP. A keystroke cancels requests for the document, which sends `$/cancelRequest`. Stale non-completion results are dropped; completion can map forward while the same word is typed, and cached markers move with the text until new results arrive.
 - **C# language server (`Darp.CodeEditor.CSharp.Server`).** Out of process, LSP over stdio, Roslyn 5.9.0. It caches a Roslyn document for the current version and applies `didChange` edits incrementally. It loads the globals type with `MetadataLoadContext`, so no user code runs in the server. The conversation reports 36 passing tests, including 19 compiler-parity checks against `CSharpScript`. It runs on the shared LSP layer `Darp.CodeEditor.Lsp` (#37).
 - **Shared script environment.** `Darp.CodeEditor.CSharp.Hosting` (AOT-safe, no Roslyn) describes a script: globals assembly path and type name, references, framework references, imports, language version, nullable setting, unsafe, overflow and warning level. It is sent in a versioned `csharpScript` initialization section. `Darp.CodeEditor.CSharp.Scripting` (JIT) turns the description into `ScriptOptions` and compilation options. The server uses it; the runner will use it too, to reduce semantic drift; parity still needs tests (#3, #33).
 - **Script runner (`Darp.CodeEditor.CSharp.Runner`, host API `Darp.CodeEditor.CSharp.Execution`).** A separate helper process on the bundled runtime (#36): StreamJsonRpc 2.26.150 with MessagePack over stdio and length-header framing. It compiles with `ResolvedScriptEnvironment`, like the server, and returns the script's handler to the app as a generated proxy; the globals receive proxies of the app's services. Deadlines cancel first and kill after a grace period, a crash or kill restarts the runner on the next script, and `ScriptBatcher` batches single items (#35). Tested on Linux: exceptions, hangs, crashes, dispose and parent death, also from a NativeAOT app; Windows uses a job object, not tested yet. See the README.
@@ -101,7 +101,7 @@ Host app (JIT or AOT)
 ### 2.3 Rules that keep the UI thread free
 
 1. The editor works with no language service. Typing does not wait for the backend; background TextMate colors currently follow the text. C# features switch on when the server is ready.
-2. The boundary is async only. Drawing code reads caches and never calls the language service.
+2. The boundary is async only. The service only queues work on the UI thread; drawing code reads caches and never calls the language service.
 3. Every request carries a document version and a cancellation token. A keystroke cancels obsolete feature requests; completion may map forward while typing the same word. The server deliberately retains completion across ordinary text changes; explicit cancellation and document closure still must work (review fixes pending).
 4. Completion fetches its list once, off the UI thread. It filters locally on each keystroke, loads descriptions only when shown, and commit inserts text that is already computed.
 5. A UI stall probe measures stalls in the demos and benchmarks. The headless test that types while Roslyn loads, which the original design planned, is not in the repository.
@@ -120,9 +120,9 @@ Host app (JIT or AOT)
 |---|---|---|
 | Editor core and demos (JIT and AOT) | `main`, commit `01cef73` | Built. 15 tests pass (per the conversation). In-window popups exist behind `--overlay-popups` |
 | C# language server and shared environment | `feat/csharp-script-server` (draft PR #1) | Built. 36 tests pass. Review: 7 findings, 4 must-fix (cancellation, closed-document cache, version rules, server outliving the app). Merge after fixes |
-| LSP layer (`Darp.CodeEditor.Lsp`) | `feat/lsp-protocol` has no commits beyond `main` | Not started |
-| Script runner | `feat/script-runner` | Built: runner, host API, MSBuild layout with the bundled runtime, Run in both demos, tests and benchmark. Tests run on Linux and, in CI, on Windows; macOS not run |
-| Editor LSP client | none | Not started. Demos still use the in-process C# service |
+| LSP layer (`Darp.CodeEditor.Lsp`) | `main` (PR #6) | Merged |
+| Script runner | `main` (PR #7) | Built: runner, host API, MSBuild layout with the bundled runtime, Run in both demos, tests and benchmark. Tests run on Linux and, in CI, on Windows; macOS not run |
+| Editor LSP client | `feat/lsp-client` | Built: `LspLanguageService`, process ownership and restarts in the layer. Both demos get C# through the server; the in-process service is the server benchmark's baseline |
 | Luau | none | Follow-up |
 | WebView editor | `feat/webview-bakeoff` | Record only, not merged |
 | Repository setup (CI, releases, feed) | `main` (PR #2) | Merged |
@@ -148,7 +148,7 @@ Question numbers are from the design conversation. Later answers replace earlier
 | 12 | Script definition contents | References, imports, globals type, language version, nullable setting, script kind. No `#r` or `#load` in v1. Each file is its own script | Host controls references, so editor and runner agree. Product owner: "keep it simple" | decided |
 | 13 | Diagnostics | Compiler diagnostics only. Analyzers can be opted in later | Analyzers add load time and memory | decided |
 | 14 | Editing helpers | Auto-indent, bracket matching, auto-closing brackets and quotes, toggle comment, Tab and Shift+Tab. No go-to-line | Cheap, and expected from any code editor | decided (not in `main` yet) |
-| 15 | When Roslyn starts | Planned: start when the first C# editor opens, with `PrewarmAsync()` to start earlier. One shared language-server instance per app | Apps that never open an editor pay nothing. Roslyn costs ~220 MiB once loaded | decided (planned host API; not implemented in the supplied prototype/server sources; server warms after environment loading) |
+| 15 | When Roslyn starts | Planned: start when the first C# editor opens, with `PrewarmAsync()` to start earlier. One shared language-server instance per app | Apps that never open an editor pay nothing. Roslyn costs ~220 MiB once loaded | decided (built: `CSharpLanguageServer.CreateService`, the first open document starts the server, `PrewarmAsync()` earlier) |
 | 16 | Pilot app and existing editor | First consumer is the greenfield test app (#24). The real app follows after the test app | Product owner: "greenfield test app for now" | decided (existing editor left alone, #41) |
 | 17 | Repository setup | Use the existing CI, release-please, NuGet publishing and changelog conventions | Proven setup | decided (merged in PR #2) |
 | 18 | Helper runtime, long term | Separate helper on an installed .NET runtime; download a per-user runtime if none is installed | Supported setup. A crashing script cannot take the app down | superseded by #31 |
@@ -171,7 +171,7 @@ Question numbers are from the design conversation. Later answers replace earlier
 | 34 | Script API interface rules | Methods are async only (`Task`, `Task<T>`, `IAsyncEnumerable<T>`). Returned handlers have no events or properties; use callback interfaces. No generic methods. Data is copied. No streams in v1 | The price of a process boundary and of AOT | decided |
 | 35 | High-frequency calls | Batching in the runner API from the start. No in-process mode | JIT caller, 100k synthetic packets: one call each takes 3.3 s; batches of 100 take 0.07 s (~1.5M packets/s); AOT caller: 3.87 s and 0.088 s | decided |
 | 36 | Processes | Two separate processes, language server and script runner, on the same bundled runtime | A hung or killed script must not take down completion. The runner must work with no editor open. Sharing was estimated to save ~150 MiB (not measured) | decided |
-| 37 | EmmyLua framework | Replace it with one small LSP layer (working name `Darp.CodeEditor.Lsp`), shared by the editor client and the server | EmmyLua needed a replaced scheduler for cancellation, fixed shutdown and hand-written completion lists. Its NativeAOT publish gave 100 warnings, and completion-list/plain-string-hover deserialization failed in the client probe | decided; built, the server runs on `Darp.CodeEditor.Lsp` |
+| 37 | EmmyLua framework | Replace it with one small LSP layer (working name `Darp.CodeEditor.Lsp`), shared by the editor client and the server | EmmyLua needed a replaced scheduler for cancellation, fixed shutdown and hand-written completion lists. Its NativeAOT publish gave 100 warnings, and completion-list/plain-string-hover deserialization failed in the client probe | decided; built: the server and the editor's client run on `Darp.CodeEditor.Lsp` |
 | 38 | .NET docs for hover | Conditional MSBuild switch in the host project. SDK English docs and script-DLL docs were proposed as copy inputs; no SDK needed on user machines | Without docs, hover shows signatures but no descriptions. Product owner suggested making copying conditional | decided (#40: off by default; copies framework and script-API docs) |
 | 39 | Regular C# files | Scripts only for now. Regular files only if a use case appears | Keeps the server small; #27 and #30 were already moot | decided |
 | 40 | Hover docs default | The switch from #38 is off by default. When on, it copies .NET's English docs from the build machine's SDK and the docs of the app's script DLLs | Apps that want hover docs opt in; user machines need no SDK | decided |
@@ -204,6 +204,7 @@ Only the numbers that drove decisions. Source names refer to section 7.
 | GC pauses | 40 new runs: longest 21.4 ms, none over 50 ms. The prototype's 57–167 ms outliers were not reproduced | #10 (no reproduced >50 ms pause; maximum tail not certified) | GC pause research |
 | Existing C# language servers | Microsoft's server: 1.99 s to first completion, 385 MiB, 147.6 MiB payload. csharp-ls: 2.81 s, 256 MiB. No supported custom script-globals configuration was found; these timings are regular-C# fixtures with different completion lists | #10 (build our own) | C# language server research |
 | Own C# server against the in-process service | Start to first member list: 1,123 ms (729 ms ReadyToRun) against 1,341 ms. Warm word list p50 22 ms against 11 ms. Memory 248 MiB against 216 MiB | #10, #20 | C# language server benchmark (README on `feat/csharp-script-server`) |
+| Demos on the C# server against in-process (Linux VM, 3 cold runs each, load 3–11) | C# ready (semantic colors and diagnostics): JIT 1.77 s against 1.86 s in-process; AOT 1.13 s. Highlighted text from editor creation: AOT 56 ms, JIT 472 ms. Warm word list p50/p95 8/35 ms (JIT), 8/23 ms (AOT) against 13/27 ms in-process. RSS idle: host + server 408 MiB (JIT), 353 MiB (AOT) against 347 MiB in-process; after typing 523 / 443 against 418 MiB. AOT executable 34.2 MiB after the editor polish (31.9 MiB without C# before it) plus the 25.8 MiB server on `Darp.CodeEditor.Lsp` | #10, #15 | Demo benchmark on `feat/lsp-client` |
 
 ## 5. Open questions and next steps
 
@@ -227,7 +228,7 @@ Only the numbers that drove decisions. Source names refer to section 7.
 2. Build `Darp.CodeEditor.Lsp`, switch the server to it and remove EmmyLua (#37).
 3. Build the script runner: a separate helper on the bundled runtime, with a shared runtime folder proposed for the language server and runner. Batching, timeouts, restart, and no orphan processes on Windows and Linux. A Run button in both demos.
 4. Editor polish: in-window popups by default, the first-completion stall, first-frame colors, editing helpers, light and dark themes, and the key-to-pixel probe with a guard so no keystroke reaches another app.
-5. Build the editor's LSP client, so both demos get C# through the server. The AOT demo gets C# for the first time.
+5. ~~Build the editor's LSP client, so both demos get C# through the server.~~ Built on `feat/lsp-client`; the AOT demo has C#.
 6. Repository setup: CI on Linux and Windows with an AOT gate, release-please, and publishing to the private feed.
 7. Re-run the Windows benchmarks on the Windows laptop with in-window popups.
 8. Build the greenfield test app from the template (#24). The real app follows.

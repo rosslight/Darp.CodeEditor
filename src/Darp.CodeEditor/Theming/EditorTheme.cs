@@ -118,7 +118,8 @@ internal sealed class EditorTheme
             LineNumbers = Get("editorLineNumber.foreground") ?? fallback.LineNumbers,
             Selection = Get("editor.selectionBackground") ?? fallback.Selection,
             CurrentLineBackground = Get("editor.lineHighlightBackground"),
-            CurrentLineBorder = GetPen("editor.lineHighlightBorder")
+            CurrentLineBorder =
+                GetPen("editor.lineHighlightBorder")
                 ?? (Get("editor.lineHighlightBackground") is null ? fallback.CurrentLineBorder : null),
             Caret = Get("editorCursor.foreground") ?? fallback.Caret,
             WidgetBackground = widgetBackground,

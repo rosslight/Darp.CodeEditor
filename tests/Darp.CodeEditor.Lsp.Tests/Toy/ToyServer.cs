@@ -8,6 +8,8 @@ namespace Darp.CodeEditor.Lsp.Testing;
 /// "error" in a document is a diagnostic.
 /// </summary>
 /// <remarks>
+/// With <see cref="WholeDocumentTokens"/> it classifies whole documents only, as luau-lsp does, and waits until the
+/// request is cancelled for a document with the word "slow".
 /// Hovering "slow" waits until the request is cancelled. Hovering "stale" waits until the document changes and then
 /// answers <see cref="ErrorCodes.ContentModified"/>. After <c>initialized</c> the server asks the client for its
 /// <c>greeting</c> setting with <c>workspace/configuration</c>, and hovers greet with it.
@@ -39,35 +41,46 @@ internal sealed class ToyServer
         rpc.OnRequest(LspMethods.Hover, OnHoverAsync);
         rpc.OnRequest(LspMethods.SignatureHelp, OnSignatureHelp);
         rpc.OnRequest(LspMethods.SemanticTokensRange, OnSemanticTokens);
+        rpc.OnRequest(LspMethods.SemanticTokensFull, OnWholeDocumentTokensAsync);
     }
 
     public LanguageServer Server { get; }
 
-    private Task<InitializeResult> InitializeAsync(InitializeParams parameters, CancellationToken cancellationToken)
+    /// <summary>Offers <c>semanticTokens/full</c> instead of <c>semanticTokens/range</c>.</summary>
+    public bool WholeDocumentTokens { get; init; }
+
+    /// <summary>How long the server takes to answer <c>initialize</c>, as one that loads a lot.</summary>
+    public TimeSpan InitializeDelay { get; init; }
+
+    private async Task<InitializeResult> InitializeAsync(
+        InitializeParams parameters,
+        CancellationToken cancellationToken
+    )
     {
         if (
             parameters.InitializationOptions is { ValueKind: JsonValueKind.Object } options
             && options.TryGetProperty("fail", out _)
         )
             throw new JsonRpcException(ErrorCodes.RequestFailed, "Initialization failed as asked.");
+        await Task.Delay(InitializeDelay, cancellationToken);
         _insertReplace = parameters.Capabilities.TextDocument?.Completion?.CompletionItem?.InsertReplaceSupport == true;
-        return Task.FromResult(
-            new InitializeResult(
-                new ServerCapabilities
+        return new InitializeResult(
+            new ServerCapabilities
+            {
+                PositionEncoding = "utf-16",
+                TextDocumentSync = new TextDocumentSyncOptions
                 {
-                    PositionEncoding = "utf-16",
-                    TextDocumentSync = new TextDocumentSyncOptions
-                    {
-                        OpenClose = true,
-                        Change = TextDocumentSyncKind.Incremental,
-                    },
-                    CompletionProvider = new CompletionOptions { TriggerCharacters = ["."], ResolveProvider = true },
-                    HoverProvider = true,
-                    SignatureHelpProvider = new SignatureHelpOptions { TriggerCharacters = ["(", ","] },
-                    SemanticTokensProvider = new SemanticTokensOptions(Legend, Range: true),
+                    OpenClose = true,
+                    Change = TextDocumentSyncKind.Incremental,
                 },
-                new ServerInfo("toy", "1.0")
-            )
+                CompletionProvider = new CompletionOptions { TriggerCharacters = ["."], ResolveProvider = true },
+                HoverProvider = true,
+                SignatureHelpProvider = new SignatureHelpOptions { TriggerCharacters = ["(", ","] },
+                SemanticTokensProvider = WholeDocumentTokens
+                    ? new SemanticTokensOptions(Legend, Full: true)
+                    : new SemanticTokensOptions(Legend, Range: true),
+            },
+            new ServerInfo("toy", "1.0")
         );
     }
 
@@ -260,6 +273,24 @@ internal sealed class ToyServer
         return Task.FromResult<SemanticTokens?>(new SemanticTokens([.. data]));
     }
 
+    private async Task<SemanticTokens?> OnWholeDocumentTokensAsync(
+        SemanticTokensParams parameters,
+        CancellationToken cancellationToken
+    )
+    {
+        if (!_documents.TryGetValue(parameters.TextDocument.Uri, out ToyDocument? document))
+            return null;
+        string text = document.Text;
+        var range = new DocumentRange(default, ToPosition(text, text.Length));
+        Task<SemanticTokens?> tokens = OnSemanticTokens(
+            new SemanticTokensRangeParams(parameters.TextDocument, range),
+            cancellationToken
+        );
+        if (HasWord(text, "slow"))
+            await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+        return await tokens.ConfigureAwait(false);
+    }
+
     private Task PublishDiagnosticsAsync(ToyDocument document)
     {
         var diagnostics = new List<Diagnostic>();
@@ -306,6 +337,20 @@ internal sealed class ToyServer
     {
         int lineStart = offset == 0 ? 0 : text.LastIndexOf('\n', offset - 1) + 1;
         return new Position(text.AsSpan(0, lineStart).Count('\n'), offset - lineStart);
+    }
+
+    private static bool HasWord(string text, string word)
+    {
+        for (
+            int i = text.IndexOf(word, StringComparison.Ordinal);
+            i >= 0;
+            i = text.IndexOf(word, i + 1, StringComparison.Ordinal)
+        )
+        {
+            if (WordAt(text, i) == (i, i + word.Length))
+                return true;
+        }
+        return false;
     }
 
     private static (int Start, int End) WordAt(string text, int offset)

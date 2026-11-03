@@ -111,7 +111,9 @@ internal sealed class EditingHelpers
     private bool CanChange(int offset, int length) =>
         length == 0
             ? CanInsert(offset)
-            : TextArea.ReadOnlySectionProvider.GetDeletableSegments(new TextSegment { StartOffset = offset, Length = length })
+            : TextArea.ReadOnlySectionProvider.GetDeletableSegments(
+                new TextSegment { StartOffset = offset, Length = length }
+            )
                 is var segments
                 && segments.Sum(segment => segment.Length) == length;
 

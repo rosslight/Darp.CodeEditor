@@ -1,16 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <!-- Roslyn Workspaces/Features compose their services with System.Composition (reflection): JIT only. -->
-    <IsAotCompatible>false</IsAotCompatible>
-    <Description>C# script language service for Darp.CodeEditor, built on Roslyn. Needs the JIT.</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>C# script editing for Darp.CodeEditor: starts the C# script language server for a script environment. NativeAOT compatible.</Description>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Darp.CodeEditor\Darp.CodeEditor.csproj" />
-  </ItemGroup>
-  <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Features" />
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />
+    <ProjectReference Include="..\Darp.CodeEditor.CSharp.Hosting\Darp.CodeEditor.CSharp.Hosting.csproj" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Darp.CodeEditor.Tests" />

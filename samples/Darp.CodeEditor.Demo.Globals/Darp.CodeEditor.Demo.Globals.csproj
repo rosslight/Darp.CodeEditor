@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- The globals of the demos' C# scripts. The C# server reads this assembly as a file, also next to the AOT demo. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- The XML docs show up in completion descriptions, hover and signature help. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+</Project>

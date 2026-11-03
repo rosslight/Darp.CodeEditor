@@ -1,7 +1,6 @@
 using System.Runtime;
 using System.Runtime.InteropServices;
 using Avalonia.Controls.ApplicationLifetimes;
-using Darp.CodeEditor.CSharp;
 using Darp.CodeEditor.Instrumentation;
 using Darp.CodeEditor.Samples;
 
@@ -64,28 +63,30 @@ internal static class DemoRun
         Task<double> visible = Ui.WaitForVisibleAsync(editor, highlighted: false);
         Task<double> highlighted = Ui.WaitForVisibleAsync(editor, highlighted: true);
         Task<int> uncoloredOnFirstFrame = Ui.LinesWithoutColorsOnFirstFrameAsync(editor);
-        Task<double> classified = timings.WhenFirstAsync("classification");
-        Task<double> diagnosed = timings.WhenFirstAsync("diagnostics");
+        CSharpBench? csharp = window.CSharp is { } service ? new CSharpBench(service, timings) : null;
 
         await highlighted;
         report.Add(probe.EndPhase());
 
         probe.BeginPhase("startup: until C# ready + semantic colors");
-        CSharpScriptLanguageService? service = await window.CSharpReady;
-        double ready = ProcessClock.ElapsedMs;
-        if (service is not null)
-            await Task.WhenAll(classified, diagnosed);
+        if (csharp is not null)
+            await csharp.WaitUntilReadyAsync();
         await Task.Delay(500);
         report.Add(probe.EndPhase());
 
-        report.Add($"  editor text visible:        {await visible, 7:F0} ms after process start");
-        report.Add($"  editor text highlighted:    {await highlighted, 7:F0} ms");
+        double created = window.EditorsCreatedMs;
+        report.Add($"  editors created:            {created, 7:F0} ms after process start");
+        report.Add(
+            $"  editor text visible:        {await visible, 7:F0} ms after process start, {await visible - created:F0} ms after editor creation"
+        );
+        report.Add(
+            $"  editor text highlighted:    {await highlighted, 7:F0} ms after process start, {await highlighted - created:F0} ms after editor creation"
+        );
         report.Add($"  lines without colors on the first frame: {await uncoloredOnFirstFrame}");
-        if (service is not null)
+        if (csharp is not null)
         {
-            report.Add($"  C# service ready:           {ready, 7:F0} ms");
-            report.Add($"  semantic colors shown:      {await classified, 7:F0} ms");
-            report.Add($"  diagnostics shown:          {await diagnosed, 7:F0} ms");
+            await csharp.ReportAsync(report, created);
+            report.Add($"  idle {csharp.DescribeMemory()}");
         }
         report.Add($"  startup timings: {timings.Summary()}");
 
@@ -97,8 +98,11 @@ internal static class DemoRun
         if (!options.Bench)
             return;
         await EditorScenarios.RunThemeSwitchAsync(window, editor, probe, report);
-        if (service is not null)
-            await LanguageServiceScenarios.RunAsync(window, editor, probe, report);
+        if (csharp is not null)
+        {
+            await LanguageServiceScenarios.RunAsync(window, 0, editor, probe, report);
+            report.Add($"  after typing, {csharp.DescribeMemory()}");
+        }
         if (!options.SkipHighlightingBench)
             await EditorScenarios.RunHighlightingAsync(window, probe, report);
     }
@@ -106,11 +110,13 @@ internal static class DemoRun
     /// <summary>Opens completion with its description and leaves the window open for a screenshot.</summary>
     private static async Task ShowSceneAsync(MainWindow window)
     {
-        if (await window.CSharpReady is null)
+        if (window.CSharp is not { } service)
             return;
         CodeEditor editor = window.CSharpEditor;
         using var timings = new TimingLog(editor);
-        await timings.WhenFirstAsync("diagnostics");
+        await service.PrewarmAsync();
+        // Gives the server time to load the environment and publish its first results.
+        await Task.Delay(2000);
         editor.Select(editor.Document.TextLength, 0);
         editor.ScrollToLine(1);
         Task<double> completion = timings.WhenFirstAsync("completion");

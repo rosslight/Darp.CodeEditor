@@ -21,8 +21,9 @@ namespace Darp.CodeEditor.Completion;
 /// </summary>
 /// <remarks>
 /// While open, the list filters the items of its session whenever the typed word changes, with ordinal matching (well
-/// under a millisecond for thousands of items), and commits by replacing the word with precomputed text. It closes
-/// when the caret leaves the word, the editor loses focus or the document is replaced.
+/// under a millisecond for thousands of items), and hands the selected item and the word to its owner to commit. A
+/// list asked again replaces the items in place. It closes when the caret leaves the word, the editor loses focus or
+/// the document is replaced.
 /// </remarks>
 internal sealed class CompletionPopup
 {
@@ -71,15 +72,21 @@ internal sealed class CompletionPopup
     /// <summary>Raised when a session ends, by commit, cancellation or because the caret left the word.</summary>
     public event EventHandler? Closed;
 
+    /// <summary>The selected item of the open list, which typing one of its commit characters commits.</summary>
+    public CompletionItem? SelectedItem =>
+        _session is { IsWarmUp: false } session && _view.SelectedItem is { } index ? session.Items[index] : null;
+
     /// <summary>Starts a session: shows the items that match the text between the start offset and the caret.</summary>
     /// <param name="createDescription">Creates the description view for the item at an index, loading lazily.</param>
+    /// <param name="commit">Commits the item at an index over the word from a start to an end offset.</param>
     /// <returns>False, and nothing shown, when no item matches.</returns>
     public bool Open(
         IReadOnlyList<CompletionItem> items,
         int startOffset,
         int endOffset,
         bool closeWhenCaretAtStart,
-        Func<int, Control> createDescription
+        Func<int, Control> createDescription,
+        Action<int, int, int> commit
     )
     {
         Hide();
@@ -89,7 +96,8 @@ internal sealed class CompletionPopup
             CreateAnchor(document, startOffset, AnchorMovementType.BeforeInsertion),
             CreateAnchor(document, endOffset, AnchorMovementType.AfterInsertion),
             closeWhenCaretAtStart,
-            createDescription
+            createDescription,
+            commit
         );
         _session = session;
         _view.SetItems(items);
@@ -111,6 +119,30 @@ internal sealed class CompletionPopup
     }
 
     /// <summary>
+    /// Shows other items in the open list, such as the next list of an incomplete one, over the same word.
+    /// </summary>
+    /// <returns>False, and the list closed, when no item matches.</returns>
+    public bool ReplaceItems(
+        IReadOnlyList<CompletionItem> items,
+        Func<int, Control> createDescription,
+        Action<int, int, int> commit
+    )
+    {
+        if (_session is not { IsWarmUp: false } open)
+            return false;
+        var session = new Session(items, open.Start, open.End, open.CloseWhenCaretAtStart, createDescription, commit);
+        _session = session;
+        _view.SetItems(items);
+        if (!Filter(session, CurrentQuery(session)))
+        {
+            Hide();
+            return false;
+        }
+        ShowDescription();
+        return true;
+    }
+
+    /// <summary>
     /// Does the first-use work of the popup while the UI is idle, so the first list a user opens is as fast as later
     /// ones: JIT compilation in JIT hosts, the first layout and text rendering of list and description. The first list
     /// took 25-30 ms otherwise. Each step is a separate dispatcher job behind input and rendering, none over 5 ms.
@@ -127,7 +159,13 @@ internal sealed class CompletionPopup
             CreateAnchor(document, offset, AnchorMovementType.BeforeInsertion),
             CreateAnchor(document, offset, AnchorMovementType.AfterInsertion),
             closeWhenCaretAtStart: false,
-            _ => new TextBlock { Text = "Warm-up", TextWrapping = TextWrapping.Wrap, FontFamily = _editor.FontFamily }
+            _ => new TextBlock
+            {
+                Text = "Warm-up",
+                TextWrapping = TextWrapping.Wrap,
+                FontFamily = _editor.FontFamily,
+            },
+            (_, _, _) => { }
         )
         {
             IsWarmUp = true,
@@ -176,15 +214,15 @@ internal sealed class CompletionPopup
         OnClosed();
     }
 
-    /// <summary>Replaces the word with the selected item.</summary>
+    /// <summary>Hands the selected item and the word it replaces to the owner of the list, after closing it.</summary>
     public void Commit()
     {
         if (_session is not { IsWarmUp: false } session || _view.SelectedItem is not { } index)
             return;
         int start = session.Start.Offset;
-        int length = session.End.Offset - start;
+        int end = session.End.Offset;
         Hide();
-        _editor.Document.Replace(start, length, session.Items[index].InsertText);
+        session.Commit(index, start, end);
     }
 
     /// <summary>Handles the keys that navigate, commit or close the open list. Returns false for other keys.</summary>
@@ -345,11 +383,18 @@ internal sealed class CompletionPopup
         double listShift = _view.TextLeft + 1;
         TextView textView = _editor.TextArea.TextView;
         double wordX =
-            textView.GetVisualPosition(new TextViewPosition(_editor.Document.GetLocation(wordStart)), VisualYPosition.LineTop).X
-            - textView.ScrollOffset.X;
+            textView
+                .GetVisualPosition(
+                    new TextViewPosition(_editor.Document.GetLocation(wordStart)),
+                    VisualYPosition.LineTop
+                )
+                .X - textView.ScrollOffset.X;
         double windowWidth = double.PositiveInfinity;
         double listLeft = wordX - listShift;
-        if (TopLevel.GetTopLevel(textView) is { } topLevel && textView.TranslatePoint(new Point(wordX, 0), topLevel) is { } inWindow)
+        if (
+            TopLevel.GetTopLevel(textView) is { } topLevel
+            && textView.TranslatePoint(new Point(wordX, 0), topLevel) is { } inWindow
+        )
         {
             windowWidth = topLevel.ClientSize.Width;
             // Where the list ends up after the popup slides away from the window edges.
@@ -381,7 +426,8 @@ internal sealed class CompletionPopup
         TextAnchor start,
         TextAnchor end,
         bool closeWhenCaretAtStart,
-        Func<int, Control> createDescription
+        Func<int, Control> createDescription,
+        Action<int, int, int> commit
     )
     {
         public IReadOnlyList<CompletionItem> Items { get; } = items;
@@ -389,6 +435,7 @@ internal sealed class CompletionPopup
         public TextAnchor End { get; } = end;
         public bool CloseWhenCaretAtStart { get; } = closeWhenCaretAtStart;
         public Func<int, Control> CreateDescription { get; } = createDescription;
+        public Action<int, int, int> Commit { get; } = commit;
         public bool IsWarmUp { get; init; }
         public Dictionary<int, Control> Descriptions { get; } = [];
         public string? Query { get; set; }

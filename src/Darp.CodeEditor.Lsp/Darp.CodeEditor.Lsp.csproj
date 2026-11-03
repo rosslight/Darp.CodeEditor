@@ -3,6 +3,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <IsAotCompatible>true</IsAotCompatible>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <Description>JSON-RPC and Language Server Protocol layer for Darp.CodeEditor language servers and clients. NativeAOT compatible, no dependencies.</Description>
+    <!-- The source-generated P/Invoke marshalling of the Windows process code. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Description>JSON-RPC and Language Server Protocol layer for Darp.CodeEditor language servers and clients. Also starts helper processes that end with the app. NativeAOT compatible, no dependencies.</Description>
   </PropertyGroup>
 </Project>

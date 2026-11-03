@@ -14,9 +14,20 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Darp.CodeEditor\Darp.CodeEditor.csproj" />
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp\Darp.CodeEditor.CSharp.csproj" />
     <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp.Execution\Darp.CodeEditor.CSharp.Execution.csproj" />
-    <!-- Scripts compile against the script API; NativeAOT ships it as a file next to the app. -->
-    <ProjectReference Include="..\Darp.CodeEditor.Demo.ScriptApi\Darp.CodeEditor.Demo.ScriptApi.csproj" CSharpScriptReference="true" />
+    <!--
+      Script-visible assemblies: NativeAOT ships them as files next to the app, where the runner loads them and the C#
+      server reads them. The script.csx globals, and the packet.csx script API.
+    -->
+    <ProjectReference
+      Include="..\Darp.CodeEditor.Demo.Globals\Darp.CodeEditor.Demo.Globals.csproj"
+      CSharpScriptReference="true"
+    />
+    <ProjectReference
+      Include="..\Darp.CodeEditor.Demo.ScriptApi\Darp.CodeEditor.Demo.ScriptApi.csproj"
+      CSharpScriptReference="true"
+    />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\Shared\**\*.cs" LinkBase="Shared" />
@@ -27,6 +38,8 @@
       CopyToPublishDirectory="PreserveNewest"
     />
   </ItemGroup>
+  <!-- Puts the C# script language server next to the app. -->
+  <Import Project="..\..\src\Darp.CodeEditor.CSharp\build\Darp.CodeEditor.CSharp.targets" />
   <!-- Puts the C# script runner and its .NET runtime next to the app, for the Run action. -->
   <Import Project="..\..\src\Darp.CodeEditor.CSharp.Execution\build\Darp.CodeEditor.CSharp.Execution.targets" />
 </Project>
