@@ -237,8 +237,8 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
     /// Whether text inserted at <paramref name="offset"/> would be code, comment or string: tokenizes its line up to
     /// there from the state at the line's start, so a line after a line comment starts in code and one inside a block
     /// comment in a comment. When that cannot run now or does not finish in time, the tokens of the character before
-    /// if they are exact for the line as it is; unknown otherwise or while the grammar loads. Code when the language
-    /// has no grammar.
+    /// if they are still exact up to it; unknown otherwise or while the grammar loads. Code when the language has no
+    /// grammar.
     /// </summary>
     public TokenKind TokenKindBefore(int offset)
     {
@@ -283,11 +283,12 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
     }
 
     /// <summary>
-    /// The kind of the character before <paramref name="column"/> from the line's tokens, if they are exact for the
-    /// line as it is: tokens from before an edit can say code where a string starts now.
+    /// The kind of the character before <paramref name="column"/> from the line's tokens, if they are still exact up
+    /// to it: tokens of text that changed since, or of a line that starts in another state now, can say code where a
+    /// string starts.
     /// </summary>
     private TokenKind ExactKindBefore(int index, int column) =>
-        column > 0 && _lines[index] is { IsValid: true, Tokens: { } tokens }
+        column > 0 && _lines[index] is { Tokens: { } tokens } line && column - 1 < line.ExactBefore
             ? KindOf(tokens, column - 1)
             : TokenKind.Unknown;
 
@@ -358,11 +359,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
             // Tokens of another grammar or theme: their color ids mean other colors now.
             _generation++;
             foreach (LineEntry entry in _lines)
-            {
-                entry.Tokens = null;
-                entry.EndState = null;
-                entry.IsValid = false;
-            }
+                entry.Tokenized(null, null, exact: false);
             _firstInvalid = 0;
         }
         _grammar = loaded.Grammar;
@@ -378,10 +375,8 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         {
             for (int i = 0; i < loaded.Lines.Length && loaded.FirstLine + i < _lines.Count; i++)
             {
-                LineEntry entry = _lines[loaded.FirstLine + i];
-                entry.Tokens = loaded.Lines[i].Tokens;
-                entry.EndState = loaded.Lines[i].EndState;
-                entry.IsValid = loaded.FirstLine == 0;
+                _lines[loaded.FirstLine + i]
+                    .Tokenized(loaded.Lines[i].Tokens, loaded.Lines[i].EndState, exact: loaded.FirstLine == 0);
             }
         }
         ApplyTheme(loaded.Theme);
@@ -443,14 +438,12 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
             return;
         }
         bool endStateChanged = !Equals(entry.EndState, result.RuleStack);
-        entry.Tokens = result.Tokens;
-        entry.EndState = result.RuleStack;
-        entry.IsValid = exact;
+        entry.Tokenized(result.Tokens, result.RuleStack, exact);
         if (!endStateChanged || index + 1 >= _lines.Count)
             return;
         // The next line starts in a different state. It may be built already, from tokens for the old state; it has
         // not been reached in this pass yet, so it can be rebuilt.
-        _lines[index + 1].IsValid = false;
+        _lines[index + 1].Invalidate();
         _firstInvalid = Math.Min(_firstInvalid, index + 1);
         TextView textView = _editor.TextArea.TextView;
         if (textView.GetVisualLine(line.LineNumber + 1) is { } next)
@@ -489,15 +482,18 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
             _loadingText = document.CreateSnapshot();
         // Keep one entry per line: entries right after the changed line are inserted or removed, so the entries of
         // all following lines keep their tokens and states.
-        int first = document.GetLineByOffset(e.Offset).LineNumber - 1;
+        DocumentLine firstLine = document.GetLineByOffset(e.Offset);
+        int first = firstLine.LineNumber - 1;
         int lastInserted = document.GetLineByOffset(e.Offset + e.InsertionLength).LineNumber - 1;
         int delta = document.LineCount - _lines.Count;
         if (delta > 0)
             _lines.InsertRange(first + 1, Enumerable.Range(0, delta).Select(_ => new LineEntry()));
         else if (delta < 0)
             _lines.RemoveRange(first + 1, -delta);
-        for (int i = first; i <= lastInserted; i++)
-            _lines[i].IsValid = false;
+        // The changed line keeps its exact tokens before the change; the lines after it within the change are new.
+        _lines[first].Invalidate(e.Offset - firstLine.Offset);
+        for (int i = first + 1; i <= lastInserted; i++)
+            _lines[i].Invalidate();
         _firstInvalid = Math.Min(_firstInvalid, first);
         _firstEditedSinceRequest = Math.Min(_firstEditedSinceRequest, first);
         // New text, such as a file just opened: start now. The first layout of a new window runs in the same
@@ -589,12 +585,10 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         {
             LineEntry line = _lines[first + i];
             bool endStateChanged = !Equals(line.EndState, results[i].EndState);
-            line.EndState = results[i].EndState;
-            line.Tokens = results[i].Tokens;
-            line.IsValid = true;
+            line.Tokenized(results[i].Tokens, results[i].EndState, exact: true);
             // The next line starts in a different state, so its tokens may be wrong too.
             if (endStateChanged && first + i + 1 < _lines.Count)
-                _lines[first + i + 1].IsValid = false;
+                _lines[first + i + 1].Invalidate();
         }
         if (applicable > 0 && _document is { } document)
         {
@@ -675,15 +669,39 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
 
     private sealed class LineEntry
     {
-        public IStateStack? EndState { get; set; }
+        public IStateStack? EndState { get; private set; }
 
         /// <summary>Pairs of start index and encoded attributes, as TextMate's binary tokens.</summary>
-        public int[]? Tokens { get; set; }
+        public int[]? Tokens { get; private set; }
 
         /// <summary>
         /// True when the tokens are exact for the line as it is. Invalid lines keep tokens from before an edit or from
         /// a guessed start state, and their end state, until they are tokenized again.
         /// </summary>
-        public bool IsValid { get; set; }
+        public bool IsValid { get; private set; }
+
+        /// <summary>
+        /// The tokens before this column are still exact: the line was tokenized from its exact start state, and its
+        /// text changed only from here since. 0 when none are.
+        /// </summary>
+        public int ExactBefore { get; private set; }
+
+        public void Tokenized(int[]? tokens, IStateStack? endState, bool exact)
+        {
+            Tokens = tokens;
+            EndState = endState;
+            IsValid = exact;
+            ExactBefore = exact ? int.MaxValue : 0;
+        }
+
+        /// <summary>
+        /// Marks the tokens as outdated from <paramref name="column"/> on, where the text changed; from the start when
+        /// the line may start in another state now.
+        /// </summary>
+        public void Invalidate(int column = 0)
+        {
+            IsValid = false;
+            ExactBefore = Math.Min(ExactBefore, column);
+        }
     }
 }

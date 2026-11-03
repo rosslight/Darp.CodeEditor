@@ -147,12 +147,23 @@ public sealed class EditingHelpersTests
     [AvaloniaFact]
     public async Task A_quote_typed_late_in_a_long_comment_line_does_not_close()
     {
-        // Past the length tokenized on the UI thread, the context is unknown: the line's tokens are from before the quote.
+        // Past the length tokenized on the UI thread, the context comes from the line's tokens before the quote.
         string comment = "// " + new string('x', 1000) + " ";
         using var editor = new EditorUnderTest(comment + "|", languageId: "csharp");
         await editor.WaitForLanguageAsync("//");
         editor.Type("\"");
         editor.Text.ShouldBe(comment + "\"|");
+    }
+
+    [AvaloniaFact]
+    public async Task A_quote_typed_late_in_a_long_code_line_closes()
+    {
+        // The context comes from the line's tokens before the quote: typing it changed only what follows.
+        string code = "x = " + new string('a', 1000) + " ";
+        using var editor = new EditorUnderTest(code + "|", languageId: "csharp");
+        await editor.WaitForLanguageAsync("//");
+        editor.Type("\"");
+        editor.Text.ShouldBe(code + "\"|\"");
     }
 
     [AvaloniaFact]
