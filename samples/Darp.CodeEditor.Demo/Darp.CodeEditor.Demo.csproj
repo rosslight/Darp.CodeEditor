@@ -15,6 +15,7 @@
     <!-- What the Darp.CodeEditor.CSharp package holds: the editor's C#, the script environment, the runner API. -->
     <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp\Darp.CodeEditor.CSharp.csproj" />
     <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp.Hosting\Darp.CodeEditor.CSharp.Hosting.csproj" />
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.Luau\Darp.CodeEditor.Luau.csproj" />
     <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp.Execution\Darp.CodeEditor.CSharp.Execution.csproj" />
     <!-- The script.csx globals; the C# server reads the assembly as a file. -->
     <ProjectReference Include="..\Darp.CodeEditor.Demo.Globals\Darp.CodeEditor.Demo.Globals.csproj" />
@@ -23,8 +24,11 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\Shared\**\*.cs" LinkBase="Shared" />
-    <None Include="..\Shared\Grammars\**" LinkBase="Grammars" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The app's Luau API, which luau-lsp loads. -->
+    <None Include="..\Shared\Luau\**" LinkBase="Luau" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <!-- Puts luau-lsp and the Luau grammar next to the app. -->
+  <Import Project="..\..\src\Darp.CodeEditor.Luau\build\Darp.CodeEditor.Luau.targets" />
   <!-- Puts the C# helpers next to the app, as the Darp.CodeEditor.CSharp package does. -->
   <Import Project="..\..\src\Darp.CodeEditor.CSharp\buildTransitive\Darp.CodeEditor.CSharp.targets" />
 </Project>

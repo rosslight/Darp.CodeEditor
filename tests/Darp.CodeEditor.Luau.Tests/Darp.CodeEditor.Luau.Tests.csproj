@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.Luau\Darp.CodeEditor.Luau.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The host API the tests give their scripts. -->
+    <None Include="TestApi\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <AssemblyMetadata
+      Include="LuauTargets"
+      Value="$(MSBuildThisFileDirectory)..\..\src\Darp.CodeEditor.Luau\build\Darp.CodeEditor.Luau.targets"
+    />
+    <AssemblyMetadata Include="LuauLspCacheDirectory" Value="$(LuauLspCacheDirectory)" />
+  </ItemGroup>
+  <!-- Puts luau-lsp next to the tests: they run against the real server. -->
+  <Import Project="..\..\src\Darp.CodeEditor.Luau\build\Darp.CodeEditor.Luau.targets" />
+</Project>

@@ -2,7 +2,23 @@ using Darp.CodeEditor.Instrumentation;
 
 namespace Darp.CodeEditor.Samples;
 
-/// <summary>Scenarios with the C# language service: completion latency and a typing burst.</summary>
+/// <summary>What one round of the completion latency scenario types, in a language with completion.</summary>
+/// <param name="WordStart">Ends with the first letter of a word, which asks for a word list.</param>
+/// <param name="MemberAccess">Asks for a member list after the word.</param>
+internal sealed record CompletionRound(
+    string Language,
+    string WordStart,
+    string WordRest,
+    string MemberAccess,
+    string LineRest
+)
+{
+    public static CompletionRound CSharp { get; } = new("C#", "\nD", "evice", ".", "ReadTemp();");
+
+    public static CompletionRound Luau { get; } = new("Luau", "\nd", "evice", ":", "readTemperature()");
+}
+
+/// <summary>Scenarios with a language service: completion latency and, for C#, a typing burst.</summary>
 internal static class LanguageServiceScenarios
 {
     private const int TypingDelayMs = 40;
@@ -17,21 +33,45 @@ internal static class LanguageServiceScenarios
         BenchReport report
     )
     {
+        await MeasureCompletionAsync(host, tab, editor, probe, report, CompletionRound.CSharp);
+
+        // A fast typist does not wait: sessions start, filter, commit and get cancelled continuously.
+        var burst = new TimingLog(editor);
+        probe.BeginPhase("C#: typing burst with completion");
+        await Ui.TypeAsync(editor, SampleDocuments.TypingBurst + SampleDocuments.TypingBurst, TypingDelayMs);
+        await Task.Delay(1000);
+        report.Add(probe.EndPhase());
+        report.Add("  " + Ui.TakeKeystrokeSummary());
+        report.Add($"  timings: {burst.Summary()}");
+        burst.Dispose();
+    }
+
+    /// <summary>
+    /// One completion session at a time, so each latency is one request: a word start and a member access, 20 times.
+    /// </summary>
+    /// <param name="tab">The tab of the editor.</param>
+    public static async Task MeasureCompletionAsync(
+        IBenchHost host,
+        int tab,
+        CodeEditor editor,
+        UiStallProbe probe,
+        BenchReport report,
+        CompletionRound round
+    )
+    {
         await host.ShowTabAsync(tab);
         using var timings = new TimingLog(editor);
-
-        // One session at a time, so each latency is one request: an identifier start and a member access.
-        probe.BeginPhase("C#: completion latency");
+        probe.BeginPhase($"{round.Language}: completion latency");
         var latencies = new List<(string Trigger, double Ms, int Items)>();
         editor.Select(editor.Document.TextLength, 0);
         for (int i = 0; i < 20; i++)
         {
-            (double wordMs, int wordItems) = await TypeAndWaitAsync(editor, timings, "\nD");
+            (double wordMs, int wordItems) = await TypeAndWaitAsync(editor, timings, round.WordStart);
             latencies.Add(("word", wordMs, wordItems));
-            await Ui.TypeAsync(editor, "evice", TypingDelayMs);
-            (double memberMs, int memberItems) = await TypeAndWaitAsync(editor, timings, ".");
+            await Ui.TypeAsync(editor, round.WordRest, TypingDelayMs);
+            (double memberMs, int memberItems) = await TypeAndWaitAsync(editor, timings, round.MemberAccess);
             latencies.Add(("member", memberMs, memberItems));
-            await Ui.TypeAsync(editor, "ReadTemp();", TypingDelayMs);
+            await Ui.TypeAsync(editor, round.LineRest, TypingDelayMs);
         }
         await Task.Delay(500);
         report.Add(probe.EndPhase());
@@ -46,16 +86,6 @@ internal static class LanguageServiceScenarios
             );
         }
         report.Add($"  timings: {timings.Summary()}");
-
-        // A fast typist does not wait: sessions start, filter, commit and get cancelled continuously.
-        var burst = new TimingLog(editor);
-        probe.BeginPhase("C#: typing burst with completion");
-        await Ui.TypeAsync(editor, SampleDocuments.TypingBurst + SampleDocuments.TypingBurst, TypingDelayMs);
-        await Task.Delay(1000);
-        report.Add(probe.EndPhase());
-        report.Add("  " + Ui.TakeKeystrokeSummary());
-        report.Add($"  timings: {burst.Summary()}");
-        burst.Dispose();
     }
 
     private static async Task<(double Ms, int Items)> TypeAndWaitAsync(

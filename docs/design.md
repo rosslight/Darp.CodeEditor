@@ -80,7 +80,7 @@ Host app (JIT or AOT)
 │  LSP client  (LspLanguageService on Darp.CodeEditor.Lsp)
 │    │ LSP over stdio                         │ LSP over stdio
 │    ▼                                        ▼
-│  C# language server (Roslyn 5.9.0)       luau-lsp (follow-up)
+│  C# language server (Roslyn 5.9.0)       luau-lsp 1.70.1
 │    one process, shared by the app's editors
 │
 └─ Script runner (separate process)
@@ -99,7 +99,7 @@ Both C# helpers run with ReadyToRun on one .NET runtime that the app ships in he
 - **Shared script environment.** `Darp.CodeEditor.CSharp.Hosting` (AOT-safe, no Roslyn) describes a script: globals assembly path and type name, references, framework references, imports, language version, nullable setting, unsafe, overflow and warning level. It is sent in a versioned `csharpScript` initialization section. `Darp.CodeEditor.CSharp.Scripting` (JIT) turns the description into `ScriptOptions` and compilation options. The server and the runner use it, so the editor reports what the runner compiles; parity between the two is tested for diagnostics (#3, #33). Apps get `Hosting` in the `Darp.CodeEditor.CSharp` package; `Scripting` is not shipped to apps (#43).
 - **Script runner (`Darp.CodeEditor.CSharp.Runner`, host API `Darp.CodeEditor.CSharp.Execution`).** A separate helper process on the bundled runtime (#36): StreamJsonRpc 2.26.150 with MessagePack over stdio and length-header framing. It compiles with `ResolvedScriptEnvironment`, like the server, and returns the script's handler to the app as a generated proxy; the globals receive proxies of the app's services. Deadlines cancel first and kill after a grace period, a crash or kill restarts the runner on the next script, and `ScriptBatcher` batches single items (#35). Tested on Linux and, in CI, on Windows: exceptions, hangs, crashes, dispose and parent death, also from a NativeAOT app. It runs on `Microsoft.NETCore.App` only (#45) and culture-invariant by default (#46). See the README.
 - **Process ownership.** Both helpers start through the layer's `ChildProcess` (#49): on Windows created suspended and resumed inside a kill-on-close job object; on Linux through `setpriv --pdeathsig KILL` from a launcher thread that lives as long as the app, with a check that the parent is still the app; both with the app's environment minus `DOTNET_*`, `COMPlus_*` and `CORECLR_*`, and killed on dispose. The runner also arms `PR_SET_PDEATHSIG` itself (machines without `setpriv`) and polls its parent on macOS.
-- **Luau (follow-up).** luau-lsp runs as a separate process behind the same LSP client. Host API type-definition generation is planned, not built (#2).
+- **Luau (`Darp.CodeEditor.Luau`, AOT-safe).** luau-lsp 1.70.1 runs as a separate process behind the same LSP client, owned and restarted like the C# server. The host describes its Luau API with definition (`.d.luau`) and documentation files, plus the type-checking mode and further luau-lsp settings (standard platform, not Roblox). The package's targets download the pinned release per runtime identifier, check its SHA-256 and put it next to the app; Windows arm64 runs the x64 build under emulation (#2, #21). Generating definitions from host types is not built.
 
 ### 2.3 Rules that keep the UI thread free
 
@@ -128,7 +128,7 @@ Both C# helpers run with ReadyToRun on one .NET runtime that the app ships in he
 | Script runner | `main` (PR #7) | Merged: runner, host API, Run in both demos, tests and benchmark. Tests run on Linux and, in CI, on Windows; macOS not run |
 | Editor LSP client | `main` (PR #10) | Merged: `LspLanguageService`, process ownership and restarts in the layer; both demos get C# through the server |
 | Packaging (#43) | `build/packaging` | Three packages; both helpers ReadyToRun on the bundled runtime; one process ownership implementation; packaging test publishes a self-contained JIT app and a NativeAOT app from the packages |
-| Luau | `feat/luau` | In progress |
+| Luau | `main` (PR #11) | Built: `Darp.CodeEditor.Luau` (environment, luau-lsp service, grammar, build-time download with checksums); Luau editors with a host API in both demos. Tests against luau-lsp run in CI. NuGet payload for luau-lsp follows the packaging work |
 | WebView editor | `feat/webview-bakeoff` | Record only, not merged |
 | Repository setup (CI, releases, feed) | `main` (PR #2) | Merged |
 | Greenfield test app | none | Planned (#24) |
@@ -140,7 +140,7 @@ Question numbers are from the design conversation. Later answers replace earlier
 | # | Topic | Decision | Why | Status |
 |---|---|---|---|---|
 | 1 | C# in AOT apps | First answer: v1 has C# only in JIT apps. Long term, AOT apps get C# through a helper process | Rich editing APIs were demonstrated in a preserved ~121 MiB NativeAOT executable with warnings and untested paths; stock NativeAOT cannot execute emitted assemblies | superseded by #10 and #33 (AOT C# is now in scope) |
-| 2 | Luau | After C#, not in v1. Highlighting first, then luau-lsp as a separate process | A maintained MIT Luau grammar exists. luau-lsp provides completion, signature help, hover and diagnostics. An owned type checker was estimated to take weeks | decided |
+| 2 | Luau | After C#, not in v1. Highlighting first, then luau-lsp as a separate process | A maintained MIT Luau grammar exists. luau-lsp provides completion, signature help, hover and diagnostics. An owned type checker was estimated to take weeks | decided (built on `feat/luau`: `Darp.CodeEditor.Luau`) |
 | 3 | Script definition | One description per script: references, imports, globals type, language version, nullable setting, script kind. Editor and runner both read it | Editor errors then match what runs. The first answer's "running stays in the app" is superseded by #33 | decided for shared definition; execution ownership superseded by #33 |
 | 4 | Performance budgets | Highlighted text within 100 ms without the language service. No language work over 16 ms on the UI thread (tests fail above 50 ms). C# ready within 1.5 s in JIT apps with ReadyToRun. The 100 ms clock starts when the editor is created (#42). Completion within 50 ms p95 | Revised from the first numbers (2 s to C# ready, 100 ms completion p95) after the C# hosting research | decided |
 | 5 | Document size and count | Scripts up to ~5,000 lines, a handful of editors. One editor-side Roslyn shared per app (runner split added by #36). Above ~20,000 lines, C# features off, TextMate only | Product owner: "sounds reasonable" | decided |
@@ -245,7 +245,7 @@ Only the numbers that drove decisions. Source names refer to section 7.
 6a. Packaging (#43): ~~three packages, helpers in `Darp.CodeEditor.CSharp`, server on the shared runtime with ReadyToRun~~ built on `build/packaging`.
 7. Re-run the Windows benchmarks on the Windows laptop with in-window popups.
 8. Build the greenfield test app from the template (#24). The real app follows.
-9. Luau through luau-lsp (#2).
+9. ~~Luau through luau-lsp (#2).~~ Built on `feat/luau`.
 
 ## 6. Inconsistencies in the sources
 
