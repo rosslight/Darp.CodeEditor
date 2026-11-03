@@ -104,6 +104,7 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
 
     /// <summary>Starts the server before the first document opens.</summary>
     /// <returns>A task that completes when the server runs, or fails when its first start failed.</returns>
+    /// <exception cref="ObjectDisposedException">The service was disposed.</exception>
     public async Task PrewarmAsync(CancellationToken cancellationToken = default)
     {
         await StartServer().WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -116,8 +117,17 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
 
     public void OpenDocument(DocumentSnapshot document)
     {
-        if (Post(() => OpenAsync(document)))
+        if (!Post(() => OpenAsync(document)))
+            return;
+        try
+        {
+            // The start's outcome reaches the editors through Invalidated; a failed start is logged and retried.
             _ = StartServer();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Disposal is in progress.
+        }
     }
 
     public void ChangeDocument(DocumentChange change) => _work.Writer.TryWrite(new Work(change, null));
@@ -288,6 +298,7 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
         await _loop.ConfigureAwait(false);
     }
 
+    /// <exception cref="ObjectDisposedException">The service was disposed.</exception>
     private Task<LanguageClient> StartServer()
     {
         if (
@@ -297,14 +308,7 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
         {
             StateChanged?.Invoke(this, EventArgs.Empty);
         }
-        try
-        {
-            return _supervisor.StartAsync();
-        }
-        catch (ObjectDisposedException exception)
-        {
-            return Task.FromException<LanguageClient>(exception);
-        }
+        return _supervisor.StartAsync();
     }
 
     private async Task<LanguageClient> StartClientAsync(CancellationToken cancellationToken)
