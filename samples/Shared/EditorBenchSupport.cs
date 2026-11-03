@@ -102,18 +102,35 @@ internal static class Ui
         }
     }
 
-    /// <summary>Writes where the end of line 1 is on screen, for the input latency probe (see <see cref="E2eTarget"/>).</summary>
+    /// <summary>
+    /// Puts the caret at the end of line 1 and the keyboard focus in the editor, activates the window, and writes
+    /// where that is on screen, for the input latency probe (see <see cref="E2eTarget"/>). The probe never clicks.
+    /// </summary>
     public static void WriteE2eTarget(CodeEditor editor, string path)
     {
+        TopLevel topLevel = TopLevel.GetTopLevel(editor) ?? throw new InvalidOperationException("Editor not shown.");
+        long window =
+            topLevel.TryGetPlatformHandle()?.Handle.ToInt64()
+            ?? throw new InvalidOperationException("The window has no native handle.");
+        editor.TextArea.ClearSelection();
+        editor.CaretOffset = editor.Document.GetLineByNumber(1).EndOffset;
+        (topLevel as Window)?.Activate();
+        editor.TextArea.Focus();
         TextView textView = editor.TextArea.TextView;
         var end = new TextViewPosition(1, editor.Document.GetLineByNumber(1).Length + 1);
         Point position = textView.GetVisualPosition(end, VisualYPosition.LineTop) - textView.ScrollOffset;
-        TopLevel topLevel = TopLevel.GetTopLevel(editor) ?? throw new InvalidOperationException("Editor not shown.");
         Point inTopLevel =
             textView.TranslatePoint(position, topLevel) ?? throw new InvalidOperationException("Editor not shown.");
         PixelPoint screen = topLevel.PointToScreen(inTopLevel);
         double scale = topLevel.RenderScaling;
-        E2eTarget.Write(path, screen.X, screen.Y, textView.DefaultLineHeight * scale, textView.WideSpaceWidth * scale);
+        E2eTarget.Write(
+            path,
+            window,
+            screen.X,
+            screen.Y,
+            textView.DefaultLineHeight * scale,
+            textView.WideSpaceWidth * scale
+        );
     }
 
     /// <summary>How long the UI thread spent handling each typed character, in ms (input handling only, not layout).</summary>

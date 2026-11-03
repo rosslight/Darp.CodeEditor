@@ -6,9 +6,10 @@ using Darp.CodeEditor.Probe;
 // Measures editors from outside their process, the same way for every editor:
 //   latency --target e2e.json [--count 60] [--out file]
 //     Injects keystrokes as the OS would (XTest on X11, SendInput on Windows) and polls the screen until the typed
-//     character's pixels change. The target file comes from a demo started with --e2e e2e.json. Before the click and
-//     before every key, the probe checks that the demo owns the window under the pointer or the foreground window,
-//     and aborts otherwise. Check and injection are not atomic: do not use the machine while it runs.
+//     character's pixels change. The target file comes from a demo started with --e2e e2e.json, which focuses its own
+//     editor; the probe never clicks. Before and after every key, the probe checks that the demo's process is alive
+//     and its window is the foreground window, and before every key that no modifier key or mouse button is down. It
+//     aborts otherwise. Check and injection are not atomic: nobody may use the machine while it runs.
 //   startup [--title "Code editor demo"] [--out file] -- <app> [arguments]
 //     Starts the app and polls its window until the first editor lines show text, then highlighted text (at least two
 //     hues). Times are from starting the process, as seen on screen.
@@ -33,20 +34,27 @@ switch (args.FirstOrDefault())
     case "latency":
     {
         JsonElement target = JsonDocument.Parse(File.ReadAllText(Value("--target") ?? "e2e.json")).RootElement;
+        var window = new TargetWindow(target.GetProperty("pid").GetInt32(), target.GetProperty("window").GetInt64());
         var cell = new TargetCell(
-            target.GetProperty("pid").GetInt32(),
             target.GetProperty("x").GetDouble(),
             target.GetProperty("y").GetDouble(),
             target.GetProperty("lineHeight").GetDouble(),
             target.GetProperty("charWidth").GetDouble()
         );
-        int count = int.Parse(Value("--count") ?? "60", CultureInfo.InvariantCulture);
-        using IScreenInput screen = OperatingSystem.IsWindows() ? new Win32ScreenInput() : new X11ScreenInput();
+        if (
+            !int.TryParse(Value("--count") ?? "60", CultureInfo.InvariantCulture, out int count)
+            || count is < 1 or > InputLatency.MaxCount
+        )
+        {
+            Console.Error.WriteLine($"--count must be 1 to {InputLatency.MaxCount}");
+            return 2;
+        }
         try
         {
-            InputLatency.Run(screen, cell, count, Report);
+            using IScreenInput screen = OperatingSystem.IsWindows() ? new Win32ScreenInput() : new X11ScreenInput();
+            InputLatency.Run(screen, window, cell, count, Report);
         }
-        catch (TargetNotForegroundException exception)
+        catch (UnsafeInputException exception)
         {
             Report($"ABORTED: {exception.Message}");
             Save();
@@ -98,9 +106,12 @@ void Save()
 
 namespace Darp.CodeEditor.Probe
 {
+    /// <summary>The demo's window: the only window the probe may type into.</summary>
+    /// <param name="Window">The native handle: an HWND on Windows, an X window id on X11.</param>
+    internal readonly record struct TargetWindow(int ProcessId, long Window);
+
     /// <summary>The end of a text line on screen, in physical pixels: where the next character appears.</summary>
-    /// <param name="ProcessId">The process whose window must have the focus while the probe types.</param>
-    internal readonly record struct TargetCell(int ProcessId, double X, double Y, double LineHeight, double CharWidth)
+    internal readonly record struct TargetCell(double X, double Y, double LineHeight, double CharWidth)
     {
         /// <summary>The middle of the next character cell: the typed glyph changes it, the caret does not.</summary>
         public (int X, int Y, int Width, int Height) GlyphRegion =>
@@ -115,9 +126,10 @@ namespace Darp.CodeEditor.Probe
     /// <summary>Synthetic input and screen reads through the window system.</summary>
     internal interface IScreenInput : IDisposable
     {
-        void Click(int x, int y);
-
-        /// <summary>Presses and releases the key that types 'm' (<paramref name="backspace"/> false) or BackSpace.</summary>
+        /// <summary>
+        /// Presses and releases the key that types 'm' (<paramref name="backspace"/> false) or BackSpace. Throws
+        /// <see cref="UnsafeInputException"/> when the window system did not take every event.
+        /// </summary>
         void Key(bool backspace);
 
         /// <summary>The pixels of a screen region, as currently shown, 4 bytes per pixel (blue, green, red, unused).</summary>
@@ -126,15 +138,21 @@ namespace Darp.CodeEditor.Probe
         /// <summary>The screen position of the client area of the first visible window whose title starts so.</summary>
         (int X, int Y)? FindWindow(string titlePrefix);
 
-        /// <summary>The process that owns the top-level window at a screen position, if known.</summary>
-        int? ProcessAt(int x, int y);
+        /// <summary>
+        /// Why a key now would not reach only the target window, or null when it would: the window must exist, belong to
+        /// the target process and have the keyboard focus.
+        /// </summary>
+        string? CheckFocus(TargetWindow target);
 
-        /// <summary>The process that owns the window that receives keyboard input, if known.</summary>
-        int? ForegroundProcess();
+        /// <summary>
+        /// A modifier key or mouse button that is down, or null. A key typed now would combine with it into a shortcut.
+        /// The probe does not release it: it is the user's.
+        /// </summary>
+        string? HeldModifier();
     }
 
-    /// <summary>The target window does not have the focus: injecting input now could reach another application.</summary>
-    internal sealed class TargetNotForegroundException(string message) : Exception(message);
+    /// <summary>Injecting input now could reach another application, or do something else than typing.</summary>
+    internal sealed class UnsafeInputException(string message) : Exception(message);
 
     internal static class StartupOnScreen
     {
@@ -227,25 +245,38 @@ namespace Darp.CodeEditor.Probe
 
     internal static class InputLatency
     {
+        /// <summary>The most characters one run types (and deletes again).</summary>
+        public const int MaxCount = 200;
+
         private static readonly TimeSpan s_timeout = TimeSpan.FromSeconds(1);
+        private static readonly TimeSpan s_maxRunTime = TimeSpan.FromMinutes(3);
+        private const int CountdownSeconds = 5;
 
         /// <summary>
         /// Types 'm' and deletes it again, <paramref name="count"/> times each, always in the same cell. Each sample is
         /// the time from injecting the key until the cell's pixels first differ from before.
         /// </summary>
-        public static void Run(IScreenInput screen, TargetCell cell, int count, Action<string> report)
+        public static void Run(
+            IScreenInput screen,
+            TargetWindow target,
+            TargetCell cell,
+            int count,
+            Action<string> report
+        )
         {
-            // Clicking right of the line end focuses the editor and puts the caret at the end of the line.
-            int clickX = (int)(cell.X + cell.CharWidth * 6);
-            int clickY = (int)(cell.Y + cell.LineHeight / 2);
-            if (screen.ProcessAt(clickX, clickY) is var owner && owner != cell.ProcessId)
+            // Holding the process keeps its id from being reused while the probe runs.
+            using Process demo = Process.GetProcessById(target.ProcessId);
+            Console.WriteLine(
+                $"The probe types {count * 2} keys into the demo window (process {target.ProcessId}). Do not use the "
+                    + "keyboard or mouse until it is done: switching windows stops it, but cannot undo a key already sent."
+            );
+            for (int second = CountdownSeconds; second > 0; second--)
             {
-                throw new TargetNotForegroundException(
-                    $"the window at {clickX},{clickY} belongs to process {owner?.ToString() ?? "unknown"}, not to the demo ({cell.ProcessId})"
-                );
+                Console.WriteLine($"  starting in {second} s");
+                Thread.Sleep(1000);
+                EnsureSafe(screen, demo, target, checkModifiers: false);
             }
-            screen.Click(clickX, clickY);
-            Thread.Sleep(500);
+
             (int x, int y, int width, int height) = cell.GlyphRegion;
             byte[] empty = screen.Capture(x, y, width, height);
             var typed = new List<double>();
@@ -253,13 +284,18 @@ namespace Darp.CodeEditor.Probe
             int timeouts = 0;
             int notRestored = 0;
             var random = new Random(1);
+            var run = Stopwatch.StartNew();
             for (int i = 0; i < count * 2; i++)
             {
+                if (run.Elapsed > s_maxRunTime)
+                    throw new UnsafeInputException($"the run took longer than {s_maxRunTime.TotalMinutes:F0} minutes");
                 bool backspace = i % 2 == 1;
                 byte[] before = screen.Capture(x, y, width, height);
-                EnsureForeground(screen, cell.ProcessId);
+                EnsureSafe(screen, demo, target, checkModifiers: true);
                 long start = Stopwatch.GetTimestamp();
                 screen.Key(backspace);
+                // The focus may have moved while the key was on its way.
+                EnsureSafe(screen, demo, target, checkModifiers: false);
                 double? ms = null;
                 while (Stopwatch.GetElapsedTime(start) < s_timeout)
                 {
@@ -289,14 +325,15 @@ namespace Darp.CodeEditor.Probe
             );
         }
 
-        private static void EnsureForeground(IScreenInput screen, int processId)
+        private static void EnsureSafe(IScreenInput screen, Process demo, TargetWindow target, bool checkModifiers)
         {
-            if (screen.ForegroundProcess() is var foreground && foreground != processId)
-            {
-                throw new TargetNotForegroundException(
-                    $"the foreground window belongs to process {foreground?.ToString() ?? "unknown"}, not to the demo ({processId})"
-                );
-            }
+            demo.Refresh();
+            if (demo.HasExited)
+                throw new UnsafeInputException($"the demo (process {target.ProcessId}) has exited");
+            if (screen.CheckFocus(target) is { } focus)
+                throw new UnsafeInputException(focus);
+            if (checkModifiers && screen.HeldModifier() is { } held)
+                throw new UnsafeInputException($"{held} is held down; a key now would be a shortcut");
         }
 
         private static string Summary(string name, List<double> samples)

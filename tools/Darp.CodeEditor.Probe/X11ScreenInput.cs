@@ -18,6 +18,23 @@ internal sealed unsafe partial class X11ScreenInput : IScreenInput
     private readonly IntPtr _activeWindowAtom;
     private readonly IntPtr _pidAtom;
 
+    /// <summary>Shift, Control, Alt (Mod1), Super (Mod4), AltGr (Mod5) and mouse buttons 1-5; not Caps or Num Lock.</summary>
+    private static readonly (uint Bit, string Name)[] s_modifiers =
+    [
+        (1 << 0, "Shift"),
+        (1 << 2, "Ctrl"),
+        (1 << 3, "Alt"),
+        (1 << 6, "the Super key"),
+        (1 << 7, "AltGr"),
+        (1 << 8, "the left mouse button"),
+        (1 << 9, "the middle mouse button"),
+        (1 << 10, "the right mouse button"),
+        (1 << 11, "mouse button 4"),
+        (1 << 12, "mouse button 5"),
+    ];
+
+    private static int s_failedRequests;
+
     public X11ScreenInput()
     {
         _display = XOpenDisplay(IntPtr.Zero);
@@ -26,24 +43,22 @@ internal sealed unsafe partial class X11ScreenInput : IScreenInput
         _root = XDefaultRootWindow(_display);
         _m = XKeysymToKeycode(_display, 'm');
         _backspace = XKeysymToKeycode(_display, XkBackSpace);
+        XSetErrorHandler(&OnError);
         _activeWindowAtom = XInternAtom(_display, "_NET_ACTIVE_WINDOW", 0);
         _pidAtom = XInternAtom(_display, "_NET_WM_PID", 0);
-    }
-
-    public void Click(int x, int y)
-    {
-        XTestFakeMotionEvent(_display, -1, x, y, 0);
-        XTestFakeButtonEvent(_display, 1, 1, 0);
-        XTestFakeButtonEvent(_display, 1, 0, 0);
-        XFlush(_display);
     }
 
     public void Key(bool backspace)
     {
         byte key = backspace ? _backspace : _m;
-        XTestFakeKeyEvent(_display, key, 1, 0);
-        XTestFakeKeyEvent(_display, key, 0, 0);
+        bool pressed = XTestFakeKeyEvent(_display, key, 1, 0) != 0;
+        bool released = XTestFakeKeyEvent(_display, key, 0, 0) != 0;
+        // A key down without its key up would stay pressed: release the probe's own key.
+        if (pressed && !released)
+            XTestFakeKeyEvent(_display, key, 0, 0);
         XFlush(_display);
+        if (!pressed || !released)
+            throw new UnsafeInputException("XTest did not take the key events");
     }
 
     public byte[] Capture(int x, int y, int width, int height)
@@ -75,49 +90,56 @@ internal sealed unsafe partial class X11ScreenInput : IScreenInput
         return (x, y);
     }
 
-    public int? ProcessAt(int x, int y)
+    /// <summary>
+    /// The target window must be the window the manager marks as active (EWMH) and hold the X input focus itself or
+    /// through a child window.
+    /// </summary>
+    public string? CheckFocus(TargetWindow target)
     {
-        // With a reparenting window manager the root's child is the frame; the application's window is inside it.
-        IntPtr window = _root;
-        while (XTranslateCoordinates(_display, _root, window, x, y, out _, out _, out IntPtr child) && child != IntPtr.Zero)
+        var window = (IntPtr)target.Window;
+        s_failedRequests = 0;
+        bool exists = XGetWindowAttributes(_display, window, out _) && s_failedRequests == 0;
+        if (!exists)
+            return "the demo's window no longer exists";
+        if (Cardinal(window, _pidAtom) is not { } processId || (int)processId != target.ProcessId)
+            return "the demo's window belongs to another process now";
+        if (Cardinal(_root, _activeWindowAtom) is { } active && active != window)
+            return $"the active window is 0x{active:X}, not the demo's window 0x{window:X}";
+        XGetInputFocus(_display, out IntPtr focus, out _);
+        for (IntPtr current = focus; current != IntPtr.Zero && current != 1 && current != _root; )
         {
-            if (Cardinal(child, _pidAtom) is { } processId)
-                return (int)processId;
-            window = child;
+            if (current == window)
+                return null;
+            if (XQueryTree(_display, current, out _, out IntPtr parent, out IntPtr children, out _) == 0)
+                break;
+            if (children != IntPtr.Zero)
+                XFree(children);
+            current = parent;
+        }
+        // 0 is None and 1 is PointerRoot: keys would go to whatever is under the pointer.
+        return $"the input focus is on window 0x{focus:X}, not in the demo's window 0x{window:X}";
+    }
+
+    public string? HeldModifier()
+    {
+        XQueryPointer(_display, _root, out _, out _, out _, out _, out _, out _, out uint mask);
+        foreach ((uint bit, string name) in s_modifiers)
+        {
+            if ((mask & bit) != 0)
+                return name;
         }
         return null;
     }
 
     /// <summary>
-    /// The process whose window has the X input focus, where keys go, if the window manager also marks it as active
-    /// (EWMH). Null when either is unknown or they differ.
+    /// Counts failed requests instead of Xlib's default, which ends the process; a window that went away while the
+    /// probe looks at it is an expected failure.
     /// </summary>
-    public int? ForegroundProcess()
+    [UnmanagedCallersOnly]
+    private static int OnError(IntPtr display, IntPtr error)
     {
-        int? active =
-            Cardinal(_root, _activeWindowAtom) is { } window && window != 0 && Cardinal(window, _pidAtom) is { } pid
-                ? (int)pid
-                : null;
-        XGetInputFocus(_display, out IntPtr focus, out _);
-        int? focused = ProcessOfWindowOrAncestor(focus);
-        return active == focused ? focused : null;
-    }
-
-    /// <summary>The process of a window or of the nearest ancestor that names one; focus may be on a child window.</summary>
-    private int? ProcessOfWindowOrAncestor(IntPtr window)
-    {
-        // 0 is None and 1 is PointerRoot: keys would go to whatever is under the pointer.
-        while (window != IntPtr.Zero && window != 1 && window != _root)
-        {
-            if (Cardinal(window, _pidAtom) is { } processId)
-                return (int)processId;
-            if (XQueryTree(_display, window, out _, out IntPtr parent, out IntPtr children, out _) == 0)
-                return null;
-            if (children != IntPtr.Zero)
-                XFree(children);
-            window = parent;
-        }
-        return null;
+        s_failedRequests++;
+        return 0;
     }
 
     private IntPtr? Cardinal(IntPtr window, IntPtr property)
@@ -218,6 +240,23 @@ internal sealed unsafe partial class X11ScreenInput : IScreenInput
     [LibraryImport(LibX11)]
     private static partial int XGetInputFocus(IntPtr display, out IntPtr focus, out int revertTo);
 
+    [LibraryImport(LibX11)]
+    private static partial IntPtr XSetErrorHandler(delegate* unmanaged<IntPtr, IntPtr, int> handler);
+
+    [LibraryImport(LibX11)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool XQueryPointer(
+        IntPtr display,
+        IntPtr window,
+        out IntPtr root,
+        out IntPtr child,
+        out int rootX,
+        out int rootY,
+        out int windowX,
+        out int windowY,
+        out uint mask
+    );
+
     [LibraryImport(LibX11, StringMarshalling = StringMarshalling.Utf8)]
     private static partial IntPtr XInternAtom(IntPtr display, string name, int onlyIfExists);
 
@@ -317,9 +356,5 @@ internal sealed unsafe partial class X11ScreenInput : IScreenInput
     [LibraryImport(LibXtst)]
     private static partial int XTestFakeKeyEvent(IntPtr display, uint keycode, int isPress, ulong delay);
 
-    [LibraryImport(LibXtst)]
-    private static partial int XTestFakeButtonEvent(IntPtr display, uint button, int isPress, ulong delay);
 
-    [LibraryImport(LibXtst)]
-    private static partial int XTestFakeMotionEvent(IntPtr display, int screen, int x, int y, ulong delay);
 }

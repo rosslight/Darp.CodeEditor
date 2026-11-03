@@ -10,15 +10,26 @@ namespace Darp.CodeEditor.Probe;
 [SupportedOSPlatform("windows")]
 internal sealed unsafe partial class Win32ScreenInput : IScreenInput
 {
-    private const uint InputMouse = 0;
     private const uint InputKeyboard = 1;
-    private const uint MouseLeftDown = 0x0002;
-    private const uint MouseLeftUp = 0x0004;
     private const uint KeyUp = 0x0002;
     private const ushort VkBack = 0x08;
     private const ushort VkM = 0x4D;
     private const uint SrcCopy = 0x00CC0020;
-    private const uint GetAncestorRoot = 2;
+
+    /// <summary>Keys and buttons that turn a typed key into a shortcut or a click into a drag.</summary>
+    private static readonly (int Key, string Name)[] s_modifiers =
+    [
+        (0x10, "Shift"),
+        (0x11, "Ctrl"),
+        (0x12, "Alt"),
+        (0x5B, "the left Windows key"),
+        (0x5C, "the right Windows key"),
+        (0x01, "the left mouse button"),
+        (0x02, "the right mouse button"),
+        (0x04, "the middle mouse button"),
+        (0x05, "the first extra mouse button"),
+        (0x06, "the second extra mouse button"),
+    ];
 
     private readonly IntPtr _screen = GetDC(IntPtr.Zero);
     private readonly IntPtr _memory;
@@ -26,23 +37,6 @@ internal sealed unsafe partial class Win32ScreenInput : IScreenInput
     public Win32ScreenInput()
     {
         _memory = CreateCompatibleDC(_screen);
-    }
-
-    public void Click(int x, int y)
-    {
-        SetCursorPos(x, y);
-        Input* inputs = stackalloc Input[2];
-        inputs[0] = new Input
-        {
-            Type = InputMouse,
-            Mouse = new MouseInput { Flags = MouseLeftDown },
-        };
-        inputs[1] = new Input
-        {
-            Type = InputMouse,
-            Mouse = new MouseInput { Flags = MouseLeftUp },
-        };
-        SendInput(2, inputs, sizeof(Input));
     }
 
     public void Key(bool backspace)
@@ -59,7 +53,14 @@ internal sealed unsafe partial class Win32ScreenInput : IScreenInput
             Type = InputKeyboard,
             Keyboard = new KeyboardInput { VirtualKey = key, Flags = KeyUp },
         };
-        SendInput(2, inputs, sizeof(Input));
+        uint sent = SendInput(2, inputs, sizeof(Input));
+        if (sent == 2)
+            return;
+        int error = Marshal.GetLastPInvokeError();
+        // A key down without its key up would stay pressed: release the probe's own key.
+        if (sent == 1)
+            SendInput(1, inputs + 1, sizeof(Input));
+        throw new UnsafeInputException($"SendInput took {sent} of 2 events (error {error}), input may be blocked");
     }
 
     public byte[] Capture(int x, int y, int width, int height)
@@ -111,16 +112,28 @@ internal sealed unsafe partial class Win32ScreenInput : IScreenInput
         return found;
     }
 
-    public int? ProcessAt(int x, int y)
+    public string? CheckFocus(TargetWindow target)
     {
-        IntPtr window = WindowFromPoint(new Point { X = x, Y = y });
-        return window == IntPtr.Zero ? null : ProcessOf(GetAncestor(window, GetAncestorRoot));
+        var window = (IntPtr)target.Window;
+        if (!IsWindow(window))
+            return "the demo's window no longer exists";
+        if (ProcessOf(window) != target.ProcessId)
+            return "the demo's window belongs to another process now";
+        IntPtr foreground = GetForegroundWindow();
+        return foreground == window
+            ? null
+            : $"the foreground window is 0x{foreground:X} of process {ProcessOf(foreground)?.ToString() ?? "unknown"}, not the demo's window 0x{window:X}";
     }
 
-    public int? ForegroundProcess()
+    public string? HeldModifier()
     {
-        IntPtr window = GetForegroundWindow();
-        return window == IntPtr.Zero ? null : ProcessOf(window);
+        foreach ((int key, string name) in s_modifiers)
+        {
+            // The high bit: down now.
+            if ((GetAsyncKeyState(key) & 0x8000) != 0)
+                return name;
+        }
+        return null;
     }
 
     private static int? ProcessOf(IntPtr window) =>
@@ -147,17 +160,6 @@ internal sealed unsafe partial class Win32ScreenInput : IScreenInput
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct MouseInput
-    {
-        public int X;
-        public int Y;
-        public uint MouseData;
-        public uint Flags;
-        public uint Time;
-        public IntPtr ExtraInfo;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
     private struct KeyboardInput
     {
         public ushort VirtualKey;
@@ -173,11 +175,12 @@ internal sealed unsafe partial class Win32ScreenInput : IScreenInput
         [FieldOffset(0)]
         public uint Type;
 
-        [FieldOffset(8)]
-        public MouseInput Mouse;
-
+        // The union's size is that of its largest member, MOUSEINPUT: 32 bytes on 64-bit.
         [FieldOffset(8)]
         public KeyboardInput Keyboard;
+
+        [FieldOffset(8)]
+        private fixed byte _union[32];
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -221,20 +224,17 @@ internal sealed unsafe partial class Win32ScreenInput : IScreenInput
     private static partial IntPtr GetForegroundWindow();
 
     [LibraryImport("user32.dll")]
-    private static partial IntPtr WindowFromPoint(Point point);
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsWindow(IntPtr window);
 
     [LibraryImport("user32.dll")]
-    private static partial IntPtr GetAncestor(IntPtr window, uint flags);
+    private static partial short GetAsyncKeyState(int key);
 
     [LibraryImport("user32.dll")]
     private static partial uint GetWindowThreadProcessId(IntPtr window, out uint processId);
 
-    [LibraryImport("user32.dll")]
+    [LibraryImport("user32.dll", SetLastError = true)]
     private static partial uint SendInput(uint count, Input* inputs, int size);
-
-    [LibraryImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool SetCursorPos(int x, int y);
 
     [LibraryImport("user32.dll")]
     private static partial IntPtr GetDC(IntPtr window);

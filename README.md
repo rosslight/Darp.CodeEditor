@@ -108,10 +108,16 @@ Command line flags of both demos:
 ## Measure from outside
 
 `tools/measure/run-linux.sh` (X11, XTest) and `tools/measure/run-windows.ps1` (SendInput) run `--bench` for both demos,
-time highlighted text on screen after launch, and measure keystroke to changed pixels with the probe. The probe checks
-before its click that the demo owns the window under the pointer, and before every key that it owns the foreground
-window (on X11: the active window and the one with the input focus), and aborts the run otherwise. Check and key are
-not atomic, and on X11 a keyboard grab by another client is not detected, so do not use the machine while it runs.
+time highlighted text on screen after launch, and measure keystroke to changed pixels with the probe.
+
+The probe types real keys into the demo window, so **nobody may use the machine while the e2e part runs**. It never
+clicks: a demo started with `--e2e` focuses its own editor and reports its process and window. Before and after every
+key the probe checks that this window is the foreground window (on X11: the active window holding the input focus) and
+that the demo still runs, before every key that no modifier key or mouse button is down, and that the window system
+took every injected event. It aborts otherwise, and the scripts then stop and close the demo. It prints a warning and
+counts down 5 s before the first key, types at most 400 keys, and gives up after 3 minutes. Check and key are not
+atomic, and on X11 a keyboard grab by another client is not detected.
+
 Results of the editor polish work on Linux: [docs/editor-polish.md](docs/editor-polish.md).
 
 ## C# script language server

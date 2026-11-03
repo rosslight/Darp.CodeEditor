@@ -3,8 +3,10 @@
 #
 #   pwsh tools\measure\run-windows.ps1 [-Out dir] [-Runs 5] [-E2eCount 60] [-SkipBuild] [-Only bench,startup,e2e]
 #
-# The latency probe injects real keystrokes with SendInput. Before every key it checks that the demo's window is the
-# foreground window and aborts otherwise, so do not use the machine while it runs; switching windows ends the run.
+# The latency probe injects real keystrokes with SendInput into the demo window. It never clicks: the demo focuses its
+# own editor. Before and after every key it checks that the demo's window is the foreground window, and before every
+# key that no modifier key or mouse button is down; otherwise it aborts and this script stops. The check and the key
+# are not atomic: nobody may use the machine while the e2e part runs.
 # Prerequisites: .NET 10 SDK and the Visual Studio C++ build tools (NativeAOT links with link.exe).
 param(
     [string]$Out = "",
@@ -48,18 +50,24 @@ if ($Only -contains "startup") {
 }
 
 if ($Only -contains "e2e") {
-    # A C# document without language features; the probe clicks behind line 1 and types there.
+    # A C# document without language features; the demo puts the caret at the end of line 1 and the probe types there.
     foreach ($demo in $demos) {
         $target = Join-Path $Out "e2e-$($demo.Name).json"
         $result = Join-Path $Out "e2e-$($demo.Name).txt"
         Remove-Item $target -ErrorAction SilentlyContinue
         $process = Start-Process -FilePath $demo.Exe -ArgumentList @("--e2e", $target) -PassThru
-        $deadline = (Get-Date).AddSeconds(60)
-        while (-not (Test-Path $target) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 100 }
-        Start-Sleep -Seconds 3
-        dotnet $probe latency --target $target --count $E2eCount --out $result
-        if ($LASTEXITCODE) { Write-Warning "latency $($demo.Name) aborted, see $result" }
-        taskkill /PID $process.Id /T /F | Out-Null
+        try {
+            $deadline = (Get-Date).AddSeconds(60)
+            while (-not (Test-Path $target) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 100 }
+            if (-not (Test-Path $target)) { throw "The $($demo.Name) demo did not write $target." }
+            Start-Sleep -Seconds 3
+            dotnet $probe latency --target $target --count $E2eCount --out $result
+            # A probe that stopped for safety ends the whole run: no further demo or probe starts.
+            if ($LASTEXITCODE) { throw "The latency probe stopped for the $($demo.Name) demo (exit code $LASTEXITCODE), see $result." }
+        }
+        finally {
+            taskkill /PID $process.Id /T /F | Out-Null
+        }
         Start-Sleep -Seconds 1
     }
 }
