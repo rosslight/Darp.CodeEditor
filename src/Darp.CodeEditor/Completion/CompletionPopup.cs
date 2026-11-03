@@ -133,9 +133,10 @@ internal sealed class CompletionPopup
         };
         _session = session;
         _view.SetItems(session.Items);
-        // Every path of the matcher (prefix, ignoring case, word parts, substring, no match), often enough for the
-        // runtime to compile it fully before the first real list.
-        foreach (string query in (string[])["", "Warm", "warm", "wu", "mup", "zz"])
+        // Every path of the matcher (no match, substring, word parts, ignoring case, prefix), often enough for the
+        // runtime to compile it fully before the first real list. The last query matches every item, so the layout
+        // and rendering below have rows and a description, as a real list does.
+        foreach (string query in (string[])["zz", "mup", "wu", "warm", "Warm", ""])
             Filter(session, query);
         if (!await YieldAsync(session))
             return;

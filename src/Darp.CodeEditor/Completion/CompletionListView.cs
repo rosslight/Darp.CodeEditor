@@ -47,6 +47,9 @@ internal sealed class CompletionListView : Control
     /// <summary>Where item text starts, from the left edge: the list moves left by this to align it with the word.</summary>
     public double TextLeft => GlyphLeft + _glyphWidth + Gap;
 
+    /// <summary>How many items match what was typed.</summary>
+    public int MatchCount => _matches.Length;
+
     /// <summary>The index into the items of the selected match, or null.</summary>
     public int? SelectedItem => _selected >= 0 && _selected < _matches.Length ? _matches[_selected] : null;
 
