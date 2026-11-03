@@ -345,9 +345,17 @@ scripts started.
 | macOS | The runner polls its parent process ID. | no |
 | all | The runner exits at the end of its input. | by hand |
 
-On Windows the runner is started normally and assigned to the job right after, not created suspended: it runs no
-script and starts no process before the app's first request, which the app sends after the assignment, and an app
-that dies in between closes the runner's input. If the job cannot be assigned, starting fails.
+The runner inherits the app's environment without the variables that start with `DOTNET_`, `COMPlus_` or
+`CORECLR_`. Through them .NET loads or attaches code at startup (startup hooks, profilers, diagnostic ports, extra
+dependencies) or changes runtime settings, and they are meant for the app. Everything else passes through; apps set
+variables for the runner, such as tracing settings, with `CSharpScriptRunnerOptions.RunnerEnvironmentVariables`.
+
+On Windows the runner is started normally and assigned to the job right after, not created suspended. Before the app's
+first request, which the app sends after the assignment, the runner runs only its own startup and starts no process;
+without those variables nothing else can run in it. An app that dies in between closes the runner's input, which ends
+it. A suspended start would need its own `CreateProcess` code for pipes and handle inheritance instead of
+`Process.Start`, and would still let the app's profilers and hooks into the runner. Code injected machine-wide, for
+example through `AppInit_DLLs`, is out of scope. If the job cannot be assigned, starting fails.
 
 Processes that scripts start survive a runner crash or the app's death on Linux, because the death signal is not
 inherited; apps that let scripts start processes need a cgroup or a policy against it. The runner is not a security

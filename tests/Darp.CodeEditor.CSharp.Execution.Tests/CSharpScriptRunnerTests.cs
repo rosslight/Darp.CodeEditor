@@ -100,6 +100,45 @@ public sealed class CSharpScriptRunnerTests
     }
 
     [Fact]
+    public async Task Runner_gets_the_app_environment_without_dotnet_runtime_variables()
+    {
+        // Harmless stand-ins for startup hooks, profilers and runtime settings meant for the app.
+        string[] inherited = ["DOTNET_DARP_RUNNER_TEST", "CORECLR_DARP_RUNNER_TEST", "DARP_RUNNER_TEST"];
+        foreach (string name in inherited)
+            Environment.SetEnvironmentVariable(name, "app");
+        try
+        {
+            await using CSharpScriptRunner runner = await CSharpScriptRunner.StartAsync(
+                new CSharpScriptRunnerOptions
+                {
+                    Environment = TestEnvironment.Create(),
+                    Services = [CSharpScriptService.Create<ITestHost>(new RecordingHost())],
+                    RunnerEnvironmentVariables = new Dictionary<string, string> { ["DOTNET_DARP_RUNNER_SET"] = "set" },
+                },
+                Cancellation
+            );
+            using ITestHandler handler = await runner.EvaluateAsync<ITestHandler>(
+                Handler(
+                    "return 0;",
+                    """
+                    string[] names =
+                        ["DOTNET_DARP_RUNNER_TEST", "CORECLR_DARP_RUNNER_TEST", "DARP_RUNNER_TEST", "DOTNET_DARP_RUNNER_SET"];
+                    return names.Select(name => Environment.GetEnvironmentVariable(name) is null ? 0 : 1).ToArray();
+                    """
+                ),
+                Cancellation
+            );
+
+            (await handler.HandleBatchAsync([], Cancellation)).ShouldBe([0, 0, 1, 1]);
+        }
+        finally
+        {
+            foreach (string name in inherited)
+                Environment.SetEnvironmentVariable(name, null);
+        }
+    }
+
+    [Fact]
     public async Task Compile_errors_are_the_diagnostics_the_editor_shows()
     {
         const string code = """

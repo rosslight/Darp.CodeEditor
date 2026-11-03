@@ -40,6 +40,14 @@ public sealed record CSharpScriptRunnerOptions
     public TimeSpan StartTimeout { get; init; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
+    /// Environment variables for the runner. It inherits the app's environment without the variables that start with
+    /// <c>DOTNET_</c>, <c>COMPlus_</c> or <c>CORECLR_</c>, such as startup hooks, profilers and runtime settings meant for
+    /// the app; set those here when the runner needs them, for example to trace it.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> RunnerEnvironmentVariables { get; init; } =
+        new Dictionary<string, string>();
+
+    /// <summary>
     /// The directory of the runner. Defaults to <c>helpers/csharp-runner</c> next to the app, where the
     /// <c>Darp.CodeEditor.CSharp.Execution.targets</c> put it.
     /// </summary>

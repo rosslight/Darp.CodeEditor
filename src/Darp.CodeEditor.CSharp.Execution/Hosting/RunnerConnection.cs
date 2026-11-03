@@ -76,7 +76,9 @@ internal sealed class RunnerConnection : IAsyncDisposable
     )
     {
         RunnerLocation location = RunnerLocation.Find(options.RunnerDirectory);
-        RunnerProcess process = await RunnerProcess.StartAsync(location, options.Output).ConfigureAwait(false);
+        RunnerProcess process = await RunnerProcess
+            .StartAsync(location, options.RunnerEnvironmentVariables, options.Output)
+            .ConfigureAwait(false);
         var connection = new RunnerConnection(options, process);
         try
         {

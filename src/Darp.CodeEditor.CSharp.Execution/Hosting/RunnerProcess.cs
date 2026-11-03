@@ -54,7 +54,18 @@ internal sealed class RunnerProcess : IDisposable
         return string.Join('\n', _standardError);
     }
 
-    public static async Task<RunnerProcess> StartAsync(RunnerLocation location, Action<string>? output)
+    /// <summary>
+    /// Prefixes of the variables through which .NET loads or attaches code at startup or tunes the runtime: startup
+    /// hooks, profilers, diagnostic ports, extra dependencies and runtime knobs. They are meant for the app, and on
+    /// Windows they could run code before the runner is in its job.
+    /// </summary>
+    private static readonly string[] s_removedVariablePrefixes = ["DOTNET_", "COMPlus_", "CORECLR_"];
+
+    public static async Task<RunnerProcess> StartAsync(
+        RunnerLocation location,
+        IReadOnlyDictionary<string, string> environmentVariables,
+        Action<string>? output
+    )
     {
         var start = new ProcessStartInfo(location.Executable)
         {
@@ -68,13 +79,22 @@ internal sealed class RunnerProcess : IDisposable
         };
         start.ArgumentList.Add(RunnerNames.ParentProcessIdArgument);
         start.ArgumentList.Add(Environment.ProcessId.ToString(CultureInfo.InvariantCulture));
+        foreach (string name in start.Environment.Keys.ToArray())
+        {
+            if (s_removedVariablePrefixes.Any(prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+                start.Environment.Remove(name);
+        }
         if (location.DotNetRoot is { } dotNetRoot)
             start.Environment["DOTNET_ROOT"] = dotNetRoot;
+        foreach ((string name, string value) in environmentVariables)
+            start.Environment[name] = value;
 
         if (OperatingSystem.IsWindows())
         {
-            // The runner reads its first request only after this returns, so it runs no script before it is in the job.
-            // If the host dies before the assignment, the runner reads the end of its input and exits.
+            // Started first and assigned right after, not created suspended: before the app's first request, which
+            // follows the assignment, the runner runs only its own startup, and the variables that could add other
+            // code to it are gone. If the app dies before the assignment, the runner reads the end of its input and
+            // exits.
             var job = WindowsJob.Create();
             Process? process = null;
             try
@@ -193,7 +213,7 @@ internal sealed class RunnerProcess : IDisposable
 
 /// <summary>Where the runner is, and the .NET runtime it runs on.</summary>
 /// <param name="Executable">The runner's app host.</param>
-/// <param name="DotNetRoot">The .NET root the app host should use, or null to let it search.</param>
+/// <param name="DotNetRoot">The .NET root the app host should use, or null to let it search the default locations.</param>
 internal sealed record RunnerLocation(string Executable, string? DotNetRoot)
 {
     public const string RunnerName = "Darp.CodeEditor.CSharp.Runner";
@@ -223,8 +243,8 @@ internal sealed record RunnerLocation(string Executable, string? DotNetRoot)
 
     private static string? FindHostDotNetRoot()
     {
-        if (Environment.GetEnvironmentVariable("DOTNET_ROOT") is { Length: > 0 })
-            return null;
+        if (Environment.GetEnvironmentVariable("DOTNET_ROOT") is { Length: > 0 } dotNetRoot)
+            return dotNetRoot;
         // <root>/shared/Microsoft.NETCore.App/<version>/ when the host runs on an installed runtime.
         string runtime = RuntimeEnvironment.GetRuntimeDirectory();
         string root = Path.GetFullPath(Path.Combine(runtime, "..", "..", ".."));
