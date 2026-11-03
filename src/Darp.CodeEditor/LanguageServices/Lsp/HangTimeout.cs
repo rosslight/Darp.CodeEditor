@@ -78,11 +78,12 @@ internal sealed class HangTimeout
     }
 
     /// <summary>Notes that <paramref name="client"/> ended; one that <paramref name="hung"/> doubles the timeout.</summary>
-    public void Ended(LanguageClient client, bool hung)
+    /// <param name="client">The server, or null for one that left <c>initialize</c> unanswered.</param>
+    public void Ended(LanguageClient? client, bool hung)
     {
         lock (_lock)
         {
-            if (_answered == client)
+            if (client is not null && _answered == client)
             {
                 ResetIfHealthy();
                 _answered = null;

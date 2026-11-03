@@ -362,6 +362,46 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Each_initialize_timeout_doubles_the_next_starts_wait_until_a_slow_server_starts()
+    {
+        // A start waits twice the timeout for initialize, as for any server that answered nothing yet: 0.2 s first.
+        var servers = new ToyServers { InitializeDelay = TimeSpan.FromMilliseconds(350) };
+        var failures = new List<string>();
+        await using LspLanguageService service = servers.CreateService(
+            TimeSpan.FromMilliseconds(100),
+            options =>
+                options with
+                {
+                    MaxResponseTimeout = TimeSpan.FromSeconds(1),
+                    Log = message =>
+                    {
+                        if (message.Contains("did not answer initialize", StringComparison.Ordinal))
+                        {
+                            lock (failures)
+                                failures.Add(message);
+                        }
+                    },
+                }
+        );
+        try
+        {
+            await service.PrewarmAsync(Timeout);
+        }
+        catch (TimeoutException)
+        {
+            // The first start takes longer than it may.
+        }
+
+        await Wait.UntilAsync(() => service.State == LanguageServerState.Running || servers.Starts >= 6);
+
+        service.State.ShouldBe(LanguageServerState.Running);
+        string[] waited = Seconds(failures);
+        waited.ShouldNotBeEmpty();
+        // Usually 0.4 s is enough; on a busy machine it may take one more start.
+        waited.ShouldBe(new[] { "0.2 s", "0.4 s", "0.8 s" }.Take(waited.Length));
+    }
+
+    [Fact]
     public async Task Each_hang_doubles_the_next_servers_timeout_up_to_the_longest_until_one_runs_healthy()
     {
         var servers = new ToyServers();
@@ -523,6 +563,13 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
             lock (hangs)
                 hangs.Add(message);
         }
+    }
+
+    /// <summary>The time each message ends with, such as "0.1 s".</summary>
+    private static string[] Seconds(List<string> messages)
+    {
+        lock (messages)
+            return [.. messages.Select(m => m[(m.LastIndexOf(' ', m.Length - 4) + 1)..^1])];
     }
 
     /// <summary>How long each server was waited for before it counted as hung, such as "0.1 s".</summary>

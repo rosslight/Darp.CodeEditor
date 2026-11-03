@@ -369,6 +369,8 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            // A hang like any other: the next start waits longer, so that a server that starts slowly gets to run.
+            _timeout.Ended(null, hung: true);
             throw new TimeoutException(
                 $"The language server did not answer initialize within {timeout.TotalSeconds:0.#} s."
             );
