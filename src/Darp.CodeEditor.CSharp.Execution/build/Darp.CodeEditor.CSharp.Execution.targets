@@ -13,6 +13,9 @@
 
       <ProjectReference Include="..\MyApp.ScriptApi\MyApp.ScriptApi.csproj" CSharpScriptReference="true" />
       <PackageReference Include="MyApp.Devices" CSharpScriptReference="true" />
+
+    The runner runs on Microsoft.NETCore.App only: the build fails when a marked reference needs another shared
+    framework, such as Microsoft.AspNetCore.App.
   -->
   <PropertyGroup>
     <CSharpScriptRunnerProject Condition="'$(CSharpScriptRunnerProject)' == ''"
@@ -90,7 +93,58 @@
         Exclude="@(_CSharpScriptReferenceUnmarked)"
       />
       <_CSharpScriptReferenceRoot Include="@(_CSharpScriptReferenceMarked->'%(SourcePath)'->Distinct())" />
+      <!-- Assemblies of shared frameworks other than the one the runner has. -->
+      <_CSharpScriptOtherFrameworkAssembly
+        Include="@(ReferencePath)"
+        Condition="'%(ReferencePath.FrameworkReferenceName)' != '' and '%(ReferencePath.FrameworkReferenceName)' != 'Microsoft.NETCore.App'"
+      />
     </ItemGroup>
+  </Target>
+
+  <!--
+    A marked reference that needs another shared framework would build and then fail in the runner, so the build fails
+    and names the reference and the framework. Runs once per marked reference.
+  -->
+  <Target
+    Name="CheckCSharpScriptReferenceFrameworks"
+    AfterTargets="ResolveReferences"
+    DependsOnTargets="_ResolveCSharpScriptReferences"
+    Outputs="%(_CSharpScriptReferenceRoot.Identity)"
+  >
+    <ItemGroup>
+      <_CSharpScriptFrameworkClosure Remove="@(_CSharpScriptFrameworkClosure)" />
+      <_CSharpScriptFrameworkUnused Remove="@(_CSharpScriptFrameworkUnused)" />
+      <_CSharpScriptFrameworkUsed Remove="@(_CSharpScriptFrameworkUsed)" />
+    </ItemGroup>
+    <ResolveAssemblyReference
+      Condition="'@(_CSharpScriptReferenceRoot)' != '' and '@(_CSharpScriptOtherFrameworkAssembly)' != ''"
+      AssemblyFiles="@(_CSharpScriptReferenceRoot)"
+      CandidateAssemblyFiles="@(_CSharpScriptReferenceCandidate);@(_CSharpScriptOtherFrameworkAssembly)"
+      SearchPaths="{CandidateAssemblyFiles}"
+      AllowedAssemblyExtensions=".dll"
+      FindDependencies="true"
+      FindSatellites="false"
+      FindSerializationAssemblies="false"
+      FindRelatedFiles="false"
+      AutoUnify="true"
+      Silent="true"
+    >
+      <Output TaskParameter="ResolvedDependencyFiles" ItemName="_CSharpScriptFrameworkClosure" />
+    </ResolveAssemblyReference>
+    <ItemGroup>
+      <_CSharpScriptFrameworkUnused
+        Include="@(_CSharpScriptOtherFrameworkAssembly)"
+        Exclude="@(_CSharpScriptFrameworkClosure)"
+      />
+      <_CSharpScriptFrameworkUsed
+        Include="@(_CSharpScriptOtherFrameworkAssembly)"
+        Exclude="@(_CSharpScriptFrameworkUnused)"
+      />
+    </ItemGroup>
+    <Error
+      Condition="'@(_CSharpScriptFrameworkUsed)' != ''"
+      Text="The script reference %(_CSharpScriptReferenceRoot.Filename) needs the shared framework @(_CSharpScriptFrameworkUsed->'%(FrameworkReferenceName)'->Distinct()), through @(_CSharpScriptFrameworkUsed->'%(Filename)', ', '). The C# script runner runs on Microsoft.NETCore.App only, so scripts could not load it. Remove the CSharpScriptReference mark or that dependency."
+    />
   </Target>
 
   <Target

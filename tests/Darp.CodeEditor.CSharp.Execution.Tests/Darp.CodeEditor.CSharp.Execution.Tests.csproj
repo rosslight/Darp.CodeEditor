@@ -32,6 +32,11 @@
       Value="$(MSBuildThisFileDirectory)..\Darp.CodeEditor.CSharp.Execution.TestHost\Darp.CodeEditor.CSharp.Execution.TestHost.csproj"
     />
     <AssemblyMetadata
+      Include="ExecutionTargets"
+      Value="$(MSBuildThisFileDirectory)..\..\src\Darp.CodeEditor.CSharp.Execution\build\Darp.CodeEditor.CSharp.Execution.targets"
+    />
+    <AssemblyMetadata Include="Configuration" Value="$(Configuration)" />
+    <AssemblyMetadata
       Include="TestHostDirectory"
       Value="$(MSBuildThisFileDirectory)..\Darp.CodeEditor.CSharp.Execution.TestHost\bin\$(Configuration)\$(TargetFramework)\"
     />

@@ -92,6 +92,62 @@ public sealed class HostProcessTests
         }
     }
 
+    [Fact]
+    public async Task Build_fails_when_a_script_reference_needs_another_shared_framework()
+    {
+        string root = Directory.CreateTempSubdirectory("csharp-runner-framework-").FullName;
+        try
+        {
+            // Empty build files keep the repository's out of the fixture.
+            File.WriteAllText(Path.Combine(root, "Directory.Build.props"), "<Project />");
+            File.WriteAllText(Path.Combine(root, "Directory.Build.targets"), "<Project />");
+            Directory.CreateDirectory(Path.Combine(root, "Api"));
+            File.WriteAllText(
+                Path.Combine(root, "Api", "Api.csproj"),
+                """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>
+                  <ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /></ItemGroup>
+                </Project>
+                """
+            );
+            File.WriteAllText(
+                Path.Combine(root, "Api", "Web.cs"),
+                "namespace Api; public static class Web { public static string Name => typeof(Microsoft.AspNetCore.Http.HttpContext).Name; }"
+            );
+            Directory.CreateDirectory(Path.Combine(root, "Host"));
+            File.WriteAllText(
+                Path.Combine(root, "Host", "Host.csproj"),
+                $"""
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework></PropertyGroup>
+                  <ItemGroup><ProjectReference Include="../Api/Api.csproj" CSharpScriptReference="true" /></ItemGroup>
+                  <Import Project="{GetMetadata("ExecutionTargets")}" />
+                </Project>
+                """
+            );
+            File.WriteAllText(Path.Combine(root, "Host", "Program.cs"), "System.Console.WriteLine(Api.Web.Name);");
+
+            (int exitCode, string log) = await DotNetAsync([
+                "build",
+                Path.Combine(root, "Host", "Host.csproj"),
+                "-c",
+                GetMetadata("Configuration"),
+            ]);
+
+            exitCode.ShouldNotBe(0, log);
+            log.ShouldContain(
+                "The script reference Api needs the shared framework Microsoft.AspNetCore.App",
+                Case.Sensitive,
+                log
+            );
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     /// <summary>
     /// The portable runtime identifier of this machine, such as linux-x64. <see cref="RuntimeInformation.RuntimeIdentifier"/>
     /// is a distribution's own identifier on runtimes the distribution built.
