@@ -8,6 +8,9 @@ namespace Darp.CodeEditor.Demo.Aot;
 
 public sealed partial class MainWindow : Window, IBenchHost
 {
+    /// <summary>The tab of the Luau editor.</summary>
+    public const int LuauTab = 0;
+
     /// <summary>The tab of the C# editor.</summary>
     public const int CSharpTab = 2;
 
@@ -30,16 +33,29 @@ public sealed partial class MainWindow : Window, IBenchHost
         if (options.NoLanguageService)
             return;
 
-        // C# through the same language server as in the JIT demo; opening the document starts it in the background.
+        // C# through the same language server as in the JIT demo, Luau through luau-lsp with the app's Luau API.
+        // Opening a document starts its server in the background.
         LspLanguageService csharp = DemoCSharp.CreateService(options);
+        LspLanguageService luau = DemoLuau.CreateService(options);
         CSharp = csharp;
+        Luau = luau;
         csharp.StateChanged += (_, _) =>
         {
             double at = ProcessClock.ElapsedMs;
-            Dispatcher.UIThread.Post(() => Status.Text = DemoCSharp.Describe(csharp, at));
+            Dispatcher.UIThread.Post(() =>
+            {
+                _csharpStatus = DemoCSharp.Describe(csharp, at);
+                ShowStatus();
+            });
         };
+        luau.StateChanged += (_, _) => Dispatcher.UIThread.Post(ShowStatus);
         CSharpEditor.LanguageService = csharp;
-        Closed += (_, _) => _ = csharp.DisposeAsync().AsTask();
+        LuauEditor.LanguageService = luau;
+        Closed += (_, _) =>
+        {
+            _ = csharp.DisposeAsync().AsTask();
+            _ = luau.DisposeAsync().AsTask();
+        };
     }
 
     /// <summary>When the window started to create its editors, in milliseconds since the process started.</summary>
@@ -47,6 +63,11 @@ public sealed partial class MainWindow : Window, IBenchHost
 
     /// <summary>The C# language service; null with <c>--no-language-service</c>.</summary>
     public LspLanguageService? CSharp { get; }
+
+    /// <summary>The Luau language service; null with <c>--no-language-service</c>.</summary>
+    public LspLanguageService? Luau { get; }
+
+    private string _csharpStatus = "";
 
     TopLevel IBenchHost.TopLevel => this;
 
@@ -63,4 +84,7 @@ public sealed partial class MainWindow : Window, IBenchHost
         Tabs.SelectedIndex = index;
         return Ui.NextFrameAsync(this);
     }
+
+    private void ShowStatus() =>
+        Status.Text = Luau is { } luau ? $"{_csharpStatus} · {DemoLuau.Describe(luau)}" : _csharpStatus;
 }

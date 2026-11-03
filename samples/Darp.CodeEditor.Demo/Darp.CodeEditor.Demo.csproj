@@ -20,6 +20,8 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\Shared\**\*.cs" LinkBase="Shared" />
+    <!-- The app's Luau API, which luau-lsp loads. -->
+    <None Include="..\Shared\Luau\**" LinkBase="Luau" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <!-- Puts luau-lsp and the Luau grammar next to the app. -->
   <Import Project="..\..\src\Darp.CodeEditor.Luau\build\Darp.CodeEditor.Luau.targets" />
