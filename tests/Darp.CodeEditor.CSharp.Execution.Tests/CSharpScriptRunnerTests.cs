@@ -203,6 +203,7 @@ public sealed class CSharpScriptRunnerTests
                 ("CS1061", ScriptDiagnosticSeverity.Error, 1, 5, 1, 12),
             ]);
         // The editor compiles with ResolvedScriptEnvironment as well; the runner must report its diagnostics exactly.
+        // Both the runner and the editor's language server run culture-invariant, so their messages are English.
         ResolvedScriptEnvironment environment = ResolvedScriptEnvironment.Resolve(TestEnvironment.Create());
         Script<object> script = environment.CreateScript(code, typeof(TestGlobals), environment.CreateScriptOptions());
         exception
@@ -215,7 +216,7 @@ public sealed class CSharpScriptRunnerTests
                     .Select(d =>
                         (
                             d.Id,
-                            d.GetMessage(),
+                            d.GetMessage(CultureInfo.InvariantCulture),
                             d.Location.GetLineSpan().StartLinePosition.Line,
                             d.Location.GetLineSpan().StartLinePosition.Character
                         )
