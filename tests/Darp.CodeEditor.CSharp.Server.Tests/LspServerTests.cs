@@ -443,6 +443,9 @@ public sealed class LspDocumentSyncTests
 {
     private const string DeviceHover = "```csharp\nDarp.CodeEditor.CSharp.TestGlobals.TestDevice Device { get; }";
 
+    /// <summary>Text that every feature request of <see cref="SendEveryRequest"/> has an answer for.</summary>
+    private const string EveryRequestText = "var t = Device.ReadTemperature();\nLog(";
+
     [Fact]
     public async Task Diagnostics_are_published_for_the_newest_version_after_incremental_changes()
     {
@@ -500,22 +503,26 @@ public sealed class LspDocumentSyncTests
     }
 
     [Fact]
-    public async Task Closing_a_document_ends_its_pending_completion_as_content_modified()
+    public async Task Closing_a_document_answers_its_pending_requests_with_null()
     {
         const string uri = "file:///scripts/closed.csx";
         await using LspClient client = await TestServer.StartAsync();
-        const string text = "var t = Device.";
-        await client.OpenAsync(uri, text);
+        await client.OpenAsync(uri, EveryRequestText);
 
-        // The environment is still loading, so the completion is pending when the document closes.
-        PendingRequest completion = client.Send("textDocument/completion", TestServer.AtEnd(uri, text));
+        // The environment is still loading, so the requests are pending when the document closes.
+        (string Method, PendingRequest Request)[] requests = SendEveryRequest(client, uri);
         await client.NotifyAsync(
             "textDocument/didClose",
             new JsonObject { ["textDocument"] = new JsonObject { ["uri"] = uri } }
         );
-        LspResponse response = await completion.Response;
 
-        response.Error.ShouldNotBeNull().Code.ShouldBe(ErrorCodes.ContentModified);
+        // As for any document the server does not know.
+        foreach ((string method, PendingRequest request) in requests)
+        {
+            LspResponse response = await request.Response;
+            response.Error.ShouldBeNull(method);
+            response.Result.ShouldBeNull(method);
+        }
     }
 
     [Fact]
@@ -573,23 +580,55 @@ public sealed class LspDocumentSyncTests
     }
 
     [Fact]
-    public async Task A_new_version_ends_pending_requests_for_the_old_one_as_content_modified()
+    public async Task A_new_version_leaves_pending_requests_to_answer_for_the_text_they_were_sent_for()
     {
-        const string uri = "file:///scripts/stale.csx";
+        const string uri = "file:///scripts/edited.csx";
         await using LspClient client = await TestServer.StartAsync();
-        const string text = "var t = Device.ReadTemperature();";
-        await client.OpenAsync(uri, text);
+        await client.OpenAsync(uri, EveryRequestText);
 
-        PendingRequest hover = client.Send("textDocument/hover", TestServer.At(uri, text, "Device"));
-        await client.ChangeAsync(uri, 2, TestServer.Range(text, 0, 0), "// edited\n");
-        LspResponse response = await hover.Response;
+        // The environment is still loading, so the requests are pending when the change arrives.
+        (string Method, PendingRequest Request)[] requests = SendEveryRequest(client, uri);
+        await client.ChangeAsync(uri, 2, TestServer.Range(EveryRequestText, 0, 0), "// edited\n");
+        Dictionary<string, LspResponse> responses = [];
+        foreach ((string method, PendingRequest request) in requests)
+            responses[method] = await request.Response;
         JsonNode? fresh = await client.RequestAsync(
             "textDocument/hover",
-            TestServer.At(uri, "// edited\n" + text, "Device")
+            TestServer.At(uri, "// edited\n" + EveryRequestText, "Device")
         );
 
-        // The server, not the client, ended the request: ContentModified, which clients drop silently.
-        response.Error.ShouldNotBeNull().Code.ShouldBe(ErrorCodes.ContentModified);
-        fresh.GetString("contents", "value").ShouldStartWith(DeviceHover);
+        foreach ((string method, LspResponse response) in responses)
+            response.Error.ShouldBeNull(method);
+        responses["completion"].Result.GetArray("items").Select(i => i.GetString("label")).ShouldContain("ReadTemperature");
+        responses["signatureHelp"].Result.GetArray("signatures").ShouldNotBeEmpty();
+        responses["semanticTokens"].Result.GetArray("data").ShouldNotBeEmpty();
+        // The hover is for the text it was sent for, where Device is on the first line.
+        responses["hover"].Result.GetString("contents", "value").ShouldStartWith(DeviceHover);
+        responses["hover"].Result.GetInt("range", "start", "line").ShouldBe(0);
+        fresh.GetInt("range", "start", "line").ShouldBe(1);
+    }
+
+    /// <summary>Sends completion after <c>Device.</c>, hover on <c>Device</c>, signature help in <c>Log(</c> and
+    /// semantic tokens for <see cref="EveryRequestText"/>.</summary>
+    private static (string Method, PendingRequest Request)[] SendEveryRequest(LspClient client, string uri)
+    {
+        const string text = EveryRequestText;
+        return
+        [
+            ("completion", client.Send("textDocument/completion", TestServer.At(uri, text, "Device.", "Device.".Length))),
+            ("hover", client.Send("textDocument/hover", TestServer.At(uri, text, "Device"))),
+            ("signatureHelp", client.Send("textDocument/signatureHelp", TestServer.AtEnd(uri, text))),
+            (
+                "semanticTokens",
+                client.Send(
+                    "textDocument/semanticTokens/range",
+                    new JsonObject
+                    {
+                        ["textDocument"] = new JsonObject { ["uri"] = uri },
+                        ["range"] = TestServer.Range(text, 0, text.Length),
+                    }
+                )
+            ),
+        ];
     }
 }

@@ -19,10 +19,10 @@ internal static class HoverHandler
         bool markdown = session.Client.HoverMarkdown;
         // The snapshot is taken; the rest runs on the thread pool while later messages are dispatched.
         await Task.Yield();
-        return await StaleWork
+        return await DocumentWork
             .RunAsync(
                 token,
-                snapshot.Changed,
+                snapshot.Owner,
                 async cancellationToken =>
                     await GetHoverAsync(
                             snapshot.Owner.GetDocument(

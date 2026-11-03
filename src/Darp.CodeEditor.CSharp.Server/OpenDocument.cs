@@ -27,8 +27,8 @@ internal sealed class OpenDocument
     public DocumentSnapshot Current { get; private set; }
 
     /// <summary>
-    /// Cancelled when the document closes, or opens again as a new document. Work that may outlive a version, such as
-    /// completion, stops then.
+    /// Cancelled when the document closes, or opens again as a new document. Requests on it stop then and answer null;
+    /// a newer version does not stop them.
     /// </summary>
     public CancellationToken Closed => _lifetime.Token;
 
@@ -93,7 +93,7 @@ internal sealed class DocumentSnapshot
 
     public SourceText Text { get; }
 
-    /// <summary>Cancelled when the document moves to a newer version or closes.</summary>
+    /// <summary>Cancelled when the document moves to a newer version or closes; pending diagnostics stop then.</summary>
     public CancellationToken Changed { get; }
 
     public LineMap Lines => _lines ??= LineMap.Create(Text);

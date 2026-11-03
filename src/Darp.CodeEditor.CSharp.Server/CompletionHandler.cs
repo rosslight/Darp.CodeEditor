@@ -34,8 +34,8 @@ namespace Darp.CodeEditor.CSharp.Server;
 /// answering. Items are sorted as Roslyn sorts them; <c>sortText</c> is the item's rank.
 /// </para>
 /// <para>
-/// A completion request is not cancelled when the text changes: the client can still use the list while the user
-/// keeps typing the same word. Closing the document ends it with <see cref="ErrorCodes.ContentModified"/>.
+/// Like every request, a completion request goes on when the text changes: the client can still use the list while
+/// the user keeps typing the same word. Closing the document answers it with null.
 /// </para>
 /// </remarks>
 internal static class CompletionHandler
@@ -288,11 +288,10 @@ internal static class CompletionHandler
         ClientFeatures client = session.Client;
         // The snapshot is taken; the rest runs on the thread pool while later messages are dispatched.
         await Task.Yield();
-        // Typing does not end completion, closing the document does.
-        return await StaleWork
+        return await DocumentWork
             .RunAsync(
                 token,
-                snapshot.Owner.Closed,
+                snapshot.Owner,
                 async cancellationToken =>
                     await GetCompletionsAsync(
                             await session.Workspace.WaitAsync(cancellationToken).ConfigureAwait(false),
@@ -309,6 +308,8 @@ internal static class CompletionHandler
             .ConfigureAwait(false);
     }
 
+    /// <summary>Resolves an item of the newest list of its document; items of older or closed lists come back as they are.</summary>
+    /// <remarks>It goes on when the document changes or closes meanwhile: the item is for the text of its list.</remarks>
     private static async Task<CompletionItem?> ResolveRequestAsync(
         ScriptSession session,
         CompletionItem item,

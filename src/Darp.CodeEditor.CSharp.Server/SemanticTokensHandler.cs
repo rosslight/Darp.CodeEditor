@@ -57,10 +57,10 @@ internal static class SemanticTokensHandler
         TextSpan span = snapshot.Lines.GetSpan(request.Range);
         // The snapshot is taken; the rest runs on the thread pool while later messages are dispatched.
         await Task.Yield();
-        return await StaleWork
+        return await DocumentWork
             .RunAsync(
                 token,
-                snapshot.Changed,
+                snapshot.Owner,
                 async cancellationToken =>
                     await GetTokensAsync(
                             snapshot.Owner.GetDocument(

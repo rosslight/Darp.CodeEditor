@@ -235,10 +235,11 @@ editor and in the host. `#:package` comes later.
 | `publishDiagnostics` | Compiler diagnostics only, 200 ms after the last change, tagged with the document version. |
 | `semanticTokens/range` | Roslyn's classifier. Token types use LSP's names where one exists (`namespace`, `class`, `method`, `property`, `variable`, `keyword`, ...) and C# names otherwise (`delegate`, `extensionMethod`, `field`, `constant`, `label`); modifier `static`. |
 
-A new document version ends pending hover, signature help and semantic tokens requests for the old one with
-`ContentModified`, which clients drop silently, and drops pending diagnostics. Completion requests go on through new
-versions, since the client can keep filtering the list while the user types the same word; closing or reopening the
-document ends them with `ContentModified`. `RequestCancelled` answers only requests the client cancelled.
+A new document version drops pending diagnostics but ends no request: each request answers for the text it was sent
+for. LSP 3.17 asks servers not to answer `ContentModified` for changes in messages they have yet to process, since the
+result may still be of use; the client cancels what it no longer needs, and a completion list stays useful while the
+user types the same word. Closing or reopening the document answers its pending requests with `null`, as for any
+document the server does not know.
 
 ### Benchmark
 
