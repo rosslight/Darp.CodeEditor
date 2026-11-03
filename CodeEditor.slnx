@@ -33,5 +33,6 @@
     <Project Path="tests/Darp.CodeEditor.CSharp.Execution.TestApi/Darp.CodeEditor.CSharp.Execution.TestApi.csproj" />
     <Project Path="tests/Darp.CodeEditor.CSharp.Execution.TestDependency/Darp.CodeEditor.CSharp.Execution.TestDependency.csproj" />
     <Project Path="tests/Darp.CodeEditor.CSharp.Execution.TestHost/Darp.CodeEditor.CSharp.Execution.TestHost.csproj" />
+    <Project Path="tests/Darp.CodeEditor.Packaging.Tests/Darp.CodeEditor.Packaging.Tests.csproj" />
   </Folder>
 </Solution>

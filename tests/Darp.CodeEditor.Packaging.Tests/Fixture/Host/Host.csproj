@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsAotCompatible>true</IsAotCompatible>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Restore fetches the ReadyToRun compiler and the runtime pack, which publish uses for the C# helpers. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <!-- One warning per trim or AOT problem, so that the test sees each of them. -->
+    <TrimmerSingleWarn>false</TrimmerSingleWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Darp.CodeEditor.CSharp" />
+    <!-- Scripts compile against the script API; NativeAOT ships it as a file next to the app. -->
+    <ProjectReference Include="..\ScriptApi\ScriptApi.csproj" CSharpScriptReference="true" />
+  </ItemGroup>
+</Project>
