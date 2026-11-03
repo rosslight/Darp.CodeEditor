@@ -92,11 +92,13 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
     {
         await _service.PrewarmAsync(Timeout);
         _service.OpenDocument(new DocumentSnapshot("a", 1, Text));
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        using var cancellation = new CancellationTokenSource();
 
-        await Should.ThrowAsync<OperationCanceledException>(
-            _service.GetQuickInfoAsync(new DocumentVersion("a", 1), 13, cancellation.Token)
-        );
+        Task<QuickInfo?> request = _service.GetQuickInfoAsync(new DocumentVersion("a", 1), 13, cancellation.Token);
+        // Cancelled once the server has it, so that there is a request to cancel.
+        await Wait.UntilAsync(() => _servers.SentOf("textDocument/hover").Count == 1);
+        cancellation.Cancel();
+        await Should.ThrowAsync<OperationCanceledException>(request);
 
         long hover = (long)_servers.SentOf("textDocument/hover").Single()["id"]!;
         await Wait.UntilAsync(() => _servers.SentOf("$/cancelRequest").Count == 1);
