@@ -229,9 +229,15 @@ internal sealed class CompletionController
     }
 
     /// <summary>
-    /// Replaces the word with the item's text, and applies its additional edits, such as a <c>using</c> directive:
-    /// at once when the item is resolved, otherwise when the resolve arrives.
+    /// Replaces the item's range, or else the word, with the item's text, and applies its additional edits, such as a
+    /// <c>using</c> directive, in the same undo step.
     /// </summary>
+    /// <remarks>
+    /// Commit stays synchronous: a commit character is inserted right after it, and waiting for the server would hold
+    /// the keystroke. The selected item is usually resolved by then, for its description. When its resolve arrives
+    /// later, its edits join the commit's undo step, but only while the document is still exactly as the commit left
+    /// it; after any other change, an undo included, they no longer belong to the commit and are dropped.
+    /// </remarks>
     private void Commit(ShownList shown, int index, int wordStart, int wordEnd)
     {
         CompletionItem item = shown.List.Items[index];
@@ -240,18 +246,19 @@ internal sealed class CompletionController
             return;
         if (item.Range is { } range)
         {
-            int itemStart = shown.Checkpoint.MoveOffsetTo(
+            // Typing at the end of the range, as in an insert range that ends at the caret, extends it.
+            wordStart = shown.Checkpoint.MoveOffsetTo(
                 document.Version,
                 range.Start,
                 AnchorMovementType.BeforeInsertion
             );
-            wordStart = Math.Min(wordStart, itemStart);
+            wordEnd = shown.Checkpoint.MoveOffsetTo(document.Version, range.End, AnchorMovementType.AfterInsertion);
         }
         Task<CompletionItemDetails?> details = shown.Resolve(index);
         document.BeginUpdate();
         try
         {
-            document.Replace(wordStart, wordEnd - wordStart, item.InsertText);
+            document.Replace(wordStart, Math.Max(0, wordEnd - wordStart), item.InsertText);
             if (details.IsCompleted)
                 ApplyEdits(details.Result?.AdditionalEdits ?? item.AdditionalEdits, shown.Checkpoint);
         }
@@ -260,26 +267,44 @@ internal sealed class CompletionController
             document.EndUpdate();
         }
         if (!details.IsCompleted)
-            _ = ApplyEditsWhenResolvedAsync(details, item, shown.Checkpoint);
+            _ = ApplyEditsWhenResolvedAsync(details, item, shown.Checkpoint, document.Version);
     }
 
+    /// <param name="committed">The document's version right after the commit.</param>
     private async Task ApplyEditsWhenResolvedAsync(
         Task<CompletionItemDetails?> details,
         CompletionItem item,
-        ITextSourceVersion checkpoint
+        ITextSourceVersion checkpoint,
+        ITextSourceVersion committed
     )
     {
         IReadOnlyList<TextEdit>? edits = (await details)?.AdditionalEdits ?? item.AdditionalEdits;
-        if (edits is not { Count: > 0 } || !checkpoint.BelongsToSameDocumentAs(_editor.Document.Version))
+        TextDocument document = _editor.Document;
+        if (
+            edits is not { Count: > 0 }
+            || !committed.BelongsToSameDocumentAs(document.Version)
+            || committed.CompareAge(document.Version) != 0
+        )
+        {
             return;
-        _editor.Document.BeginUpdate();
+        }
+        // Nothing changed since the commit, so the last undo step is the commit's: the edits continue it.
+        document.UndoStack.StartContinuedUndoGroup();
         try
         {
-            ApplyEdits(edits, checkpoint);
+            document.BeginUpdate();
+            try
+            {
+                ApplyEdits(edits, checkpoint);
+            }
+            finally
+            {
+                document.EndUpdate();
+            }
         }
         finally
         {
-            _editor.Document.EndUpdate();
+            document.UndoStack.EndUndoGroup();
         }
     }
 
