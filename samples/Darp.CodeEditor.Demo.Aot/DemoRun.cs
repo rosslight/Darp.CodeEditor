@@ -20,6 +20,15 @@ internal static class DemoRun
         int exitCode = 0;
         try
         {
+            if (options.E2eOutput is { } e2eOutput)
+            {
+                // A C# document without language features: the input latency probe types at the end of line 1.
+                await window.ShowTabAsync(2);
+                await Ui.WaitForVisibleAsync(window.CSharpEditor, highlighted: true);
+                await Task.Delay(500);
+                Ui.WriteE2eTarget(window.CSharpEditor, e2eOutput);
+                return;
+            }
             if (probe is null)
             {
                 // Scene for a screenshot: highlighting with the Luau grammar and the search panel open.
@@ -36,7 +45,7 @@ internal static class DemoRun
         }
         report.Save();
         probe?.Dispose();
-        if (!options.Hold)
+        if (!options.Hold && options.E2eOutput is null)
             desktop.Shutdown(exitCode);
     }
 
@@ -56,6 +65,7 @@ internal static class DemoRun
         using var timings = new TimingLog(editor);
         Task<double> visible = Ui.WaitForVisibleAsync(editor, highlighted: false);
         Task<double> highlighted = Ui.WaitForVisibleAsync(editor, highlighted: true);
+        Task<int> uncoloredOnFirstFrame = Ui.LinesWithoutColorsOnFirstFrameAsync(editor);
         await highlighted;
         report.Add(probe.EndPhase());
         probe.BeginPhase("startup: first frame + 500 ms");
@@ -63,6 +73,7 @@ internal static class DemoRun
         report.Add(probe.EndPhase());
         report.Add($"  editor text visible:        {await visible, 7:F0} ms after process start");
         report.Add($"  editor text highlighted:    {await highlighted, 7:F0} ms");
+        report.Add($"  lines without colors on the first frame: {await uncoloredOnFirstFrame}");
         report.Add($"  startup timings: {timings.Summary()}");
 
         report.Add(EditorScenarios.CheckSearch(editor, "reading", "sample"));
@@ -76,6 +87,10 @@ internal static class DemoRun
 
         if (!options.Bench)
             return;
+
+        await window.ShowTabAsync(0);
+        await EditorScenarios.RunThemeSwitchAsync(window, editor, probe, report);
+        await window.ShowTabAsync(1);
 
         probe.BeginPhase("JSON: typing burst with word completion");
         json.Select(json.Document.GetLineByNumber(4).EndOffset, 0);

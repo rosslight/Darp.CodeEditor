@@ -6,11 +6,13 @@
     Title="Code editor demo (JIT, C# scripting)"
     Width="1200"
     Height="800"
-    Background="#1E1E1E"
 >
     <DockPanel>
         <Border DockPanel.Dock="Bottom" Background="#007ACC" Padding="8,3">
-            <TextBlock x:Name="Status" Foreground="White" />
+            <DockPanel>
+                <Button x:Name="ThemeButton" DockPanel.Dock="Right" Padding="8,0" Content="Light / dark" />
+                <TextBlock x:Name="Status" Foreground="White" />
+            </DockPanel>
         </Border>
         <TabControl x:Name="Tabs">
             <TabItem Header="script.csx">

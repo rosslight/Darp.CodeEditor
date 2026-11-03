@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using Darp.CodeEditor.Instrumentation;
 
@@ -14,6 +15,8 @@ public sealed class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            if (Program.Options.Light)
+                RequestedThemeVariant = ThemeVariant.Light;
             // Start probing before the window exists, so startup work on the UI thread is measured too.
             UiStallProbe? probe = Program.Options.Measure
                 ? new UiStallProbe(Dispatcher.UIThread, TimeSpan.FromMilliseconds(2))
@@ -21,7 +24,7 @@ public sealed class App : Application
             probe?.BeginPhase("startup: until first highlighted frame");
             var window = new MainWindow(Program.Options.NoLanguageService);
             desktop.MainWindow = window;
-            if (probe is not null || Program.Options.Scene)
+            if (probe is not null || Program.Options.Scene || Program.Options.E2eOutput is not null)
                 DemoRun.Start(window, desktop, probe, Program.Options);
         }
         base.OnFrameworkInitializationCompleted();

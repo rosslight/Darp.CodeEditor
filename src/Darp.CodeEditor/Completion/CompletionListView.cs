@@ -3,8 +3,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
-using Avalonia.Media.Immutable;
 using Darp.CodeEditor.LanguageServices;
+using Darp.CodeEditor.Theming;
 
 namespace Darp.CodeEditor.Completion;
 
@@ -16,30 +16,27 @@ internal sealed class CompletionListView : Control
 {
     private const int MaxVisibleRows = 12;
     private const double ListWidth = 380;
+    private const double GlyphLeft = 6;
+    private const double Gap = 8;
 
-    private static readonly IBrush s_background = new ImmutableSolidColorBrush(Color.Parse("#252526"));
-    private static readonly IBrush s_selection = new ImmutableSolidColorBrush(Color.Parse("#04395E"));
-    private static readonly IBrush s_foreground = new ImmutableSolidColorBrush(Color.Parse("#D4D4D4"));
-    private static readonly IBrush s_detail = new ImmutableSolidColorBrush(Color.Parse("#8C8C8C"));
-    private static readonly IBrush s_method = new ImmutableSolidColorBrush(Color.Parse("#B180D7"));
-    private static readonly IBrush s_type = new ImmutableSolidColorBrush(Color.Parse("#EE9D28"));
-    private static readonly IBrush s_keyword = new ImmutableSolidColorBrush(Color.Parse("#569CD6"));
-    private static readonly IBrush s_variable = new ImmutableSolidColorBrush(Color.Parse("#75BEFF"));
-
-    private readonly IReadOnlyList<CompletionItem> _items;
     private readonly Typeface _typeface;
     private readonly double _fontSize;
     private readonly double _rowHeight;
+    private readonly double _glyphWidth;
+    private IReadOnlyList<CompletionItem> _items = [];
+    private EditorTheme _theme = EditorTheme.Default;
     private int[] _matches = [];
     private int _selected = -1;
     private int _firstVisible;
 
-    public CompletionListView(IReadOnlyList<CompletionItem> items, FontFamily fontFamily, double fontSize)
+    public CompletionListView(FontFamily fontFamily, double fontSize)
     {
-        _items = items;
         _typeface = new Typeface(fontFamily);
         _fontSize = fontSize;
         _rowHeight = Math.Ceiling(fontSize * 1.45);
+        _glyphWidth = CreateText("M", Brushes.Black).WidthIncludingTrailingWhitespace;
+        Width = ListWidth;
+        MaxHeight = MaxVisibleRows * _rowHeight;
         ClipToBounds = true;
     }
 
@@ -47,8 +44,34 @@ internal sealed class CompletionListView : Control
 
     public event EventHandler? ItemActivated;
 
+    /// <summary>Where item text starts, from the left edge: the list moves left by this to align it with the word.</summary>
+    public double TextLeft => GlyphLeft + _glyphWidth + Gap;
+
+    /// <summary>How many items match what was typed.</summary>
+    public int MatchCount => _matches.Length;
+
     /// <summary>The index into the items of the selected match, or null.</summary>
     public int? SelectedItem => _selected >= 0 && _selected < _matches.Length ? _matches[_selected] : null;
+
+    public EditorTheme EditorTheme
+    {
+        get => _theme;
+        set
+        {
+            _theme = value;
+            InvalidateVisual();
+        }
+    }
+
+    /// <summary>Rows that fit: fewer than the maximum when the window is too small for the whole list.</summary>
+    private int VisibleRows =>
+        Math.Max(1, Math.Min(MaxVisibleRows, Bounds.Height > 0 ? (int)(Bounds.Height / _rowHeight) : MaxVisibleRows));
+
+    public void SetItems(IReadOnlyList<CompletionItem> items)
+    {
+        _items = items;
+        SetMatches([]);
+    }
 
     public void SetMatches(int[] matches)
     {
@@ -72,19 +95,20 @@ internal sealed class CompletionListView : Control
 
     public override void Render(DrawingContext context)
     {
-        context.FillRectangle(s_background, new Rect(Bounds.Size));
-        int last = Math.Min(_matches.Length, _firstVisible + MaxVisibleRows);
+        context.FillRectangle(_theme.WidgetBackground, new Rect(Bounds.Size));
+        int last = Math.Min(_matches.Length, _firstVisible + VisibleRows);
         for (int row = _firstVisible; row < last; row++)
         {
             double y = (row - _firstVisible) * _rowHeight;
-            if (row == _selected)
-                context.FillRectangle(s_selection, new Rect(0, y, Bounds.Width, _rowHeight));
+            bool selected = row == _selected;
+            if (selected)
+                context.FillRectangle(_theme.ListSelectionBackground, new Rect(0, y, Bounds.Width, _rowHeight));
             CompletionItem item = _items[_matches[row]];
-            double x = 6;
-            x += DrawText(context, KindGlyph(item.Kind), KindBrush(item.Kind), x, y) + 8;
-            x += DrawText(context, item.DisplayText, s_foreground, x, y) + 8;
+            DrawText(context, KindGlyph(item.Kind), KindBrush(item.Kind), GlyphLeft, y);
+            IBrush foreground = selected ? _theme.ListSelectionForeground : _theme.WidgetForeground;
+            double x = TextLeft + DrawText(context, item.DisplayText, foreground, TextLeft, y) + Gap;
             if (item.InlineDescription is { } detail)
-                DrawText(context, detail, s_detail, x, y);
+                DrawText(context, detail, _theme.WidgetSecondaryForeground, x, y);
         }
     }
 
@@ -100,7 +124,7 @@ internal sealed class CompletionListView : Control
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
-        int maxFirst = Math.Max(0, _matches.Length - MaxVisibleRows);
+        int maxFirst = Math.Max(0, _matches.Length - VisibleRows);
         _firstVisible = Math.Clamp(_firstVisible - (int)Math.Round(e.Delta.Y * 3), 0, maxFirst);
         InvalidateVisual();
         e.Handled = true;
@@ -113,8 +137,8 @@ internal sealed class CompletionListView : Control
         {
             if (row < _firstVisible)
                 _firstVisible = row;
-            else if (row >= _firstVisible + MaxVisibleRows)
-                _firstVisible = row - MaxVisibleRows + 1;
+            else if (row >= _firstVisible + VisibleRows)
+                _firstVisible = row - VisibleRows + 1;
         }
         InvalidateVisual();
         SelectionChanged?.Invoke(this, EventArgs.Empty);
@@ -122,17 +146,13 @@ internal sealed class CompletionListView : Control
 
     private double DrawText(DrawingContext context, string text, IBrush brush, double x, double y)
     {
-        var formatted = new FormattedText(
-            text,
-            CultureInfo.InvariantCulture,
-            FlowDirection.LeftToRight,
-            _typeface,
-            _fontSize,
-            brush
-        );
+        FormattedText formatted = CreateText(text, brush);
         context.DrawText(formatted, new Point(x, y + (_rowHeight - formatted.Height) / 2));
         return formatted.WidthIncludingTrailingWhitespace;
     }
+
+    private FormattedText CreateText(string text, IBrush brush) =>
+        new(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, _typeface, _fontSize, brush);
 
     private static string KindGlyph(CompletionItemKind kind) =>
         kind switch
@@ -150,16 +170,16 @@ internal sealed class CompletionListView : Control
             _ => "·",
         };
 
-    private static IBrush KindBrush(CompletionItemKind kind) =>
+    private IBrush KindBrush(CompletionItemKind kind) =>
         kind switch
         {
-            CompletionItemKind.Method or CompletionItemKind.ExtensionMethod => s_method,
+            CompletionItemKind.Method or CompletionItemKind.ExtensionMethod => _theme.SymbolMethod,
             CompletionItemKind.Class
             or CompletionItemKind.Struct
             or CompletionItemKind.Delegate
             or CompletionItemKind.Interface
-            or CompletionItemKind.Enum => s_type,
-            CompletionItemKind.Keyword => s_keyword,
-            _ => s_variable,
+            or CompletionItemKind.Enum => _theme.SymbolType,
+            CompletionItemKind.Keyword => _theme.SymbolKeyword,
+            _ => _theme.SymbolVariable,
         };
 }
