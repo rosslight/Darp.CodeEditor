@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Media;
 using AvaloniaEdit.Search;
 using Darp.CodeEditor.Instrumentation;
 
@@ -42,11 +43,14 @@ internal static class EditorScenarios
             editor.LanguageId = languageId;
             editor.Text = large;
             await host.ShowAsync(editor);
+            Task<int> uncoloredOnFirstFrame = Ui.LinesWithoutColorsOnFirstFrameAsync(editor);
             double visible = await Ui.WaitForVisibleAsync(editor, highlighted);
             await Task.Delay(500);
             report.Add(probe.EndPhase());
             report.Add(
-                $"  {label}: {editor.Document.LineCount} lines visible{(highlighted ? " and highlighted" : "")} after {visible - start:F0} ms; {timings.Summary()}"
+                $"  {label}: {editor.Document.LineCount} lines visible{(highlighted ? " and highlighted" : "")} after {visible - start:F0} ms"
+                    + (highlighted ? $", {await uncoloredOnFirstFrame} lines without colors on the first frame" : "")
+                    + $"; {timings.Summary()}"
             );
 
             probe.BeginPhase($"{label}: scroll 10k lines");
@@ -92,6 +96,39 @@ internal static class EditorScenarios
             report.Add(probe.EndPhase());
             report.Add("  " + Ui.TakeKeystrokeSummary());
         }
+    }
+
+    /// <summary>
+    /// Switches the app between light and dark three times. For each switch: when the editor showed the new theme,
+    /// and how many of the shown lines had no colors in that frame.
+    /// </summary>
+    public static async Task RunThemeSwitchAsync(
+        IBenchHost host,
+        CodeEditor editor,
+        UiStallProbe probe,
+        BenchReport report
+    )
+    {
+        probe.BeginPhase("theme: switch light/dark 6 times");
+        using var timings = new TimingLog(editor);
+        var switches = new List<string>();
+        for (int i = 0; i < 6; i++)
+        {
+            IBrush? before = editor.Background;
+            double start = ProcessClock.ElapsedMs;
+            long toggleStart = System.Diagnostics.Stopwatch.GetTimestamp();
+            Ui.ToggleThemeVariant();
+            double toggleMs = System.Diagnostics.Stopwatch.GetElapsedTime(toggleStart).TotalMilliseconds;
+            while (ReferenceEquals(editor.Background, before) && ProcessClock.ElapsedMs - start < 5000)
+                await Ui.NextFrameAsync(host.TopLevel);
+            switches.Add(
+                $"{(i % 2 == 0 ? "light" : "dark")} {ProcessClock.ElapsedMs - start:F0} ms ({editor.VisibleLinesWithoutHighlighting} lines without colors, variant setter {toggleMs:F0} ms)"
+            );
+            await Task.Delay(300);
+        }
+        report.Add(probe.EndPhase());
+        report.Add("  theme shown after: " + string.Join(", ", switches));
+        report.Add($"  timings: {timings.Summary()}");
     }
 
     /// <summary>

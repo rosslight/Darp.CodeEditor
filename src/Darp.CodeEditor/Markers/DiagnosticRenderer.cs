@@ -1,20 +1,18 @@
 using Avalonia;
 using Avalonia.Media;
-using Avalonia.Media.Immutable;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Rendering;
 using Darp.CodeEditor.LanguageServices;
+using Darp.CodeEditor.Theming;
 
 namespace Darp.CodeEditor.Markers;
 
-/// <summary>Draws squiggles under diagnostics. Rendering reads only the cached segments.</summary>
-internal sealed class DiagnosticRenderer : IBackgroundRenderer
+/// <summary>Draws squiggles under diagnostics, in the theme's colors. Rendering reads only the cached segments.</summary>
+internal sealed class DiagnosticRenderer : IBackgroundRenderer, IThemedRenderer
 {
-    private static readonly IPen s_errorPen = new ImmutablePen(new ImmutableSolidColorBrush(Color.Parse("#F14C4C")));
-    private static readonly IPen s_warningPen = new ImmutablePen(new ImmutableSolidColorBrush(Color.Parse("#CCA700")));
-    private static readonly IPen s_infoPen = new ImmutablePen(new ImmutableSolidColorBrush(Color.Parse("#3794FF")));
-
     private SegmentCache<DiagnosticSegment> _cache = SegmentCache<DiagnosticSegment>.Empty;
+
+    public EditorTheme EditorTheme { private get; set; } = EditorTheme.Default;
 
     public KnownLayer Layer => KnownLayer.Selection;
 
@@ -51,9 +49,9 @@ internal sealed class DiagnosticRenderer : IBackgroundRenderer
         {
             IPen pen = segment.Diagnostic.Severity switch
             {
-                DiagnosticSeverity.Error => s_errorPen,
-                DiagnosticSeverity.Warning => s_warningPen,
-                _ => s_infoPen,
+                DiagnosticSeverity.Error => EditorTheme.Error,
+                DiagnosticSeverity.Warning => EditorTheme.Warning,
+                _ => EditorTheme.Info,
             };
             foreach (Rect rect in BackgroundGeometryBuilder.GetRectsForSegment(textView, segment))
                 drawingContext.DrawGeometry(null, pen, CreateSquiggle(rect));

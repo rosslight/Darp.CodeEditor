@@ -6,6 +6,7 @@
 *.csx      text diff=csharp
 *.sln      text eol=crlf
 *.csproj   text eol=crlf
+*.sh       text eol=lf
 
 *.verified.cs text eol=lf working-tree-encoding=UTF-8
 *.verified.txt text eol=lf working-tree-encoding=UTF-8

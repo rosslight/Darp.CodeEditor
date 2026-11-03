@@ -7,16 +7,12 @@ using Avalonia.Themes.Fluent;
 
 namespace Darp.CodeEditor.Tests;
 
-/// <summary>The headless app that the editor tests run in.</summary>
+/// <summary>The application for headless editor tests: Fluent and the AvaloniaEdit control templates.</summary>
 public sealed class TestApp : Application
 {
-    public static AppBuilder BuildAvaloniaApp() =>
-        AppBuilder.Configure<TestApp>().UseHeadless(new AvaloniaHeadlessPlatformOptions());
-
     public override void Initialize()
     {
         Styles.Add(new FluentTheme());
-        // The editor's template.
         Styles.Add(
             new StyleInclude(new Uri("avares://Darp.CodeEditor.Tests/"))
             {
@@ -24,4 +20,7 @@ public sealed class TestApp : Application
             }
         );
     }
+
+    public static AppBuilder BuildAvaloniaApp() =>
+        AppBuilder.Configure<TestApp>().UseHeadless(new AvaloniaHeadlessPlatformOptions());
 }

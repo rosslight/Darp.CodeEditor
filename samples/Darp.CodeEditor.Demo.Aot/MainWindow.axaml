@@ -6,15 +6,17 @@
     Title="Code editor demo (NativeAOT, C# through the language server)"
     Width="1200"
     Height="800"
-    Background="#1E1E1E"
 >
     <DockPanel>
         <Border DockPanel.Dock="Bottom" Background="#68217A" Padding="8,3">
-            <TextBlock
-                x:Name="Status"
-                Foreground="White"
-                Text="NativeAOT · Ctrl+F to search · C# through the C# server · JSON has word completion and parse errors"
-            />
+            <DockPanel>
+                <Button x:Name="ThemeButton" DockPanel.Dock="Right" Padding="8,0" Content="Light / dark" />
+                <TextBlock
+                    x:Name="Status"
+                    Foreground="White"
+                    Text="NativeAOT · Ctrl+F to search · C# through the C# server · JSON has word completion and parse errors"
+                />
+            </DockPanel>
         </Border>
         <TabControl x:Name="Tabs">
             <TabItem Header="script.luau">

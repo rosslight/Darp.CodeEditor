@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using Avalonia.Threading;
 using AvaloniaEdit.Document;
 using Darp.CodeEditor.LanguageServices;
 using CompletionList = Darp.CodeEditor.LanguageServices.CompletionList;
@@ -12,13 +13,14 @@ namespace Darp.CodeEditor.Completion;
 /// <summary>
 /// Runs completion sessions. A session fetches its list off the UI thread and <see cref="CompletionPopup"/> filters it
 /// locally while the user keeps typing the word; a list the service marked incomplete is fetched again for each
-/// further letter and replaces the shown one when it arrives. The selected item is resolved lazily for its description
-/// and additional edits, and commit inserts text the service already computed.
+/// further letter and replaces the items in the open list when it arrives. The selected item is resolved lazily for
+/// its description and additional edits, and commit inserts text the service already computed.
 /// </summary>
 internal sealed class CompletionController
 {
     private readonly CodeEditor _editor;
     private readonly LanguageFeatures _features;
+    private CompletionPopup? _popup;
     private Session? _session;
 
     public CompletionController(CodeEditor editor, LanguageFeatures features)
@@ -29,6 +31,26 @@ internal sealed class CompletionController
         editor.TextArea.TextEntered += OnTextEntered;
         editor.DocumentChanged += (_, _) => Cancel();
         editor.AddHandler(InputElement.KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
+        editor.TextArea.TextView.VisualLinesChanged += OnFirstLayout;
+        editor.EditorThemeChanged += (_, _) => _popup?.ApplyTheme(editor.EditorTheme);
+    }
+
+    /// <summary>True while the completion list is shown; it takes the navigation keys then.</summary>
+    public bool IsOpen => _popup?.IsOpen == true;
+
+    /// <summary>Created after the first frame, so it adds nothing to the time until the editor shows text.</summary>
+    private CompletionPopup Popup
+    {
+        get
+        {
+            if (_popup is null)
+            {
+                _popup = new CompletionPopup(_editor);
+                _popup.ApplyTheme(_editor.EditorTheme);
+                _popup.Closed += (_, _) => OnPopupClosed();
+            }
+            return _popup;
+        }
     }
 
     public void Cancel()
@@ -37,7 +59,25 @@ internal sealed class CompletionController
             return;
         _session = null;
         session.Cancellation.Cancel();
-        session.Window?.Hide();
+        _popup?.Hide();
+    }
+
+    private void OnFirstLayout(object? sender, EventArgs e)
+    {
+        _editor.TextArea.TextView.VisualLinesChanged -= OnFirstLayout;
+        Dispatcher.UIThread.Post(() => _ = WarmUpAsync(), DispatcherPriority.Background);
+    }
+
+    private async Task WarmUpAsync()
+    {
+        try
+        {
+            await Popup.WarmUpAsync();
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceWarning($"Warming up the completion list failed: {exception}");
+        }
     }
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
@@ -47,19 +87,32 @@ internal sealed class CompletionController
             e.Handled = true;
             Start(service, new CompletionTrigger(CompletionTriggerKind.Invoke));
         }
+        else if (_popup is { IsOpen: true } popup && e.KeyModifiers == KeyModifiers.None && popup.HandleKey(e.Key))
+        {
+            e.Handled = true;
+        }
+    }
+
+    private void OnPopupClosed()
+    {
+        // The list closed itself (commit, Escape, caret left the word): end the session and its requests.
+        if (_session is not { Shown: not null } session)
+            return;
+        _session = null;
+        session.Cancellation.Cancel();
     }
 
     private void OnTextEntering(object? sender, TextInputEventArgs e)
     {
-        if (_session is not { } session || e.Text is not [char c] || IsIdentifierPart(c))
+        if (_session is null || e.Text is not [char c] || IsIdentifierPart(c))
             return;
         if (
-            session.Window is { SelectedItem: { } item } window
+            _popup is { IsOpen: true, SelectedItem: { } item } popup
             && _features.Service is { } service
             && (item.CommitCharacters ?? service.Capabilities.CompletionCommitCharacters).Contains(c)
         )
         {
-            window.Commit();
+            popup.Commit();
         }
         Cancel();
     }
@@ -97,7 +150,7 @@ internal sealed class CompletionController
         _ = ShowListAsync(service, session, trigger);
     }
 
-    /// <summary>Fetches a list and shows it in place of the session's current one.</summary>
+    /// <summary>Fetches a list and shows it, in place of the session's current one if there is one.</summary>
     private async Task ShowListAsync(ILanguageService service, Session session, CompletionTrigger trigger)
     {
         // A newer request for an incomplete list replaces an older one.
@@ -118,7 +171,7 @@ internal sealed class CompletionController
         if (list is null || list.Items.Count == 0)
         {
             // A refined list that found nothing leaves the shown one to the local filter.
-            if (session.Window is null)
+            if (session.Shown is null)
                 End(session, "completion-empty", start);
             return;
         }
@@ -135,7 +188,7 @@ internal sealed class CompletionController
         int caret = _editor.CaretOffset;
         if (caret < wordStart || !IsIdentifierRun(text, wordStart, caret))
         {
-            if (session.Window is null)
+            if (session.Shown is null)
                 End(session, "completion-dropped", start);
             return;
         }
@@ -144,39 +197,26 @@ internal sealed class CompletionController
         var shown = new ShownList(service, _features, list, checkpoint, document.DocumentId);
         Func<int, Control> createDescription = index => LoadDescription(shown, index);
         Action<int, int, int> commit = (index, from, to) => Commit(shown, index, from, to);
-        if (session.Window is { } open)
+        bool refining = session.Shown is not null;
+        // A list asked again replaces the items in the open list; it keeps the word the first list started.
+        bool open = refining
+            ? Popup.ReplaceItems(list.Items, createDescription, commit)
+            : Popup.Open(
+                list.Items,
+                wordStart,
+                Math.Max(caret, wordEnd),
+                closeWhenCaretAtStart: session.Kind == CompletionTriggerKind.Insertion,
+                createDescription,
+                commit
+            );
+        if (!open)
         {
-            // A list asked again replaces the items in the open window.
-            session.Shown = shown;
-            if (!open.ReplaceItems(list.Items, createDescription, commit))
-                Cancel();
-        }
-        else
-        {
-            var window = new CompletionPopup(_editor.TextArea, list.Items, createDescription, commit)
-            {
-                StartOffset = wordStart,
-                EndOffset = Math.Max(caret, wordEnd),
-                CloseWhenCaretAtBeginning = session.Kind == CompletionTriggerKind.Insertion,
-            };
-            window.Closed += (_, _) =>
-            {
-                if (_session != session)
-                    return;
-                _session = null;
-                session.Cancellation.Cancel();
-            };
-            if (!window.Filter())
-            {
-                window.Hide();
+            if (!refining)
                 End(session, "completion-dropped", start);
-                return;
-            }
-            session.Shown = shown;
-            session.Window = window;
-            window.Show();
+            return;
         }
-        string name = trigger.Kind == CompletionTriggerKind.IncompleteList ? "completion-refined" : "completion";
+        session.Shown = shown;
+        string name = refining ? "completion-refined" : "completion";
         _editor.ReportTiming($"{name}-ui", Stopwatch.GetElapsedTime(uiStart), list.Items.Count);
         _editor.ReportTiming(name, Stopwatch.GetElapsedTime(start), list.Items.Count);
     }
@@ -262,7 +302,7 @@ internal sealed class CompletionController
             Text = "…",
             MaxWidth = 480,
             TextWrapping = TextWrapping.Wrap,
-            Foreground = Brushes.Gainsboro,
+            Foreground = _editor.EditorTheme.WidgetForeground,
         };
         _ = LoadAsync();
         return block;
@@ -304,10 +344,8 @@ internal sealed class CompletionController
         /// <summary>The request in flight, for the first list or a refined one.</summary>
         public CancellationTokenSource? Request { get; set; }
 
-        /// <summary>The list on screen and its window; null until the first list arrived.</summary>
+        /// <summary>The list on screen; null until the first one is shown, while the popup may show another session.</summary>
         public ShownList? Shown { get; set; }
-
-        public CompletionPopup? Window { get; set; }
     }
 
     /// <summary>A list on screen, with the version it was computed for and its items' resolves.</summary>

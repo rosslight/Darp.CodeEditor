@@ -14,18 +14,5 @@ internal static class Program
         return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 
-    public static AppBuilder BuildAvaloniaApp() =>
-        AppBuilder
-            .Configure<App>()
-            .UsePlatformDetect()
-            .With(
-                new X11PlatformOptions { OverlayPopups = Environment.GetCommandLineArgs().Contains("--overlay-popups") }
-            )
-            .With(
-                new Win32PlatformOptions
-                {
-                    OverlayPopups = Environment.GetCommandLineArgs().Contains("--overlay-popups"),
-                }
-            )
-            .LogToTrace();
+    public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<App>().UsePlatformDetect().LogToTrace();
 }
