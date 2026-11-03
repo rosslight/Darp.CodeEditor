@@ -23,9 +23,13 @@ public sealed class EditorCompletionTests
             Height = 600,
         };
         window.Show();
+        // The list opens at the caret, which needs a layout.
+        window.UpdateLayout();
         editor.LanguageService = service;
         var timings = new List<string>();
         editor.Timing += (_, timing) => timings.Add(timing.Name);
+        // The list closes when the editor loses the focus.
+        editor.TextArea.Focus();
         editor.CaretOffset = 2;
 
         editor.TextArea.PerformTextInput("b");

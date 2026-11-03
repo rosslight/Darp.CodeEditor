@@ -26,7 +26,7 @@ internal sealed class CompletionListView : Control
     private static readonly IBrush s_keyword = new ImmutableSolidColorBrush(Color.Parse("#569CD6"));
     private static readonly IBrush s_variable = new ImmutableSolidColorBrush(Color.Parse("#75BEFF"));
 
-    private readonly IReadOnlyList<CompletionItem> _items;
+    private IReadOnlyList<CompletionItem> _items;
     private readonly Typeface _typeface;
     private readonly double _fontSize;
     private readonly double _rowHeight;
@@ -49,6 +49,13 @@ internal sealed class CompletionListView : Control
 
     /// <summary>The index into the items of the selected match, or null.</summary>
     public int? SelectedItem => _selected >= 0 && _selected < _matches.Length ? _matches[_selected] : null;
+
+    /// <summary>Draws other items; <see cref="SetMatches"/> follows.</summary>
+    public void SetItems(IReadOnlyList<CompletionItem> items)
+    {
+        _items = items;
+        _matches = [];
+    }
 
     public void SetMatches(int[] matches)
     {

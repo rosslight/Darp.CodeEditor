@@ -22,9 +22,9 @@ internal sealed class CompletionPopup : CompletionWindowBase
     private static readonly IBrush s_background = new ImmutableSolidColorBrush(Color.Parse("#252526"));
     private static readonly IBrush s_border = new ImmutableSolidColorBrush(Color.Parse("#454545"));
 
-    private readonly IReadOnlyList<CompletionItem> _items;
-    private readonly Func<int, Control> _createDescription;
-    private readonly Action<int, int, int> _commit;
+    private IReadOnlyList<CompletionItem> _items;
+    private Func<int, Control> _createDescription;
+    private Action<int, int, int> _commit;
     private readonly Dictionary<int, Control> _descriptions = [];
     private readonly CompletionListView _view;
     private readonly Popup _descriptionPopup;
@@ -80,6 +80,27 @@ internal sealed class CompletionPopup : CompletionWindowBase
 
     /// <summary>Closes the popup when the caret moves back to <see cref="CompletionWindowBase.StartOffset"/>.</summary>
     public bool CloseWhenCaretAtBeginning { get; init; }
+
+    /// <summary>
+    /// Shows other items in place of the current ones, such as the next list of an incomplete one, and filters them.
+    /// Returns false if none match.
+    /// </summary>
+    public bool ReplaceItems(
+        IReadOnlyList<CompletionItem> items,
+        Func<int, Control> createDescription,
+        Action<int, int, int> commit
+    )
+    {
+        _items = items;
+        _createDescription = createDescription;
+        _commit = commit;
+        _descriptions.Clear();
+        _query = null;
+        _view.SetItems(items);
+        bool matched = Filter();
+        ShowDescription();
+        return matched;
+    }
 
     /// <summary>Filters the items by the text between the start offset and the caret. Returns false if none match.</summary>
     public bool Filter()

@@ -142,37 +142,40 @@ internal sealed class CompletionController
 
         long uiStart = Stopwatch.GetTimestamp();
         var shown = new ShownList(service, _features, list, checkpoint, document.DocumentId);
-        var window = new CompletionPopup(
-            _editor.TextArea,
-            list.Items,
-            index => LoadDescription(shown, index),
-            (index, from, to) => Commit(shown, index, from, to)
-        )
+        Func<int, Control> createDescription = index => LoadDescription(shown, index);
+        Action<int, int, int> commit = (index, from, to) => Commit(shown, index, from, to);
+        if (session.Window is { } open)
         {
-            StartOffset = wordStart,
-            EndOffset = Math.Max(caret, wordEnd),
-            CloseWhenCaretAtBeginning = session.Kind == CompletionTriggerKind.Insertion,
-        };
-        window.Closed += (_, _) =>
-        {
-            // Replacing an incomplete list closes the old window; that does not end the session.
-            if (_session != session || session.Window != window)
-                return;
-            _session = null;
-            session.Cancellation.Cancel();
-        };
-        if (!window.Filter())
-        {
-            window.Hide();
-            if (session.Window is null)
-                End(session, "completion-dropped", start);
-            return;
+            // A list asked again replaces the items in the open window.
+            session.Shown = shown;
+            if (!open.ReplaceItems(list.Items, createDescription, commit))
+                Cancel();
         }
-        CompletionPopup? previous = session.Window;
-        session.Shown = shown;
-        session.Window = window;
-        window.Show();
-        previous?.Hide();
+        else
+        {
+            var window = new CompletionPopup(_editor.TextArea, list.Items, createDescription, commit)
+            {
+                StartOffset = wordStart,
+                EndOffset = Math.Max(caret, wordEnd),
+                CloseWhenCaretAtBeginning = session.Kind == CompletionTriggerKind.Insertion,
+            };
+            window.Closed += (_, _) =>
+            {
+                if (_session != session)
+                    return;
+                _session = null;
+                session.Cancellation.Cancel();
+            };
+            if (!window.Filter())
+            {
+                window.Hide();
+                End(session, "completion-dropped", start);
+                return;
+            }
+            session.Shown = shown;
+            session.Window = window;
+            window.Show();
+        }
         string name = trigger.Kind == CompletionTriggerKind.IncompleteList ? "completion-refined" : "completion";
         _editor.ReportTiming($"{name}-ui", Stopwatch.GetElapsedTime(uiStart), list.Items.Count);
         _editor.ReportTiming(name, Stopwatch.GetElapsedTime(start), list.Items.Count);
