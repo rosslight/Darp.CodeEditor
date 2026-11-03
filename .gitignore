@@ -15,3 +15,6 @@ artifacts/
 
 # Measurement output
 measurements/
+
+# Downloaded tools
+.tools/

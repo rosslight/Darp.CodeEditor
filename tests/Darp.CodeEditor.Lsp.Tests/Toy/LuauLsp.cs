@@ -1,0 +1,165 @@
+using System.Diagnostics;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Channels;
+using Darp.CodeEditor.Lsp.Protocol;
+
+namespace Darp.CodeEditor.Lsp.Testing;
+
+/// <summary>A luau-lsp process with a connection to it, for the interop checks.</summary>
+internal sealed class LuauLsp : IAsyncDisposable
+{
+    /// <summary>A Luau script with a function, an unfinished member access, and a call to hover over.</summary>
+    public const string Script = """
+        local function greet(name: string): string
+            return "Hello, " .. name
+        end
+
+        local s = string.
+        print(greet("you"))
+
+        """;
+
+    /// <summary>Right after <c>string.</c>.</summary>
+    public static readonly Position MemberAccess = new(4, 17);
+
+    /// <summary>On <c>greet</c> in the call.</summary>
+    public static readonly Position Call = new(5, 8);
+
+    private readonly Process _process;
+    private readonly StringBuilder _log = new();
+
+    public LuauLsp(string executable)
+    {
+        var startInfo = new ProcessStartInfo(executable)
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add("lsp");
+        startInfo.ArgumentList.Add("--stdio");
+        _process = Process.Start(startInfo) ?? throw new InvalidOperationException("luau-lsp did not start.");
+        _process.ErrorDataReceived += (_, e) => Log($"stderr: {e.Data}");
+        _process.BeginErrorReadLine();
+        Connection = new JsonRpcConnection(_process.StandardOutput.BaseStream, _process.StandardInput.BaseStream, Log);
+        // Requests that luau-lsp sends to its client.
+        Connection.OnRequest(Request("workspace/configuration"), (p, _) => Task.FromResult(NullPerItem(p)));
+        Connection.OnRequest(Request("client/registerCapability"), (_, _) => Task.FromResult(default(JsonElement)));
+        Connection.OnRequest(
+            Request("window/workDoneProgress/create"),
+            (_, _) => Task.FromResult(default(JsonElement))
+        );
+        Connection.OnNotification(
+            LspMethods.PublishDiagnostics,
+            (p, token) => Diagnostics.Writer.WriteAsync(p, token).AsTask()
+        );
+        Connection.OnNotification(
+            LspMethods.LogMessage,
+            (p, _) =>
+            {
+                Log($"log: {p.Message}");
+                return Task.CompletedTask;
+            }
+        );
+        Connection.Start();
+    }
+
+    public JsonRpcConnection Connection { get; }
+
+    public Channel<PublishDiagnosticsParams> Diagnostics { get; } = Channel.CreateUnbounded<PublishDiagnosticsParams>();
+
+    /// <summary>What luau-lsp wrote to stderr and logged, and protocol errors.</summary>
+    public string Output
+    {
+        get
+        {
+            lock (_log)
+                return _log.ToString();
+        }
+    }
+
+    /// <summary>The binary from <c>fetch-luau-lsp.sh</c>, or the one <c>LUAU_LSP</c> names; null when missing.</summary>
+    public static string? FindExecutable()
+    {
+        if (Environment.GetEnvironmentVariable("LUAU_LSP") is { Length: > 0 } path)
+            return File.Exists(path) ? path : null;
+        for (
+            DirectoryInfo? directory = new(AppContext.BaseDirectory);
+            directory is not null;
+            directory = directory.Parent
+        )
+        {
+            string candidate = Path.Combine(directory.FullName, ".tools", "luau-lsp", "luau-lsp");
+            if (File.Exists(candidate))
+                return candidate;
+        }
+        return null;
+    }
+
+    public static InitializeParams InitializeParams(string rootUri) =>
+        new(
+            new ClientCapabilities
+            {
+                General = new GeneralClientCapabilities { PositionEncodings = ["utf-16"] },
+                Workspace = new WorkspaceClientCapabilities { Configuration = true, WorkspaceFolders = true },
+                TextDocument = new TextDocumentClientCapabilities
+                {
+                    Completion = new CompletionClientCapabilities
+                    {
+                        ContextSupport = true,
+                        CompletionItem = new CompletionItemClientCapabilities
+                        {
+                            DocumentationFormat = [MarkupKind.Markdown, MarkupKind.PlainText],
+                            InsertReplaceSupport = true,
+                            LabelDetailsSupport = true,
+                            ResolveSupport = new CompletionResolveSupport(["documentation", "detail"]),
+                        },
+                    },
+                    Hover = new HoverClientCapabilities { ContentFormat = [MarkupKind.Markdown, MarkupKind.PlainText] },
+                    PublishDiagnostics = new PublishDiagnosticsClientCapabilities { VersionSupport = true },
+                },
+            }
+        )
+        {
+            ProcessId = Environment.ProcessId,
+            ClientInfo = new ClientInfo("Darp.CodeEditor.Lsp tests"),
+            RootUri = rootUri,
+            WorkspaceFolders = [new WorkspaceFolder(rootUri, "scripts")],
+        };
+
+    public async Task<int> WaitForExitAsync(CancellationToken cancellationToken)
+    {
+        await _process.WaitForExitAsync(cancellationToken);
+        return _process.ExitCode;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (!_process.HasExited)
+            _process.Kill();
+        await _process.WaitForExitAsync();
+        await Connection.DisposeAsync();
+        _process.Dispose();
+    }
+
+    private static RequestType<JsonElement, JsonElement> Request(string method) =>
+        new(method, LspJsonContext.Default.JsonElement, LspJsonContext.Default.JsonElement);
+
+    /// <summary>Answers <c>workspace/configuration</c> with null for every item: luau-lsp then uses its defaults.</summary>
+    private static JsonElement NullPerItem(JsonElement parameters)
+    {
+        int count = parameters.TryGetProperty("items", out JsonElement items) ? items.GetArrayLength() : 0;
+        return JsonSerializer.Deserialize(
+            $"[{string.Join(',', Enumerable.Repeat("null", count))}]",
+            LspJsonContext.Default.JsonElement
+        );
+    }
+
+    private void Log(string? message)
+    {
+        lock (_log)
+            _log.AppendLine(message);
+    }
+}
