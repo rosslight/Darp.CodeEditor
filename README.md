@@ -317,10 +317,22 @@ Every call crosses processes, so the API follows these rules:
 - Data is copied, never shared: changing an argument changes the copy, and objects have no identity across calls.
 - No streams.
 - Script API assemblies, and what they use, need no shared framework but `Microsoft.NETCore.App`.
-- The runner uses invariant globalization: scripts format with the invariant culture, and localized resources fall
-  back to the neutral ones.
 - Scripts must not write to the process's standard output directly. `Console.Out` goes to the runner's standard
   error, which the app receives through `CSharpScriptRunnerOptions.Output`.
+
+Scripts run culture-invariant. The runner uses .NET's invariant globalization: the current culture is the invariant
+one, so formatting and parsing behave the same on every machine; creating another culture, such as `de-DE`, throws
+`CultureNotFoundException`; and localized resources are not loaded, only the neutral ones in the main assembly. This
+keeps scripts deterministic and needs no ICU library on Linux. A host that wants cultures turns globalization on for
+the runner:
+
+```csharp
+RunnerEnvironmentVariables = new Dictionary<string, string> { ["DOTNET_SYSTEM_GLOBALIZATION_INVARIANT"] = "0" },
+```
+
+The runner then needs ICU (libicu) on Linux, like any .NET app that uses cultures, and does not start without it.
+Culture names that .NET does not know, such as custom cultures, also need
+`DOTNET_SYSTEM_GLOBALIZATION_PREDEFINED_CULTURES_ONLY=0`.
 
 ### Failures
 

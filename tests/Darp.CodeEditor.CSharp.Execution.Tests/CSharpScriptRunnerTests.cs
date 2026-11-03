@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.Reflection;
 using Darp.CodeEditor.CSharp.Execution.TestApi;
 using Darp.CodeEditor.CSharp.Execution.TestHost;
@@ -137,6 +138,49 @@ public sealed class CSharpScriptRunnerTests
             foreach (string name in inherited)
                 Environment.SetEnvironmentVariable(name, null);
         }
+    }
+
+    [Theory]
+    [InlineData(null, 0)]
+    [InlineData("0", 1)]
+    public async Task Scripts_run_culture_invariant_unless_the_app_turns_globalization_on(
+        string? invariant,
+        int formatsGerman
+    )
+    {
+        Assert.SkipUnless(
+            1.5.ToString(new CultureInfo("de-DE")) == "1,5",
+            "Needs ICU, which the runner then loads too."
+        );
+        await using CSharpScriptRunner runner = await CSharpScriptRunner.StartAsync(
+            new CSharpScriptRunnerOptions
+            {
+                Environment = TestEnvironment.Create(),
+                Services = [CSharpScriptService.Create<ITestHost>(new RecordingHost())],
+                RunnerEnvironmentVariables = invariant is null
+                    ? new Dictionary<string, string>()
+                    : new Dictionary<string, string> { ["DOTNET_SYSTEM_GLOBALIZATION_INVARIANT"] = invariant },
+            },
+            Cancellation
+        );
+        using ITestHandler handler = await runner.EvaluateAsync<ITestHandler>(
+            Handler(
+                "return 0;",
+                """
+                try
+                {
+                    return [1.5.ToString(new System.Globalization.CultureInfo("de-DE")) == "1,5" ? 1 : -1];
+                }
+                catch (System.Globalization.CultureNotFoundException)
+                {
+                    return [0];
+                }
+                """
+            ),
+            Cancellation
+        );
+
+        (await handler.HandleBatchAsync([], Cancellation)).ShouldBe([formatsGerman]);
     }
 
     [Fact]
