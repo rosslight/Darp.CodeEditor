@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Reflection;
 using Darp.CodeEditor.CSharp.Execution.TestApi;
 using Darp.CodeEditor.CSharp.Execution.TestHost;
@@ -323,6 +324,65 @@ public sealed class CSharpScriptRunnerTests
     }
 
     [Fact]
+    public async Task Cancelling_an_evaluation_returns_although_the_runner_does_not_read_and_the_runner_is_killed()
+    {
+        Assert.SkipUnless(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS(), "Stops the runner with SIGSTOP.");
+        await using CSharpScriptRunner runner = await StartAsync(compileTimeout: TimeSpan.FromSeconds(3));
+        int stopped = runner.ProcessId.ShouldNotBeNull();
+        Task<ScriptRunnerExitedEventArgs> exited = runner.NextExitAsync();
+        Signal(stopped, "STOP");
+        try
+        {
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+            long start = Stopwatch.GetTimestamp();
+
+            await Should.ThrowAsync<OperationCanceledException>(() =>
+                runner.EvaluateAsync<ITestHandler>(LargerThanAPipe(Handler("return 1;")), cancellation.Token)
+            );
+
+            Stopwatch.GetElapsedTime(start).ShouldBeLessThan(TimeSpan.FromSeconds(2));
+            // Nobody waits for it any more, but a runner that does not read its input is stuck.
+            (await exited.WaitAsync(TimeSpan.FromSeconds(10), Cancellation)).Reason.ShouldBe(
+                ScriptRunnerExitReason.Killed
+            );
+        }
+        finally
+        {
+            if (IsRunning(stopped))
+                Signal(stopped, "CONT");
+        }
+        using ITestHandler handler = await runner.EvaluateAsync<ITestHandler>(Handler("return 1;"), Cancellation);
+        (await handler.HandleAsync(new Sample(0, []), Cancellation)).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Evaluating_with_a_runner_that_does_not_read_times_out_and_kills_it()
+    {
+        Assert.SkipUnless(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS(), "Stops the runner with SIGSTOP.");
+        await using CSharpScriptRunner runner = await StartAsync(compileTimeout: TimeSpan.FromSeconds(1));
+        int stopped = runner.ProcessId.ShouldNotBeNull();
+        Task<ScriptRunnerExitedEventArgs> exited = runner.NextExitAsync();
+        Signal(stopped, "STOP");
+        try
+        {
+            await Should.ThrowAsync<TimeoutException>(() =>
+                runner
+                    .EvaluateAsync<ITestHandler>(LargerThanAPipe(Handler("return 1;")), Cancellation)
+                    .WaitAsync(TimeSpan.FromSeconds(10), Cancellation)
+            );
+
+            (await exited.WaitAsync(TimeSpan.FromSeconds(10), Cancellation)).Reason.ShouldBe(
+                ScriptRunnerExitReason.Killed
+            );
+        }
+        finally
+        {
+            if (IsRunning(stopped))
+                Signal(stopped, "CONT");
+        }
+    }
+
+    [Fact]
     public async Task Crash_is_reported_and_the_next_script_gets_a_new_runner()
     {
         await using CSharpScriptRunner runner = await StartAsync();
@@ -404,4 +464,7 @@ public sealed class CSharpScriptRunnerTests
             .Emit(path, cancellationToken: Cancellation);
         result.Success.ShouldBeTrue(string.Join('\n', result.Diagnostics));
     }
+
+    /// <summary>Pads a script past a pipe buffer, so sending it blocks until the runner reads.</summary>
+    private static string LargerThanAPipe(string code) => code + "\n// " + new string('x', 1_000_000);
 }

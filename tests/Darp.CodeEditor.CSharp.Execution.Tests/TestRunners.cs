@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using Darp.CodeEditor.CSharp.Execution.TestApi;
 using Darp.CodeEditor.CSharp.Execution.TestHost;
 
@@ -11,7 +12,8 @@ internal static class TestRunners
         ITestHost? host = null,
         TimeSpan? callTimeout = null,
         TimeSpan? gracePeriod = null,
-        Action<string>? output = null
+        Action<string>? output = null,
+        TimeSpan? compileTimeout = null
     ) =>
         CSharpScriptRunner.StartAsync(
             new CSharpScriptRunnerOptions
@@ -21,6 +23,7 @@ internal static class TestRunners
                 CallTimeout = callTimeout ?? TimeSpan.FromSeconds(30),
                 CancellationGracePeriod = gracePeriod ?? TimeSpan.FromMilliseconds(300),
                 Output = output,
+                CompileTimeout = compileTimeout ?? TimeSpan.FromSeconds(60),
             },
             TestContext.Current.CancellationToken
         );
@@ -56,6 +59,13 @@ internal static class TestRunners
         );
         runner.RunnerExited += (_, e) => exited.TrySetResult(e);
         return exited.Task;
+    }
+
+    /// <summary>Sends a Unix signal, such as STOP or CONT.</summary>
+    public static void Signal(int processId, string signal)
+    {
+        using Process kill = Process.Start("kill", [$"-{signal}", processId.ToString(CultureInfo.InvariantCulture)])!;
+        kill.WaitForExit();
     }
 
     public static bool IsRunning(int processId)

@@ -104,14 +104,13 @@ internal sealed class RunnerConnection : IAsyncDisposable
         {
             // Ending fails the pending compiles; one added after that would wait for nothing.
             _endedToken.Token.ThrowIfCancellationRequested();
-            await _rpc.NotifyAsync(
-                    nameof(IRunnerService.Compile),
-                    [id, code, RunnerTypeName.Of(typeof(T))],
-                    [typeof(long), typeof(string), typeof(RunnerTypeName)]
+            CompileResult result = await CompileAsync(
+                    id,
+                    code,
+                    RunnerTypeName.Of(typeof(T)),
+                    compiled.Task,
+                    cancellationToken
                 )
-                .ConfigureAwait(false);
-            CompileResult result = await compiled
-                .Task.WaitAsync(_options.CompileTimeout, cancellationToken)
                 .ConfigureAwait(false);
             if (result.Error is { } error)
                 throw new InvalidOperationException(error);
@@ -133,8 +132,66 @@ internal sealed class RunnerConnection : IAsyncDisposable
         finally
         {
             _compiles.TryRemove(id, out _);
+            // Not awaited: when the runner does not read its input, the release waits for nothing.
             if (!started)
-                await ReleaseAsync(id).ConfigureAwait(false);
+                _ = ReleaseAsync(id);
+        }
+    }
+
+    /// <summary>
+    /// Hands the script to the runner and waits for it to compile, both within the compile timeout and the caller's
+    /// cancellation. A runner that has not read the script or answered by then makes no progress: it is killed, like a
+    /// call past its deadline, also when the caller stopped waiting earlier.
+    /// </summary>
+    private async Task<CompileResult> CompileAsync(
+        long id,
+        string code,
+        RunnerTypeName handler,
+        Task<CompileResult> compiled,
+        CancellationToken cancellationToken
+    )
+    {
+        using var compiling = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        compiling.CancelAfter(_options.CompileTimeout);
+        Task send = _rpc.NotifyAsync(
+            nameof(IRunnerService.Compile),
+            [id, code, handler],
+            [typeof(long), typeof(string), typeof(RunnerTypeName)]
+        );
+        _ = EndUnlessSentAsync(send, _options.CompileTimeout);
+        try
+        {
+            await send.WaitAsync(compiling.Token).ConfigureAwait(false);
+            return await compiled.WaitAsync(compiling.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw;
+        }
+        catch (OperationCanceledException) when (!_endedToken.IsCancellationRequested)
+        {
+            End(ScriptRunnerExitReason.Killed);
+            throw new TimeoutException(
+                $"The runner did not compile the script within {_options.CompileTimeout}, so it was stopped."
+            );
+        }
+    }
+
+    /// <summary>Kills the runner when it does not read a message within <paramref name="limit"/>.</summary>
+    private async Task EndUnlessSentAsync(Task send, TimeSpan limit)
+    {
+        try
+        {
+            await send.WaitAsync(limit).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            End(ScriptRunnerExitReason.Killed);
+        }
+        catch (Exception)
+        {
+            // Sending failed because the connection ended, which reports itself.
         }
     }
 
@@ -188,7 +245,7 @@ internal sealed class RunnerConnection : IAsyncDisposable
         }
     }
 
-    /// <summary>Tells the runner to forget a script. Best effort: it never hides the failure that led here.</summary>
+    /// <summary>Tells the runner to forget a script. Best effort: it never fails, it only ends with the runner.</summary>
     private async Task ReleaseAsync(long id)
     {
         if (!IsAlive)
@@ -197,8 +254,7 @@ internal sealed class RunnerConnection : IAsyncDisposable
         {
             await _rpc.NotifyAsync(nameof(IRunnerService.Release), [id], [typeof(long)]).ConfigureAwait(false);
         }
-        catch (Exception exception)
-            when (exception is ConnectionLostException or ObjectDisposedException or OperationCanceledException)
+        catch (Exception)
         {
             // The runner is gone, and the script with it.
         }

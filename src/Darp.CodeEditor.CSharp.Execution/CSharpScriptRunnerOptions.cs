@@ -33,7 +33,11 @@ public sealed record CSharpScriptRunnerOptions
     /// </summary>
     public TimeSpan CancellationGracePeriod { get; init; } = TimeSpan.FromSeconds(1);
 
-    /// <summary>How long compiling a script may take. Compiling runs no script code and has no call deadline.</summary>
+    /// <summary>
+    /// How long handing a script to the runner and compiling it may take. Compiling runs no script code and has no call
+    /// deadline. A runner that misses this timeout is stuck, for example because it no longer reads its input, and is
+    /// killed like one that misses a call deadline.
+    /// </summary>
     public TimeSpan CompileTimeout { get; init; } = TimeSpan.FromSeconds(60);
 
     /// <summary>How long starting a runner and loading the environment may take.</summary>
