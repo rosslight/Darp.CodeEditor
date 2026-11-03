@@ -8,6 +8,9 @@ internal enum TokenKind
     Code,
     Comment,
     String,
+
+    /// <summary>Highlighting has no answer yet, for example while the grammar loads.</summary>
+    Unknown,
 }
 
 /// <summary>Finds matching brackets, ignoring brackets in comments and strings.</summary>

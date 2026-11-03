@@ -162,9 +162,12 @@ internal sealed class EditingHelpers
             if (char.IsLetterOrDigit(previous) || previous == '_' || previous == pair.Open)
                 return false;
         }
-        // The context where the character went in, within its line and from the state at the line's start.
+        // The context where the character went in, within its line and from the state at the line's start. Without
+        // one, a closer could land inside a comment or string: add none.
         TokenKind kind = _editor.TokenKindBefore(typed);
-        return !(pair.NotInString && kind == TokenKind.String) && !(pair.NotInComment && kind == TokenKind.Comment);
+        return kind != TokenKind.Unknown
+            && !(pair.NotInString && kind == TokenKind.String)
+            && !(pair.NotInComment && kind == TokenKind.Comment);
     }
 
     /// <summary>True, and forgets it, when the editor inserted the closer at <paramref name="offset"/>.</summary>

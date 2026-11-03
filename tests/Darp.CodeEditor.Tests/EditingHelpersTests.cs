@@ -145,6 +145,17 @@ public sealed class EditingHelpersTests
     }
 
     [AvaloniaFact]
+    public async Task A_quote_typed_late_in_a_long_comment_line_does_not_close()
+    {
+        // Past the length tokenized on the UI thread, the context comes from the line's tokens.
+        string comment = "// " + new string('x', 1000) + " ";
+        using var editor = new EditorUnderTest(comment + "|", languageId: "csharp");
+        await editor.WaitForLanguageAsync("//");
+        editor.Type("\"");
+        editor.Text.ShouldBe(comment + "\"|");
+    }
+
+    [AvaloniaFact]
     public void Typing_an_opening_bracket_around_a_selection_surrounds_it()
     {
         using var editor = new EditorUnderTest("x = «abc»;");

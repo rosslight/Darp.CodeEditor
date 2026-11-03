@@ -67,6 +67,9 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
     private Task<LoadedTheme>? _theme;
     private LoadedTheme? _appliedTheme;
     private TextMateGrammar? _grammar;
+
+    /// <summary>True when loading found no grammar for the language: its text is plain code.</summary>
+    private bool _hasNoGrammar;
     private Task<LoadedGrammar>? _loading;
     private ITextSource? _loadingText;
     private int _generation;
@@ -108,6 +111,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         // Results of requests with the previous grammar are dropped.
         _generation++;
         _grammar = null;
+        _hasNoGrammar = false;
         Invalidate();
         if (_theme is { } theme)
             Load(source, theme);
@@ -232,23 +236,33 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
     /// <summary>
     /// Whether text inserted at <paramref name="offset"/> would be code, comment or string: tokenizes its line up to
     /// there from the state at the line's start, so a line after a line comment starts in code and one inside a block
-    /// comment in a comment. Code when that state is unknown or the grammar is busy.
+    /// comment in a comment. When that cannot run now, the last tokens of the character before; unknown without those
+    /// or while the grammar loads. Code when the language has no grammar.
     /// </summary>
     public TokenKind TokenKindBefore(int offset)
     {
-        if (_grammar is not { TooSlowForUiThread: false } grammar || _document is not { } document)
-            return TokenKind.Code;
+        if (_document is not { } document)
+            return TokenKind.Unknown;
+        if (_grammar is not { } grammar)
+            return _hasNoGrammar ? TokenKind.Code : TokenKind.Unknown;
         DocumentLine line = document.GetLineByOffset(offset);
         int index = line.LineNumber - 1;
         int column = offset - line.Offset;
-        if (index >= _lines.Count || column > MaxSyncLineLength || (index > 0 && _lines[index - 1].EndState is null))
-            return TokenKind.Code;
+        if (index >= _lines.Count)
+            return TokenKind.Unknown;
+        if (
+            grammar.TooSlowForUiThread
+            || column > MaxSyncLineLength
+            || (index > 0 && _lines[index - 1].EndState is null)
+            || !grammar.TryEnterOnUiThread(s_contextTimeLimit)
+        )
+        {
+            return column > 0 && _lines[index].Tokens is { } known ? KindOf(known, column - 1) : TokenKind.Unknown;
+        }
         IStateStack? state = index == 0 ? null : _lines[index - 1].EndState;
         // A space stands for the inserted text: the token it gets is the context there. Ending at the prefix would
         // give a closing quote's string token, though the position after it is code.
         string text = document.GetText(line.Offset, column) + " ";
-        if (!grammar.TryEnterOnUiThread(s_contextTimeLimit))
-            return TokenKind.Code;
         int[] tokens;
         try
         {
@@ -336,6 +350,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
             _firstInvalid = 0;
         }
         _grammar = loaded.Grammar;
+        _hasNoGrammar = loaded.Grammar is null;
         // The lines tokenized while loading still apply if the text has not changed since. Lines from the start of the
         // document are exact; lines further down started from a guessed state.
         if (
