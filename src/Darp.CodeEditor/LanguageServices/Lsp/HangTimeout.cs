@@ -87,7 +87,10 @@ internal sealed class HangTimeout
         {
             if (client is not null && _answered == client)
             {
-                ResetIfHealthy();
+                // A server that hung ran healthy only until the call it hung in started, which checked that already;
+                // the time it waited for the call does not count.
+                if (!hung)
+                    ResetIfHealthy();
                 _answered = null;
             }
             if (hung && _timeout != Timeout.InfiniteTimeSpan)

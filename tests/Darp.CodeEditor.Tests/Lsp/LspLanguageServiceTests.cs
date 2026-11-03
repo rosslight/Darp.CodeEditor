@@ -418,8 +418,8 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
             options =>
                 options with
                 {
-                    MaxResponseTimeout = TimeSpan.FromMilliseconds(300),
-                    Restart = options.Restart! with { StableAfter = TimeSpan.FromMilliseconds(500) },
+                    MaxResponseTimeout = TimeSpan.FromMilliseconds(400),
+                    Restart = options.Restart! with { StableAfter = TimeSpan.FromMilliseconds(300) },
                     Log = message => RecordHang(hangs, message),
                 }
         );
@@ -427,13 +427,14 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
         service.OpenDocument(new DocumentSnapshot("a", 1, Text));
         ChannelReader<LanguageServerState> states = RecordStates(service);
 
-        // Each server answers once, so that it gets the timeout rather than twice that, and then hangs.
+        // Each server answers once, so that it gets the timeout rather than twice that, and then hangs. Waiting for
+        // a hang is not running healthy, although the longest wait is longer than StableAfter.
         for (int i = 0; i < 4; i++)
             await AnswerThenHangAsync(TimeSpan.Zero);
         // This server answers and runs for longer than StableAfter before it hangs.
-        await AnswerThenHangAsync(TimeSpan.FromMilliseconds(600));
+        await AnswerThenHangAsync(TimeSpan.FromMilliseconds(400));
 
-        HangTimes(hangs).ShouldBe(["0.1 s", "0.2 s", "0.3 s", "0.3 s", "0.1 s"]);
+        HangTimes(hangs).ShouldBe(["0.1 s", "0.2 s", "0.4 s", "0.4 s", "0.1 s"]);
         servers.Starts.ShouldBe(6);
 
         async Task AnswerThenHangAsync(TimeSpan healthy)
