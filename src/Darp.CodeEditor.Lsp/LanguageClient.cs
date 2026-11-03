@@ -119,6 +119,19 @@ public sealed class LanguageClient : IAsyncDisposable
         await _transport.DisposeAsync().ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Ends the server at once, without <c>shutdown</c>: for a server that stopped answering or reading. Completes
+    /// <see cref="Completion"/>; disposing afterwards does nothing.
+    /// </summary>
+    public async ValueTask AbortAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+        // The process first, so that it ends even if the connection waits for it.
+        await _transport.DisposeAsync().ConfigureAwait(false);
+        await Connection.DisposeAsync().ConfigureAwait(false);
+    }
+
     private static void Register(JsonRpcConnection connection, LanguageClientOptions options, Action<string> log)
     {
         connection.OnRequest(

@@ -41,6 +41,27 @@ public sealed class LanguageClientTests
     }
 
     [Fact]
+    public async Task Aborting_ends_the_server_without_shutdown_and_completes_the_client()
+    {
+        var wire = new Wire();
+        var toy = new ToyServer(wire.Input, wire.Output);
+        Task<int> run = toy.Server.RunAsync();
+        (Stream input, Stream output) = wire.Peer;
+        var transport = new LanguageServerTransport(input, output, run, toy.Server.DisposeAsync);
+        LanguageClient client = await LanguageClient.StartAsync(
+            transport,
+            new LanguageClientOptions(ToyClient.InitializeParams),
+            Wire.Timeout
+        );
+
+        await client.AbortAsync().AsTask().WaitAsync(Wire.Timeout);
+
+        await client.Completion.WaitAsync(Wire.Timeout);
+        // Without shutdown and exit, the server ends with code 1.
+        (await run.WaitAsync(Wire.Timeout)).ShouldBe(1);
+    }
+
+    [Fact]
     public async Task A_failed_start_fails_the_caller_and_is_retried()
     {
         int starts = 0;
