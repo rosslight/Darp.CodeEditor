@@ -44,6 +44,7 @@ public static class CSharpLanguageServer
                 ClientName = "Darp.CodeEditor.CSharp",
                 Log = options.Log,
                 Restart = options.Restart,
+                ResponseTimeout = options.ResponseTimeout,
             }
         );
     }
@@ -125,4 +126,10 @@ public sealed record CSharpLanguageServerOptions
 
     /// <summary>How long a crashed server waits before it restarts.</summary>
     public SupervisorOptions? Restart { get; init; }
+
+    /// <summary>
+    /// How long the server may take to answer or to read before it counts as hung and restarts; see
+    /// <see cref="LspLanguageServiceOptions.ResponseTimeout"/>.
+    /// </summary>
+    public TimeSpan ResponseTimeout { get; init; } = TimeSpan.FromSeconds(10);
 }

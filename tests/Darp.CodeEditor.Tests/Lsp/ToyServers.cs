@@ -16,7 +16,7 @@ namespace Darp.CodeEditor.Tests.Lsp;
 internal sealed class ToyServers
 {
     private readonly List<JsonObject> _sent = [];
-    private TaskCompletionSource _writes = Open();
+    private WriteGate _gate = new();
     private ToyServer? _current;
     private int _starts;
 
@@ -33,7 +33,8 @@ internal sealed class ToyServers
     }
 
     /// <summary>A service of these servers, which restart after 10 ms.</summary>
-    public LspLanguageService CreateService() =>
+    /// <param name="responseTimeout">After how long a server that answers or reads nothing counts as hung.</param>
+    public LspLanguageService CreateService(TimeSpan? responseTimeout = null) =>
         new(
             new LspLanguageServiceOptions(StartAsync, "toy")
             {
@@ -45,16 +46,20 @@ internal sealed class ToyServers
                     ["number"] = ClassificationKind.Constant,
                 },
                 Restart = new SupervisorOptions { FirstDelay = TimeSpan.FromMilliseconds(10) },
+                ResponseTimeout = responseTimeout ?? TimeSpan.FromSeconds(10),
             }
         );
 
     /// <summary>The messages of a method the client sent.</summary>
     public IReadOnlyList<JsonObject> SentOf(string method) => [.. Sent.Where(m => (string?)m["method"] == method)];
 
-    /// <summary>Holds what the client writes until <see cref="UnblockWrites"/>, as a server that reads nothing.</summary>
-    public void BlockWrites() => _writes = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    /// <summary>
+    /// Holds what the client writes to the running server until <see cref="UnblockWrites"/>, as a server that reads
+    /// nothing. Servers started later read again.
+    /// </summary>
+    public void BlockWrites() => _gate.Block();
 
-    public void UnblockWrites() => _writes.TrySetResult();
+    public void UnblockWrites() => _gate.Open();
 
     /// <summary>Ends the running server as a crash would: its connection closes without shutdown.</summary>
     public Task CrashAsync() =>
@@ -68,7 +73,9 @@ internal sealed class ToyServers
         Task<int> run = server.Server.RunAsync();
         _current = server;
         Interlocked.Increment(ref _starts);
-        var output = new RecordingStream(toServer.Writer.AsStream(), Record, () => _writes.Task);
+        var gate = new WriteGate();
+        _gate = gate;
+        var output = new RecordingStream(toServer.Writer.AsStream(), Record, () => gate.Opened);
         return Task.FromResult(
             new LanguageServerTransport(
                 toClient.Reader.AsStream(),
@@ -84,17 +91,24 @@ internal sealed class ToyServers
         );
     }
 
-    private static TaskCompletionSource Open()
-    {
-        var open = new TaskCompletionSource();
-        open.SetResult();
-        return open;
-    }
-
     private void Record(JsonObject message)
     {
         lock (_sent)
             _sent.Add(message);
+    }
+
+    /// <summary>Holds the writes to one server while it is blocked.</summary>
+    private sealed class WriteGate
+    {
+        private TaskCompletionSource _opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public WriteGate() => _opened.SetResult();
+
+        public Task Opened => _opened.Task;
+
+        public void Block() => _opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void Open() => _opened.TrySetResult();
     }
 
     /// <summary>Passes writes on, and reads the LSP messages in them.</summary>

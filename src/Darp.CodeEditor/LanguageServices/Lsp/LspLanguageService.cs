@@ -174,8 +174,15 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
             try
             {
                 item =
-                    await result
-                        .Client.Connection.SendRequestAsync(LspMethods.CompletionResolve, item, cancellationToken)
+                    await AnswerAsync(
+                            result.Client,
+                            result.Client.Connection.SendRequestAsync(
+                                LspMethods.CompletionResolve,
+                                item,
+                                cancellationToken
+                            ),
+                            cancellationToken
+                        )
                         .ConfigureAwait(false)
                     ?? item;
             }
@@ -329,7 +336,19 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
                     }
                 ),
         };
-        return await LanguageClient.StartAsync(transport, options, cancellationToken).ConfigureAwait(false);
+        // A server that never answers initialize counts as a failed start, which is retried.
+        using var initializing = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        initializing.CancelAfter(_options.ResponseTimeout);
+        try
+        {
+            return await LanguageClient.StartAsync(transport, options, initializing.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                $"The language server did not answer initialize within {_options.ResponseTimeout.TotalSeconds:0.#} s."
+            );
+        }
     }
 
     private InitializeParams CreateInitializeParams() =>
@@ -600,7 +619,7 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
                     || !_documents.TryGetValue(document.DocumentId, out ServerDocument? open)
                     || open.Text.Version != document.Version
                         ? null
-                        : new Sent<TResponse>(send(client, open), open.Text, features)
+                        : new Sent<TResponse>(send(client, open), open.Text, features, client)
                 );
             }
             catch (Exception exception)
@@ -615,7 +634,7 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
         TResponse? response;
         try
         {
-            response = await request.Response.WaitAsync(cancellationToken).ConfigureAwait(false);
+            response = await AnswerAsync(request.Client, request.Response, cancellationToken).ConfigureAwait(false);
         }
         catch (JsonRpcException exception)
             when (exception.Code is ErrorCodes.RequestCancelled or ErrorCodes.ContentModified)
@@ -630,15 +649,62 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
         return response is null ? null : map(response, request.Text, request.Features);
     }
 
+    /// <summary>Sends a notification and waits until it is written: a server that stops reading counts as hung.</summary>
     private async ValueTask NotifyAsync<T>(LanguageClient client, NotificationType<T> type, T parameters)
     {
         try
         {
-            await client.Connection.SendNotificationAsync(type, parameters).ConfigureAwait(false);
+            await client
+                .Connection.SendNotificationAsync(type, parameters)
+                .WaitAsync(_options.ResponseTimeout)
+                .ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            Abort(client, $"it read nothing for {_options.ResponseTimeout.TotalSeconds:0.#} s");
         }
         catch (IOException)
         {
             // The connection ended: the server restarts and gets the documents again.
+        }
+    }
+
+    /// <summary>
+    /// Waits for the answer to a request while the caller wants it. A server that gives none within
+    /// <see cref="LspLanguageServiceOptions.ResponseTimeout"/> counts as hung: it is ended, and restarts.
+    /// </summary>
+    /// <exception cref="IOException">The server counts as hung.</exception>
+    private async Task<T?> AnswerAsync<T>(LanguageClient client, Task<T?> response, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await response.WaitAsync(_options.ResponseTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            Abort(client, $"it answered nothing for {_options.ResponseTimeout.TotalSeconds:0.#} s");
+            throw new IOException("The language server stopped answering.");
+        }
+    }
+
+    /// <summary>Ends a server that stopped answering or reading; the supervisor starts a new one.</summary>
+    private void Abort(LanguageClient client, string reason)
+    {
+        if (_features.Client != client)
+            return;
+        Log($"The language server is hung: {reason}. It is ended and restarts.");
+        _ = AbortAsync();
+
+        async Task AbortAsync()
+        {
+            try
+            {
+                await client.AbortAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                Log($"Ending the hung language server failed: {exception}");
+            }
         }
     }
 
@@ -845,7 +911,12 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
     /// <summary>A change to send, or other work for the loop.</summary>
     private readonly record struct Work(DocumentChange? Change, Func<ValueTask>? Run);
 
-    private sealed record Sent<TResponse>(Task<TResponse?> Response, DocumentText Text, ServerFeatures Features)
+    private sealed record Sent<TResponse>(
+        Task<TResponse?> Response,
+        DocumentText Text,
+        ServerFeatures Features,
+        LanguageClient Client
+    )
         where TResponse : class;
 
     /// <param name="Items">The server's items in the order of the editor's list.</param>

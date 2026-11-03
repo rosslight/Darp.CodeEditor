@@ -45,6 +45,13 @@ public sealed record LspLanguageServiceOptions(
     /// <summary>How long a crashed server waits before it restarts.</summary>
     public SupervisorOptions? Restart { get; init; }
 
+    /// <summary>
+    /// How long the server may take to answer a request the editor still waits for, to read what the editor sent, or
+    /// to answer <c>initialize</c>. A server that takes longer counts as hung: it is ended and restarts.
+    /// <see cref="Timeout.InfiniteTimeSpan"/> waits forever.
+    /// </summary>
+    public TimeSpan ResponseTimeout { get; init; } = TimeSpan.FromSeconds(10);
+
     /// <summary>How much the server may send in one message.</summary>
     public JsonRpcLimits? Limits { get; init; }
 }

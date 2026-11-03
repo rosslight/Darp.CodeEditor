@@ -251,4 +251,47 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
             .Count.ShouldBe(200);
         info.ShouldNotBeNull().Range.ShouldBe(new TextRange(0, 1_000_200));
     }
+
+    [Fact]
+    public async Task A_server_that_stops_answering_is_ended_and_restarted()
+    {
+        var servers = new ToyServers();
+        await using LspLanguageService service = servers.CreateService(TimeSpan.FromMilliseconds(500));
+        await service.PrewarmAsync(Timeout);
+        service.OpenDocument(new DocumentSnapshot("a", 1, Text));
+
+        // The toy answers a hover over "slow" only when it is cancelled, and nothing cancels this one.
+        var waited = Stopwatch.StartNew();
+        QuickInfo? hung = await service.GetQuickInfoAsync(new DocumentVersion("a", 1), 13, Timeout);
+        waited.Stop();
+        await Wait.UntilAsync(() => servers.Starts == 2 && service.State == LanguageServerState.Running);
+
+        hung.ShouldBeNull();
+        waited.Elapsed.ShouldBeInRange(TimeSpan.FromMilliseconds(450), TimeSpan.FromSeconds(10));
+        (await service.GetQuickInfoAsync(new DocumentVersion("a", 1), 1, Timeout))
+            .ShouldNotBeNull()
+            .Text.ShouldBe("Hi, alpha");
+    }
+
+    [Fact]
+    public async Task A_server_that_stops_reading_is_ended_and_restarted_with_the_current_text()
+    {
+        var servers = new ToyServers();
+        await using LspLanguageService service = servers.CreateService(TimeSpan.FromMilliseconds(500));
+        await service.PrewarmAsync(Timeout);
+        service.OpenDocument(new DocumentSnapshot("a", 1, Text));
+        // A round trip, so that the document reached the server before it stops reading.
+        (await service.GetQuickInfoAsync(new DocumentVersion("a", 1), 1, Timeout)).ShouldNotBeNull();
+        servers.BlockWrites();
+
+        var call = Stopwatch.StartNew();
+        service.ChangeDocument(new DocumentChange("a", 2, new TextChange(0, 0, "x")));
+        call.Stop();
+        await Wait.UntilAsync(() => servers.Starts == 2 && service.State == LanguageServerState.Running);
+
+        call.Elapsed.ShouldBeLessThan(TimeSpan.FromMilliseconds(100));
+        (await service.GetQuickInfoAsync(new DocumentVersion("a", 2), 1, Timeout))
+            .ShouldNotBeNull()
+            .Text.ShouldBe("Hi, xalpha");
+    }
 }
