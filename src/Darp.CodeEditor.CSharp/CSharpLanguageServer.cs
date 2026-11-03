@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.Text.Json;
 using Darp.CodeEditor.CSharp.Hosting;
 using Darp.CodeEditor.LanguageServices;
@@ -19,7 +18,7 @@ namespace Darp.CodeEditor.CSharp;
 public static class CSharpLanguageServer
 {
     /// <summary>The file name of the server's main assembly.</summary>
-    public const string ServerFileName = "Darp.CodeEditor.CSharp.Server.dll";
+    public const string ServerFileName = CSharpHelper.ServerName + ".dll";
 
     /// <summary>
     /// Creates a service that starts the server for <paramref name="environment"/> when the first C# document opens, or
@@ -31,9 +30,7 @@ public static class CSharpLanguageServer
     )
     {
         options ??= new CSharpLanguageServerOptions();
-        string server = Path.GetFullPath(
-            options.ServerPath ?? Path.Combine(AppContext.BaseDirectory, "helpers", "csharp-server", ServerFileName)
-        );
+        string? server = options.ServerPath is { } path ? Path.GetFullPath(path) : null;
         using JsonDocument initializationOptions = JsonDocument.Parse(
             CSharpScriptInitializationOptions.Create(environment).ToJsonString()
         );
@@ -50,63 +47,38 @@ public static class CSharpLanguageServer
         );
     }
 
-    private static Task<LanguageServerTransport> StartAsync(string server, CSharpLanguageServerOptions options)
+    private static Task<LanguageServerTransport> StartAsync(string? server, CSharpLanguageServerOptions options)
     {
-        if (!File.Exists(server))
-        {
-            throw new FileNotFoundException(
-                $"The C# script language server is not at {server}. Import Darp.CodeEditor.CSharp.targets into the app "
-                    + "project, or set CSharpLanguageServerOptions.ServerPath.",
-                server
-            );
-        }
-        bool assembly = server.EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
-        var start = new ProcessStartInfo(assembly ? options.DotNetPath ?? FindDotNet() : server)
-        {
-            WorkingDirectory = Path.GetDirectoryName(server),
-        };
-        if (assembly)
-            start.ArgumentList.Add(server);
+        const string howToFix =
+            "Reference the Darp.CodeEditor.CSharp package from the app project, or set "
+            + "CSharpLanguageServerOptions.ServerPath.";
+        if (server is null)
+            server = CSharpHelper.Find(CSharpHelper.DefaultDirectory("csharp-server"), CSharpHelper.ServerName, howToFix);
+        else if (!File.Exists(server))
+            throw new FileNotFoundException($"The C# script language server is not at {server}. {howToFix}", server);
+        Dictionary<string, string> environment = [];
+        if (options.DotNetRoot is { } root)
+            environment["DOTNET_ROOT"] = root;
+        ProcessStartInfo start = CSharpHelper.CreateStartInfo(server, options.DotNetPath, environment);
         foreach (string argument in options.Arguments)
             start.ArgumentList.Add(argument);
-        if (options.DotNetRoot is { } root)
-            start.Environment["DOTNET_ROOT"] = root;
         Action<string>? log = options.Log;
         return LanguageServerTransport.StartProcessAsync(start, log is null ? null : line => log($"C# server: {line}"));
-    }
-
-    /// <summary>
-    /// The <c>dotnet</c> executable: the one that runs the app's tooling, the one in <c>DOTNET_ROOT</c>, the one of the
-    /// runtime that runs the app, or else the one on the <c>PATH</c>.
-    /// </summary>
-    private static string FindDotNet()
-    {
-        string executable = OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet";
-        if (Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") is { Length: > 0 } host && File.Exists(host))
-            return host;
-        if (
-            Environment.GetEnvironmentVariable("DOTNET_ROOT") is { Length: > 0 } root
-            && Path.Combine(root, executable) is var rooted
-            && File.Exists(rooted)
-        )
-        {
-            return rooted;
-        }
-        // A JIT app runs on <root>/shared/Microsoft.NETCore.App/<version>/.
-        string fromRuntime = Path.GetFullPath(
-            Path.Combine(RuntimeEnvironment.GetRuntimeDirectory(), "..", "..", "..", executable)
-        );
-        return File.Exists(fromRuntime) ? fromRuntime : executable;
     }
 }
 
 /// <summary>Where the C# script language server is, and how it runs.</summary>
+/// <remarks>
+/// The server inherits the app's environment without the variables that start with <c>DOTNET_</c>, <c>COMPlus_</c> or
+/// <c>CORECLR_</c>, such as startup hooks, profilers and runtime settings meant for the app.
+/// </remarks>
 public sealed record CSharpLanguageServerOptions
 {
     /// <summary>
-    /// The server: its <c>.dll</c>, which runs with <c>dotnet</c>, or its app host. By default
-    /// <c>helpers/csharp-server/Darp.CodeEditor.CSharp.Server.dll</c> next to the app, where
-    /// <c>Darp.CodeEditor.CSharp.targets</c> puts it.
+    /// The server: its <c>.dll</c>, which runs with <c>dotnet</c>, or its app host. By default the one in
+    /// <c>helpers/csharp-server</c> next to the app, where the <c>Darp.CodeEditor.CSharp</c> package puts it: a
+    /// published app has its app host, which runs on the .NET runtime in <c>helpers/dotnet</c>; a build output has its
+    /// <c>.dll</c>.
     /// </summary>
     public string? ServerPath { get; init; }
 
@@ -116,7 +88,10 @@ public sealed record CSharpLanguageServerOptions
     /// </summary>
     public string? DotNetPath { get; init; }
 
-    /// <summary>The .NET runtime that an app-host server runs on, such as a runtime bundled with the app.</summary>
+    /// <summary>
+    /// <c>DOTNET_ROOT</c> for the server, for an app host that is not tied to a runtime of its own. The app hosts in
+    /// <c>helpers/</c> ignore it: they run only on the runtime in <c>helpers/dotnet</c>.
+    /// </summary>
     public string? DotNetRoot { get; init; }
 
     /// <summary>Further server arguments, such as <c>--diagnostics-delay 100</c>.</summary>

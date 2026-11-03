@@ -1,14 +1,14 @@
 using System.Text;
 
-namespace Darp.CodeEditor.CSharp.Execution.Hosting;
+namespace Darp.CodeEditor.Lsp.Hosting;
 
 /// <summary>
-/// Splits the runner's console output into lines of bounded length, so a script that writes without line breaks cannot
-/// grow the app's memory. A longer line is cut, ends with "…", and the rest of it is dropped.
+/// Splits a child's console output into lines of bounded length, so a child that writes without line breaks cannot
+/// grow this process's memory. A longer line is cut, ends with "…", and the rest of it is dropped.
 /// </summary>
 internal sealed class OutputLines(Action<string> line)
 {
-    /// <summary>The most characters of a line that are kept; documented on <see cref="CSharpScriptRunnerOptions.Output"/>.</summary>
+    /// <summary>The most characters of a line that are kept; documented on <see cref="ChildProcess.StartAsync"/>.</summary>
     public const int MaxLength = 4096;
 
     private readonly Action<string> _line = line;

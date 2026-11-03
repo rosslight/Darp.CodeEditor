@@ -4,4 +4,9 @@
     <!-- Host apps describe their script environment with this library, including NativeAOT apps. -->
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- CSharpHelper: both start the C# helpers the same way. -->
+    <InternalsVisibleTo Include="Darp.CodeEditor.CSharp" />
+    <InternalsVisibleTo Include="Darp.CodeEditor.CSharp.Execution" />
+  </ItemGroup>
 </Project>

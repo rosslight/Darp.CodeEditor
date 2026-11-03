@@ -10,6 +10,8 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Darp.CodeEditor.CSharp.Hosting\Darp.CodeEditor.CSharp.Hosting.csproj" />
+    <!-- ChildProcess: the runner ends with the app. -->
+    <ProjectReference Include="..\Darp.CodeEditor.Lsp\Darp.CodeEditor.Lsp.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="StreamJsonRpc" />
