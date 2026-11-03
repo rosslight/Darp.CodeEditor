@@ -106,12 +106,18 @@ Command line flags of both demos:
 2. Requests and notifications are dispatched in arrival order. A `DispatchMode.Serial` handler (the default for
    notifications, such as `textDocument/didChange`) runs to completion before the next message. A
    `DispatchMode.Concurrent` handler (the default for requests) runs until its first incomplete `await`, so it reads
-   the state that all earlier messages left behind, and then runs alongside later messages.
+   the state that all earlier messages left behind, and then runs alongside later messages. It must therefore capture
+   the state it works on, such as the document text and version, before that first `await`. A `Serial` handler must
+   not await a request to the peer that the peer can only answer after a request of its own was dispatched here: that
+   deadlocks.
 3. A request whose token was cancelled by the time its handler returned answers `RequestCancelled`, whatever the
    handler returned. Handlers throw `JsonRpcException`, for example with `ContentModified`, to answer other errors.
 4. Sending only queues a message. One write loop serializes and writes messages in the order they were sent, so
    callers never wait for serialization or a slow peer. A request cancelled before it went out is left out; otherwise
-   `$/cancelRequest` follows it. Disposing drops what was not written yet.
+   `$/cancelRequest` follows it. Disposing drops what was not written yet. A failed write ends the connection, since
+   part of the frame may be on the stream; messages that fail to serialize fail only their own send. The send queue
+   has no bound: callers that send many large messages, such as document changes, await each send to get
+   back-pressure.
 5. `JsonRpcLimits` caps headers and messages; a longer message ends the connection. Null results are written as
    `"result": null`, and document URIs are kept as sent.
 

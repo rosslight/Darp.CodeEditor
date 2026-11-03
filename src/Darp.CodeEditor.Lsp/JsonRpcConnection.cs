@@ -138,8 +138,10 @@ public sealed class JsonRpcConnection : IAsyncDisposable
     /// <summary>Handles notifications of <paramref name="type"/>. Handlers are registered before <see cref="Start"/>.</summary>
     /// <param name="handler">Receives a token that is cancelled when the connection ends.</param>
     /// <remarks>
-    /// A <see cref="DispatchMode.Serial"/> handler holds up all later messages, so it must not await a request to the
-    /// peer that the peer can only answer after this connection dispatched a request of the peer.
+    /// A <see cref="DispatchMode.Concurrent"/> handler must read the state it works on before its first incomplete
+    /// <c>await</c>: later messages are dispatched from then on. A <see cref="DispatchMode.Serial"/> handler holds up
+    /// all later messages, so it must not await a request to the peer that the peer can only answer after this
+    /// connection dispatched a request of the peer.
     /// </remarks>
     public void OnNotification<TParams>(
         NotificationType<TParams> type,
@@ -603,24 +605,47 @@ public sealed class JsonRpcConnection : IAsyncDisposable
             // A request that its caller cancelled before it went out is left out, and then its $/cancelRequest too.
             if (message.Abandoned.IsCancellationRequested || message.Cancels is { WasWritten: false })
                 continue;
+            ReadOnlyMemory<byte> body;
             try
             {
                 // After dispose, the remaining messages fail without being built or touching the stream.
                 _disposed.Token.ThrowIfCancellationRequested();
-                await WriteFrameAsync(message.Build()).ConfigureAwait(false);
+                body = message.Build();
+            }
+            catch (Exception exception)
+            {
+                // Nothing reached the stream, so only this message fails.
+                Fail(message, _disposed.IsCancellationRequested ? Closed() : exception);
+                if (!_disposed.IsCancellationRequested)
+                    _log($"Serializing a message failed: {exception}");
+                continue;
+            }
+            try
+            {
+                await WriteFrameAsync(body).ConfigureAwait(false);
                 message.WasWritten = true;
                 message.Written?.TrySetResult();
             }
             catch (Exception exception)
             {
-                Exception failure = _disposed.IsCancellationRequested ? Closed() : exception;
-                message.Written?.TrySetException(failure);
-                if (message.RequestId is { } id && _outgoing.TryRemove(id, out TaskCompletionSource<JsonElement>? call))
-                    call.TrySetException(failure);
+                // Part of the frame may be on the stream, so a later frame would be read as its rest: end the connection.
+                Fail(message, _disposed.IsCancellationRequested ? Closed() : exception);
                 if (!_disposed.IsCancellationRequested)
-                    _log($"Sending a message failed: {exception}");
+                    _log($"Writing a message failed, so the connection ends: {exception}");
+                Stop();
+                while (_sends.Reader.TryRead(out OutgoingMessage? queued))
+                    Fail(queued, Closed());
+                return;
             }
         }
+    }
+
+    /// <summary>Fails the caller of a message that was not written.</summary>
+    private void Fail(OutgoingMessage message, Exception failure)
+    {
+        message.Written?.TrySetException(failure);
+        if (message.RequestId is { } id && _outgoing.TryRemove(id, out TaskCompletionSource<JsonElement>? call))
+            call.TrySetException(failure);
     }
 
     /// <remarks>
