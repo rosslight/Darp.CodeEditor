@@ -18,6 +18,14 @@ public sealed partial class MainWindow : Window, IBenchHost
         LuauEditor.Text = SampleDocuments.LuauScript;
         JsonEditor.Text = SampleDocuments.Json;
         SetLuauGrammar();
+        PacketScriptRun.Attach(
+            this,
+            RunButton,
+            RunOutput,
+            PacketEditor,
+            () => Tabs.SelectedItem = PacketTab,
+            Program.Options
+        );
 
         // The editors are fully usable now. C# features switch on once the service finished loading.
         CSharpReady = noLanguageService ? Task.FromResult<CSharpScriptLanguageService?>(null) : StartCSharpAsync();

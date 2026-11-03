@@ -95,7 +95,7 @@ Host app (JIT or AOT)
 - **Language service contract (`ILanguageService`).** Six async methods: completions, completion description, diagnostics, classifications (for the visible range), quick info and signature help. A document is `DocumentSnapshot(DocumentId, Version, Text)`. Every request carries a cancellation token. The editor always calls the service through `Task.Run`. A keystroke cancels requests for the document. Stale non-completion results are dropped; completion can map forward while the same word is typed, and cached markers move with the text until new results arrive.
 - **C# language server (`Darp.CodeEditor.CSharp.Server`).** Out of process, LSP over stdio, Roslyn 5.9.0. It caches a Roslyn document for the current version and applies `didChange` edits incrementally. It loads the globals type with `MetadataLoadContext`, so no user code runs in the server. The conversation reports 36 passing tests, including 19 compiler-parity checks against `CSharpScript`. It runs on the shared LSP layer `Darp.CodeEditor.Lsp` (#37).
 - **Shared script environment.** `Darp.CodeEditor.CSharp.Hosting` (AOT-safe, no Roslyn) describes a script: globals assembly path and type name, references, framework references, imports, language version, nullable setting, unsafe, overflow and warning level. It is sent in a versioned `csharpScript` initialization section. `Darp.CodeEditor.CSharp.Scripting` (JIT) turns the description into `ScriptOptions` and compilation options. The server uses it; the runner will use it too, to reduce semantic drift; parity still needs tests (#3, #33).
-- **Script runner (not in the repository yet).** A separate helper process on the bundled runtime (#36). The spike recommends StreamJsonRpc 2.26.150 with MessagePack over stdio and length-header framing. It compiles with `CSharpScript.EvaluateAsync<IHandler>` and exposes the returned handler through a remote proxy; this is the proposed production approach. The scripts receive a generated proxy for the globals. The spike tested exceptions, hangs, crashes and parent death on Linux.
+- **Script runner (`Darp.CodeEditor.CSharp.Runner`, host API `Darp.CodeEditor.CSharp.Execution`).** A separate helper process on the bundled runtime (#36): StreamJsonRpc 2.26.150 with MessagePack over stdio and length-header framing. It compiles with `ResolvedScriptEnvironment`, like the server, and returns the script's handler to the app as a generated proxy; the globals receive proxies of the app's services. Deadlines cancel first and kill after a grace period, a crash or kill restarts the runner on the next script, and `ScriptBatcher` batches single items (#35). Tested on Linux: exceptions, hangs, crashes, dispose and parent death, also from a NativeAOT app; Windows uses a job object, not tested yet. See the README.
 - **Luau (follow-up).** luau-lsp runs as a separate process behind the same LSP client. Host API type-definition generation is planned, not built (#2).
 
 ### 2.3 Rules that keep the UI thread free
@@ -121,7 +121,7 @@ Host app (JIT or AOT)
 | Editor core and demos (JIT and AOT) | `main`, commit `01cef73` | Built. 15 tests pass (per the conversation). In-window popups exist behind `--overlay-popups` |
 | C# language server and shared environment | `feat/csharp-script-server` (draft PR #1) | Built. 36 tests pass. Review: 7 findings, 4 must-fix (cancellation, closed-document cache, version rules, server outliving the app). Merge after fixes |
 | LSP layer (`Darp.CodeEditor.Lsp`) | `feat/lsp-protocol` has no commits beyond `main` | Not started |
-| Script runner | `feat/script-runner` has no runner code yet | Spike done, see section 4. Product code not started |
+| Script runner | `feat/script-runner` | Built: runner, host API, MSBuild layout with the bundled runtime, Run in both demos, tests and benchmark. Tests run on Linux and, in CI, on Windows; macOS not run |
 | Editor LSP client | none | Not started. Demos still use the in-process C# service |
 | Luau | none | Follow-up |
 | WebView editor | `feat/webview-bakeoff` | Record only, not merged |
@@ -215,7 +215,7 @@ Only the numbers that drove decisions. Source names refer to section 7.
 4. **Windows budgets.** Highlighted text (1,123 ms JIT) and C# ready (2.68 s) are over budget on the Windows laptop. The Windows re-run is not done.
 5. **Untested platforms.** arm64 and macOS are untested. The server is tested on Linux x64 only.
 6. **GC outliers.** The 57–167 ms pauses seen in the early prototype are unexplained. They were not reproduced in 40 runs.
-7. **Script runner.** The Windows process cleanup is documented, not tested. The batching numbers come from synthetic load. Real handler work and UI load at 1,000–10,000 packets per second are not measured.
+7. **Script runner.** On Windows, CI tests the job object for parent death, kills and crashes, but not for processes that scripts start. The batching numbers come from synthetic load. Real handler work and UI load at 1,000–10,000 packets per second are not measured.
 8. **Nullable in scripts.** `CSharpScript` has no public nullable option. The shared options builder accepts only `disable`; scripts can opt in with `#nullable enable`.
 9. **IME and accessibility.** Not tested. The test VM has no input-method engine.
 10. **Theme model.** Only Dark+ is wired. Semantic colors are hard-coded.

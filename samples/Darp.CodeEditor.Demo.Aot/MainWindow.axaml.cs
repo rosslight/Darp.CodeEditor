@@ -14,6 +14,14 @@ public sealed partial class MainWindow : Window, IBenchHost
         CSharpEditor.Text = SampleDocuments.CSharpScript;
         // A small language service without Roslyn: word completion and JSON parse errors, all AOT-safe.
         JsonEditor.LanguageService = new JsonLanguageService();
+        PacketScriptRun.Attach(
+            this,
+            RunButton,
+            RunOutput,
+            PacketEditor,
+            () => Tabs.SelectedItem = PacketTab,
+            Program.Options
+        );
 
         string grammar = Path.Combine(AppContext.BaseDirectory, "Grammars", "Luau.tmLanguage.json");
         LuauEditor.LanguageConfiguration = LuauLanguage.Configuration;

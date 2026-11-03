@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp.Execution\Darp.CodeEditor.CSharp.Execution.csproj" />
+    <!-- Compiles scripts in-process the way the editor does, to compare diagnostics. -->
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp.Scripting\Darp.CodeEditor.CSharp.Scripting.csproj" />
+    <ProjectReference Include="..\Darp.CodeEditor.CSharp.Execution.TestApi\Darp.CodeEditor.CSharp.Execution.TestApi.csproj" />
+    <!-- Started as a separate host process; built before the tests run. -->
+    <ProjectReference
+      Include="..\Darp.CodeEditor.CSharp.Execution.TestHost\Darp.CodeEditor.CSharp.Execution.TestHost.csproj"
+      ReferenceOutputAssembly="false"
+    />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Darp.CodeEditor.CSharp.Execution.TestHost\TestEnvironment.cs" Link="TestEnvironment.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <AssemblyMetadata
+      Include="TestHostProject"
+      Value="$(MSBuildThisFileDirectory)..\Darp.CodeEditor.CSharp.Execution.TestHost\Darp.CodeEditor.CSharp.Execution.TestHost.csproj"
+    />
+    <AssemblyMetadata
+      Include="ExecutionTargets"
+      Value="$(MSBuildThisFileDirectory)..\..\src\Darp.CodeEditor.CSharp.Execution\build\Darp.CodeEditor.CSharp.Execution.targets"
+    />
+    <AssemblyMetadata Include="Configuration" Value="$(Configuration)" />
+    <AssemblyMetadata
+      Include="TestHostDirectory"
+      Value="$(MSBuildThisFileDirectory)..\Darp.CodeEditor.CSharp.Execution.TestHost\bin\$(Configuration)\$(TargetFramework)\"
+    />
+  </ItemGroup>
+  <Import Project="..\..\src\Darp.CodeEditor.CSharp.Execution\build\Darp.CodeEditor.CSharp.Execution.targets" />
+</Project>

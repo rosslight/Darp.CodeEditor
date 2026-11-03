@@ -19,6 +19,7 @@ internal sealed record DemoOptions(
     bool Scene,
     bool NoLanguageService,
     bool SkipHighlightingBench,
+    bool RunScript,
     string? OutputPath,
     string? E2eOutput,
     bool Light
@@ -35,6 +36,7 @@ internal sealed record DemoOptions(
             args.Contains("--scene"),
             args.Contains("--no-language-service"),
             args.Contains("--skip-highlighting-bench"),
+            args.Contains("--run-script"),
             Value(args, "--out"),
             Value(args, "--e2e"),
             args.Contains("--light")

@@ -16,6 +16,7 @@
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
     <PackageVersion Include="Shouldly" Version="4.3.0" />
+    <PackageVersion Include="StreamJsonRpc" Version="2.26.150" />
     <PackageVersion Include="System.Reflection.MetadataLoadContext" Version="10.0.0" />
     <PackageVersion Include="TextMateSharp" Version="2.0.4" />
     <PackageVersion Include="TextMateSharp.Grammars" Version="2.0.4" />
