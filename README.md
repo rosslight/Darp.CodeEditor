@@ -112,6 +112,7 @@ time highlighted text on screen after launch, and measure keystroke to changed p
 before its click that the demo owns the window under the pointer, and before every key that it owns the foreground
 window (on X11: the active window and the one with the input focus), and aborts the run otherwise. Check and key are
 not atomic, and on X11 a keyboard grab by another client is not detected, so do not use the machine while it runs.
+Results of the editor polish work on Linux: [docs/editor-polish.md](docs/editor-polish.md).
 
 ## C# script language server
 
