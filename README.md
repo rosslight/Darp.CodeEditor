@@ -8,7 +8,10 @@ measured numbers; it is not the product. "Darp.CodeEditor" is a working name.
 ```
 Darp.CodeEditor            NativeAOT-compatible; no Roslyn, no MEF
   CodeEditor               AvaloniaEdit TextEditor + TextMate highlighting + search panel
-  Highlighting/            TextMate tokenization on the thread pool; rendering reads a per-line cache
+  Highlighting/            TextMate: visible lines tokenized in the frame (≤ 4 ms), the rest on the thread pool
+  Theming/                 VS Code themes (Dark+/Light+ or a file) following the app's light/dark variant
+  Popups/                  completion, signature help and hover, drawn on the window's overlay layer
+  Editing/                 auto-indent, bracket matching, auto-closing pairs, toggle comment (LanguageConfiguration)
   LanguageServices/        ILanguageService: async only, snapshot + version + CancellationToken, plain DTOs
   LanguageFeatures         calls the service via Task.Run, debounces, drops or maps forward stale results
   Completion/              one fetch per session, local ordinal filtering, lazy descriptions, sync commit
@@ -66,7 +69,7 @@ Rules the code follows:
 | `samples/Darp.CodeEditor.Demo` | JIT desktop app: C# script with completion, diagnostics, semantic colors, quick info, signature help; Luau and JSON with highlighting. |
 | `samples/Darp.CodeEditor.Demo.Aot` | `PublishAot=true`, references only `Darp.CodeEditor`: Luau, JSON and C# highlighting, search, and a small AOT-safe JSON language service (word completion, parse errors). |
 | `samples/Shared` | Sample documents, measurement scenarios and the Luau grammar shared by both demos. |
-| `tests/Darp.CodeEditor.Tests` | Contract tests for the C# service and the completion matcher. |
+| `tests/Darp.CodeEditor.Tests` | Contract tests for the C# service and the completion matcher; headless tests of the editing helpers. |
 | `src/Darp.CodeEditor.Lsp` | JSON-RPC and LSP layer for language servers and the editor's LSP client (`IsAotCompatible`). |
 | `tests/Darp.CodeEditor.Lsp.Tests` | Tests of the LSP layer, a toy server and client, and an interop test against luau-lsp. |
 | `tests/Darp.CodeEditor.Lsp.AotSmoke` | NativeAOT build of the toy server and client, and of the luau-lsp check. |
@@ -74,6 +77,8 @@ Rules the code follows:
 | `tests/Darp.CodeEditor.CSharp.TestGlobals` | A globals contract assembly for the tests, including the demo's `ScriptGlobals`. |
 | `tests/Shared` | A small LSP client over stdio, used by the tests and the benchmark. |
 | `benchmarks/Darp.CodeEditor.CSharp.Server.Benchmark` | Server against in-process service: startup, completion latency, memory, sizes. |
+| `tools/Darp.CodeEditor.Probe` | Measures from outside the app: keystroke to changed pixels on screen, startup on screen, process-tree memory. |
+| `tools/measure` | Scripts that run the benchmarks and the probe for both demos on Linux and Windows. |
 
 ## Run
 
@@ -116,10 +121,32 @@ Command line flags of both demos:
 | `--out <file>` | Also writes the results to a file. |
 | `--hold` | Keeps the window open after `--smoke` or `--bench`. |
 | `--scene` | Prepares a scene for a screenshot and stays open. |
-| `--overlay-popups` | Draws popups inside the window instead of native windows (Avalonia platform option). |
 | `--skip-highlighting-bench` | Skips the highlighting scenarios of `--bench`. |
 | `--no-language-service` | JIT demo only: starts without the C# service, to attribute startup stalls. |
 | `--low-latency-gc` | JIT demo only: sets `GCLatencyMode.SustainedLowLatency`. |
+| `--light` | Starts with the light theme variant. The status bar's button switches between light and dark at run time. |
+| `--e2e <file>` | Writes where line 1 of a C# document without language features ends on screen, for `Probe latency`, and stays open. |
+
+## Measure from outside
+
+`tools/measure/run-windows.ps1` runs `--bench` for both demos and times highlighted text on screen after launch; it
+injects no input. `tools/measure/run-linux.sh` does the same and, for test VMs, also measures keystroke to changed
+pixels with the probe's `latency` mode (XTest).
+
+Windows gets no key-to-pixel measurement: `SendInput` inserts keys into the system input stream, not into a window,
+so a key the probe checked against the demo's window can still reach another application if the focus changes in
+between. No check makes that safe on a machine someone works on, so the probe refuses `latency` on Windows; the bench's
+keystroke timings, taken inside the demo process, stand in for it.
+
+On X11 the probe types real keys into the demo window, so **nobody may use the display while it runs**. It never
+clicks: a demo started with `--e2e` focuses its own editor and reports its process and window. Before and after every
+key the probe checks that this window is the active window holding the input focus and that the demo still runs,
+before every key that no modifier key or mouse button is down, and that XTest took every event; it aborts otherwise,
+and the script then stops and closes the demo. It counts down 5 s with a warning before the first key and types at
+most 400 keys. Its 3-minute deadline is checked before each key and does not interrupt one. Check and key are not
+atomic, and a keyboard grab by another client is not detected.
+
+Results of the editor polish work on Linux: [docs/editor-polish.md](docs/editor-polish.md).
 
 ## LSP layer
 

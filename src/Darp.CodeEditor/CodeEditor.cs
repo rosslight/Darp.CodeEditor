@@ -1,12 +1,17 @@
 using System.Diagnostics;
+using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Media;
+using Avalonia.Styling;
 using AvaloniaEdit;
+using AvaloniaEdit.Rendering;
 using AvaloniaEdit.TextMate;
+using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.LanguageServices;
+using Darp.CodeEditor.Theming;
 using TextMateSharp.Grammars;
-using TextMateSharp.Registry;
 
 namespace Darp.CodeEditor;
 
@@ -15,18 +20,27 @@ namespace Darp.CodeEditor;
 /// features.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The editor is fully usable without a <see cref="LanguageService"/>. Setting one switches on completion,
 /// diagnostics, semantic colors, quick info and signature help.
+/// </para>
+/// <para>
+/// Colors come from a VS Code theme: <see cref="DarkTheme"/> while the editor's theme variant (from the app or a
+/// <see cref="ThemeVariantScope"/>) is dark, <see cref="LightTheme"/> otherwise. It follows variant changes at run time.
+/// </para>
 /// </remarks>
 public class CodeEditor : TextEditor
 {
-    private static RegistryOptions? s_registryOptions;
-    private static IReadOnlyDictionary<string, string>? s_themeColors;
-
     private readonly LanguageFeatures _languageFeatures;
     private BackgroundTextMateHighlighter? _highlighter;
     private TextMate.Installation? _textMate;
     private string? _languageId;
+    private CodeEditorTheme _darkTheme = CodeEditorTheme.DarkPlus;
+    private CodeEditorTheme _lightTheme = CodeEditorTheme.LightPlus;
+    private CodeEditorTheme? _requestedTheme;
+    private Task<LoadedTheme>? _theme;
+    private LanguageConfiguration _languageConfiguration = LanguageConfiguration.Default;
+    private bool _languageConfigurationSet;
 
     public CodeEditor()
     {
@@ -34,22 +48,50 @@ public class CodeEditor : TextEditor
         ShowLineNumbers = true;
         Options.ConvertTabsToSpaces = true;
         Options.HighlightCurrentLine = true;
-
-        // The theme is read once per process, on first use; grammars load on the thread pool.
-        long start = Stopwatch.GetTimestamp();
-        s_registryOptions ??= new RegistryOptions(ThemeName.DarkPlus);
-        s_themeColors ??= new Registry(s_registryOptions).GetTheme().GetGuiColorDictionary();
-        ApplyThemeColors(s_themeColors);
-        StartupTimings.Add(new EditorTiming("textmate-theme", Stopwatch.GetElapsedTime(start)));
-
+        // Until the editor is in a window its variant is unknown: start loading the app's, which it usually inherits.
+        ThemeVariant variant = Application.Current?.ActualThemeVariant ?? ThemeVariant.Dark;
+        ApplyColors(EditorTheme.Fallback(IsDark(variant)));
         _languageFeatures = new LanguageFeatures(this);
+        // After the language features, so completion sees typed characters first and can commit with them.
+        _ = new EditingHelpers(this);
+        TextArea.TextView.BackgroundRenderers.Add(new BracketHighlighter(this));
+        ActualThemeVariantChanged += (_, _) => SelectTheme(ActualThemeVariant);
+        SelectTheme(variant);
     }
 
     /// <summary>
     /// True (the default) to tokenize on the thread pool. False uses AvaloniaEdit.TextMate, which tokenizes the
-    /// visible lines on the UI thread; kept for comparison. Set it before the grammar.
+    /// visible lines on the UI thread, with Dark+ only; kept for comparison. Set it before the grammar.
     /// </summary>
     public bool UseBackgroundTokenization { get; init; } = true;
+
+    /// <summary>The theme while the editor's theme variant is dark. VS Code's Dark+ by default.</summary>
+    public CodeEditorTheme DarkTheme
+    {
+        get => _darkTheme;
+        set
+        {
+            _darkTheme = value;
+            SelectTheme(ActualThemeVariant);
+        }
+    }
+
+    /// <summary>The theme while the editor's theme variant is light. VS Code's Light+ by default.</summary>
+    public CodeEditorTheme LightTheme
+    {
+        get => _lightTheme;
+        set
+        {
+            _lightTheme = value;
+            SelectTheme(ActualThemeVariant);
+        }
+    }
+
+    /// <summary>Colors of the editor's own UI: popups, squiggles and markers.</summary>
+    internal EditorTheme EditorTheme { get; private set; } = EditorTheme.Default;
+
+    /// <summary>Raised on the UI thread when <see cref="EditorTheme"/> changed.</summary>
+    internal event EventHandler? EditorThemeChanged;
 
     /// <summary>Diagnostics: rendered lines that background tokenization has not reached yet.</summary>
     public int VisibleLinesWithoutHighlighting => _highlighter?.CountVisibleLinesWithoutTokens() ?? 0;
@@ -66,8 +108,24 @@ public class CodeEditor : TextEditor
             if (value == _languageId)
                 return;
             _languageId = value;
-            if (value is not null && s_registryOptions is { } options)
-                SetGrammar(options.GetScopeByLanguageId(value), null);
+            if (value is null)
+                return;
+            SetGrammar(new GrammarSource(value, null));
+            LoadLanguageConfiguration(value);
+        }
+    }
+
+    /// <summary>
+    /// Comment tokens and brackets for the editing helpers: auto-indent, bracket matching, auto-closing pairs and
+    /// toggle comment. Taken from the bundled grammar of <see cref="LanguageId"/> unless set; set it for a grammar file.
+    /// </summary>
+    public LanguageConfiguration LanguageConfiguration
+    {
+        get => _languageConfiguration;
+        set
+        {
+            _languageConfiguration = value;
+            _languageConfigurationSet = true;
         }
     }
 
@@ -75,7 +133,7 @@ public class CodeEditor : TextEditor
     public void SetGrammarFile(string path)
     {
         _languageId = null;
-        SetGrammar(null, path);
+        SetGrammar(new GrammarSource(null, path));
     }
 
     /// <summary>Identifies the document in requests to <see cref="LanguageService"/>.</summary>
@@ -99,6 +157,13 @@ public class CodeEditor : TextEditor
 
     protected override Type StyleKeyOverride => typeof(TextEditor);
 
+    protected override void OnApplyTemplate(TemplateAppliedEventArgs e)
+    {
+        base.OnApplyTemplate(e);
+        // The search panel exists from here on.
+        ApplySearchPanelColors(EditorTheme);
+    }
+
     internal void ReportTiming(string name, TimeSpan duration, int count = 0)
     {
         var timing = new EditorTiming(name, duration, count);
@@ -118,58 +183,152 @@ public class CodeEditor : TextEditor
         LanguageServiceFailed?.Invoke(this, exception);
     }
 
-    internal void AddPopup(Popup popup) => LogicalChildren.Add(popup);
+    /// <summary>Parses a theme color: #RGB, #RGBA, #RRGGBB or #RRGGBBAA, where Avalonia expects alpha first.</summary>
+    internal static bool TryParseThemeColor(string color, out Color parsed) =>
+        Color.TryParse(
+            color switch
+            {
+                ['#', _, _, _, _, _, _, _, _] => $"#{color[7..9]}{color[1..7]}",
+                ['#', var r, var g, var b, var a] => $"#{a}{r}{g}{b}",
+                _ => color,
+            },
+            out parsed
+        );
 
-    /// <summary>Parses a TextMate theme color: #RRGGBB, or #RRGGBBAA where Avalonia expects #AARRGGBB.</summary>
+    /// <inheritdoc cref="TryParseThemeColor"/>
     internal static Color ParseThemeColor(string color) =>
-        Color.Parse(color is ['#', _, _, _, _, _, _, _, _] ? $"#{color[7..9]}{color[1..7]}" : color);
+        TryParseThemeColor(color, out Color parsed) ? parsed : throw new FormatException($"Not a color: {color}");
 
-    private void SetGrammar(string? scopeName, string? grammarFile)
+    private static bool IsDark(ThemeVariant variant)
     {
-        if (UseBackgroundTokenization)
+        for (ThemeVariant? current = variant; current is not null; current = current.InheritVariant)
         {
-            _highlighter ??= CreateHighlighter();
-            _highlighter.SetGrammar(scopeName, grammarFile);
+            if (current == ThemeVariant.Dark)
+                return true;
+            if (current == ThemeVariant.Light)
+                return false;
+        }
+        return false;
+    }
+
+    /// <summary>Whether a position is code, comment or string, as far as highlighting knows; code when unknown.</summary>
+    internal TokenKind TokenKindAt(int offset) => _highlighter?.TokenKindAt(offset) ?? TokenKind.Code;
+
+    /// <summary>Whether text inserted at a position would be code, comment or string; code when unknown.</summary>
+    internal TokenKind TokenKindBefore(int offset) => _highlighter?.TokenKindBefore(offset) ?? TokenKind.Code;
+
+    private async void LoadLanguageConfiguration(string languageId)
+    {
+        try
+        {
+            LanguageConfiguration? configuration = await TextMateCatalog.GetLanguageConfigurationAsync(languageId);
+            if (configuration is not null && languageId == _languageId && !_languageConfigurationSet)
+                _languageConfiguration = configuration;
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceWarning($"Loading the language configuration of {languageId} failed: {exception}");
+        }
+    }
+
+    /// <summary>Loads the theme for a variant on the thread pool; it applies with the grammar's tokens.</summary>
+    private async void SelectTheme(ThemeVariant variant)
+    {
+        CodeEditorTheme requested = IsDark(variant) ? _darkTheme : _lightTheme;
+        if (requested == _requestedTheme)
+            return;
+        _requestedTheme = requested;
+        Task<LoadedTheme> theme = TextMateCatalog.GetThemeAsync(requested);
+        _theme = theme;
+        if (_highlighter is { } highlighter)
+        {
+            highlighter.SetTheme(theme);
             return;
         }
+        try
+        {
+            // Completes synchronously for a theme loaded before.
+            LoadedTheme loaded = await theme;
+            if (_theme == theme && _highlighter is null)
+                ApplyTheme(loaded);
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceWarning($"Loading the theme {requested} failed: {exception}");
+        }
+    }
+
+    private void SetGrammar(GrammarSource source)
+    {
+        if (!UseBackgroundTokenization)
+        {
+            SetStockGrammar(source);
+            return;
+        }
+        if (_highlighter is null)
+        {
+            _highlighter = new BackgroundTextMateHighlighter(this);
+            _highlighter.ThemeApplied += (_, theme) => ApplyTheme(theme);
+            // Before the semantic colorizer, which colors on top.
+            TextArea.TextView.LineTransformers.Insert(0, _highlighter);
+            if (_theme is { } theme)
+                _highlighter.SetTheme(theme);
+        }
+        _highlighter.SetGrammar(source);
+    }
+
+    private async void SetStockGrammar(GrammarSource source)
+    {
+        RegistryOptions options = await TextMateCatalog.Options;
         long start = Stopwatch.GetTimestamp();
-        _textMate ??= this.InstallTextMate(s_registryOptions);
-        if (grammarFile is not null)
-            _textMate.SetGrammarFile(grammarFile);
+        _textMate ??= this.InstallTextMate(options);
+        if (source.File is { } file)
+            _textMate.SetGrammarFile(file);
         else
-            _textMate.SetGrammar(scopeName);
+            _textMate.SetGrammar(options.GetScopeByLanguageId(source.LanguageId));
         ReportTiming("textmate-set-grammar", Stopwatch.GetElapsedTime(start));
     }
 
-    private BackgroundTextMateHighlighter CreateHighlighter()
+    private void ApplyTheme(LoadedTheme theme)
     {
-        var highlighter = new BackgroundTextMateHighlighter(
-            this,
-            s_registryOptions ?? new RegistryOptions(ThemeName.DarkPlus)
-        );
-        // Before the semantic colorizer, which colors on top.
-        TextArea.TextView.LineTransformers.Insert(0, highlighter);
-        return highlighter;
+        EditorTheme colors = theme.Colors;
+        if (colors == EditorTheme)
+            return;
+        long start = Stopwatch.GetTimestamp();
+        ApplyColors(colors);
+        // Rendering parts added by others, such as the semantic colorizer and the squiggles.
+        TextView textView = TextArea.TextView;
+        foreach (IThemedRenderer renderer in textView.LineTransformers.OfType<IThemedRenderer>())
+            renderer.EditorTheme = colors;
+        foreach (IThemedRenderer renderer in textView.BackgroundRenderers.OfType<IThemedRenderer>())
+            renderer.EditorTheme = colors;
+        EditorThemeChanged?.Invoke(this, EventArgs.Empty);
+        textView.Redraw();
+        ReportTiming("theme-applied", Stopwatch.GetElapsedTime(start));
     }
 
-    private void ApplyThemeColors(IReadOnlyDictionary<string, string> colors)
+    private void ApplyColors(EditorTheme colors)
     {
-        if (GetThemeBrush("editor.background") is { } background)
-            Background = background;
-        if (GetThemeBrush("editor.foreground") is { } foreground)
-            Foreground = foreground;
-        if (GetThemeBrush("editorLineNumber.foreground") is { } lineNumbers)
-            LineNumbersForeground = lineNumbers;
-        if (GetThemeBrush("editor.selectionBackground") is { } selection)
-            TextArea.SelectionBrush = selection;
-        if (GetThemeBrush("editor.lineHighlightBackground") is { } currentLine)
-        {
-            TextArea.TextView.CurrentLineBackground = currentLine;
-            TextArea.TextView.CurrentLineBorder = new Pen(currentLine);
-        }
+        EditorTheme = colors;
+        Background = colors.Background;
+        Foreground = colors.Foreground;
+        LineNumbersForeground = colors.LineNumbers;
+        SearchResultsBrush = colors.FindMatch;
+        TextArea.SelectionBrush = colors.Selection;
+        TextArea.Caret.CaretBrush = colors.Caret;
+        TextView textView = TextArea.TextView;
+        textView.CurrentLineBackground = colors.CurrentLineBackground;
+        textView.CurrentLineBorder = colors.CurrentLineBorder is { } border ? new Pen(border.Brush) : null;
+        ApplySearchPanelColors(colors);
+    }
 
-        IBrush? GetThemeBrush(string key) =>
-            colors.TryGetValue(key, out string? color) ? new SolidColorBrush(ParseThemeColor(color)) : null;
+    private void ApplySearchPanelColors(EditorTheme colors)
+    {
+        if (SearchPanel is not { } panel)
+            return;
+        panel.Background = colors.WidgetBackground;
+        panel.BorderBrush = colors.WidgetBorder;
+        panel.Foreground = colors.WidgetForeground;
     }
 }
 

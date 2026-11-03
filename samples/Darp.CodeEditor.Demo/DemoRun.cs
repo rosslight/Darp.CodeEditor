@@ -21,6 +21,15 @@ internal static class DemoRun
         int exitCode = 0;
         try
         {
+            if (options.E2eOutput is { } e2eOutput)
+            {
+                // A C# document without language features: the input latency probe types at the end of line 1.
+                await window.ShowTabAsync(0);
+                await Ui.WaitForVisibleAsync(window.CSharpEditor, highlighted: true);
+                await Task.Delay(500);
+                Ui.WriteE2eTarget(window.CSharpEditor, e2eOutput);
+                return;
+            }
             if (probe is null)
                 await ShowSceneAsync(window);
             else
@@ -33,7 +42,7 @@ internal static class DemoRun
         }
         report.Save();
         probe?.Dispose();
-        if (!options.Hold && !options.Scene)
+        if (!options.Hold && !options.Scene && options.E2eOutput is null)
             desktop.Shutdown(exitCode);
     }
 
@@ -54,6 +63,7 @@ internal static class DemoRun
         // Subscribe to every milestone before the first frame.
         Task<double> visible = Ui.WaitForVisibleAsync(editor, highlighted: false);
         Task<double> highlighted = Ui.WaitForVisibleAsync(editor, highlighted: true);
+        Task<int> uncoloredOnFirstFrame = Ui.LinesWithoutColorsOnFirstFrameAsync(editor);
         Task<double> classified = timings.WhenFirstAsync("classification");
         Task<double> diagnosed = timings.WhenFirstAsync("diagnostics");
 
@@ -70,6 +80,7 @@ internal static class DemoRun
 
         report.Add($"  editor text visible:        {await visible, 7:F0} ms after process start");
         report.Add($"  editor text highlighted:    {await highlighted, 7:F0} ms");
+        report.Add($"  lines without colors on the first frame: {await uncoloredOnFirstFrame}");
         if (service is not null)
         {
             report.Add($"  C# service ready:           {ready, 7:F0} ms");
@@ -85,6 +96,7 @@ internal static class DemoRun
 
         if (!options.Bench)
             return;
+        await EditorScenarios.RunThemeSwitchAsync(window, editor, probe, report);
         if (service is not null)
             await LanguageServiceScenarios.RunAsync(window, editor, probe, report);
         if (!options.SkipHighlightingBench)

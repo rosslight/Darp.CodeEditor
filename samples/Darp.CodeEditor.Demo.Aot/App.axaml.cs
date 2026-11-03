@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using Darp.CodeEditor.Instrumentation;
 
@@ -14,13 +15,15 @@ public sealed class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            if (Program.Options.Light)
+                RequestedThemeVariant = ThemeVariant.Light;
             UiStallProbe? probe = Program.Options.Measure
                 ? new UiStallProbe(Dispatcher.UIThread, TimeSpan.FromMilliseconds(2))
                 : null;
             probe?.BeginPhase("startup: until first highlighted frame");
             var window = new MainWindow();
             desktop.MainWindow = window;
-            if (probe is not null || Program.Options.Scene)
+            if (probe is not null || Program.Options.Scene || Program.Options.E2eOutput is not null)
                 DemoRun.Start(window, desktop, probe, Program.Options);
         }
         base.OnFrameworkInitializationCompleted();
