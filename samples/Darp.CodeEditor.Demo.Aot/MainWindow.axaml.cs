@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Threading;
 using Darp.CodeEditor.LanguageServices;
+using Darp.CodeEditor.Luau;
 using Darp.CodeEditor.Samples;
 
 namespace Darp.CodeEditor.Demo.Aot;
@@ -25,12 +26,7 @@ public sealed partial class MainWindow : Window, IBenchHost
         JsonEditor.LanguageService = new JsonLanguageService();
         PacketScriptRun.Attach(this, RunButton, RunOutput, PacketEditor, () => Tabs.SelectedItem = PacketTab, options);
 
-        string grammar = Path.Combine(AppContext.BaseDirectory, "Grammars", "Luau.tmLanguage.json");
-        LuauEditor.LanguageConfiguration = LuauLanguage.Configuration;
-        if (File.Exists(grammar))
-            LuauEditor.SetGrammarFile(grammar);
-        else
-            LuauEditor.LanguageId = "lua";
+        LuauLanguage.Configure(LuauEditor);
         if (options.NoLanguageService)
             return;
 

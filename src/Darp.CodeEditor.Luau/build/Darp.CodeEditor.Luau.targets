@@ -1,0 +1,181 @@
+<Project>
+  <!--
+    Puts luau-lsp, its base configurations and the Luau grammar next to the app, where LuauLanguageServer and
+    LuauLanguage find them by default. Import this file into the app project.
+
+      helpers/luau-lsp/luau-lsp(.exe)     the pinned luau-lsp release for the app's runtime identifier
+      helpers/luau-lsp/luaurc/*.luaurc    one base configuration per LuauMode
+      Grammars/Luau.tmLanguage.json       the TextMate grammar
+
+    The release comes from GitHub once and is kept in LuauLspCacheDirectory. Every build checks the archive against
+    the SHA-256 below before it is used; a download that does not match is deleted and fails the build.
+
+      IncludeLuauLsp          false: no luau-lsp; the app brings its own (LuauLanguageServerOptions.ServerPath)
+      LuauLspExecutable       a luau-lsp to copy instead of the pinned release; it is not checked
+      LuauLspArchive          the pinned release's zip, already on disk (offline builds); it is checked
+      LuauLspCacheDirectory   where downloads are kept; default .tools/luau-lsp/ in this repository
+      LuauLspDownloadUrl      a mirror of the release's zip
+
+    Windows arm64 gets the x64 build, which runs under emulation: luau-lsp has no arm64 build for Windows.
+
+    TODO: the NuGet package is to carry luau-lsp per runtime identifier instead of downloading it at build time, laid
+    out like the other helpers. LuauLspExecutable here and LuauLanguageServerOptions.ServerPath at run time are the
+    seam for that.
+  -->
+  <PropertyGroup>
+    <IncludeLuauLsp Condition="'$(IncludeLuauLsp)' == ''">true</IncludeLuauLsp>
+    <LuauLspCacheDirectory Condition="'$(LuauLspCacheDirectory)' == ''"
+      >$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '..', '..', '.tools', 'luau-lsp'))</LuauLspCacheDirectory>
+    <LuauLspCacheDirectory>$([MSBuild]::EnsureTrailingSlash('$(LuauLspCacheDirectory)'))</LuauLspCacheDirectory>
+    <_LuauLspVersion>1.70.1</_LuauLspVersion>
+    <_LuauLspRid>$(RuntimeIdentifier)</_LuauLspRid>
+    <_LuauLspRid Condition="'$(_LuauLspRid)' == ''">$(NETCoreSdkRuntimeIdentifier)</_LuauLspRid>
+  </PropertyGroup>
+
+  <!-- luau-lsp's release assets per runtime identifier, and their SHA-256 from the release page. -->
+  <PropertyGroup Condition="'$(_LuauLspRid)' == 'win-x64' or '$(_LuauLspRid)' == 'win-arm64'">
+    <_LuauLspAsset>win64</_LuauLspAsset>
+    <_LuauLspSha256>64225b9738102a30de6ee09fb28e5a3827edc402ecf2a6364af570312468159f</_LuauLspSha256>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(_LuauLspRid)' == 'osx-x64' or '$(_LuauLspRid)' == 'osx-arm64'">
+    <!-- One universal binary for both. -->
+    <_LuauLspAsset>macos</_LuauLspAsset>
+    <_LuauLspSha256>7d3936e8dec6dc77547abd061d2e950da392562a5f94858b880f23dba50d84cd</_LuauLspSha256>
+  </PropertyGroup>
+  <!-- glibc Linux; also SDK identifiers of distributions, such as ubuntu.24.04-x64. musl has no build. -->
+  <PropertyGroup Condition="'$(_LuauLspAsset)' == '' and !$(_LuauLspRid.StartsWith('win')) and !$(_LuauLspRid.StartsWith('osx')) and !$(_LuauLspRid.Contains('musl'))">
+    <_LuauLspAsset Condition="$(_LuauLspRid.EndsWith('-x64'))">linux-x86_64</_LuauLspAsset>
+    <_LuauLspSha256 Condition="$(_LuauLspRid.EndsWith('-x64'))"
+      >1a2ea1ae4f98f8946cefd970a4b54853e11ab4775e6932faa7f60cf920346567</_LuauLspSha256>
+    <_LuauLspAsset Condition="$(_LuauLspRid.EndsWith('-arm64'))">linux-arm64</_LuauLspAsset>
+    <_LuauLspSha256 Condition="$(_LuauLspRid.EndsWith('-arm64'))"
+      >6062345b95124ca937b8c324b74bc3fddb1d6919ba133c58f8b17945ce1acbc2</_LuauLspSha256>
+  </PropertyGroup>
+  <PropertyGroup>
+    <_LuauLspFileName>luau-lsp</_LuauLspFileName>
+    <_LuauLspFileName
+      Condition="'$(_LuauLspAsset)' == 'win64' or ('$(_LuauLspAsset)' == '' and $(_LuauLspRid.StartsWith('win')))"
+      >luau-lsp.exe</_LuauLspFileName>
+    <LuauLspDownloadUrl Condition="'$(LuauLspDownloadUrl)' == ''"
+      >https://github.com/JohnnyMorganz/luau-lsp/releases/download/$(_LuauLspVersion)/luau-lsp-$(_LuauLspAsset).zip</LuauLspDownloadUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None
+      Include="$(MSBuildThisFileDirectory)luaurc\*.luaurc"
+      Link="helpers\luau-lsp\luaurc\%(Filename)%(Extension)"
+      CopyToOutputDirectory="PreserveNewest"
+      CopyToPublishDirectory="PreserveNewest"
+      Visible="false"
+    />
+    <None
+      Include="$(MSBuildThisFileDirectory)..\Grammars\Luau.tmLanguage.json"
+      Link="Grammars\Luau.tmLanguage.json"
+      CopyToOutputDirectory="PreserveNewest"
+      CopyToPublishDirectory="PreserveNewest"
+      Visible="false"
+    />
+  </ItemGroup>
+
+  <!-- Adds luau-lsp to the files copied to the output and publish directories. -->
+  <Target
+    Name="AddLuauLspToOutput"
+    BeforeTargets="AssignTargetPaths"
+    DependsOnTargets="ResolveLuauLsp"
+    Condition="'$(IncludeLuauLsp)' == 'true' and '$(DesignTimeBuild)' != 'true'"
+  >
+    <ItemGroup>
+      <None
+        Include="$(LuauLspPath)"
+        Link="helpers\luau-lsp\$(_LuauLspFileName)"
+        CopyToOutputDirectory="PreserveNewest"
+        CopyToPublishDirectory="PreserveNewest"
+        Visible="false"
+      />
+    </ItemGroup>
+  </Target>
+
+  <!-- Sets LuauLspPath to the luau-lsp for the app: LuauLspExecutable, or the pinned release, checked and unpacked. -->
+  <Target Name="ResolveLuauLsp" DependsOnTargets="_UnpackLuauLsp">
+    <PropertyGroup>
+      <LuauLspPath Condition="'$(LuauLspExecutable)' != ''"
+        >$([System.IO.Path]::GetFullPath('$(LuauLspExecutable)'))</LuauLspPath>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(LuauLspPath)')" Text="luau-lsp is not at '$(LuauLspPath)'." />
+  </Target>
+
+  <Target Name="_GetLuauLspArchive" Condition="'$(LuauLspExecutable)' == ''">
+    <Error
+      Condition="'$(_LuauLspAsset)' == ''"
+      Text="luau-lsp $(_LuauLspVersion) has no build for the runtime identifier '$(_LuauLspRid)'. Set LuauLspExecutable to a luau-lsp built for it, or IncludeLuauLsp to false."
+    />
+    <PropertyGroup>
+      <_LuauLspArchive>$(LuauLspArchive)</_LuauLspArchive>
+      <_LuauLspArchive Condition="'$(_LuauLspArchive)' == ''"
+        >$(LuauLspCacheDirectory)$(_LuauLspVersion)/luau-lsp-$(_LuauLspAsset).zip</_LuauLspArchive>
+      <_LuauLspArchive>$([System.IO.Path]::GetFullPath('$(_LuauLspArchive)'))</_LuauLspArchive>
+    </PropertyGroup>
+    <Error
+      Condition="'$(LuauLspArchive)' != '' and !Exists('$(_LuauLspArchive)')"
+      Text="LuauLspArchive '$(_LuauLspArchive)' does not exist."
+    />
+  </Target>
+
+  <!--
+    Downloads the release into the cache. Builds of several projects may download at the same time: each writes its
+    own file and moves it into the cache only after the check, so the cache never holds a partial or wrong archive.
+  -->
+  <Target
+    Name="_DownloadLuauLsp"
+    Condition="'$(LuauLspExecutable)' == '' and '$(LuauLspArchive)' == '' and !Exists('$(_LuauLspArchive)')"
+  >
+    <PropertyGroup>
+      <_LuauLspDownloadDirectory>$([System.IO.Path]::GetDirectoryName('$(_LuauLspArchive)'))</_LuauLspDownloadDirectory>
+      <_LuauLspDownloadName>luau-lsp-$(_LuauLspAsset).$([System.Guid]::NewGuid().ToString('N')).download</_LuauLspDownloadName>
+      <_LuauLspDownload>$(_LuauLspDownloadDirectory)$([System.IO.Path]::DirectorySeparatorChar)$(_LuauLspDownloadName)</_LuauLspDownload>
+    </PropertyGroup>
+    <MakeDir Directories="$(_LuauLspDownloadDirectory)" />
+    <DownloadFile
+      SourceUrl="$(LuauLspDownloadUrl)"
+      DestinationFolder="$(_LuauLspDownloadDirectory)"
+      DestinationFileName="$(_LuauLspDownloadName)"
+    />
+    <GetFileHash Files="$(_LuauLspDownload)" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="_LuauLspDownloadHash" />
+    </GetFileHash>
+    <Delete Files="$(_LuauLspDownload)" Condition="'$(_LuauLspDownloadHash)' != '$(_LuauLspSha256)'" />
+    <Error
+      Condition="'$(_LuauLspDownloadHash)' != '$(_LuauLspSha256)'"
+      Text="The luau-lsp download from $(LuauLspDownloadUrl) has the SHA-256 $(_LuauLspDownloadHash.ToLowerInvariant()), not $(_LuauLspSha256) of luau-lsp $(_LuauLspVersion) for $(_LuauLspAsset). It was deleted."
+    />
+    <Move
+      SourceFiles="$(_LuauLspDownload)"
+      DestinationFiles="$(_LuauLspArchive)"
+      Condition="!Exists('$(_LuauLspArchive)')"
+    />
+    <!-- Another build moved its download in first. -->
+    <Delete Files="$(_LuauLspDownload)" />
+  </Target>
+
+  <!-- _GetLuauLspArchive runs first: the condition of _DownloadLuauLsp needs the archive's path. -->
+  <Target
+    Name="_UnpackLuauLsp"
+    DependsOnTargets="_GetLuauLspArchive;_DownloadLuauLsp"
+    Condition="'$(LuauLspExecutable)' == ''"
+  >
+    <GetFileHash Files="$(_LuauLspArchive)" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="_LuauLspArchiveHash" />
+    </GetFileHash>
+    <Error
+      Condition="'$(_LuauLspArchiveHash)' != '$(_LuauLspSha256)'"
+      Text="The luau-lsp archive '$(_LuauLspArchive)' has the SHA-256 $(_LuauLspArchiveHash.ToLowerInvariant()), not $(_LuauLspSha256) of luau-lsp $(_LuauLspVersion) for $(_LuauLspAsset). Delete it, or set LuauLspArchive to the release's zip."
+    />
+    <PropertyGroup>
+      <_LuauLspUnpacked>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'luau-lsp', '$(_LuauLspVersion)', '$(_LuauLspAsset)'))</_LuauLspUnpacked>
+      <LuauLspPath>$(_LuauLspUnpacked)$(_LuauLspFileName)</LuauLspPath>
+    </PropertyGroup>
+    <Unzip SourceFiles="$(_LuauLspArchive)" DestinationFolder="$(_LuauLspUnpacked)" SkipUnchangedFiles="true" />
+    <!-- Unzip drops the executable bit. -->
+    <Exec Command="chmod +x &quot;$(LuauLspPath)&quot;" Condition="!$([MSBuild]::IsOSPlatform('Windows'))" />
+  </Target>
+</Project>

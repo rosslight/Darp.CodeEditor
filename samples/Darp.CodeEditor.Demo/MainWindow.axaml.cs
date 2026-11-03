@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Threading;
 using Darp.CodeEditor.LanguageServices;
+using Darp.CodeEditor.Luau;
 using Darp.CodeEditor.Samples;
 
 namespace Darp.CodeEditor.Demo;
@@ -18,7 +19,7 @@ public sealed partial class MainWindow : Window, IBenchHost
         CSharpEditor.Text = SampleDocuments.CSharpScript;
         LuauEditor.Text = SampleDocuments.LuauScript;
         JsonEditor.Text = SampleDocuments.Json;
-        SetLuauGrammar();
+        LuauLanguage.Configure(LuauEditor);
         PacketScriptRun.Attach(this, RunButton, RunOutput, PacketEditor, () => Tabs.SelectedItem = PacketTab, options);
         if (options.NoLanguageService)
             return;
@@ -55,16 +56,5 @@ public sealed partial class MainWindow : Window, IBenchHost
     {
         Tabs.SelectedIndex = index;
         return Ui.NextFrameAsync(this);
-    }
-
-    private void SetLuauGrammar()
-    {
-        // TextMateSharp.Grammars has no Luau grammar; use the MIT-licensed one if it is next to the app, else Lua.
-        string grammar = Path.Combine(AppContext.BaseDirectory, "Grammars", "Luau.tmLanguage.json");
-        LuauEditor.LanguageConfiguration = LuauLanguage.Configuration;
-        if (File.Exists(grammar))
-            LuauEditor.SetGrammarFile(grammar);
-        else
-            LuauEditor.LanguageId = "lua";
     }
 }
