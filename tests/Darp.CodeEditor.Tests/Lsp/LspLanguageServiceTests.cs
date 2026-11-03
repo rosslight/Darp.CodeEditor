@@ -3,12 +3,16 @@ using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using Darp.CodeEditor.LanguageServices;
 using Darp.CodeEditor.Lsp.Testing;
+using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 using Protocol = Darp.CodeEditor.Lsp.Protocol;
 
 namespace Darp.CodeEditor.Tests.Lsp;
 
-/// <summary>The LSP client against the toy server of the LSP layer's tests.</summary>
+/// <summary>
+/// The LSP client against the toy server of the LSP layer's tests. Tests of hang timeouts run them on a fake clock and
+/// pass its time themselves, so that a slow machine cannot make a server look hung.
+/// </summary>
 public sealed class LspLanguageServiceTests : IAsyncLifetime
 {
     private const string Text = "alpha error\nslow stale add(1, 2)\n";
@@ -257,8 +261,13 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
     [Fact]
     public async Task A_server_that_stops_answering_is_ended_and_restarted()
     {
-        var servers = new ToyServers();
-        await using LspLanguageService service = servers.CreateService(TimeSpan.FromMilliseconds(500));
+        var clock = new FakeTimeProvider();
+        var servers = new ToyServers { Time = clock };
+        var hangs = new List<string>();
+        await using LspLanguageService service = servers.CreateService(
+            TimeSpan.FromMilliseconds(500),
+            options => options with { Log = message => RecordHang(hangs, message) }
+        );
         await service.PrewarmAsync(Timeout);
         service.OpenDocument(new DocumentSnapshot("a", 1, Text));
         // A server that answered once gets the response timeout, not twice that.
@@ -266,13 +275,14 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
         ChannelReader<LanguageServerState> states = RecordStates(service);
 
         // The toy answers a hover over "slow" only when it is cancelled, and nothing cancels this one.
-        var waited = Stopwatch.StartNew();
-        QuickInfo? hung = await service.GetQuickInfoAsync(new DocumentVersion("a", 1), 13, Timeout);
-        waited.Stop();
+        QuickInfo? hung = await PassTimeUntilAsync(
+            clock,
+            service.GetQuickInfoAsync(new DocumentVersion("a", 1), 13, Timeout)
+        );
         await RestartedAsync(states);
 
         hung.ShouldBeNull();
-        waited.Elapsed.ShouldBeInRange(TimeSpan.FromMilliseconds(450), TimeSpan.FromSeconds(10));
+        HangTimes(hangs).ShouldBe(["0.5 s"]);
         servers.Starts.ShouldBe(2);
         (await service.GetQuickInfoAsync(new DocumentVersion("a", 1), 1, Timeout))
             .ShouldNotBeNull()
@@ -282,7 +292,8 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
     [Fact]
     public async Task A_server_that_stops_reading_is_ended_and_restarted_with_the_current_text()
     {
-        var servers = new ToyServers();
+        var clock = new FakeTimeProvider();
+        var servers = new ToyServers { Time = clock };
         await using LspLanguageService service = servers.CreateService(TimeSpan.FromMilliseconds(500));
         await service.PrewarmAsync(Timeout);
         service.OpenDocument(new DocumentSnapshot("a", 1, Text));
@@ -291,12 +302,14 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
         ChannelReader<LanguageServerState> states = RecordStates(service);
         servers.BlockWrites();
 
-        var call = Stopwatch.StartNew();
-        service.ChangeDocument(new DocumentChange("a", 2, new TextChange(0, 0, "x")));
-        call.Stop();
+        // The call returns although the change cannot be written: until the clock passes the timeout, nothing ends
+        // the server.
+        CancellationToken timeout = Timeout;
+        await Task.Run(() => service.ChangeDocument(new DocumentChange("a", 2, new TextChange(0, 0, "x"))), timeout)
+            .WaitAsync(timeout);
+        await PassTimeUntilAsync(clock, () => service.State != LanguageServerState.Running);
         await RestartedAsync(states);
 
-        call.Elapsed.ShouldBeLessThan(TimeSpan.FromMilliseconds(100));
         servers.Starts.ShouldBe(2);
         (await service.GetQuickInfoAsync(new DocumentVersion("a", 2), 1, Timeout))
             .ShouldNotBeNull()
@@ -341,7 +354,8 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
     [Fact]
     public async Task A_server_that_has_answered_nothing_yet_gets_twice_the_response_timeout()
     {
-        var servers = new ToyServers();
+        var clock = new FakeTimeProvider();
+        var servers = new ToyServers { Time = clock };
         var hangs = new List<string>();
         await using LspLanguageService service = servers.CreateService(
             TimeSpan.FromMilliseconds(200),
@@ -351,28 +365,28 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
         service.OpenDocument(new DocumentSnapshot("a", 1, Text));
         ChannelReader<LanguageServerState> states = RecordStates(service);
 
-        var waited = Stopwatch.StartNew();
-        QuickInfo? hung = await service.GetQuickInfoAsync(new DocumentVersion("a", 1), 13, Timeout);
-        waited.Stop();
+        QuickInfo? hung = await PassTimeUntilAsync(
+            clock,
+            service.GetQuickInfoAsync(new DocumentVersion("a", 1), 13, Timeout)
+        );
         await RestartedAsync(states);
 
         hung.ShouldBeNull();
-        waited.Elapsed.ShouldBeGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(380));
         HangTimes(hangs).ShouldBe(["0.4 s"]);
     }
 
     [Fact]
-    public async Task Each_initialize_timeout_doubles_the_next_starts_wait_until_a_slow_server_starts()
+    public async Task Each_initialize_timeout_doubles_the_next_starts_wait_until_a_server_answers()
     {
         // A start waits twice the timeout for initialize, as for any server that answered nothing yet: 0.2 s first.
-        var servers = new ToyServers { InitializeDelay = TimeSpan.FromMilliseconds(350) };
+        var clock = new FakeTimeProvider();
+        var servers = new ToyServers { Time = clock, UnansweredInitializes = 2 };
         var failures = new List<string>();
         await using LspLanguageService service = servers.CreateService(
             TimeSpan.FromMilliseconds(100),
             options =>
                 options with
                 {
-                    MaxResponseTimeout = TimeSpan.FromSeconds(1),
                     Log = message =>
                     {
                         if (message.Contains("did not answer initialize", StringComparison.Ordinal))
@@ -383,28 +397,21 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
                     },
                 }
         );
-        try
-        {
-            await service.PrewarmAsync(Timeout);
-        }
-        catch (TimeoutException)
-        {
-            // The first start takes longer than it may.
-        }
 
-        await Wait.UntilAsync(() => service.State == LanguageServerState.Running || servers.Starts >= 6);
+        Task prewarm = service.PrewarmAsync(Timeout);
+        // No more time passes once the third server starts: it answers before its wait is over.
+        await PassTimeUntilAsync(clock, () => servers.Starts == 3);
+        await Wait.UntilAsync(() => service.State == LanguageServerState.Running);
 
-        service.State.ShouldBe(LanguageServerState.Running);
-        string[] waited = Seconds(failures);
-        waited.ShouldNotBeEmpty();
-        // Usually 0.4 s is enough; on a busy machine it may take one more start.
-        waited.ShouldBe(new[] { "0.2 s", "0.4 s", "0.8 s" }.Take(waited.Length));
+        await Should.ThrowAsync<TimeoutException>(prewarm);
+        Seconds(failures).ShouldBe(["0.2 s", "0.4 s"]);
     }
 
     [Fact]
     public async Task Each_hang_doubles_the_next_servers_timeout_up_to_the_longest_until_one_runs_healthy()
     {
-        var servers = new ToyServers();
+        var clock = new FakeTimeProvider();
+        var servers = new ToyServers { Time = clock };
         var hangs = new List<string>();
         await using LspLanguageService service = servers.CreateService(
             TimeSpan.FromMilliseconds(100),
@@ -432,8 +439,10 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
         async Task AnswerThenHangAsync(TimeSpan healthy)
         {
             (await service.GetQuickInfoAsync(new DocumentVersion("a", 1), 1, Timeout)).ShouldNotBeNull();
-            await Task.Delay(healthy, Timeout);
-            (await service.GetQuickInfoAsync(new DocumentVersion("a", 1), 13, Timeout)).ShouldBeNull();
+            clock.Advance(healthy);
+            (
+                await PassTimeUntilAsync(clock, service.GetQuickInfoAsync(new DocumentVersion("a", 1), 13, Timeout))
+            ).ShouldBeNull();
             await RestartedAsync(states);
         }
     }
@@ -547,6 +556,27 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
         var states = Channel.CreateUnbounded<LanguageServerState>();
         service.StateChanged += (_, _) => states.Writer.TryWrite(service.State);
         return states.Reader;
+    }
+
+    /// <summary>
+    /// Moves the clock on in small steps until <paramref name="done"/>, so that the service's timeouts pass without
+    /// waiting for them. Time stands still otherwise: a timeout passes only while a test waits for it.
+    /// </summary>
+    private static async Task PassTimeUntilAsync(FakeTimeProvider clock, Func<bool> done)
+    {
+        CancellationToken timeout = Timeout;
+        while (!done())
+        {
+            clock.Advance(TimeSpan.FromMilliseconds(10));
+            await Task.Delay(1, timeout);
+        }
+    }
+
+    /// <summary>Moves the clock on in small steps until <paramref name="task"/> completes.</summary>
+    private static async Task<T> PassTimeUntilAsync<T>(FakeTimeProvider clock, Task<T> task)
+    {
+        await PassTimeUntilAsync(clock, () => task.IsCompleted);
+        return await task;
     }
 
     /// <summary>Waits until the server restarted: the state went to Restarting and then back to Running.</summary>

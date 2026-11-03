@@ -25,8 +25,11 @@ internal sealed class ToyServers
     /// <summary>Starts servers that classify whole documents only, as luau-lsp does.</summary>
     public bool WholeDocumentTokens { get; init; }
 
-    /// <summary>How long the servers take to answer <c>initialize</c>.</summary>
-    public TimeSpan InitializeDelay { get; init; }
+    /// <summary>How many of the first servers never answer <c>initialize</c>.</summary>
+    public int UnansweredInitializes { get; init; }
+
+    /// <summary>The clock of the services' hang timeouts.</summary>
+    public TimeProvider Time { get; init; } = TimeProvider.System;
 
     /// <summary>The running server, or the last one.</summary>
     public ToyServer Current => _current ?? throw new InvalidOperationException("No server ran.");
@@ -69,7 +72,7 @@ internal sealed class ToyServers
             Restart = new SupervisorOptions { FirstDelay = TimeSpan.FromMilliseconds(10) },
             ResponseTimeout = responseTimeout ?? TimeSpan.FromSeconds(10),
         };
-        return new LspLanguageService(configure is null ? options : configure(options));
+        return new LspLanguageService(configure is null ? options : configure(options), Time);
     }
 
     /// <summary>The messages of a method the client sent.</summary>
@@ -102,7 +105,7 @@ internal sealed class ToyServers
         var server = new ToyServer(toServer.Reader.AsStream(), toClient.Writer.AsStream())
         {
             WholeDocumentTokens = WholeDocumentTokens,
-            InitializeDelay = InitializeDelay,
+            InitializeDelay = Starts < UnansweredInitializes ? Timeout.InfiniteTimeSpan : TimeSpan.Zero,
         };
         Task<int> run = server.Server.RunAsync();
         var exit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

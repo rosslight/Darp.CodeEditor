@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Darp.CodeEditor.Lsp;
 
 namespace Darp.CodeEditor.LanguageServices;
@@ -18,6 +17,7 @@ internal sealed class HangTimeout
     private readonly TimeSpan _first;
     private readonly TimeSpan _longest;
     private readonly TimeSpan _healthyAfter;
+    private readonly TimeProvider _time;
     private readonly Lock _lock = new();
     private TimeSpan _timeout;
     private LanguageClient? _answered;
@@ -26,8 +26,9 @@ internal sealed class HangTimeout
     /// <param name="timeout">The timeout; <see cref="Timeout.InfiniteTimeSpan"/> waits forever.</param>
     /// <param name="longest">The longest that hangs raise the timeout to; infinite raises it without bound.</param>
     /// <param name="healthyAfter">How long a server that answered runs until the timeout is back to the first.</param>
+    /// <param name="time">The clock that measures how long a server ran.</param>
     /// <exception cref="ArgumentOutOfRangeException">A timeout is neither positive nor infinite.</exception>
-    public HangTimeout(TimeSpan timeout, TimeSpan longest, TimeSpan healthyAfter)
+    public HangTimeout(TimeSpan timeout, TimeSpan longest, TimeSpan healthyAfter, TimeProvider time)
     {
         if (timeout <= TimeSpan.Zero && timeout != Timeout.InfiniteTimeSpan)
         {
@@ -52,6 +53,7 @@ internal sealed class HangTimeout
             : longest > timeout ? longest
             : timeout;
         _healthyAfter = healthyAfter;
+        _time = time;
         _timeout = timeout;
     }
 
@@ -73,7 +75,7 @@ internal sealed class HangTimeout
             if (_answered == client)
                 return;
             _answered = client;
-            _answeredAt = Stopwatch.GetTimestamp();
+            _answeredAt = _time.GetTimestamp();
         }
     }
 
@@ -95,7 +97,7 @@ internal sealed class HangTimeout
 
     private void ResetIfHealthy()
     {
-        if (_answered is not null && Stopwatch.GetElapsedTime(_answeredAt) >= _healthyAfter)
+        if (_answered is not null && _time.GetElapsedTime(_answeredAt) >= _healthyAfter)
             _timeout = _first;
     }
 
