@@ -25,6 +25,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\Darp.CodeEditor.CSharp.Execution.TestHost\TestEnvironment.cs" Link="TestEnvironment.cs" />
+    <Compile Include="..\Shared\CommandLine.cs" Link="Shared\CommandLine.cs" />
   </ItemGroup>
   <ItemGroup>
     <AssemblyMetadata
@@ -32,8 +33,8 @@
       Value="$(MSBuildThisFileDirectory)..\Darp.CodeEditor.CSharp.Execution.TestHost\Darp.CodeEditor.CSharp.Execution.TestHost.csproj"
     />
     <AssemblyMetadata
-      Include="ExecutionTargets"
-      Value="$(MSBuildThisFileDirectory)..\..\src\Darp.CodeEditor.CSharp.Execution\build\Darp.CodeEditor.CSharp.Execution.targets"
+      Include="CSharpTargets"
+      Value="$(MSBuildThisFileDirectory)..\..\src\Darp.CodeEditor.CSharp\buildTransitive\Darp.CodeEditor.CSharp.targets"
     />
     <AssemblyMetadata Include="Configuration" Value="$(Configuration)" />
     <AssemblyMetadata
@@ -41,5 +42,6 @@
       Value="$(MSBuildThisFileDirectory)..\Darp.CodeEditor.CSharp.Execution.TestHost\bin\$(Configuration)\$(TargetFramework)\"
     />
   </ItemGroup>
-  <Import Project="..\..\src\Darp.CodeEditor.CSharp.Execution\build\Darp.CodeEditor.CSharp.Execution.targets" />
+  <!-- Puts the C# helpers next to the tests, as the Darp.CodeEditor.CSharp package does. -->
+  <Import Project="..\..\src\Darp.CodeEditor.CSharp\buildTransitive\Darp.CodeEditor.CSharp.targets" />
 </Project>

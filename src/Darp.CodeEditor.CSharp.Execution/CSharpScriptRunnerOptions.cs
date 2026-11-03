@@ -53,7 +53,8 @@ public sealed record CSharpScriptRunnerOptions
 
     /// <summary>
     /// The directory of the runner. Defaults to <c>helpers/csharp-runner</c> next to the app, where the
-    /// <c>Darp.CodeEditor.CSharp.Execution.targets</c> put it.
+    /// <c>Darp.CodeEditor.CSharp</c> package puts it: a published app has the runner's app host, which runs on the .NET
+    /// runtime in <c>helpers/dotnet</c>; a build output has its assembly, which runs with <c>dotnet</c>.
     /// </summary>
     public string? RunnerDirectory { get; init; }
 

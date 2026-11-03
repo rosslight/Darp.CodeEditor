@@ -2,13 +2,61 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <IsAotCompatible>true</IsAotCompatible>
-    <Description>C# script editing for Darp.CodeEditor: starts the C# script language server for a script environment. NativeAOT compatible.</Description>
+    <Description>C# scripts for Darp.CodeEditor apps: the script environment, C# editing through the C# script language server, and running scripts in the script runner. Ships both helpers and puts them, with the .NET runtime they run on, next to the app. NativeAOT compatible.</Description>
+    <!-- Packs the helpers, built from source; see buildTransitive/Darp.CodeEditor.CSharp.targets. -->
+    <PackCSharpHelpers>true</PackCSharpHelpers>
+    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);_AddBundledAssembliesToPackage</TargetsForTfmSpecificBuildOutput>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);_AddCSharpHelpersToPackage</TargetsForTfmSpecificContentInPackage>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Darp.CodeEditor\Darp.CodeEditor.csproj" />
-    <ProjectReference Include="..\Darp.CodeEditor.CSharp.Hosting\Darp.CodeEditor.CSharp.Hosting.csproj" />
+    <!--
+      Part of this package rather than packages of their own: hosts get one package for C#. They are separate assemblies
+      because the language server and the runner use them too, without the editor.
+    -->
+    <ProjectReference
+      Include="..\Darp.CodeEditor.CSharp.Hosting\Darp.CodeEditor.CSharp.Hosting.csproj"
+      PrivateAssets="all"
+      BundleInPackage="true"
+    />
+    <ProjectReference
+      Include="..\Darp.CodeEditor.CSharp.Execution\Darp.CodeEditor.CSharp.Execution.csproj"
+      PrivateAssets="all"
+      BundleInPackage="true"
+    />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- What Darp.CodeEditor.CSharp.Execution needs, as a dependency of this package. -->
+    <PackageReference Include="StreamJsonRpc" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Darp.CodeEditor.Tests" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="buildTransitive\Darp.CodeEditor.CSharp.targets" Pack="true" PackagePath="buildTransitive/" />
+  </ItemGroup>
+
+  <Target Name="_AddBundledAssembliesToPackage">
+    <MSBuild
+      Projects="@(ProjectReference->WithMetadataValue('BundleInPackage', 'true'))"
+      Targets="GetTargetPath"
+      Properties="Configuration=$(Configuration)"
+      RemoveProperties="TargetFramework"
+    >
+      <Output TaskParameter="TargetOutputs" ItemName="_BundledAssembly" />
+    </MSBuild>
+    <ItemGroup>
+      <_BundledAssemblyFile Include="@(_BundledAssembly);@(_BundledAssembly->'%(RootDir)%(Directory)%(Filename).pdb')" />
+      <BuildOutputInPackage Include="@(_BundledAssemblyFile)" Condition="Exists('%(FullPath)')" />
+    </ItemGroup>
+  </Target>
+
+  <!-- The helpers as portable IL, which an app's publish compiles for its runtime identifier. -->
+  <Target Name="_AddCSharpHelpersToPackage" DependsOnTargets="GetCSharpHelperFiles">
+    <ItemGroup>
+      <TfmSpecificPackageFile Include="@(_CSharpHelperFile)" PackagePath="tools/%(Helper)/%(HelperPath)" />
+    </ItemGroup>
+  </Target>
+
+  <Import Project="buildTransitive\Darp.CodeEditor.CSharp.targets" />
 </Project>

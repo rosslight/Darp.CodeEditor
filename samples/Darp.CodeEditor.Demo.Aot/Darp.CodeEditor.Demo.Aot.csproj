@@ -7,6 +7,8 @@
     <!-- Recommended Avalonia settings for Native AOT. -->
     <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- No effect on the app's native code: restore fetches the ReadyToRun compiler for the C# helpers. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia.Desktop" />
@@ -14,7 +16,9 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Darp.CodeEditor\Darp.CodeEditor.csproj" />
+    <!-- What the Darp.CodeEditor.CSharp package holds: the editor's C#, the script environment, the runner API. -->
     <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp\Darp.CodeEditor.CSharp.csproj" />
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp.Hosting\Darp.CodeEditor.CSharp.Hosting.csproj" />
     <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp.Execution\Darp.CodeEditor.CSharp.Execution.csproj" />
     <!--
       Script-visible assemblies: NativeAOT ships them as files next to the app, where the runner loads them and the C#
@@ -38,8 +42,6 @@
       CopyToPublishDirectory="PreserveNewest"
     />
   </ItemGroup>
-  <!-- Puts the C# script language server next to the app. -->
-  <Import Project="..\..\src\Darp.CodeEditor.CSharp\build\Darp.CodeEditor.CSharp.targets" />
-  <!-- Puts the C# script runner and its .NET runtime next to the app, for the Run action. -->
-  <Import Project="..\..\src\Darp.CodeEditor.CSharp.Execution\build\Darp.CodeEditor.CSharp.Execution.targets" />
+  <!-- Puts the C# helpers next to the app, as the Darp.CodeEditor.CSharp package does. -->
+  <Import Project="..\..\src\Darp.CodeEditor.CSharp\buildTransitive\Darp.CodeEditor.CSharp.targets" />
 </Project>

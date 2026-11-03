@@ -7,6 +7,8 @@
     <!-- Attach<T>() calls are replaced by the generated proxies, so the host needs no reflection. -->
     <EnableStreamJsonRpcInterceptors>true</EnableStreamJsonRpcInterceptors>
     <InterceptorsNamespaces>$(InterceptorsNamespaces);StreamJsonRpc.Generated</InterceptorsNamespaces>
+    <!-- Ships inside the Darp.CodeEditor.CSharp package. -->
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Darp.CodeEditor.CSharp.Hosting\Darp.CodeEditor.CSharp.Hosting.csproj" />
