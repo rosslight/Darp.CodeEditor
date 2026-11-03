@@ -10,6 +10,7 @@ accounts and workflows with access to this repository can restore them.
 | --- | --- |
 | `Darp.CodeEditor` | The editor core and its LSP client. |
 | `Darp.CodeEditor.Lsp` | The JSON-RPC and LSP layer, and `ChildProcess` for helper processes that end with the app. |
+| `Darp.CodeEditor.Luau` | Luau for apps: the environment, the luau-lsp service, the Luau grammar, luau-lsp 1.70.1 for Windows, Linux and macOS in `tools/luau-lsp/`, and `buildTransitive/Darp.CodeEditor.Luau.targets`, which puts luau-lsp and the grammar next to the app. |
 | `Darp.CodeEditor.CSharp` | C# for apps: the editor's C# service, the script environment (`Darp.CodeEditor.CSharp.Hosting`), the runner API (`Darp.CodeEditor.CSharp.Execution`), the language server and the script runner as portable IL in `tools/`, and `buildTransitive/Darp.CodeEditor.CSharp.targets`, which puts the helpers and their .NET runtime next to the app. |
 
 `Directory.Build.targets` decides: a library under `src/` is a package, with its project name as the package ID.
@@ -20,7 +21,7 @@ live in `Directory.Build.props`.
 
 Apps that reference `Darp.CodeEditor.CSharp` set `PublishReadyToRun=true` in their project, NativeAOT apps included:
 publish compiles the helpers for the app's runtime identifier and copies the runtime from the runtime pack, which restore
-then fetches. The README's *Packaging* section has the details. `tests/Darp.CodeEditor.Packaging.Tests` packs the three
+then fetches. The README's *Packaging* section has the details. `tests/Darp.CodeEditor.Packaging.Tests` packs the four
 packages into a folder and publishes an app outside the repository from them.
 
 ## Versions

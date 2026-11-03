@@ -52,7 +52,7 @@ Darp.CodeEditor.CSharp.Runner     helper, JIT only, framework-dependent .NET 10 
 Darp.CodeEditor.Luau       NativeAOT-compatible
   LuauLanguageServer       the LspLanguageService of luau-lsp for an environment: the app's Luau API
   LuauLanguage             the Luau grammar and editing helpers for an editor
-  build/                   Darp.CodeEditor.Luau.targets: puts luau-lsp and the grammar next to the app
+  buildTransitive/         Darp.CodeEditor.Luau.targets: puts luau-lsp and the grammar next to the app
 ```
 
 Every language goes through an out-of-process LSP server, for JIT and NativeAOT hosts alike: C# through the C# script
@@ -101,7 +101,7 @@ Rules the code follows:
 | `tests/Darp.CodeEditor.CSharp.Execution.Tests` | Tests of the runner: handlers, callbacks, batching, diagnostics, faults, process ownership, NativeAOT publish. |
 | `tests/Darp.CodeEditor.CSharp.Execution.TestApi` | A script API assembly for the runner tests and benchmark. |
 | `tests/Darp.CodeEditor.CSharp.Execution.TestHost` | A small app that runs a script; the tests start it and publish it with NativeAOT. |
-| `tests/Darp.CodeEditor.Packaging.Tests` | Packs the packages, and builds and publishes an app outside the repository that uses only them: self-contained JIT and NativeAOT. |
+| `tests/Darp.CodeEditor.Packaging.Tests` | Packs the packages, and builds and publishes an app outside the repository that uses only them, C# and Luau: self-contained JIT and NativeAOT. |
 | `benchmarks/Darp.CodeEditor.CSharp.Server.Benchmark` | Server against the former in-process Roslyn service, kept in `InProcess/` as the baseline: startup, completion latency, memory, sizes. |
 | `benchmarks/Darp.CodeEditor.CSharp.Execution.Benchmark` | The runner from a JIT or NativeAOT app: cold start to the first result, warm calls, batches. |
 | `tools/Darp.CodeEditor.Probe` | Measures from outside the app: keystroke to changed pixels on screen, startup on screen, process-tree memory. |
@@ -675,8 +675,10 @@ asks once per version and cuts out the visible range.
 
 ### luau-lsp binaries
 
-`Darp.CodeEditor.Luau.targets` puts luau-lsp 1.70.1 next to the app on build and publish, for the app's runtime
-identifier (or the SDK's portable one when the build has none):
+The `Darp.CodeEditor.Luau` package carries luau-lsp 1.70.1 for every platform it has a build for (21.5 MiB package),
+and its `Darp.CodeEditor.Luau.targets` copies the one for the app's runtime identifier (or the SDK's portable one when
+the build has none) to `helpers/luau-lsp/` on build and publish, with the base configurations; the grammar goes to
+`Grammars/`. Nothing is downloaded when an app builds:
 
 | Runtime identifier | Release asset |
 | --- | --- |
@@ -687,10 +689,10 @@ identifier (or the SDK's portable one when the build has none):
 | `osx-x64`, `osx-arm64` | `luau-lsp-macos.zip`, one universal binary |
 
 Linux builds need glibc. Other identifiers, such as `linux-musl-x64` or `freebsd-x64`, fail the build with a message.
-The archive is downloaded from the GitHub release once into `.tools/luau-lsp/` and checked on every build against its
-SHA-256, which the targets pin per asset; a download that does not match is deleted and fails the build. Builds unpack
-it into `obj/` and copy the executable to `helpers/luau-lsp/`, with the base configurations; the grammar goes to
-`Grammars/`.
+In this repository, and to pack the package, the archive is downloaded from the GitHub release once into
+`.tools/luau-lsp/` and checked on every build against its SHA-256, which the targets pin per asset; a download that
+does not match is deleted and fails the build. Builds unpack it into `obj/` and copy the executable from there. The
+properties below apply to these builds; `LuauLspExecutable` and `IncludeLuauLsp` apply to apps that use the package too.
 
 | Property | Effect |
 | --- | --- |
@@ -698,6 +700,7 @@ it into `obj/` and copy the executable to `helpers/luau-lsp/`, with the base con
 | `LuauLspCacheDirectory` | Where downloads are kept, such as a shared cache. A filled cache needs no network. |
 | `LuauLspDownloadUrl` | A mirror of the release's zip. |
 | `LuauLspExecutable` | Another luau-lsp to ship, such as a native Windows arm64 build; it is not checked. |
+| `IncludeLuauLsp` | `false`: no luau-lsp next to the app; it brings its own (`LuauLanguageServerOptions.ServerPath`). |
 | `IncludeLuauLsp` | `false`: no luau-lsp; the app brings its own (`LuauLanguageServerOptions.ServerPath`). |
 
 The download is a stand-in for development: the NuGet package is to carry the binaries per runtime identifier, laid out
