@@ -466,6 +466,8 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
     {
         _client = client;
         _features = ServerFeatures.From(client, _tokenTypes);
+        foreach (ServerDocument document in _documents.Values)
+            document.CancelFullTokens();
         Log($"The language server {client.ServerInfo?.Name} {client.ServerInfo?.Version} runs.");
         foreach (ServerDocument document in _documents.Values)
             await NotifyAsync(client, LspMethods.DidOpen, document.CreateOpenParams(_options.LanguageId))
@@ -485,6 +487,8 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
             Log("The language server stopped; it restarts.");
             _client = null;
             _features = ServerFeatures.None;
+            foreach (ServerDocument document in _documents.Values)
+                document.CancelFullTokens();
             _completions.Clear();
             _signatures.Clear();
             foreach (ServerDocument document in _documents.Values)
@@ -521,6 +525,7 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
         {
             DocumentText before = document.Text;
             document.Text = before.Apply(change.Version, change.Change);
+            document.CancelFullTokens();
             var removed = new TextRange(change.Change.Offset, change.Change.RemovedLength);
             events.Add(new TextDocumentContentChangeEvent(change.Change.InsertedText, before.GetRange(removed)));
         }
@@ -546,6 +551,7 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
     {
         if (!_documents.Remove(documentId, out ServerDocument? document))
             return;
+        document.CancelFullTokens();
         _completions.TryRemove(documentId, out _);
         _signatures.TryRemove(documentId, out _);
         if (_client is { } client)
@@ -651,6 +657,11 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
         catch (IOException)
         {
             // The connection ended: the server restarts and the editors ask again.
+            return null;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // A shared request that a change, closing or a new server made obsolete.
             return null;
         }
         return response is null ? null : map(response, request.Text, request.Features);
@@ -939,7 +950,7 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
     /// <summary>A document the editors opened, with its text as the loop last changed it.</summary>
     private sealed class ServerDocument(string id, string uri, DocumentText text)
     {
-        private (DocumentText Text, LanguageClient Client, Task<SemanticTokens?> Tokens)? _fullTokens;
+        private FullTokens? _fullTokens;
 
         public string Id { get; } = id;
 
@@ -952,18 +963,41 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
         public DidOpenTextDocumentParams CreateOpenParams(string languageId) =>
             new(new TextDocumentItem(Uri, languageId, Text.Version, Text.Text));
 
-        /// <summary>The tokens of the whole document, requested once per version.</summary>
+        /// <summary>
+        /// The tokens of the whole document, requested once per version and server; every range of the version uses
+        /// them, so no single caller cancels them.
+        /// </summary>
         public Task<SemanticTokens?> GetFullTokens(LanguageClient client)
         {
             if (_fullTokens is { } cached && cached.Text == Text && cached.Client == client)
                 return cached.Tokens;
+            CancelFullTokens();
+            var cancellation = new CancellationTokenSource();
             Task<SemanticTokens?> tokens = client.Connection.SendRequestAsync(
                 LspMethods.SemanticTokensFull,
-                new SemanticTokensParams(Identifier)
+                new SemanticTokensParams(Identifier),
+                cancellation.Token
             );
-            _fullTokens = (Text, client, tokens);
+            _fullTokens = new FullTokens(Text, client, tokens, cancellation);
             return tokens;
         }
+
+        /// <summary>Cancels the request for the whole document's tokens once a change, closing or a new server made it obsolete.</summary>
+        public void CancelFullTokens()
+        {
+            if (_fullTokens is not { } cached)
+                return;
+            _fullTokens = null;
+            cached.Cancellation.Cancel();
+            cached.Cancellation.Dispose();
+        }
+
+        private sealed record FullTokens(
+            DocumentText Text,
+            LanguageClient Client,
+            Task<SemanticTokens?> Tokens,
+            CancellationTokenSource Cancellation
+        );
     }
 
     /// <summary>What the running server supports, for any thread.</summary>

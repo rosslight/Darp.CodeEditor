@@ -16,9 +16,17 @@ namespace Darp.CodeEditor.Tests.Lsp;
 internal sealed class ToyServers
 {
     private readonly List<JsonObject> _sent = [];
+    private readonly ManualResetEventSlim _settings = new(initialState: true);
     private WriteGate _gate = new();
     private ToyServer? _current;
+    private TaskCompletionSource? _exit;
     private int _starts;
+
+    /// <summary>Starts servers that classify whole documents only, as luau-lsp does.</summary>
+    public bool WholeDocumentTokens { get; init; }
+
+    /// <summary>The running server, or the last one.</summary>
+    public ToyServer Current => _current ?? throw new InvalidOperationException("No server ran.");
 
     public int Starts => Volatile.Read(ref _starts);
 
@@ -38,7 +46,13 @@ internal sealed class ToyServers
         new(
             new LspLanguageServiceOptions(StartAsync, "toy")
             {
-                Settings = item => item.Section == "toy" ? ToyServer.ToJson("""{"greeting":"Hi"}""") : null,
+                Settings = item =>
+                {
+                    // A test holds the client's dispatch here with BlockSettings.
+                    if (item.Section == "block")
+                        _settings.Wait(TimeSpan.FromSeconds(30));
+                    return item.Section == "toy" ? ToyServer.ToJson("""{"greeting":"Hi"}""") : null;
+                },
                 // The toy's words and numbers, colored as locals and constants.
                 TokenTypes = new Dictionary<string, ClassificationKind?>
                 {
@@ -61,6 +75,14 @@ internal sealed class ToyServers
 
     public void UnblockWrites() => _gate.Open();
 
+    /// <summary>Makes the client wait in its answer to a settings request for the section "block".</summary>
+    public void BlockSettings() => _settings.Reset();
+
+    public void UnblockSettings() => _settings.Set();
+
+    /// <summary>Reports the running server's process as exited, while the server itself keeps running.</summary>
+    public void Exit() => (_exit ?? throw new InvalidOperationException("No server runs.")).TrySetResult();
+
     /// <summary>Ends the running server as a crash would: its connection closes without shutdown.</summary>
     public Task CrashAsync() =>
         (_current ?? throw new InvalidOperationException("No server runs.")).Server.DisposeAsync().AsTask();
@@ -69,9 +91,14 @@ internal sealed class ToyServers
     {
         var toServer = new Pipe();
         var toClient = new Pipe();
-        var server = new ToyServer(toServer.Reader.AsStream(), toClient.Writer.AsStream());
+        var server = new ToyServer(toServer.Reader.AsStream(), toClient.Writer.AsStream())
+        {
+            WholeDocumentTokens = WholeDocumentTokens,
+        };
         Task<int> run = server.Server.RunAsync();
+        var exit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _current = server;
+        _exit = exit;
         Interlocked.Increment(ref _starts);
         var gate = new WriteGate();
         _gate = gate;
@@ -80,7 +107,7 @@ internal sealed class ToyServers
             new LanguageServerTransport(
                 toClient.Reader.AsStream(),
                 output,
-                run,
+                Task.WhenAny(run, exit.Task),
                 async () =>
                 {
                     await server.Server.DisposeAsync();

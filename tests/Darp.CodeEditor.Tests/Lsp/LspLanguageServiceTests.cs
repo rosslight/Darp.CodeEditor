@@ -2,7 +2,9 @@ using System.Diagnostics;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using Darp.CodeEditor.LanguageServices;
+using Darp.CodeEditor.Lsp.Testing;
 using Shouldly;
+using Protocol = Darp.CodeEditor.Lsp.Protocol;
 
 namespace Darp.CodeEditor.Tests.Lsp;
 
@@ -294,4 +296,107 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
             .ShouldNotBeNull()
             .Text.ShouldBe("Hi, xalpha");
     }
+
+    [Fact]
+    public async Task Diagnostics_a_server_published_for_an_earlier_version_are_dropped()
+    {
+        await _service.PrewarmAsync(Timeout);
+        _service.OpenDocument(new DocumentSnapshot("a", 1, "alpha error\n"));
+        (await _diagnostics.Reader.ReadAsync(Timeout)).Version.ShouldBe(1);
+        _service.ChangeDocument(new DocumentChange("a", 2, new TextChange(0, 0, "x")));
+        (await _diagnostics.Reader.ReadAsync(Timeout)).Version.ShouldBe(2);
+
+        // Late diagnostics of version 1, then fresh ones of version 2.
+        await PublishAsync(_servers.Current, 1, "stale");
+        await PublishAsync(_servers.Current, 2, "fresh");
+        DiagnosticsChangedEventArgs next = await _diagnostics.Reader.ReadAsync(Timeout);
+
+        (next.Version, next.Diagnostics.Single().Message).ShouldBe((2, "fresh"));
+    }
+
+    [Fact]
+    public async Task Diagnostics_of_a_server_that_was_replaced_are_dropped()
+    {
+        await _service.PrewarmAsync(Timeout);
+        _service.OpenDocument(new DocumentSnapshot("a", 1, "alpha error\n"));
+        (await _diagnostics.Reader.ReadAsync(Timeout)).Diagnostics.Count.ShouldBe(1);
+        ToyServer old = _servers.Current;
+        _servers.BlockSettings();
+        // The old server asks for a setting, and the client's dispatch waits in its answer; diagnostics the server
+        // publishes afterwards are read and wait behind it.
+        Task<System.Text.Json.JsonElement> asked = old.Server.Connection.SendRequestAsync(
+            ToyServer.Configuration,
+            ToyServer.ToJson("""{"items":[{"section":"block"}]}"""),
+            CancellationToken.None
+        );
+        _ = asked.ContinueWith(static t => _ = t.Exception, TaskScheduler.Default);
+        await PublishAsync(old, 1, "stale");
+        await Task.Delay(500, Timeout);
+
+        // The process ends: the client clears the diagnostics and restarts the server.
+        _servers.Exit();
+        (await _diagnostics.Reader.ReadAsync(Timeout)).Diagnostics.ShouldBeEmpty();
+        // Only now the old connection delivers its diagnostics.
+        _servers.UnblockSettings();
+        DiagnosticsChangedEventArgs next = await _diagnostics.Reader.ReadAsync(Timeout);
+
+        next.Diagnostics.Single().Message.ShouldBe("Found an error.");
+        _servers.Starts.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Whole_document_tokens_are_asked_once_per_version_and_cancelled_by_a_change()
+    {
+        var servers = new ToyServers { WholeDocumentTokens = true };
+        await using LspLanguageService service = servers.CreateService();
+        await service.PrewarmAsync(Timeout);
+        // The toy answers whole-document tokens for "slow" only when they are cancelled.
+        service.OpenDocument(new DocumentSnapshot("a", 1, "slow alpha 12\n"));
+
+        Task<IReadOnlyList<ClassifiedRange>> first = service.GetClassificationsAsync(
+            new DocumentVersion("a", 1),
+            new TextRange(0, 4),
+            Timeout
+        );
+        Task<IReadOnlyList<ClassifiedRange>> second = service.GetClassificationsAsync(
+            new DocumentVersion("a", 1),
+            new TextRange(5, 5),
+            Timeout
+        );
+        await Wait.UntilAsync(() => servers.SentOf("textDocument/semanticTokens/full").Count == 1);
+        long asked = (long)servers.SentOf("textDocument/semanticTokens/full").Single()["id"]!;
+        service.ChangeDocument(new DocumentChange("a", 2, new TextChange(0, 4, "fast")));
+        IReadOnlyList<ClassifiedRange> stale = await first;
+        IReadOnlyList<ClassifiedRange> staleToo = await second;
+        await Wait.UntilAsync(() => servers.SentOf("$/cancelRequest").Any(m => (long?)m["params"]?["id"] == asked));
+        IReadOnlyList<ClassifiedRange> current = await service.GetClassificationsAsync(
+            new DocumentVersion("a", 2),
+            new TextRange(0, 13),
+            Timeout
+        );
+
+        stale.ShouldBeEmpty();
+        staleToo.ShouldBeEmpty();
+        current.ShouldBe([
+            new ClassifiedRange(new TextRange(0, 4), ClassificationKind.Local),
+            new ClassifiedRange(new TextRange(5, 5), ClassificationKind.Local),
+            new ClassifiedRange(new TextRange(11, 2), ClassificationKind.Constant),
+        ]);
+        servers.SentOf("textDocument/semanticTokens/full").Count.ShouldBe(2);
+    }
+
+    private static Task PublishAsync(ToyServer server, int version, string message) =>
+        server.Server.Connection.SendNotificationAsync(
+            Protocol.LspMethods.PublishDiagnostics,
+            new Protocol.PublishDiagnosticsParams(
+                "file:///a",
+                [
+                    new Protocol.Diagnostic(
+                        new Protocol.DocumentRange(new Protocol.Position(0, 0), new Protocol.Position(0, 1)),
+                        message
+                    ),
+                ],
+                version
+            )
+        );
 }
