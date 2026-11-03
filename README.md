@@ -1,7 +1,11 @@
-# Darp.CodeEditor (spike)
+# Darp.CodeEditor
 
-A prototype of a code editor library for Avalonia desktop apps. It exists to prove or disprove one architecture with
-measured numbers; it is not the product. "Darp.CodeEditor" is a working name.
+To review or try what is built, start with the [review guide](docs/review-guide.md); the design and its decisions are
+in [docs/design.md](docs/design.md).
+
+A code editor library for Avalonia desktop apps: an AvaloniaEdit editor that gets language features from language
+servers over LSP, with C# scripts (editing and running) and Luau built in. Pre-release: no version is published to
+the feed yet.
 
 ## Architecture
 
@@ -701,10 +705,10 @@ properties below apply to these builds; `LuauLspExecutable` and `IncludeLuauLsp`
 | `LuauLspDownloadUrl` | A mirror of the release's zip. |
 | `LuauLspExecutable` | Another luau-lsp to ship, such as a native Windows arm64 build; it is not checked. |
 | `IncludeLuauLsp` | `false`: no luau-lsp next to the app; it brings its own (`LuauLanguageServerOptions.ServerPath`). |
-| `IncludeLuauLsp` | `false`: no luau-lsp; the app brings its own (`LuauLanguageServerOptions.ServerPath`). |
 
-The download is a stand-in for development: the NuGet package is to carry the binaries per runtime identifier, laid out
-like the other helpers. `LuauLspExecutable` and `LuauLanguageServerOptions.ServerPath` are where that plugs in.
+Apps that use the NuGet package need no download: the package carries the four release builds, and the build copies
+the one for the app's runtime identifier to `helpers/luau-lsp/`. `LuauLspExecutable` and
+`LuauLanguageServerOptions.ServerPath` replace it with another build.
 
 In the NativeAOT demo on Linux x64 (2026-11-03, 8 cores, shared machine), luau-lsp answered `initialize` 87 ms after
 process start, and the Luau editor showed semantic colors and diagnostics 52 ms after it was created. Warm completion
