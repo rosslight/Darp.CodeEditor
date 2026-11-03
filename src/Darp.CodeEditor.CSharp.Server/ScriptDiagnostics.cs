@@ -1,11 +1,10 @@
 using System.Collections.Immutable;
-using EmmyLua.LanguageServer.Framework.Protocol.Model;
-using EmmyLua.LanguageServer.Framework.Protocol.Model.Diagnostic;
+using Darp.CodeEditor.Lsp.Protocol;
 using Microsoft.CodeAnalysis;
 using Diagnostic = Microsoft.CodeAnalysis.Diagnostic;
 using DiagnosticSeverity = Microsoft.CodeAnalysis.DiagnosticSeverity;
-using LspDiagnostic = EmmyLua.LanguageServer.Framework.Protocol.Model.Diagnostic.Diagnostic;
-using LspDiagnosticSeverity = EmmyLua.LanguageServer.Framework.Protocol.Model.Diagnostic.DiagnosticSeverity;
+using LspDiagnostic = Darp.CodeEditor.Lsp.Protocol.Diagnostic;
+using LspDiagnosticSeverity = Darp.CodeEditor.Lsp.Protocol.DiagnosticSeverity;
 
 namespace Darp.CodeEditor.CSharp.Server;
 
@@ -30,23 +29,22 @@ internal static class ScriptDiagnostics
         foreach (Diagnostic diagnostic in diagnostics)
         {
             result.Add(
-                new LspDiagnostic
-                {
+                new LspDiagnostic(
                     // Diagnostics without a place in the script, such as a broken reference, go to its start.
-                    Range = diagnostic.Location.IsInSource
+                    diagnostic.Location.IsInSource
                         ? lines.GetRange(diagnostic.Location.SourceSpan)
                         : new DocumentRange(new Position(0, 0), new Position(0, 0)),
-                    Severity = diagnostic.Severity switch
+                    diagnostic.GetMessage(),
+                    diagnostic.Severity switch
                     {
                         DiagnosticSeverity.Error => LspDiagnosticSeverity.Error,
                         DiagnosticSeverity.Warning => LspDiagnosticSeverity.Warning,
                         _ => LspDiagnosticSeverity.Information,
                     },
-                    Code = diagnostic.Id,
-                    Source = "csharp",
-                    Message = diagnostic.GetMessage(),
-                    Tags = GetTags(diagnostic),
-                }
+                    diagnostic.Id,
+                    "csharp",
+                    GetTags(diagnostic)
+                )
             );
         }
         return result;

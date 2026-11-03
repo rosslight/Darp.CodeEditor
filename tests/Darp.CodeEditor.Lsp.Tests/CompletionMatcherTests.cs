@@ -1,7 +1,6 @@
-using Darp.CodeEditor.Completion;
 using Shouldly;
 
-namespace Darp.CodeEditor.Tests;
+namespace Darp.CodeEditor.Lsp.Tests;
 
 public sealed class CompletionMatcherTests
 {
