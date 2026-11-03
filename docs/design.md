@@ -120,9 +120,9 @@ Host app (JIT or AOT)
 |---|---|---|
 | Editor core and demos (JIT and AOT) | `main`, commit `01cef73` | Built. 15 tests pass (per the conversation). In-window popups exist behind `--overlay-popups` |
 | C# language server and shared environment | `feat/csharp-script-server` (draft PR #1) | Built. 36 tests pass. Review: 7 findings, 4 must-fix (cancellation, closed-document cache, version rules, server outliving the app). Merge after fixes |
-| LSP layer (`Darp.CodeEditor.Lsp`) | `feat/lsp-protocol` (PR #6) | Built; in review |
+| LSP layer (`Darp.CodeEditor.Lsp`) | `main` (PR #6) | Merged |
 | Script runner | `feat/script-runner` has no runner code yet | Spike done, see section 4. Product code not started |
-| Editor LSP client | `feat/lsp-client`, stacked on PR #6 | Built: `LspLanguageService`, process ownership and restarts in the layer. Both demos get C# through the server; the in-process service is the server benchmark's baseline |
+| Editor LSP client | `feat/lsp-client` | Built: `LspLanguageService`, process ownership and restarts in the layer. Both demos get C# through the server; the in-process service is the server benchmark's baseline |
 | Luau | none | Follow-up |
 | WebView editor | `feat/webview-bakeoff` | Record only, not merged |
 | Repository setup (CI, releases, feed) | `main` (PR #2) | Merged |
@@ -171,7 +171,7 @@ Question numbers are from the design conversation. Later answers replace earlier
 | 34 | Script API interface rules | Methods are async only (`Task`, `Task<T>`, `IAsyncEnumerable<T>`). Returned handlers have no events or properties; use callback interfaces. No generic methods. Data is copied. No streams in v1 | The price of a process boundary and of AOT | decided |
 | 35 | High-frequency calls | Batching in the runner API from the start. No in-process mode | JIT caller, 100k synthetic packets: one call each takes 3.3 s; batches of 100 take 0.07 s (~1.5M packets/s); AOT caller: 3.87 s and 0.088 s | decided |
 | 36 | Processes | Two separate processes, language server and script runner, on the same bundled runtime | A hung or killed script must not take down completion. The runner must work with no editor open. Sharing was estimated to save ~150 MiB (not measured) | decided |
-| 37 | EmmyLua framework | Replace it with one small LSP layer (working name `Darp.CodeEditor.Lsp`), shared by the editor client and the server | EmmyLua needed a replaced scheduler for cancellation, fixed shutdown and hand-written completion lists. Its NativeAOT publish gave 100 warnings, and completion-list/plain-string-hover deserialization failed in the client probe | decided (layer built on PR #6; the editor client uses it; the server still uses EmmyLua) |
+| 37 | EmmyLua framework | Replace it with one small LSP layer (working name `Darp.CodeEditor.Lsp`), shared by the editor client and the server | EmmyLua needed a replaced scheduler for cancellation, fixed shutdown and hand-written completion lists. Its NativeAOT publish gave 100 warnings, and completion-list/plain-string-hover deserialization failed in the client probe | decided (layer merged in PR #6; the editor client uses it; the server still uses EmmyLua) |
 | 38 | .NET docs for hover | Conditional MSBuild switch in the host project. SDK English docs and script-DLL docs were proposed as copy inputs; no SDK needed on user machines | Without docs, hover shows signatures but no descriptions. Product owner suggested making copying conditional | decided (#40: off by default; copies framework and script-API docs) |
 | 39 | Regular C# files | Scripts only for now. Regular files only if a use case appears | Keeps the server small; #27 and #30 were already moot | decided |
 | 40 | Hover docs default | The switch from #38 is off by default. When on, it copies .NET's English docs from the build machine's SDK and the docs of the app's script DLLs | Apps that want hover docs opt in; user machines need no SDK | decided |
