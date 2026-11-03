@@ -46,7 +46,8 @@ both runs. The machine is shared with other agents: load average 0.3–1.7 durin
 Notes:
 
 - Key to changed pixels is dominated by frame pacing on this VM (Xvnc, software rendering); the typing path was already
-  sub-millisecond. It is the number to compare on Windows.
+  sub-millisecond. It is the number to compare on Windows. Xvnc paces frames by its connected VNC viewers: with none,
+  Avalonia presents about once a second and every on-screen number is ~850 ms. Measure with a viewer attached.
 - On screen, the probe's "editor text" time is not meaningful on this VM: without a compositor the root window still
   shows the previous run's pixels when the new window maps, so it reports text 2 ms after the window. Highlighted text is
   reported instead. In JIT it is bounded by the first frame the app presents (~850 ms), not by highlighting.
@@ -80,6 +81,10 @@ right has no room, and stacked above the line when neither side has room.
 - **The 4 ms budget is cooperative.** TextMate checks its time limit between regex searches, so one expensive
   expression can overrun it. A grammar that overran by more than the budget once is tokenized only on the thread pool
   from then on.
-- **Probe on X11.** Before each key the probe checks the active window and the input focus; a keyboard grab by another
-  client is not detected, and check and injection are not atomic on either platform. Do not use the machine while it
-  runs.
+- **UI stalls over 16 ms that remain.** Startup itself is one long UI-thread job in both builds (window creation and
+  first layout: ~450 ms JIT, ~30 ms AOT); after it, the JIT idle stalls and the first variant switch above.
+- **The probe types real keys.** It never clicks: the demo focuses its own editor. Before and after every key it checks
+  that the demo still runs and that its exact window has the foreground (Windows) or is the active window holding the
+  input focus (X11), before every key that no modifier key or mouse button is down, and that every injected event was
+  taken; it aborts otherwise, and the scripts stop. Check and key are still not atomic, and on X11 a keyboard grab by
+  another client is not detected: nobody may use the machine while it runs.
