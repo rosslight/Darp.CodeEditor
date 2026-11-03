@@ -139,10 +139,35 @@ public sealed class PackagedApp : IAsyncLifetime
             {
                 string cached = Path.Combine(packages, package.ToLowerInvariant(), _version);
                 if (Directory.Exists(cached))
-                    Directory.Delete(cached, recursive: true);
+                    await DeleteAsync(cached);
             }
         }
-        Directory.Delete(_root, recursive: true);
+        await DeleteAsync(_root);
+    }
+
+    /// <summary>
+    /// Deletes a directory of this run. On Windows, a virus scanner or the indexer can hold files that were just built
+    /// for a moment, so it tries again for a while; what is still left then stays behind, and the tests do not fail.
+    /// </summary>
+    private static async Task DeleteAsync(string directory)
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                Directory.Delete(directory, recursive: true);
+                return;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                if (attempt == 20)
+                {
+                    TestContext.Current.SendDiagnosticMessage($"Could not delete {directory}: {exception.Message}");
+                    return;
+                }
+                await Task.Delay(TimeSpan.FromMilliseconds(500));
+            }
+        }
     }
 
     /// <summary>
