@@ -238,7 +238,8 @@ internal sealed class RunnerConnection : IAsyncDisposable
         {
             _rpc.OutboundRequestTimeout = _options.CallTimeout;
             _deadlines = new Deadlines(
-                _options.CallTimeout + _options.CancellationGracePeriod,
+                _options.CallTimeout,
+                _options.CancellationGracePeriod,
                 () => End(ScriptRunnerExitReason.Killed)
             );
             _rpc.Deadlines = _deadlines;
@@ -304,8 +305,12 @@ internal sealed class RunnerConnection : IAsyncDisposable
         }
     }
 
-    private sealed class HostRpc(IJsonRpcMessageHandler messageHandler) : JsonRpc(messageHandler)
+    private sealed class HostRpc : JsonRpc
     {
+        public HostRpc(IJsonRpcMessageHandler messageHandler)
+            : base(messageHandler) =>
+            CancellationStrategy = new GivingUp(this, CancellationStrategy ?? throw new InvalidOperationException());
+
         public Deadlines? Deadlines { get; set; }
 
         protected override ValueTask SendAsync(JsonRpcMessage message, CancellationToken cancellationToken)
@@ -337,46 +342,104 @@ internal sealed class RunnerConnection : IAsyncDisposable
     }
 
     /// <summary>
-    /// Kills the runner when a request goes unanswered past its deadline plus the grace period. StreamJsonRpc already
+    /// Tells <see cref="HostRpc.Deadlines"/> when StreamJsonRpc gives up on a call: at its deadline, or when its caller
+    /// cancels it. StreamJsonRpc has decided how the call fails by then.
+    /// </summary>
+    private sealed class GivingUp(HostRpc rpc, ICancellationStrategy inner) : ICancellationStrategy
+    {
+        private readonly HostRpc _rpc = rpc;
+        private readonly ICancellationStrategy _inner = inner;
+
+        public void CancelOutboundRequest(RequestId requestId)
+        {
+            _rpc.Deadlines?.GaveUp(requestId);
+            _inner.CancelOutboundRequest(requestId);
+        }
+
+        public void OutboundRequestEnded(RequestId requestId) => _inner.OutboundRequestEnded(requestId);
+
+        public void IncomingRequestStarted(RequestId requestId, CancellationTokenSource cancellationTokenSource) =>
+            _inner.IncomingRequestStarted(requestId, cancellationTokenSource);
+
+        public void IncomingRequestEnded(RequestId requestId) => _inner.IncomingRequestEnded(requestId);
+    }
+
+    /// <summary>
+    /// Kills the runner when a request goes unanswered for the grace period after its deadline. StreamJsonRpc already
     /// failed the call with <see cref="TimeoutException"/> and asked the runner to cancel it at the deadline.
     /// </summary>
+    /// <remarks>
+    /// The grace period starts only once StreamJsonRpc gave up on the call. When the app was starved of CPU across the
+    /// deadline, StreamJsonRpc's timeout and the kill are due at once; a kill before the timeout ran would fail the call
+    /// with <see cref="ConnectionLostException"/> instead.
+    /// </remarks>
     private sealed class Deadlines : IDisposable
     {
-        private readonly Dictionary<RequestId, long> _sent = [];
-        private readonly TimeSpan _limit;
+        private readonly Dictionary<RequestId, Call> _calls = [];
+        private readonly TimeSpan _deadline;
+        private readonly TimeSpan _gracePeriod;
         private readonly Action _overdue;
         private readonly Timer _timer;
 
-        public Deadlines(TimeSpan limit, Action overdue)
+        public Deadlines(TimeSpan deadline, TimeSpan gracePeriod, Action overdue)
         {
-            _limit = limit;
+            _deadline = deadline;
+            _gracePeriod = gracePeriod;
             _overdue = overdue;
+            TimeSpan limit = deadline + gracePeriod;
             TimeSpan period = TimeSpan.FromMilliseconds(Math.Clamp(limit.TotalMilliseconds / 8, 10, 250));
             _timer = new Timer(_ => Check(), null, period, period);
         }
 
         public void Sent(RequestId id)
         {
-            lock (_sent)
-                _sent[id] = Stopwatch.GetTimestamp();
+            lock (_calls)
+                _calls[id] = new Call(Stopwatch.GetTimestamp());
+        }
+
+        public void GaveUp(RequestId id)
+        {
+            lock (_calls)
+            {
+                if (_calls.TryGetValue(id, out Call? call))
+                    call.GaveUpAt ??= Stopwatch.GetTimestamp();
+            }
         }
 
         public void Answered(RequestId id)
         {
-            lock (_sent)
-                _sent.Remove(id);
+            lock (_calls)
+                _calls.Remove(id);
         }
 
         public void Dispose() => _timer.Dispose();
 
         private void Check()
         {
-            lock (_sent)
+            lock (_calls)
             {
-                if (!_sent.Values.Any(sent => Stopwatch.GetElapsedTime(sent) > _limit))
+                long now = Stopwatch.GetTimestamp();
+                // A call its caller cancelled early still has until its deadline.
+                if (
+                    !_calls.Values.Any(call =>
+                        call.GaveUpAt is { } gaveUp
+                        && Stopwatch.GetElapsedTime(gaveUp, now) > _gracePeriod
+                        && Stopwatch.GetElapsedTime(call.SentAt, now) > _deadline + _gracePeriod
+                    )
+                )
+                {
                     return;
+                }
             }
             _overdue();
+        }
+
+        private sealed class Call(long sentAt)
+        {
+            public long SentAt { get; } = sentAt;
+
+            /// <summary>When StreamJsonRpc gave up on the call.</summary>
+            public long? GaveUpAt { get; set; }
         }
     }
 }
