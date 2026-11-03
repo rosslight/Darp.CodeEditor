@@ -49,33 +49,38 @@ internal sealed class ToyServer
     /// <summary>Offers <c>semanticTokens/full</c> instead of <c>semanticTokens/range</c>.</summary>
     public bool WholeDocumentTokens { get; init; }
 
-    private Task<InitializeResult> InitializeAsync(InitializeParams parameters, CancellationToken cancellationToken)
+    /// <summary>How long the server takes to answer <c>initialize</c>, as one that loads a lot.</summary>
+    public TimeSpan InitializeDelay { get; init; }
+
+    private async Task<InitializeResult> InitializeAsync(
+        InitializeParams parameters,
+        CancellationToken cancellationToken
+    )
     {
         if (
             parameters.InitializationOptions is { ValueKind: JsonValueKind.Object } options
             && options.TryGetProperty("fail", out _)
         )
             throw new JsonRpcException(ErrorCodes.RequestFailed, "Initialization failed as asked.");
+        await Task.Delay(InitializeDelay, cancellationToken);
         _insertReplace = parameters.Capabilities.TextDocument?.Completion?.CompletionItem?.InsertReplaceSupport == true;
-        return Task.FromResult(
-            new InitializeResult(
-                new ServerCapabilities
+        return new InitializeResult(
+            new ServerCapabilities
+            {
+                PositionEncoding = "utf-16",
+                TextDocumentSync = new TextDocumentSyncOptions
                 {
-                    PositionEncoding = "utf-16",
-                    TextDocumentSync = new TextDocumentSyncOptions
-                    {
-                        OpenClose = true,
-                        Change = TextDocumentSyncKind.Incremental,
-                    },
-                    CompletionProvider = new CompletionOptions { TriggerCharacters = ["."], ResolveProvider = true },
-                    HoverProvider = true,
-                    SignatureHelpProvider = new SignatureHelpOptions { TriggerCharacters = ["(", ","] },
-                    SemanticTokensProvider = WholeDocumentTokens
-                        ? new SemanticTokensOptions(Legend, Full: true)
-                        : new SemanticTokensOptions(Legend, Range: true),
+                    OpenClose = true,
+                    Change = TextDocumentSyncKind.Incremental,
                 },
-                new ServerInfo("toy", "1.0")
-            )
+                CompletionProvider = new CompletionOptions { TriggerCharacters = ["."], ResolveProvider = true },
+                HoverProvider = true,
+                SignatureHelpProvider = new SignatureHelpOptions { TriggerCharacters = ["(", ","] },
+                SemanticTokensProvider = WholeDocumentTokens
+                    ? new SemanticTokensOptions(Legend, Full: true)
+                    : new SemanticTokensOptions(Legend, Range: true),
+            },
+            new ServerInfo("toy", "1.0")
         );
     }
 
