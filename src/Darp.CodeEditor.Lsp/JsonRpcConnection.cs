@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
+using System.Text.Unicode;
 using System.Threading.Channels;
 using Darp.CodeEditor.Lsp.Protocol;
 
@@ -19,6 +20,11 @@ namespace Darp.CodeEditor.Lsp;
 /// One loop reads the input. It completes responses and applies <c>$/cancelRequest</c> as they arrive, and creates the
 /// cancellation token of each request on receipt, so a request can be cancelled while it is still queued. Requests and
 /// notifications are dispatched one at a time in arrival order, as their <see cref="DispatchMode"/> says.
+/// </para>
+/// <para>
+/// One loop writes the output, from construction until disposal. Sending only queues a message: the write loop
+/// serializes and writes the messages in the order they were sent, so callers never wait for serialization or a slow
+/// peer. Params are serialized when the message is written, so they must not change after they were sent.
 /// </para>
 /// <para>
 /// A request answers with <see cref="ErrorCodes.RequestCancelled"/> when its token was cancelled by the time its handler
@@ -51,19 +57,25 @@ public sealed class JsonRpcConnection : IAsyncDisposable
     private readonly Channel<Incoming> _queue = Channel.CreateUnbounded<Incoming>(
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
     );
-    private readonly SemaphoreSlim _writeLock = new(1, 1);
+    private readonly Channel<OutgoingMessage> _sends = Channel.CreateUnbounded<OutgoingMessage>(
+        new UnboundedChannelOptions { SingleReader = true }
+    );
     private readonly CancellationTokenSource _stop = new();
+    private readonly CancellationTokenSource _disposed = new();
     private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly HashSet<Task> _running = [];
+    private readonly Task _writeLoop;
     private Task? _loops;
     private long _lastId;
 
     /// <param name="log">Receives protocol errors and handler failures; the default drops them.</param>
-    public JsonRpcConnection(Stream input, Stream output, Action<string>? log = null)
+    /// <param name="limits">How much the peer may send; <see cref="JsonRpcLimits"/>' defaults when null.</param>
+    public JsonRpcConnection(Stream input, Stream output, Action<string>? log = null, JsonRpcLimits? limits = null)
     {
         _log = log ?? (static _ => { });
-        _reader = new MessageReader(input, _log);
+        _reader = new MessageReader(input, limits ?? new JsonRpcLimits(), _log);
         _output = output;
+        _writeLoop = Task.Run(WriteLoopAsync);
     }
 
     /// <summary>Completes when the connection ended: the input ended, it was disposed, or a server received <c>exit</c>.</summary>
@@ -74,10 +86,27 @@ public sealed class JsonRpcConnection : IAsyncDisposable
     internal Func<string, JsonRpcException?>? Filter { get; init; }
 
     /// <summary>Handles requests of <paramref name="type"/>. Handlers are registered before <see cref="Start"/>.</summary>
+    /// <remarks>
+    /// A <see cref="DispatchMode.Concurrent"/> handler must read the state it works on, such as the document text,
+    /// before its first incomplete <c>await</c>: later messages, such as <c>textDocument/didChange</c>, are dispatched
+    /// from then on. A <see cref="DispatchMode.Serial"/> handler holds up all later messages, so it must not await a
+    /// request to the peer that the peer can only answer after this connection dispatched a request of the peer.
+    /// </remarks>
     public void OnRequest<TParams, TResult>(
         RequestType<TParams, TResult> type,
         Func<TParams, CancellationToken, Task<TResult?>> handler,
         DispatchMode mode = DispatchMode.Concurrent
+    ) => OnRequest(type, handler, mode, answered: null);
+
+    /// <param name="answered">
+    /// Runs when the handler's result became the answer, before the next message is dispatched for a
+    /// <see cref="DispatchMode.Serial"/> handler.
+    /// </param>
+    internal void OnRequest<TParams, TResult>(
+        RequestType<TParams, TResult> type,
+        Func<TParams, CancellationToken, Task<TResult?>> handler,
+        DispatchMode mode,
+        Action? answered
     ) =>
         Register(
             _requestHandlers,
@@ -90,20 +119,28 @@ public sealed class JsonRpcConnection : IAsyncDisposable
                 {
                     TResult? result = await handler(ReadParams(parameters, type.Params), request.Cancellation.Token)
                         .ConfigureAwait(false);
-                    response = Finish(request)
-                        ? Build(request.Id, null, "result", result, type.Result)
-                        : Cancelled(request.Id);
+                    if (Finish(request))
+                    {
+                        response = Build(request.Id, null, "result", result, type.Result);
+                        answered?.Invoke();
+                    }
+                    else
+                        response = Cancelled(request.Id);
                 }
                 catch (Exception exception)
                 {
                     response = Finish(request) ? Error(request.Id, ToError(request, exception)) : Cancelled(request.Id);
                 }
-                await SendResponseAsync(response).ConfigureAwait(false);
+                Send(response);
             }
         );
 
     /// <summary>Handles notifications of <paramref name="type"/>. Handlers are registered before <see cref="Start"/>.</summary>
     /// <param name="handler">Receives a token that is cancelled when the connection ends.</param>
+    /// <remarks>
+    /// A <see cref="DispatchMode.Serial"/> handler holds up all later messages, so it must not await a request to the
+    /// peer that the peer can only answer after this connection dispatched a request of the peer.
+    /// </remarks>
     public void OnNotification<TParams>(
         NotificationType<TParams> type,
         Func<TParams, CancellationToken, Task> handler,
@@ -136,8 +173,9 @@ public sealed class JsonRpcConnection : IAsyncDisposable
 
     /// <summary>Sends a request and returns its result.</summary>
     /// <remarks>
-    /// Cancelling <paramref name="cancellationToken"/> sends <c>$/cancelRequest</c> and ends the call right away; a
-    /// later response is ignored.
+    /// Cancelling <paramref name="cancellationToken"/> ends the call right away, even while the output is blocked. A
+    /// request that was not written yet is then left out; otherwise <c>$/cancelRequest</c> follows it, and the late
+    /// response is ignored.
     /// </remarks>
     /// <exception cref="JsonRpcException">The peer answered with an error.</exception>
     /// <exception cref="IOException">The connection ended before the response arrived.</exception>
@@ -153,13 +191,18 @@ public sealed class JsonRpcConnection : IAsyncDisposable
         _outgoing[id] = response;
         try
         {
-            // Stop fails the requests it finds; a request added after that sees the stop here.
-            if (_stop.IsCancellationRequested)
+            var request = new OutgoingMessage(() =>
+                Build(new RequestId(id), type.Method, "params", parameters, type.Params)
+            )
+            {
+                RequestId = id,
+                Abandoned = cancellationToken,
+            };
+            // Stop refuses messages before it fails the requests it finds, so a request is either refused or failed.
+            if (!_sends.Writer.TryWrite(request))
                 throw Closed();
-            await WriteFrameAsync(Build(new RequestId(id), type.Method, "params", parameters, type.Params))
-                .ConfigureAwait(false);
             JsonElement result;
-            using (cancellationToken.UnsafeRegister(_ => CancelOutgoing(id, cancellationToken), null))
+            using (cancellationToken.UnsafeRegister(_ => CancelOutgoing(id, request, cancellationToken), null))
                 result = await response.Task.ConfigureAwait(false);
             return result.Deserialize(type.Result);
         }
@@ -169,29 +212,45 @@ public sealed class JsonRpcConnection : IAsyncDisposable
         }
     }
 
-    /// <exception cref="IOException">The connection ended.</exception>
-    public Task SendNotificationAsync<TParams>(NotificationType<TParams> type, TParams parameters) =>
-        WriteFrameAsync(Build(null, type.Method, "params", parameters, type.Params));
+    /// <summary>Sends a notification.</summary>
+    /// <returns>A task that completes when the notification was written.</returns>
+    /// <exception cref="IOException">The connection ended before the notification was written.</exception>
+    public Task SendNotificationAsync<TParams>(NotificationType<TParams> type, TParams parameters)
+    {
+        var written = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var notification = new OutgoingMessage(() => Build(null, type.Method, "params", parameters, type.Params))
+        {
+            Written = written,
+        };
+        return _sends.Writer.TryWrite(notification) ? written.Task : Task.FromException(Closed());
+    }
 
     /// <summary>Ends the connection and waits until running handlers returned.</summary>
+    /// <remarks>Messages that were not written yet are dropped; await a notification's task to make sure it went out.</remarks>
     public async ValueTask DisposeAsync()
     {
         Stop();
+        _disposed.Cancel();
         if (_loops is not null)
             await _loops.ConfigureAwait(false);
+        await _writeLoop.ConfigureAwait(false);
         Task[] running;
         lock (_running)
             running = [.. _running];
         await Task.WhenAll(running).ConfigureAwait(false);
     }
 
-    /// <summary>Stops reading and dispatching, cancels incoming requests and fails outgoing ones.</summary>
+    /// <summary>
+    /// Stops reading and dispatching, cancels incoming requests and fails outgoing ones. Messages that were already
+    /// sent are still written, until the connection is disposed.
+    /// </summary>
     internal void Stop()
     {
         if (_stop.IsCancellationRequested)
             return;
         _stop.Cancel();
         _queue.Writer.TryComplete();
+        _sends.Writer.TryComplete();
         foreach (IncomingRequest request in _incoming.Values)
             Observe(request.Cancellation.CancelAsync(), "Cancelling a request");
         foreach (long id in _outgoing.Keys)
@@ -212,12 +271,11 @@ public sealed class JsonRpcConnection : IAsyncDisposable
                 {
                     ReadOnlyMemory<byte> error = Receive(body.Span);
                     if (!error.IsEmpty)
-                        await WriteFrameAsync(error).ConfigureAwait(false);
+                        Send(error);
                 }
                 catch (Exception exception)
                 {
-                    if (!_stop.IsCancellationRequested)
-                        _log($"Handling a message failed: {exception}");
+                    _log($"Handling a message failed: {exception}");
                 }
             }
         }
@@ -237,26 +295,39 @@ public sealed class JsonRpcConnection : IAsyncDisposable
     private ReadOnlyMemory<byte> Receive(ReadOnlySpan<byte> body)
     {
         JsonElement message;
+        string? name;
+        bool hasId;
+        RequestId? id;
         try
         {
+            // JSON text is UTF-8. The reader checks the structure, but the encoding only of the strings it decodes.
+            if (!Utf8.IsValid(body))
+                throw new JsonException("The message is not valid UTF-8.");
             var reader = new Utf8JsonReader(body);
             // Copies the message, so that it stays valid when the read buffer is reused.
             message = JsonElement.ParseValue(ref reader);
             if (reader.Read())
                 throw new JsonException("The message continues after its JSON value.");
+            if (message.ValueKind != JsonValueKind.Object)
+            {
+                var invalid = new JsonRpcException(ErrorCodes.InvalidRequest, "A message must be a JSON object.");
+                return Error(null, invalid);
+            }
+            name =
+                message.TryGetProperty("method", out JsonElement method) && method.ValueKind == JsonValueKind.String
+                    ? method.GetString()
+                    : null;
+            hasId = message.TryGetProperty("id", out JsonElement idElement);
+            id = RequestId.TryRead(idElement, out RequestId value) ? value : null;
         }
-        catch (JsonException exception)
+        // Strings with unpaired surrogate escapes fail to decode with InvalidOperationException.
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {
             _log($"Received a message that is not JSON: {exception.Message}");
             return Error(null, new JsonRpcException(ErrorCodes.ParseError, "The message is not valid JSON."));
         }
-        if (message.ValueKind != JsonValueKind.Object)
-            return Error(null, new JsonRpcException(ErrorCodes.InvalidRequest, "A message must be a JSON object."));
-        bool hasId = message.TryGetProperty("id", out JsonElement idElement);
-        RequestId? id = RequestId.TryRead(idElement, out RequestId value) ? value : null;
-        if (!message.TryGetProperty("method", out JsonElement method) || method.ValueKind != JsonValueKind.String)
+        if (name is null)
             return ReceiveResponse(id, message);
-        string name = method.GetString() ?? "";
         JsonElement? parameters = message.TryGetProperty("params", out JsonElement element) ? element : null;
         if (!hasId)
         {
@@ -267,16 +338,20 @@ public sealed class JsonRpcConnection : IAsyncDisposable
             return default;
         }
         if (id is not { } requestId)
+        {
             return Error(
                 null,
                 new JsonRpcException(ErrorCodes.InvalidRequest, "A request id must be a number or string.")
             );
+        }
         var request = new IncomingRequest(requestId, name);
         if (!_incoming.TryAdd(requestId, request))
+        {
             return Error(
                 requestId,
                 new JsonRpcException(ErrorCodes.InvalidRequest, $"Request {requestId} is running.")
             );
+        }
         _queue.Writer.TryWrite(new Incoming(name, parameters, request));
         return default;
     }
@@ -336,19 +411,23 @@ public sealed class JsonRpcConnection : IAsyncDisposable
         }
     }
 
-    private void CancelOutgoing(long id, CancellationToken cancellationToken)
+    /// <summary>Ends a call whose caller cancelled it, and queues its <c>$/cancelRequest</c> behind the request.</summary>
+    private void CancelOutgoing(long id, OutgoingMessage request, CancellationToken cancellationToken)
     {
         if (!_outgoing.TryRemove(id, out TaskCompletionSource<JsonElement>? response))
             return;
         response.TrySetCanceled(cancellationToken);
-        if (!_stop.IsCancellationRequested)
-        {
-            Observe(
-                SendNotificationAsync(LspMethods.CancelRequest, new CancelParams(new RequestId(id))),
-                "Sending $/cancelRequest"
-            );
-        }
+        _sends.Writer.TryWrite(
+            new OutgoingMessage(() =>
+                Build(null, LspMethods.CancelRequest.Method, "params", new CancelParams(new RequestId(id)), Cancel)
+            )
+            {
+                Cancels = request,
+            }
+        );
     }
+
+    private static JsonTypeInfo<CancelParams> Cancel => LspJsonContext.Default.CancelParams;
 
     private async Task DispatchLoopAsync()
     {
@@ -390,10 +469,8 @@ public sealed class JsonRpcConnection : IAsyncDisposable
                 return (registration.Handle(request, message.Params), registration.Mode);
         }
         rejection ??= new JsonRpcException(ErrorCodes.MethodNotFound, $"Unknown method {message.Method}.");
-        return (
-            SendResponseAsync(Finish(request) ? Error(request.Id, rejection) : Cancelled(request.Id)),
-            DispatchMode.Serial
-        );
+        Send(Finish(request) ? Error(request.Id, rejection) : Cancelled(request.Id));
+        return (Task.CompletedTask, DispatchMode.Serial);
     }
 
     private void Register<TContext>(
@@ -442,7 +519,10 @@ public sealed class JsonRpcConnection : IAsyncDisposable
     }
 
     /// <summary>Ends a request that is being answered.</summary>
-    /// <returns>False when the request was cancelled; it then answers <see cref="ErrorCodes.RequestCancelled"/>.</returns>
+    /// <returns>
+    /// False when the request was cancelled; it then answers <see cref="ErrorCodes.RequestCancelled"/>. Nothing
+    /// cancels the request after this returned true.
+    /// </returns>
     private bool Finish(IncomingRequest request)
     {
         _incoming.TryRemove(request.Id, out _);
@@ -512,45 +592,50 @@ public sealed class JsonRpcConnection : IAsyncDisposable
         return body.WrittenMemory;
     }
 
-    /// <summary>Writes a response; a failure is logged, since nobody waits for it.</summary>
-    private async Task SendResponseAsync(ReadOnlyMemory<byte> body)
+    /// <summary>Queues a response that was already built; it is dropped once the connection stopped.</summary>
+    private void Send(ReadOnlyMemory<byte> response) => _sends.Writer.TryWrite(new OutgoingMessage(() => response));
+
+    /// <summary>Builds and writes the queued messages in order, until the connection stopped and they are written.</summary>
+    private async Task WriteLoopAsync()
     {
-        try
+        await foreach (OutgoingMessage message in _sends.Reader.ReadAllAsync().ConfigureAwait(false))
         {
-            await WriteFrameAsync(body).ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            if (!_stop.IsCancellationRequested)
-                _log($"Sending a response failed: {exception}");
+            // A request that its caller cancelled before it went out is left out, and then its $/cancelRequest too.
+            if (message.Abandoned.IsCancellationRequested || message.Cancels is { WasWritten: false })
+                continue;
+            try
+            {
+                // After dispose, the remaining messages fail without being built or touching the stream.
+                _disposed.Token.ThrowIfCancellationRequested();
+                await WriteFrameAsync(message.Build()).ConfigureAwait(false);
+                message.WasWritten = true;
+                message.Written?.TrySetResult();
+            }
+            catch (Exception exception)
+            {
+                Exception failure = _disposed.IsCancellationRequested ? Closed() : exception;
+                message.Written?.TrySetException(failure);
+                if (message.RequestId is { } id && _outgoing.TryRemove(id, out TaskCompletionSource<JsonElement>? call))
+                    call.TrySetException(failure);
+                if (!_disposed.IsCancellationRequested)
+                    _log($"Sending a message failed: {exception}");
+            }
         }
     }
 
-    /// <exception cref="IOException">The connection ended.</exception>
+    /// <remarks>
+    /// A write is never cancelled halfway, except on dispose: then a write that the stream does not cancel, such as to a
+    /// console stream, is abandoned.
+    /// </remarks>
     private async Task WriteFrameAsync(ReadOnlyMemory<byte> body)
     {
         byte[] header = Encoding.ASCII.GetBytes(
             string.Create(CultureInfo.InvariantCulture, $"Content-Length: {body.Length}\r\n\r\n")
         );
-        CancellationToken stop = _stop.Token;
-        try
-        {
-            await _writeLock.WaitAsync(stop).ConfigureAwait(false);
-            try
-            {
-                await _output.WriteAsync(header, stop).ConfigureAwait(false);
-                await _output.WriteAsync(body, stop).ConfigureAwait(false);
-                await _output.FlushAsync(stop).ConfigureAwait(false);
-            }
-            finally
-            {
-                _writeLock.Release();
-            }
-        }
-        catch (OperationCanceledException) when (stop.IsCancellationRequested)
-        {
-            throw Closed();
-        }
+        CancellationToken disposed = _disposed.Token;
+        await _output.WriteAsync(header, disposed).AsTask().WaitAsync(disposed).ConfigureAwait(false);
+        await _output.WriteAsync(body, disposed).AsTask().WaitAsync(disposed).ConfigureAwait(false);
+        await _output.FlushAsync(disposed).WaitAsync(disposed).ConfigureAwait(false);
     }
 
     /// <summary>Logs failures of work that nobody awaits.</summary>
@@ -590,5 +675,29 @@ public sealed class JsonRpcConnection : IAsyncDisposable
 
         /// <summary>Created when the request is read, so that a cancel for a queued request works.</summary>
         public CancellationTokenSource Cancellation { get; } = new();
+    }
+
+    /// <summary>A message for the write loop.</summary>
+    private sealed class OutgoingMessage
+    {
+        public OutgoingMessage(Func<ReadOnlyMemory<byte>> build) => Build = build;
+
+        /// <summary>Serializes the message, on the write loop.</summary>
+        public Func<ReadOnlyMemory<byte>> Build { get; }
+
+        /// <summary>For a notification: completes when it was written, and faults when it could not be.</summary>
+        public TaskCompletionSource? Written { get; init; }
+
+        /// <summary>For a request: its id, whose call fails when the request cannot be written.</summary>
+        public long? RequestId { get; init; }
+
+        /// <summary>For a request: its caller's token. A request that was cancelled before it was written is left out.</summary>
+        public CancellationToken Abandoned { get; init; }
+
+        /// <summary>For <c>$/cancelRequest</c>: the request it cancels. It is left out when that request was not written.</summary>
+        public OutgoingMessage? Cancels { get; init; }
+
+        /// <summary>Set by the write loop, which alone reads it.</summary>
+        public bool WasWritten { get; set; }
     }
 }
