@@ -50,7 +50,7 @@ public sealed class EditorCompletionTests
         servers
             .SentOf("textDocument/completion")
             .Select(m => (int?)m["params"]?["context"]?["triggerKind"])
-            .ShouldBe([2, 3]);
+            .ShouldBe([1, 3]);
         editor.Text.ShouldBe("-- uses beta\nx\nbeta()");
         window.Close();
     }

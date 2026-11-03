@@ -59,6 +59,13 @@ public sealed class LuauLspTests
                 new CompletionTrigger(CompletionTriggerKind.TriggerCharacter, '.'),
                 Wait.Timeout
             );
+            // A typed word start goes out as Invoked.
+            CompletionList? words = await service.GetCompletionsAsync(
+                document,
+                Script.IndexOf("greet(\"", StringComparison.Ordinal) + 3,
+                new CompletionTrigger(CompletionTriggerKind.Insertion, 'g'),
+                Wait.Timeout
+            );
             QuickInfo? hover = await service.GetQuickInfoAsync(
                 document,
                 Script.IndexOf("greet(\"", StringComparison.Ordinal) + 1,
@@ -72,6 +79,7 @@ public sealed class LuauLspTests
             DiagnosticsChangedEventArgs published = await diagnostics.Reader.ReadAsync(Wait.Timeout);
 
             members.ShouldNotBeNull().Items.ShouldContain(i => i.DisplayText == "format");
+            words.ShouldNotBeNull().Items.ShouldContain(i => i.DisplayText == "greet");
             hover.ShouldNotBeNull().Text.ShouldContain("greet");
             // luau-lsp classifies whole documents only.
             classified.ShouldContain(c => Script.Substring(c.Range.Start, c.Range.Length) == "greet");

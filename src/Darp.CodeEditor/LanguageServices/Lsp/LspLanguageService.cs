@@ -779,16 +779,22 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
     private static TextEdit[] MapEdits(IReadOnlyList<Protocol.TextEdit> edits, DocumentText text) =>
         [.. edits.Select(e => new TextEdit(text.GetTextRange(e.Range), e.NewText))];
 
+    /// <summary>
+    /// LSP's context: typing a server's trigger character is <c>TriggerCharacter</c>, asking again for an incomplete
+    /// list is <c>TriggerForIncompleteCompletions</c>, and everything else, also typing the first letter of a word, is
+    /// <c>Invoked</c>.
+    /// </summary>
     private static CompletionContext ToContext(CompletionTrigger trigger) =>
         trigger.Kind switch
         {
-            CompletionTriggerKind.Invoke => new CompletionContext(Protocol.CompletionTriggerKind.Invoked),
+            CompletionTriggerKind.TriggerCharacter => new CompletionContext(
+                Protocol.CompletionTriggerKind.TriggerCharacter,
+                trigger.Character.ToString()
+            ),
             CompletionTriggerKind.IncompleteList => new CompletionContext(
                 Protocol.CompletionTriggerKind.TriggerForIncompleteCompletions
             ),
-            // The first letter of a word goes as a trigger character too: the C# server then completes as Roslyn
-            // does for typed characters, and other servers complete as invoked.
-            _ => new CompletionContext(Protocol.CompletionTriggerKind.TriggerCharacter, trigger.Character.ToString()),
+            _ => new CompletionContext(Protocol.CompletionTriggerKind.Invoked),
         };
 
     private static CompletionItemKind ToKind(Protocol.CompletionItemKind? kind) =>

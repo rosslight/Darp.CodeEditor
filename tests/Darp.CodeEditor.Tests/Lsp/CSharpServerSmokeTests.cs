@@ -44,10 +44,11 @@ public sealed class CSharpServerSmokeTests
                 Wait.Timeout
             );
             CompletionList types = (
+                // Typed letters go out as Invoked, which the server answers like Roslyn's typing trigger.
                 await service.GetCompletionsAsync(
                     document,
                     text.Length,
-                    new CompletionTrigger(CompletionTriggerKind.Invoke),
+                    new CompletionTrigger(CompletionTriggerKind.Insertion, 'i'),
                     Wait.Timeout
                 )
             ).ShouldNotBeNull();

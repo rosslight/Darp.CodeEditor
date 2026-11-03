@@ -112,7 +112,7 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Completion_maps_edits_commit_characters_and_incompleteness_and_asks_again_with_its_kind()
+    public async Task Completion_maps_edits_commit_characters_and_incompleteness_and_sends_the_lsp_trigger_kind()
     {
         await _service.PrewarmAsync(Timeout);
         _service.OpenDocument(new DocumentSnapshot("a", 1, Text));
@@ -129,6 +129,12 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
             new CompletionTrigger(CompletionTriggerKind.IncompleteList, 'l'),
             Timeout
         );
+        await _service.GetCompletionsAsync(
+            new DocumentVersion("a", 1),
+            2,
+            new CompletionTrigger(CompletionTriggerKind.TriggerCharacter, '.'),
+            Timeout
+        );
 
         list.ShouldNotBeNull().IsIncomplete.ShouldBeTrue();
         list.ApplicableRange.ShouldBe(new TextRange(0, 5));
@@ -138,10 +144,13 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
         alpha.CommitCharacters.ShouldBe(['.']);
         (beta.InsertText, beta.Kind).ShouldBe(("beta()", CompletionItemKind.Method));
         beta.AdditionalEdits.ShouldBe([new TextEdit(new TextRange(0, 0), "-- uses beta\n")]);
+        // Typing a letter is Invoked; only the server's trigger characters are TriggerCharacter.
         _servers
             .SentOf("textDocument/completion")
-            .Select(m => (int?)m["params"]?["context"]?["triggerKind"])
-            .ShouldBe([2, 3]);
+            .Select(m =>
+                ((int?)m["params"]?["context"]?["triggerKind"], (string?)m["params"]?["context"]?["triggerCharacter"])
+            )
+            .ShouldBe([(1, null), (3, null), (2, ".")]);
     }
 
     [Fact]
