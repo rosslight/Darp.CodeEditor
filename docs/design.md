@@ -127,8 +127,8 @@ Both C# helpers run with ReadyToRun on one .NET runtime that the app ships in he
 | C# language server and shared environment | `main` (PRs #1, #8) | Merged, on the LSP layer |
 | Script runner | `main` (PR #7) | Merged: runner, host API, Run in both demos, tests and benchmark. Tests run on Linux and, in CI, on Windows; macOS not run |
 | Editor LSP client | `main` (PR #10) | Merged: `LspLanguageService`, process ownership and restarts in the layer; both demos get C# through the server |
-| Packaging (#43) | `build/packaging` | Four packages with Luau; both C# helpers ReadyToRun on the bundled runtime; luau-lsp in the Luau package; one process ownership implementation; packaging test publishes a self-contained JIT app and a NativeAOT app from the packages |
-| Luau | `main` (PR #11) | Built: `Darp.CodeEditor.Luau` (environment, luau-lsp service, grammar); Luau editors with a host API in both demos. Tests against luau-lsp run in CI. The package carries luau-lsp for every platform it has a build for (`build/packaging`) |
+| Packaging (#43) | `main` (PR #12) | Merged: four packages with Luau; both C# helpers ReadyToRun on the bundled runtime; luau-lsp in the Luau package; one process ownership implementation; packaging test publishes a self-contained JIT app and a NativeAOT app from the packages |
+| Luau | `main` (PRs #11, #12) | Merged: `Darp.CodeEditor.Luau` (environment, luau-lsp service, grammar); Luau editors with a host API in both demos. Tests against luau-lsp run in CI. The package carries luau-lsp for every platform it has a build for (PR #12) |
 | WebView editor | `feat/webview-bakeoff` | Record only, not merged |
 | Repository setup (CI, releases, feed) | `main` (PR #2) | Merged |
 | Greenfield test app | none | Planned (#24) |
@@ -234,18 +234,15 @@ Only the numbers that drove decisions. Source names refer to section 7.
 11. **Environment changes.** Changing the script definition requires a server restart.
 12. **Publishing requirements.** Apps need `PublishReadyToRun=true`, and NativeAOT apps that publish for another platform than the SDK's also `UseAppHost=true`, because package build files cannot change what restore fetches. Publish fails with a message that names the property.
 
-### 5.2 Next steps (planned as of 2026-11-02)
+### 5.2 Next steps (as of 2026-11-03)
 
-1. Merge the C# server after the review fixes and shared-LSP migration: cancellation, closed-document results, version rules, a watchdog for a dead parent process, lifecycle checks, globals identity, and a benchmark with overlapping requests. Add tests that fail when the bug is present.
-2. Build `Darp.CodeEditor.Lsp`, switch the server to it and remove EmmyLua (#37).
-3. ~~Build the script runner: a separate helper on the bundled runtime, with a shared runtime folder proposed for the language server and runner. Batching, timeouts, restart, and no orphan processes on Windows and Linux. A Run button in both demos.~~ Built; the language server shares the runtime folder since `build/packaging`.
-4. Editor polish: in-window popups by default, the first-completion stall, first-frame colors, editing helpers, light and dark themes, and the key-to-pixel probe with a guard so no keystroke reaches another app.
-5. ~~Build the editor's LSP client, so both demos get C# through the server.~~ Built on `feat/lsp-client`; the AOT demo has C#.
-6. ~~Repository setup: CI on Linux and Windows with an AOT gate, release-please, and publishing to the private feed.~~ Built.
-6a. Packaging (#43): ~~helpers in `Darp.CodeEditor.CSharp`, server on the shared runtime with ReadyToRun, luau-lsp in `Darp.CodeEditor.Luau`~~ built on `build/packaging`.
-7. Re-run the Windows benchmarks on the Windows laptop with in-window popups.
-8. Build the greenfield test app from the template (#24). The real app follows.
-9. ~~Luau through luau-lsp (#2).~~ Built on `feat/luau`.
+Everything planned on 2026-11-02 is merged: the server on the shared LSP layer, the editor polish, the editor's LSP
+client, the script runner, Luau, the repository setup and the packaging. What remains, with the measurements and the
+decisions taken during implementation, is in the [review guide](review-guide.md):
+
+1. Merge the release PR when the packages should reach the feed.
+2. Build the greenfield test app from the template (#24); the real app follows.
+3. Re-run the Windows benchmarks with the ReadyToRun helpers, and run once on arm64.
 
 ## 6. Inconsistencies in the sources
 
