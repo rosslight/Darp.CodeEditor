@@ -15,6 +15,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Darp.CodeEditor\Darp.CodeEditor.csproj" />
     <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp\Darp.CodeEditor.CSharp.csproj" />
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.Luau\Darp.CodeEditor.Luau.csproj" />
     <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp.Execution\Darp.CodeEditor.CSharp.Execution.csproj" />
     <!--
       Script-visible assemblies: NativeAOT ships them as files next to the app, where the runner loads them and the C#
@@ -31,13 +32,16 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\Shared\**\*.cs" LinkBase="Shared" />
+    <!-- The app's Luau API, which luau-lsp loads. -->
     <None
-      Include="..\Shared\Grammars\**"
-      LinkBase="Grammars"
+      Include="..\Shared\Luau\**"
+      LinkBase="Luau"
       CopyToOutputDirectory="PreserveNewest"
       CopyToPublishDirectory="PreserveNewest"
     />
   </ItemGroup>
+  <!-- Puts luau-lsp and the Luau grammar next to the app. -->
+  <Import Project="..\..\src\Darp.CodeEditor.Luau\build\Darp.CodeEditor.Luau.targets" />
   <!-- Puts the C# script language server next to the app. -->
   <Import Project="..\..\src\Darp.CodeEditor.CSharp\build\Darp.CodeEditor.CSharp.targets" />
   <!-- Puts the C# script runner and its .NET runtime next to the app, for the Run action. -->

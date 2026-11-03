@@ -1,0 +1,18 @@
+{
+  "@test/global/device": {
+    "documentation": "The device this script runs on."
+  },
+  "@test/globaltype/Device.readTemperature": {
+    "documentation": "Reads the current temperature in degrees Celsius.",
+    "params": [],
+    "returns": []
+  },
+  "@test/globaltype/Device.setLed": {
+    "documentation": "Switches the status LED.",
+    "params": [{ "name": "on", "documentation": "@test/globaltype/Device.setLed/param/1" }],
+    "returns": []
+  },
+  "@test/globaltype/Device.setLed/param/1": {
+    "documentation": "True to switch the LED on."
+  }
+}

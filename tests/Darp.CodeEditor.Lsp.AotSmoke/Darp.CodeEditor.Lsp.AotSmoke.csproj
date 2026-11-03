@@ -15,4 +15,6 @@
   <ItemGroup>
     <Compile Include="..\Darp.CodeEditor.Lsp.Tests\Toy\*.cs" LinkBase="Toy" />
   </ItemGroup>
+  <!-- Puts luau-lsp next to the program, for the luau-lsp check. -->
+  <Import Project="..\..\src\Darp.CodeEditor.Luau\build\Darp.CodeEditor.Luau.targets" />
 </Project>

@@ -80,22 +80,21 @@ internal sealed class LuauLsp : IAsyncDisposable
         }
     }
 
-    /// <summary>The binary from <c>fetch-luau-lsp.sh</c>, or the one <c>LUAU_LSP</c> names; null when missing.</summary>
+    /// <summary>
+    /// The luau-lsp that <c>Darp.CodeEditor.Luau.targets</c> puts next to the tests, or the one <c>LUAU_LSP</c> names;
+    /// null when missing.
+    /// </summary>
     public static string? FindExecutable()
     {
-        if (Environment.GetEnvironmentVariable("LUAU_LSP") is { Length: > 0 } path)
-            return File.Exists(path) ? path : null;
-        for (
-            DirectoryInfo? directory = new(AppContext.BaseDirectory);
-            directory is not null;
-            directory = directory.Parent
-        )
-        {
-            string candidate = Path.Combine(directory.FullName, ".tools", "luau-lsp", "luau-lsp");
-            if (File.Exists(candidate))
-                return candidate;
-        }
-        return null;
+        string path = Environment.GetEnvironmentVariable("LUAU_LSP") is { Length: > 0 } named
+            ? named
+            : Path.Combine(
+                AppContext.BaseDirectory,
+                "helpers",
+                "luau-lsp",
+                OperatingSystem.IsWindows() ? "luau-lsp.exe" : "luau-lsp"
+            );
+        return File.Exists(path) ? path : null;
     }
 
     public static InitializeParams InitializeParams(string rootUri) =>

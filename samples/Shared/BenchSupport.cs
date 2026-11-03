@@ -14,7 +14,8 @@ internal static class ProcessClock
 /// <summary>Command line flags shared by the demos.</summary>
 /// <param name="CSharpServer">The C# server's .dll or app host, instead of the one next to the app.</param>
 /// <param name="DotNet">The dotnet executable that runs the C# server.</param>
-/// <param name="ServerLog">Writes the C# server's log to standard error.</param>
+/// <param name="ServerLog">Writes the log of the C# server and luau-lsp to standard error.</param>
+/// <param name="LuauLsp">The luau-lsp executable, instead of the one next to the app.</param>
 internal sealed record DemoOptions(
     bool Smoke,
     bool Bench,
@@ -28,7 +29,8 @@ internal sealed record DemoOptions(
     bool Light,
     string? CSharpServer = null,
     string? DotNet = null,
-    bool ServerLog = false
+    bool ServerLog = false,
+    string? LuauLsp = null
 )
 {
     public bool Measure => Smoke || Bench;
@@ -48,7 +50,8 @@ internal sealed record DemoOptions(
             args.Contains("--light"),
             Value(args, "--csharp-server"),
             Value(args, "--dotnet"),
-            args.Contains("--server-log")
+            args.Contains("--server-log"),
+            Value(args, "--luau-lsp")
         );
     }
 

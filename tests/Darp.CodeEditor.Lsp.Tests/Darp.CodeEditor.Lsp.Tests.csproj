@@ -17,4 +17,6 @@
     <!-- Its build output is copied next to the tests, which start it. -->
     <ProjectReference Include="..\Darp.CodeEditor.Lsp.TestProcess\Darp.CodeEditor.Lsp.TestProcess.csproj" />
   </ItemGroup>
+  <!-- Puts luau-lsp next to the tests, for the interop test. -->
+  <Import Project="..\..\src\Darp.CodeEditor.Luau\build\Darp.CodeEditor.Luau.targets" />
 </Project>

@@ -1,0 +1,34 @@
+{
+  "@demo/global/log": {
+    "documentation": "Writes a message to the script log.",
+    "params": [{ "name": "message", "documentation": "@demo/global/log/param/0" }],
+    "returns": []
+  },
+  "@demo/global/log/param/0": { "documentation": "The text to write." },
+  "@demo/global/device": { "documentation": "The device this script runs on." },
+  "@demo/globaltype/Device": { "documentation": "A sensor device." },
+  "@demo/globaltype/Device.name": { "documentation": "The display name of the device." },
+  "@demo/globaltype/Device.readTemperature": {
+    "documentation": "Reads the current temperature in degrees Celsius.",
+    "params": [],
+    "returns": []
+  },
+  "@demo/globaltype/Device.setLed": {
+    "documentation": "Switches the status LED.",
+    "params": [{ "name": "on", "documentation": "@demo/globaltype/Device.setLed/param/1" }],
+    "returns": []
+  },
+  "@demo/globaltype/Device.setLed/param/1": { "documentation": "True to switch the LED on." },
+  "@demo/globaltype/Device.read": {
+    "documentation": "Reads raw bytes from a device register.",
+    "params": [
+      { "name": "register", "documentation": "@demo/globaltype/Device.read/param/1" },
+      { "name": "length", "documentation": "@demo/globaltype/Device.read/param/2" }
+    ],
+    "returns": []
+  },
+  "@demo/globaltype/Device.read/param/1": { "documentation": "The register address." },
+  "@demo/globaltype/Device.read/param/2": { "documentation": "How many bytes to read." },
+  "@demo/global/limits": { "documentation": "Limits configured for the device." },
+  "@demo/global/limits.maxTemperature": { "documentation": "Above this temperature the script should act." }
+}

@@ -72,9 +72,10 @@ internal static class SampleDocuments
 
         """;
 
+    /// <summary>A Luau script on the demo app's Luau API (<c>Luau/demo.d.luau</c>).</summary>
     public const string LuauScript = """
         --!strict
-        -- Luau script with type annotations
+        -- Luau script with type annotations; device, limits and log come from the app
         type Reading = { name: string, value: number }
 
         local readings: { Reading } = {}
@@ -86,7 +87,7 @@ internal static class SampleDocuments
         end
 
         for i = 1, 10 do
-            addReading(`sensor{i}`, math.random() * 40)
+            addReading(`{device.name} #{i}`, device:readTemperature())
         end
 
         local hottest: Reading? = nil
@@ -96,8 +97,9 @@ internal static class SampleDocuments
             end
         end
 
-        if hottest then
-            print(string.format("Hottest: %s at %.1f", hottest.name, hottest.value))
+        if hottest and hottest.value > limits.maxTemperature then
+            device:setLed(true)
+            log(string.format("Hottest: %s at %.1f", hottest.name, hottest.value))
         end
 
         """;

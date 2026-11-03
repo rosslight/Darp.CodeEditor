@@ -63,14 +63,22 @@ internal static class DemoRun
         Task<double> visible = Ui.WaitForVisibleAsync(editor, highlighted: false);
         Task<double> highlighted = Ui.WaitForVisibleAsync(editor, highlighted: true);
         Task<int> uncoloredOnFirstFrame = Ui.LinesWithoutColorsOnFirstFrameAsync(editor);
-        CSharpBench? csharp = window.CSharp is { } service ? new CSharpBench(service, timings) : null;
+        LanguageServerBench? csharp = window.CSharp is { } service
+            ? new LanguageServerBench("C# server", service, timings)
+            : null;
+        using var luauTimings = new TimingLog(window.LuauEditor);
+        LanguageServerBench? luau = window.Luau is { } luauService
+            ? new LanguageServerBench("luau-lsp", luauService, luauTimings)
+            : null;
 
         await highlighted;
         report.Add(probe.EndPhase());
 
-        probe.BeginPhase("startup: until C# ready + semantic colors");
+        probe.BeginPhase("startup: until C# and Luau ready + semantic colors");
         if (csharp is not null)
             await csharp.WaitUntilReadyAsync();
+        if (luau is not null)
+            await luau.WaitUntilReadyAsync();
         await Task.Delay(500);
         report.Add(probe.EndPhase());
 
@@ -88,6 +96,11 @@ internal static class DemoRun
             await csharp.ReportAsync(report, created);
             report.Add($"  idle {csharp.DescribeMemory()}");
         }
+        if (luau is not null)
+        {
+            await luau.ReportAsync(report, created);
+            report.Add($"  idle {luau.DescribeMemory()}");
+        }
         report.Add($"  startup timings: {timings.Summary()}");
 
         await window.ShowTabAsync(2);
@@ -102,6 +115,18 @@ internal static class DemoRun
         {
             await LanguageServiceScenarios.RunAsync(window, 0, editor, probe, report);
             report.Add($"  after typing, {csharp.DescribeMemory()}");
+        }
+        if (luau is not null)
+        {
+            await LanguageServiceScenarios.MeasureCompletionAsync(
+                window,
+                1,
+                window.LuauEditor,
+                probe,
+                report,
+                CompletionRound.Luau
+            );
+            report.Add($"  after typing, {luau.DescribeMemory()}");
         }
         if (!options.SkipHighlightingBench)
             await EditorScenarios.RunHighlightingAsync(window, probe, report);

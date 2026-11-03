@@ -4,7 +4,7 @@ using Darp.CodeEditor.Lsp.Protocol;
 using Darp.CodeEditor.Lsp.Testing;
 
 // Checks the library in a NativeAOT build. "server" runs the toy server on stdio. Without arguments, the program
-// starts itself as the toy server and talks to it, then talks to luau-lsp if fetch-luau-lsp.sh downloaded it.
+// starts itself as the toy server and talks to it, then talks to the luau-lsp that publish puts next to it.
 if (args is ["server"])
 {
     var toy = new ToyServer(Console.OpenStandardInput(), Console.OpenStandardOutput(), Console.Error.WriteLine);
@@ -22,7 +22,7 @@ await CheckExitWithoutShutdownAsync();
 if (LuauLsp.FindExecutable() is { } luau)
     await CheckLuauLspAsync(luau);
 else
-    Console.WriteLine("skip luau-lsp is missing; run tests/Darp.CodeEditor.Lsp.Tests/fetch-luau-lsp.sh");
+    Console.WriteLine("skip luau-lsp is missing; Darp.CodeEditor.Luau.targets puts it next to the program");
 
 Console.WriteLine(failures.Count == 0 ? "All checks passed." : $"{failures.Count} checks failed.");
 return failures.Count == 0 ? 0 : 1;
