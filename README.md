@@ -9,14 +9,23 @@ measured numbers; it is not the product. "Darp.CodeEditor" is a working name.
 Darp.CodeEditor            NativeAOT-compatible; no Roslyn, no MEF
   CodeEditor               AvaloniaEdit TextEditor + TextMate highlighting + search panel
   Highlighting/            TextMate tokenization on the thread pool; rendering reads a per-line cache
-  LanguageServices/        ILanguageService: async only, snapshot + version + CancellationToken, plain DTOs
-  LanguageFeatures         calls the service via Task.Run, debounces, drops or maps forward stale results
-  Completion/              one fetch per session, local ordinal filtering, lazy descriptions, sync commit
+  LanguageServices/        ILanguageService: open/change/close documents, versioned requests, pushed diagnostics
+    LspLanguageService     ILanguageService over LSP: one language server per service, restarted when it crashes
+  LanguageFeatures         sends edits, asks for the visible lines' colors, drops or maps forward stale results
+  Completion/              one list per session (asked again while incomplete), local filtering, lazy resolve
   Markers/                 semantic colors and diagnostic squiggles, read from segment caches during render
   Instrumentation/         UiStallProbe: UI-thread latency and GC pauses per phase
 
-Darp.CodeEditor.CSharp     JIT only; Roslyn Workspaces + Features (no EditorFeatures, no VS editor, no VS-MEF)
-  CSharpScriptLanguageService   script submissions with a globals type, created and warmed up on the thread pool
+Darp.CodeEditor.Lsp        NativeAOT-compatible; only the shared framework
+  JsonRpcConnection        JSON-RPC 2.0 with Content-Length framing, for both ends of a connection
+  LanguageServer           the server lifecycle: initialize, shutdown, exit
+  LanguageClient           the client lifecycle, and the requests servers send their client
+  Hosting/                 ChildProcess: helper processes that end with the app; Supervisor: restarts with backoff
+  Protocol/                source-generated DTOs for the subset of LSP the editor and its servers use
+
+Darp.CodeEditor.CSharp     NativeAOT-compatible; no Roslyn
+  CSharpLanguageServer     the LspLanguageService of the C# script language server for an environment
+  build/                   Darp.CodeEditor.CSharp.targets: puts the server next to the app
 
 Darp.CodeEditor.CSharp.Hosting    NativeAOT-compatible; no Roslyn
   CSharpScriptEnvironment         globals contract assembly + type name, references, imports, compiler options
@@ -31,27 +40,21 @@ Darp.CodeEditor.CSharp.Server     JIT only, framework-dependent .NET 10 console 
   ScriptWorkspace                 one script submission per document, globals type loaded as metadata only
 ```
 
-```
-Darp.CodeEditor.Lsp        NativeAOT-compatible; only the shared framework
-  JsonRpcConnection        JSON-RPC 2.0 with Content-Length framing, for both ends of a connection
-  LanguageServer           the server lifecycle: initialize, shutdown, exit
-  Protocol/                source-generated DTOs for the subset of LSP the editor and its servers use
-```
-
-The C# script language server is the path forward: every language goes through an out-of-process LSP server, for JIT
-and NativeAOT hosts alike. `Darp.CodeEditor.CSharp` stays as the in-process baseline until the editor's LSP client
-exists.
+Every language goes through an out-of-process LSP server, for JIT and NativeAOT hosts alike: C# through the C# script
+language server, Luau through luau-lsp.
 
 Rules the code follows:
 
 1. The editor works fully without a language service (typing, TextMate colors, search). Setting
    `CodeEditor.LanguageService` later switches on completion, diagnostics, semantic colors, quick info and signature help.
-2. The boundary is async only. Rendering and layout read only caches that results fill; they never call the service.
-3. Every request carries a document version and a cancellation token. A keystroke cancels document-wide requests;
-   results for an older version are dropped, and cached results move with the text (AvaloniaEdit segments) until new
-   ones arrive. Completion results map forward while the user keeps typing the same word.
-4. Completion fetches its list once per session off the UI thread, filters locally per keystroke, loads descriptions
-   lazily, and commits text the service already computed.
+2. The boundary is async only. The editor calls the service on the UI thread, and the service only queues the work.
+   Rendering and layout read only caches that results fill; they never call the service.
+3. Every request carries a document version and a cancellation token. A keystroke cancels document-wide requests, which
+   tells the server too; results for an older version are dropped, and cached results move with the text (AvaloniaEdit
+   segments) until new ones arrive. Completion results map forward while the user keeps typing the same word.
+4. Completion fetches its list off the UI thread and filters it locally per keystroke; a list the server marked
+   incomplete is asked again for each further letter. Items resolve lazily for their descriptions and additional edits,
+   and commit inserts text the service already computed.
 5. No `.Result`, `.Wait()` or `GetAwaiter().GetResult()` on the UI thread.
 
 ## Layout
@@ -59,22 +62,24 @@ Rules the code follows:
 | Path | What |
 | --- | --- |
 | `src/Darp.CodeEditor` | The editor library (`IsAotCompatible`). |
-| `src/Darp.CodeEditor.CSharp` | C# script language service on Roslyn (JIT only), used in-process by the JIT demo. |
+| `src/Darp.CodeEditor.CSharp` | `IsAotCompatible`: C# script editing through the C# script language server, and the targets that put the server next to an app. |
 | `src/Darp.CodeEditor.CSharp.Hosting` | `IsAotCompatible`: the script environment a host describes, and its `initializationOptions` section. |
 | `src/Darp.CodeEditor.CSharp.Scripting` | Turns an environment into `ScriptOptions` for the host and compiler options for the server. |
 | `src/Darp.CodeEditor.CSharp.Server` | The C# script language server (LSP over stdio). |
-| `samples/Darp.CodeEditor.Demo` | JIT desktop app: C# script with completion, diagnostics, semantic colors, quick info, signature help; Luau and JSON with highlighting. |
-| `samples/Darp.CodeEditor.Demo.Aot` | `PublishAot=true`, references only `Darp.CodeEditor`: Luau, JSON and C# highlighting, search, and a small AOT-safe JSON language service (word completion, parse errors). |
+| `samples/Darp.CodeEditor.Demo` | JIT desktop app: C# script through the C# server with completion, diagnostics, semantic colors, quick info, signature help; Luau and JSON with highlighting. |
+| `samples/Darp.CodeEditor.Demo.Aot` | `PublishAot=true`: the same C# features through the same server, Luau and JSON highlighting, search, and a small in-process JSON language service (word completion, parse errors). |
+| `samples/Darp.CodeEditor.Demo.Globals` | The globals of the demos' C# scripts; the server reads the assembly as a file, also next to the AOT demo. |
 | `samples/Shared` | Sample documents, measurement scenarios and the Luau grammar shared by both demos. |
-| `tests/Darp.CodeEditor.Tests` | Contract tests for the C# service and the completion matcher. |
+| `tests/Darp.CodeEditor.Tests` | The LSP client against the layer's toy server, luau-lsp and the C# server; the completion matcher. |
 | `src/Darp.CodeEditor.Lsp` | JSON-RPC and LSP layer for language servers and the editor's LSP client (`IsAotCompatible`). |
 | `tests/Darp.CodeEditor.Lsp.Tests` | Tests of the LSP layer, a toy server and client, and an interop test against luau-lsp. |
 | `tests/Darp.CodeEditor.Lsp.AotSmoke` | NativeAOT build of the toy server and client, and of the luau-lsp check. |
+| `tests/Darp.CodeEditor.Lsp.TestProcess` | A child process for the tests of `ChildProcess`, including one that dies with its host. |
 
 | `tests/Darp.CodeEditor.CSharp.Server.Tests` | Compiler-parity tests against `CSharpScript`, and tests that drive the server process over stdio. |
 | `tests/Darp.CodeEditor.CSharp.TestGlobals` | A globals contract assembly for the tests, including the demo's `ScriptGlobals`. |
 | `tests/Shared` | A small LSP client over stdio, used by the tests and the benchmark. |
-| `benchmarks/Darp.CodeEditor.CSharp.Server.Benchmark` | Server against in-process service: startup, completion latency, memory, sizes. |
+| `benchmarks/Darp.CodeEditor.CSharp.Server.Benchmark` | Server against the former in-process Roslyn service, kept in `InProcess/` as the baseline: startup, completion latency, memory, sizes. |
 
 ## Run
 
@@ -105,8 +110,10 @@ dotnet publish tests/Darp.CodeEditor.Lsp.AotSmoke -c Release -r linux-x64
 tests/Darp.CodeEditor.Lsp.AotSmoke/bin/Release/net10.0/linux-x64/publish/Darp.CodeEditor.Lsp.AotSmoke
 ```
 
-On a Linux machine without a display, run the demos on a virtual X server (for example `xvfb-run` or any X server
-with `DISPLAY` set).
+Both demos start the C# script language server from `helpers/csharp-server/` next to them, which
+`Darp.CodeEditor.CSharp.targets` fills on build and publish, with `dotnet` on the installed .NET 10 runtime. On a Linux
+machine without a display, run the demos on a virtual X server (for example `xvfb-run` or any X server with `DISPLAY`
+set).
 
 Command line flags of both demos:
 
@@ -119,7 +126,10 @@ Command line flags of both demos:
 | `--scene` | Prepares a scene for a screenshot and stays open. |
 | `--overlay-popups` | Draws popups inside the window instead of native windows (Avalonia platform option). |
 | `--skip-highlighting-bench` | Skips the highlighting scenarios of `--bench`. |
-| `--no-language-service` | JIT demo only: starts without the C# service, to attribute startup stalls. |
+| `--no-language-service` | Starts without the C# server, to attribute startup stalls. |
+| `--csharp-server <path>` | The C# server's `.dll` or app host, instead of the one next to the demo. |
+| `--dotnet <path>` | The `dotnet` executable that runs the C# server. |
+| `--server-log` | Writes the C# server's standard error and log messages to standard error. |
 | `--low-latency-gc` | JIT demo only: sets `GCLatencyMode.SustainedLowLatency`. |
 
 ## LSP layer
@@ -145,6 +155,38 @@ Command line flags of both demos:
    back-pressure.
 5. `JsonRpcLimits` caps headers and messages; a longer message ends the connection. Null results are written as
    `"result": null`, and document URIs are kept as sent.
+
+## Language servers in the editor
+
+`LspLanguageService` is the editor's `ILanguageService` over LSP. One service owns one server and serves every editor of
+its language. A host creates the C# one from the script environment:
+
+```csharp
+LspLanguageService csharp = CSharpLanguageServer.CreateService(environment);
+_ = csharp.PrewarmAsync();          // optional: start the server before the first editor opens
+editor.LanguageService = csharp;    // opens the document; the first open document starts the server
+await csharp.DisposeAsync();        // shutdown and exit, then the process ends
+```
+
+`CSharpLanguageServerOptions` sets the server (`ServerPath`: its `.dll`, run with `dotnet`, or its app host), the
+`dotnet` executable (`DotNetPath`) and the runtime an app host runs on (`DotNetRoot`), which is where a runtime bundled
+with the app plugs in. Any other server runs through `LspLanguageServiceOptions` with a start function, such as
+`LanguageServerTransport.StartProcessAsync`; luau-lsp works this way, with whole-document semantic tokens and its
+settings requests answered by the `Settings` hook.
+
+1. The editor opens, changes and closes documents and makes requests on the UI thread; the service only queues them.
+   One loop keeps a copy of each document, converts offsets to UTF-16 positions, and sends changes before the requests
+   made after them. It waits until each change is written; edits that queued up meanwhile go out as one `didChange`, so
+   a server that stops reading does not grow the queue by a message per keystroke.
+2. Responses are converted with the document version they were requested for. Cancelling a request sends
+   `$/cancelRequest`; `RequestCancelled` and `ContentModified` answers return nothing.
+3. Diagnostics are pushed: the editor shows those of its current version and drops older ones.
+4. Completion lists keep their incompleteness, per-item commit characters and edit ranges. Resolve loads descriptions
+   and additional edits, such as a `using` directive, which commit applies at once or when the resolve arrives.
+5. The server runs as a `ChildProcess`: on Windows in a job object that kills it when the app dies, on Linux with
+   `PR_SET_PDEATHSIG` armed through `setpriv` from a launcher thread that never ends. When it crashes, a `Supervisor`
+   starts it again after 0.5 s, doubling up to 30 s while it keeps failing, and opens the documents again. Meanwhile
+   requests answer nothing and the editors keep their TextMate colors; `Invalidated` brings the features back.
 
 ## C# script language server
 
