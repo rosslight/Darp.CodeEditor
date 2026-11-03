@@ -4,7 +4,7 @@ using Shouldly;
 
 namespace Darp.CodeEditor.Lsp.Tests;
 
-/// <summary>The client end of this library against luau-lsp; skipped unless <c>fetch-luau-lsp.sh</c> ran.</summary>
+/// <summary>The client end of this library against the luau-lsp that the build puts next to the tests.</summary>
 public sealed class LuauLspTests
 {
     [Fact]
@@ -13,7 +13,7 @@ public sealed class LuauLspTests
         string executable =
             LuauLsp.FindExecutable()
             ?? throw Xunit.Sdk.SkipException.ForSkip(
-                "luau-lsp is missing; run tests/Darp.CodeEditor.Lsp.Tests/fetch-luau-lsp.sh."
+                "luau-lsp is missing next to the tests; Darp.CodeEditor.Luau.targets puts it there."
             );
         DirectoryInfo root = Directory.CreateTempSubdirectory("luau-lsp-");
         string script = Path.Combine(root.FullName, "main.luau");
