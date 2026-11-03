@@ -22,15 +22,5 @@ internal static class Program
         AppBuilder
             .Configure<App>()
             .UsePlatformDetect()
-            // Measurement switch: draw popups inside the window instead of creating native windows.
-            .With(
-                new X11PlatformOptions { OverlayPopups = Environment.GetCommandLineArgs().Contains("--overlay-popups") }
-            )
-            .With(
-                new Win32PlatformOptions
-                {
-                    OverlayPopups = Environment.GetCommandLineArgs().Contains("--overlay-popups"),
-                }
-            )
             .LogToTrace();
 }

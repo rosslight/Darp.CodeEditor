@@ -8,7 +8,10 @@ measured numbers; it is not the product. "Darp.CodeEditor" is a working name.
 ```
 Darp.CodeEditor            NativeAOT-compatible; no Roslyn, no MEF
   CodeEditor               AvaloniaEdit TextEditor + TextMate highlighting + search panel
-  Highlighting/            TextMate tokenization on the thread pool; rendering reads a per-line cache
+  Highlighting/            TextMate: visible lines tokenized in the frame (≤ 4 ms), the rest on the thread pool
+  Theming/                 VS Code themes (Dark+/Light+ or a file) following the app's light/dark variant
+  Popups/                  completion, signature help and hover, drawn on the window's overlay layer
+  Editing/                 auto-indent, bracket matching, auto-closing pairs, toggle comment (LanguageConfiguration)
   LanguageServices/        ILanguageService: async only, snapshot + version + CancellationToken, plain DTOs
   LanguageFeatures         calls the service via Task.Run, debounces, drops or maps forward stale results
   Completion/              one fetch per session, local ordinal filtering, lazy descriptions, sync commit
@@ -38,6 +41,12 @@ Darp.CodeEditor.CSharp.Execution  NativeAOT-compatible; no Roslyn; StreamJsonRpc
 Darp.CodeEditor.CSharp.Runner     JIT only, framework-dependent helper: compiles and runs scripts, RPC over stdio
 ```
 
+```
+Darp.CodeEditor.Lsp        NativeAOT-compatible; only the shared framework
+  JsonRpcConnection        JSON-RPC 2.0 with Content-Length framing, for both ends of a connection
+  LanguageServer           the server lifecycle: initialize, shutdown, exit
+  Protocol/                source-generated DTOs for the subset of LSP the editor and its servers use
+```
 The C# script language server is the path forward: every language goes through an out-of-process LSP server, for JIT
 and NativeAOT hosts alike. `Darp.CodeEditor.CSharp` stays as the in-process baseline until the editor's LSP client
 exists.
@@ -65,11 +74,14 @@ Rules the code follows:
 | `src/Darp.CodeEditor.CSharp.Server` | The C# script language server (LSP over stdio). |
 | `src/Darp.CodeEditor.CSharp.Execution` | `IsAotCompatible`: runs scripts in the runner; the MSBuild targets that ship it. |
 | `src/Darp.CodeEditor.CSharp.Runner` | The runner: a helper process that compiles and runs scripts. |
+| `src/Darp.CodeEditor.Lsp` | JSON-RPC and LSP layer for language servers and the editor's LSP client (`IsAotCompatible`). |
 | `samples/Darp.CodeEditor.Demo` | JIT desktop app: C# script with completion, diagnostics, semantic colors, quick info, signature help; Luau and JSON with highlighting; Run (F5) runs packet.csx in the script runner. |
 | `samples/Darp.CodeEditor.Demo.Aot` | `PublishAot=true`, without Roslyn: Luau, JSON and C# highlighting, search, a small AOT-safe JSON language service (word completion, parse errors), and Run (F5) for packet.csx through the script runner. |
 | `samples/Darp.CodeEditor.Demo.ScriptApi` | The demos' script API: globals, a service the app implements, the handler scripts return. |
 | `samples/Shared` | Sample documents, measurement scenarios, the Run action and the Luau grammar shared by both demos. |
-| `tests/Darp.CodeEditor.Tests` | Contract tests for the C# service and the completion matcher. |
+| `tests/Darp.CodeEditor.Tests` | Contract tests for the C# service and the completion matcher; headless tests of the editing helpers. |
+| `tests/Darp.CodeEditor.Lsp.Tests` | Tests of the LSP layer, a toy server and client, and an interop test against luau-lsp. |
+| `tests/Darp.CodeEditor.Lsp.AotSmoke` | NativeAOT build of the toy server and client, and of the luau-lsp check. |
 | `tests/Darp.CodeEditor.CSharp.Server.Tests` | Compiler-parity tests against `CSharpScript`, and tests that drive the server process over stdio. |
 | `tests/Darp.CodeEditor.CSharp.TestGlobals` | A globals contract assembly for the tests, including the demo's `ScriptGlobals`. |
 | `tests/Shared` | A small LSP client over stdio, used by the tests and the benchmark. |
@@ -78,6 +90,8 @@ Rules the code follows:
 | `tests/Darp.CodeEditor.CSharp.Execution.TestHost` | A small app that runs a script; the tests start it and publish it with NativeAOT. |
 | `benchmarks/Darp.CodeEditor.CSharp.Server.Benchmark` | Server against in-process service: startup, completion latency, memory, sizes. |
 | `benchmarks/Darp.CodeEditor.CSharp.Execution.Benchmark` | The runner from a JIT or NativeAOT app: cold start to the first result, warm calls, batches. |
+| `tools/Darp.CodeEditor.Probe` | Measures from outside the app: keystroke to changed pixels on screen, startup on screen, process-tree memory. |
+| `tools/measure` | Scripts that run the benchmarks and the probe for both demos on Linux and Windows. |
 
 ## Run
 
@@ -97,6 +111,18 @@ dotnet test --project tests/Darp.CodeEditor.CSharp.Server.Tests
 dotnet test --project tests/Darp.CodeEditor.CSharp.Execution.Tests
 ```
 
+The LSP layer has its own tests. The luau-lsp interop test is skipped until the script downloaded luau-lsp to
+`.tools/`; the NativeAOT check runs it too.
+
+```bash
+tests/Darp.CodeEditor.Lsp.Tests/fetch-luau-lsp.sh
+dotnet test --project tests/Darp.CodeEditor.Lsp.Tests
+
+# Fails on any trim or AOT warning
+dotnet publish tests/Darp.CodeEditor.Lsp.AotSmoke -c Release -r linux-x64
+tests/Darp.CodeEditor.Lsp.AotSmoke/bin/Release/net10.0/linux-x64/publish/Darp.CodeEditor.Lsp.AotSmoke
+```
+
 On a Linux machine without a display, run the demos on a virtual X server (for example `xvfb-run` or any X server
 with `DISPLAY` set).
 
@@ -110,10 +136,56 @@ Command line flags of both demos:
 | `--hold` | Keeps the window open after `--smoke` or `--bench`. |
 | `--scene` | Prepares a scene for a screenshot and stays open. |
 | `--run-script` | Runs packet.csx through the script runner once the window opens, prints the output and exits. |
-| `--overlay-popups` | Draws popups inside the window instead of native windows (Avalonia platform option). |
 | `--skip-highlighting-bench` | Skips the highlighting scenarios of `--bench`. |
 | `--no-language-service` | JIT demo only: starts without the C# service, to attribute startup stalls. |
 | `--low-latency-gc` | JIT demo only: sets `GCLatencyMode.SustainedLowLatency`. |
+| `--light` | Starts with the light theme variant. The status bar's button switches between light and dark at run time. |
+| `--e2e <file>` | Writes where line 1 of a C# document without language features ends on screen, for `Probe latency`, and stays open. |
+
+## Measure from outside
+
+`tools/measure/run-windows.ps1` runs `--bench` for both demos and times highlighted text on screen after launch; it
+injects no input. `tools/measure/run-linux.sh` does the same and, for test VMs, also measures keystroke to changed
+pixels with the probe's `latency` mode (XTest).
+
+Windows gets no key-to-pixel measurement: `SendInput` inserts keys into the system input stream, not into a window,
+so a key the probe checked against the demo's window can still reach another application if the focus changes in
+between. No check makes that safe on a machine someone works on, so the probe refuses `latency` on Windows; the bench's
+keystroke timings, taken inside the demo process, stand in for it.
+
+On X11 the probe types real keys into the demo window, so **nobody may use the display while it runs**. It never
+clicks: a demo started with `--e2e` focuses its own editor and reports its process and window. Before and after every
+key the probe checks that this window is the active window holding the input focus and that the demo still runs,
+before every key that no modifier key or mouse button is down, and that XTest took every event; it aborts otherwise,
+and the script then stops and closes the demo. It counts down 5 s with a warning before the first key and types at
+most 400 keys. Its 3-minute deadline is checked before each key and does not interrupt one. Check and key are not
+atomic, and a keyboard grab by another client is not detected.
+
+Results of the editor polish work on Linux: [docs/editor-polish.md](docs/editor-polish.md).
+
+## LSP layer
+
+`Darp.CodeEditor.Lsp` dispatches the messages it receives as follows:
+
+1. One loop reads the input. Responses and `$/cancelRequest` take effect as they are read, and every request gets its
+   cancellation token on receipt, so a request can be cancelled while it is queued.
+2. Requests and notifications are dispatched in arrival order. A `DispatchMode.Serial` handler (the default for
+   notifications, such as `textDocument/didChange`) runs to completion before the next message. A
+   `DispatchMode.Concurrent` handler (the default for requests) runs until its first incomplete `await`, so it reads
+   the state that all earlier messages left behind, and then runs alongside later messages. It must therefore capture
+   the state it works on, such as the document text and version, before that first `await`. A `Serial` handler must
+   not await a request to the peer that the peer can only answer after a request of its own was dispatched here: that
+   deadlocks.
+3. A request whose token was cancelled by the time its handler returned answers `RequestCancelled`, whatever the
+   handler returned. Handlers throw `JsonRpcException`, for example with `ContentModified`, to answer other errors.
+4. Sending only queues a message. One write loop serializes and writes messages in the order they were sent, so
+   callers never wait for serialization or a slow peer. A request cancelled before it went out is left out; otherwise
+   `$/cancelRequest` follows it. Disposing drops what was not written yet. A failed write ends the connection, since
+   part of the frame may be on the stream; messages that fail to serialize fail only their own send. The send queue
+   has no bound: callers that send many large messages, such as document changes, await each send to get
+   back-pressure.
+5. `JsonRpcLimits` caps headers and messages; a longer message ends the connection. Null results are written as
+   `"result": null`, and document URIs are kept as sent.
 
 ## C# script language server
 

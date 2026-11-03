@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Darp.CodeEditor/Darp.CodeEditor.csproj" />
     <Project Path="src/Darp.CodeEditor.CSharp/Darp.CodeEditor.CSharp.csproj" />
+    <Project Path="src/Darp.CodeEditor.Lsp/Darp.CodeEditor.Lsp.csproj" />
     <Project Path="src/Darp.CodeEditor.CSharp.Hosting/Darp.CodeEditor.CSharp.Hosting.csproj" />
     <Project Path="src/Darp.CodeEditor.CSharp.Scripting/Darp.CodeEditor.CSharp.Scripting.csproj" />
     <Project Path="src/Darp.CodeEditor.CSharp.Execution/Darp.CodeEditor.CSharp.Execution.csproj" />
@@ -17,8 +18,13 @@
     <Project Path="benchmarks/Darp.CodeEditor.CSharp.Execution.Benchmark/Darp.CodeEditor.CSharp.Execution.Benchmark.csproj" />
     <Project Path="benchmarks/Darp.CodeEditor.CSharp.Server.Benchmark/Darp.CodeEditor.CSharp.Server.Benchmark.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Darp.CodeEditor.Probe/Darp.CodeEditor.Probe.csproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Darp.CodeEditor.Tests/Darp.CodeEditor.Tests.csproj" />
+    <Project Path="tests/Darp.CodeEditor.Lsp.Tests/Darp.CodeEditor.Lsp.Tests.csproj" />
+    <Project Path="tests/Darp.CodeEditor.Lsp.AotSmoke/Darp.CodeEditor.Lsp.AotSmoke.csproj" />
     <Project Path="tests/Darp.CodeEditor.CSharp.Server.Tests/Darp.CodeEditor.CSharp.Server.Tests.csproj" />
     <Project Path="tests/Darp.CodeEditor.CSharp.TestGlobals/Darp.CodeEditor.CSharp.TestGlobals.csproj" />
     <Project Path="tests/Darp.CodeEditor.CSharp.Execution.Tests/Darp.CodeEditor.CSharp.Execution.Tests.csproj" />

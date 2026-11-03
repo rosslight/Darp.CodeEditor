@@ -8,6 +8,7 @@ public sealed partial class MainWindow : Window, IBenchHost
     public MainWindow()
     {
         InitializeComponent();
+        ThemeButton.Click += (_, _) => Ui.ToggleThemeVariant();
         LuauEditor.Text = SampleDocuments.LuauScript;
         JsonEditor.Text = SampleDocuments.Json.Replace("\"file\": null", "\"file\": null,");
         CSharpEditor.Text = SampleDocuments.CSharpScript;
@@ -23,6 +24,7 @@ public sealed partial class MainWindow : Window, IBenchHost
         );
 
         string grammar = Path.Combine(AppContext.BaseDirectory, "Grammars", "Luau.tmLanguage.json");
+        LuauEditor.LanguageConfiguration = LuauLanguage.Configuration;
         if (File.Exists(grammar))
             LuauEditor.SetGrammarFile(grammar);
         else

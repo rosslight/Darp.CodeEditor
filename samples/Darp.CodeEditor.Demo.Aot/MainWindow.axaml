@@ -6,18 +6,20 @@
     Title="Code editor demo (NativeAOT, highlighting and search)"
     Width="1200"
     Height="800"
-    Background="#1E1E1E"
 >
     <DockPanel>
         <Border DockPanel.Dock="Top" Background="#2D2D30" Padding="6,4">
             <Button x:Name="RunButton" Content="Run packet.csx (F5)" />
         </Border>
         <Border DockPanel.Dock="Bottom" Background="#68217A" Padding="8,3">
-            <TextBlock
-                x:Name="Status"
-                Foreground="White"
-                Text="NativeAOT · Ctrl+F to search · JSON has word completion and parse errors"
-            />
+            <DockPanel>
+                <Button x:Name="ThemeButton" DockPanel.Dock="Right" Padding="8,0" Content="Light / dark" />
+                <TextBlock
+                    x:Name="Status"
+                    Foreground="White"
+                    Text="NativeAOT · Ctrl+F to search · JSON has word completion and parse errors"
+                />
+            </DockPanel>
         </Border>
         <TextBox
             x:Name="RunOutput"
