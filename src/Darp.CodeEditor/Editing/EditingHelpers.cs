@@ -162,8 +162,8 @@ internal sealed class EditingHelpers
             if (char.IsLetterOrDigit(previous) || previous == '_' || previous == pair.Open)
                 return false;
         }
-        // Highlighting has not seen the typed character yet: ask about what was before it.
-        TokenKind kind = typed > 0 ? _editor.TokenKindAt(typed - 1) : TokenKind.Code;
+        // The context where the character went in, within its line and from the state at the line's start.
+        TokenKind kind = _editor.TokenKindBefore(typed);
         return !(pair.NotInString && kind == TokenKind.String) && !(pair.NotInComment && kind == TokenKind.Comment);
     }
 

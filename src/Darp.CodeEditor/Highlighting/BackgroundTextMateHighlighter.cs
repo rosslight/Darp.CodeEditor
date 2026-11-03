@@ -52,6 +52,9 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
     private const int DefaultForegroundId = 1;
     private static readonly TimeSpan s_lineTimeLimit = TimeSpan.FromMilliseconds(200);
     private static readonly TimeSpan s_frameBudget = TimeSpan.FromMilliseconds(4);
+
+    /// <summary>How long finding the context of a typed character may take; it is one line, usually well under 1 ms.</summary>
+    private static readonly TimeSpan s_contextTimeLimit = TimeSpan.FromMilliseconds(2);
     private static readonly long s_frameBudgetTicks = (long)(s_frameBudget.TotalSeconds * Stopwatch.Frequency);
 
     /// <summary>Lines that compile the most common expressions when the document is still empty while loading.</summary>
@@ -207,7 +210,14 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         DocumentLine line = document.GetLineByOffset(offset);
         if (line.LineNumber - 1 >= _lines.Count || _lines[line.LineNumber - 1].Tokens is not { } tokens)
             return TokenKind.Code;
-        int column = offset - line.Offset;
+        return KindOf(tokens, offset - line.Offset);
+    }
+
+    /// <summary>The kind of the token at a column, from TextMate's binary tokens.</summary>
+    private static TokenKind KindOf(int[] tokens, int column)
+    {
+        if (tokens.Length < 2)
+            return TokenKind.Code;
         int i = 0;
         while (i + 2 < tokens.Length && tokens[i + 2] <= column)
             i += 2;
@@ -217,6 +227,38 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
             2 or 3 => TokenKind.String,
             _ => TokenKind.Code,
         };
+    }
+
+    /// <summary>
+    /// Whether text inserted at <paramref name="offset"/> would be code, comment or string: tokenizes its line up to
+    /// there from the state at the line's start, so a line after a line comment starts in code and one inside a block
+    /// comment in a comment. Code when that state is unknown or the grammar is busy.
+    /// </summary>
+    public TokenKind TokenKindBefore(int offset)
+    {
+        if (_grammar is not { TooSlowForUiThread: false } grammar || _document is not { } document)
+            return TokenKind.Code;
+        DocumentLine line = document.GetLineByOffset(offset);
+        int index = line.LineNumber - 1;
+        int column = offset - line.Offset;
+        if (index >= _lines.Count || column > MaxSyncLineLength || (index > 0 && _lines[index - 1].EndState is null))
+            return TokenKind.Code;
+        IStateStack? state = index == 0 ? null : _lines[index - 1].EndState;
+        // A space stands for the inserted text: the token it gets is the context there. Ending at the prefix would
+        // give a closing quote's string token, though the position after it is code.
+        string text = document.GetText(line.Offset, column) + " ";
+        if (!grammar.TryEnterOnUiThread(s_contextTimeLimit))
+            return TokenKind.Code;
+        int[] tokens;
+        try
+        {
+            tokens = grammar.Grammar.TokenizeLine2(new LineText(text.AsMemory()), state, s_contextTimeLimit).Tokens;
+        }
+        finally
+        {
+            grammar.ExitOnUiThread();
+        }
+        return KindOf(tokens, column);
     }
 
     protected override void ColorizeLine(DocumentLine line)

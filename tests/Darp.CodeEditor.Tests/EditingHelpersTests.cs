@@ -124,6 +124,27 @@ public sealed class EditingHelpersTests
     }
 
     [AvaloniaFact]
+    public async Task A_quote_typed_on_the_line_after_a_line_comment_closes()
+    {
+        using var editor = new EditorUnderTest("// comment\n|", languageId: "csharp");
+        await editor.WaitForLanguageAsync("//");
+        editor.Type("\"");
+        editor.Text.ShouldBe("// comment\n\"|\"");
+    }
+
+    [AvaloniaTheory]
+    [InlineData("Log(\"a |", "\"", "Log(\"a \"|")]
+    [InlineData("// say |", "'", "// say '|")]
+    [InlineData("/* open\n|", "\"", "/* open\n\"|")]
+    public async Task A_quote_typed_in_a_string_or_comment_does_not_close(string marked, string quote, string expected)
+    {
+        using var editor = new EditorUnderTest(marked, languageId: "csharp");
+        await editor.WaitForLanguageAsync("//");
+        editor.Type(quote);
+        editor.Text.ShouldBe(expected);
+    }
+
+    [AvaloniaFact]
     public void Typing_an_opening_bracket_around_a_selection_surrounds_it()
     {
         using var editor = new EditorUnderTest("x = «abc»;");

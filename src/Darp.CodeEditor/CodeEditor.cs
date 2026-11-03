@@ -214,6 +214,9 @@ public class CodeEditor : TextEditor
     /// <summary>Whether a position is code, comment or string, as far as highlighting knows; code when unknown.</summary>
     internal TokenKind TokenKindAt(int offset) => _highlighter?.TokenKindAt(offset) ?? TokenKind.Code;
 
+    /// <summary>Whether text inserted at a position would be code, comment or string; code when unknown.</summary>
+    internal TokenKind TokenKindBefore(int offset) => _highlighter?.TokenKindBefore(offset) ?? TokenKind.Code;
+
     private async void LoadLanguageConfiguration(string languageId)
     {
         try
