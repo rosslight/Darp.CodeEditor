@@ -12,6 +12,11 @@
     <TrimmerSingleWarn>false</TrimmerSingleWarn>
     <!-- Restore then fetches the ReadyToRun compiler for the C# helpers. -->
     <PublishReadyToRun>true</PublishReadyToRun>
+    <!--
+      Set here rather than with -p:PublishAot=true: a global property reaches the referenced libraries too, which then
+      compile differently into their usual output folders while other tests read them.
+    -->
+    <PublishAot Condition="'$(TestHostPublishAot)' == 'true'">true</PublishAot>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharp.Execution\Darp.CodeEditor.CSharp.Execution.csproj" />
