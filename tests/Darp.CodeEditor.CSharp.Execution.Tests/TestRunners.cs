@@ -10,7 +10,8 @@ internal static class TestRunners
     public static Task<CSharpScriptRunner> StartAsync(
         ITestHost? host = null,
         TimeSpan? callTimeout = null,
-        TimeSpan? gracePeriod = null
+        TimeSpan? gracePeriod = null,
+        Action<string>? output = null
     ) =>
         CSharpScriptRunner.StartAsync(
             new CSharpScriptRunnerOptions
@@ -19,6 +20,7 @@ internal static class TestRunners
                 Services = [CSharpScriptService.Create(host ?? new RecordingHost())],
                 CallTimeout = callTimeout ?? TimeSpan.FromSeconds(30),
                 CancellationGracePeriod = gracePeriod ?? TimeSpan.FromMilliseconds(300),
+                Output = output,
             },
             TestContext.Current.CancellationToken
         );
@@ -69,10 +71,13 @@ internal static class TestRunners
         }
     }
 
-    public static async Task<bool> WaitUntilExitedAsync(int processId, TimeSpan timeout)
+    public static Task<bool> WaitUntilExitedAsync(int processId, TimeSpan timeout) =>
+        WaitUntilAsync(() => !IsRunning(processId), timeout);
+
+    public static async Task<bool> WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
     {
         long start = Stopwatch.GetTimestamp();
-        while (IsRunning(processId))
+        while (!condition())
         {
             if (Stopwatch.GetElapsedTime(start) > timeout)
                 return false;

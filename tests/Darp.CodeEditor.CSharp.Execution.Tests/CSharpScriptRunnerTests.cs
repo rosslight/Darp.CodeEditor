@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Darp.CodeEditor.CSharp.Execution.TestApi;
 using Darp.CodeEditor.CSharp.Execution.TestHost;
 using Darp.CodeEditor.CSharp.Scripting;
@@ -161,6 +162,31 @@ public sealed class CSharpScriptRunnerTests
         exception.Message.ShouldStartWith(message);
         using ITestHandler handler = await runner.EvaluateAsync<ITestHandler>(Handler("return 1;"), Cancellation);
         (await handler.HandleAsync(new Sample(0, []), Cancellation)).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Script_output_reaches_the_app_in_lines_of_bounded_length()
+    {
+        var lines = new ConcurrentQueue<string>();
+        await using CSharpScriptRunner runner = await StartAsync(output: lines.Enqueue);
+        using ITestHandler handler = await runner.EvaluateAsync<ITestHandler>(
+            Handler(
+                """
+                // 20 million characters without a line break must not pile up in the app.
+                for (int i = 0; i < 20; i++)
+                    Console.Write(new string('x', 1_000_000));
+                Console.WriteLine();
+                Console.WriteLine("after the long line");
+                return 1;
+                """
+            ),
+            Cancellation
+        );
+
+        await handler.HandleAsync(new Sample(0, []), Cancellation);
+
+        (await WaitUntilAsync(() => lines.Contains("after the long line"), TimeSpan.FromSeconds(30))).ShouldBeTrue();
+        lines.Single(line => line.StartsWith('x')).ShouldBe(new string('x', 4096) + "…");
     }
 
     [Fact]

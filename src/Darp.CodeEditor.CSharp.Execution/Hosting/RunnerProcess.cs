@@ -129,8 +129,7 @@ internal sealed class RunnerProcess : IDisposable
 
     private async Task DrainStandardErrorAsync(StreamReader reader, Action<string>? output)
     {
-        // Keep reading, so a runner that writes much never blocks on a full pipe.
-        while (await reader.ReadLineAsync().ConfigureAwait(false) is { } line)
+        var lines = new OutputLines(line =>
         {
             _standardError.Enqueue(line);
             while (_standardError.Count > StandardErrorLines)
@@ -144,7 +143,13 @@ internal sealed class RunnerProcess : IDisposable
                 // A failing callback must not stop the draining, or the runner blocks on a full pipe.
                 Trace.TraceError($"CSharpScriptRunnerOptions.Output failed: {exception}");
             }
-        }
+        });
+        // Keep reading, so a runner that writes much never blocks on a full pipe, and read in chunks, not lines.
+        char[] buffer = new char[4096];
+        int read;
+        while ((read = await reader.ReadAsync(buffer.AsMemory()).ConfigureAwait(false)) > 0)
+            lines.Write(buffer.AsSpan(0, read));
+        lines.Complete();
     }
 
     /// <summary>Starts processes from one thread that never ends.</summary>

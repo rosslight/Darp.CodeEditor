@@ -47,7 +47,8 @@ public sealed record CSharpScriptRunnerOptions
 
     /// <summary>
     /// Receives each line the runner writes to its console, including what scripts write with
-    /// <see cref="Console.WriteLine()"/>. Called on the thread pool; exceptions it throws are traced and ignored.
+    /// <see cref="Console.WriteLine()"/>. Lines longer than 4096 characters are cut and end with "…". Called on the
+    /// thread pool; exceptions it throws are traced and ignored.
     /// </summary>
     public Action<string>? Output { get; init; }
 }

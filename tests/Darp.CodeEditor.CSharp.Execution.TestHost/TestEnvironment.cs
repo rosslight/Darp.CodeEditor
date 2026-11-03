@@ -13,7 +13,7 @@ internal static class TestEnvironment
                 Path.Combine(AppContext.BaseDirectory, "Darp.CodeEditor.CSharp.Execution.TestApi.dll"),
                 typeof(TestGlobals).FullName!
             ),
-            FrameworkReferences = ["System.Collections", "System.Diagnostics.Process", "System.Linq"],
+            FrameworkReferences = ["System.Collections", "System.Console", "System.Diagnostics.Process", "System.Linq"],
             Imports =
             [
                 "System",
