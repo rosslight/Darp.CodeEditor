@@ -14,5 +14,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Darp.CodeEditor.Lsp\Darp.CodeEditor.Lsp.csproj" />
+    <!-- Its build output is copied next to the tests, which start it. -->
+    <ProjectReference Include="..\Darp.CodeEditor.Lsp.TestProcess\Darp.CodeEditor.Lsp.TestProcess.csproj" />
   </ItemGroup>
 </Project>
