@@ -26,28 +26,28 @@ Darp.CodeEditor.Lsp        NativeAOT-compatible; only the shared framework
   Hosting/                 ChildProcess: helper processes that end with the app; Supervisor: restarts with backoff
   Protocol/                source-generated DTOs for the subset of LSP the editor and its servers use
 
-Darp.CodeEditor.CSharp     NativeAOT-compatible; no Roslyn
+Darp.CodeEditor.CSharp     NativeAOT-compatible; no Roslyn. The package for C#: this, .Hosting, .Execution, both helpers
   CSharpLanguageServer     the LspLanguageService of the C# script language server for an environment
-  build/                   Darp.CodeEditor.CSharp.targets: puts the server next to the app
+  buildTransitive/         Darp.CodeEditor.CSharp.targets: puts the helpers, and on publish their .NET runtime, next to
+                           the app
 
-Darp.CodeEditor.CSharp.Hosting    NativeAOT-compatible; no Roslyn
+Darp.CodeEditor.CSharp.Hosting    NativeAOT-compatible; no Roslyn; ships in Darp.CodeEditor.CSharp
   CSharpScriptEnvironment         globals contract assembly + type name, references, imports, compiler options
   CSharpScriptInitializationOptions   the versioned "csharpScript" section of LSP initializationOptions
 
-Darp.CodeEditor.CSharp.Scripting  JIT only; Roslyn Scripting
-  ResolvedScriptEnvironment       reference files, parse and compilation options of an environment;
-                                  ScriptOptions for hosts, the same options for the server
+Darp.CodeEditor.CSharp.Execution  NativeAOT-compatible; no Roslyn; StreamJsonRpc; ships in Darp.CodeEditor.CSharp
+  CSharpScriptRunner              runs scripts in the runner process, returns their handlers as typed proxies
+  ScriptBatcher                   sends single items to a handler in batches
 
-Darp.CodeEditor.CSharp.Server     JIT only, framework-dependent .NET 10 console app: LSP over stdio
+Darp.CodeEditor.CSharp.Scripting  JIT only; Roslyn Scripting; used by both helpers, not by apps
+  ResolvedScriptEnvironment       reference files, parse and compilation options of an environment
+
+Darp.CodeEditor.CSharp.Server     helper, JIT only, framework-dependent .NET 10 console app: LSP over stdio
   Darp.CodeEditor.Lsp             protocol layer and lifecycle
   ScriptWorkspace                 one script submission per document, globals type loaded as metadata only
 
-Darp.CodeEditor.CSharp.Execution  NativeAOT-compatible; no Roslyn; StreamJsonRpc
-  CSharpScriptRunner              runs scripts in the runner process, returns their handlers as typed proxies
-  ScriptBatcher                   sends single items to a handler in batches
-  build/*.targets                 puts the runner and its .NET runtime next to the app
-
-Darp.CodeEditor.CSharp.Runner     JIT only, framework-dependent helper: compiles and runs scripts, RPC over stdio
+Darp.CodeEditor.CSharp.Runner     helper, JIT only, framework-dependent .NET 10 console app: compiles and runs scripts,
+                                  RPC over stdio
 ```
 
 Every language goes through an out-of-process LSP server, for JIT and NativeAOT hosts alike: C# through the C# script
@@ -72,11 +72,11 @@ Rules the code follows:
 | Path | What |
 | --- | --- |
 | `src/Darp.CodeEditor` | The editor library (`IsAotCompatible`). |
-| `src/Darp.CodeEditor.CSharp` | `IsAotCompatible`: C# script editing through the C# script language server, and the targets that put the server next to an app. |
+| `src/Darp.CodeEditor.CSharp` | `IsAotCompatible`: C# script editing through the C# script language server, and the package for C#: it bundles `.Hosting` and `.Execution`, ships both helpers, and has the targets that put them next to an app. |
 | `src/Darp.CodeEditor.CSharp.Hosting` | `IsAotCompatible`: the script environment a host describes, and its `initializationOptions` section. |
-| `src/Darp.CodeEditor.CSharp.Scripting` | Turns an environment into `ScriptOptions` for the host and compiler options for the server. |
-| `src/Darp.CodeEditor.CSharp.Server` | The C# script language server (LSP over stdio). |
-| `src/Darp.CodeEditor.CSharp.Execution` | `IsAotCompatible`: runs scripts in the runner; the MSBuild targets that ship it. |
+| `src/Darp.CodeEditor.CSharp.Scripting` | Turns an environment into `ScriptOptions` and compiler options, for the server and the runner. |
+| `src/Darp.CodeEditor.CSharp.Server` | The C# script language server (LSP over stdio), a helper. |
+| `src/Darp.CodeEditor.CSharp.Execution` | `IsAotCompatible`: runs scripts in the runner. |
 | `src/Darp.CodeEditor.CSharp.Runner` | The runner: a helper process that compiles and runs scripts. |
 | `src/Darp.CodeEditor.Lsp` | JSON-RPC and LSP layer for language servers and the editor's LSP client (`IsAotCompatible`). |
 | `samples/Darp.CodeEditor.Demo` | JIT desktop app: C# script through the C# server with completion, diagnostics, semantic colors, quick info, signature help; Luau and JSON with highlighting; Run (F5) runs packet.csx in the script runner. |
@@ -90,10 +90,11 @@ Rules the code follows:
 | `tests/Darp.CodeEditor.Lsp.TestProcess` | A child process for the tests of `ChildProcess`, including one that dies with its host. |
 | `tests/Darp.CodeEditor.CSharp.Server.Tests` | Compiler-parity tests against `CSharpScript`, and tests that drive the server process over stdio. |
 | `tests/Darp.CodeEditor.CSharp.TestGlobals` | A globals contract assembly for the tests, including the demo's `ScriptGlobals`. |
-| `tests/Shared` | A small LSP client over stdio, used by the tests and the benchmark. |
+| `tests/Shared` | A small LSP client over stdio, used by the tests and the benchmark; running the dotnet CLI from tests. |
 | `tests/Darp.CodeEditor.CSharp.Execution.Tests` | Tests of the runner: handlers, callbacks, batching, diagnostics, faults, process ownership, NativeAOT publish. |
 | `tests/Darp.CodeEditor.CSharp.Execution.TestApi` | A script API assembly for the runner tests and benchmark. |
 | `tests/Darp.CodeEditor.CSharp.Execution.TestHost` | A small app that runs a script; the tests start it and publish it with NativeAOT. |
+| `tests/Darp.CodeEditor.Packaging.Tests` | Packs the packages, and builds and publishes an app outside the repository that uses only them: self-contained JIT and NativeAOT. |
 | `benchmarks/Darp.CodeEditor.CSharp.Server.Benchmark` | Server against the former in-process Roslyn service, kept in `InProcess/` as the baseline: startup, completion latency, memory, sizes. |
 | `benchmarks/Darp.CodeEditor.CSharp.Execution.Benchmark` | The runner from a JIT or NativeAOT app: cold start to the first result, warm calls, batches. |
 | `tools/Darp.CodeEditor.Probe` | Measures from outside the app: keystroke to changed pixels on screen, startup on screen, process-tree memory. |
@@ -107,6 +108,10 @@ Requires the .NET 10 SDK.
 # JIT demo
 dotnet run --project samples/Darp.CodeEditor.Demo -c Release
 
+# JIT demo as it ships: ReadyToRun, the C# helpers on the .NET runtime in helpers/dotnet
+dotnet publish samples/Darp.CodeEditor.Demo -c Release -r linux-x64
+samples/Darp.CodeEditor.Demo/bin/Release/net10.0/linux-x64/publish/Darp.CodeEditor.Demo
+
 # NativeAOT demo
 dotnet publish samples/Darp.CodeEditor.Demo.Aot -c Release -r linux-x64
 samples/Darp.CodeEditor.Demo.Aot/bin/Release/net10.0/linux-x64/publish/Darp.CodeEditor.Demo.Aot
@@ -115,6 +120,7 @@ samples/Darp.CodeEditor.Demo.Aot/bin/Release/net10.0/linux-x64/publish/Darp.Code
 dotnet test --project tests/Darp.CodeEditor.Tests
 dotnet test --project tests/Darp.CodeEditor.CSharp.Server.Tests
 dotnet test --project tests/Darp.CodeEditor.CSharp.Execution.Tests
+dotnet test --project tests/Darp.CodeEditor.Packaging.Tests   # packs; needs nuget.org and a NativeAOT toolchain
 ```
 
 The LSP layer has its own tests. The luau-lsp interop test is skipped until the script downloaded luau-lsp to
@@ -129,10 +135,11 @@ dotnet publish tests/Darp.CodeEditor.Lsp.AotSmoke -c Release -r linux-x64
 tests/Darp.CodeEditor.Lsp.AotSmoke/bin/Release/net10.0/linux-x64/publish/Darp.CodeEditor.Lsp.AotSmoke
 ```
 
-Both demos start the C# script language server from `helpers/csharp-server/` next to them, which
-`Darp.CodeEditor.CSharp.targets` fills on build and publish, with `dotnet` on the installed .NET 10 runtime. On a Linux
-machine without a display, run the demos on a virtual X server (for example `xvfb-run` or any X server with `DISPLAY`
-set).
+Both demos start the C# script language server and the script runner from `helpers/` next to them, which
+`Darp.CodeEditor.CSharp.targets` fills as the package does for any app (see [Packaging](#packaging)): a build runs them
+with `dotnet` on the installed .NET 10 runtime, a publish runs them with ReadyToRun on the runtime in `helpers/dotnet`.
+On a Linux machine without a display, run the demos on a virtual X server (for example `xvfb-run` or any X server with
+`DISPLAY` set).
 
 Command line flags of both demos:
 
@@ -210,11 +217,12 @@ editor.LanguageService = csharp;    // opens the document; the first open docume
 await csharp.DisposeAsync();        // shutdown and exit, then the process ends
 ```
 
-`CSharpLanguageServerOptions` sets the server (`ServerPath`: its `.dll`, run with `dotnet`, or its app host), the
-`dotnet` executable (`DotNetPath`) and the runtime an app host runs on (`DotNetRoot`), which is where a runtime bundled
-with the app plugs in. Any other server runs through `LspLanguageServiceOptions` with a start function, such as
-`LanguageServerTransport.StartProcessAsync`; luau-lsp works this way, with whole-document semantic tokens and its
-settings requests answered by the `Settings` hook.
+`CSharpLanguageServerOptions` can point elsewhere: the server (`ServerPath`: its `.dll`, run with `dotnet`, or its app
+host), the `dotnet` executable (`DotNetPath`) and `DOTNET_ROOT` for an app host without a runtime of its own
+(`DotNetRoot`). By default the service starts the server in `helpers/csharp-server` next to the app: its app host in a
+published app, its `.dll` with `dotnet` in a build output. Any other server runs through `LspLanguageServiceOptions` with
+a start function, such as `LanguageServerTransport.StartProcessAsync`; luau-lsp works this way, with whole-document
+semantic tokens and its settings requests answered by the `Settings` hook.
 
 1. The editor opens, changes and closes documents and makes requests on the UI thread; the service only queues them.
    One loop keeps a copy of each document, converts offsets to UTF-16 positions, and sends changes before the requests
@@ -240,17 +248,13 @@ settings requests answered by the `Settings` hook.
 
 ## C# script language server
 
-A framework-dependent .NET 10 console app that speaks LSP over stdio. It needs the .NET 10 runtime, installed or
-downloaded per user, and no SDK. It never runs script code: the globals type is read as metadata.
+A framework-dependent .NET 10 console app that speaks LSP over stdio. It ships in the `Darp.CodeEditor.CSharp` package,
+and a published app runs it with ReadyToRun on the .NET runtime it ships in `helpers/dotnet`; no SDK and no installed
+runtime are needed (see [Packaging](#packaging)). It never runs script code: the globals type is read as metadata.
 
 ```bash
-dotnet publish src/Darp.CodeEditor.CSharp.Server -c Release -o artifacts/csharp-server
-# With ReadyToRun, which reaches the first completion about 40 % sooner (see the benchmark below):
-dotnet publish src/Darp.CodeEditor.CSharp.Server -c Release -r linux-x64 --self-contained false \
-  -p:PublishReadyToRun=true -o artifacts/csharp-server-r2r
-
 # The editor starts it and talks LSP on stdin/stdout; stderr is a log.
-dotnet artifacts/csharp-server/Darp.CodeEditor.CSharp.Server.dll
+dotnet src/Darp.CodeEditor.CSharp.Server/bin/Release/net10.0/Darp.CodeEditor.CSharp.Server.dll
 ```
 
 | Argument | Effect |
@@ -266,8 +270,8 @@ process named by `processId` in the answered `initialize` ends.
 ### Script environment
 
 The host describes the environment once, with `CSharpScriptEnvironment` from `Darp.CodeEditor.CSharp.Hosting`, and
-sends it in `initializationOptions`. JIT hosts compile their scripts from the same description with
-`Darp.CodeEditor.CSharp.Scripting`, so the editor reports what the host compiles:
+sends it in `initializationOptions`. The runner compiles scripts from the same description with
+`Darp.CodeEditor.CSharp.Scripting`, as the server does, so the editor reports what the runner compiles:
 
 ```csharp
 var environment = new CSharpScriptEnvironment
@@ -277,10 +281,6 @@ var environment = new CSharpScriptEnvironment
     Imports = ["System", "System.Linq"],
 };
 JsonObject initializationOptions = CSharpScriptInitializationOptions.Create(environment);
-
-// In a JIT host that runs the scripts:
-ResolvedScriptEnvironment resolved = ResolvedScriptEnvironment.Resolve(environment);
-Script<object> script = resolved.CreateScript(code, typeof(ScriptGlobals), resolved.CreateScriptOptions());
 ```
 
 The section, as JSON (every value but `version` is optional):
@@ -309,11 +309,11 @@ The section, as JSON (every value but `version` is optional):
 | `frameworkReferences` | .NET runtime assemblies by name, resolved in the runtime of the process that compiles. `System.Private.CoreLib` and `System.Runtime` are always referenced. |
 | `imports` | Namespaces imported into every script. |
 | `languageVersion` | `latest`, `preview`, `default` or a version such as `13.0`. |
-| `nullable` | `disable`, `enable`, `warnings` or `annotations`. `CSharpScript` has no public option for it, so `CreateScriptOptions` accepts only `disable`; scripts opt in with `#nullable enable`. |
+| `nullable` | `disable`, `enable`, `warnings` or `annotations`. `CSharpScript` has no public option for it, so the runner accepts only `disable`; scripts opt in with `#nullable enable`. |
 | `allowUnsafe`, `checkOverflow`, `warningLevel` | Compiler options, as in `ScriptOptions`. |
 
 The server rejects other `version` values in `initialize`. v1 has no directives: `#r` and `#load` are errors, in the
-editor and in the host. `#:package` comes later.
+editor and in the runner.
 
 ### Protocol
 
@@ -484,27 +484,21 @@ reached a device is not undone by killing the runner. Compiling runs no script c
 
 ### Process ownership
 
-The runner ends with the app, even while a script is busy, and `DisposeAsync` kills the runner and the processes its
-scripts started.
+The runner and the language server end with the app, even while a script is busy, and disposing kills them and the
+processes they started. Both start through the LSP layer's `ChildProcess`, one implementation for both:
 
 | Platform | Mechanism | Checked |
 | --- | --- | --- |
-| Linux | The runner arms `PR_SET_PDEATHSIG` (`SIGKILL`) before it reads the first request, and exits if its parent is no longer the app. The app starts runners from one thread that lives as long as the app, because the signal fires when the thread that started the child ends. | tests (JIT app), by hand (NativeAOT app) |
-| Windows | The app puts the runner in a job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` and holds its only handle. | no |
+| Windows | The helper is created suspended, put in a job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` whose only handle the app holds, and then resumed, so nothing it starts escapes the job. It inherits only its three pipe ends. | tests in CI (layer, runner, server) |
+| Linux | The helper starts through `setpriv --pdeathsig KILL` from one thread that lives as long as the app, because the signal fires when the thread that started the child ends; a shell then checks that its parent is still the app. The runner also arms `PR_SET_PDEATHSIG` itself and checks its parent, which covers machines without `setpriv`. | tests (JIT app), by hand (NativeAOT app) |
 | macOS | The runner polls its parent process ID. | no |
-| all | The runner exits at the end of its input. | by hand |
+| all | Both helpers exit at the end of their input; the server also when the client's process ends. | tests (server's client watch), by hand (end of input) |
 
-The runner inherits the app's environment without the variables that start with `DOTNET_`, `COMPlus_` or
+Both helpers inherit the app's environment without the variables that start with `DOTNET_`, `COMPlus_` or
 `CORECLR_`. Through them .NET loads or attaches code at startup (startup hooks, profilers, diagnostic ports, extra
 dependencies) or changes runtime settings, and they are meant for the app. Everything else passes through; apps set
-variables for the runner, such as tracing settings, with `CSharpScriptRunnerOptions.RunnerEnvironmentVariables`.
-
-On Windows the runner is started normally and assigned to the job right after, not created suspended. Before the app's
-first request, which the app sends after the assignment, the runner runs only its own startup and starts no process;
-without those variables nothing else can run in it. An app that dies in between closes the runner's input, which ends
-it. A suspended start would need its own `CreateProcess` code for pipes and handle inheritance instead of
-`Process.Start`, and would still let the app's profilers and hooks into the runner. Code injected machine-wide, for
-example through `AppInit_DLLs`, is out of scope. If the job cannot be assigned, starting fails.
+variables for the runner, such as tracing settings, with `CSharpScriptRunnerOptions.RunnerEnvironmentVariables`. Code
+injected machine-wide, for example through `AppInit_DLLs`, is out of scope.
 
 Processes that scripts start survive a runner crash or the app's death on Linux, because the death signal is not
 inherited; apps that let scripts start processes need a cgroup or a policy against it. The runner is not a security
@@ -512,7 +506,23 @@ sandbox: scripts run with the app's user rights.
 
 ### Packaging
 
-The runtime is shared by every helper, so it ships once:
+Apps get C# from one package, `Darp.CodeEditor.CSharp`: the editor's C# service, the script environment, the runner
+API, and both helpers. It depends on `Darp.CodeEditor` and `Darp.CodeEditor.Lsp`.
+
+```xml
+<PropertyGroup>
+  <!-- Restore then fetches what publish needs for the helpers; NativeAOT apps set it too. -->
+  <PublishReadyToRun>true</PublishReadyToRun>
+</PropertyGroup>
+<ItemGroup>
+  <PackageReference Include="Darp.CodeEditor.CSharp" Version="..." />
+  <!-- NativeAOT: publish copies the DLLs of marked references next to the app, with StreamJsonRpc and PolyType. -->
+  <ProjectReference Include="..\MyApp.ScriptApi\MyApp.ScriptApi.csproj" CSharpScriptReference="true" />
+  <PackageReference Include="MyApp.Devices" CSharpScriptReference="true" />
+</ItemGroup>
+```
+
+A published app has the helpers and the runtime they share; nothing on the user's machine is needed:
 
 ```
 MyApp(.exe)
@@ -521,44 +531,58 @@ helpers/
   dotnet/                       the .NET runtime, laid out as an installed one:
     host/fxr/<version>/         hostfxr
     shared/Microsoft.NETCore.App/<version>/
-  csharp-runner/                framework-dependent and ReadyToRun; its app host looks only in ../dotnet
-  csharp-server/                later: the language server, published the same way
+  csharp-server/                the language server, framework-dependent and ReadyToRun; its app host looks only in
+  csharp-runner/                ../dotnet; the runner the same way
 ```
 
-| | Shared runtime (chosen) | Self-contained helpers |
-| --- | --- | --- |
-| Runner alone, Linux x64 | 78 MiB runtime + 36 MiB runner (33 + 15 MiB gzipped) | about the same |
-| Runner and language server | the runtime once | the runtime twice, about 78 MiB more |
-| Runtime updates | one directory | per helper |
-| Launch | the runner's app host, `AppHostRelativeDotNet=../dotnet` | the helper's app host |
+- `dotnet build`: the helpers go to `helpers/` as portable IL and run with `dotnet` on the runtime that runs the app,
+  so `dotnet run` works without publishing.
+- `dotnet publish -r <rid>`: the helpers are compiled with ReadyToRun for the app's runtime identifier and get app
+  hosts tied to `helpers/dotnet`, which holds the runtime from the `Microsoft.NETCore.App.Runtime.<rid>` package.
+  `PublishReadyToRun=true` in the app project makes restore fetch that package and the ReadyToRun compiler; publish
+  fails with a message naming the property when they are missing. `CSharpHelpersReadyToRun=false` publishes the
+  helpers as IL instead, which start about 40 % slower. A NativeAOT app that publishes for another platform than the
+  SDK's also sets `UseAppHost=true`, so that restore fetches that platform's app host; it still publishes as one
+  native executable.
 
-The runtime comes from the `Microsoft.NETCore.App.Runtime.<rid>` package, so no SDK or runtime download is needed on
-the build machine beyond NuGet. Import the targets into the app project:
+The package carries the helpers as portable IL, and the app's publish does everything that depends on the runtime
+identifier, with the SDK's own ReadyToRun and app host tasks. Alternatives were ReadyToRun builds for every runtime
+identifier, in one package or in one package per runtime identifier chosen through `runtime.json`:
 
-```xml
-<Import Project="path/to/src/Darp.CodeEditor.CSharp.Execution/build/Darp.CodeEditor.CSharp.Execution.targets" />
-<ItemGroup>
-  <!-- NativeAOT: publish copies the DLLs of marked references next to the app, with StreamJsonRpc and PolyType. -->
-  <ProjectReference Include="..\MyApp.ScriptApi\MyApp.ScriptApi.csproj" CSharpScriptReference="true" />
-  <PackageReference Include="MyApp.Devices" CSharpScriptReference="true" />
-</ItemGroup>
-```
+| | IL in the package (chosen) | ReadyToRun per RID, one package | ReadyToRun per RID, a package each |
+| --- | ---: | ---: | ---: |
+| `Darp.CodeEditor.CSharp` download | 15.1 MiB | ~170 MiB (4 RIDs), ~250 MiB (6) | 15.1 MiB + 42 MiB per RID |
+| Feed storage per version, 6 RIDs | 15.1 MiB | ~250 MiB | ~265 MiB |
+| Runtime identifiers | every one the SDK has a runtime pack for | the ones packed | the ones packed; others fall back to RID-graph parents, such as `linux-musl-x64` to `linux-x64` |
+| Extra work at the app's publish | ReadyToRun, about 15 s on 8 cores | none | none |
+| Offline | after restore, like the app's own runtime packs | yes | yes |
+| Build | one portable build; targets drive the SDK's tasks | crossgen for each RID in CI; Windows and macOS app hosts made elsewhere | the same, plus a package per RID and `runtime.json` |
+
+Sizes of a published app's helpers, without symbols, from `linux-x64` (zipped in parentheses):
+
+| RID | `dotnet/` | `csharp-server/` | `csharp-runner/` |
+| --- | ---: | ---: | ---: |
+| linux-x64 | 78.8 MiB (34.2) | 66.0 MiB (27.4) | 37.2 MiB (15.6) |
+| linux-arm64 | 84.6 MiB (32.1) | 72.5 MiB (26.0) | 41.5 MiB (14.8) |
+| win-x64 | 76.7 MiB (34.0) | 64.5 MiB (26.9) | 36.6 MiB (15.4) |
+| win-arm64 | 86.2 MiB (32.6) | 72.8 MiB (26.0) | 41.8 MiB (14.8) |
+| osx-arm64 | 82.6 MiB (31.1) | 72.6 MiB (26.0) | 41.6 MiB (14.8) |
+| osx-x64 | 76.1 MiB (33.2) | 66.0 MiB (27.4) | 37.2 MiB (15.6) |
+
+The language server and the runner each keep their own copy of the Roslyn compiler (28 MiB with ReadyToRun on
+linux-x64): one directory for both would need one set of dependencies for two apps that are versioned and loaded
+apart.
 
 Mark the references whose types scripts use. Publish also ships what the marked assemblies need at run time, found
 by their assembly references among the app's own assemblies, with their satellite assemblies; the runner loads those
-from the app's directory. Assemblies the runner ships itself, with the same identity, stay out. JIT apps have all their
-DLLs next to them already.
+from the app's directory, and the language server reads the same files. Assemblies the runner ships itself, with the
+same identity, stay out. JIT apps have all their DLLs next to them already.
 
 The runner has `Microsoft.NETCore.App` only. When a marked reference, or something it uses, needs another shared
 framework, such as `Microsoft.AspNetCore.App`, the build fails and names the reference and the framework.
 
-- `dotnet build`: the runner's build output goes to `helpers/csharp-runner`, and it runs on the runtime that runs the
-  app, so `dotnet run` works without publishing.
-- `dotnet publish -r <rid>`: the runner, ReadyToRun for the app's runtime identifier, and the runtime go to
-  `helpers/`.
-
-A NuGet package would carry the same targets in `buildTransitive/` and the runner's build output instead of the
-project reference; it is not built yet.
+In this repository the demos, tests and benchmarks import `src/Darp.CodeEditor.CSharp/buildTransitive/Darp.CodeEditor.CSharp.targets`
+directly; it builds the helpers from source instead of taking them from the package.
 
 ### Benchmark
 
