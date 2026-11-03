@@ -236,7 +236,8 @@ internal sealed class CompletionController
     /// Commit stays synchronous: a commit character is inserted right after it, and waiting for the server would hold
     /// the keystroke. The selected item is usually resolved by then, for its description. When its resolve arrives
     /// later, its edits join the commit's undo step, but only while the document is still exactly as the commit left
-    /// it; after any other change, an undo included, they no longer belong to the commit and are dropped.
+    /// it and that step is still the last one; after any other change or undo step, an undo included, they no longer
+    /// belong to the commit and are dropped.
     /// </remarks>
     private void Commit(ShownList shown, int index, int wordStart, int wordEnd)
     {
@@ -255,6 +256,9 @@ internal sealed class CompletionController
             wordEnd = shown.Checkpoint.MoveOffsetTo(document.Version, range.End, AnchorMovementType.AfterInsertion);
         }
         Task<CompletionItemDetails?> details = shown.Resolve(index);
+        // Names the commit's undo step, so that late edits can tell whether it is still the last one.
+        var step = new object();
+        document.UndoStack.StartUndoGroup(step);
         document.BeginUpdate();
         try
         {
@@ -265,31 +269,36 @@ internal sealed class CompletionController
         finally
         {
             document.EndUpdate();
+            document.UndoStack.EndUndoGroup();
         }
         if (!details.IsCompleted)
-            _ = ApplyEditsWhenResolvedAsync(details, item, shown.Checkpoint, document.Version);
+            _ = ApplyEditsWhenResolvedAsync(details, item, shown.Checkpoint, document.Version, step);
     }
 
     /// <param name="committed">The document's version right after the commit.</param>
+    /// <param name="step">The name of the commit's undo step.</param>
     private async Task ApplyEditsWhenResolvedAsync(
         Task<CompletionItemDetails?> details,
         CompletionItem item,
         ITextSourceVersion checkpoint,
-        ITextSourceVersion committed
+        ITextSourceVersion committed,
+        object step
     )
     {
         IReadOnlyList<TextEdit>? edits = (await details)?.AdditionalEdits ?? item.AdditionalEdits;
         TextDocument document = _editor.Document;
+        // An undo step that changes no text, such as one an app pushed, keeps the version: the step's name tells.
         if (
             edits is not { Count: > 0 }
             || !committed.BelongsToSameDocumentAs(document.Version)
             || committed.CompareAge(document.Version) != 0
+            || document.UndoStack.LastGroupDescriptor != step
         )
         {
             return;
         }
-        // Nothing changed since the commit, so the last undo step is the commit's: the edits continue it.
-        document.UndoStack.StartContinuedUndoGroup();
+        // The text is as the commit left it and its undo step is the last: the edits continue that step.
+        document.UndoStack.StartContinuedUndoGroup(step);
         try
         {
             document.BeginUpdate();

@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
+using AvaloniaEdit.Document;
 using Darp.CodeEditor.LanguageServices;
 using Shouldly;
 
@@ -58,6 +59,27 @@ public sealed class CommitAndSignatureTests
         await Task.Delay(100);
 
         editor.Text.ShouldBe("x\nbeta;");
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task A_resolve_that_arrives_after_another_undo_step_adds_nothing()
+    {
+        var service = new ScriptedService();
+        (CodeEditor editor, Window window) = await OpenWithListAsync(service);
+
+        Commit(editor);
+        // An undo step of the app that changes no text, so that the document's version stays the commit's.
+        editor.Document.UndoStack.Push(new TextlessOperation());
+        service.Details.SetResult(s_usingDirective);
+        await Task.Delay(100);
+
+        editor.Text.ShouldBe("x\nbeta");
+        // The app's step and the commit undo one at a time, each whole.
+        editor.Document.UndoStack.Undo();
+        editor.Text.ShouldBe("x\nbeta");
+        editor.Document.UndoStack.Undo();
+        editor.Text.ShouldBe("x\nb");
         window.Close();
     }
 
@@ -154,4 +176,12 @@ public sealed class CommitAndSignatureTests
             0,
             new TextRange(4, 0)
         );
+
+    /// <summary>An undo step that changes no text.</summary>
+    private sealed class TextlessOperation : IUndoableOperation
+    {
+        public void Undo() { }
+
+        public void Redo() { }
+    }
 }
