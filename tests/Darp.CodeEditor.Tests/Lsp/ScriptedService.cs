@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Darp.CodeEditor.LanguageServices;
 
 namespace Darp.CodeEditor.Tests.Lsp;
@@ -97,5 +98,8 @@ internal sealed class ScriptedService : ILanguageService
     {
         public TaskCompletionSource<SignatureHelp?> Answer { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>When the editor asked, as a <see cref="Stopwatch"/> timestamp.</summary>
+        public long SentAt { get; } = Stopwatch.GetTimestamp();
     }
 }

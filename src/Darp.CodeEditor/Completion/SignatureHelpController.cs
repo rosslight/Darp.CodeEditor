@@ -74,11 +74,12 @@ internal sealed class SignatureHelpController
 
     /// <summary>
     /// An edit cancels the request in flight, which tells the server so; help that was shown or requested is asked
-    /// again when typing pauses. Trigger characters ask at once, right after this.
+    /// again when typing pauses, and each edit until then starts the pause over. Trigger characters ask at once,
+    /// right after this.
     /// </summary>
     private void OnTextChanged()
     {
-        if (_cancellation is null && _shown is null)
+        if (_cancellation is null && _shown is null && !_stale)
             return;
         _cancellation?.Cancel();
         _cancellation = null;

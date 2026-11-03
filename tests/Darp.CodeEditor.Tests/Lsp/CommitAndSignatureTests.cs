@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
@@ -130,6 +131,29 @@ public sealed class CommitAndSignatureTests
         first.Position.ShouldBe(4);
         (second.Document.Version, second.Position).ShouldBe((first.Document.Version + 1, editor.CaretOffset));
         shown.Count.ShouldBe(1);
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task Every_edit_restarts_the_pause_before_signature_help_is_asked_again()
+    {
+        var service = new ScriptedService();
+        (CodeEditor editor, Window window) = await OpenWithListAsync(service);
+        editor.TextArea.PerformTextInput("(");
+        await Wait.UntilAsync(() => service.SignatureRequests.Count == 1);
+        int asked = service.SignatureRequests[0].Document.Version;
+
+        // The first edit cancels the request; the second comes before the pause ends.
+        editor.TextArea.PerformTextInput("1");
+        await Task.Delay(60);
+        editor.TextArea.PerformTextInput("2");
+        long typed = Stopwatch.GetTimestamp();
+        await Wait.UntilAsync(() => service.SignatureRequests[^1].Document.Version == asked + 2);
+
+        // The pause of 100 ms counts from the last edit.
+        Stopwatch
+            .GetElapsedTime(typed, service.SignatureRequests[^1].SentAt)
+            .ShouldBeGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(90));
         window.Close();
     }
 
