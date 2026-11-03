@@ -1,7 +1,8 @@
 # Editor polish: measurements
 
 Status: Linux x64 VM measured (2026-11-02/03). Windows numbers are still to come: run `tools/measure/run-windows.ps1`
-on the Windows laptop.
+on the Windows laptop. It runs the in-process benchmarks and the on-screen startup probe and injects no input; key to
+changed pixels is measured on Linux VMs only (see below).
 
 What changed, one commit each on `feat/editor-polish`: completion, signature help and hover draw inside the window;
 the first completion list no longer stalls; visible lines get colors in the frame that shows them; light and dark VS
@@ -46,7 +47,7 @@ both runs. The machine is shared with other agents: load average 0.3–1.7 durin
 Notes:
 
 - Key to changed pixels is dominated by frame pacing on this VM (Xvnc, software rendering); the typing path was already
-  sub-millisecond. It is the number to compare on Windows. Xvnc paces frames by its connected VNC viewers: with none,
+  sub-millisecond. Xvnc paces frames by its connected VNC viewers: with none,
   Avalonia presents about once a second and every on-screen number is ~850 ms. Measure with a viewer attached.
 - On screen, the probe's "editor text" time is not meaningful on this VM: without a compositor the root window still
   shows the previous run's pixels when the new window maps, so it reports text 2 ms after the window. Highlighted text is
@@ -83,8 +84,12 @@ right has no room, and stacked above the line when neither side has room.
   from then on.
 - **UI stalls over 16 ms that remain.** Startup itself is one long UI-thread job in both builds (window creation and
   first layout: ~450 ms JIT, ~30 ms AOT); after it, the JIT idle stalls and the first variant switch above.
-- **The probe types real keys.** It never clicks: the demo focuses its own editor. Before and after every key it checks
-  that the demo still runs and that its exact window has the foreground (Windows) or is the active window holding the
-  input focus (X11), before every key that no modifier key or mouse button is down, and that every injected event was
-  taken; it aborts otherwise, and the scripts stop. Check and key are still not atomic, and on X11 a keyboard grab by
-  another client is not detected: nobody may use the machine while it runs.
+- **No key-to-pixel numbers on Windows.** `SendInput` inserts keys into the system input stream, not into a window, so
+  a key checked against the demo's window can still reach another application when the focus changes in between; no
+  check makes that safe on a machine in use, and the probe refuses its `latency` mode there. Windows numbers come from
+  the in-process `--bench`, which injects no input.
+- **The Linux probe types real keys.** For test VMs only. It never clicks: the demo focuses its own editor. Before and
+  after every key it checks that the demo still runs and that its window is the active window holding the input focus,
+  before every key that no modifier key or mouse button is down, and that every injected event was taken; it aborts
+  otherwise, and the script stops. Its deadline is cooperative (checked before each key). Check and key are not
+  atomic, and a keyboard grab by another client is not detected: nobody may use the display while it runs.

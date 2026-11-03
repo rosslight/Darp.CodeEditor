@@ -4,32 +4,13 @@ using System.Runtime.Versioning;
 namespace Darp.CodeEditor.Probe;
 
 /// <summary>
-/// SendInput and GDI reads of the screen. With DWM, BitBlt from the screen returns the composed desktop, so a change is
-/// seen once DWM has presented the frame.
+/// GDI reads of the screen. With DWM, BitBlt from the screen returns the composed desktop, so a change is seen once DWM
+/// has presented the frame. It injects no input (see the latency mode).
 /// </summary>
 [SupportedOSPlatform("windows")]
 internal sealed unsafe partial class Win32ScreenInput : IScreenInput
 {
-    private const uint InputKeyboard = 1;
-    private const uint KeyUp = 0x0002;
-    private const ushort VkBack = 0x08;
-    private const ushort VkM = 0x4D;
     private const uint SrcCopy = 0x00CC0020;
-
-    /// <summary>Keys and buttons that turn a typed key into a shortcut or a click into a drag.</summary>
-    private static readonly (int Key, string Name)[] s_modifiers =
-    [
-        (0x10, "Shift"),
-        (0x11, "Ctrl"),
-        (0x12, "Alt"),
-        (0x5B, "the left Windows key"),
-        (0x5C, "the right Windows key"),
-        (0x01, "the left mouse button"),
-        (0x02, "the right mouse button"),
-        (0x04, "the middle mouse button"),
-        (0x05, "the first extra mouse button"),
-        (0x06, "the second extra mouse button"),
-    ];
 
     private readonly IntPtr _screen = GetDC(IntPtr.Zero);
     private readonly IntPtr _memory;
@@ -37,30 +18,6 @@ internal sealed unsafe partial class Win32ScreenInput : IScreenInput
     public Win32ScreenInput()
     {
         _memory = CreateCompatibleDC(_screen);
-    }
-
-    public void Key(bool backspace)
-    {
-        ushort key = backspace ? VkBack : VkM;
-        Input* inputs = stackalloc Input[2];
-        inputs[0] = new Input
-        {
-            Type = InputKeyboard,
-            Keyboard = new KeyboardInput { VirtualKey = key },
-        };
-        inputs[1] = new Input
-        {
-            Type = InputKeyboard,
-            Keyboard = new KeyboardInput { VirtualKey = key, Flags = KeyUp },
-        };
-        uint sent = SendInput(2, inputs, sizeof(Input));
-        if (sent == 2)
-            return;
-        int error = Marshal.GetLastPInvokeError();
-        // A key down without its key up would stay pressed: release the probe's own key.
-        if (sent == 1)
-            SendInput(1, inputs + 1, sizeof(Input));
-        throw new UnsafeInputException($"SendInput took {sent} of 2 events (error {error}), input may be blocked");
     }
 
     public byte[] Capture(int x, int y, int width, int height)
@@ -112,33 +69,6 @@ internal sealed unsafe partial class Win32ScreenInput : IScreenInput
         return found;
     }
 
-    public string? CheckFocus(TargetWindow target)
-    {
-        var window = (IntPtr)target.Window;
-        if (!IsWindow(window))
-            return "the demo's window no longer exists";
-        if (ProcessOf(window) != target.ProcessId)
-            return "the demo's window belongs to another process now";
-        IntPtr foreground = GetForegroundWindow();
-        return foreground == window
-            ? null
-            : $"the foreground window is 0x{foreground:X} of process {ProcessOf(foreground)?.ToString() ?? "unknown"}, not the demo's window 0x{window:X}";
-    }
-
-    public string? HeldModifier()
-    {
-        foreach ((int key, string name) in s_modifiers)
-        {
-            // The high bit: down now.
-            if ((GetAsyncKeyState(key) & 0x8000) != 0)
-                return name;
-        }
-        return null;
-    }
-
-    private static int? ProcessOf(IntPtr window) =>
-        GetWindowThreadProcessId(window, out uint processId) == 0 ? null : (int)processId;
-
     [UnmanagedCallersOnly]
     private static int OnWindow(IntPtr window, IntPtr data)
     {
@@ -157,30 +87,6 @@ internal sealed unsafe partial class Win32ScreenInput : IScreenInput
     {
         DeleteDC(_memory);
         ReleaseDC(IntPtr.Zero, _screen);
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct KeyboardInput
-    {
-        public ushort VirtualKey;
-        public ushort ScanCode;
-        public uint Flags;
-        public uint Time;
-        public IntPtr ExtraInfo;
-    }
-
-    [StructLayout(LayoutKind.Explicit)]
-    private struct Input
-    {
-        [FieldOffset(0)]
-        public uint Type;
-
-        // The union's size is that of its largest member, MOUSEINPUT: 32 bytes on 64-bit.
-        [FieldOffset(8)]
-        public KeyboardInput Keyboard;
-
-        [FieldOffset(8)]
-        private fixed byte _union[32];
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -220,21 +126,10 @@ internal sealed unsafe partial class Win32ScreenInput : IScreenInput
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool ClientToScreen(IntPtr window, ref Point point);
 
-    [LibraryImport("user32.dll")]
-    private static partial IntPtr GetForegroundWindow();
 
-    [LibraryImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool IsWindow(IntPtr window);
 
-    [LibraryImport("user32.dll")]
-    private static partial short GetAsyncKeyState(int key);
 
-    [LibraryImport("user32.dll")]
-    private static partial uint GetWindowThreadProcessId(IntPtr window, out uint processId);
 
-    [LibraryImport("user32.dll", SetLastError = true)]
-    private static partial uint SendInput(uint count, Input* inputs, int size);
 
     [LibraryImport("user32.dll")]
     private static partial IntPtr GetDC(IntPtr window);

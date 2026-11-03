@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace Darp.CodeEditor.Probe;
 
 /// <summary>XTest input and XGetImage reads of the root window, which on a server without a compositor is the screen.</summary>
-internal sealed unsafe partial class X11ScreenInput : IScreenInput
+internal sealed unsafe partial class X11ScreenInput : IKeyInput
 {
     private const string LibX11 = "libX11.so.6";
     private const string LibXtst = "libXtst.so.6";

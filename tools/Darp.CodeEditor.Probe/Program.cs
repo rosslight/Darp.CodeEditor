@@ -5,11 +5,12 @@ using Darp.CodeEditor.Probe;
 
 // Measures editors from outside their process, the same way for every editor:
 //   latency --target e2e.json [--count 60] [--out file]
-//     Injects keystrokes as the OS would (XTest on X11, SendInput on Windows) and polls the screen until the typed
-//     character's pixels change. The target file comes from a demo started with --e2e e2e.json, which focuses its own
-//     editor; the probe never clicks. Before and after every key, the probe checks that the demo's process is alive
-//     and its window is the foreground window, and before every key that no modifier key or mouse button is down. It
-//     aborts otherwise. Check and injection are not atomic: nobody may use the machine while it runs.
+//     X11 only, for test VMs: injects keystrokes with XTest and polls the screen until the typed character's pixels
+//     change. The target file comes from a demo started with --e2e e2e.json, which focuses its own editor; the probe
+//     never clicks. Before and after every key, the probe checks that the demo's process is alive and its window holds
+//     the input focus, and before every key that no modifier key or mouse button is down. It aborts otherwise. Check
+//     and injection are not atomic: nobody may use the display while it runs. Not on Windows: SendInput inserts into
+//     the system input stream, not into a window, so no check makes it safe on a machine in use.
 //   startup [--title "Code editor demo"] [--out file] -- <app> [arguments]
 //     Starts the app and polls its window until the first editor lines show text, then highlighted text (at least two
 //     hues). Times are from starting the process, as seen on screen.
@@ -33,6 +34,14 @@ switch (args.FirstOrDefault())
 {
     case "latency":
     {
+        if (!OperatingSystem.IsLinux())
+        {
+            Console.Error.WriteLine(
+                "latency runs on X11 only. On Windows, SendInput inserts keys into the system input stream, not into "
+                    + "the demo window, so they can reach another application; use the demos' --bench timings instead."
+            );
+            return 2;
+        }
         JsonElement target = JsonDocument.Parse(File.ReadAllText(Value("--target") ?? "e2e.json")).RootElement;
         var window = new TargetWindow(target.GetProperty("pid").GetInt32(), target.GetProperty("window").GetInt64());
         var cell = new TargetCell(
@@ -51,7 +60,7 @@ switch (args.FirstOrDefault())
         }
         try
         {
-            using IScreenInput screen = OperatingSystem.IsWindows() ? new Win32ScreenInput() : new X11ScreenInput();
+            using var screen = new X11ScreenInput();
             InputLatency.Run(screen, window, cell, count, Report);
         }
         catch (UnsafeInputException exception)
@@ -123,20 +132,24 @@ namespace Darp.CodeEditor.Probe
             );
     }
 
-    /// <summary>Synthetic input and screen reads through the window system.</summary>
+    /// <summary>Screen reads through the window system.</summary>
     internal interface IScreenInput : IDisposable
+    {
+        /// <summary>The pixels of a screen region, as currently shown, 4 bytes per pixel (blue, green, red, unused).</summary>
+        byte[] Capture(int x, int y, int width, int height);
+
+        /// <summary>The screen position of the client area of the first visible window whose title starts so.</summary>
+        (int X, int Y)? FindWindow(string titlePrefix);
+    }
+
+    /// <summary>Synthetic keys, X11 only (see the latency mode for why not on Windows).</summary>
+    internal interface IKeyInput : IScreenInput
     {
         /// <summary>
         /// Presses and releases the key that types 'm' (<paramref name="backspace"/> false) or BackSpace. Throws
         /// <see cref="UnsafeInputException"/> when the window system did not take every event.
         /// </summary>
         void Key(bool backspace);
-
-        /// <summary>The pixels of a screen region, as currently shown, 4 bytes per pixel (blue, green, red, unused).</summary>
-        byte[] Capture(int x, int y, int width, int height);
-
-        /// <summary>The screen position of the client area of the first visible window whose title starts so.</summary>
-        (int X, int Y)? FindWindow(string titlePrefix);
 
         /// <summary>
         /// Why a key now would not reach only the target window, or null when it would: the window must exist, belong to
@@ -207,7 +220,8 @@ namespace Darp.CodeEditor.Probe
             );
             if (!process.HasExited)
                 process.Kill(entireProcessTree: true);
-            process.WaitForExit();
+            if (!process.WaitForExit(TimeSpan.FromSeconds(10)))
+                throw new InvalidOperationException($"The app (process {process.Id}) is still running after ending it.");
         }
 
         /// <summary>Light and dark pixels, and how many hue sectors have clearly colored pixels.</summary>
@@ -257,7 +271,7 @@ namespace Darp.CodeEditor.Probe
         /// the time from injecting the key until the cell's pixels first differ from before.
         /// </summary>
         public static void Run(
-            IScreenInput screen,
+            IKeyInput screen,
             TargetWindow target,
             TargetCell cell,
             int count,
@@ -287,11 +301,12 @@ namespace Darp.CodeEditor.Probe
             var run = Stopwatch.StartNew();
             for (int i = 0; i < count * 2; i++)
             {
-                if (run.Elapsed > s_maxRunTime)
-                    throw new UnsafeInputException($"the run took longer than {s_maxRunTime.TotalMinutes:F0} minutes");
                 bool backspace = i % 2 == 1;
                 byte[] before = screen.Capture(x, y, width, height);
                 EnsureSafe(screen, demo, target, checkModifiers: true);
+                // The deadline is cooperative: checked right before each key, never interrupting one.
+                if (run.Elapsed > s_maxRunTime)
+                    throw new UnsafeInputException($"the run took longer than {s_maxRunTime.TotalMinutes:F0} minutes");
                 long start = Stopwatch.GetTimestamp();
                 screen.Key(backspace);
                 // The focus may have moved while the key was on its way.
@@ -325,7 +340,7 @@ namespace Darp.CodeEditor.Probe
             );
         }
 
-        private static void EnsureSafe(IScreenInput screen, Process demo, TargetWindow target, bool checkModifiers)
+        private static void EnsureSafe(IKeyInput screen, Process demo, TargetWindow target, bool checkModifiers)
         {
             demo.Refresh();
             if (demo.HasExited)
