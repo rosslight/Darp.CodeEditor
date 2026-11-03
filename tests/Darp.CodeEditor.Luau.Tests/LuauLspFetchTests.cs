@@ -16,23 +16,15 @@ public sealed class LuauLspFetchTests : IDisposable
 {
     private readonly DirectoryInfo _directory = Directory.CreateTempSubdirectory("luau-lsp-fetch-");
 
-    public LuauLspFetchTests()
-    {
-        File.WriteAllText(
-            Path.Combine(_directory.FullName, "fetch.proj"),
-            $"""
-            <Project>
-              <PropertyGroup>
-                <IntermediateOutputPath>obj/</IntermediateOutputPath>
-              </PropertyGroup>
-              <Import Project="{Metadata("LuauTargets")}" />
-              <Target Name="Resolve" DependsOnTargets="ResolveLuauLsp">
-                <Message Importance="high" Text="LuauLspPath=$(LuauLspPath)" />
-              </Target>
-            </Project>
-            """
-        );
-    }
+    public LuauLspFetchTests() => WriteProject(_directory.FullName);
+
+    /// <summary>The portable runtime identifier of this machine, which has a luau-lsp build.</summary>
+    private static string RuntimeIdentifier =>
+        (
+            OperatingSystem.IsWindows() ? "win"
+            : OperatingSystem.IsMacOS() ? "osx"
+            : "linux"
+        ) + (RuntimeInformation.OSArchitecture == Architecture.Arm64 ? "-arm64" : "-x64");
 
     /// <summary>The pinned release's archive, which the build of these tests downloaded and checked.</summary>
     private static string ReleaseArchive =>
@@ -82,12 +74,55 @@ public sealed class LuauLspFetchTests : IDisposable
         tamperedExitCode.ShouldNotBe(0, tamperedOutput);
         tamperedOutput.ShouldContain("has the SHA-256");
         exitCode.ShouldBe(0, output);
-        string unpacked = output.Split('\n').Single(l => l.Contains("LuauLspPath=")).Split("LuauLspPath=")[1].Trim();
+        string unpacked = UnpackedPath(output);
         File.Exists(unpacked).ShouldBeTrue(unpacked);
         new FileInfo(unpacked).Length.ShouldBeGreaterThan(1_000_000);
     }
 
+    [Fact]
+    public async Task A_project_path_with_shell_syntax_is_never_run_as_a_command()
+    {
+        // Windows file names cannot hold quotes.
+        string name = OperatingSystem.IsWindows()
+            ? "luau review `touch REVIEW_MARKER`"
+            : "luau \"review\" `touch REVIEW_MARKER`";
+        string project = Directory.CreateDirectory(Path.Combine(_directory.FullName, name)).FullName;
+        WriteProject(project);
+
+        (int exitCode, string output) = await MsBuildInAsync(
+            project,
+            RuntimeIdentifier,
+            $"-p:LuauLspArchive={ReleaseArchive}"
+        );
+
+        exitCode.ShouldBe(0, output);
+        Directory.GetFiles(_directory.FullName, "REVIEW_MARKER", SearchOption.AllDirectories).ShouldBeEmpty();
+        string unpacked = UnpackedPath(output);
+        unpacked.ShouldStartWith(project);
+        if (!OperatingSystem.IsWindows())
+            File.GetUnixFileMode(unpacked).HasFlag(UnixFileMode.UserExecute).ShouldBeTrue(unpacked);
+    }
+
     public void Dispose() => _directory.Delete(recursive: true);
+
+    private static void WriteProject(string directory) =>
+        File.WriteAllText(
+            Path.Combine(directory, "fetch.proj"),
+            $"""
+            <Project>
+              <PropertyGroup>
+                <IntermediateOutputPath>obj/</IntermediateOutputPath>
+              </PropertyGroup>
+              <Import Project="{Metadata("LuauTargets")}" />
+              <Target Name="Resolve" DependsOnTargets="ResolveLuauLsp">
+                <Message Importance="high" Text="LuauLspPath=$(LuauLspPath)" />
+              </Target>
+            </Project>
+            """
+        );
+
+    private static string UnpackedPath(string output) =>
+        output.Split('\n').Single(l => l.Contains("LuauLspPath=")).Split("LuauLspPath=")[1].Trim();
 
     private static string Metadata(string key) =>
         typeof(LuauLspFetchTests)
@@ -128,12 +163,21 @@ public sealed class LuauLspFetchTests : IDisposable
         }
     }
 
-    /// <summary>Runs the targets' resolve step in a project of their own, with MSBuild processes of its own.</summary>
-    private async Task<(int ExitCode, string Output)> MsBuildAsync(params string[] properties)
+    private Task<(int ExitCode, string Output)> MsBuildAsync(params string[] properties) =>
+        MsBuildInAsync(_directory.FullName, RuntimeIdentifier, properties);
+
+    /// <summary>
+    /// Runs the targets' resolve step in the project in <paramref name="directory"/>, with MSBuild processes of its own.
+    /// </summary>
+    private static async Task<(int ExitCode, string Output)> MsBuildInAsync(
+        string directory,
+        string runtimeIdentifier,
+        params string[] properties
+    )
     {
         var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet")
         {
-            WorkingDirectory = _directory.FullName,
+            WorkingDirectory = directory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
@@ -145,7 +189,7 @@ public sealed class LuauLspFetchTests : IDisposable
                     "-t:Resolve",
                     "-nologo",
                     "-nodeReuse:false",
-                    $"-p:RuntimeIdentifier={RuntimeInformation.RuntimeIdentifier}",
+                    $"-p:RuntimeIdentifier={runtimeIdentifier}",
                     .. properties,
                 ]
         )

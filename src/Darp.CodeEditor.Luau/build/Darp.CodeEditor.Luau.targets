@@ -77,6 +77,41 @@
     />
   </ItemGroup>
 
+  <!--
+    Adds the execute permissions to a file, as chmod +x does. File.SetUnixFileMode is missing from the reference
+    assemblies that inline tasks compile against, so it is called through reflection; MSBuild runs on .NET.
+  -->
+  <UsingTask
+    TaskName="MakeLuauLspExecutable"
+    TaskFactory="RoslynCodeTaskFactory"
+    AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll"
+  >
+    <ParameterGroup>
+      <Executable ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Reflection" />
+      <Code Type="Fragment" Language="cs">
+        <![CDATA[
+        Type mode = typeof(File).Assembly.GetType("System.IO.UnixFileMode");
+        MethodInfo get = mode == null ? null : typeof(File).GetMethod("GetUnixFileMode", new[] { typeof(string) });
+        MethodInfo set = mode == null ? null : typeof(File).GetMethod("SetUnixFileMode", new[] { typeof(string), mode });
+        if (get == null || set == null)
+        {
+            Log.LogError("Cannot make {0} executable: MSBuild runs on a runtime without File.SetUnixFileMode.", Executable);
+        }
+        else
+        {
+            int current = Convert.ToInt32(get.Invoke(null, new object[] { Executable }));
+            // UserExecute | GroupExecute | OtherExecute
+            set.Invoke(null, new object[] { Executable, Enum.ToObject(mode, current | 0x49) });
+        }
+        ]]>
+      </Code>
+    </Task>
+  </UsingTask>
+
   <!-- Adds luau-lsp to the files copied to the output and publish directories. -->
   <Target
     Name="AddLuauLspToOutput"
@@ -175,7 +210,7 @@
       <LuauLspPath>$(_LuauLspUnpacked)$(_LuauLspFileName)</LuauLspPath>
     </PropertyGroup>
     <Unzip SourceFiles="$(_LuauLspArchive)" DestinationFolder="$(_LuauLspUnpacked)" SkipUnchangedFiles="true" />
-    <!-- Unzip drops the executable bit. -->
-    <Exec Command="chmod +x &quot;$(LuauLspPath)&quot;" Condition="!$([MSBuild]::IsOSPlatform('Windows'))" />
+    <!-- Unzip drops the executable bit. No shell: the path may hold anything a directory name can. -->
+    <MakeLuauLspExecutable Executable="$(LuauLspPath)" Condition="!$([MSBuild]::IsOSPlatform('Windows'))" />
   </Target>
 </Project>

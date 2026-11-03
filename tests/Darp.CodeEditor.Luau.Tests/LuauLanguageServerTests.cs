@@ -191,4 +191,35 @@ public sealed class LuauLanguageServerTests
             parent.Delete(recursive: true);
         }
     }
+
+    [Fact]
+    public async Task A_luau_lsp_without_execute_permissions_gets_them_before_it_starts()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Windows has no execute permissions.");
+            return;
+        }
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("luau-");
+        try
+        {
+            string server = Path.Combine(directory.FullName, LuauLanguageServer.ServerFileName);
+            File.Copy(
+                Path.Combine(AppContext.BaseDirectory, "helpers", "luau-lsp", LuauLanguageServer.ServerFileName),
+                server
+            );
+            File.SetUnixFileMode(server, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+
+            await using LuauSession luau = await LuauSession.StartAsync(
+                options: new LuauLanguageServerOptions { ServerPath = server }
+            );
+
+            luau.Service.State.ShouldBe(LanguageServerState.Running);
+            File.GetUnixFileMode(server).HasFlag(UnixFileMode.UserExecute).ShouldBeTrue();
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
 }

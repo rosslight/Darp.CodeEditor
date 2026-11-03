@@ -184,6 +184,7 @@ public static class LuauLanguageServer
                 server
             );
         }
+        EnsureExecutable(server);
         var start = new ProcessStartInfo(server) { WorkingDirectory = Path.GetDirectoryName(server) };
         foreach (string argument in CreateArguments(environment, options.Arguments))
             start.ArgumentList.Add(argument);
@@ -191,6 +192,32 @@ public static class LuauLanguageServer
         return await LanguageServerTransport
             .StartProcessAsync(start, log is null ? null : line => log($"luau-lsp: {line}"))
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Gives luau-lsp the execute permissions it lost, such as in a copy made by a tool that drops them.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The permissions cannot be changed.</exception>
+    private static void EnsureExecutable(string server)
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+        const UnixFileMode execute = UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
+        UnixFileMode mode = File.GetUnixFileMode(server);
+        if ((mode & execute) != 0)
+            return;
+        try
+        {
+            File.SetUnixFileMode(server, mode | execute);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or IOException)
+        {
+            throw new InvalidOperationException(
+                $"luau-lsp at {server} is not executable, and its permissions cannot be changed: {exception.Message} "
+                    + "Make it executable, for example with chmod +x.",
+                exception
+            );
+        }
     }
 
     private static string RequireFile(string path, string kind)
