@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
@@ -379,9 +380,7 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
         {
             // A hang like any other: the next start waits longer, so that a server that starts slowly gets to run.
             _timeout.Ended(null, hung: true);
-            throw new TimeoutException(
-                $"The language server did not answer initialize within {timeout.TotalSeconds:0.#} s."
-            );
+            throw new TimeoutException($"The language server did not answer initialize within {Seconds(timeout)}.");
         }
     }
 
@@ -714,7 +713,7 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
         }
         catch (TimeoutException)
         {
-            Abort(client, $"it read nothing for {timeout.TotalSeconds:0.#} s");
+            Abort(client, $"it read nothing for {Seconds(timeout)}");
         }
         catch (IOException)
         {
@@ -737,12 +736,16 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
         }
         catch (TimeoutException)
         {
-            Abort(client, $"it answered nothing for {timeout.TotalSeconds:0.#} s");
+            Abort(client, $"it answered nothing for {Seconds(timeout)}");
             throw new IOException("The language server stopped answering.");
         }
         _timeout.Answered(client);
         return answer;
     }
+
+    /// <summary>A timeout for the log, such as "0.4 s": in English like the rest of the message.</summary>
+    private static string Seconds(TimeSpan timeout) =>
+        timeout.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture) + " s";
 
     /// <summary>Ends a server that stopped answering or reading; the supervisor starts a new one.</summary>
     private void Abort(LanguageClient client, string reason)
