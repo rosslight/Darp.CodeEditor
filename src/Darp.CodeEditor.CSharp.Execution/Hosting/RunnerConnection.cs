@@ -159,7 +159,7 @@ internal sealed class RunnerConnection : IAsyncDisposable
     {
         _rpc.StartListening();
         string environment = CSharpScriptInitializationOptions.Create(_options.Environment).ToJsonString();
-        string[] services = [.. _options.Services.Select(s => s.ServiceType.FullName ?? "")];
+        RunnerTypeName[] services = [.. _options.Services.Select(s => RunnerTypeName.Of(s.ServiceType))];
         // Starting has its own timeout: request deadlines and the watchdog apply from here on.
         try
         {

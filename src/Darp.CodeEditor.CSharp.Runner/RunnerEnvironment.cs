@@ -53,7 +53,7 @@ internal sealed class RunnerEnvironment
     /// <param name="services">The full names of the service interfaces the host provides.</param>
     public static RunnerEnvironment Load(
         CSharpScriptEnvironment environment,
-        IReadOnlyList<string> services,
+        IReadOnlyList<RunnerTypeName> services,
         JsonRpc rpc,
         ShapeProviders shapes
     )
@@ -78,13 +78,15 @@ internal sealed class RunnerEnvironment
         foreach (ParameterInfo parameter in constructor.GetParameters())
         {
             Type serviceType = parameter.ParameterType;
-            if (!serviceType.IsInterface || !services.Contains(serviceType.FullName))
+            RunnerTypeName? service = services.FirstOrDefault(s => s.FullName == serviceType.FullName);
+            if (!serviceType.IsInterface || service is null)
             {
                 throw new ArgumentException(
                     $"The globals constructor takes {serviceType} ({parameter.Name}), which the host does not provide "
                         + "as a service. Add it to CSharpScriptRunnerOptions.Services."
                 );
             }
+            AppTypes.Verify(serviceType, service);
             shapes.Add(GetShapes(serviceType));
             proxies.Add(
                 rpc.Attach(
@@ -116,9 +118,7 @@ internal sealed class RunnerEnvironment
         CancellationToken cancellationToken
     )
     {
-        Type handlerType = Assembly
-            .Load(new AssemblyName(handler.Assembly))
-            .GetType(handler.FullName, throwOnError: true)!;
+        Type handlerType = AppTypes.Load(handler);
         _shapes.Add(GetShapes(handlerType));
 
         Script<object> script = _resolved.CreateScript(code, _globalsType, _options);

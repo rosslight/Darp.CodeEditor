@@ -1,8 +1,12 @@
 using System.Collections.Concurrent;
+using System.Reflection;
 using Darp.CodeEditor.CSharp.Execution.TestApi;
 using Darp.CodeEditor.CSharp.Execution.TestHost;
+using Darp.CodeEditor.CSharp.Hosting;
 using Darp.CodeEditor.CSharp.Scripting;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.Emit;
 using Microsoft.CodeAnalysis.Scripting;
 using Shouldly;
 using StreamJsonRpc;
@@ -60,6 +64,39 @@ public sealed class CSharpScriptRunnerTests
         );
 
         exception.Message.ShouldContain(typeof(ITestHost).FullName!);
+    }
+
+    [Fact]
+    public async Task Start_fails_when_the_script_api_next_to_the_app_is_another_build()
+    {
+        // Same name and version as the app's script API, but another build, as an outdated deployment leaves it.
+        AssemblyName appBuild = typeof(TestGlobals).Assembly.GetName();
+        string directory = Directory.CreateTempSubdirectory("csharp-runner-api-").FullName;
+        try
+        {
+            string otherBuild = Path.Combine(directory, appBuild.Name + ".dll");
+            EmitOtherBuild(otherBuild, appBuild);
+
+            InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(() =>
+                CSharpScriptRunner.StartAsync(
+                    new CSharpScriptRunnerOptions
+                    {
+                        Environment = TestEnvironment.Create() with
+                        {
+                            Globals = new CSharpScriptGlobals(otherBuild, typeof(TestGlobals).FullName!),
+                        },
+                        Services = [CSharpScriptService.Create<ITestHost>(new RecordingHost())],
+                    },
+                    Cancellation
+                )
+            );
+
+            exception.Message.ShouldContain($"Ship the {appBuild.Name} assembly the app was built with");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     [Fact]
@@ -301,5 +338,31 @@ public sealed class CSharpScriptRunnerTests
         await Should.ThrowAsync<ObjectDisposedException>(() =>
             runner.EvaluateAsync<ITestHandler>(Handler("return 1;"), Cancellation)
         );
+    }
+
+    private static void EmitOtherBuild(string path, AssemblyName name)
+    {
+        string source = $$"""
+            [assembly: System.Reflection.AssemblyVersion("{{name.Version}}")]
+            namespace Darp.CodeEditor.CSharp.Execution.TestApi;
+            public interface ITestHost { }
+            public sealed class TestGlobals { public TestGlobals(ITestHost host) { } }
+            """;
+        string[] platform = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator);
+        MetadataReference[] references =
+        [
+            .. platform
+                .Where(p => Path.GetFileName(p) is "System.Runtime.dll" or "System.Private.CoreLib.dll")
+                .Select(p => MetadataReference.CreateFromFile(p)),
+        ];
+        EmitResult result = CSharpCompilation
+            .Create(
+                name.Name,
+                [CSharpSyntaxTree.ParseText(source, cancellationToken: Cancellation)],
+                references,
+                new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+            )
+            .Emit(path, cancellationToken: Cancellation);
+        result.Success.ShouldBeTrue(string.Join('\n', result.Diagnostics));
     }
 }

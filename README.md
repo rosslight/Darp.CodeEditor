@@ -305,6 +305,9 @@ The app's script API assembly references StreamJsonRpc (2.26.150, the version th
 | Handlers | `[RpcMarshalable, GenerateShape(IncludeMethods = MethodShapeFlags.PublicInstance)] partial interface ... : IDisposable`; scripts implement them. |
 | Data | Records or classes with `[GenerateShape]`. |
 
+The app and the runner exchange the identity of each script API assembly they use, including its module version ID,
+so a stale copy next to the app fails at start instead of in a call.
+
 Every call crosses processes, so the API follows these rules:
 
 - Methods are async: `Task`, `Task<T>`, `ValueTask`, `ValueTask<T>` or `IAsyncEnumerable<T>`. A final
@@ -324,7 +327,7 @@ Every call crosses processes, so the API follows these rules:
 | Script code threw | `ScriptException` with the script's exception type, message and stack trace | keeps running; the handler keeps working |
 | A call passed `CallTimeout` | `TimeoutException`; the runner is asked to cancel the call | is killed if the call has not ended `CancellationGracePeriod` later: `RunnerExited` with `Killed` |
 | The runner crashed or was killed | `ConnectionLostException` for calls in flight, `ObjectDisposedException` for later calls on its handlers | `RunnerExited` with `Crashed`, the exit code and its last lines of standard error |
-| The environment cannot load | `InvalidOperationException` from `StartAsync` | is not started |
+| The environment cannot load, or the script API next to the app is another build than the app's | `InvalidOperationException` from `StartAsync` (or `EvaluateAsync` for a handler type), naming both builds | is not started |
 
 The next `EvaluateAsync` after an exit starts a new runner. Retrying calls is the app's decision: a call that already
 reached a device is not undone by killing the runner. Compiling runs no script code and has its own

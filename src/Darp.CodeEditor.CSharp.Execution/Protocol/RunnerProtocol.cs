@@ -43,19 +43,24 @@ internal partial interface IRunnerHost
 }
 
 /// <param name="Environment">The environment as the <c>initializationOptions</c> JSON of the language server.</param>
-/// <param name="Services">The host services, by the full names of their interfaces.</param>
+/// <param name="Services">The interfaces of the host services.</param>
 [GenerateShape]
-internal sealed partial record RunnerStart(string Environment, IReadOnlyList<string> Services);
+internal sealed partial record RunnerStart(string Environment, IReadOnlyList<RunnerTypeName> Services);
 
-/// <summary>A type by its full name and the simple name of its assembly.</summary>
+/// <summary>A type of the app's script API, with the identity of the assembly the app was built with.</summary>
+/// <param name="FullName">The full name of the type.</param>
+/// <param name="Assembly">The full name of its assembly: name, version, culture and public key token.</param>
+/// <param name="ModuleVersionId">
+/// The MVID of the assembly's module. It changes whenever the assembly does, also when the version stays the same.
+/// </param>
 [GenerateShape]
-internal sealed partial record RunnerTypeName(string FullName, string Assembly)
+internal sealed partial record RunnerTypeName(string FullName, string Assembly, Guid ModuleVersionId)
 {
     public static RunnerTypeName Of(Type type) =>
         new(
             type.FullName ?? throw new ArgumentException($"The type {type} has no full name.", nameof(type)),
-            type.Assembly.GetName().Name
-                ?? throw new ArgumentException($"The assembly of {type} has no name.", nameof(type))
+            type.Assembly.GetName().FullName,
+            type.Module.ModuleVersionId
         );
 }
 
