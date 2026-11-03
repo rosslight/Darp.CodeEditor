@@ -45,6 +45,7 @@ public static class CSharpLanguageServer
                 Log = options.Log,
                 Restart = options.Restart,
                 ResponseTimeout = options.ResponseTimeout,
+                MaxResponseTimeout = options.MaxResponseTimeout,
             }
         );
     }
@@ -131,5 +132,11 @@ public sealed record CSharpLanguageServerOptions
     /// How long the server may take to answer or to read before it counts as hung and restarts; see
     /// <see cref="LspLanguageServiceOptions.ResponseTimeout"/>.
     /// </summary>
-    public TimeSpan ResponseTimeout { get; init; } = TimeSpan.FromSeconds(10);
+    public TimeSpan ResponseTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// The longest that hangs in a row raise <see cref="ResponseTimeout"/> to; see
+    /// <see cref="LspLanguageServiceOptions.MaxResponseTimeout"/>.
+    /// </summary>
+    public TimeSpan MaxResponseTimeout { get; init; } = TimeSpan.FromMinutes(2);
 }

@@ -261,6 +261,8 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
         await using LspLanguageService service = servers.CreateService(TimeSpan.FromMilliseconds(500));
         await service.PrewarmAsync(Timeout);
         service.OpenDocument(new DocumentSnapshot("a", 1, Text));
+        // A server that answered once gets the response timeout, not twice that.
+        (await service.GetQuickInfoAsync(new DocumentVersion("a", 1), 1, Timeout)).ShouldNotBeNull();
         ChannelReader<LanguageServerState> states = RecordStates(service);
 
         // The toy answers a hover over "slow" only when it is cancelled, and nothing cancels this one.
@@ -334,6 +336,66 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
         held.Set();
 
         atStart.ShouldBe([LanguageServerState.Starting, LanguageServerState.Restarting]);
+    }
+
+    [Fact]
+    public async Task A_server_that_has_answered_nothing_yet_gets_twice_the_response_timeout()
+    {
+        var servers = new ToyServers();
+        var hangs = new List<string>();
+        await using LspLanguageService service = servers.CreateService(
+            TimeSpan.FromMilliseconds(200),
+            options => options with { Log = message => RecordHang(hangs, message) }
+        );
+        await service.PrewarmAsync(Timeout);
+        service.OpenDocument(new DocumentSnapshot("a", 1, Text));
+        ChannelReader<LanguageServerState> states = RecordStates(service);
+
+        var waited = Stopwatch.StartNew();
+        QuickInfo? hung = await service.GetQuickInfoAsync(new DocumentVersion("a", 1), 13, Timeout);
+        waited.Stop();
+        await RestartedAsync(states);
+
+        hung.ShouldBeNull();
+        waited.Elapsed.ShouldBeGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(380));
+        HangTimes(hangs).ShouldBe(["0.4 s"]);
+    }
+
+    [Fact]
+    public async Task Each_hang_doubles_the_next_servers_timeout_up_to_the_longest_until_one_runs_healthy()
+    {
+        var servers = new ToyServers();
+        var hangs = new List<string>();
+        await using LspLanguageService service = servers.CreateService(
+            TimeSpan.FromMilliseconds(100),
+            options =>
+                options with
+                {
+                    MaxResponseTimeout = TimeSpan.FromMilliseconds(300),
+                    Restart = options.Restart! with { StableAfter = TimeSpan.FromMilliseconds(500) },
+                    Log = message => RecordHang(hangs, message),
+                }
+        );
+        await service.PrewarmAsync(Timeout);
+        service.OpenDocument(new DocumentSnapshot("a", 1, Text));
+        ChannelReader<LanguageServerState> states = RecordStates(service);
+
+        // Each server answers once, so that it gets the timeout rather than twice that, and then hangs.
+        for (int i = 0; i < 4; i++)
+            await AnswerThenHangAsync(TimeSpan.Zero);
+        // This server answers and runs for longer than StableAfter before it hangs.
+        await AnswerThenHangAsync(TimeSpan.FromMilliseconds(600));
+
+        HangTimes(hangs).ShouldBe(["0.1 s", "0.2 s", "0.3 s", "0.3 s", "0.1 s"]);
+        servers.Starts.ShouldBe(6);
+
+        async Task AnswerThenHangAsync(TimeSpan healthy)
+        {
+            (await service.GetQuickInfoAsync(new DocumentVersion("a", 1), 1, Timeout)).ShouldNotBeNull();
+            await Task.Delay(healthy, Timeout);
+            (await service.GetQuickInfoAsync(new DocumentVersion("a", 1), 13, Timeout)).ShouldBeNull();
+            await RestartedAsync(states);
+        }
     }
 
     [Fact]
@@ -452,5 +514,27 @@ public sealed class LspLanguageServiceTests : IAsyncLifetime
     {
         while (await states.ReadAsync(Timeout) != LanguageServerState.Restarting) { }
         while (await states.ReadAsync(Timeout) != LanguageServerState.Running) { }
+    }
+
+    private static void RecordHang(List<string> hangs, string message)
+    {
+        if (message.StartsWith("The language server is hung", StringComparison.Ordinal))
+        {
+            lock (hangs)
+                hangs.Add(message);
+        }
+    }
+
+    /// <summary>How long each server was waited for before it counted as hung, such as "0.1 s".</summary>
+    private static string[] HangTimes(List<string> hangs)
+    {
+        lock (hangs)
+            return
+            [
+                .. hangs.Select(m =>
+                    m[(m.IndexOf(" for ", StringComparison.Ordinal) + 5)..m.IndexOf(" s.", StringComparison.Ordinal)]
+                    + " s"
+                ),
+            ];
     }
 }

@@ -55,6 +55,7 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
     private readonly LspLanguageServiceOptions _options;
     private readonly Dictionary<string, ClassificationKind?> _tokenTypes;
     private readonly Supervisor<LanguageClient> _supervisor;
+    private readonly HangTimeout _timeout;
     private readonly Channel<Work> _work = Channel.CreateUnbounded<Work>(
         new UnboundedChannelOptions { SingleReader = true }
     );
@@ -79,12 +80,20 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
                 ?? new Dictionary<string, ClassificationKind?>()
         )
             _tokenTypes[name] = kind;
+        _timeout = new HangTimeout(
+            options.ResponseTimeout,
+            options.MaxResponseTimeout,
+            (options.Restart ?? new SupervisorOptions()).StableAfter
+        );
         _supervisor = new Supervisor<LanguageClient>(StartClientAsync, client => client.Completion, options.Restart);
         _supervisor.Started += client => Post(() => OnStartedAsync(client));
         _supervisor.Failed += (client, exception) =>
         {
             if (client is not null)
+            {
                 ClearFeatures(client);
+                _timeout.Ended(client, hung: false);
+            }
             Post(() => OnFailed(client, exception));
             // At once, before the supervisor starts the next server: the state never says Running for an ended one.
             SetState(LanguageServerState.Restarting);
@@ -351,8 +360,9 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
                 ),
         };
         // A server that never answers initialize counts as a failed start, which is retried.
+        TimeSpan timeout = _timeout.Of(null);
         using var initializing = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        initializing.CancelAfter(_options.ResponseTimeout);
+        initializing.CancelAfter(timeout);
         try
         {
             return await LanguageClient.StartAsync(transport, options, initializing.Token).ConfigureAwait(false);
@@ -360,7 +370,7 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             throw new TimeoutException(
-                $"The language server did not answer initialize within {_options.ResponseTimeout.TotalSeconds:0.#} s."
+                $"The language server did not answer initialize within {timeout.TotalSeconds:0.#} s."
             );
         }
     }
@@ -684,16 +694,14 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
     /// <summary>Sends a notification and waits until it is written: a server that stops reading counts as hung.</summary>
     private async ValueTask NotifyAsync<T>(LanguageClient client, NotificationType<T> type, T parameters)
     {
+        TimeSpan timeout = _timeout.Of(client);
         try
         {
-            await client
-                .Connection.SendNotificationAsync(type, parameters)
-                .WaitAsync(_options.ResponseTimeout)
-                .ConfigureAwait(false);
+            await client.Connection.SendNotificationAsync(type, parameters).WaitAsync(timeout).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
-            Abort(client, $"it read nothing for {_options.ResponseTimeout.TotalSeconds:0.#} s");
+            Abort(client, $"it read nothing for {timeout.TotalSeconds:0.#} s");
         }
         catch (IOException)
         {
@@ -702,21 +710,25 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
     }
 
     /// <summary>
-    /// Waits for the answer to a request while the caller wants it. A server that gives none within
-    /// <see cref="LspLanguageServiceOptions.ResponseTimeout"/> counts as hung: it is ended, and restarts.
+    /// Waits for the answer to a request while the caller wants it. A server that gives none within its
+    /// <see cref="HangTimeout"/> counts as hung: it is ended, and restarts.
     /// </summary>
     /// <exception cref="IOException">The server counts as hung.</exception>
     private async Task<T?> AnswerAsync<T>(LanguageClient client, Task<T?> response, CancellationToken cancellationToken)
     {
+        TimeSpan timeout = _timeout.Of(client);
+        T? answer;
         try
         {
-            return await response.WaitAsync(_options.ResponseTimeout, cancellationToken).ConfigureAwait(false);
+            answer = await response.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
-            Abort(client, $"it answered nothing for {_options.ResponseTimeout.TotalSeconds:0.#} s");
+            Abort(client, $"it answered nothing for {timeout.TotalSeconds:0.#} s");
             throw new IOException("The language server stopped answering.");
         }
+        _timeout.Answered(client);
+        return answer;
     }
 
     /// <summary>Ends a server that stopped answering or reading; the supervisor starts a new one.</summary>
@@ -725,6 +737,7 @@ public sealed class LspLanguageService : ILanguageService, IAsyncDisposable
         // The first to find it hung ends it; the state says so at once.
         if (!ClearFeatures(client))
             return;
+        _timeout.Ended(client, hung: true);
         Log($"The language server is hung: {reason}. It is ended and restarts.");
         _ = AbortAsync();
         SetState(LanguageServerState.Restarting);

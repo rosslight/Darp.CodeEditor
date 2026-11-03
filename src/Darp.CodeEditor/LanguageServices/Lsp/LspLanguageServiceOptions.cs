@@ -47,10 +47,19 @@ public sealed record LspLanguageServiceOptions(
 
     /// <summary>
     /// How long the server may take to answer a request the editor still waits for, to read what the editor sent, or
-    /// to answer <c>initialize</c>. A server that takes longer counts as hung: it is ended and restarts.
-    /// <see cref="Timeout.InfiniteTimeSpan"/> waits forever.
+    /// to answer <c>initialize</c>. A server that takes longer counts as hung: it is ended and restarts. A server that
+    /// has answered no request yet, such as one that still loads, gets twice as long. Each hang doubles the time of the
+    /// next server, up to <see cref="MaxResponseTimeout"/>, until a server answered and kept running for
+    /// <see cref="SupervisorOptions.StableAfter"/> of <see cref="Restart"/>. <see cref="Timeout.InfiniteTimeSpan"/>
+    /// waits forever.
     /// </summary>
-    public TimeSpan ResponseTimeout { get; init; } = TimeSpan.FromSeconds(10);
+    public TimeSpan ResponseTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// The longest that hangs in a row raise <see cref="ResponseTimeout"/> to; a server that has answered nothing yet
+    /// gets twice that.
+    /// </summary>
+    public TimeSpan MaxResponseTimeout { get; init; } = TimeSpan.FromMinutes(2);
 
     /// <summary>How much the server may send in one message.</summary>
     public JsonRpcLimits? Limits { get; init; }

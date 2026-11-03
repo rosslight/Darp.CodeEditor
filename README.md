@@ -231,8 +231,10 @@ settings requests answered by the `Settings` hook.
    starts it again after 0.5 s, doubling up to 30 s while it keeps failing, and opens the documents again. Meanwhile
    requests answer nothing and the editors keep their TextMate colors; `Invalidated` brings the features back.
 6. A server that answers a request the editor still waits for, reads what it was sent, or answers `initialize` no
-   sooner than `ResponseTimeout` (10 s by default) counts as hung: it is ended without shutdown and restarts like a
-   crashed one. The UI thread never waits for any of this.
+   sooner than `ResponseTimeout` (30 s by default) counts as hung: it is ended without shutdown and restarts like a
+   crashed one, and `State` says `Restarting` at once. A server that has answered nothing yet, such as one that still
+   loads, gets twice as long. Each hang doubles the time of the next server, up to `MaxResponseTimeout` (2 min by
+   default), until a server answered and kept running for `StableAfter`. The UI thread never waits for any of this.
 
 ## C# script language server
 
