@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Runs compiled C# scripts in a separate process: script handlers, callbacks into the app, deadlines and batching.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Darp.CodeEditor.CSharpScript\Darp.CodeEditor.CSharpScript.csproj" />
+  </ItemGroup>
+</Project>

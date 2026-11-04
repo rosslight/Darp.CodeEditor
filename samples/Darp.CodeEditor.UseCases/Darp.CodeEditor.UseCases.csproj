@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Use cases written against the API draft. They compile but do not run: the API's members are not implemented yet.
+    Each file is one scenario of a host app.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <RootNamespace>UseCases</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharpScript.Runner\Darp.CodeEditor.CSharpScript.Runner.csproj" />
+    <!--
+      Planned MSBuild switch: scripts may use the assemblies of references marked CSharpScriptReference, and publish
+      copies their DLLs next to the app, NativeAOT apps included. It does nothing in the draft.
+    -->
+    <ProjectReference
+      Include="..\Darp.CodeEditor.UseCases.ScriptApi\Darp.CodeEditor.UseCases.ScriptApi.csproj"
+      CSharpScriptReference="true"
+    />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- The docs show up in the editor's hover and completion for scripts. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <RootNamespace>UseCases.ScriptApi</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Script API interfaces cross the process boundary through StreamJsonRpc's generated proxies. -->
+    <PackageReference Include="StreamJsonRpc" />
+  </ItemGroup>
+</Project>

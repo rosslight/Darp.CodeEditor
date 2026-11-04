@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>C# scripts in Darp.CodeEditor: a host-defined script environment, the C# language server, and compiling scripts to run them.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Darp.CodeEditor\Darp.CodeEditor.csproj" />
+  </ItemGroup>
+</Project>

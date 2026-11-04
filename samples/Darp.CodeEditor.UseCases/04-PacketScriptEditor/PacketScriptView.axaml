@@ -1,0 +1,37 @@
+<UserControl
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ce="using:Darp.CodeEditor"
+    xmlns:local="using:UseCases.PacketScripts"
+    x:Class="UseCases.PacketScripts.PacketScriptView"
+    x:DataType="local:PacketScriptViewModel"
+>
+    <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8">
+            <Button Content="Run" Command="{Binding RunCommand}" HotKey="F5" />
+            <Button Content="Stop" Command="{Binding RunCancelCommand}" HotKey="Shift+F5" />
+        </StackPanel>
+
+        <!-- Diagnostics follow the text: the list updates as the user types. -->
+        <ListBox
+            x:Name="Errors"
+            DockPanel.Dock="Bottom"
+            Height="100"
+            ItemsSource="{Binding Script.Diagnostics}"
+            SelectionChanged="OnErrorSelected"
+        >
+            <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="ce:Diagnostic">
+                    <TextBlock>
+                        <Run Text="{Binding Code}" />
+                        <Run Text="{Binding Message}" />
+                    </TextBlock>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <TextBox DockPanel.Dock="Bottom" Height="120" IsReadOnly="True" Text="{Binding Output}" />
+
+        <ce:CodeEditor x:Name="Editor" Document="{Binding Script}" />
+    </DockPanel>
+</UserControl>
