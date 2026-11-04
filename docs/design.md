@@ -107,6 +107,7 @@ Question numbers continue the prototype's log. The prototype's decisions still h
 | 65 | Selection | One `TextSelection` value with an anchor and a caret, not a range plus a caret offset | Product owner's choice; keeps a backward selection's direction, as Monaco and CodeMirror do |
 | 66 | Indentation | On the document, with the language's default. Not detected from the text in v1 | Product owner: detection is easy to add later |
 | 67 | Markers and view state | No markers from the app and no storable view state in v1 | Product owner's choice |
+| 68 | Line and column numbers | `TextPosition` counts lines and columns from 1; offsets stay 0-based. The LSP client converts | Status bars and error messages show positions from 1, as Monaco and AvaloniaEdit count them |
 
 ## 4. Lessons from the prototype
 

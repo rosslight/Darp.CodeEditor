@@ -29,7 +29,7 @@ public sealed class SavedSequences(CSharpScriptServer scripts, CSharpScriptRunne
         if (!compilation.Succeeded)
         {
             foreach (Diagnostic error in compilation.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error))
-                await log.WriteAsync($"{path}({error.Start.Line + 1},{error.Start.Column + 1}): {error.Message}", stop);
+                await log.WriteAsync($"{path}({error.Start.Line},{error.Start.Column}): {error.Message}", stop);
             return false;
         }
 

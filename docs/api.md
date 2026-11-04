@@ -104,9 +104,9 @@ documents, indentation detected from the text, markers that the app adds, and a 
 
 ## 5. Positions
 
-Offsets count UTF-16 code units. Lines end at `\r\n`, `\n` or `\r`. Lines and columns count from 0. The same rule holds
-in the editor, in the LSP client and in the C# server. Ranges are not checked when created; members that take them
-clamp them to the text.
+Offsets count UTF-16 code units from 0. Lines end at `\r\n`, `\n` or `\r`, alike in the editor, the LSP client and
+the C# server. `TextPosition` counts lines and columns from 1, as editors show them; the LSP client converts to the
+protocol's 0-based positions. Ranges are not checked when created; members that take them clamp them to the text.
 
 ## 6. Language servers
 

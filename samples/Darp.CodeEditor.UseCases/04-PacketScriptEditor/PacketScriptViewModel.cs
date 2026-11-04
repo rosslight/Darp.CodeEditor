@@ -78,7 +78,7 @@ public sealed partial class PacketScriptViewModel : ObservableObject, IDisposabl
         if (!compilation.Succeeded)
         {
             foreach (Diagnostic error in compilation.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error))
-                WriteLine($"({error.Start.Line + 1},{error.Start.Column + 1}): {error.Code} {error.Message}");
+                WriteLine($"({error.Start.Line},{error.Start.Column}): {error.Code} {error.Message}");
             return;
         }
 
