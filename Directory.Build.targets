@@ -1,0 +1,18 @@
+<Project>
+  <!--
+    Packages are the libraries under src/. Executables under src/ and everything outside it (samples, tests, benchmarks,
+    tools) are not packed, unless a project sets IsPackable itself.
+  -->
+  <PropertyGroup>
+    <_IsUnderSrc>$(MSBuildProjectDirectory.StartsWith($([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', 'src'))))</_IsUnderSrc>
+    <_IsExecutable Condition="'$(OutputType)' == 'Exe' or '$(OutputType)' == 'WinExe'">true</_IsExecutable>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(IsPackable)' == ''">
+    <IsPackable>false</IsPackable>
+    <IsPackable Condition="'$(_IsUnderSrc)' == 'true' and '$(_IsExecutable)' != 'true'">true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
+</Project>
