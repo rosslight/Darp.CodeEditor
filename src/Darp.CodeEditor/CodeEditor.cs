@@ -9,15 +9,26 @@ namespace Darp.CodeEditor;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The editor is a view. The app owns the document, and the document keeps the text, the undo history and the
-/// diagnostics. Setting <see cref="Document"/> shows another document, starting at the caret, selection and first
-/// visible line of the last editor that showed it. Several editors can show one document, each with its own caret.
+/// The editor is a view. The app owns the document, and the document keeps the text, the undo history, the
+/// indentation and the diagnostics. Setting <see cref="Document"/> shows another document, starting at the caret,
+/// selection and first visible line of the last editor that showed it. Several editors can show one document, each
+/// with its own caret.
 /// </para>
 /// <para>
 /// Use it on the UI thread. It never waits for a language server: text and colors come first, and language features
 /// follow when the server answers. Out of the visual tree, the editor drops its subscriptions on the document, its
 /// pending requests and its rendering resources, so a discarded editor is collected even while its document lives
 /// on. <see cref="Document"/> keeps its value, so the editor can come back.
+/// </para>
+/// <para>
+/// Built in, with no settings: the current line is highlighted, brackets match, brackets and quotes close as you type,
+/// new lines are indented, whitespace shows inside the selection, and the view scrolls past the last line. The font
+/// defaults to a monospace one; set <c>FontFamily</c> and <c>FontSize</c> as for any control.
+/// </para>
+/// <para>
+/// The editor handles only its own keys: editing, navigation, search (Ctrl+F, Ctrl+H, F3), completion (Ctrl+Space),
+/// comments (Ctrl+/) and indentation (Tab, Shift+Tab). Other keys, such as F5 or Ctrl+S, go on to the app's key
+/// bindings.
 /// </para>
 /// <para>Members that take offsets or ranges clamp them to the text.</para>
 /// </remarks>
@@ -45,18 +56,6 @@ public class CodeEditor : TemplatedControl
         defaultValue: true
     );
 
-    /// <summary>Defines the <see cref="IndentationSize"/> property.</summary>
-    public static readonly StyledProperty<int> IndentationSizeProperty = AvaloniaProperty.Register<CodeEditor, int>(
-        nameof(IndentationSize),
-        defaultValue: 4
-    );
-
-    /// <summary>Defines the <see cref="ConvertTabsToSpaces"/> property.</summary>
-    public static readonly StyledProperty<bool> ConvertTabsToSpacesProperty = AvaloniaProperty.Register<
-        CodeEditor,
-        bool
-    >(nameof(ConvertTabsToSpaces), defaultValue: true);
-
     /// <summary>Defines the <see cref="LightTheme"/> property.</summary>
     public static readonly StyledProperty<CodeEditorTheme> LightThemeProperty = AvaloniaProperty.Register<
         CodeEditor,
@@ -69,11 +68,13 @@ public class CodeEditor : TemplatedControl
         CodeEditorTheme
     >(nameof(DarkTheme), defaultValue: CodeEditorTheme.DarkPlus);
 
-    /// <summary>Defines the <see cref="CaretOffset"/> property.</summary>
-    public static readonly DirectProperty<CodeEditor, int> CaretOffsetProperty = AvaloniaProperty.RegisterDirect<
-        CodeEditor,
-        int
-    >(nameof(CaretOffset), editor => editor.CaretOffset, (editor, value) => editor.CaretOffset = value);
+    /// <summary>Defines the <see cref="Selection"/> property.</summary>
+    public static readonly DirectProperty<CodeEditor, TextSelection> SelectionProperty =
+        AvaloniaProperty.RegisterDirect<CodeEditor, TextSelection>(
+            nameof(Selection),
+            editor => editor.Selection,
+            (editor, value) => editor.Selection = value
+        );
 
     /// <summary>Defines the <see cref="CaretPosition"/> property.</summary>
     public static readonly DirectProperty<CodeEditor, TextPosition> CaretPositionProperty =
@@ -81,12 +82,6 @@ public class CodeEditor : TemplatedControl
             nameof(CaretPosition),
             editor => editor.CaretPosition
         );
-
-    /// <summary>Defines the <see cref="Selection"/> property.</summary>
-    public static readonly DirectProperty<CodeEditor, TextRange> SelectionProperty = AvaloniaProperty.RegisterDirect<
-        CodeEditor,
-        TextRange
-    >(nameof(Selection), editor => editor.Selection, (editor, value) => editor.Selection = value);
 
     /// <summary>The document the editor shows. Without one, the editor is empty and read-only.</summary>
     public CodeDocument? Document
@@ -116,20 +111,6 @@ public class CodeEditor : TemplatedControl
         set => SetValue(ShowLineNumbersProperty, value);
     }
 
-    /// <summary>The columns of one indentation level, and the width of a tab. Default: 4.</summary>
-    public int IndentationSize
-    {
-        get => GetValue(IndentationSizeProperty);
-        set => SetValue(IndentationSizeProperty, value);
-    }
-
-    /// <summary>Whether Tab and auto-indent insert spaces rather than tabs. Default: true.</summary>
-    public bool ConvertTabsToSpaces
-    {
-        get => GetValue(ConvertTabsToSpacesProperty);
-        set => SetValue(ConvertTabsToSpacesProperty, value);
-    }
-
     /// <summary>
     /// The colors while the app's theme variant is light. Default: <see cref="CodeEditorTheme.LightPlus"/>.
     /// </summary>
@@ -148,8 +129,11 @@ public class CodeEditor : TemplatedControl
         set => SetValue(DarkThemeProperty, value);
     }
 
-    /// <summary>The caret's offset in the document's text.</summary>
-    public int CaretOffset
+    /// <summary>
+    /// The selection and the caret. Without a selection, <see cref="TextSelection.Anchor"/> and
+    /// <see cref="TextSelection.Caret"/> are the same offset.
+    /// </summary>
+    public TextSelection Selection
     {
         get => throw new NotImplementedException();
         set => throw new NotImplementedException();
@@ -159,17 +143,14 @@ public class CodeEditor : TemplatedControl
     public TextPosition CaretPosition => throw new NotImplementedException();
 
     /// <summary>
-    /// The selected text; empty at the caret when nothing is selected. Setting it puts the caret at its end.
+    /// Scrolls <paramref name="range"/> into view: not at all when it is visible, centered when it is not. A range
+    /// taller than the view shows from its start.
     /// </summary>
-    public TextRange Selection
-    {
-        get => throw new NotImplementedException();
-        set => throw new NotImplementedException();
-    }
+    public void ScrollTo(TextRange range) => throw new NotImplementedException();
 
-    /// <summary>Scrolls the line of <paramref name="offset"/> into view, centered when it is far away.</summary>
-    public void ScrollTo(int offset) => throw new NotImplementedException();
-
-    /// <summary>Opens the search bar, as Ctrl+F does, or the replace bar, as Ctrl+H does.</summary>
+    /// <summary>
+    /// Opens the search bar, as Ctrl+F does, or the replace bar, as Ctrl+H does. A selection within one line becomes
+    /// the search text.
+    /// </summary>
     public void OpenSearch(bool replace = false) => throw new NotImplementedException();
 }

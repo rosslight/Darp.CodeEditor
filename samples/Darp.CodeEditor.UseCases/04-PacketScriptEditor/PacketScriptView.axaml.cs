@@ -14,8 +14,11 @@ public partial class PacketScriptView : UserControl
     {
         if (Errors.SelectedItem is not Diagnostic diagnostic)
             return;
-        Editor.Selection = diagnostic.Range;
-        Editor.ScrollTo(diagnostic.Range.Start);
+        Editor.Selection = new TextSelection(diagnostic.Range.Start, diagnostic.Range.End);
+        Editor.ScrollTo(diagnostic.Range);
         Editor.Focus();
     }
+
+    // For users who don't know Ctrl+F.
+    private void OnFind(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => Editor.OpenSearch();
 }

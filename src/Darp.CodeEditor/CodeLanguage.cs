@@ -19,14 +19,21 @@ public sealed class CodeLanguage
     /// <summary>The language server of the language's documents, if any.</summary>
     public LanguageServer? Server => throw new NotImplementedException();
 
+    /// <summary>The indentation new documents of the language start with.</summary>
+    public Indentation Indentation => throw new NotImplementedException();
+
     /// <summary>
     /// A language whose grammar and editing rules ship with the editor, taken from VS Code's built-in extensions, such
     /// as <c>csharp</c>, <c>json</c>, <c>lua</c>, <c>xml</c> or <c>yaml</c>.
     /// </summary>
     /// <param name="id">The VS Code language identifier.</param>
     /// <param name="server">The language server of the language's documents, if any.</param>
+    /// <param name="indentation">
+    /// The indentation of its documents. Default: VS Code's for the language, such as 2 spaces for YAML and 4 for C#.
+    /// </param>
     /// <exception cref="ArgumentException">The editor does not ship a grammar for <paramref name="id"/>.</exception>
-    public static CodeLanguage Bundled(string id, LanguageServer? server = null) => throw new NotImplementedException();
+    public static CodeLanguage Bundled(string id, LanguageServer? server = null, Indentation? indentation = null) =>
+        throw new NotImplementedException();
 
     /// <summary>A language from the files of a VS Code extension.</summary>
     /// <remarks>
@@ -40,11 +47,13 @@ public sealed class CodeLanguage
     /// bracket matching or auto-closing pairs.
     /// </param>
     /// <param name="server">The language server of the language's documents, if any.</param>
+    /// <param name="indentation">The indentation of its documents. Default: 4 spaces.</param>
     public static CodeLanguage FromFiles(
         string id,
         string grammarPath,
         string? configurationPath = null,
-        LanguageServer? server = null
+        LanguageServer? server = null,
+        Indentation? indentation = null
     ) => throw new NotImplementedException();
 
     /// <summary>

@@ -36,11 +36,11 @@ if (compilation.Succeeded)
 
 | Package | Public types |
 |---|---|
-| `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorTheme`, `TextRange`, `TextPosition`, `Diagnostic`, `DiagnosticSeverity` |
+| `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorTheme`, `TextRange`, `TextPosition`, `TextSelection`, `Indentation`, `Diagnostic`, `DiagnosticSeverity` |
 | `Darp.CodeEditor.CSharpScript` | `CSharpScriptServer`, `CSharpScriptServerOptions`, `CSharpScriptEnvironment`, `CSharpScriptCompilation`, `CompiledScript` |
 | `Darp.CodeEditor.CSharpScript.Runner` | `CSharpScriptRunner`, `CSharpScriptRunnerOptions`, `CSharpScriptService`, `ScriptBatcher<TItem, TResult>`, `ScriptBatcherOptions`, `ScriptException`, `ScriptRunnerExitedEventArgs`, `ScriptRunnerExitReason` |
 
-25 public types in all. Two more things are public without being types of ours:
+27 public types in all. Two more things are public without being types of ours:
 
 - **The project file.**
   - `CSharpScriptReference="true"` on a package or project reference: scripts may use its assemblies. Publishing copies their DLLs next to the app, NativeAOT apps included.
@@ -51,7 +51,36 @@ if (compilation.Succeeded)
   - the `IShapeable<T>` constraints on `RunAsync<T>` and `CSharpScriptService.Create<T>`. With them, NativeAOT apps call and copy these types without reflection, and the compiler rejects types without a shape;
   - its exceptions for failed handler calls.
 
-## 2. Who owns what
+## 2. The editor
+
+A setting is a property of `CodeEditor` when apps would set it differently for different editors, such as a read-only
+viewer and a script editor. Where one good value fits every editor, it is built in. Settings that describe the text
+rather than its view belong to the document, as in Monaco and CodeMirror.
+
+| Member | What it is |
+|---|---|
+| `Document` | the document the editor shows |
+| `IsReadOnly`, `WordWrap`, `ShowLineNumbers` | view settings; line numbers are on by default |
+| `LightTheme`, `DarkTheme` | the colors for the app's light and dark theme variant |
+| `FontFamily`, `FontSize` | inherited from Avalonia; the default font is a monospace one, not the app's |
+| `Selection` | a `TextSelection`: anchor and caret, so a backward selection keeps its direction |
+| `CaretPosition` | the caret's line and column, read-only and bindable, for status bars |
+| `ScrollTo(TextRange)` | brings a range into view: not at all when it is visible, centered when it is not |
+| `OpenSearch(replace)` | the search or replace bar, for a Find button; Ctrl+F and Ctrl+H open them too |
+
+**Built in, with no settings:** current-line highlight, bracket matching, auto-closing brackets and quotes,
+auto-indent, whitespace shown inside the selection, scrolling past the last line.
+
+**Keys:** the editor handles only its own: editing, navigation, search (Ctrl+F, Ctrl+H, F3), completion (Ctrl+Space),
+comments (Ctrl+/) and indentation (Tab, Shift+Tab). Other keys, such as F5 or Ctrl+S, reach the app's key bindings.
+
+**Indentation** belongs to the document (`CodeDocument.Indentation`), so all editors of one document agree. It starts
+with the language's default, such as 2 spaces for YAML, and is not detected from the text.
+
+**Later, when asked for:** whitespace display modes, rulers, folding, a minimap, placeholder text for empty
+documents, indentation detected from the text, markers that the app adds, and a view state the app can store.
+
+## 3. Who owns what
 
 | Object | Created by | Shared by | Ends with |
 |---|---|---|---|
@@ -64,7 +93,7 @@ if (compilation.Succeeded)
 | A handler from `RunAsync<T>` | the runner | | `Dispose`, or the end of its runner's process |
 | `CompiledScript` | `CompileAsync` | runs | nothing to dispose; it outlives the server |
 
-## 3. Threads
+## 4. Threads
 
 - **UI thread only:** `CodeEditor` and `CodeDocument`, which raise their events there. The same goes for `CompileAsync(CodeDocument)`, because it takes the document's version when called.
 - **Immutable, any thread:** `CodeLanguage` and `CodeEditorTheme`.
@@ -73,13 +102,13 @@ if (compilation.Succeeded)
   - The runner's `Exited` and `Output`, and calls into the app's services, come on any thread.
 - **No blocking:** nothing in the API makes the UI thread wait for a server or a script. Creating and disposing documents only queues work for the server.
 
-## 4. Positions
+## 5. Positions
 
 Offsets count UTF-16 code units. Lines end at `\r\n`, `\n` or `\r`. Lines and columns count from 0. The same rule holds
 in the editor, in the LSP client and in the C# server. Ranges are not checked when created; members that take them
 clamp them to the text.
 
-## 5. Language servers
+## 6. Language servers
 
 "Any LSP server" means any server that works with this subset of the protocol, which the client implements:
 
@@ -92,7 +121,7 @@ clamp them to the text.
 A server that needs pulled diagnostics would add them to v1. The client advertises only what it implements, so
 servers fall back where they can.
 
-## 6. Failures in the runner
+## 7. Failures in the runner
 
 | What happens | `RunAsync` | A call on a handler |
 |---|---|---|
@@ -104,7 +133,7 @@ servers fall back where they can.
 `ScriptException` derives from StreamJsonRpc's `RemoteInvocationException`. Handler calls go through StreamJsonRpc's
 proxies, and those can only turn a script's failure into one of these.
 
-## 7. Not public, on purpose
+## 8. Not public, on purpose
 
 - **The LSP layer.** Protocol types, JSON-RPC and process plumbing are internal. Languages plug in through
   `LanguageServerOptions`: a command line, initialization options and settings answers.
@@ -118,7 +147,7 @@ proxies, and those can only turn a script's failure into one of these.
   `Darp.CodeEditor`, which benchmarks and `dotnet-counters` read. They carry document versions, queue ages and
   waits, so that delays can be traced.
 
-## 8. Not proven yet
+## 9. Not proven yet
 
 Decision #52 has the C# server compile and the runner run the result without Roslyn. The prototype's runner ran
 scripts through Roslyn Scripting, so this is new. It needs a spike before the runner is built:
@@ -134,9 +163,10 @@ scripts through Roslyn Scripting, so this is new. It needs a spike before the ru
 Roslyn's script assemblies make this possible in principle: they have a factory method that takes the globals.
 Nobody has done it here yet.
 
-## 9. Open questions
+## 10. Open questions
 
-Question numbers continue the decision log in [design.md](design.md).
+Question numbers continue the decision log in [design.md](design.md). Decisions taken in the API discussion are
+recorded there too (#64–#67).
 
 - **Q55 – Logging.**
   - **Draft:** takes `Microsoft.Extensions.Logging.ILogger`.
@@ -154,7 +184,7 @@ Question numbers continue the decision log in [design.md](design.md).
   - **Alternative:** the app keeps that state.
   - **Recommended:** as drafted.
 - **Q58 – StreamJsonRpc in the script API.**
-  - **Draft:** script API assemblies reference StreamJsonRpc and use its attributes, its shape constraints and its exceptions (sections 1 and 6).
+  - **Draft:** script API assemblies reference StreamJsonRpc and use its attributes, its shape constraints and its exceptions (sections 1 and 7).
   - **Alternative:** hiding it would take our own attributes, source generator and a wrapper around every handler.
   - **Recommended:** accept it for v1.
 - **Q59 – Running scripts without the editor's UI.**

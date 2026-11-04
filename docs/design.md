@@ -100,9 +100,13 @@ Question numbers continue the prototype's log. The prototype's decisions still h
 |---|---|---|---|
 | 50 | Public packages | `Darp.CodeEditor`, `Darp.CodeEditor.CSharpScript`; `Darp.CodeEditor.Luau` after v1; others when needed. The LSP layer is internal. The editor's API takes any LSP server | The prototype's public surface was too large (about 740 public members, most from the LSP layer and from deriving from AvaloniaEdit's editor). Replaces #43 |
 | 51 | Runner package | Running scripts is its own package, `Darp.CodeEditor.CSharpScript.Runner` | Product owner's choice |
-| 52 | Who compiles | The C# server compiles scripts; the runner only loads and runs them, without Roslyn. Compiling runs beside the editor's requests on Roslyn's immutable snapshots: completion keeps answering while a script compiles. Both wait while the server starts or restarts. Needs a proof before the runner is built ([api.md](api.md#8-not-proven-yet)) | Roslyn ships once instead of twice (the runner's copy was 28 MiB); what runs is what the editor checked (R7); the runner restarts quickly after a kill. Replaces the compiling part of #33 and #36 |
+| 52 | Who compiles | The C# server compiles scripts; the runner only loads and runs them, without Roslyn. Compiling runs beside the editor's requests on Roslyn's immutable snapshots: completion keeps answering while a script compiles. Both wait while the server starts or restarts. Needs a proof before the runner is built ([api.md](api.md#9-not-proven-yet)) | Roslyn ships once instead of twice (the runner's copy was 28 MiB); what runs is what the editor checked (R7); the runner restarts quickly after a kill. Replaces the compiling part of #33 and #36 |
 | 53 | Benchmarks | Most benchmarks in a BenchmarkDotNet project | Product owner's choice |
 | 54 | Restart | The prototype stays on the `draft` branch. `main` starts a new history | Product owner's choice |
+| 64 | Editor properties | A setting is a property of `CodeEditor` when apps would set it differently per editor; one good value for every editor is built in; settings of the text belong to the document. Line numbers and the search bar are part of the editor's API without a use case asking for them | Product owner: a good editor experience counts even before a use case asks, taking the best from CodeMirror and Monaco |
+| 65 | Selection | One `TextSelection` value with an anchor and a caret, not a range plus a caret offset | Product owner's choice; keeps a backward selection's direction, as Monaco and CodeMirror do |
+| 66 | Indentation | On the document, with the language's default. Not detected from the text in v1 | Product owner: detection is easy to add later |
+| 67 | Markers and view state | No markers from the app and no storable view state in v1 | Product owner's choice |
 
 ## 4. Lessons from the prototype
 

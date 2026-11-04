@@ -21,7 +21,8 @@ namespace Darp.CodeEditor;
 /// that shows it again starts there.
 /// </para>
 /// <para>
-/// <see cref="PropertyChanged"/> reports <see cref="IsModified"/>, <see cref="CanUndo"/>, <see cref="CanRedo"/> and
+/// <see cref="PropertyChanged"/> reports <see cref="IsModified"/>, <see cref="CanUndo"/>, <see cref="CanRedo"/>,
+/// <see cref="Indentation"/> and
 /// <see cref="Diagnostics"/>, for bindings. It does not report <see cref="Text"/>: each read copies the whole text, so
 /// a binding would copy it on every keystroke. Listen to <see cref="TextChanged"/> and read the text when needed.
 /// </para>
@@ -72,6 +73,17 @@ public sealed class CodeDocument : INotifyPropertyChanged, IDisposable
 
     /// <summary>Counts changes: every change of the text increases it.</summary>
     public int Version => throw new NotImplementedException();
+
+    /// <summary>
+    /// How Tab and new lines indent, in every editor that shows the document. It starts with the language's
+    /// <see cref="CodeLanguage.Indentation"/>; the document does not detect it from the text. Changing it leaves the
+    /// existing text as it is.
+    /// </summary>
+    public Indentation Indentation
+    {
+        get => throw new NotImplementedException();
+        set => throw new NotImplementedException();
+    }
 
     /// <summary>
     /// Whether the document moved away from its unmodified point in the undo history: creation, or the last
