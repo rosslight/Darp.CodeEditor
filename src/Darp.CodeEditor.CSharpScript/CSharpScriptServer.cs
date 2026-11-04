@@ -17,7 +17,7 @@ namespace Darp.CodeEditor.CSharpScript;
 /// Compiling runs beside the editor's requests: completion keeps answering while a script compiles. A compilation
 /// waits while the server starts or restarts, like completion does.
 /// </para>
-/// <para>Safe to use from any thread.</para>
+/// <para>Safe to use from any thread, except <see cref="CompileAsync(CodeDocument, CancellationToken)"/>.</para>
 /// </remarks>
 public sealed class CSharpScriptServer : IAsyncDisposable
 {
@@ -29,25 +29,33 @@ public sealed class CSharpScriptServer : IAsyncDisposable
 
     /// <summary>
     /// The language of scripts in <paramref name="environment"/>, for <see cref="CodeDocument"/>s. Create it once per
-    /// environment and share it.
+    /// environment and share it. The language keeps a copy of the environment: later changes to its lists have no
+    /// effect.
     /// </summary>
     /// <exception cref="ArgumentException">
-    /// A reference or the globals type's assembly is not next to the app: its project reference is not marked with
-    /// <c>CSharpScriptReference</c>.
+    /// A reference or the globals type's assembly is not next to the app, because its project reference is not marked
+    /// with <c>CSharpScriptReference</c>; or the globals type has no public constructor.
     /// </exception>
     public CodeLanguage CreateLanguage(CSharpScriptEnvironment environment) => throw new NotImplementedException();
 
     /// <summary>
-    /// Compiles the text that <paramref name="document"/> has now, in its language's environment: what runs is exactly
-    /// what the editor checked.
+    /// Compiles <paramref name="document"/>'s current version, in its language's environment, from the same snapshot
+    /// of that version that the editor's diagnostics come from.
     /// </summary>
+    /// <remarks>
+    /// Call it on the UI thread: it takes the document's version before it returns. Later edits do not cancel the
+    /// compilation, and disposing the document does not affect it.
+    /// </remarks>
     /// <exception cref="ArgumentException">The document's language does not come from this server.</exception>
     public Task<CSharpScriptCompilation> CompileAsync(
         CodeDocument document,
         CancellationToken cancellationToken = default
     ) => throw new NotImplementedException();
 
-    /// <summary>Compiles <paramref name="code"/> in <paramref name="environment"/>, with no document or editor.</summary>
+    /// <summary>
+    /// Compiles <paramref name="code"/> in <paramref name="environment"/>, with no document or editor. Safe to call from
+    /// any thread.
+    /// </summary>
     public Task<CSharpScriptCompilation> CompileAsync(
         string code,
         CSharpScriptEnvironment environment,
@@ -73,6 +81,12 @@ public sealed class CSharpScriptCompilation
     /// <summary>Errors and warnings, with ranges in the compiled text.</summary>
     public IReadOnlyList<Diagnostic> Diagnostics => throw new NotImplementedException();
 
+    /// <summary>
+    /// The <see cref="CodeDocument.Version"/> that was compiled; null for compiled strings. Compare it with the
+    /// document's current version to tell whether the user changed the script since.
+    /// </summary>
+    public int? DocumentVersion => throw new NotImplementedException();
+
     /// <summary>Whether the script compiled without errors; <see cref="Script"/> is set then.</summary>
     [MemberNotNullWhen(true, nameof(Script))]
     public bool Succeeded => throw new NotImplementedException();
@@ -81,7 +95,10 @@ public sealed class CSharpScriptCompilation
     public CompiledScript? Script => throw new NotImplementedException();
 }
 
-/// <summary>A script compiled for its environment, ready to run in a runner as often as needed.</summary>
+/// <summary>
+/// A script compiled for its environment, ready to run in a runner as often as needed. It needs no server: it stays
+/// runnable after the server restarts or is disposed.
+/// </summary>
 public sealed class CompiledScript
 {
     private CompiledScript() { }

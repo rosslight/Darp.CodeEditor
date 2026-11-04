@@ -29,6 +29,10 @@ public sealed class CodeLanguage
     public static CodeLanguage Bundled(string id, LanguageServer? server = null) => throw new NotImplementedException();
 
     /// <summary>A language from the files of a VS Code extension.</summary>
+    /// <remarks>
+    /// Only records the paths: the files are read off the UI thread, by <see cref="PreloadAsync"/> or when an editor
+    /// first needs them. The grammar must be self-contained, or include only scopes of the bundled grammars.
+    /// </remarks>
     /// <param name="id">The language identifier that the language server receives.</param>
     /// <param name="grammarPath">The TextMate grammar, a <c>.tmLanguage.json</c> file.</param>
     /// <param name="configurationPath">
@@ -44,8 +48,8 @@ public sealed class CodeLanguage
     ) => throw new NotImplementedException();
 
     /// <summary>
-    /// Loads the grammar and editing rules off the UI thread, so that the first editor of the language shows colors in
-    /// its first frame. Optional: editors load them on their own otherwise.
+    /// Loads the grammar and editing rules off the UI thread, so that the first editor of the language shows colors
+    /// sooner. Optional: editors load them on their own otherwise.
     /// </summary>
     public Task PreloadAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
 }

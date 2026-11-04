@@ -13,8 +13,12 @@ namespace Darp.CodeEditor;
 /// </para>
 /// <para>
 /// A document whose language has a server is open in that server from creation until <see cref="Dispose"/>, whether
-/// an editor shows it or not, and the server starts with the first such document. <see cref="Diagnostics"/> follow
-/// the text. A document without a server holds nothing that needs disposing.
+/// an editor shows it or not, and the server starts with the first such document. Neither creating nor disposing a
+/// document waits for the server. A document without a server holds nothing that needs disposing.
+/// </para>
+/// <para>
+/// A document remembers the caret, selection and first visible line of the editor that showed it last, and an editor
+/// that shows it again starts there.
 /// </para>
 /// <para>
 /// <see cref="PropertyChanged"/> reports <see cref="IsModified"/>, <see cref="CanUndo"/>, <see cref="CanRedo"/> and
@@ -31,6 +35,9 @@ public sealed class CodeDocument : INotifyPropertyChanged, IDisposable
     /// The file the text belongs to, if any. Language servers that look at nearby files or configuration use it. The
     /// document never reads or writes it.
     /// </param>
+    /// <exception cref="InvalidOperationException">
+    /// Another open document of the same language server has <paramref name="filePath"/>.
+    /// </exception>
     public CodeDocument(CodeLanguage language, string text = "", string? filePath = null) =>
         throw new NotImplementedException();
 
@@ -43,8 +50,18 @@ public sealed class CodeDocument : INotifyPropertyChanged, IDisposable
     /// <summary>The language: highlighting, editing rules and the language server, if any.</summary>
     public CodeLanguage Language => throw new NotImplementedException();
 
-    /// <summary>The file the text belongs to, as given at creation.</summary>
-    public string? FilePath => throw new NotImplementedException();
+    /// <summary>
+    /// The file the text belongs to, if any. Setting it, for example after "Save as", moves the document to the new
+    /// path in its language server and keeps its text and undo history.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Another open document of the same language server has the new path.
+    /// </exception>
+    public string? FilePath
+    {
+        get => throw new NotImplementedException();
+        set => throw new NotImplementedException();
+    }
 
     /// <summary>The whole text. Setting it replaces the text in one step that the user can undo.</summary>
     public string Text
@@ -57,8 +74,8 @@ public sealed class CodeDocument : INotifyPropertyChanged, IDisposable
     public int Version => throw new NotImplementedException();
 
     /// <summary>
-    /// Whether the text differs from the text at creation or at the last <see cref="MarkUnmodified"/>. Undoing back to
-    /// that text clears it again.
+    /// Whether the document moved away from its unmodified point in the undo history: creation, or the last
+    /// <see cref="MarkUnmodified"/>. Undoing back to that point clears it; typing the same text again does not.
     /// </summary>
     public bool IsModified => throw new NotImplementedException();
 
@@ -69,13 +86,23 @@ public sealed class CodeDocument : INotifyPropertyChanged, IDisposable
     public bool CanRedo => throw new NotImplementedException();
 
     /// <summary>
-    /// The language server's latest diagnostics, with ranges in the current text: they move with edits until the
-    /// server reports again. Empty without a server.
+    /// The language server's latest diagnostics, with ranges in the text of <see cref="DiagnosticsVersion"/>. Servers
+    /// report again shortly after each change; meanwhile the editor's squiggles move with the text, these records do
+    /// not. Empty without a server.
     /// </summary>
     public IReadOnlyList<Diagnostic> Diagnostics => throw new NotImplementedException();
 
-    /// <summary>Makes the current text the unmodified one, for example after saving it.</summary>
-    public void MarkUnmodified() => throw new NotImplementedException();
+    /// <summary>The <see cref="Version"/> that <see cref="Diagnostics"/> were reported for.</summary>
+    public int DiagnosticsVersion => throw new NotImplementedException();
+
+    /// <summary>
+    /// Makes <paramref name="version"/> the unmodified point, for example after saving that version's text.
+    /// </summary>
+    /// <returns>
+    /// False, with no change, when the text changed since <paramref name="version"/>: the saved text is no longer the
+    /// document's, so the document stays modified.
+    /// </returns>
+    public bool MarkUnmodified(int version) => throw new NotImplementedException();
 
     /// <summary>Undoes the last step, as Ctrl+Z does.</summary>
     public void Undo() => throw new NotImplementedException();
@@ -86,9 +113,14 @@ public sealed class CodeDocument : INotifyPropertyChanged, IDisposable
     /// <summary>The line and column of <paramref name="offset"/> in the current text.</summary>
     public TextPosition GetPosition(int offset) => throw new NotImplementedException();
 
-    /// <summary>The offset of <paramref name="position"/> in the current text, clamped to the end of its line.</summary>
+    /// <summary>
+    /// The offset of <paramref name="position"/> in the current text, clamped to the end of its line and to the last
+    /// line.
+    /// </summary>
     public int GetOffset(TextPosition position) => throw new NotImplementedException();
 
-    /// <summary>Closes the document in its language server. Editors that still show it become empty.</summary>
+    /// <summary>
+    /// Closes the document in its language server, without waiting for it. Editors that still show it become empty.
+    /// </summary>
     public void Dispose() => throw new NotImplementedException();
 }

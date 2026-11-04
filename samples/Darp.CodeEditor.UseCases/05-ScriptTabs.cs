@@ -42,11 +42,12 @@ public sealed partial class ScriptTabsViewModel(ScriptLanguages languages) : Obs
         SelectedTab = tab;
     }
 
-    /// <summary>Saves a tab's script.</summary>
+    /// <summary>Saves a tab's script. Edits made while it saves keep the tab modified.</summary>
     public async Task SaveAsync(ScriptTab tab, CancellationToken cancellationToken)
     {
+        int version = tab.Document.Version;
         await File.WriteAllTextAsync(tab.Document.FilePath!, tab.Document.Text, cancellationToken);
-        tab.Document.MarkUnmodified();
+        tab.Document.MarkUnmodified(version);
     }
 
     /// <summary>Closes a tab for good.</summary>

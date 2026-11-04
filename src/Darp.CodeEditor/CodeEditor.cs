@@ -10,14 +10,16 @@ namespace Darp.CodeEditor;
 /// <remarks>
 /// <para>
 /// The editor is a view. The app owns the document, and the document keeps the text, the undo history and the
-/// diagnostics. Setting <see cref="Document"/> shows another document; the editor brings back that document's caret,
-/// selection and scroll position from the last time an editor showed it.
+/// diagnostics. Setting <see cref="Document"/> shows another document, starting at the caret, selection and first
+/// visible line of the last editor that showed it. Several editors can show one document, each with its own caret.
 /// </para>
 /// <para>
 /// Use it on the UI thread. It never waits for a language server: text and colors come first, and language features
-/// follow when the server answers. Out of the visual tree, the editor holds no subscriptions on its document, so a
-/// discarded editor is collected even while its document lives on.
+/// follow when the server answers. Out of the visual tree, the editor drops its subscriptions on the document, its
+/// pending requests and its rendering resources, so a discarded editor is collected even while its document lives
+/// on. <see cref="Document"/> keeps its value, so the editor can come back.
 /// </para>
+/// <para>Members that take offsets or ranges clamp them to the text.</para>
 /// </remarks>
 public class CodeEditor : TemplatedControl
 {
@@ -156,7 +158,9 @@ public class CodeEditor : TemplatedControl
     /// <summary>The caret's line and column, for a status bar.</summary>
     public TextPosition CaretPosition => throw new NotImplementedException();
 
-    /// <summary>The selected text; empty at the caret when nothing is selected.</summary>
+    /// <summary>
+    /// The selected text; empty at the caret when nothing is selected. Setting it puts the caret at its end.
+    /// </summary>
     public TextRange Selection
     {
         get => throw new NotImplementedException();

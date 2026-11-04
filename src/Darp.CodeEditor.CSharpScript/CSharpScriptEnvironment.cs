@@ -5,22 +5,33 @@ namespace Darp.CodeEditor.CSharpScript;
 /// <c>using</c>. The editor checks scripts against it, and the compiler and the runner use the same one.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Scripts can use the assemblies of references that the app's project marks with <c>CSharpScriptReference="true"</c>,
-/// plus .NET's own. Publishing copies the marked references' DLLs next to the app, NativeAOT apps included, because
-/// the language server reads and the runner loads those files. A globals type must come from such an assembly.
+/// plus .NET's own. The build writes a list of the marked assemblies, and publishing copies their DLLs next to the
+/// app, NativeAOT apps included: the language server reads those files, and the runner loads them.
+/// </para>
+/// <para>
+/// Languages and compilations keep a copy of the environment, so changing its lists afterwards has no effect.
+/// </para>
 /// </remarks>
 public sealed record CSharpScriptEnvironment
 {
     /// <summary>
     /// The type whose public members scripts use without qualification, as if the script were its method. The runner
-    /// creates an instance for every run, passing the app's services to its constructor; see the runner package.
-    /// Null: scripts have no globals.
+    /// creates an instance for every run, passing the app's services to its one public constructor; see the runner
+    /// package. Null: scripts have no globals.
     /// </summary>
+    /// <remarks>
+    /// The type must come from a marked assembly. The library finds that assembly's DLL by its name in the build's list
+    /// and reads the type from the file, so the app itself never reflects over the type's members.
+    /// </remarks>
     public Type? GlobalsType { get; init; }
 
     /// <summary>
-    /// The names of the assemblies scripts may use, such as <c>System.Text.Json</c> or <c>MyApp.ScriptApi</c>. Null:
-    /// every assembly marked with <c>CSharpScriptReference</c>, and all of .NET's.
+    /// The names of the assemblies scripts may use, such as <c>System.Text.Json</c> or <c>MyApp.ScriptApi</c>, besides
+    /// .NET's and the globals type's, which they can always use. Null: every assembly marked with
+    /// <c>CSharpScriptReference</c>. What these assemblies depend on loads at run time without becoming visible to
+    /// scripts.
     /// </summary>
     public IReadOnlyList<string>? References { get; init; }
 

@@ -27,8 +27,8 @@ public sealed class YamlEditing : IAsyncDisposable
             {
                 FileName = Path.Combine(AppContext.BaseDirectory, "tools", "yaml-language-server"),
                 Arguments = ["--stdio"],
-                Settings = section =>
-                    section == "yaml"
+                Settings = request =>
+                    request.Section == "yaml"
                         ? new JsonObject
                         {
                             ["validate"] = true,

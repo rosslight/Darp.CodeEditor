@@ -14,11 +14,12 @@ namespace UseCases.HighFrequency;
 /// <summary>Decodes the packets of one device with a packet script's handler.</summary>
 public sealed class PacketPipeline(IPacketHandler handler) : IAsyncDisposable
 {
-    private readonly ScriptBatcher<Packet, Reading> _batcher = new(
-        (packets, cancellationToken) => handler.HandleBatchAsync(packets, cancellationToken)
-    );
+    private readonly ScriptBatcher<Packet, Reading> _batcher = new(packets => handler.HandleBatchAsync(packets));
 
-    /// <summary>Decodes one packet; called for every packet the device sends.</summary>
+    /// <summary>
+    /// Decodes one packet; called for every packet the device sends. The token only stops waiting for room in the
+    /// queue.
+    /// </summary>
     public Task<Reading> DecodeAsync(Packet packet, CancellationToken cancellationToken) =>
         _batcher.SubmitAsync(packet, cancellationToken);
 

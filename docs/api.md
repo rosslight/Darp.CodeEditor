@@ -24,27 +24,32 @@ CodeLanguage packetScripts = scripts.CreateLanguage(new CSharpScriptEnvironment
 var document = new CodeDocument(packetScripts, text);
 editor.Document = document;
 
-// Run: compile what the editor shows, run it in the runner, keep calling its handler.
+// Run: compile the version the editor shows, run it, keep calling its handler.
+var runner = new CSharpScriptRunner(new CSharpScriptRunnerOptions { Services = [CSharpScriptService.Create<IOutputLog>(log)] });
 CSharpScriptCompilation compilation = await scripts.CompileAsync(document);
 if (compilation.Succeeded)
 {
-    IPacketHandler handler = await runner.RunAsync<IPacketHandler>(compilation.Script, [CSharpScriptService.Create(log)]);
+    IPacketHandler handler = await runner.RunAsync<IPacketHandler>(compilation.Script);
     Reading reading = await handler.HandleAsync(packet);
 }
 ```
 
 | Package | Public types |
 |---|---|
-| `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerState`, `CodeEditorTheme`, `TextRange`, `TextPosition`, `Diagnostic`, `DiagnosticSeverity` |
+| `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorTheme`, `TextRange`, `TextPosition`, `Diagnostic`, `DiagnosticSeverity` |
 | `Darp.CodeEditor.CSharpScript` | `CSharpScriptServer`, `CSharpScriptServerOptions`, `CSharpScriptEnvironment`, `CSharpScriptCompilation`, `CompiledScript` |
-| `Darp.CodeEditor.CSharpScript.Runner` | `CSharpScriptRunner`, `CSharpScriptRunnerOptions`, `CSharpScriptService`, `ScriptBatcher<TItem, TResult>`, `ScriptBatcherOptions`, `ScriptException`, `ScriptRunnerExitedException`, `ScriptRunnerExitedEventArgs`, `ScriptRunnerExitReason` |
+| `Darp.CodeEditor.CSharpScript.Runner` | `CSharpScriptRunner`, `CSharpScriptRunnerOptions`, `CSharpScriptService`, `ScriptBatcher<TItem, TResult>`, `ScriptBatcherOptions`, `ScriptException`, `ScriptRunnerExitedEventArgs`, `ScriptRunnerExitReason` |
 
-25 public types in all. The project file is part of the API too:
+25 public types in all. Two more things are public without being types of ours:
 
-- `CSharpScriptReference="true"` on a package or project reference: scripts may use its assemblies, and publish copies
-  their DLLs next to the app, NativeAOT apps included.
-- `PublishReadyToRun=true`: needed so that publish can compile the C# helpers with ReadyToRun (prototype #48).
-- Later: a switch that copies XML docs for hover (prototype #38, #40).
+- **The project file.**
+  - `CSharpScriptReference="true"` on a package or project reference: scripts may use its assemblies. Publishing copies their DLLs next to the app, NativeAOT apps included.
+  - `PublishReadyToRun=true`: publishing needs it to compile the C# helpers with ReadyToRun (prototype #48).
+  - Later: a switch that copies XML docs for hover (prototype #38, #40).
+- **StreamJsonRpc and PolyType** (Q58), for the script API:
+  - its attributes: `[JsonRpcContract]` for the app's services, `[RpcMarshalable]` for handlers, `[GenerateShape]` on both and on the data they exchange;
+  - the `IShapeable<T>` constraints on `RunAsync<T>` and `CSharpScriptService.Create<T>`. With them, NativeAOT apps call and copy these types without reflection, and the compiler rejects types without a shape;
+  - its exceptions for failed handler calls.
 
 ## 2. Who owns what
 
@@ -53,25 +58,53 @@ if (compilation.Succeeded)
 | `LanguageServer`, `CSharpScriptServer` | the app, once (a singleton) | all documents of its languages | `DisposeAsync`, at app exit |
 | `CodeLanguage` | the app, once per language or script environment | documents | nothing to dispose |
 | `CodeDocument` | the app, usually a view model, one per script or file | the editors that show it | `Dispose`, when the user closes it for good |
-| `CodeEditor` | the view | | the visual tree; out of it, the editor holds nothing |
+| `CodeEditor` | the view | | the visual tree; out of it, the editor drops its subscriptions, requests and rendering resources |
 | `CSharpScriptRunner` | the app, once per isolation boundary | the scripts and handlers in its process | `DisposeAsync` |
+| The runner's services | the app | all runs of the runner | the runner's `DisposeAsync` |
 | A handler from `RunAsync<T>` | the runner | | `Dispose`, or the end of its runner's process |
+| `CompiledScript` | `CompileAsync` | runs | nothing to dispose; it outlives the server |
 
 ## 3. Threads
 
-- `CodeEditor` and `CodeDocument`: UI thread only. They raise their events on the UI thread.
-- `CodeLanguage` and `CodeEditorTheme`: immutable, any thread.
-- `LanguageServer`, `CSharpScriptServer`, `CSharpScriptRunner` and `ScriptBatcher`: any thread.
-  `LanguageServer.StateChanged` comes on the UI thread, for status indicators; the runner's `Exited` and `Output`
-  come on any thread.
-- Nothing in the API makes the UI thread wait for a server or a script.
+- **UI thread only:** `CodeEditor` and `CodeDocument`, which raise their events there. The same goes for `CompileAsync(CodeDocument)`, because it takes the document's version when called.
+- **Immutable, any thread:** `CodeLanguage` and `CodeEditorTheme`.
+- **Any thread:** `LanguageServer`, `CSharpScriptServer`, `CSharpScriptRunner` and `ScriptBatcher`.
+  - `LanguageServer.StateChanged` is posted to the UI thread for status indicators. Nothing waits for it, so servers and compiling also work before the UI runs.
+  - The runner's `Exited` and `Output`, and calls into the app's services, come on any thread.
+- **No blocking:** nothing in the API makes the UI thread wait for a server or a script. Creating and disposing documents only queues work for the server.
 
 ## 4. Positions
 
 Offsets count UTF-16 code units. Lines end at `\r\n`, `\n` or `\r`. Lines and columns count from 0. The same rule holds
-in the editor, in the LSP client and in the C# server.
+in the editor, in the LSP client and in the C# server. Ranges are not checked when created; members that take them
+clamp them to the text.
 
-## 5. Not public, on purpose
+## 5. Language servers
+
+"Any LSP server" means any server that works with this subset of the protocol, which the client implements:
+
+- **Lifecycle:** `initialize` (with the root folder and initialization options), shutdown and exit, and `$/cancelRequest`.
+- **Documents:** incremental `didOpen`, `didChange` and `didClose`.
+- **Features:** completion with resolve, hover, signature help, semantic tokens (range, or full), and pushed diagnostics (`publishDiagnostics`).
+- **Server requests the client answers:** `workspace/configuration` (through `Settings`) and `client/registerCapability`. Registrations are acknowledged, and only the features above take effect.
+- **Not in v1:** pulled diagnostics, workspace edits, file watching, code actions, formatting, rename. The client does not advertise them.
+
+A server that needs pulled diagnostics would add them to v1. The client advertises only what it implements, so
+servers fall back where they can.
+
+## 6. Failures in the runner
+
+| What happens | `RunAsync` | A call on a handler |
+|---|---|---|
+| The script throws | `ScriptException` | `ScriptException` |
+| The caller's token is cancelled | `OperationCanceledException`; the process is killed if the script does not stop within the grace period | `OperationCanceledException` |
+| The call takes longer than `CallTimeout` | no limit for runs | `TimeoutException`; the process is killed if the script does not stop within the grace period |
+| The process ends (crash or kill) | `ConnectionLostException` | `ConnectionLostException`; `Exited` says why |
+
+`ScriptException` derives from StreamJsonRpc's `RemoteInvocationException`. Handler calls go through StreamJsonRpc's
+proxies, and those can only turn a script's failure into one of these.
+
+## 7. Not public, on purpose
 
 - **The LSP layer.** Protocol types, JSON-RPC and process plumbing are internal. Languages plug in through
   `LanguageServerOptions`: a command line, initialization options and settings answers.
@@ -82,32 +115,59 @@ in the editor, in the LSP client and in the C# server.
 - **Popups and policies.** Completion, hover and signature help have no settings yet. Restart and hang timeouts keep
   the prototype's defaults.
 - **Timings.** The prototype's timing properties and events become `ActivitySource` and `Meter` instruments named
-  `Darp.CodeEditor`, which benchmarks and `dotnet-counters` read.
+  `Darp.CodeEditor`, which benchmarks and `dotnet-counters` read. They carry document versions, queue ages and
+  waits, so that delays can be traced.
 
-## 6. Open questions
+## 8. Not proven yet
+
+Decision #52 has the C# server compile and the runner run the result without Roslyn. The prototype's runner ran
+scripts through Roslyn Scripting, so this is new. It needs a spike before the runner is built:
+
+- emit from the server's snapshot;
+- load the assembly, with a unique identity per compilation;
+- call the script's entry point with its globals;
+- await its result, for synchronous and awaited scripts;
+- return handlers;
+- show line numbers in exceptions;
+- unload old scripts.
+
+Roslyn's script assemblies make this possible in principle: they have a factory method that takes the globals.
+Nobody has done it here yet.
+
+## 9. Open questions
 
 Question numbers continue the decision log in [design.md](design.md).
 
-- **Q55 – Logging.** The draft takes `Microsoft.Extensions.Logging.ILogger`. Your apps log with Serilog's own `ILogger`;
-  they would pass `new SerilogLoggerFactory(logger).CreateLogger(...)` from Serilog.Extensions.Logging. Alternatives: a
-  plain `Action<string>`, or Serilog's interface. **Recommended:** Microsoft's `ILogger`, the usual choice for
-  libraries.
-- **Q56 – When a document opens in its server.** The draft opens it at creation, until `Dispose`, shown or not. Error
-  counts across tabs and Run without showing the script then work. The cost: the server analyzes hidden documents
-  too, so it must put shown ones first. Alternative: open only while an editor shows it. **Recommended:** at creation.
-- **Q57 – Caret and scroll per document.** The draft's editor brings back a document's caret, selection and scroll
-  position when it shows that document again, kept inside the document. Alternative: the app keeps that state, or
-  each tab keeps its own editor. **Recommended:** as drafted.
-- **Q58 – The script API depends on StreamJsonRpc.** Script API assemblies mark their interfaces with StreamJsonRpc's
-  `[JsonRpcContract]` and `[RpcMarshalable]` and PolyType's `[GenerateShape]`, and reference StreamJsonRpc. Hiding it
-  would take our own attributes and source generator. **Recommended:** accept it for v1.
-- **Q59 – Avalonia for running scripts.** The runner package depends on the C# package, which depends on the editor
-  package and so on Avalonia. An app without Avalonia, such as a console tool, could not run scripts then.
-  **Recommended:** accept it until such an app exists. Then the compiler moves into an Avalonia-free package.
-- **Q60 – Storing compiled scripts.** A `CompiledScript` that can be saved and loaded would let later runs skip Roslyn
-  entirely, for scripts that rarely change. **Recommended:** after v1.
-- **Q61 – Bundled grammars.** VS Code's grammars come in one 6.5 MB DLL, and NativeAOT cannot trim parts of it. The
-  editor could ship it whole, or only a few grammars (C#, JSON, XML, YAML, Lua) and take the rest from files.
-  **Recommended:** a few, plus `CodeLanguage.FromFiles` for the others.
-- **Q62 – No `Text` property on the editor.** Text goes through the document only, so no binding copies the whole
-  text on every keystroke. **Recommended:** as drafted.
+- **Q55 – Logging.**
+  - **Draft:** takes `Microsoft.Extensions.Logging.ILogger`.
+  - **Your apps:** they log with Serilog's own `ILogger`, so they'd pass `new SerilogLoggerFactory(logger).CreateLogger(...)` from Serilog.Extensions.Logging.
+  - **Alternatives:** a plain `Action<string>`, or Serilog's interface.
+  - **Recommended:** Microsoft's `ILogger`, the usual choice for libraries.
+- **Q56 – When a document opens in its server.**
+  - **Draft:** at creation, until `Dispose`, whether shown or not. Then error counts across tabs work, and so does Run without showing the script.
+  - **Cost:** the server also analyzes hidden documents. The editor's focused document goes first, and hidden documents get their diagnostics later.
+  - **Alternative:** open a document only while an editor shows it.
+  - **Recommended:** at creation.
+- **Q57 – Caret and scroll per document.**
+  - **Draft:** a document remembers the caret, selection and first visible line of the editor that showed it last. The next editor starts there.
+  - **Several editors at once:** each keeps its own state while it shows the document.
+  - **Alternative:** the app keeps that state.
+  - **Recommended:** as drafted.
+- **Q58 – StreamJsonRpc in the script API.**
+  - **Draft:** script API assemblies reference StreamJsonRpc and use its attributes, its shape constraints and its exceptions (sections 1 and 6).
+  - **Alternative:** hiding it would take our own attributes, source generator and a wrapper around every handler.
+  - **Recommended:** accept it for v1.
+- **Q59 – Running scripts without the editor's UI.**
+  - **Today:** the runner package depends on the C# package, and through it on the editor package and Avalonia. A console app can reference those, so it would work.
+  - **What matters:** nothing in compiling and running may wait for Avalonia's UI thread. The draft makes sure of that.
+  - **Recommended:** keep one dependency chain until an app without Avalonia needs scripts. Then the compiler moves into a package of its own.
+- **Q60 – Storing compiled scripts.** A `CompiledScript` that can be saved and loaded would let later runs skip Roslyn entirely, for scripts that rarely change. **Recommended:** after v1.
+- **Q61 – Bundled grammars.**
+  - **The problem:** VS Code's grammars come in one 6.5 MB DLL, and NativeAOT can't trim parts of it.
+  - **Options:** ship it whole, or only a few grammars (C#, JSON, XML, YAML, Lua) and take the rest from files.
+  - **Recommended:** a few, plus `CodeLanguage.FromFiles` for the others.
+- **Q62 – No `Text` property on the editor.** Text goes through the document only, so no binding copies the whole text on every keystroke. **Recommended:** as drafted.
+- **Q63 – Services per runner or per run.**
+  - **Draft:** services are registered once per runner, as in the prototype. Scripts in one runner share them, so a runner per device gives each device's scripts their own station.
+  - **Alternative:** services per run. StreamJsonRpc's analyzer then requires every service interface to extend `IDisposable`, and the runner releases a run's services with its handler.
+  - **Recommended:** per runner, unless your apps need different services within one runner.

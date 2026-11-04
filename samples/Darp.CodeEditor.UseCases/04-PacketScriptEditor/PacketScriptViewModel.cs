@@ -1,3 +1,4 @@
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Darp.CodeEditor;
@@ -13,12 +14,13 @@ namespace UseCases.PacketScripts;
 // the document's diagnostics; clicking one moves the caret there (see the view).
 //
 // - The document lives in the view model: leaving the page and coming back keeps the text and its undo history.
-// - Run does not check the diagnostics first: CompileAsync reports the same errors for the text it compiled.
+// - Run does not check the document's diagnostics first: the compilation has its own, for exactly the version it
+//   compiled, and Run prints those.
+// - Scripts write to the app's ScriptOutput service, which every page with an output panel shows.
 //
 // Questions:
 // - Should Run wait for the latest diagnostics, or is compiling and showing the compiler's errors enough?
-// - The script's console output goes to the runner's Output callback, shared by all scripts of the runner. Should
-//   output be per run instead?
+// - Output is per runner, not per run. Does a page need only the output of its own script?
 
 /// <summary>The packet script page.</summary>
 public sealed partial class PacketScriptViewModel : ObservableObject, IDisposable
@@ -44,13 +46,21 @@ public sealed partial class PacketScriptViewModel : ObservableObject, IDisposabl
 
     private readonly CSharpScriptServer _scripts;
     private readonly CSharpScriptRunner _runner;
+    private readonly ScriptOutput _output;
     private IPacketHandler? _handler;
 
     /// <summary>Creates the page with the default script.</summary>
-    public PacketScriptViewModel(CSharpScriptServer scripts, CSharpScriptRunner runner, ScriptLanguages languages)
+    public PacketScriptViewModel(
+        CSharpScriptServer scripts,
+        CSharpScriptRunner runner,
+        ScriptOutput output,
+        ScriptLanguages languages
+    )
     {
         _scripts = scripts;
         _runner = runner;
+        _output = output;
+        _output.Written += OnScriptOutput;
         Script = new CodeDocument(languages.Packets, DefaultScript);
     }
 
@@ -67,7 +77,8 @@ public sealed partial class PacketScriptViewModel : ObservableObject, IDisposabl
         CSharpScriptCompilation compilation = await _scripts.CompileAsync(Script, cancellationToken);
         if (!compilation.Succeeded)
         {
-            WriteLine("The script has errors; see the error list.");
+            foreach (Diagnostic error in compilation.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error))
+                WriteLine($"({error.Start.Line + 1},{error.Start.Column + 1}): {error.Code} {error.Message}");
             return;
         }
 
@@ -75,11 +86,7 @@ public sealed partial class PacketScriptViewModel : ObservableObject, IDisposabl
         _handler = null;
         try
         {
-            _handler = await _runner.RunAsync<IPacketHandler>(
-                compilation.Script,
-                [CSharpScriptService.Create<IOutputLog>(new OutputLog(this))],
-                cancellationToken
-            );
+            _handler = await _runner.RunAsync<IPacketHandler>(compilation.Script, cancellationToken);
             Reading reading = await _handler.HandleAsync(new Packet(1, [0x0B, 0x09]), cancellationToken);
             WriteLine($"Channel {reading.Channel}: {reading.Value} {reading.Unit}");
         }
@@ -95,20 +102,13 @@ public sealed partial class PacketScriptViewModel : ObservableObject, IDisposabl
 
     private void WriteLine(string line) => Output += line + "\n";
 
+    private void OnScriptOutput(string line) => Dispatcher.UIThread.Post(() => WriteLine(line));
+
     /// <inheritdoc />
     public void Dispose()
     {
+        _output.Written -= OnScriptOutput;
         _handler?.Dispose();
         Script.Dispose();
-    }
-
-    /// <summary>The <see cref="IOutputLog"/> that scripts write to: this page's output panel.</summary>
-    private sealed class OutputLog(PacketScriptViewModel page) : IOutputLog
-    {
-        public Task WriteAsync(string message, CancellationToken cancellationToken = default)
-        {
-            Avalonia.Threading.Dispatcher.UIThread.Post(() => page.WriteLine(message));
-            return Task.CompletedTask;
-        }
     }
 }

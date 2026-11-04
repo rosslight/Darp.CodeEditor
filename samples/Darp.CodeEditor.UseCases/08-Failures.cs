@@ -1,4 +1,5 @@
 using Darp.CodeEditor.CSharpScript.Runner;
+using StreamJsonRpc;
 using UseCases.ScriptApi;
 
 namespace UseCases.Failures;
@@ -7,9 +8,10 @@ namespace UseCases.Failures;
 // and keeps working; the next run starts a fresh runner process.
 //
 // - An exception in the script reaches the app as ScriptException, with the script's stack trace.
-// - A call that takes longer than CallTimeout is cancelled; if it does not stop, the process is killed. Every
-//   handler of that runner is gone then, and their calls throw ScriptRunnerExitedException.
-// - Exited tells the app when handlers died, so it can rerun the scripts it depends on.
+// - A call that takes longer than CallTimeout fails with TimeoutException, and the script is asked to stop. If it does
+//   not stop, the process is killed: every handler of that runner is gone then, and their calls fail with
+//   StreamJsonRpc's ConnectionLostException.
+// - Exited tells the app when and why handlers died, so it can rerun the scripts it depends on.
 //
 // Questions:
 // - Should the runner rerun scripts on its own after a crash, or is that always the app's decision?
@@ -48,13 +50,13 @@ public sealed class GuardedHandler
                 $"The script failed: {exception.ScriptExceptionType}: {exception.Message}\n{exception.ScriptStackTrace}"
             );
         }
-        catch (ScriptRunnerExitedException exception) when (exception.Reason == ScriptRunnerExitReason.CallTimedOut)
+        catch (TimeoutException)
         {
-            _report("The script took too long and was stopped.");
+            _report("The script took too long and was asked to stop.");
         }
-        catch (ScriptRunnerExitedException exception)
+        catch (ConnectionLostException)
         {
-            _report($"The script runner ended: {exception.Reason}.");
+            // Exited reports why.
         }
         return null;
     }

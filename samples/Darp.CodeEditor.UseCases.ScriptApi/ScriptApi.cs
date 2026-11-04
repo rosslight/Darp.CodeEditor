@@ -10,6 +10,10 @@ namespace UseCases.ScriptApi;
 // assembly because NativeAOT apps ship it as a DLL next to the app: the language server reads it and the runner
 // loads it. Two kinds of scripts use it: packet scripts return a handler the app keeps calling; sequence scripts run
 // from start to end and act through the app's services.
+//
+// The app's services are [JsonRpcContract] interfaces, registered once per runner. Handlers are [RpcMarshalable]: they
+// travel back as a run's result, and must be IDisposable so that the app can release them. [GenerateShape] lets
+// NativeAOT apps call and copy both without reflection.
 
 /// <summary>What packet scripts use without qualification.</summary>
 public sealed class PacketScriptGlobals(IOutputLog log)

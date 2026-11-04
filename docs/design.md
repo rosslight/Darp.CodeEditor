@@ -100,7 +100,7 @@ Question numbers continue the prototype's log. The prototype's decisions still h
 |---|---|---|---|
 | 50 | Public packages | `Darp.CodeEditor`, `Darp.CodeEditor.CSharpScript`; `Darp.CodeEditor.Luau` after v1; others when needed. The LSP layer is internal. The editor's API takes any LSP server | The prototype's public surface was too large (about 740 public members, most from the LSP layer and from deriving from AvaloniaEdit's editor). Replaces #43 |
 | 51 | Runner package | Running scripts is its own package, `Darp.CodeEditor.CSharpScript.Runner` | Product owner's choice |
-| 52 | Who compiles | The C# server compiles scripts; the runner only loads and runs them, without Roslyn. Compiling runs beside the editor's requests on Roslyn's immutable snapshots: completion keeps answering while a script compiles. Both wait while the server starts or restarts | Roslyn ships once instead of twice (the runner's copy was 28 MiB); what runs is what the editor checked (R7); the runner restarts quickly after a kill. Replaces the compiling part of #33 and #36 |
+| 52 | Who compiles | The C# server compiles scripts; the runner only loads and runs them, without Roslyn. Compiling runs beside the editor's requests on Roslyn's immutable snapshots: completion keeps answering while a script compiles. Both wait while the server starts or restarts. Needs a proof before the runner is built ([api.md](api.md#8-not-proven-yet)) | Roslyn ships once instead of twice (the runner's copy was 28 MiB); what runs is what the editor checked (R7); the runner restarts quickly after a kill. Replaces the compiling part of #33 and #36 |
 | 53 | Benchmarks | Most benchmarks in a BenchmarkDotNet project | Product owner's choice |
 | 54 | Restart | The prototype stays on the `draft` branch. `main` starts a new history | Product owner's choice |
 
@@ -117,7 +117,8 @@ findings are contracts to design in from the start:
 | The editor and the server split lines differently with CR-only line breaks; a huge column overflowed | One line-break rule (`\r\n`, `\n`, `\r`) and UTF-16 columns everywhere, with tests on both sides |
 | A skipped long line passed a wrong lexical state on, so the lines after it were colored wrong | Skipped lines have an unknown state, and highlighting recovers after them |
 | Outdated tokenizing kept running after an edit | Highlighting work stops between lines when the text changed |
-| The regex `(a+)+$` on 29 characters froze search for 21 s | Search has a time limit and a limit on the matches it keeps |
+| One grammar call can take longer than the UI thread's budget | Still open: grammar work on the UI thread is cooperative, so the first frame's colors have no hard deadline |
+| The regex `(a+)+$` on 29 characters froze search for 21 s | Search has a time limit and a limit on the matches it keeps, and says so when it hits one; replace never acts on a partial result |
 | One completion slot for all documents: a small tab waited 146–162 ms behind four large ones | The document an editor shows goes first |
-| Unbounded message queues held 63 MB behind a blocked pipe | Queues have limits, and outdated work is dropped rather than queued |
+| Unbounded message queues held 63 MB behind a blocked pipe | Queues have limits on both ends. Text changes always arrive in order; outdated feature requests are dropped or merged; responses and cancellations always get through |
 | A benchmark wrapper reported success when runs failed; JIT and AOT demos measured different languages | Benchmarks fail loudly and compare JIT and AOT on the same source |

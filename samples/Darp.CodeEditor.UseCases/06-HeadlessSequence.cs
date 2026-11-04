@@ -1,7 +1,6 @@
 using Darp.CodeEditor;
 using Darp.CodeEditor.CSharpScript;
 using Darp.CodeEditor.CSharpScript.Runner;
-using UseCases.ScriptApi;
 using UseCases.Startup;
 
 namespace UseCases.Headless;
@@ -19,12 +18,7 @@ namespace UseCases.Headless;
 // - Should a compiled script be storable, so that later runs skip the compiler entirely?
 
 /// <summary>Runs saved sequence scripts.</summary>
-public sealed class SavedSequences(
-    CSharpScriptServer scripts,
-    CSharpScriptRunner runner,
-    IStation station,
-    IOutputLog log
-)
+public sealed class SavedSequences(CSharpScriptServer scripts, CSharpScriptRunner runner, ScriptOutput log)
 {
     /// <summary>Compiles and runs the sequence in <paramref name="path"/>; <paramref name="stop"/> stops it.</summary>
     /// <returns>Whether the sequence compiled and ran to its end.</returns>
@@ -39,11 +33,7 @@ public sealed class SavedSequences(
             return false;
         }
 
-        await runner.RunAsync(
-            compilation.Script,
-            [CSharpScriptService.Create(station), CSharpScriptService.Create(log)],
-            stop
-        );
+        await runner.RunAsync(compilation.Script, stop);
         return true;
     }
 }
