@@ -1,12 +1,13 @@
 using Avalonia;
 using Avalonia.Headless;
+using Avalonia.Themes.Fluent;
 
 namespace Darp.CodeEditor.Tests;
 
 /// <summary>
-/// The app's main UI thread, for the tests of the UI collection: a headless Avalonia app that they share. Avalonia's
-/// xunit integration does not work with xunit's NativeAOT runner, so tests run their bodies on that thread through
-/// Avalonia's headless test session.
+/// The app's main UI thread, for the tests of the UI collection: a headless Avalonia app that they share, with
+/// <see cref="TestApp"/>'s styles. Avalonia's xunit integration does not work with xunit's NativeAOT runner, so tests
+/// run their bodies on that thread through Avalonia's headless test session.
 /// </summary>
 public sealed class UiFixture : IAsyncDisposable
 {
@@ -14,7 +15,7 @@ public sealed class UiFixture : IAsyncDisposable
     public const string Collection = "UI";
 
     private readonly HeadlessUnitTestSession _session = HeadlessUnitTestSession.StartNew(
-        typeof(Application),
+        typeof(TestApp),
         AvaloniaTestIsolationLevel.PerAssembly
     );
 
@@ -38,3 +39,23 @@ public sealed class UiFixture : IAsyncDisposable
 /// <summary>The tests that run on the UI thread of <see cref="UiFixture"/>.</summary>
 [CollectionDefinition(UiFixture.Collection)]
 public sealed class UiCollection : ICollectionFixture<UiFixture>;
+
+/// <summary>
+/// The tests' app: Fluent and the editor's styles, as an app adds them, and Skia, so that headless windows render
+/// pixels.
+/// </summary>
+public sealed class TestApp : Application
+{
+    /// <summary>Found by the headless session, which builds the app from it.</summary>
+    public static AppBuilder BuildAvaloniaApp() =>
+        AppBuilder
+            .Configure<TestApp>()
+            .UseSkia()
+            .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false });
+
+    public override void Initialize()
+    {
+        Styles.Add(new FluentTheme());
+        Styles.Add(new CodeEditorStyles());
+    }
+}

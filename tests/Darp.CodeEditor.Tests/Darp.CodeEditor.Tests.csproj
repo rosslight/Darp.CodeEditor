@@ -8,6 +8,10 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia.Headless" />
+    <!-- Renders the headless windows, so that tests can read their pixels. -->
+    <PackageReference Include="Avalonia.Skia" />
+    <!-- The app theme that editors are checked against. -->
+    <PackageReference Include="Avalonia.Themes.Fluent" />
     <!-- Not in the NativeAOT tests: coverlet can't be compiled ahead of time. -->
     <PackageReference Include="coverlet.MTP" Condition="'$(_IsPublishing)' != 'true'" />
     <PackageReference Include="Shouldly" />
