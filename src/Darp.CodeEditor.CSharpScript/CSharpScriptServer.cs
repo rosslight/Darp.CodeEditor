@@ -15,7 +15,9 @@ namespace Darp.CodeEditor.CSharpScript;
 /// child of the app: it ends when the app ends, even when the app is killed.
 /// </para>
 /// <para>
-/// <see cref="PropertyChanged"/> reports <see cref="State"/> on the UI thread, for a status indicator to bind. Before
+/// <see cref="PropertyChanged"/> reports <see cref="State"/> on the UI thread the server belongs to, for a status
+/// indicator to bind: that of the thread that created it, if that thread has an Avalonia dispatcher, and otherwise the
+/// app's main UI thread. Its documents get their diagnostics on their own UI thread. Before
 /// Avalonia is set up, the server leaves Avalonia's dispatcher alone and raises it where the state changed, so
 /// compiling also works before the app's UI runs. When the process fails, <see cref="State"/> shows the restart,
 /// <see cref="StartAsync"/> throws why a process did not start, and the server's own messages arrive through

@@ -14,9 +14,10 @@ namespace Darp.CodeEditor.CSharpScript.Runner;
 /// <para>
 /// Globals last as long as their run. When the script's code has finished, the session cancels the stop token and
 /// disposes the globals if they are <see cref="IAsyncDisposable"/> or <see cref="IDisposable"/>, while the bridge is
-/// still up: that is where they end what the run registered and send what it left queued. What must outlive a run
-/// belongs to the session object. A callback that the session object keeps after the run must not use the run's
-/// globals. The public members of the globals are what scripts see, so implement the disposal explicitly.
+/// still up: that is where they release what the run owns and send what it left queued. What must outlive a run
+/// belongs to the session object. A callback that a script hands to the session object outlives its run, so it may
+/// only use what outlives its run. The public members of the globals are what scripts see, so implement the disposal
+/// explicitly.
 /// </para>
 /// <para>
 /// <c>StartScriptAsync</c> requires this interface, so the compiler rejects a script started in a session that can't

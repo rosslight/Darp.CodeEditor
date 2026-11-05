@@ -165,7 +165,9 @@ public sealed class CSharpScriptSession<TSessionSide, TSessionObject> : IAsyncDi
     public TSessionSide Remote => throw new NotImplementedException();
 
     /// <summary>
-    /// Completes once the process has ended, for any reason, before the session's runs fail because of it. Never
+    /// Completes once the process has ended, for any reason, before the session's runs and calls fail because of it:
+    /// the session holds those failures back until it knows the exit, and kills a process whose connection broke but
+    /// which does not exit. Completes once, with one reason; see <see cref="CSharpScriptSessionExitReason"/>. Never
     /// faults. After a <see cref="ConnectionLostException"/>, await it to learn why the session ended.
     /// </summary>
     public Task<CSharpScriptSessionExit> Exited => throw new NotImplementedException();
@@ -196,10 +198,11 @@ public sealed class CSharpScriptSession<TSessionSide, TSessionObject> : IAsyncDi
 /// disposable, while the bridge is still up, and then completes <see cref="Completion"/>.
 /// </para>
 /// <para>
-/// What the run started belongs to its globals: they end it when they are disposed, closing what the run registered
-/// to new calls and awaiting the calls already running. Queued values are sent before disposal ends. The library
-/// cannot see inside the globals, so this holds as far as the script API keeps it. What must outlive a run belongs to
-/// the session object. A kill runs no cleanup and delivers nothing still queued.
+/// The globals end what the run owns when they are disposed, such as sending its queued values. Script code that the
+/// script handed to something longer-lived, such as a callback set on the session object, can still be called after
+/// the run has ended: the library does not track it. Such a callback may only use what outlives its run: the session
+/// object and what it owns, not the run's globals, its input, or what they own. A kill runs no cleanup and delivers
+/// nothing still queued.
 /// </para>
 /// </remarks>
 public sealed class CSharpScriptRun
@@ -298,12 +301,19 @@ public sealed class CSharpScriptSessionExit
 }
 
 /// <summary>Why a session's process ended.</summary>
+/// <remarks>
+/// When several causes meet, such as a kill during disposal, the first cause the session acted on is the reason. A
+/// process that ends by itself before any of them is <see cref="Crashed"/>, also while it is being disposed.
+/// </remarks>
 public enum CSharpScriptSessionExitReason
 {
     /// <summary>The app disposed the session, and the runner ended in time.</summary>
     Disposed,
 
-    /// <summary>The app called <see cref="CSharpScriptSession{TSessionSide, TSessionObject}.KillAsync"/>.</summary>
+    /// <summary>
+    /// The app called <see cref="CSharpScriptSession{TSessionSide, TSessionObject}.KillAsync"/>, also during
+    /// disposal.
+    /// </summary>
     Killed,
 
     /// <summary>
@@ -313,7 +323,10 @@ public enum CSharpScriptSessionExitReason
     /// </summary>
     StopTimedOut,
 
-    /// <summary>It crashed, for example from a stack overflow in a script.</summary>
+    /// <summary>
+    /// It ended by itself, for example from a stack overflow in a script or an unhandled exception in code a script left
+    /// running, before the app ended it.
+    /// </summary>
     Crashed,
 
     /// <summary>

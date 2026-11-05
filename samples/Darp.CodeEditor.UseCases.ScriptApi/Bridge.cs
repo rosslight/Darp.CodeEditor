@@ -53,12 +53,6 @@ public partial interface ISessionSide
 
     /// <summary>App to script, at high rates: a batch of inputs through the calculation, in order.</summary>
     Task<double[]> CalculateManyAsync(double[] inputs, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// App to script, a callback that a run owns: calls the handler a running script registered for
-    /// <paramref name="topic"/>. It is gone when that run ends. Fails while no run answers the topic.
-    /// </summary>
-    Task TriggerAsync(string topic, CancellationToken cancellationToken);
 }
 
 /// <summary>What one run gets from the app when it starts.</summary>

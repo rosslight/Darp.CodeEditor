@@ -93,7 +93,14 @@ public class CodeEditor : TemplatedControl
             editor => editor.CaretPosition
         );
 
-    /// <summary>The document the editor shows. Without one, the editor is empty and read-only.</summary>
+    /// <summary>
+    /// The document the editor shows. Without one, the editor is empty and read-only. Only a document of the editor's
+    /// own UI thread can be shown; see <see cref="CodeDocument"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The document belongs to another UI thread: create it on the thread of the editor's window. Through a binding,
+    /// Avalonia reports this as a binding error.
+    /// </exception>
     public CodeDocument? Document
     {
         get => GetValue(DocumentProperty);

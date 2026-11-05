@@ -12,12 +12,14 @@ namespace Darp.CodeEditor;
 /// the document, and with it the undo history.
 /// </para>
 /// <para>
-/// Create, read and dispose a document on any thread. Change it only on the UI thread, where the user types and editors
-/// draw: setting <see cref="Text"/>, <see cref="FilePath"/> or <see cref="Indentation"/>, <see cref="Undo"/>,
-/// <see cref="Redo"/> and <see cref="MarkUnmodified"/> throw <see cref="InvalidOperationException"/> on other
-/// threads. Events are raised on the UI thread, also for documents created elsewhere. To read the text and its version
-/// together, take <see cref="CurrentSnapshot"/>. Before Avalonia is set up there is no UI thread yet: the document
-/// leaves Avalonia's dispatcher alone, checks no thread and raises its events where the change happens.
+/// Create, read and dispose a document on any thread. It belongs to one UI thread: that of the thread that created it,
+/// if that thread has an Avalonia dispatcher, and otherwise the app's main UI thread. Change it only there, where the
+/// user types and editors draw: setting <see cref="Text"/>, <see cref="FilePath"/> or <see cref="Indentation"/>,
+/// <see cref="Undo"/>, <see cref="Redo"/> and <see cref="MarkUnmodified"/> throw <see cref="InvalidOperationException"/>
+/// on other threads. Events are raised there too, also for documents created elsewhere. Only editors on that thread
+/// can show it. To read the text and its version together, take <see cref="CurrentSnapshot"/>. Before Avalonia is set
+/// up there is no UI thread yet: the document leaves Avalonia's dispatcher alone, checks no thread and raises its
+/// events where the change happens.
 /// </para>
 /// <para>
 /// <see cref="Create"/> creates a document without a server. A server creates its own, with

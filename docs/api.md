@@ -201,7 +201,8 @@ app starts.
 
 - **Editors:** on their UI thread, as any control. An editor posts its own work to its `Dispatcher`, which Avalonia 12 gives every control, not to `Dispatcher.UIThread`.
 - **Documents:** create, read, compile and dispose them on any thread. Change them only on the UI thread, where the user types and editors draw: setting `Text`, `FilePath` or `Indentation`, `Undo`, `Redo` and `MarkUnmodified` throw elsewhere. Their events come on the UI thread, also for documents created elsewhere.
-  - Documents and servers are not Avalonia objects, so "the UI thread" is the app's main one, `Dispatcher.UIThread`. An editor on a second UI thread can't show documents in v1.
+  - A document belongs to one UI thread, because AvaloniaEdit's text buffer does: that of the thread that created it, if that thread has an Avalonia dispatcher (`Dispatcher.FromThread`, which creates none), and otherwise the app's main one. Its events come there, and its changes are checked against it. An editor on another UI thread refuses the document at once, with a message that says to create it on the editor's thread. Apps with one UI thread notice nothing; apps with several create a window's documents on that window's thread.
+  - Servers follow the same rule for their own `State`, and send each document's diagnostics to that document's thread.
   - `CurrentSnapshot` is the text with its version, immutable. Reading `Text` and the version separately could pair one version's text with the next one's number.
   - The document makes a snapshot after every change, sharing the unchanged parts of the text. In AvaloniaEdit, an edit plus its snapshot takes about 4 µs on 5,000 lines.
   - `document.CompileAsync()` compiles the snapshot current at the call, and the compilation keeps it as `Snapshot`.
@@ -343,12 +344,17 @@ script, and one that throws ends the run's `Completion`. A run:
   disposes its globals if they are disposable, while the bridge is still up, and then completes `Completion`. Tasks
   that the code started and did not await, such as a timer, are not part of the run: they keep running in the
   session.
-- **owns, through its globals, what it started.** Disposing the globals ends it: what the run registered stops taking
-  calls, the calls already running are cancelled and awaited, and queued values are sent. The library cannot see
-  inside the globals, so this holds as far as the script API keeps it; the use cases' sample shows how. What must
-  outlive a run, such as a calculation the app keeps calling, belongs to the session object; scripts that should keep
-  answering, such as triggers, wait until they are stopped. A kill runs no cleanup and delivers nothing still
-  queued.
+- **ends what it owns when its globals are disposed,** such as sending its queued values. A kill runs no cleanup and
+  delivers nothing still queued.
+
+**Callbacks and the end of a run.** A run ends when its script's code has returned: the session cancels the run's
+stop token and disposes its globals. Script code that the script handed to something longer-lived, such as a callback
+set on the session object, can still be called afterwards; the library does not track it. A callback may outlive its
+run, so it may only use what outlives its run: the session object and what it owns, not the run's globals, its input,
+or what they own. Passing the run's stop token along is a safety net: once the run has ended it is cancelled, so a
+callback that breaks the rule fails loudly instead of working on a closed device. Callbacks that should end with their
+run are removed by the globals when they are disposed; a call already running may still finish shortly after. In v1,
+script code does not cross the bridge to the app: the bridge's methods copy data only.
 
 **Readiness and threads.** Calls from the app and from overlapping scripts reach the session object on any thread,
 and the script API makes it safe for that. The library does not serialise them: a script may wait for the app while
@@ -390,8 +396,13 @@ safe after a kill or a crash, and to call twice. A session keeps every script it
 callbacks a run left in the session object keep working.
 
 **When a session has ended,** `session.Exited` completes with the reason (`Disposed`, `Killed`, `StopTimedOut`,
-`Crashed` or `DisposeTimedOut`), the exit code and the end of the process's standard error. It completes before the session's runs
-fail because of it, so code that catches `ConnectionLostException` awaits it to learn why. A session cannot be used
+`Crashed` or `DisposeTimedOut`), the exit code and the end of the process's standard error. It completes once, with
+one reason: when several causes meet, such as a kill during disposal, the first cause the session acted on wins, and a
+process that ended by itself before any of them is `Crashed`, also while it was being disposed. It completes before
+the session's runs and calls fail because of it: StreamJsonRpc notices a broken pipe before the operating system
+reports the exit, so the session holds those failures back until it knows the exit, and kills a process whose
+connection broke but which does not exit. So code that catches `ConnectionLostException` awaits `Exited` to learn
+why. A session cannot be used
 again after a kill or a crash, and does not restart by itself: an app that keeps a session checks
 `session.Exited.IsCompleted` before it starts a run, and starts a new session then.
 
@@ -502,20 +513,20 @@ generated proxies, and a JIT runner with precompiled classes standing in for scr
 
 Still open:
 
-- what a run owns, Q96: registrations that stop taking calls and await the running ones. A spike found that only
-  removing a registration let a running callback use disposed globals, and a review found that the sample's version
-  drains one registration before it closes the next, and stops cleaning up when cancelling throws;
 - runner-side dependencies on Windows and arm64, the bridge and contracts loaded once for both sides, two versions of
   one package in the app and the runner side, and the build step that deploys them;
 - the C# server and the runners ending with the app, when the app is killed: a test per platform;
 - nothing touching Avalonia's dispatcher before Avalonia is set up: a test creates a server, a document and a
   compilation on a pool thread, then starts the app;
-- concurrent `DisposeAsync` and `KillAsync`, and the order of `Exited` and failing runs, in the real implementation.
+- the exit reason rule and `Exited` completing before failures, when causes race: tests that kill the runner at every
+  step of disposing, and call `DisposeAsync` and `KillAsync` together;
+- documents on a second UI thread: an editor there refuses a document of the main thread, and accepts one created on
+  its own;
+- integration tests on GitHub Actions for Windows, Linux and macOS, once the API is decided.
 
 ## 10. Open questions
 
 Question numbers continue the decision log in [design.md](design.md). Decisions taken in the API discussion are
-recorded there too (#61, #64–#95).
+recorded there too (#61, #64–#98).
 
-- **Q96 – What a run owns.** Deferred: a library type that owns what a run registered, so that script APIs don't each
-  write the cleanup of section 9.
+None right now. Section 9 lists what still needs proving.
