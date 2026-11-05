@@ -39,11 +39,11 @@ if (compilation.Succeeded)
 
 | Package | Public types |
 |---|---|
-| `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorTheme`, `CodeEditorStyles`, `TextRange`, `TextPosition`, `TextSelection`, `Indentation`, `Diagnostic`, `DiagnosticSeverity` |
+| `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorTheme`, `CodeEditorStyles`, `TextSnapshot`, `TextRange`, `TextPosition`, `TextSelection`, `Indentation`, `Diagnostic`, `DiagnosticSeverity` |
 | `Darp.CodeEditor.CSharpScript` | `CSharpScriptServer`, `CSharpScriptServerOptions`, `CSharpScriptEnvironment`, `CSharpScriptCompilation`, `CompiledScript`, `CSharpCodeLanguage` (adds `CodeLanguage.CSharp`) |
 | `Darp.CodeEditor.CSharpScript.Runner` | `CSharpScriptRunner`, `CSharpScriptRunnerOptions`, `CSharpScriptService`, `ScriptBatcher<TItem, TResult>`, `ScriptBatcherOptions`, `ScriptException`, `ScriptRunnerExitedEventArgs`, `ScriptRunnerExitReason` |
 
-29 public types in all. Three more things are public without being types of ours:
+30 public types in all. Three more things are public without being types of ours:
 
 - **The project file.**
   - `CSharpScriptReference="true"` on a package or project reference: scripts may use its assemblies. Publishing copies their DLLs next to the app, NativeAOT apps included.
@@ -177,8 +177,12 @@ documents, indentation detected from the text, markers that the app adds, and a 
 
 ## 4. Threads
 
-- **UI thread only:** `CodeEditor` and `CodeDocument`, which raise their events there. The same goes for the servers' `CreateDocument`, and for `CompileAsync(CodeDocument)`, because it takes the document's version when called.
-- **Immutable, any thread:** `CodeLanguage` and `CodeEditorTheme`.
+- **UI thread only:** `CodeEditor`.
+- **Documents:** create, read, compile and dispose them on any thread. Change them only on the UI thread, where the user types and editors draw: setting `Text`, `FilePath` or `Indentation`, `Undo`, `Redo` and `MarkUnmodified` throw elsewhere. Their events come on the UI thread, also for documents created elsewhere.
+  - `CurrentSnapshot` is the text with its version, immutable. Reading `Text` and the version separately could pair one version's text with the next one's number.
+  - The document makes a snapshot after every change, sharing the unchanged parts of the text. In AvaloniaEdit, an edit plus its snapshot takes about 4 µs on 5,000 lines.
+  - `CompileAsync(document)` compiles the snapshot current at the call, and the compilation keeps it as `Snapshot`.
+- **Immutable, any thread:** `CodeLanguage`, `CodeEditorTheme` and `TextSnapshot`.
 - **Any thread:** `LanguageServer`, `CSharpScriptServer`, `CSharpScriptRunner` and `ScriptBatcher`.
   - `LanguageServer.StateChanged` is posted to the UI thread for status indicators. Nothing waits for it, so servers and compiling also work before the UI runs.
   - The runner's `Exited` and `Output`, and calls into the app's services, come on any thread.
@@ -188,7 +192,8 @@ documents, indentation detected from the text, markers that the app adds, and a 
 
 Offsets count UTF-16 code units from 0. Lines end at `\r\n`, `\n` or `\r`, alike in the editor, the LSP client and
 the C# server. `TextPosition` counts lines and columns from 1, as editors show them; the LSP client converts to the
-protocol's 0-based positions. Ranges are not checked when created; members that take them clamp them to the text.
+protocol's 0-based positions. `TextSnapshot.GetPosition` and `GetOffset` convert, in the text of that snapshot.
+Ranges are not checked when created; members that take them clamp them to the text.
 
 ## 6. Language servers
 
@@ -249,7 +254,7 @@ Nobody has done it here yet.
 ## 10. Open questions
 
 Question numbers continue the decision log in [design.md](design.md). Decisions taken in the API discussion are
-recorded there too (#61, #64–#78).
+recorded there too (#61, #64–#79).
 
 - **Q55 – Logging.**
   - **Draft:** takes `Microsoft.Extensions.Logging.ILogger`.

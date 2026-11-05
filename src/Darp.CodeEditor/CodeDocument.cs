@@ -9,7 +9,14 @@ namespace Darp.CodeEditor;
 /// <remarks>
 /// <para>
 /// The app owns a document and disposes it when the user closes it for good. Switching tabs or recreating views keeps
-/// the document, and with it the undo history. Use it on the UI thread; it raises its events there.
+/// the document, and with it the undo history.
+/// </para>
+/// <para>
+/// Create, read and dispose a document on any thread. Change it only on the UI thread, where the user types and editors
+/// draw: setting <see cref="Text"/>, <see cref="FilePath"/> or <see cref="Indentation"/>, <see cref="Undo"/>,
+/// <see cref="Redo"/> and <see cref="MarkUnmodified"/> throw <see cref="InvalidOperationException"/> on other
+/// threads. Events are raised on the UI thread, also for documents created elsewhere. To read the text and its version
+/// together, take <see cref="CurrentSnapshot"/>.
 /// </para>
 /// <para>
 /// The constructor creates a document without a server. A server creates its own, with
@@ -63,15 +70,18 @@ public sealed class CodeDocument : INotifyPropertyChanged, IDisposable
         set => throw new NotImplementedException();
     }
 
-    /// <summary>The whole text. Setting it replaces the text in one step that the user can undo.</summary>
+    /// <summary>
+    /// The whole text, as <c>CurrentSnapshot.GetText()</c>. Setting it replaces the text in one step that the user can
+    /// undo.
+    /// </summary>
     public string Text
     {
         get => throw new NotImplementedException();
         set => throw new NotImplementedException();
     }
 
-    /// <summary>Counts changes: every change of the text increases it.</summary>
-    public int Version => throw new NotImplementedException();
+    /// <summary>The text as it is now, with its version.</summary>
+    public TextSnapshot CurrentSnapshot => throw new NotImplementedException();
 
     /// <summary>
     /// How Tab and new lines indent, in every editor that shows the document. It starts as in VS Code: 2 spaces for
@@ -97,38 +107,27 @@ public sealed class CodeDocument : INotifyPropertyChanged, IDisposable
     public bool CanRedo => throw new NotImplementedException();
 
     /// <summary>
-    /// The language server's latest diagnostics, with ranges in the text of <see cref="DiagnosticsVersion"/>. Servers
-    /// report again shortly after each change; meanwhile the editor's squiggles move with the text, these records do
-    /// not. Empty without a server.
+    /// The language server's latest diagnostics, with ranges in the text the server analyzed. Servers report again
+    /// shortly after each change; meanwhile the editor's squiggles move with the text, these records do not. Empty
+    /// without a server.
     /// </summary>
     public IReadOnlyList<Diagnostic> Diagnostics => throw new NotImplementedException();
 
-    /// <summary>The <see cref="Version"/> that <see cref="Diagnostics"/> were reported for.</summary>
-    public int DiagnosticsVersion => throw new NotImplementedException();
-
     /// <summary>
-    /// Makes <paramref name="version"/> the unmodified point, for example after saving that version's text.
+    /// Makes <paramref name="snapshot"/> the unmodified point, for example after saving its text.
     /// </summary>
     /// <returns>
-    /// False, with no change, when the text changed since <paramref name="version"/>: the saved text is no longer the
+    /// False, with no change, when the text changed since <paramref name="snapshot"/>: the saved text is no longer the
     /// document's, so the document stays modified.
     /// </returns>
-    public bool MarkUnmodified(int version) => throw new NotImplementedException();
+    /// <exception cref="ArgumentException">The snapshot is of another document.</exception>
+    public bool MarkUnmodified(TextSnapshot snapshot) => throw new NotImplementedException();
 
     /// <summary>Undoes the last step, as Ctrl+Z does.</summary>
     public void Undo() => throw new NotImplementedException();
 
     /// <summary>Redoes the last undone step, as Ctrl+Y does.</summary>
     public void Redo() => throw new NotImplementedException();
-
-    /// <summary>The line and column of <paramref name="offset"/> in the current text.</summary>
-    public TextPosition GetPosition(int offset) => throw new NotImplementedException();
-
-    /// <summary>
-    /// The offset of <paramref name="position"/> in the current text, clamped to the end of its line and to the last
-    /// line.
-    /// </summary>
-    public int GetOffset(TextPosition position) => throw new NotImplementedException();
 
     /// <summary>
     /// Closes the document in its language server, without waiting for it. Editors that still show it become empty.

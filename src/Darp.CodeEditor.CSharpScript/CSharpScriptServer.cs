@@ -17,10 +17,7 @@ namespace Darp.CodeEditor.CSharpScript;
 /// Compiling runs beside the editor's requests: completion keeps answering while a script compiles. A compilation
 /// waits while the server starts or restarts, like completion does.
 /// </para>
-/// <para>
-/// Safe to use from any thread, except <see cref="CreateDocument"/> and
-/// <see cref="CompileAsync(CodeDocument, CancellationToken)"/>, which work on documents.
-/// </para>
+/// <para>Safe to use from any thread.</para>
 /// <para>
 /// The server checks and loads an environment's references once, and reuses them for every document and compilation
 /// in an environment with the same settings.
@@ -41,7 +38,7 @@ public sealed class CSharpScriptServer : IAsyncDisposable
 
     /// <summary>
     /// Creates a C# script document in <paramref name="environment"/>, open in this server until the document's
-    /// <see cref="CodeDocument.Dispose"/>. Its language is <c>CodeLanguage.CSharp</c>. Call it on the UI thread.
+    /// <see cref="CodeDocument.Dispose"/>. Its language is <c>CodeLanguage.CSharp</c>.
     /// </summary>
     /// <remarks>
     /// The document keeps a copy of the environment: later changes to its lists have no effect.
@@ -54,12 +51,11 @@ public sealed class CSharpScriptServer : IAsyncDisposable
         throw new NotImplementedException();
 
     /// <summary>
-    /// Compiles <paramref name="document"/>'s current version, in the environment it was created in, from the same
-    /// snapshot of that version that the editor's diagnostics come from.
+    /// Compiles the document's <see cref="CodeDocument.CurrentSnapshot"/> at the time of the call, in the environment
+    /// the document was created in, from the same Roslyn snapshot that the editor's diagnostics come from.
     /// </summary>
     /// <remarks>
-    /// Call it on the UI thread: it takes the document's version before it returns. Later edits do not cancel the
-    /// compilation, and disposing the document does not affect it.
+    /// Later edits do not cancel the compilation, and disposing the document does not affect it.
     /// </remarks>
     /// <exception cref="ArgumentException">
     /// This server did not create the document, through <see cref="CreateDocument"/> or its
@@ -101,10 +97,10 @@ public sealed class CSharpScriptCompilation
     public IReadOnlyList<Diagnostic> Diagnostics => throw new NotImplementedException();
 
     /// <summary>
-    /// The <see cref="CodeDocument.Version"/> that was compiled; null for compiled strings. Compare it with the
-    /// document's current version to tell whether the user changed the script since.
+    /// The document's text that was compiled; null for compiled strings. Compare its version with the document's
+    /// <see cref="CodeDocument.CurrentSnapshot"/> to tell whether the user changed the script since.
     /// </summary>
-    public int? DocumentVersion => throw new NotImplementedException();
+    public TextSnapshot? Snapshot => throw new NotImplementedException();
 
     /// <summary>Whether the script compiled without errors; <see cref="Script"/> is set then.</summary>
     [MemberNotNullWhen(true, nameof(Script))]

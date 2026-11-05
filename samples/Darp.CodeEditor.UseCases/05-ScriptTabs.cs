@@ -49,9 +49,9 @@ public sealed partial class ScriptTabsViewModel(CSharpScriptServer scripts) : Ob
     /// <summary>Saves a tab's script. Edits made while it saves keep the tab modified.</summary>
     public async Task SaveAsync(ScriptTab tab, CancellationToken cancellationToken)
     {
-        int version = tab.Document.Version;
-        await File.WriteAllTextAsync(tab.FilePath, tab.Document.Text, cancellationToken);
-        tab.Document.MarkUnmodified(version);
+        TextSnapshot snapshot = tab.Document.CurrentSnapshot;
+        await File.WriteAllTextAsync(tab.FilePath, snapshot.GetText(), cancellationToken);
+        tab.Document.MarkUnmodified(snapshot);
     }
 
     /// <summary>Closes a tab for good.</summary>
