@@ -21,9 +21,18 @@ namespace Darp.CodeEditor;
 /// on. <see cref="Document"/> keeps its value, so the editor can come back.
 /// </para>
 /// <para>
+/// The editor needs <see cref="CodeEditorStyles"/> in the app's styles. The text area takes its colors from
+/// <see cref="ColorTheme"/>: syntax and language-server colors, background, selection, caret, line numbers, search and
+/// bracket matches, and the squiggles under diagnostics. Everything around the text takes the app's look: completion,
+/// hover and signature help look like the app's flyouts and tooltips, and the search bar and scroll bars are the app's
+/// controls. Code inside popups keeps the editor's colors, background and font.
+/// </para>
+/// <para>
 /// Built in, with no settings: the current line is highlighted, brackets match, brackets and quotes close as you type,
-/// new lines are indented, whitespace shows inside the selection, and the view scrolls past the last line. The font
-/// defaults to a monospace one; set <c>FontFamily</c> and <c>FontSize</c> as for any control.
+/// new lines are indented, whitespace shows inside the selection, and the view scrolls past the last line. Hover shows
+/// the server's Markdown, with code blocks highlighted by the document's grammar, below the messages of the
+/// diagnostics under the pointer. Completion items show VS Code's codicons, in the color theme's symbol colors. The
+/// font defaults to a monospace one; set <c>FontFamily</c> and <c>FontSize</c> as for any control.
 /// </para>
 /// <para>
 /// The editor handles only its own keys: editing, navigation, search (Ctrl+F, Ctrl+H, F3), completion (Ctrl+Space),
@@ -56,17 +65,11 @@ public class CodeEditor : TemplatedControl
         defaultValue: true
     );
 
-    /// <summary>Defines the <see cref="LightTheme"/> property.</summary>
-    public static readonly StyledProperty<CodeEditorTheme> LightThemeProperty = AvaloniaProperty.Register<
+    /// <summary>Defines the <see cref="ColorTheme"/> property.</summary>
+    public static readonly StyledProperty<CodeEditorTheme> ColorThemeProperty = AvaloniaProperty.Register<
         CodeEditor,
         CodeEditorTheme
-    >(nameof(LightTheme), defaultValue: CodeEditorTheme.LightPlus);
-
-    /// <summary>Defines the <see cref="DarkTheme"/> property.</summary>
-    public static readonly StyledProperty<CodeEditorTheme> DarkThemeProperty = AvaloniaProperty.Register<
-        CodeEditor,
-        CodeEditorTheme
-    >(nameof(DarkTheme), defaultValue: CodeEditorTheme.DarkPlus);
+    >(nameof(ColorTheme), defaultValue: CodeEditorTheme.LightPlus);
 
     /// <summary>Defines the <see cref="Selection"/> property.</summary>
     public static readonly DirectProperty<CodeEditor, TextSelection> SelectionProperty =
@@ -112,21 +115,20 @@ public class CodeEditor : TemplatedControl
     }
 
     /// <summary>
-    /// The colors while the app's theme variant is light. Default: <see cref="CodeEditorTheme.LightPlus"/>.
+    /// The colors of the text area: a VS Code color theme. Default: the <c>CodeEditorColorTheme</c> resource, which
+    /// <see cref="CodeEditorStyles"/> defines as <see cref="CodeEditorTheme.LightPlus"/> for light theme variants and
+    /// <see cref="CodeEditorTheme.DarkPlus"/> for dark ones, so editors follow the app's theme variant and any
+    /// <c>ThemeVariantScope</c> around them. Where no resource matches, Light+.
     /// </summary>
-    public CodeEditorTheme LightTheme
+    /// <remarks>
+    /// To give every editor other colors, override <c>CodeEditorColorTheme</c> in the app's theme dictionaries.
+    /// Setting the property on one editor fixes its colors whatever the theme variant. To make one editor dark in a
+    /// light app, prefer a <c>ThemeVariantScope</c> around it: its popups then turn dark too.
+    /// </remarks>
+    public CodeEditorTheme ColorTheme
     {
-        get => GetValue(LightThemeProperty);
-        set => SetValue(LightThemeProperty, value);
-    }
-
-    /// <summary>
-    /// The colors while the app's theme variant is dark. Default: <see cref="CodeEditorTheme.DarkPlus"/>.
-    /// </summary>
-    public CodeEditorTheme DarkTheme
-    {
-        get => GetValue(DarkThemeProperty);
-        set => SetValue(DarkThemeProperty, value);
+        get => GetValue(ColorThemeProperty);
+        set => SetValue(ColorThemeProperty, value);
     }
 
     /// <summary>

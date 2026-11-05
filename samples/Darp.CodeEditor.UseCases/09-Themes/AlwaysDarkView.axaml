@@ -1,0 +1,16 @@
+<!--
+  Scenario: one page stays dark in a light app, such as a full-screen script editor for a dim shop floor.
+
+  - The ThemeVariantScope turns the editor's colors and its popups dark. Setting ColorTheme on the editor instead
+    would change only the text area, and leave light popups over dark text.
+-->
+<UserControl
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ce="using:Darp.CodeEditor"
+    x:Class="UseCases.Themes.AlwaysDarkView"
+>
+    <ThemeVariantScope RequestedThemeVariant="Dark">
+        <ce:CodeEditor x:Name="Editor" />
+    </ThemeVariantScope>
+</UserControl>

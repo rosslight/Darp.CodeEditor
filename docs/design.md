@@ -1,6 +1,6 @@
 # Darp.CodeEditor: design
 
-Status as of 2026-11-04. The project restarted from scratch. The prototype, its full decision log (#1–#49), its
+Status as of 2026-11-05. The project restarted from scratch. The prototype, its full decision log (#1–#49), its
 measurements and reports are on the [`draft`](https://github.com/rosslight/Darp.CodeEditor/tree/draft) branch, in
 `docs/design.md` and `docs/review-guide.md`. This document keeps what still holds and records the restart's
 decisions. The public API is drafted in [api.md](api.md).
@@ -40,7 +40,8 @@ These are the prototype's requirements; R4 changed with the restart.
 
 **In:** highlighting, find and replace, editing helpers (auto-indent, bracket matching, auto-closing pairs, toggle
 comment, Tab and Shift+Tab), completion, signature help, hover, diagnostics, any LSP server, C# scripts with a
-host-defined environment, running scripts.
+host-defined environment, running scripts. Marks beside the scroll bar for errors and search matches, added once the
+core works (#73).
 
 **Not in v1:** Luau, rename, quick fixes, refactorings, find usages, formatting, analyzers, go-to-line, `#r` and
 `#load`, scripts across files, regular C# files.
@@ -108,6 +109,11 @@ Question numbers continue the prototype's log. The prototype's decisions still h
 | 66 | Indentation | On the document, with the language's default. Not detected from the text in v1 | Product owner: detection is easy to add later |
 | 67 | Markers and view state | No markers from the app and no storable view state in v1 | Product owner's choice |
 | 68 | Line and column numbers | `TextPosition` counts lines and columns from 1; offsets stay 0-based. The LSP client converts | Status bars and error messages show positions from 1, as Monaco and AvaloniaEdit count them |
+| 69 | Color theme | One `ColorTheme` property instead of a light and a dark theme. Its default comes from the resource `CodeEditorColorTheme`, which the library defines per theme variant (Light+, Dark+) and apps override in their theme dictionaries. `CodeEditorTheme` is created in XAML with `Source` | Avalonia's own way: editors follow the variant through resource lookup, so `ThemeVariantScope` and custom variants need no API of ours. `Theme` is taken by Avalonia's control themes. Product owner's choice |
+| 70 | What the color theme styles | The color theme styles the text area only. Completion, hover, signature help, the search bar and scroll bars take the app's look, from its flyout, tooltip and input styles; code inside popups keeps the editor's colors and font. One include, `CodeEditorStyles`, brings the control theme and AvaloniaEdit's styles | Token colors belong to their theme's background, as in AvaloniaEdit, Monaco and CodeMirror; popups then match Fluent and FluentAvalonia, font, padding and corners included. Product owner's choice |
+| 71 | Errors and hover | Squiggles in the theme's colors; hover shows the diagnostics' messages above the server's Markdown, with code blocks highlighted by the editor's grammar | As in Monaco and CodeMirror. The prototype dropped emphasis and links |
+| 72 | Completion icons | VS Code's codicons as vector shapes, in the theme's `symbolIcon.*` colors. Their CC BY 4.0 credit goes in the package's third-party notices | One icon set made for code symbols, with a clear license. Visual Studio's image library has no clear license to redistribute. Product owner's choice |
+| 73 | Scroll bar marks | Marks for errors, warnings and search matches beside the scroll bar are in v1, but designed and added after the core | They add to the API without changing it. Product owner's choice |
 
 ## 4. Lessons from the prototype
 

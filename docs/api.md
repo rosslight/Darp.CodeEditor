@@ -1,6 +1,6 @@
 # API draft
 
-Status: draft for discussion, 2026-11-04. Every public type and member of the v1 packages is declared, with its
+Status: draft for discussion, 2026-11-05. Every public type and member of the v1 packages is declared, with its
 documentation, but nothing is implemented. [`samples/Darp.CodeEditor.UseCases`](../samples/Darp.CodeEditor.UseCases)
 compiles against the draft: one file per scenario of a host app, each with the questions it raises. Write your own
 scenarios there to try the API.
@@ -36,11 +36,11 @@ if (compilation.Succeeded)
 
 | Package | Public types |
 |---|---|
-| `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorTheme`, `TextRange`, `TextPosition`, `TextSelection`, `Indentation`, `Diagnostic`, `DiagnosticSeverity` |
+| `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorTheme`, `CodeEditorStyles`, `TextRange`, `TextPosition`, `TextSelection`, `Indentation`, `Diagnostic`, `DiagnosticSeverity` |
 | `Darp.CodeEditor.CSharpScript` | `CSharpScriptServer`, `CSharpScriptServerOptions`, `CSharpScriptEnvironment`, `CSharpScriptCompilation`, `CompiledScript` |
 | `Darp.CodeEditor.CSharpScript.Runner` | `CSharpScriptRunner`, `CSharpScriptRunnerOptions`, `CSharpScriptService`, `ScriptBatcher<TItem, TResult>`, `ScriptBatcherOptions`, `ScriptException`, `ScriptRunnerExitedEventArgs`, `ScriptRunnerExitReason` |
 
-27 public types in all. Two more things are public without being types of ours:
+28 public types in all. Three more things are public without being types of ours:
 
 - **The project file.**
   - `CSharpScriptReference="true"` on a package or project reference: scripts may use its assemblies. Publishing copies their DLLs next to the app, NativeAOT apps included.
@@ -50,6 +50,7 @@ if (compilation.Succeeded)
   - its attributes: `[JsonRpcContract]` for the app's services, `[RpcMarshalable]` for handlers, `[GenerateShape]` on both and on the data they exchange;
   - the `IShapeable<T>` constraints on `RunAsync<T>` and `CSharpScriptService.Create<T>`. With them, NativeAOT apps call and copy these types without reflection, and the compiler rejects types without a shape;
   - its exceptions for failed handler calls.
+- **The resource key `CodeEditorColorTheme`**: the color theme of editors that don't set `ColorTheme` (section 2).
 
 ## 2. The editor
 
@@ -61,7 +62,7 @@ rather than its view belong to the document, as in Monaco and CodeMirror.
 |---|---|
 | `Document` | the document the editor shows |
 | `IsReadOnly`, `WordWrap`, `ShowLineNumbers` | view settings; line numbers are on by default |
-| `LightTheme`, `DarkTheme` | the colors for the app's light and dark theme variant |
+| `ColorTheme` | the colors of the text area; by default from the `CodeEditorColorTheme` resource, so it follows the theme variant |
 | `FontFamily`, `FontSize` | inherited from Avalonia; the default font is a monospace one, not the app's |
 | `Selection` | a `TextSelection`: anchor and caret, so a backward selection keeps its direction |
 | `CaretPosition` | the caret's line and column, read-only and bindable, for status bars |
@@ -69,13 +70,65 @@ rather than its view belong to the document, as in Monaco and CodeMirror.
 | `OpenSearch(replace)` | the search or replace bar, for a Find button; Ctrl+F and Ctrl+H open them too |
 
 **Built in, with no settings:** current-line highlight, bracket matching, auto-closing brackets and quotes,
-auto-indent, whitespace shown inside the selection, scrolling past the last line.
+auto-indent, whitespace shown inside the selection, scrolling past the last line, and the look of errors, hover and
+completion below.
 
 **Keys:** the editor handles only its own: editing, navigation, search (Ctrl+F, Ctrl+H, F3), completion (Ctrl+Space),
 comments (Ctrl+/) and indentation (Tab, Shift+Tab). Other keys, such as F5 or Ctrl+S, reach the app's key bindings.
 
 **Indentation** belongs to the document (`CodeDocument.Indentation`), so all editors of one document agree. It starts
 with the language's default, such as 2 spaces for YAML, and is not detected from the text.
+
+**Look.** The text and everything around it are styled differently, as in Monaco and CodeMirror:
+
+- **The text area** takes its colors from `ColorTheme`, a VS Code color theme: syntax and language-server colors,
+  background, selection, caret, line numbers, current line, search and bracket matches, squiggles. Token colors are
+  made for their theme's background, so they come together.
+- **Everything around the text** takes the app's look: completion, hover and signature help look like the app's
+  flyouts and tooltips, and the search bar and scroll bars are the app's controls. They match Avalonia's Fluent
+  theme, FluentAvalonia or any other theme, font, padding and corners included. Code inside popups keeps the editor's
+  colors, background and font.
+- **Popups stay inside the window**, as in the prototype (#19).
+
+Apps add one line to `App.axaml`, after their theme. It brings AvaloniaEdit's styles along:
+
+```xml
+<Application.Styles>
+  <FluentTheme />
+  <ce:CodeEditorStyles />
+</Application.Styles>
+```
+
+`ColorTheme` comes from the resource `CodeEditorColorTheme`, which `CodeEditorStyles` defines as Light+ for light
+theme variants and Dark+ for dark ones. An app with its own colors overrides it where Avalonia's theme resources go:
+
+```xml
+<ResourceDictionary.ThemeDictionaries>
+  <ResourceDictionary x:Key="Dark">
+    <ce:CodeEditorTheme x:Key="CodeEditorColorTheme" Source="avares://MyApp/Themes/brand-dark.json" />
+  </ResourceDictionary>
+  <ResourceDictionary x:Key="Light">
+    <ce:CodeEditorTheme x:Key="CodeEditorColorTheme" Source="avares://MyApp/Themes/brand-light.json" />
+  </ResourceDictionary>
+</ResourceDictionary.ThemeDictionaries>
+```
+
+So editors follow the app's theme variant through Avalonia's resource lookup, inside a `ThemeVariantScope` too. A
+custom variant gets the colors of the variant it inherits from, unless the app adds an entry for it: FluentAvalonia's
+high contrast inherits from Light, so it shows Light+ without one. To make one editor dark in a light app, wrap it in a
+`ThemeVariantScope`: its popups turn dark too. Setting `ColorTheme` on the editor changes only the text area.
+
+- **Errors:** squiggles in the theme's error, warning and info colors. Hovering shows the messages above the
+  server's information.
+- **Hover:** Markdown, with emphasis, inline code, lists and links. Code blocks are highlighted with the editor's
+  grammar and colors.
+- **Completion icons:** VS Code's codicons, drawn as vector shapes in the theme's `symbolIcon.*` colors, as in VS
+  Code. Their designs are licensed CC BY 4.0: the package lists them in its third-party notices, and apps that show
+  notices of their own include that entry.
+
+**Before v1, additive:** marks beside the scroll bar for errors, warnings and search matches, as Monaco's overview
+ruler shows them. Scripts of 5,000 lines need them to find errors outside the view. They add to the API without
+changing it, so they wait until the core works.
 
 **Later, when asked for:** whitespace display modes, rulers, folding, a minimap, placeholder text for empty
 documents, indentation detected from the text, markers that the app adds, and a view state the app can store.
@@ -140,8 +193,9 @@ proxies, and those can only turn a script's failure into one of these.
 - **A language service interface.** The prototype's public `ILanguageService` is gone: every language comes through a
   language server. An in-process service could come back later, if a language needs one.
 - **AvaloniaEdit.** `CodeEditor` wraps AvaloniaEdit's editor instead of deriving from it, so AvaloniaEdit's API is not
-  part of ours.
-- **Popups and policies.** Completion, hover and signature help have no settings yet. Restart and hang timeouts keep
+  part of ours. `CodeEditorStyles` includes its styles.
+- **Popups and policies.** Completion, hover and signature help have no settings yet, and their parts have no style
+  classes for apps to restyle. They take the app's look instead. Restart and hang timeouts keep
   the prototype's defaults.
 - **Timings.** The prototype's timing properties and events become `ActivitySource` and `Meter` instruments named
   `Darp.CodeEditor`, which benchmarks and `dotnet-counters` read. They carry document versions, queue ages and
@@ -166,7 +220,7 @@ Nobody has done it here yet.
 ## 10. Open questions
 
 Question numbers continue the decision log in [design.md](design.md). Decisions taken in the API discussion are
-recorded there too (#64–#67).
+recorded there too (#64–#73).
 
 - **Q55 – Logging.**
   - **Draft:** takes `Microsoft.Extensions.Logging.ILogger`.

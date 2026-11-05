@@ -1,0 +1,47 @@
+<!--
+  Scenario: the app's styles. Editors follow the app's light and dark switch on their own, with VS Code's Light+ and
+  Dark+. This app has its own editor colors instead: VS Code theme files that it ships as Avalonia resources, one per
+  theme variant. Popups, the search bar and scroll bars take the app's look, so they match FluentTheme here, and
+  FluentAvalonia in an app that uses it.
+
+  - The override goes where Avalonia's theme resources go: the app's theme dictionaries. A custom theme variant gets
+    the colors of the variant it inherits from, unless it has an entry of its own here.
+  - Fonts come from the editor's FontFamily and FontSize, so one style sets them for every editor.
+
+  Questions:
+  - Do the apps ship their own theme files, or are Light+ and Dark+ enough?
+-->
+<Application
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ce="using:Darp.CodeEditor"
+    x:Class="UseCases.Themes.App"
+    RequestedThemeVariant="Default"
+>
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <ce:CodeEditorTheme
+                        x:Key="CodeEditorColorTheme"
+                        Source="avares://Darp.CodeEditor.UseCases/Themes/brand-light.json"
+                    />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <ce:CodeEditorTheme
+                        x:Key="CodeEditorColorTheme"
+                        Source="avares://Darp.CodeEditor.UseCases/Themes/brand-dark.json"
+                    />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+
+    <Application.Styles>
+        <FluentTheme />
+        <ce:CodeEditorStyles />
+        <Style Selector="ce|CodeEditor">
+            <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, monospace" />
+        </Style>
+    </Application.Styles>
+</Application>
