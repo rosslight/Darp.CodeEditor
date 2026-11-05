@@ -1,5 +1,4 @@
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Engines;
 using Darp.CodeEditor.Loading;
 
 namespace Darp.CodeEditor.Benchmarks;
@@ -8,7 +7,7 @@ namespace Darp.CodeEditor.Benchmarks;
 /// Loading each built-in language and theme into a new instance: reading and parsing its files. Each launch is a new
 /// process, and its first load is measured, so the numbers include the first use of the parsers.
 /// </summary>
-[SimpleJob(RunStrategy.ColdStart, launchCount: 10, warmupCount: 0, iterationCount: 1)]
+[ColdStart]
 public class LoadBenchmarks
 {
     private static readonly string[] s_yamlIncludes = ["yaml-1.0", "yaml-1.1", "yaml-1.2", "yaml-1.3", "yaml-embedded"];
