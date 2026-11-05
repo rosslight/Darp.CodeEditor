@@ -176,17 +176,63 @@ public sealed class CodeEditorTests(UiFixture ui)
             // From the middle of the view to past its right edge: narrower than the view.
             int columns = (int)(textView.Bounds.Width / textView.WideSpaceWidth);
             var range = TextRange.FromBounds(columns / 2, columns + 5);
-            X(range.Start).ShouldBeLessThan(textView.Bounds.Width);
-            X(range.End).ShouldBeGreaterThan(textView.Bounds.Width);
+            X(textView, range.Start).ShouldBeLessThan(textView.Bounds.Width);
+            X(textView, range.End).ShouldBeGreaterThan(textView.Bounds.Width);
 
             window.Editor.ScrollTo(range);
             window.Layout();
 
-            X(range.Start).ShouldBeGreaterThanOrEqualTo(textView.ScrollOffset.X);
-            X(range.End).ShouldBeLessThanOrEqualTo(textView.ScrollOffset.X + textView.Bounds.Width);
+            ShouldShowAcross(textView, range.Start);
+            ShouldShowAcross(textView, range.End);
+        });
 
-            double X(int offset) =>
-                textView.GetVisualPosition(new TextViewPosition(1, offset + 1), VisualYPosition.LineTop).X;
+    [Fact]
+    public Task ScrollTo_shows_from_its_start_a_range_over_lines_wider_than_the_view() =>
+        _ui.Run(() =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, new string('x', 300) + "\nabc");
+            using var window = new EditorWindow(new CodeEditor { Document = document }, width: 400);
+            window.Layout();
+
+            // From column 101 of the long line to the start of the next one: its ends alone would scroll left.
+            window.Editor.ScrollTo(TextRange.FromBounds(100, 302));
+            window.Layout();
+
+            ShouldShowAcross(window.TextView, 100);
+        });
+
+    [Fact]
+    public Task ScrollTo_brings_a_range_inside_a_wrapped_line_into_view() =>
+        _ui.Run(() =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, new string('x', 2_000) + "\nend");
+            using var window = new EditorWindow(new CodeEditor { Document = document, WordWrap = true }, width: 400);
+            window.Layout();
+            TextView textView = window.TextView;
+
+            window.Editor.ScrollTo(new TextRange(1_900, 5));
+            window.Layout();
+
+            textView.ScrollOffset.X.ShouldBe(0);
+            Y(textView, 1_900)
+                .ShouldBeInRange(textView.ScrollOffset.Y, textView.ScrollOffset.Y + textView.Bounds.Height);
+        });
+
+    [Fact]
+    public Task ScrollTo_finds_a_range_after_tabs_where_they_draw_it() =>
+        _ui.Run(() =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, new string('\t', 30) + "value\n");
+            using var window = new EditorWindow(new CodeEditor { Document = document }, width: 400);
+            window.Layout();
+            // Thirty tabs of four columns: as characters, "value" would be inside the view.
+            X(window.TextView, 30).ShouldBeGreaterThan(window.TextView.Bounds.Width);
+
+            window.Editor.ScrollTo(new TextRange(30, 5));
+            window.Layout();
+
+            ShouldShowAcross(window.TextView, 30);
+            ShouldShowAcross(window.TextView, 35);
         });
 
     [Fact]
@@ -573,6 +619,21 @@ public sealed class CodeEditorTests(UiFixture ui)
         TextView textView = window.TextView;
         return textView.GetDocumentLineByVisualTop(textView.ScrollOffset.Y + textView.Bounds.Height / 2).LineNumber;
     }
+
+    /// <summary>Where <paramref name="textView"/> draws <paramref name="offset"/>, across its document.</summary>
+    private static double X(TextView textView, int offset) =>
+        textView
+            .GetVisualPosition(new TextViewPosition(textView.Document.GetLocation(offset)), VisualYPosition.LineTop)
+            .X;
+
+    /// <summary>Where <paramref name="textView"/> draws the top of <paramref name="offset"/>'s row, down its document.</summary>
+    private static double Y(TextView textView, int offset) =>
+        textView
+            .GetVisualPosition(new TextViewPosition(textView.Document.GetLocation(offset)), VisualYPosition.LineTop)
+            .Y;
+
+    private static void ShouldShowAcross(TextView textView, int offset) =>
+        X(textView, offset).ShouldBeInRange(textView.ScrollOffset.X, textView.ScrollOffset.X + textView.Bounds.Width);
 
     private static IClipboard Clipboard(EditorWindow window) =>
         window.Window.Clipboard ?? throw new InvalidOperationException("The window has no clipboard.");

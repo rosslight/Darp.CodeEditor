@@ -591,28 +591,41 @@ public class CodeEditor : TemplatedControl
     {
         TextView textView = part.TextArea.TextView;
         TextDocument buffer = textView.Document;
-        Point start = textView.GetVisualPosition(
-            new TextViewPosition(buffer.GetLocation(range.Start)),
-            VisualYPosition.LineTop
-        );
-        Point end = textView.GetVisualPosition(
-            new TextViewPosition(buffer.GetLocation(range.End)),
-            VisualYPosition.LineBottom
-        );
+        Point start = Position(range.Start, VisualYPosition.LineTop);
+        double bottom = Position(range.End, VisualYPosition.LineBottom).Y;
         Vector offset = textView.ScrollOffset;
         Size view = textView.Bounds.Size;
-        SetScrollOffset(
-            part,
-            new Vector(
-                Math.Max(0, OffsetToShow(Math.Min(start.X, end.X), Math.Max(start.X, end.X), offset.X, view.Width)),
-                Math.Max(0, OffsetToShow(start.Y, end.Y, offset.Y, view.Height))
-            )
-        );
+        double y = OffsetToShow(start.Y, bottom, start.Y, offset.Y, view.Height);
+        // Lines that wrap never scroll across. A range taller than the view shows from its start, so only one that
+        // fits needs the left and right edges of every line it covers.
+        (double left, double right) = part.WordWrap || bottom - start.Y > view.Height ? (start.X, start.X) : Edges();
+        double x = part.WordWrap ? 0 : OffsetToShow(left, right, start.X, offset.X, view.Width);
+        SetScrollOffset(part, new Vector(Math.Max(0, x), Math.Max(0, y)));
 
-        // The offset that shows [from, to] in a view of length at offset: the same when it shows already.
-        static double OffsetToShow(double from, double to, double offset, double length) =>
-            from >= offset && to <= offset + length ? offset
-            : to - from > length ? from
+        Point Position(int textOffset, VisualYPosition at) =>
+            textView.GetVisualPosition(new TextViewPosition(buffer.GetLocation(textOffset)), at);
+
+        // From the range's start to the end of its line, the whole of each line between, and the last line to the
+        // range's end.
+        (double Left, double Right) Edges()
+        {
+            (double leftmost, double rightmost) = (start.X, start.X);
+            DocumentLine last = buffer.GetLineByOffset(range.End);
+            for (DocumentLine line = buffer.GetLineByOffset(range.Start); ; line = line.NextLine)
+            {
+                double from = Position(Math.Max(range.Start, line.Offset), VisualYPosition.LineTop).X;
+                double to = Position(Math.Min(range.End, line.EndOffset), VisualYPosition.LineTop).X;
+                (leftmost, rightmost) = (Math.Min(leftmost, from), Math.Max(rightmost, to));
+                if (line == last)
+                    return (leftmost, rightmost);
+            }
+        }
+
+        // The offset that shows [from, to] in a view of the length: the same when it shows already, centered when it
+        // fits, and from the range's start when it does not.
+        static double OffsetToShow(double from, double to, double rangeStart, double current, double length) =>
+            from >= current && to <= current + length ? current
+            : to - from > length ? rangeStart
             : (from + to - length) / 2;
     }
 
