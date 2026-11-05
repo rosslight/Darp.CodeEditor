@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
@@ -466,6 +467,53 @@ public sealed class CodeEditorTests(UiFixture ui)
             editor.Document.ShouldBeSameAs(document);
             TopLine(window).ShouldBe(top + 1);
             editor.CaretPosition.ShouldBe(new TextPosition(151, 3));
+        });
+
+    [Fact]
+    public Task A_selection_set_out_of_the_visual_tree_after_edits_is_the_one_shown_on_return() =>
+        _ui.Run(() =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "one two three");
+            var editor = new CodeEditor { Document = document };
+            var host = new ContentControl { Content = editor };
+            using var window = new EditorWindow(editor, host);
+            editor.Selection = new TextSelection(4, 7);
+            host.Content = null;
+            window.Layout();
+
+            document.Replace(new TextRange(0, 0), "zero ");
+            // "three", in the text as it is now: the edit before must not move it again.
+            editor.Selection = new TextSelection(13, 18);
+            host.Content = editor;
+            window.Layout();
+
+            editor.Selection.ShouldBe(new TextSelection(13, 18));
+            EditorWindow.PartOf(editor).TextArea.Caret.Offset.ShouldBe(18);
+        });
+
+    [Fact]
+    public Task A_new_template_shows_the_document_where_the_editor_was() =>
+        _ui.Run(() =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "one two three");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            CodeEditor editor = window.Editor;
+            editor.Selection = new TextSelection(4, 7);
+            TextEditor before = EditorWindow.PartOf(editor);
+
+            editor.Template = new FuncControlTemplate<CodeEditor>(
+                (_, scope) => new TextEditor { Name = "PART_TextEditor" }.RegisterInNameScope(scope)
+            );
+            window.Layout();
+            editor.Focus();
+            window.Type("2");
+
+            TextEditor after = EditorWindow.PartOf(editor);
+            after.ShouldNotBeSameAs(before);
+            before.Document.ShouldBeNull();
+            after.Document.ShouldBeSameAs(document.Buffer);
+            document.Text.ShouldBe("one 2 three");
+            editor.Selection.ShouldBe(new TextSelection(5));
         });
 
     /// <summary>

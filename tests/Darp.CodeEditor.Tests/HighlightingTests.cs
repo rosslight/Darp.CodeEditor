@@ -17,8 +17,11 @@ public sealed class HighlightingTests(UiFixture ui)
     private static readonly Color s_number = Color.Parse("#098658");
     private static readonly Color s_keyword = Color.Parse("#0000FF");
 
-    /// <summary>The Light+ color of XML's tag names.</summary>
+    /// <summary>The Light+ color of XML's tag names and YAML's keys.</summary>
     private static readonly Color s_tag = Color.Parse("#800000");
+
+    /// <summary>The Dark+ color of JSON's property names.</summary>
+    private static readonly Color s_darkPropertyName = Color.Parse("#9CDCFE");
 
     private readonly UiFixture _ui = ui;
 
@@ -26,17 +29,15 @@ public sealed class HighlightingTests(UiFixture ui)
     public async Task Tokenizing_stops_between_lines_once_the_text_changed()
     {
         TextMateGrammar grammar = await JsonGrammar();
+        string[] texts = ["{", SlowLine, SlowLine, SlowLine, SlowLine, "  \"after\": 2", "}"];
         using var changed = new CancellationTokenSource();
-        await changed.CancelAsync();
+        // During the slow lines, which take the background's time limit of 50 ms each.
+        changed.CancelAfter(TimeSpan.FromMilliseconds(10));
 
-        LineResult[] lines = BackgroundTextMateHighlighter.Tokenize(
-            grammar,
-            null,
-            ["{", "  \"a\": 1", "}"],
-            changed.Token
-        );
+        LineResult[] lines = BackgroundTextMateHighlighter.Tokenize(grammar, null, texts, changed.Token);
 
-        lines.ShouldBeEmpty();
+        lines.Length.ShouldBeInRange(2, texts.Length - 1);
+        lines[0].Tokens.ShouldNotBeNull();
     }
 
     [Fact]
@@ -126,14 +127,57 @@ public sealed class HighlightingTests(UiFixture ui)
             });
 
             window.Editor.ScrollTo(new TextRange(document.CurrentSnapshot.GetOffset(new TextPosition(4000, 1)), 0));
-            // The first pass reaches line 4,000, which overruns its budget, and ends there.
-            window.Window.UpdateLayout();
-            window.ColorsOfLine(4001).ShouldNotContain(s_keyword);
-            // The next pass, without the dispatcher's jobs, so without the background's results.
-            window.TextView.Redraw();
-            window.Window.UpdateLayout();
+            // Layout passes without the dispatcher's jobs, so without the background's results. The pass that reaches
+            // line 4,000 overruns its budget and ends there; the passes after it go on below. On a machine fast enough
+            // for that search to fit in the budget, no pass overruns.
+            for (int pass = 0; pass < 5 && !window.ColorsOfLine(4001).Contains(s_keyword); pass++)
+            {
+                window.TextView.Redraw();
+                window.Window.UpdateLayout();
+            }
 
             window.ColorsOfLine(4001).ShouldContain(s_keyword);
+        });
+
+    [Fact]
+    public Task A_document_shown_while_the_previous_ones_grammar_loads_keeps_its_own_colors() =>
+        _ui.Run(async () =>
+        {
+            var editor = new CodeEditor { Document = CodeDocument.Create(CodeLanguage.Json, Texts.Json(100)) };
+            using var window = new EditorWindow(editor);
+
+            // JSON's grammar loads in the background, and no job has run since: its result is still to come.
+            editor.Document = CodeDocument.Create(CodeLanguage.Yaml, Texts.Yaml(100));
+
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return window.ColorsOfLine(1).Contains(s_tag);
+            });
+            await Task.Delay(200);
+            window.Render();
+            window.ColorsOfLine(1).ShouldContain(s_tag);
+        });
+
+    [Fact]
+    public Task A_theme_set_while_the_grammar_loads_keeps_its_own_colors() =>
+        _ui.Run(async () =>
+        {
+            var editor = new CodeEditor { Document = CodeDocument.Create(CodeLanguage.Json, Texts.Json(100)) };
+            using var window = new EditorWindow(editor);
+
+            // The grammar loads with Light+ in the background, and no job has run since.
+            editor.ColorTheme = CodeEditorColorTheme.DarkPlus;
+
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return window.ColorsOfLine(2).Contains(s_darkPropertyName);
+            });
+            await Task.Delay(200);
+            window.Render();
+            window.ColorsOfLine(2).ShouldContain(s_darkPropertyName);
+            window.ColorsOfLine(2).ShouldNotContain(s_propertyName);
         });
 
     [Fact]
