@@ -88,14 +88,21 @@ public sealed class HighlightingTests(UiFixture ui)
     public Task A_new_editor_of_5000_lines_shows_syntax_colors_in_its_pixels(string language) =>
         _ui.Run(async () =>
         {
-            (CodeLanguage codeLanguage, string text, Color syntax) =
+            (CodeLanguage codeLanguage, string text, string key, Color syntax) =
                 language == "json"
-                    ? (CodeLanguage.Json, Texts.Json(5000), s_propertyName)
-                    : (CodeLanguage.Yaml, Texts.Yaml(5000), s_tag);
+                    ? (CodeLanguage.Json, Texts.Json(5000), "\"key", s_propertyName)
+                    : (CodeLanguage.Yaml, Texts.Yaml(5000), "key", s_tag);
             using var window = new EditorWindow(new CodeEditor { Document = CodeDocument.Create(codeLanguage, text) });
 
-            // Some glyphs' worth of pixels: anti-aliasing blends the edges of the rest.
-            await Wait.UntilAsync(() => window.RenderAndCountPixels(syntax) > 100);
+            // Every visible line with a key shows it in the key's color, and the frame has it in its pixels: some
+            // glyphs' worth, as anti-aliasing blends the edges of the rest.
+            await Wait.UntilAsync(() => window.RenderAndCountPixels(syntax) > 100 && EveryLineShows(key, syntax));
+
+            bool EveryLineShows(string part, Color color) =>
+                window.TextView.VisualLines.All(line =>
+                    !window.TextView.Document.GetText(line.FirstDocumentLine).Contains(part, StringComparison.Ordinal)
+                    || window.ColorsOfLine(line.FirstDocumentLine.LineNumber).Contains(color)
+                );
         });
 
     /// <summary>

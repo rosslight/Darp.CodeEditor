@@ -49,7 +49,11 @@ public class FirstFrameBenchmarks
     {
         var editor = new CodeEditor { Document = _document };
         _window = HeadlessEditor.Show(editor);
-        HeadlessEditor.RenderUntilColored(_window, editor);
+        HeadlessEditor.RenderUntilColored(
+            _window,
+            editor,
+            Language == "json" ? HeadlessEditor.JsonKey : HeadlessEditor.YamlKey
+        );
     }
 
     [IterationCleanup]
@@ -73,7 +77,7 @@ public class TypingBenchmarks
 
     /// <summary>In the middle of 5,000 lines of JSON, at the start of a key.</summary>
     [GlobalSetup(Target = nameof(KeystrokeIn5000Lines))]
-    public void ShowJson() => Show(HeadlessEditor.Json(5000), new TextPosition(2500, 4));
+    public void ShowJson() => Show(HeadlessEditor.Json(5000), new TextPosition(2500, 4), HeadlessEditor.JsonKey);
 
     /// <summary>
     /// On a line of 20,000 characters, a JSON array that runs out of the background's time limit, near its start:
@@ -83,7 +87,9 @@ public class TypingBenchmarks
     public void ShowLongLine() =>
         Show(
             "{\n  \"long\": [" + string.Concat(Enumerable.Repeat("1, ", 6_666)) + "1],\n  \"after\": 1\n}",
-            new TextPosition(2, 100)
+            new TextPosition(2, 100),
+            // The long line keeps no colors, and the next one starts from the start of the grammar.
+            HeadlessEditor.Expect("\"after\"", Color.Parse("#A31515"))
         );
 
     [Benchmark]
@@ -95,13 +101,13 @@ public class TypingBenchmarks
     [GlobalCleanup]
     public void Close() => _window?.Close();
 
-    private void Show(string json, TextPosition caret)
+    private void Show(string json, TextPosition caret, HeadlessEditor.Expected colored)
     {
         HeadlessEditor.SetUpApp();
         CodeDocument document = CodeDocument.Create(CodeLanguage.Json, json);
         var editor = new CodeEditor { Document = document };
         _window = HeadlessEditor.Show(editor);
-        HeadlessEditor.RenderUntilColored(_window, editor);
+        HeadlessEditor.RenderUntilColored(_window, editor, colored);
         editor.Selection = new TextSelection(document.CurrentSnapshot.GetOffset(caret));
         editor.Focus();
     }
@@ -144,7 +150,7 @@ public class ScrollingBenchmarks
         _document = CodeDocument.Create(CodeLanguage.Json, HeadlessEditor.Json(5000));
         var editor = new CodeEditor { Document = _document };
         _window = HeadlessEditor.Show(editor);
-        HeadlessEditor.RenderUntilColored(_window, editor);
+        HeadlessEditor.RenderUntilColored(_window, editor, HeadlessEditor.JsonKey);
         editor.Focus();
     }
 
@@ -198,18 +204,29 @@ internal static class HeadlessEditor
         return window;
     }
 
-    /// <summary>Renders frames until one shows the editor's visible lines in syntax colors; fails after 10 seconds.</summary>
-    public static void RenderUntilColored(Window window, CodeEditor editor)
+    /// <summary>JSON's keys, in Light+.</summary>
+    public static Expected JsonKey { get; } = Expect("\"key", Color.Parse("#0451A5"));
+
+    /// <summary>YAML's keys, in Light+.</summary>
+    public static Expected YamlKey { get; } = Expect("key", Color.Parse("#800000"));
+
+    public static Expected Expect(string text, Color color) => new(text, color);
+
+    /// <summary>
+    /// Renders frames until one shows every visible line that contains the expected text in the expected color; fails
+    /// after 10 seconds.
+    /// </summary>
+    public static void RenderUntilColored(Window window, CodeEditor editor, Expected expected)
     {
         long start = Stopwatch.GetTimestamp();
         TextView textView = editor.GetVisualDescendants().OfType<AvaloniaEdit.TextEditor>().Single().TextArea.TextView;
         while (true)
         {
             Render(window);
-            if (TextColors(textView) > 1)
+            if (IsColored(textView, expected))
                 return;
             if (Stopwatch.GetElapsedTime(start) > TimeSpan.FromSeconds(10))
-                throw new InvalidOperationException("The editor shows no syntax colors.");
+                throw new InvalidOperationException("The editor does not show its visible lines in syntax colors.");
         }
     }
 
@@ -223,16 +240,17 @@ internal static class HeadlessEditor
             Enumerable.Range(1, lines).Select(i => i % 10 == 0 ? $"# section {i}\n" : $"key{i}: value {i} # note\n")
         );
 
-    /// <summary>How many text colors the rendered lines use: the default one, and syntax colors.</summary>
-    private static int TextColors(TextView textView) =>
+    private static bool IsColored(TextView textView, Expected expected) =>
         textView.VisualLinesValid
-            ? textView
-                .VisualLines.SelectMany(line => line.TextLines)
-                .SelectMany(line => line.TextRuns)
-                .Select(run => (run.Properties?.ForegroundBrush as ISolidColorBrush)?.Color)
-                .Distinct()
-                .Count()
-            : 0;
+        && textView.VisualLines.Count > 0
+        && textView.VisualLines.All(line =>
+            !textView.Document.GetText(line.FirstDocumentLine).Contains(expected.Text, StringComparison.Ordinal)
+            || line.TextLines.SelectMany(text => text.TextRuns)
+                .Any(run => run.Properties?.ForegroundBrush is ISolidColorBrush brush && brush.Color == expected.Color)
+        );
+
+    /// <summary>The color that a visible line containing <paramref name="Text"/> must show, once colored.</summary>
+    public readonly record struct Expected(string Text, Color Color);
 
     private sealed class EditorApp : Application
     {
