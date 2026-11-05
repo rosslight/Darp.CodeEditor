@@ -53,6 +53,9 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
 
     private string? _filePath;
 
+    /// <summary>Set by <see cref="Dispose"/> on any thread, read by editors on the UI thread.</summary>
+    private volatile bool _isDisposed;
+
     private protected CodeDocument(CodeLanguage language, string text)
     {
         Language = language;
@@ -208,8 +211,28 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     /// </summary>
     public void Dispose()
     {
-        // Without a server and without editors there is nothing to close yet.
+        _isDisposed = true;
+        Disposed?.Invoke(this, EventArgs.Empty);
     }
+
+    /// <summary>
+    /// AvaloniaEdit's buffer, for the editors that show the document. Binds an unbound document to the app's main UI
+    /// thread first: editors work only there.
+    /// </summary>
+    internal TextDocument Buffer
+    {
+        get
+        {
+            VerifyAccess();
+            return _document;
+        }
+    }
+
+    /// <summary>Whether <see cref="Dispose"/> was called. Editors show nothing of a disposed document.</summary>
+    internal bool IsDisposed => _isDisposed;
+
+    /// <summary>Raised by <see cref="Dispose"/>, on the thread that disposes, for the editors that show the document.</summary>
+    internal event EventHandler? Disposed;
 
     /// <summary>
     /// The versions in AvaloniaEdit of <paramref name="snapshot"/> and of the current text, after checking that the
