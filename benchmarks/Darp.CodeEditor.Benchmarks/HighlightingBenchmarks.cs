@@ -57,6 +57,7 @@ public class HighlightingBenchmarks
     /// them. Fails if a line ran out of time.
     /// </summary>
     [Benchmark]
+    [BenchmarkCategory("CI")]
     public int TokenizeAllLinesWarm()
     {
         LineResult[] lines = BackgroundTextMateHighlighter.Tokenize(Grammar, null, _lines, CancellationToken.None);

@@ -40,9 +40,10 @@ jobs:
           dotnet pack "$RUNNER_TEMP/benchmark-baseline/src/Darp.CodeEditor/Darp.CodeEditor.csproj" -c Release \
             -o artifacts/benchmark-baseline -p:Version="$DARP_CODEEDITOR_BASELINE_VERSION"
 
-      # Both versions are measured in one run on the same machine, so that differences between runners cancel out.
+      # Only the benchmarks of the CI category, which track the budgets and the hot paths; the others run locally. Both
+      # versions are measured in one run on the same machine, so that differences between runners cancel out.
       - name: Run benchmarks
-        run: dotnet run -c Release --project benchmarks/Darp.CodeEditor.Benchmarks -- --filter '*' --join
+        run: dotnet run -c Release --project benchmarks/Darp.CodeEditor.Benchmarks -- --anyCategories CI --join
 
       - name: Report
         env:

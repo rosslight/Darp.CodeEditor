@@ -11,6 +11,11 @@ dotnet publish tests/Darp.CodeEditor.Tests -c Release -r linux-x64 -o artifacts/
 artifacts/aot-tests/Darp.CodeEditor.Tests
 ```
 
+## Benchmarks
+
+`dotnet run -c Release --project benchmarks/Darp.CodeEditor.Benchmarks -- --filter '*'` runs all benchmarks. Each pull
+request compares only the `CI` category (`--anyCategories CI`) with its target branch.
+
 ## AvaloniaEdit preview
 
 Until AvaloniaEdit releases the fixes that the editor needs, `Avalonia.AvaloniaEdit` comes from a preview feed on

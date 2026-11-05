@@ -40,6 +40,7 @@ public class FirstFrameBenchmarks
     public void CreateDocument() => _document = CodeDocument.Create(CodeLanguage.Json, HeadlessEditor.Json(5000));
 
     [Benchmark]
+    [BenchmarkCategory("CI")]
     public void FirstColoredFrame()
     {
         var editor = new CodeEditor { Document = _document };
@@ -86,9 +87,11 @@ public class TypingBenchmarks
         );
 
     [Benchmark]
+    [BenchmarkCategory("CI")]
     public void KeystrokeIn5000Lines() => TypeOrDelete();
 
     [Benchmark]
+    [BenchmarkCategory("CI")]
     public void KeystrokeOnA20000CharacterLine() => TypeOrDelete();
 
     [GlobalCleanup]
@@ -150,6 +153,7 @@ public class ScrollingBenchmarks
     }
 
     [Benchmark]
+    [BenchmarkCategory("CI")]
     public void PageDown()
     {
         Window window = _window ?? throw new InvalidOperationException("Not set up.");

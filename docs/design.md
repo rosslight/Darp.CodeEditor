@@ -36,8 +36,8 @@ These are the prototype's requirements; R4 changed with the restart.
 | C# ready | within 1.5 s of a cold start, in JIT apps too |
 | Completion | within 50 ms (p95) once warm, on scripts of 5,000 lines |
 
-The budgets are targets. Benchmarks measure them, and the benchmark comparison of each pull request tracks them; unit
-tests assert no latency (#102).
+The budgets are targets. Benchmarks measure them, and each pull request compares the benchmarks of the `CI` category,
+which track them, with its target branch; unit tests assert no latency (#102).
 
 The first editor of a JIT app takes about 450 ms to its first colors, and about 150 ms with ReadyToRun once the app has
 shown its first window. Almost all of it is Avalonia's and AvaloniaEdit's code running for the first time: a plain
