@@ -5,6 +5,9 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia.Headless" />
+    <!-- The editor benchmarks render their frames, with the app theme that editors are checked against. -->
+    <PackageReference Include="Avalonia.Skia" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
     <PackageReference Include="BenchmarkDotNet" />
   </ItemGroup>
   <!-- Default: benchmark the library in this working tree. -->
