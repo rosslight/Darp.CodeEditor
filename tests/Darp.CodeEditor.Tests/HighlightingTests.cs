@@ -29,15 +29,14 @@ public sealed class HighlightingTests(UiFixture ui)
     public async Task Tokenizing_stops_between_lines_once_the_text_changed()
     {
         TextMateGrammar grammar = await JsonGrammar();
-        string[] texts = ["{", SlowLine, SlowLine, SlowLine, SlowLine, "  \"after\": 2", "}"];
         using var changed = new CancellationTokenSource();
-        // During the slow lines, which take the background's time limit of 50 ms each.
-        changed.CancelAfter(TimeSpan.FromMilliseconds(10));
+        // The text changes as the tokenizer reaches the third line.
+        var lines = new ChangingAt(["{", "  \"a\": 1,", "  \"b\": 2,", "}"], 2, changed);
 
-        LineResult[] lines = BackgroundTextMateHighlighter.Tokenize(grammar, null, texts, changed.Token);
+        LineResult[] done = BackgroundTextMateHighlighter.Tokenize(grammar, null, lines, changed.Token);
 
-        lines.Length.ShouldBeInRange(2, texts.Length - 1);
-        lines[0].Tokens.ShouldNotBeNull();
+        done.Length.ShouldBe(2);
+        done.ShouldAllBe(line => line.Tokens != null);
     }
 
     [Fact]
@@ -284,6 +283,30 @@ public sealed class HighlightingTests(UiFixture ui)
 
     /// <summary>A property of 20,000 characters whose value is an array: tokenizing it takes seconds.</summary>
     private static string SlowLine { get; } = "  \"slow\": [" + string.Concat(Enumerable.Repeat("1, ", 6_666)) + "1],";
+
+    /// <summary>Lines whose text changes, cancelling <paramref name="change"/>, as the tokenizer reaches one of them.</summary>
+    private sealed class ChangingAt(string[] lines, int index, CancellationTokenSource change) : IReadOnlyList<string>
+    {
+        private readonly string[] _lines = lines;
+        private readonly int _index = index;
+        private readonly CancellationTokenSource _change = change;
+
+        public int Count => _lines.Length;
+
+        public string this[int i] => _lines[i];
+
+        public IEnumerator<string> GetEnumerator()
+        {
+            for (int i = 0; i < _lines.Length; i++)
+            {
+                if (i == _index)
+                    _change.Cancel();
+                yield return _lines[i];
+            }
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
 
     private static async Task<TextMateGrammar> JsonGrammar()
     {

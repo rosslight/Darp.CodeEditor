@@ -167,11 +167,11 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
     public static LineResult[] Tokenize(
         TextMateGrammar grammar,
         IStateStack? state,
-        string[] texts,
+        IReadOnlyList<string> texts,
         CancellationToken cancellationToken
     )
     {
-        var results = new List<LineResult>(texts.Length);
+        var results = new List<LineResult>(texts.Count);
         foreach (string text in texts)
         {
             if (cancellationToken.IsCancellationRequested)
