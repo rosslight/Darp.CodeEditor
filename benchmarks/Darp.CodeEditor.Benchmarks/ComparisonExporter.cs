@@ -31,7 +31,7 @@ internal sealed class ComparisonExporter : ExporterBase
 
         logger.WriteLine(Summarize(comparisons));
         logger.WriteLine(
-            "Time: 95% confidence intervals of three processes' means, with a 10% margin. Cold-start allocations are not compared."
+            "Time: 95% confidence intervals of the process means, with at least three launches and a 10% margin. Cold-start allocations are not compared."
         );
         logger.WriteLine();
         logger.WriteLine("| Benchmark | Baseline | Current | Change | Time | Allocated |");
