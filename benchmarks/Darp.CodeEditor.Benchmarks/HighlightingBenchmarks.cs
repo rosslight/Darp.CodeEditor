@@ -1,0 +1,108 @@
+// Left out of the baseline's build while the target branch has no highlighter: see NotInBaselineAttribute.
+#if !BENCHMARK_BASELINE
+using BenchmarkDotNet.Attributes;
+using Darp.CodeEditor.Highlighting;
+using Darp.CodeEditor.Loading;
+using TextMateSharp.Grammars;
+
+namespace Darp.CodeEditor.Benchmarks;
+
+/// <summary>
+/// TextMate highlighting of 5,000 lines with a grammar whose expressions are compiled: the background's throughput,
+/// and the UI thread's work for one screen.
+/// </summary>
+[MemoryDiagnoser]
+[NotInBaseline]
+public class HighlightingBenchmarks
+{
+    private const int Lines = 5000;
+
+    /// <summary>About what an editor shows at once.</summary>
+    private const int ScreenLines = 50;
+
+    private static readonly TimeSpan s_frameBudget = TimeSpan.FromMilliseconds(4);
+
+    private TextMateGrammar? _grammar;
+    private string[] _lines = [];
+
+    /// <summary>The state at the end of the line above the screen, in the middle of the text.</summary>
+    private IStateStack? _screenStart;
+
+    [Params("json", "yaml")]
+    public string Language { get; set; } = "json";
+
+    [GlobalSetup]
+    public void LoadGrammar()
+    {
+        (CodeLanguage language, string text) =
+            Language == "json" ? (CodeLanguage.Json, Json()) : (CodeLanguage.Yaml, Yaml());
+        ColorThemeFile theme =
+            CodeEditorColorTheme.LightPlus.Loaded.GetAwaiter().GetResult()
+            ?? throw new InvalidOperationException("Light+ did not load.");
+        TextMateGrammar grammar = TextMateGrammar.Load(
+            theme,
+            language.Loaded.GetAwaiter().GetResult().Grammar
+                ?? throw new InvalidOperationException($"{Language} did not load.")
+        );
+        _lines = text.Split('\n');
+        // Compiles the grammar's expressions, as the first screen does when a grammar loads.
+        LineResult[] all = BackgroundTextMateHighlighter.Tokenize(grammar, null, _lines, CancellationToken.None);
+        if (all.Length != _lines.Length || all.Any(line => line.Tokens is null))
+            throw new InvalidOperationException($"{Language} did not tokenize every line.");
+        _screenStart = all[Lines / 2 - 1].EndState;
+        _grammar = grammar;
+    }
+
+    private TextMateGrammar Grammar => _grammar ?? throw new InvalidOperationException("Not set up.");
+
+    /// <summary>The background's work: all 5,000 lines, one after another, as requests tokenize them.</summary>
+    [Benchmark]
+    public int TokenizeInBackground() =>
+        BackgroundTextMateHighlighter.Tokenize(Grammar, null, _lines, CancellationToken.None).Length;
+
+    /// <summary>The UI thread's work for one screen of invalid lines, each from the state the line above ends in.</summary>
+    [Benchmark]
+    public int TokenizeScreenOnUiThread()
+    {
+        TextMateGrammar grammar = Grammar;
+        IStateStack? state = _screenStart;
+        int tokens = 0;
+        for (int i = Lines / 2; i < Lines / 2 + ScreenLines; i++)
+        {
+            if (!grammar.TryEnterOnUiThread(s_frameBudget))
+                throw new InvalidOperationException("The grammar was busy.");
+            try
+            {
+                ITokenizeLineResult2 result = grammar.Grammar.TokenizeLine2(
+                    new LineText(_lines[i].AsMemory()),
+                    state,
+                    s_frameBudget
+                );
+                state = result.RuleStack;
+                tokens += result.Tokens.Length;
+            }
+            finally
+            {
+                grammar.ExitOnUiThread();
+            }
+        }
+        return tokens;
+    }
+
+    private static string Json() =>
+        "{\n"
+        + string.Concat(Enumerable.Range(2, Lines - 3).Select(i => $"  \"key{i}\": [\"value {i}\", {i}, true],\n"))
+        + "  \"end\": null\n}";
+
+    private static string Yaml() =>
+        string.Concat(
+            Enumerable
+                .Range(1, Lines)
+                .Select(i =>
+                    i % 10 == 0
+                        ? $"# section {i}" + (i < Lines ? "\n" : "")
+                        : $"key{i}: value {i} # note" + (i < Lines ? "\n" : "")
+                )
+        );
+}
+#endif

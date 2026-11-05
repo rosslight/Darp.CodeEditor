@@ -11,7 +11,10 @@
   <ItemGroup Condition="'$(DarpCodeEditorBaselineVersion)' == ''">
     <ProjectReference Include="..\..\src\Darp.CodeEditor\Darp.CodeEditor.csproj" />
   </ItemGroup>
-  <!-- Baseline job: benchmark a packed version of the library. -->
+  <!-- Baseline job: benchmark a packed version of the library, without the benchmarks of code it lacks ([NotInBaseline]). -->
+  <PropertyGroup Condition="'$(DarpCodeEditorBaselineVersion)' != ''">
+    <DefineConstants>$(DefineConstants);BENCHMARK_BASELINE</DefineConstants>
+  </PropertyGroup>
   <ItemGroup Condition="'$(DarpCodeEditorBaselineVersion)' != ''">
     <PackageReference Include="Darp.CodeEditor" VersionOverride="$(DarpCodeEditorBaselineVersion)" />
   </ItemGroup>
