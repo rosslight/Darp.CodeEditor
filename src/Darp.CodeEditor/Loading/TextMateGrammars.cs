@@ -1,3 +1,5 @@
+using System.Collections;
+using TextMateSharp.Internal.Grammars.Parser;
 using TextMateSharp.Internal.Grammars.Reader;
 using TextMateSharp.Internal.Types;
 
@@ -28,9 +30,39 @@ internal static class TextMateGrammars
     {
         using var reader = new StreamReader(AssetFiles.Open(file));
         IRawGrammar grammar = GrammarReader.ReadGrammarSync(reader);
-        return string.IsNullOrEmpty(grammar.GetScopeName())
-            ? throw new InvalidDataException("The grammar has no scopeName.")
-            : grammar;
+        if (string.IsNullOrEmpty(grammar.GetScopeName()))
+            throw new InvalidDataException("The grammar has no scopeName.");
+        if (grammar is Raw raw)
+            RemoveCaptureComments(raw);
+        return grammar;
+    }
+
+    private static readonly string[] s_captureKeys = ["captures", "beginCaptures", "endCaptures", "whileCaptures"];
+
+    /// <summary>
+    /// Removes the <c>comment</c> strings that VS Code's YAML grammars put among captures. vscode-textmate skips them;
+    /// TextMateSharp takes every entry for a rule and fails on them.
+    /// </summary>
+    private static void RemoveCaptureComments(Raw rule)
+    {
+        foreach (string key in s_captureKeys)
+        {
+            if (rule.TryGetValue(key, out object? value) && value is Raw captures)
+            {
+                foreach (string comment in captures.Keys.Where(k => captures[k] is not Raw).ToList())
+                    captures.Remove(comment);
+            }
+        }
+        foreach (object value in rule.Values)
+        {
+            if (value is Raw child)
+                RemoveCaptureComments(child);
+            else if (value is IList list)
+            {
+                foreach (Raw item in list.OfType<Raw>())
+                    RemoveCaptureComments(item);
+            }
+        }
     }
 
     private static Lazy<IRawGrammar?> BuiltIn(string fileName)
