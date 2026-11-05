@@ -398,15 +398,13 @@ public sealed class CodeEditorTests(UiFixture ui)
                 );
             }
 
-            // Select All is the editor's own, with the platform's gesture: Ctrl+A, or Cmd+A on macOS.
-            KeyGesture selectAll = Application
-                .Current.ShouldNotBeNull()
-                .PlatformSettings.ShouldNotBeNull()
-                .HotkeyConfiguration.SelectAll[0];
+            // Select All is the editor's own: Ctrl+A, or Cmd+A on macOS, as AvaloniaEdit decides by the operating system.
+            // The headless platform reports Ctrl on every system, so its hotkey settings can't tell.
+            KeyModifiers command = OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control;
 
             window.Press(Key.S, KeyModifiers.Control);
             window.Press(Key.F5);
-            window.Press(selectAll.Key, selectAll.KeyModifiers);
+            window.Press(Key.A, command);
             window.Type("x");
 
             pressed.ShouldBe(["Ctrl+S", "F5"]);
