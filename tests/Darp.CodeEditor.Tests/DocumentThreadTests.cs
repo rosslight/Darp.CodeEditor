@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using Avalonia.Headless.XUnit;
-using Shouldly;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -30,11 +29,11 @@ public sealed class DocumentThreadTests
         document.Undo();
 
         InvalidOperationException exception = await Task.Run(() =>
-            Should.Throw<InvalidOperationException>(() => s_changes[change](document))
+            Assert.ThrowsAny<InvalidOperationException>(() => s_changes[change](document))
         );
 
-        exception.Message.ShouldContain("main UI thread");
-        document.Text.ShouldBe("text");
+        Assert.Contains("main UI thread", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("text", document.Text);
     }
 
     [AvaloniaFact]
@@ -46,8 +45,8 @@ public sealed class DocumentThreadTests
             (document.Text, document.CurrentSnapshot.GetPosition(9))
         );
 
-        text.ShouldBe("line 1\nline 2");
-        position.ShouldBe(new TextPosition(2, 3));
+        Assert.Equal("line 1\nline 2", text);
+        Assert.Equal(new TextPosition(2, 3), position);
     }
 
     [AvaloniaFact]
@@ -59,8 +58,8 @@ public sealed class DocumentThreadTests
 
         document.Replace(new TextRange(1, 0), "b");
 
-        raisedOn.ShouldBe(Thread.CurrentThread);
-        await Task.Run(() => Should.Throw<InvalidOperationException>(() => document.Undo()));
+        Assert.Equal(Thread.CurrentThread, raisedOn);
+        await Task.Run(() => Assert.ThrowsAny<InvalidOperationException>(() => document.Undo()));
     }
 
     [Fact]
@@ -84,6 +83,6 @@ public sealed class DocumentThreadTests
         Task<string> errors = process.StandardError.ReadToEndAsync(timeout.Token);
         await process.WaitForExitAsync(timeout.Token);
 
-        process.ExitCode.ShouldBe(0, $"{await output}\n{await errors}");
+        Assert.True(process.ExitCode == 0, $"Exit code {process.ExitCode}\n{await output}\n{await errors}");
     }
 }

@@ -1,5 +1,4 @@
 using Avalonia.Headless.XUnit;
-using Shouldly;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -14,10 +13,10 @@ public sealed class CodeDocumentTests
 
         document.Replace(new TextRange(0, 3), "first");
 
-        before.GetText().ShouldBe("one\ntwo");
-        before.GetPosition(4).ShouldBe(new TextPosition(2, 1));
-        document.CurrentSnapshot.GetText().ShouldBe("first\ntwo");
-        document.CurrentSnapshot.Version.ShouldBeGreaterThan(before.Version);
+        Assert.Equal("one\ntwo", before.GetText());
+        Assert.Equal(new TextPosition(2, 1), before.GetPosition(4));
+        Assert.Equal("first\ntwo", document.CurrentSnapshot.GetText());
+        Assert.True(document.CurrentSnapshot.Version > before.Version);
     }
 
     [AvaloniaTheory]
@@ -31,50 +30,50 @@ public sealed class CodeDocumentTests
 
         document.Replace(new TextRange(start, length), "x");
 
-        document.Text.ShouldBe(expected);
+        Assert.Equal(expected, document.Text);
     }
 
     [AvaloniaFact]
     public void Each_replace_and_each_text_change_is_one_undo_step()
     {
         CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "abc");
-        document.CanUndo.ShouldBeFalse();
+        Assert.False(document.CanUndo);
 
         document.Replace(new TextRange(1, 1), "XY");
         document.Text = "new";
         document.Undo();
 
-        document.Text.ShouldBe("aXYc");
-        document.CanRedo.ShouldBeTrue();
+        Assert.Equal("aXYc", document.Text);
+        Assert.True(document.CanRedo);
         document.Undo();
-        document.Text.ShouldBe("abc");
-        document.CanUndo.ShouldBeFalse();
+        Assert.Equal("abc", document.Text);
+        Assert.False(document.CanUndo);
         document.Redo();
         document.Redo();
-        document.Text.ShouldBe("new");
-        document.CanRedo.ShouldBeFalse();
+        Assert.Equal("new", document.Text);
+        Assert.False(document.CanRedo);
     }
 
     [AvaloniaFact]
     public void Undoing_back_to_the_unmodified_point_clears_IsModified()
     {
         CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "abc");
-        document.IsModified.ShouldBeFalse();
+        Assert.False(document.IsModified);
 
         document.Replace(new TextRange(3, 0), "d");
-        document.IsModified.ShouldBeTrue();
-        document.MarkUnmodified(document.CurrentSnapshot).ShouldBeTrue();
-        document.IsModified.ShouldBeFalse();
+        Assert.True(document.IsModified);
+        Assert.True(document.MarkUnmodified(document.CurrentSnapshot));
+        Assert.False(document.IsModified);
 
         document.Undo();
-        document.IsModified.ShouldBeTrue();
+        Assert.True(document.IsModified);
         document.Redo();
-        document.IsModified.ShouldBeFalse();
+        Assert.False(document.IsModified);
 
         // Typing the same text again is a change.
         document.Replace(new TextRange(3, 1), "");
         document.Replace(new TextRange(3, 0), "d");
-        document.IsModified.ShouldBeTrue();
+        Assert.True(document.IsModified);
     }
 
     [AvaloniaFact]
@@ -85,9 +84,9 @@ public sealed class CodeDocumentTests
         TextSnapshot saved = document.CurrentSnapshot;
         document.Replace(new TextRange(4, 0), "e");
 
-        document.MarkUnmodified(saved).ShouldBeFalse();
+        Assert.False(document.MarkUnmodified(saved));
 
-        document.IsModified.ShouldBeTrue();
+        Assert.True(document.IsModified);
     }
 
     [AvaloniaFact]
@@ -97,10 +96,10 @@ public sealed class CodeDocumentTests
         TextSnapshot other = CodeDocument.Create(CodeLanguage.PlainText, "abc").CurrentSnapshot;
         TextSnapshot compiled = TextSnapshot.FromString("abc");
 
-        Should.Throw<ArgumentException>(() => document.MarkUnmodified(other));
-        Should.Throw<ArgumentException>(() => document.MarkUnmodified(compiled));
-        Should.Throw<ArgumentException>(() => document.MapToCurrent(other, new TextRange(0, 1)));
-        Should.Throw<ArgumentException>(() => document.MapToCurrent(compiled, new TextRange(0, 1)));
+        Assert.ThrowsAny<ArgumentException>(() => document.MarkUnmodified(other));
+        Assert.ThrowsAny<ArgumentException>(() => document.MarkUnmodified(compiled));
+        Assert.ThrowsAny<ArgumentException>(() => document.MapToCurrent(other, new TextRange(0, 1)));
+        Assert.ThrowsAny<ArgumentException>(() => document.MapToCurrent(compiled, new TextRange(0, 1)));
     }
 
     [AvaloniaFact]
@@ -111,17 +110,17 @@ public sealed class CodeDocumentTests
         var y = new TextRange(8, 1);
 
         document.Replace(new TextRange(0, 0), "// note\n");
-        document.MapToCurrent(analyzed, y).ShouldBe(new TextRange(16, 1));
+        Assert.Equal(new TextRange(16, 1), document.MapToCurrent(analyzed, y));
 
         // Typing at either edge stays outside the range.
         document.Replace(new TextRange(16, 0), "(");
         document.Replace(new TextRange(18, 0), ")");
-        document.MapToCurrent(analyzed, y).ShouldBe(new TextRange(17, 1));
-        document.Text.ShouldBe("// note\nlet x = (y);");
+        Assert.Equal(new TextRange(17, 1), document.MapToCurrent(analyzed, y));
+        Assert.Equal("// note\nlet x = (y);", document.Text);
 
         // Deleting the range's text shrinks it to where it was.
         document.Replace(new TextRange(12, 7), "");
-        document.MapToCurrent(analyzed, y).ShouldBe(new TextRange(12, 0));
+        Assert.Equal(new TextRange(12, 0), document.MapToCurrent(analyzed, y));
     }
 
     [AvaloniaFact]
@@ -136,7 +135,7 @@ public sealed class CodeDocumentTests
         document.Undo();
         document.Redo();
 
-        seen.ShouldBe(["ab", "c", "ab", "c"]);
+        Assert.Equal(["ab", "c", "ab", "c"], seen);
     }
 
     [AvaloniaFact]
@@ -147,25 +146,29 @@ public sealed class CodeDocumentTests
         document.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
 
         document.Replace(new TextRange(1, 0), "b");
-        changed.ShouldBe([nameof(CodeDocument.CanUndo), nameof(CodeDocument.IsModified)], ignoreOrder: true);
+        // In any order: the names are compared sorted, as they are listed.
+        Assert.Equal(
+            [nameof(CodeDocument.CanUndo), nameof(CodeDocument.IsModified)],
+            changed.Order(StringComparer.Ordinal)
+        );
 
         changed.Clear();
         document.Undo();
-        changed.ShouldBe(
-            [nameof(CodeDocument.CanUndo), nameof(CodeDocument.CanRedo), nameof(CodeDocument.IsModified)],
-            ignoreOrder: true
+        Assert.Equal(
+            [nameof(CodeDocument.CanRedo), nameof(CodeDocument.CanUndo), nameof(CodeDocument.IsModified)],
+            changed.Order(StringComparer.Ordinal)
         );
 
         changed.Clear();
         document.Indentation = Indentation.Tabs();
         document.Indentation = Indentation.Tabs();
-        changed.ShouldBe([nameof(CodeDocument.Indentation)]);
+        Assert.Equal([nameof(CodeDocument.Indentation)], changed);
     }
 
     [AvaloniaFact]
     public void Indentation_starts_as_in_VS_Code()
     {
-        CodeDocument.Create(CodeLanguage.Yaml).Indentation.ShouldBe(Indentation.Spaces(2));
-        CodeDocument.Create(CodeLanguage.Json).Indentation.ShouldBe(Indentation.Spaces(4));
+        Assert.Equal(Indentation.Spaces(2), CodeDocument.Create(CodeLanguage.Yaml).Indentation);
+        Assert.Equal(Indentation.Spaces(4), CodeDocument.Create(CodeLanguage.Json).Indentation);
     }
 }

@@ -12,7 +12,6 @@
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.13" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.13" />
-    <PackageVersion Include="Shouldly" Version="4.3.0" />
     <PackageVersion Include="StreamJsonRpc" Version="2.26.150" />
     <PackageVersion Include="TextMateSharp" Version="2.0.4" />
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
