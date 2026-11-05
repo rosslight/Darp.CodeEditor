@@ -356,7 +356,8 @@ public sealed class CSharpScriptException : RemoteInvocationException
 
     /// <summary>
     /// Where in the script it was thrown: the innermost frame in a script's own code, in <see cref="ScriptSnapshot"/>.
-    /// Null when no frame of a script is on the stack, such as for a failure in the session object itself.
+    /// As precise as the script's debug symbols: the start of the statement, not of the expression, that threw. Null
+    /// when no frame of a script is on the stack, such as for a failure in the session object itself.
     /// </summary>
     public TextPosition? ScriptPosition => throw new NotImplementedException();
 

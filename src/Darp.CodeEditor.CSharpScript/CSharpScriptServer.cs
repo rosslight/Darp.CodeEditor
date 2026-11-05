@@ -134,10 +134,14 @@ public sealed class CSharpScriptCompilation<TGlobals>
 }
 
 /// <summary>
-/// A compiled script: the assembly the server emitted for it, with its environment, ready to run as often as needed
-/// in sessions whose object creates <typeparamref name="TGlobals"/>. It needs no server: it stays runnable after the
-/// server restarts or is disposed.
+/// A compiled script: the assembly the server emitted for it, with its debug symbols, its identity and the compiled
+/// text, and its environment, ready to run as often as needed in sessions whose object creates
+/// <typeparamref name="TGlobals"/>. It needs no server: it stays runnable, and its failures still point into its text,
+/// after the server restarts or is disposed.
 /// </summary>
+/// <remarks>
+/// A script's return value is ignored: runs report only how they ended, and results go through the bridge.
+/// </remarks>
 /// <typeparam name="TGlobals">The globals type of the script's kind.</typeparam>
 public sealed class CSharpScriptAssembly<TGlobals>
     where TGlobals : class

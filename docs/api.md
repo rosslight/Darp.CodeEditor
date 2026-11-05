@@ -483,17 +483,22 @@ StreamJsonRpc's error hook, and maps a refused call to `ConnectionLostException`
 
 ## 9. Not proven yet
 
-Decision #52 has the C# server compile and the runner run the result without Roslyn. The prototype's runner ran
-scripts through Roslyn Scripting, so this is new. It needs a spike before the runner is built:
+Decision #52 has the C# server compile and the runner run the result without Roslyn. A spike proved it on
+linux-x64 with .NET 10 and Roslyn 5.9 (#99): a separate Roslyn process emitted scripts with portable PDBs, and a JIT
+runner with no Roslyn assembly loaded ran them:
 
-- emit from the server's snapshot;
-- load the assembly, with a unique identity per compilation;
-- call the script's entry point with its globals;
-- await its result, for synchronous and awaited scripts;
-- map a failure to its position and its compilation's snapshot, also in a callback that an earlier run left.
+- synchronous and awaited scripts, return values, local functions, classes, and the globals' members without
+  qualification, through the script's `Task<object> <Factory>(object[])` entry with the globals, created by the
+  session object's factory;
+- 14 compilations side by side in one runner, the same text compiled twice included;
+- failures mapped to their line and column in the compiled text, also one thrown by a callback that an earlier run
+  left in the session object, after that run's globals were disposed;
+- compiling, warm: about 5 ms for 100 lines and 170 ms for 5,000 lines, cold about 0.6 to 0.75 s; the assembly and
+  PDB of 5,000 lines take about 150 KB; loading and first call about 1 ms, or 14 ms for 5,000 lines;
+- a runner with Roslyn loaded used about 40 MiB more working set after the same scripts.
 
-Roslyn's script assemblies make this possible in principle: they have a factory method that takes the globals.
-Nobody has done it here yet.
+`#line` moved a reported position, so v1 rejects it, like `#r` and `#load`. The real bridge carrying the compiled
+scripts and failures is part of the implementation.
 
 Sessions (section 7, decisions #80 to #86) were tested in spikes: a NativeAOT host with StreamJsonRpc 2.26 and
 generated proxies, and a JIT runner with precompiled classes standing in for scripts. Proven:
@@ -539,6 +544,6 @@ Still open:
 ## 10. Open questions
 
 Question numbers continue the decision log in [design.md](design.md). Decisions taken in the API discussion are
-recorded there too (#61, #64–#98).
+recorded there too (#61, #64–#99).
 
 None right now. Section 9 lists what still needs proving.
