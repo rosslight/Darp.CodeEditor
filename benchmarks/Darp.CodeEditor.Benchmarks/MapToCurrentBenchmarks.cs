@@ -1,4 +1,3 @@
-using Avalonia.Threading;
 using BenchmarkDotNet.Attributes;
 
 namespace Darp.CodeEditor.Benchmarks;
@@ -15,8 +14,7 @@ public class MapToCurrentBenchmarks
 
     public MapToCurrentBenchmarks()
     {
-        // A dispatcher on this thread: documents belong to it, as they belong to the UI thread in an app.
-        _ = Dispatcher.CurrentDispatcher;
+        // Without Avalonia set up, documents check no thread and claim AvaloniaEdit's buffer for each change.
         _document = CodeDocument.Create(CodeLanguage.PlainText, s_text);
         _analyzed = _document.CurrentSnapshot;
     }

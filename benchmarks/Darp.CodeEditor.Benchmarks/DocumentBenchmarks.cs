@@ -1,4 +1,3 @@
-using Avalonia.Threading;
 using AvaloniaEdit.Document;
 using BenchmarkDotNet.Attributes;
 
@@ -23,8 +22,7 @@ public class DocumentBenchmarks
 
     public DocumentBenchmarks()
     {
-        // A dispatcher on this thread: documents belong to it, as they belong to the UI thread in an app.
-        _ = Dispatcher.CurrentDispatcher;
+        // Without Avalonia set up, documents check no thread and claim AvaloniaEdit's buffer for each change.
         _document = CodeDocument.Create(CodeLanguage.PlainText, s_text);
         _warm = new TextSnapshot(_rope, 1);
         _ = _warm.GetPosition(s_middle);

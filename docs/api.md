@@ -199,10 +199,10 @@ app starts.
 
 ## 4. Threads
 
-- **Editors:** on their UI thread, as any control. An editor posts its own work to its `Dispatcher`, which Avalonia 12 gives every control, not to `Dispatcher.UIThread`.
+- **Editors:** on the app's main UI thread only, because AvaloniaEdit's editor checks `Dispatcher.UIThread`. An editor on another thread fails at once. It posts its own work to its `Dispatcher`, which Avalonia 12 gives every control.
 - **Documents:** create, read, compile and dispose them on any thread. Change them only on the UI thread, where the user types and editors draw: setting `Text`, `FilePath` or `Indentation`, `Undo`, `Redo` and `MarkUnmodified` throw elsewhere. Their events come on the UI thread, also for documents created elsewhere.
-  - A document belongs to one UI thread, because AvaloniaEdit's text buffer does: that of the thread that created it, if that thread has an Avalonia dispatcher (`Dispatcher.FromThread`, which creates none), and otherwise the app's main one. Its events come there, and its changes are checked against it. An editor on another UI thread refuses the document at once, with a message that says to create it on the editor's thread. Apps with one UI thread notice nothing; apps with several create a window's documents on that window's thread.
-  - Servers follow the same rule for their own `State`, and send each document's diagnostics to that document's thread.
+  - Documents and editors work on the app's main UI thread only, because AvaloniaEdit requires it. A document belongs to that thread wherever it was created: its events come there, and its changes are checked against it.
+  - Servers raise `State` there too, and send the documents' diagnostics there.
   - `CurrentSnapshot` is the text with its version, immutable. Reading `Text` and the version separately could pair one version's text with the next one's number.
   - The document makes a snapshot after every change, sharing the unchanged parts of the text. In AvaloniaEdit, an edit plus its snapshot takes about 1 µs on 5,000 lines (section 9).
   - `document.CompileAsync()` compiles the snapshot current at the call, and the compilation keeps it as `Snapshot`.
@@ -539,8 +539,6 @@ Documents, languages and themes (sections 1 and 4) are implemented and tested. P
 - nothing in them touches Avalonia's dispatcher before Avalonia is set up: a test process loads YAML and Dark+, and
   creates, edits, undoes and maps a document on a pool thread, then sets up Avalonia on its main thread. The setup
   succeeds, and the document then belongs to the UI thread: it changes there and throws elsewhere;
-- a document created on a second thread with a running dispatcher of its own belongs to that thread: it changes and
-  raises its events there, and changes from the main UI thread throw;
 - `avares://` files load before setup, with Avalonia's standard asset loader, and built-in languages and themes
   load only when first used;
 - TextMateSharp, without its grammar package, tokenizes VS Code's JSON grammar, comments included, and its YAML
@@ -561,8 +559,6 @@ Still open:
   extended with a server and a compilation;
 - the exit reason rule and `Exited` completing before failures, when causes race: tests that kill the runner at every
   step of disposing, and call `DisposeAsync` and `KillAsync` together;
-- editors on a second UI thread: an editor there refuses a document of the main thread, and accepts one created on
-  its own. AvaloniaEdit checks `Dispatcher.UIThread` in its segment collections and line list, which editors use;
 - calls that must stay quick, such as prompts, callback replies and stopping a run, while the bridge carries bulk data
   in both directions: a test measures their latency under load;
 - integration tests on GitHub Actions for Windows, Linux and macOS, once the API is decided.
@@ -570,6 +566,6 @@ Still open:
 ## 10. Open questions
 
 Question numbers continue the decision log in [design.md](design.md). Decisions taken in the API discussion are
-recorded there too (#61, #64–#99).
+recorded there too (#61, #64–#100).
 
 None right now. Section 9 lists what still needs proving.

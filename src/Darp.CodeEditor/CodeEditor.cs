@@ -19,7 +19,8 @@ namespace Darp.CodeEditor;
 /// with <see cref="SaveViewState"/> before the switch and give them back with <see cref="RestoreViewState"/>.
 /// </para>
 /// <para>
-/// Use it on its UI thread, as any control; the editor posts its own work to its <c>Dispatcher</c>. It never waits for
+/// Use it on the app's main UI thread only, because AvaloniaEdit's editor works only there; on another thread it fails
+/// at once. The editor posts its own work to its <c>Dispatcher</c>. It never waits for
 /// a language server: text and colors come first, and language features
 /// follow when the server answers. Out of the visual tree, the editor drops its subscriptions on the document, its
 /// pending requests and its rendering resources, so a discarded editor is collected even while its document lives
@@ -94,13 +95,8 @@ public class CodeEditor : TemplatedControl
         );
 
     /// <summary>
-    /// The document the editor shows. Without one, the editor is empty and read-only. Only a document of the editor's
-    /// own UI thread can be shown; see <see cref="CodeDocument"/>.
+    /// The document the editor shows. Without one, the editor is empty and read-only.
     /// </summary>
-    /// <exception cref="InvalidOperationException">
-    /// The document belongs to another UI thread: create it on the thread of the editor's window. Through a binding,
-    /// Avalonia reports this as a binding error.
-    /// </exception>
     public CodeDocument? Document
     {
         get => GetValue(DocumentProperty);

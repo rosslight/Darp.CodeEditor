@@ -15,12 +15,11 @@ namespace Darp.CodeEditor;
 /// the document, and with it the undo history.
 /// </para>
 /// <para>
-/// Create, read and dispose a document on any thread. It belongs to one UI thread: that of the thread that created it,
-/// if that thread has an Avalonia dispatcher, and otherwise the app's main UI thread. Change it only there, where the
-/// user types and editors draw: setting <see cref="Text"/>, <see cref="FilePath"/> or <see cref="Indentation"/>,
-/// <see cref="Undo"/>, <see cref="Redo"/> and <see cref="MarkUnmodified"/> throw <see cref="InvalidOperationException"/>
-/// on other threads. Events are raised there too, also for documents created elsewhere. Only editors on that thread
-/// can show it. To read the text and its version together, take <see cref="CurrentSnapshot"/>. Before Avalonia is set
+/// Create, read and dispose a document on any thread. It belongs to the app's main UI thread, because AvaloniaEdit's
+/// editor works only there. Change it only there, where the user types and editors draw: setting <see cref="Text"/>,
+/// <see cref="FilePath"/> or <see cref="Indentation"/>, <see cref="Undo"/>, <see cref="Redo"/> and
+/// <see cref="MarkUnmodified"/> throw <see cref="InvalidOperationException"/> on other threads. Events are raised there
+/// too, also for documents created elsewhere. To read the text and its version together, take <see cref="CurrentSnapshot"/>. Before Avalonia is set
 /// up there is no UI thread yet: the document leaves Avalonia's dispatcher alone, checks no thread and raises its
 /// events where the change happens.
 /// </para>
@@ -44,10 +43,7 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
 {
     private readonly TextDocument _document;
 
-    /// <summary>
-    /// The dispatcher of the UI thread the document belongs to; null before Avalonia is set up, until the document
-    /// binds to the app's main UI thread.
-    /// </summary>
+    /// <summary>The app's main UI dispatcher; null before Avalonia is set up, until the document binds to it.</summary>
     private Dispatcher? _owner;
 
     /// <summary>Replaced on the owner's thread after each change, so that any thread can read it.</summary>
@@ -63,9 +59,8 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
         _indentation = language.Id == "yaml" ? Indentation.Spaces(2) : Indentation.Spaces(4);
         _document = new TextDocument(text);
         _currentSnapshot = new TextSnapshot(_document.CreateSnapshot(), 0);
-        // Dispatcher.FromThread creates no dispatcher, and Application.Current is null before setup, so neither ties
-        // Avalonia's UI thread to this one.
-        _owner = Dispatcher.FromThread(Thread.CurrentThread) ?? Application.Current?.Dispatcher;
+        // Application.Current is null before setup, so reading it ties no dispatcher to this thread.
+        _owner = Application.Current?.Dispatcher;
         // AvaloniaEdit's document belongs to the thread that created it. Unbound, it belongs to none between changes.
         _document.SetOwnerThread(_owner?.Thread);
         _document.TextChanged += OnTextChanged;
@@ -259,14 +254,7 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
             _owner = main;
         }
         if (_owner is not null && !_owner.CheckAccess())
-        {
-            throw new InvalidOperationException(
-                $"The document belongs to the UI thread {Describe(_owner.Thread)}, and changes only there; this is thread {Describe(Thread.CurrentThread)}."
-            );
-        }
-
-        static string Describe(Thread thread) =>
-            thread.Name is { } name ? $"'{name}' ({thread.ManagedThreadId})" : $"{thread.ManagedThreadId}";
+            throw new InvalidOperationException("Change the document only on the app's main UI thread.");
     }
 
     private void OnTextChanged(object? sender, EventArgs e)

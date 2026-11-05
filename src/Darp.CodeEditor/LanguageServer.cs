@@ -15,9 +15,8 @@ namespace Darp.CodeEditor;
 /// </para>
 /// <para>
 /// The server is safe to use from any thread. It raises <see cref="PropertyChanged"/> for <see cref="State"/> on the
-/// UI thread it belongs to, for a status indicator to bind, and nothing waits for it: that of the thread that created
-/// it, if that thread has an Avalonia dispatcher, and otherwise the app's main UI thread. Its documents get their
-/// diagnostics on their own UI thread. Before Avalonia is set up, it leaves Avalonia's
+/// app's main UI thread, for a status indicator to bind, and nothing waits for it. Its documents get their diagnostics
+/// there too. Before Avalonia is set up, it leaves Avalonia's
 /// dispatcher alone and raises the event where the state changed, so a server also works before the app's UI runs.
 /// </para>
 /// <para>

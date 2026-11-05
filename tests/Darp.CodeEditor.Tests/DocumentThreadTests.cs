@@ -1,11 +1,10 @@
 using System.Diagnostics;
 using Avalonia.Headless.XUnit;
-using Avalonia.Threading;
 using Shouldly;
 
 namespace Darp.CodeEditor.Tests;
 
-/// <summary>A document belongs to one UI thread: it changes there and raises its events there; any thread reads it.</summary>
+/// <summary>A document belongs to the app's main UI thread: it changes and raises its events there; any thread reads it.</summary>
 public sealed class DocumentThreadTests
 {
     /// <summary>Every member that changes a document.</summary>
@@ -34,7 +33,7 @@ public sealed class DocumentThreadTests
             Should.Throw<InvalidOperationException>(() => s_changes[change](document))
         );
 
-        exception.Message.ShouldContain("belongs to the UI thread");
+        exception.Message.ShouldContain("main UI thread");
         document.Text.ShouldBe("text");
     }
 
@@ -62,40 +61,6 @@ public sealed class DocumentThreadTests
 
         raisedOn.ShouldBe(Thread.CurrentThread);
         await Task.Run(() => Should.Throw<InvalidOperationException>(() => document.Undo()));
-    }
-
-    [AvaloniaFact]
-    public async Task A_document_created_on_a_second_UI_thread_belongs_to_that_thread()
-    {
-        using var stop = new CancellationTokenSource();
-        var created = new TaskCompletionSource<(Dispatcher, CodeDocument)>(
-            TaskCreationOptions.RunContinuationsAsynchronously
-        );
-        var secondThread = new Thread(() =>
-        {
-            // Avalonia 12 gives any thread a dispatcher of its own, with a main loop.
-            Dispatcher dispatcher = Dispatcher.CurrentDispatcher;
-            created.SetResult((dispatcher, CodeDocument.Create(CodeLanguage.PlainText, "a")));
-            dispatcher.MainLoop(stop.Token);
-        })
-        {
-            IsBackground = true,
-            Name = "Second UI thread",
-        };
-        secondThread.Start();
-        (Dispatcher second, CodeDocument document) = await created.Task;
-        Thread? raisedOn = null;
-        document.TextChanged += (_, _) => raisedOn = Thread.CurrentThread;
-
-        Should
-            .Throw<InvalidOperationException>(() => document.Replace(new TextRange(0, 0), "x"))
-            .Message.ShouldContain("'Second UI thread'");
-        await second.InvokeAsync(() => document.Replace(new TextRange(1, 0), "b"));
-
-        raisedOn.ShouldBe(secondThread);
-        document.Text.ShouldBe("ab");
-        stop.Cancel();
-        secondThread.Join(TimeSpan.FromSeconds(10)).ShouldBeTrue();
     }
 
     [Fact]
