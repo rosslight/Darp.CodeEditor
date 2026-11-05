@@ -28,9 +28,9 @@ public sealed class CSharpScriptServer : IAsyncDisposable
     public LanguageServer LanguageServer => throw new NotImplementedException();
 
     /// <summary>
-    /// The language of scripts in <paramref name="environment"/>, for <see cref="CodeDocument"/>s. Create it once per
-    /// environment and share it. The language keeps a copy of the environment: later changes to its lists have no
-    /// effect.
+    /// The language of scripts in <paramref name="environment"/>, for <see cref="CodeDocument"/>s and for compiling:
+    /// <c>CodeLanguage.CSharp</c>, served by this server, with the environment. Create it once per environment and
+    /// share it. The language keeps a copy of the environment: later changes to its lists have no effect.
     /// </summary>
     /// <exception cref="ArgumentException">
     /// A reference or the globals type's assembly is not next to the app, because its project reference is not marked
@@ -53,12 +53,13 @@ public sealed class CSharpScriptServer : IAsyncDisposable
     ) => throw new NotImplementedException();
 
     /// <summary>
-    /// Compiles <paramref name="code"/> in <paramref name="environment"/>, with no document or editor. Safe to call from
-    /// any thread.
+    /// Compiles <paramref name="code"/> in <paramref name="language"/>'s environment, with no document or editor. Safe
+    /// to call from any thread.
     /// </summary>
+    /// <exception cref="ArgumentException">The language does not come from this server.</exception>
     public Task<CSharpScriptCompilation> CompileAsync(
         string code,
-        CSharpScriptEnvironment environment,
+        CodeLanguage language,
         CancellationToken cancellationToken = default
     ) => throw new NotImplementedException();
 

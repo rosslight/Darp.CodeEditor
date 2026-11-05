@@ -63,7 +63,7 @@ processes, opt-in size, or a wire format two processes share. Layering alone is 
 |---|---|---|
 | `Darp.CodeEditor` | package | What apps reference: the control, highlighting, themes, search, the client for any LSP server |
 | `Darp.CodeEditor.Lsp` | internal assembly, in `Darp.CodeEditor` | JSON-RPC, LSP types, positions and child processes. The C# server uses it too, without Avalonia |
-| `Darp.CodeEditor.CSharpScript` | package | C# scripts: environment, language server, compiling. Opt-in, since it brings Roslyn and a .NET runtime |
+| `Darp.CodeEditor.CSharpScript` | package | C# scripts: the C# language, environment, language server, compiling. Opt-in, since it brings Roslyn and a .NET runtime |
 | `Darp.CodeEditor.CSharpScript.Protocol` | internal assembly, in `Darp.CodeEditor.CSharpScript` | What the app, the server and the runner exchange: the script environment, compiled scripts, the runner's calls |
 | `Darp.CodeEditor.CSharpScript.Server` | executable, in `Darp.CodeEditor.CSharpScript` | Roslyn: the C# language server, and the compiler for the runner |
 | `Darp.CodeEditor.CSharpScript.Runner` | package | Running compiled scripts: handlers, the app's services, deadlines, batching |
@@ -104,6 +104,7 @@ Question numbers continue the prototype's log. The prototype's decisions still h
 | 52 | Who compiles | The C# server compiles scripts; the runner only loads and runs them, without Roslyn. Compiling runs beside the editor's requests on Roslyn's immutable snapshots: completion keeps answering while a script compiles. Both wait while the server starts or restarts. Needs a proof before the runner is built ([api.md](api.md#9-not-proven-yet)) | Roslyn ships once instead of twice (the runner's copy was 28 MiB); what runs is what the editor checked (R7); the runner restarts quickly after a kill. Replaces the compiling part of #33 and #36 |
 | 53 | Benchmarks | Most benchmarks in a BenchmarkDotNet project | Product owner's choice |
 | 54 | Restart | The prototype stays on the `draft` branch. `main` starts a new history | Product owner's choice |
+| 61 | Built-in languages | The editor package ships plain text, JSON, XML and YAML; the C# package ships C#. Their grammar and editing-rule files are copied from VS Code's extensions, not taken from TextMateSharp's grammar package. More when needed | The grammar package is a 6.5 MB DLL that NativeAOT can't trim. Product owner's choice |
 | 64 | Editor properties | A setting is a property of `CodeEditor` when apps would set it differently per editor; one good value for every editor is built in; settings of the text belong to the document. Line numbers and the search bar are part of the editor's API without a use case asking for them | Product owner: a good editor experience counts even before a use case asks, taking the best from CodeMirror and Monaco |
 | 65 | Selection | One `TextSelection` value with an anchor and a caret, not a range plus a caret offset | Product owner's choice; keeps a backward selection's direction, as Monaco and CodeMirror do |
 | 66 | Indentation | On the document, with the language's default. Not detected from the text in v1 | Product owner: detection is easy to add later |
@@ -114,6 +115,10 @@ Question numbers continue the prototype's log. The prototype's decisions still h
 | 71 | Errors and hover | Squiggles in the theme's colors; hover shows the diagnostics' messages above the server's Markdown, with code blocks highlighted by the editor's grammar | As in Monaco and CodeMirror. The prototype dropped emphasis and links |
 | 72 | Completion icons | VS Code's codicons as vector shapes, in the theme's `symbolIcon.*` colors. Their CC BY 4.0 credit goes in the package's third-party notices | One icon set made for code symbols, with a clear license. Visual Studio's image library has no clear license to redistribute. Product owner's choice |
 | 73 | Scroll bar marks | Marks for errors, warnings and search matches beside the scroll bar are in v1, but designed and added after the core | They add to the API without changing it. Product owner's choice |
+| 74 | Languages | Built-in languages are static properties of `CodeLanguage`, and packages add theirs as extension members (`CodeLanguage.CSharp`, later Luau's). Built-in and app languages use the same public constructor, with grammar and editing rules as `avares://` or file URIs. `WithServer` attaches a server. Replaces `Bundled(id)` and `FromFiles` | Apps see every language in IntelliSense instead of guessing ids; the built-in ones prove the public path. Product owner's choice |
+| 75 | Indentation | Only on the document, starting as in VS Code (2 spaces for YAML, 4 otherwise). Languages have no indentation setting | Product owner's choice. Refines #66 |
+| 76 | Loading | Languages and themes start loading in the background when created; no `PreloadAsync`. Load errors go to Avalonia's log | Apps create languages and themes at startup, so the first editor finds them loaded without an extra call. Product owner's choice |
+| 77 | Headless compiling | `CompileAsync(code, language)` takes the script language instead of the environment | The environment is named once, and the server checks and loads its references once per language. Product owner's choice |
 
 ## 4. Lessons from the prototype
 

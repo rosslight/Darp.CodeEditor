@@ -75,9 +75,9 @@ public sealed class CodeDocument : INotifyPropertyChanged, IDisposable
     public int Version => throw new NotImplementedException();
 
     /// <summary>
-    /// How Tab and new lines indent, in every editor that shows the document. It starts with the language's
-    /// <see cref="CodeLanguage.Indentation"/>; the document does not detect it from the text. Changing it leaves the
-    /// existing text as it is.
+    /// How Tab and new lines indent, in every editor that shows the document. It starts as in VS Code: 2 spaces for
+    /// YAML, 4 spaces otherwise. The document does not detect it from the text. Changing it leaves the existing text
+    /// as it is.
     /// </summary>
     public Indentation Indentation
     {

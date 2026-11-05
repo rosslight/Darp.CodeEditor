@@ -10,7 +10,7 @@ scenarios there to try the API.
 ```csharp
 // Any language: a grammar, editing rules and, optionally, a language server.
 var yamlServer = new LanguageServer(new LanguageServerOptions { FileName = "yaml-language-server", Arguments = ["--stdio"] });
-CodeLanguage yaml = CodeLanguage.Bundled("yaml", yamlServer);
+CodeLanguage yaml = CodeLanguage.Yaml.WithServer(yamlServer);
 
 // C# scripts: one server for the app, one language per kind of script.
 var scripts = new CSharpScriptServer();
@@ -37,10 +37,10 @@ if (compilation.Succeeded)
 | Package | Public types |
 |---|---|
 | `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorTheme`, `CodeEditorStyles`, `TextRange`, `TextPosition`, `TextSelection`, `Indentation`, `Diagnostic`, `DiagnosticSeverity` |
-| `Darp.CodeEditor.CSharpScript` | `CSharpScriptServer`, `CSharpScriptServerOptions`, `CSharpScriptEnvironment`, `CSharpScriptCompilation`, `CompiledScript` |
+| `Darp.CodeEditor.CSharpScript` | `CSharpScriptServer`, `CSharpScriptServerOptions`, `CSharpScriptEnvironment`, `CSharpScriptCompilation`, `CompiledScript`, `CSharpCodeLanguage` (adds `CodeLanguage.CSharp`) |
 | `Darp.CodeEditor.CSharpScript.Runner` | `CSharpScriptRunner`, `CSharpScriptRunnerOptions`, `CSharpScriptService`, `ScriptBatcher<TItem, TResult>`, `ScriptBatcherOptions`, `ScriptException`, `ScriptRunnerExitedEventArgs`, `ScriptRunnerExitReason` |
 
-28 public types in all. Three more things are public without being types of ours:
+29 public types in all. Three more things are public without being types of ours:
 
 - **The project file.**
   - `CSharpScriptReference="true"` on a package or project reference: scripts may use its assemblies. Publishing copies their DLLs next to the app, NativeAOT apps included.
@@ -51,6 +51,28 @@ if (compilation.Succeeded)
   - the `IShapeable<T>` constraints on `RunAsync<T>` and `CSharpScriptService.Create<T>`. With them, NativeAOT apps call and copy these types without reflection, and the compiler rejects types without a shape;
   - its exceptions for failed handler calls.
 - **The resource key `CodeEditorColorTheme`**: the color theme of editors that don't set `ColorTheme` (section 2).
+
+**Languages.** A `CodeLanguage` says what kind of text a document holds: a TextMate grammar for colors, VS Code's
+editing rules (comments, brackets, auto-closing pairs) and, optionally, a language server.
+
+- **Built in:** `CodeLanguage.PlainText`, `Json`, `Xml` and `Yaml`. Packages add theirs as extension members:
+  `CodeLanguage.CSharp` from the C# package, and Luau's from its package later. IntelliSense lists them all.
+- **The app's own:** made with the same public constructor as the built-in ones, from a VS Code extension's files.
+  They can ship as Avalonia resources, so NativeAOT apps need no loose files:
+
+  ```csharp
+  var toml = new CodeLanguage(
+      "toml",
+      grammar: new Uri("avares://MyApp/Languages/toml.tmLanguage.json"),
+      configuration: new Uri("avares://MyApp/Languages/toml.language-configuration.json"));
+  ```
+
+- **A server:** `WithServer` returns a copy whose documents the server serves, such as
+  `CodeLanguage.Yaml.WithServer(yamlServer)`. C# script languages come from `CSharpScriptServer.CreateLanguage`, one
+  per kind of script, and compiling takes them too, with or without a document.
+- **Loading:** a language starts loading its files in the background when it is created, so there is nothing to
+  preload. Themes do the same. A missing or invalid file leaves documents uncolored, and the error goes to Avalonia's
+  log, as binding errors do.
 
 ## 2. The editor
 
@@ -77,7 +99,7 @@ completion below.
 comments (Ctrl+/) and indentation (Tab, Shift+Tab). Other keys, such as F5 or Ctrl+S, reach the app's key bindings.
 
 **Indentation** belongs to the document (`CodeDocument.Indentation`), so all editors of one document agree. It starts
-with the language's default, such as 2 spaces for YAML, and is not detected from the text.
+as in VS Code, 2 spaces for YAML and 4 otherwise, and is not detected from the text.
 
 **Look.** The text and everything around it are styled differently, as in Monaco and CodeMirror:
 
@@ -220,7 +242,7 @@ Nobody has done it here yet.
 ## 10. Open questions
 
 Question numbers continue the decision log in [design.md](design.md). Decisions taken in the API discussion are
-recorded there too (#64–#73).
+recorded there too (#61, #64–#77).
 
 - **Q55 – Logging.**
   - **Draft:** takes `Microsoft.Extensions.Logging.ILogger`.
@@ -246,10 +268,6 @@ recorded there too (#64–#73).
   - **What matters:** nothing in compiling and running may wait for Avalonia's UI thread. The draft makes sure of that.
   - **Recommended:** keep one dependency chain until an app without Avalonia needs scripts. Then the compiler moves into a package of its own.
 - **Q60 – Storing compiled scripts.** A `CompiledScript` that can be saved and loaded would let later runs skip Roslyn entirely, for scripts that rarely change. **Recommended:** after v1.
-- **Q61 – Bundled grammars.**
-  - **The problem:** VS Code's grammars come in one 6.5 MB DLL, and NativeAOT can't trim parts of it.
-  - **Options:** ship it whole, or only a few grammars (C#, JSON, XML, YAML, Lua) and take the rest from files.
-  - **Recommended:** a few, plus `CodeLanguage.FromFiles` for the others.
 - **Q62 – No `Text` property on the editor.** Text goes through the document only, so no binding copies the whole text on every keystroke. **Recommended:** as drafted.
 - **Q63 – Services per runner or per run.**
   - **Draft:** services are registered once per runner, as in the prototype. Scripts in one runner share them, so a runner per device gives each device's scripts their own station.

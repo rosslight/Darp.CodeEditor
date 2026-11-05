@@ -10,7 +10,6 @@ namespace UseCases.Viewer;
 //
 // Questions:
 // - Is "dispose every document" a fair rule, or should documents without a server not be disposable at all?
-// - Which bundled languages does the app need? The editor could ship all of VS Code's grammars or only a few.
 
 /// <summary>A read-only JSON view.</summary>
 public sealed class JsonViewer : IDisposable
@@ -20,7 +19,7 @@ public sealed class JsonViewer : IDisposable
     /// <summary>Creates the view of <paramref name="json"/>.</summary>
     public JsonViewer(string json)
     {
-        _document = new CodeDocument(CodeLanguage.Bundled("json"), json);
+        _document = new CodeDocument(CodeLanguage.Json, json);
         Editor = new CodeEditor
         {
             Document = _document,

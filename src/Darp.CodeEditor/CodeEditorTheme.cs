@@ -17,21 +17,23 @@ namespace Darp.CodeEditor;
 /// </ResourceDictionary.ThemeDictionaries>
 /// ]]></code>
 /// <para>
-/// A theme loads when an editor first uses it, or earlier with <see cref="PreloadAsync"/>. When its file is missing or
-/// invalid, <see cref="PreloadAsync"/> throws, and editors show <see cref="LightPlus"/> or <see cref="DarkPlus"/> by
-/// their theme variant.
+/// A theme starts loading in the background when it is created; built-in themes when first used. When its file is
+/// missing or invalid, editors show <see cref="LightPlus"/> or <see cref="DarkPlus"/> by their theme variant, and the
+/// error goes to Avalonia's log, as binding errors do.
 /// </para>
 /// </remarks>
 public sealed class CodeEditorTheme
 {
-    /// <summary>Creates a theme from <see cref="Source"/>, for XAML.</summary>
+    /// <summary>Creates a theme from <see cref="Source"/>, for XAML. Setting the source starts loading it.</summary>
     public CodeEditorTheme() { }
 
     /// <summary>VS Code's default dark theme.</summary>
-    public static CodeEditorTheme DarkPlus { get; } = new();
+    public static CodeEditorTheme DarkPlus { get; } =
+        new() { Source = new Uri("avares://Darp.CodeEditor/Themes/dark_plus.json") };
 
     /// <summary>VS Code's default light theme.</summary>
-    public static CodeEditorTheme LightPlus { get; } = new();
+    public static CodeEditorTheme LightPlus { get; } =
+        new() { Source = new Uri("avares://Darp.CodeEditor/Themes/light_plus.json") };
 
     /// <summary>
     /// The theme's file, a VS Code color theme: an absolute <c>avares://</c> or <c>file://</c> URI. The themes it
@@ -41,7 +43,4 @@ public sealed class CodeEditorTheme
 
     /// <summary>A VS Code color theme file, such as one from a theme extension.</summary>
     public static CodeEditorTheme FromFile(string path) => new() { Source = new Uri(Path.GetFullPath(path)) };
-
-    /// <summary>Loads the theme off the UI thread. Optional: editors load it on their own otherwise.</summary>
-    public Task PreloadAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
 }

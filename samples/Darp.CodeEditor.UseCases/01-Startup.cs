@@ -83,15 +83,14 @@ public static class Scripting
             .AddSingleton<ScriptLanguages>();
 
     /// <summary>
-    /// Called once the main window shows. Loads the C# grammar and theme off the UI thread, so that the first script
-    /// editor is colored in its first frame, and starts Roslyn before the user opens a script. Both are optional:
-    /// without them, the first editor loads what it needs itself.
+    /// Called once the main window shows. Creating the script languages starts loading the C# grammar, so that the
+    /// first script editor is colored in its first frame, and Roslyn starts before the user opens a script. Both are
+    /// optional: without them, the first editor loads what it needs itself.
     /// </summary>
-    public static async Task WarmUpAsync(IServiceProvider services, CancellationToken cancellationToken)
+    public static Task WarmUpAsync(IServiceProvider services, CancellationToken cancellationToken)
     {
-        await services.GetRequiredService<ScriptLanguages>().Packets.PreloadAsync(cancellationToken);
-        await CodeEditorTheme.DarkPlus.PreloadAsync(cancellationToken);
-        await services.GetRequiredService<CSharpScriptServer>().LanguageServer.StartAsync(cancellationToken);
+        _ = services.GetRequiredService<ScriptLanguages>();
+        return services.GetRequiredService<CSharpScriptServer>().LanguageServer.StartAsync(cancellationToken);
     }
 }
 

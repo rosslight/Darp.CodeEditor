@@ -5,7 +5,7 @@ namespace UseCases.AnyLanguage;
 
 // Scenario: the app edits YAML configuration files with a third-party language server it ships, such as
 // yaml-language-server. Any server that speaks LSP over stdio plugs in the same way; the editor knows nothing about
-// YAML beyond the bundled grammar.
+// YAML beyond its built-in grammar.
 //
 // - The server needs settings: it asks for them with workspace/configuration, and `Settings` answers.
 // - Documents carry their file path, so the server can find a schema or configuration next to them.
@@ -37,7 +37,7 @@ public sealed class YamlEditing : IAsyncDisposable
                         : null,
             }
         );
-        Yaml = CodeLanguage.Bundled("yaml", _server);
+        Yaml = CodeLanguage.Yaml.WithServer(_server);
     }
 
     /// <summary>The language of YAML documents.</summary>
