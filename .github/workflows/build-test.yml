@@ -1,0 +1,98 @@
+name: Build and test .NET
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Build and test on Linux x64
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+      # Installs the latest SDK that global.json allows
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+
+      - name: Restore dependencies
+        run: dotnet restore
+      - name: Build
+        run: dotnet build --no-restore
+      - name: Test
+        run: |
+          dotnet test --no-build --no-progress --results-directory ./coverage-results \
+            --coverlet --coverlet-output-format cobertura \
+            --coverlet-include "[Darp.CodeEditor]*" --coverlet-exclude "[*.Tests*]*"
+
+      - name: Attach code-coverage comment
+        uses: rosslight/pr-code-coverage-visualizer@v2.2.0
+        with:
+          files: |
+            coverage-results/coverage.cobertura.*.xml
+          update-comment: true
+          show-changed-lines-only: true
+
+      # The tests start the fixture from their own folder
+      - name: Publish the fixture with Native AOT
+        run: dotnet publish tests/Darp.CodeEditor.Tests.BeforeSetup -c Release -r linux-x64 -o ./artifacts/aot-tests /warnaserror
+      - name: Publish the tests with Native AOT
+        run: dotnet publish tests/Darp.CodeEditor.Tests -c Release -r linux-x64 -o ./artifacts/aot-tests /warnaserror
+      - name: Test Native AOT
+        working-directory: ./artifacts/aot-tests
+        run: ./Darp.CodeEditor.Tests
+
+  warnings-release:
+    name: Build without warnings
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+
+      - name: Build warning-free Debug
+        run: dotnet build -c Debug /warnaserror
+      - name: Build warning-free Release
+        run: dotnet build -c Release /warnaserror
+
+  test-other-platforms:
+    strategy:
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            rid: win-x64
+          - name: macOS arm64
+            os: macos-latest
+            rid: osx-arm64
+
+    name: Test on ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: git configure long path
+        if: runner.os == 'Windows'
+        run: git config --global core.longpaths true
+      - uses: actions/checkout@v6
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+
+      - name: Restore dependencies
+        run: dotnet restore
+      - name: Build
+        run: dotnet build --no-restore
+      - name: Test
+        run: dotnet test --no-build --no-progress
+      - name: Publish the fixture with Native AOT
+        run: dotnet publish tests/Darp.CodeEditor.Tests.BeforeSetup -c Release -r ${{ matrix.rid }} -o ./artifacts/aot-tests /warnaserror
+      - name: Publish the tests with Native AOT
+        run: dotnet publish tests/Darp.CodeEditor.Tests -c Release -r ${{ matrix.rid }} -o ./artifacts/aot-tests /warnaserror
+      - name: Test Native AOT
+        working-directory: ./artifacts/aot-tests
+        run: ./Darp.CodeEditor.Tests${{ runner.os == 'Windows' && '.exe' || '' }}

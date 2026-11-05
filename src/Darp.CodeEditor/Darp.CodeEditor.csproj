@@ -4,9 +4,21 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.AvaloniaEdit" />
+    <PackageReference Include="TextMateSharp" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The built-in languages and themes, from VS Code. -->
+    <AvaloniaResource Include="Languages\*.json" />
+    <AvaloniaResource Include="Themes\*.json" />
+    <None Include="THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="/" />
   </ItemGroup>
   <ItemGroup>
     <!-- C# script documents derive from CodeDocument, whose constructor is for the library's own documents only. -->
     <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript" />
+    <!-- Tests and benchmarks read the loaded grammars and themes. -->
+    <InternalsVisibleTo Include="Darp.CodeEditor.Tests" />
+    <InternalsVisibleTo Include="Darp.CodeEditor.Tests.BeforeSetup" />
+    <InternalsVisibleTo Include="Darp.CodeEditor.Benchmarks" />
   </ItemGroup>
 </Project>

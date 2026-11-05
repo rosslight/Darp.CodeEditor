@@ -1,3 +1,5 @@
+using Darp.CodeEditor.Loading;
+
 namespace Darp.CodeEditor;
 
 /// <summary>
@@ -23,6 +25,14 @@ namespace Darp.CodeEditor;
 /// </remarks>
 public sealed class CodeLanguage
 {
+    private static readonly Lazy<CodeLanguage> s_plainText = new(() => new CodeLanguage("plaintext"));
+
+    private static readonly Lazy<CodeLanguage> s_json = new(() => BuiltIn("json"));
+
+    private static readonly Lazy<CodeLanguage> s_xml = new(() => BuiltIn("xml"));
+
+    private static readonly Lazy<CodeLanguage> s_yaml = new(() => BuiltIn("yaml"));
+
     /// <summary>Creates a language from the files of a VS Code extension, and starts loading them.</summary>
     /// <param name="id">The language identifier that the language server receives, such as <c>toml</c>.</param>
     /// <param name="grammar">
@@ -39,34 +49,20 @@ public sealed class CodeLanguage
         Id = id;
         Grammar = grammar;
         Configuration = configuration;
+        Loaded = grammar is null && configuration is null ? Task.FromResult(LoadedLanguage.None) : Task.Run(Load);
     }
 
     /// <summary>Text without colors or editing rules, such as logs.</summary>
-    public static CodeLanguage PlainText { get; } = new("plaintext");
+    public static CodeLanguage PlainText => s_plainText.Value;
 
     /// <summary>JSON, also with comments, from VS Code's JSON extension.</summary>
-    public static CodeLanguage Json { get; } =
-        new(
-            "json",
-            new Uri("avares://Darp.CodeEditor/Languages/json.tmLanguage.json"),
-            new Uri("avares://Darp.CodeEditor/Languages/json.language-configuration.json")
-        );
+    public static CodeLanguage Json => s_json.Value;
 
     /// <summary>XML, from VS Code's XML extension.</summary>
-    public static CodeLanguage Xml { get; } =
-        new(
-            "xml",
-            new Uri("avares://Darp.CodeEditor/Languages/xml.tmLanguage.json"),
-            new Uri("avares://Darp.CodeEditor/Languages/xml.language-configuration.json")
-        );
+    public static CodeLanguage Xml => s_xml.Value;
 
     /// <summary>YAML, from VS Code's YAML extension.</summary>
-    public static CodeLanguage Yaml { get; } =
-        new(
-            "yaml",
-            new Uri("avares://Darp.CodeEditor/Languages/yaml.tmLanguage.json"),
-            new Uri("avares://Darp.CodeEditor/Languages/yaml.language-configuration.json")
-        );
+    public static CodeLanguage Yaml => s_yaml.Value;
 
     /// <summary>The language identifier that the language server receives, such as <c>json</c>.</summary>
     public string Id { get; }
@@ -76,4 +72,30 @@ public sealed class CodeLanguage
 
     /// <summary>The editing rules; null for none.</summary>
     public Uri? Configuration { get; }
+
+    /// <summary>The grammar and editing rules, once read; <see cref="LoadedLanguage.None"/> when a file failed.</summary>
+    internal Task<LoadedLanguage> Loaded { get; }
+
+    private static CodeLanguage BuiltIn(string id) =>
+        new(
+            id,
+            new Uri($"avares://Darp.CodeEditor/Languages/{id}.tmLanguage.json"),
+            new Uri($"avares://Darp.CodeEditor/Languages/{id}.language-configuration.json")
+        );
+
+    private LoadedLanguage Load()
+    {
+        try
+        {
+            return new LoadedLanguage(
+                Grammar is null ? null : TextMateGrammars.Read(Grammar),
+                Configuration is null ? LanguageConfiguration.None : LanguageConfiguration.Read(Configuration)
+            );
+        }
+        catch (Exception e)
+        {
+            AssetFiles.LogError(this, $"the language '{Id}' from {Grammar} and {Configuration}", e);
+            return LoadedLanguage.None;
+        }
+    }
 }

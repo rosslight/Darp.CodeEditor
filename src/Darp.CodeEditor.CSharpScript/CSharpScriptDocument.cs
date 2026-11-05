@@ -8,7 +8,8 @@ namespace Darp.CodeEditor.CSharpScript;
 public sealed class CSharpScriptDocument<TGlobals> : CodeDocument
     where TGlobals : class
 {
-    private CSharpScriptDocument() { }
+    private CSharpScriptDocument(string text)
+        : base(CodeLanguage.CSharp, text) { }
 
     /// <summary>The environment the document was created in.</summary>
     public CSharpScriptEnvironment<TGlobals> Environment => throw new NotImplementedException();

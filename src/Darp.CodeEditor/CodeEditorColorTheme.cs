@@ -1,3 +1,5 @@
+using Darp.CodeEditor.Loading;
+
 namespace Darp.CodeEditor;
 
 /// <summary>
@@ -26,20 +28,52 @@ namespace Darp.CodeEditor;
 /// </remarks>
 public sealed class CodeEditorColorTheme
 {
+    private static readonly Task<ColorThemeFile?> s_noSource = Task.FromResult<ColorThemeFile?>(null);
+
+    private static readonly Lazy<CodeEditorColorTheme> s_darkPlus = new(() =>
+        new CodeEditorColorTheme { Source = new Uri("avares://Darp.CodeEditor/Themes/dark_plus.json") }
+    );
+
+    private static readonly Lazy<CodeEditorColorTheme> s_lightPlus = new(() =>
+        new CodeEditorColorTheme { Source = new Uri("avares://Darp.CodeEditor/Themes/light_plus.json") }
+    );
+
     /// <summary>Creates a theme from <see cref="Source"/>, for XAML. Setting the source starts loading it.</summary>
     public CodeEditorColorTheme() { }
 
     /// <summary>VS Code's default dark theme.</summary>
-    public static CodeEditorColorTheme DarkPlus { get; } =
-        new() { Source = new Uri("avares://Darp.CodeEditor/Themes/dark_plus.json") };
+    public static CodeEditorColorTheme DarkPlus => s_darkPlus.Value;
 
     /// <summary>VS Code's default light theme.</summary>
-    public static CodeEditorColorTheme LightPlus { get; } =
-        new() { Source = new Uri("avares://Darp.CodeEditor/Themes/light_plus.json") };
+    public static CodeEditorColorTheme LightPlus => s_lightPlus.Value;
 
     /// <summary>
     /// The theme's file, a VS Code color theme: an absolute <c>avares://</c> or <c>file://</c> URI. The themes it
     /// includes are found relative to it.
     /// </summary>
-    public Uri? Source { get; init; }
+    public Uri? Source
+    {
+        get;
+        init
+        {
+            field = value;
+            Loaded = value is null ? s_noSource : Task.Run(() => Load(value));
+        }
+    }
+
+    /// <summary>The theme, once read; null without a source or when a file failed to load.</summary>
+    internal Task<ColorThemeFile?> Loaded { get; private set; } = s_noSource;
+
+    private ColorThemeFile? Load(Uri source)
+    {
+        try
+        {
+            return ColorThemeFile.Read(source);
+        }
+        catch (Exception e)
+        {
+            AssetFiles.LogError(this, $"the color theme {source}", e);
+            return null;
+        }
+    }
 }

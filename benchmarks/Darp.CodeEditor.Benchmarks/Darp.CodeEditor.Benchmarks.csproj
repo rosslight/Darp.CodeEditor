@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Headless" />
+    <PackageReference Include="BenchmarkDotNet" />
+  </ItemGroup>
+  <!-- Default: benchmark the library in this working tree. -->
+  <ItemGroup Condition="'$(DarpCodeEditorBaselineVersion)' == ''">
+    <ProjectReference Include="..\..\src\Darp.CodeEditor\Darp.CodeEditor.csproj" />
+  </ItemGroup>
+  <!-- Baseline job: benchmark a packed version of the library. -->
+  <ItemGroup Condition="'$(DarpCodeEditorBaselineVersion)' != ''">
+    <PackageReference Include="Darp.CodeEditor" VersionOverride="$(DarpCodeEditorBaselineVersion)" />
+  </ItemGroup>
+</Project>
