@@ -1,0 +1,148 @@
+using System.Diagnostics;
+using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Threading;
+
+namespace Darp.CodeEditor.Tests;
+
+/// <summary>
+/// The budgets of the design's section 1.2 that need no language server: highlighted text within 100 ms of creating
+/// the editor, and no UI-thread stall over 50 ms. Both are measured once the process has run the editor's code, so
+/// that the JIT compiler's first calls do not count; NativeAOT has none.
+/// </summary>
+[Collection(UiFixture.Collection)]
+public sealed class BudgetTests(UiFixture ui)
+{
+    private const int Lines = 5000;
+
+    private static readonly TimeSpan s_highlightingBudget = TimeSpan.FromMilliseconds(100);
+
+    private readonly UiFixture _ui = ui;
+
+    /// <summary>The languages of the highlighting budget.</summary>
+    public static TheoryData<string> Languages => ["json", "yaml"];
+
+    [Theory]
+    [MemberData(nameof(Languages))]
+    public Task Text_shows_syntax_colors_within_100_ms_of_creating_the_editor(string language) =>
+        _ui.Run(async () =>
+        {
+            (CodeLanguage codeLanguage, string text, Color syntax) = Sample(language);
+            // As in an app that created its languages and themes at startup.
+            await codeLanguage.Loaded;
+            await CodeEditorColorTheme.LightPlus.Loaded;
+            TimeSpan first = await FirstColoredFrame(codeLanguage, text, syntax);
+            CodeDocument document = CodeDocument.Create(codeLanguage, text);
+
+            TimeSpan elapsed = await FirstColoredFrame(codeLanguage, document, syntax);
+
+            TestContext.Current.TestOutputHelper?.WriteLine(
+                $"{language}: syntax colors {elapsed.TotalMilliseconds:F1} ms after creating the editor "
+                    + $"(the test's first editor: {first.TotalMilliseconds:F1} ms)"
+            );
+            elapsed.ShouldBeLessThan(s_highlightingBudget);
+        });
+
+    [Fact]
+    public Task The_UI_thread_never_stalls_over_50_ms() =>
+        _ui.Run(async () =>
+        {
+            // Once without the probe, so that the JIT compiler's first calls do not count.
+            await RunScenarios(probe: null);
+            using var probe = new UiStallProbe(Dispatcher.UIThread, TimeSpan.FromMilliseconds(1));
+
+            IReadOnlyList<StallReport> reports = await RunScenarios(probe);
+
+            foreach (StallReport report in reports)
+                TestContext.Current.TestOutputHelper?.WriteLine(report.ToString());
+            reports.ShouldAllBe(report => report.MaxMs < StallReport.FailureMs);
+        });
+
+    /// <summary>Loading, typing and scrolling 5,000 lines of JSON, and typing on a line of 20,000 characters.</summary>
+    private static async Task<IReadOnlyList<StallReport>> RunScenarios(UiStallProbe? probe)
+    {
+        var reports = new List<StallReport>();
+        CodeDocument document = CodeDocument.Create(CodeLanguage.Json, Texts.Json(Lines));
+
+        probe?.BeginPhase("loading 5,000 lines");
+        using var window = new EditorWindow(new CodeEditor { Document = document });
+        await Wait.UntilAsync(() => window.RenderedColors().Count > 2);
+        await Task.Delay(300);
+        End();
+
+        probe?.BeginPhase("typing in 5,000 lines");
+        window.Editor.Selection = new TextSelection(document.CurrentSnapshot.GetOffset(new TextPosition(20, 3)));
+        foreach (char c in "\"typed\": [1, 2, \"three\"], /* comment */ ")
+        {
+            window.Type(c.ToString());
+            await Task.Delay(16);
+        }
+        await Task.Delay(300);
+        End();
+
+        probe?.BeginPhase("scrolling 5,000 lines");
+        TextSnapshot text = document.CurrentSnapshot;
+        for (int line = 1; line <= Lines; line += 40)
+        {
+            window.Editor.ScrollTo(new TextRange(text.GetOffset(new TextPosition(line, 1)), 0));
+            await Task.Delay(16);
+        }
+        await Task.Delay(300);
+        End();
+
+        probe?.BeginPhase("typing on a 20,000-character line");
+        CodeDocument longLine = CodeDocument.Create(
+            CodeLanguage.Json,
+            "{\n  \"long\": \"" + string.Concat(Enumerable.Repeat("0123456789", 2_000)) + "\",\n  \"after\": 1\n}"
+        );
+        window.Editor.Document = longLine;
+        await Task.Delay(300);
+        window.Editor.Selection = new TextSelection(longLine.CurrentSnapshot.GetOffset(new TextPosition(2, 20_010)));
+        foreach (char c in " /*x*/")
+        {
+            window.Type(c.ToString());
+            await Task.Delay(16);
+        }
+        await Task.Delay(300);
+        End();
+        return reports;
+
+        void End()
+        {
+            if (probe is not null)
+                reports.Add(probe.EndPhase());
+        }
+    }
+
+    /// <summary>Creates an editor of a new document of <paramref name="text"/>, and waits for its colors.</summary>
+    private static Task<TimeSpan> FirstColoredFrame(CodeLanguage language, string text, Color syntax) =>
+        FirstColoredFrame(language, CodeDocument.Create(language, text), syntax);
+
+    /// <summary>
+    /// Creates and shows an editor of <paramref name="document"/>, renders frames, and returns how long after creating
+    /// the editor a frame first showed the <paramref name="syntax"/> color in its pixels.
+    /// </summary>
+    private static async Task<TimeSpan> FirstColoredFrame(CodeLanguage language, CodeDocument document, Color syntax)
+    {
+        long start = Stopwatch.GetTimestamp();
+        using var window = new EditorWindow(new CodeEditor { Document = document });
+        while (true)
+        {
+            WriteableBitmap frame = window.Render();
+            TimeSpan elapsed = Stopwatch.GetElapsedTime(start);
+            // Some glyphs' worth of pixels: anti-aliasing blends the edges of the rest.
+            if (EditorWindow.CountPixels(frame, syntax) > 100)
+                return elapsed;
+            elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10), $"No {language.Id} colors yet.");
+            await Task.Delay(1);
+        }
+    }
+
+    private static (CodeLanguage Language, string Text, Color Syntax) Sample(string language) =>
+        language switch
+        {
+            // Property names, and YAML's keys.
+            "json" => (CodeLanguage.Json, Texts.Json(Lines), Color.Parse("#0451A5")),
+            _ => (CodeLanguage.Yaml, Texts.Yaml(Lines), Color.Parse("#800000")),
+        };
+}
