@@ -102,6 +102,31 @@ public sealed class TextSnapshotTests
         }
     }
 
+    [AvaloniaFact]
+    public async Task Threads_that_use_a_new_snapshot_at_once_see_the_same_lines()
+    {
+        string text = string.Concat(Enumerable.Range(0, 2000).Select(i => $"line {i}\r\n"));
+        TextPosition[] expected = PositionsOf(text);
+
+        for (int round = 0; round < 20; round++)
+        {
+            // Each round a snapshot without its line index, used by eight threads at once.
+            TextSnapshot snapshot = CodeDocument.Create(CodeLanguage.PlainText, text).CurrentSnapshot;
+            await Task.WhenAll(
+                Enumerable
+                    .Range(0, 8)
+                    .Select(thread =>
+                        Task.Run(() =>
+                        {
+                            int offset = Array.IndexOf(expected, new TextPosition(thread * 200 + 1, 3));
+                            snapshot.GetPosition(offset).ShouldBe(expected[offset]);
+                            snapshot.GetOffset(expected[offset]).ShouldBe(offset);
+                        })
+                    )
+            );
+        }
+    }
+
     /// <summary>The position of every offset, counted character by character.</summary>
     private static TextPosition[] PositionsOf(string text)
     {
