@@ -298,7 +298,10 @@ Two limits come with it:
    of script it runs; the globals types as ordinary classes with internal constructors. Implement `Create`, the
    factories and the disposal explicitly: the globals' public members are what scripts see, so a public
    `DisposeAsync` would be a script's to call. Callbacks that the session object keeps must not use a run's globals.
-   A script API without reflection-heavy drivers may be a single project.
+   Keep the factories cheap: acquire devices in the session's setup or later in the run, so that a factory that
+   throws leaves nothing open. Report expected failures of the app side, such as a declined prompt, as result
+   records: a script sees an app-side exception only as `RemoteInvocationException` with its message. A script API
+   without reflection-heavy drivers may be a single project.
 3. In the app, both projects referenced with `CSharpScriptReference="true"`, an environment per kind of script,
    `new CSharpScriptEnvironment<TGlobals> { … }`, and a one-line wrapper around `StartAsync`, like the use cases'
    `Scripting.StartSessionAsync`: C# can't infer its three type arguments.
@@ -354,8 +357,11 @@ set on the session object, can still be called afterwards; the library does not 
 run, so it may only use what outlives its run: the session object and what it owns, not the run's globals, its input,
 or what they own. Passing the run's stop token along is a safety net: once the run has ended it is cancelled, so a
 callback that breaks the rule fails loudly instead of working on a closed device. Callbacks that should end with their
-run are removed by the globals when they are disposed; a call already running may still finish shortly after. In v1,
-script code does not cross the bridge to the app: the bridge's methods copy data only.
+run are removed by the globals when they are disposed; a call already running may still finish shortly after. A
+script API whose callbacks use what the run owns, such as its devices, gives scripts an awaited scope instead: when
+its body ends, the scope refuses new calls, stops what produces them, and waits for the calls already running, all
+before the script's code returns. The run then ends only after them, and the library needs to know nothing of it. In
+v1, script code does not cross the bridge to the app: the bridge's methods copy data only.
 
 **Readiness and threads.** Calls from the app and from overlapping scripts reach the session object on any thread,
 and the script API makes it safe for that. The library does not serialise them: a script may wait for the app while
@@ -394,7 +400,8 @@ after the app side's calls have returned, so the app may drop its app side then;
 keeps them waiting. `DisposeAsync` never throws for failures in the runner, so `await using` keeps the app's own
 exception: runs report theirs in `Completion`, and the session object's own is `Exited`'s `DisposeException`. It is
 safe after a kill or a crash, and to call twice. A session keeps every script it ran loaded until it ends, so that
-callbacks a run left in the session object keep working.
+callbacks a run left in the session object keep working. A session that runs edited scripts again and again grows
+with each, so an app that keeps one open through a long editing session replaces it at an idle moment.
 
 **When a session has ended,** `session.Exited` completes with the reason (`Disposed`, `Killed`, `StopTimedOut`,
 `Crashed` or `DisposeTimedOut`), the exit code and the end of the process's standard error. It completes once, with
@@ -539,6 +546,8 @@ Still open:
   step of disposing, and call `DisposeAsync` and `KillAsync` together;
 - documents on a second UI thread: an editor there refuses a document of the main thread, and accepts one created on
   its own;
+- calls that must stay quick, such as prompts, callback replies and stopping a run, while the bridge carries bulk data
+  in both directions: a test measures their latency under load;
 - integration tests on GitHub Actions for Windows, Linux and macOS, once the API is decided.
 
 ## 10. Open questions
