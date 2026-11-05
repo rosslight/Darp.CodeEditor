@@ -19,17 +19,17 @@ internal static class BenchmarkConfig
         if (string.IsNullOrEmpty(baselineVersion))
             return DefaultConfig.Instance;
 
-        StatisticalTestColumn timeVerdict = StatisticalTestColumn.CreateDefault();
         return DefaultConfig
             .Instance.AddDiagnoser(MemoryDiagnoser.Default)
             .AddJob(
-                Job.Default.WithMsBuildArguments($"/p:DarpCodeEditorBaselineVersion={baselineVersion}")
+                Job.Default.WithLaunchCount(3)
+                    .WithMsBuildArguments($"/p:DarpCodeEditorBaselineVersion={baselineVersion}")
                     .WithId("Baseline")
                     .AsBaseline()
             )
-            .AddJob(Job.Default.WithId("Current"))
-            .AddColumn(timeVerdict)
-            .AddExporter(new ComparisonExporter(timeVerdict))
+            .AddJob(Job.Default.WithLaunchCount(3).WithId("Current"))
+            .AddColumn(StatisticalTestColumn.CreateDefault())
+            .AddExporter(new ComparisonExporter())
             .HideColumns(Column.Arguments)
             .WithOrderer(new PairedJobsOrderer());
     }
