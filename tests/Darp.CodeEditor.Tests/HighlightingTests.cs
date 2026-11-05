@@ -10,12 +10,15 @@ namespace Darp.CodeEditor.Tests;
 [Collection(UiFixture.Collection)]
 public sealed class HighlightingTests(UiFixture ui)
 {
-    /// <summary>Light+ colors of JSON.</summary>
+    /// <summary>Light+ colors of JSON, and of the test grammar's keywords.</summary>
     private static readonly Color s_comment = Color.Parse("#008000");
     private static readonly Color s_string = Color.Parse("#A31515");
     private static readonly Color s_propertyName = Color.Parse("#0451A5");
     private static readonly Color s_number = Color.Parse("#098658");
     private static readonly Color s_keyword = Color.Parse("#0000FF");
+
+    /// <summary>The Light+ color of XML's tag names.</summary>
+    private static readonly Color s_tag = Color.Parse("#800000");
 
     private readonly UiFixture _ui = ui;
 
@@ -131,6 +134,20 @@ public sealed class HighlightingTests(UiFixture ui)
             window.Window.UpdateLayout();
 
             window.ColorsOfLine(4001).ShouldContain(s_keyword);
+        });
+
+    [Fact]
+    public Task An_xml_document_shows_its_tags_and_comments_in_their_colors() =>
+        _ui.Run(async () =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.Xml, "<root a=\"v\">\n  <!-- note -->\n</root>");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return window.ColorsOfLine(1).Contains(s_tag) && window.ColorsOfLine(2).Contains(s_comment);
+            });
         });
 
     [Fact]
