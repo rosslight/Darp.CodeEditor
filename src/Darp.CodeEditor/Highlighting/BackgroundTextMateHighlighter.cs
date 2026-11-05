@@ -247,7 +247,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
     /// </summary>
     private void TokenizeNow(TextMateGrammar grammar, DocumentLine line, int index, LineEntry entry)
     {
-        if (line.Length > MaxSyncLineLength || grammar.TooSlowForUiThread)
+        if (line.Length > MaxSyncLineLength || entry.TooSlowForUiThread)
             return;
         LineEntry? previous = index > 0 ? _lines[index - 1] : null;
         bool exact = previous is null || previous.IsValid;
@@ -282,9 +282,10 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         if (elapsed >= limit)
         {
             _frameDeadline = 0;
-            // It checks the limit only between regex searches; one search ran far past it.
+            // It checks the limit only between regex searches, and one search ran far past it, or a pause of the
+            // process did: the line is left to the background until it changes, and other lines go on as before.
             if (elapsed >= limit + s_frameBudget)
-                grammar.TooSlowForUiThread = true;
+                entry.TooSlowForUiThread = true;
             return;
         }
         bool endStateChanged = !Equals(entry.EndState, result.RuleStack);
@@ -448,6 +449,12 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         /// </summary>
         public bool IsValid { get; private set; }
 
+        /// <summary>
+        /// True when tokenizing the line on the UI thread ran far past the frame budget. Only the background tokenizes
+        /// it, until it changes.
+        /// </summary>
+        public bool TooSlowForUiThread { get; set; }
+
         public void Tokenized(int[]? tokens, IStateStack? endState, bool exact)
         {
             Tokens = tokens;
@@ -455,7 +462,11 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
             IsValid = exact;
         }
 
-        public void Invalidate() => IsValid = false;
+        public void Invalidate()
+        {
+            IsValid = false;
+            TooSlowForUiThread = false;
+        }
     }
 }
 

@@ -15,6 +15,7 @@ public sealed class HighlightingTests(UiFixture ui)
     private static readonly Color s_string = Color.Parse("#A31515");
     private static readonly Color s_propertyName = Color.Parse("#0451A5");
     private static readonly Color s_number = Color.Parse("#098658");
+    private static readonly Color s_keyword = Color.Parse("#0000FF");
 
     private readonly UiFixture _ui = ui;
 
@@ -97,6 +98,39 @@ public sealed class HighlightingTests(UiFixture ui)
             top.ShouldBeGreaterThan(3900);
             // Without the lines above, the line starts from the start of the grammar: its key is colored as a string.
             window.ColorsOfLine(top + 1).ShouldContain(s_string);
+        });
+
+    [Fact]
+    public Task A_line_that_overruns_the_UI_threads_budget_leaves_it_tokenizing_the_others() =>
+        _ui.Run(async () =>
+        {
+            var language = new CodeLanguage(
+                "backtracking",
+                new Uri("avares://Darp.CodeEditor.Tests/Languages/backtracking.tmLanguage.json")
+            );
+            // One regex search on line 4,000 runs for tens of milliseconds: TextMate cannot stop inside it. The
+            // background tokenizes the lines near the view only, so it has not been there.
+            string text = string.Join(
+                '\n',
+                Enumerable.Range(1, 5000).Select(i => i == 4000 ? new string('a', 22) : "key")
+            );
+            CodeDocument document = CodeDocument.Create(language, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return window.ColorsOfLine(2).Contains(s_keyword);
+            });
+
+            window.Editor.ScrollTo(new TextRange(document.CurrentSnapshot.GetOffset(new TextPosition(4000, 1)), 0));
+            // The first pass reaches line 4,000, which overruns its budget, and ends there.
+            window.Window.UpdateLayout();
+            window.ColorsOfLine(4001).ShouldNotContain(s_keyword);
+            // The next pass, without the dispatcher's jobs, so without the background's results.
+            window.TextView.Redraw();
+            window.Window.UpdateLayout();
+
+            window.ColorsOfLine(4001).ShouldContain(s_keyword);
         });
 
     [Fact]

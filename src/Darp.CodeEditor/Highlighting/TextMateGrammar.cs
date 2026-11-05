@@ -51,12 +51,6 @@ internal sealed class TextMateGrammar
     /// <summary>The theme's token colors, by the color id that tokens carry.</summary>
     public IBrush?[] Brushes { get; }
 
-    /// <summary>
-    /// Set on the UI thread when one line took much longer than the frame budget there: TextMate cannot stop inside
-    /// one regex search, so a grammar with such an expression is tokenized only in the background from then on.
-    /// </summary>
-    public bool TooSlowForUiThread { get; set; }
-
     /// <summary>Loads <paramref name="grammar"/> with <paramref name="theme"/>, in a registry of its own.</summary>
     public static TextMateGrammar Load(ColorThemeFile theme, IRawGrammar grammar)
     {

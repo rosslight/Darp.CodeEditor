@@ -1,0 +1,8 @@
+{
+  "comment": "A grammar for tests: its first pattern backtracks for tens of milliseconds on a line of 22 a's, in one regex search.",
+  "scopeName": "source.backtracking",
+  "patterns": [
+    { "match": "(a+)+b", "name": "keyword.control.backtracking" },
+    { "match": "\\bkey\\b", "name": "keyword.other.backtracking" }
+  ]
+}

@@ -18,6 +18,10 @@
     <PackageReference Include="xunit.v3.aot" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Grammars of the tests' own languages. -->
+    <AvaloniaResource Include="Languages\*.json" />
+  </ItemGroup>
+  <ItemGroup>
     <Using Include="Shouldly" />
     <Using Include="Xunit" />
   </ItemGroup>
