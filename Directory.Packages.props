@@ -15,7 +15,7 @@
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.13" />
     <PackageVersion Include="Shouldly" Version="5.0.0-preview.2" />
     <PackageVersion Include="StreamJsonRpc" Version="2.26.150" />
-    <PackageVersion Include="TextMateSharp" Version="2.0.4" />
+    <PackageVersion Include="TextMateSharp" Version="2.0.5" />
     <PackageVersion Include="xunit.v3.aot" Version="4.0.2" />
   </ItemGroup>
 </Project>
