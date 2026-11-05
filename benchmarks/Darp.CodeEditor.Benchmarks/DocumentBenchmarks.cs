@@ -1,3 +1,5 @@
+using Avalonia;
+using Avalonia.Headless;
 using AvaloniaEdit.Document;
 using BenchmarkDotNet.Attributes;
 
@@ -17,22 +19,50 @@ public class DocumentBenchmarks
 
     private readonly ITextSource _rope = new TextDocument(s_text).CreateSnapshot();
     private readonly TextSnapshot _warm;
-    private CodeDocument _document;
+
+    /// <summary>The document of the current iteration, from <see cref="CreateDocument"/>.</summary>
+    private CodeDocument _document = CodeDocument.Create(CodeLanguage.PlainText);
+
     private bool _flip;
 
     public DocumentBenchmarks()
     {
-        // Without Avalonia set up, documents check no thread and claim AvaloniaEdit's buffer for each change.
-        _document = CodeDocument.Create(CodeLanguage.PlainText, s_text);
         _warm = new TextSnapshot(_rope, 1);
         _ = _warm.GetPosition(s_middle);
+    }
+
+    /// <summary>
+    /// Sets up a headless app on the benchmark's thread, so that it is the UI thread that documents belong to, as in an
+    /// app. Fails unless they do: an edit from a pool thread must throw.
+    /// </summary>
+    [GlobalSetup(Target = nameof(EditAndSnapshot))]
+    public void SetUpUiThread()
+    {
+        AppBuilder.Configure<Application>().UseHeadless(new AvaloniaHeadlessPlatformOptions()).SetupWithoutStarting();
+        CreateDocument();
+        bool bound = Task.Run(() =>
+            {
+                try
+                {
+                    _document.Replace(new TextRange(0, 0), "x");
+                    return false;
+                }
+                catch (InvalidOperationException)
+                {
+                    return true;
+                }
+            })
+            .GetAwaiter()
+            .GetResult();
+        if (!bound)
+            throw new InvalidOperationException("The document does not belong to the benchmark's thread.");
     }
 
     /// <summary>A new document per iteration, so that the undo history does not grow over the whole run.</summary>
     [IterationSetup(Target = nameof(EditAndSnapshot))]
     public void CreateDocument() => _document = CodeDocument.Create(CodeLanguage.PlainText, s_text);
 
-    /// <summary>Typing one character in the middle: the edit, its undo step and its snapshot.</summary>
+    /// <summary>Typing one character in the middle, on the UI thread: the edit, its undo step and its snapshot.</summary>
     [Benchmark]
     [InvocationCount(20_000)]
     public TextSnapshot EditAndSnapshot()
