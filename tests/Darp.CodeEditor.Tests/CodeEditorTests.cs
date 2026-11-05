@@ -398,13 +398,19 @@ public sealed class CodeEditorTests(UiFixture ui)
                 );
             }
 
+            // Select All is the editor's own, with the platform's gesture: Ctrl+A, or Cmd+A on macOS.
+            KeyGesture selectAll = Application
+                .Current.ShouldNotBeNull()
+                .PlatformSettings.ShouldNotBeNull()
+                .HotkeyConfiguration.SelectAll[0];
+
             window.Press(Key.S, KeyModifiers.Control);
             window.Press(Key.F5);
-            window.Press(Key.A, KeyModifiers.Control);
+            window.Press(selectAll.Key, selectAll.KeyModifiers);
             window.Type("x");
 
             pressed.ShouldBe(["Ctrl+S", "F5"]);
-            // Ctrl+A is the editor's own: it selected the text that typing replaced.
+            // Select All selected the text that typing replaced.
             document.Text.ShouldBe("x");
         });
 

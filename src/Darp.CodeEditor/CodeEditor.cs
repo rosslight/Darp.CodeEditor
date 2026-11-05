@@ -54,11 +54,12 @@ namespace Darp.CodeEditor;
 /// font defaults to a monospace one; set <c>FontFamily</c> and <c>FontSize</c> as for any control.
 /// </para>
 /// <para>
-/// The editor handles only its own keys: editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation, search
-/// (Ctrl+F, Ctrl+H, F3), completion (Ctrl+Space), comments (Ctrl+/) and indentation (Tab, Shift+Tab). Other keys, such
-/// as F5 or Ctrl+S, go on to the app's key bindings. A right click opens the editor's context menu: Cut, Copy, Paste
-/// and Select All. For an app's Edit menu, <see cref="Cut"/>, <see cref="Copy"/>, <see cref="Paste"/> and
-/// <see cref="SelectAll"/> do the same, and the document's <c>Undo</c> and <c>Redo</c> the rest.
+/// The editor handles only its own keys: editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A; Cmd on macOS),
+/// navigation, search (Ctrl+F, Ctrl+H, F3), completion (Ctrl+Space), comments (Ctrl+/) and indentation (Tab,
+/// Shift+Tab). Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A right click opens the editor's
+/// context menu: Cut, Copy, Paste and Select All. For an app's Edit menu, <see cref="Cut"/>, <see cref="Copy"/>,
+/// <see cref="Paste"/> and <see cref="SelectAll"/> do the same, and the document's <c>Undo</c> and <c>Redo</c> the
+/// rest.
 /// </para>
 /// <para>Members that take offsets or ranges clamp them to the text.</para>
 /// </remarks>
