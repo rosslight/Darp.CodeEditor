@@ -10,12 +10,17 @@ namespace Darp.CodeEditor;
 /// <remarks>
 /// <para>
 /// The editor is a view. The app owns the document, and the document keeps the text, the undo history, the
-/// indentation and the diagnostics. Setting <see cref="Document"/> shows another document, starting at the caret,
-/// selection and first visible line of the last editor that showed it. Several editors can show one document, each
-/// with its own caret.
+/// indentation and the diagnostics. Several editors can show one document, each with its own caret.
 /// </para>
 /// <para>
-/// Use it on the UI thread. It never waits for a language server: text and colors come first, and language features
+/// The caret, the selection and the scroll position belong to the editor, and last as long as it does, as a list's
+/// scroll position does. Setting <see cref="Document"/> shows another document from its start, and a tab control may
+/// create a new editor each time a tab shows. To keep them, keep the editors, such as one per open tab, or save them
+/// with <see cref="SaveViewState"/> before the switch and give them back with <see cref="RestoreViewState"/>.
+/// </para>
+/// <para>
+/// Use it on its UI thread, as any control; the editor posts its own work to its <c>Dispatcher</c>. It never waits for
+/// a language server: text and colors come first, and language features
 /// follow when the server answers. Out of the visual tree, the editor drops its subscriptions on the document, its
 /// pending requests and its rendering resources, so a discarded editor is collected even while its document lives
 /// on. <see cref="Document"/> keeps its value, so the editor can come back.
@@ -68,10 +73,10 @@ public class CodeEditor : TemplatedControl
     );
 
     /// <summary>Defines the <see cref="ColorTheme"/> property.</summary>
-    public static readonly StyledProperty<CodeEditorTheme> ColorThemeProperty = AvaloniaProperty.Register<
+    public static readonly StyledProperty<CodeEditorColorTheme> ColorThemeProperty = AvaloniaProperty.Register<
         CodeEditor,
-        CodeEditorTheme
-    >(nameof(ColorTheme), defaultValue: CodeEditorTheme.LightPlus);
+        CodeEditorColorTheme
+    >(nameof(ColorTheme), defaultValue: CodeEditorColorTheme.LightPlus);
 
     /// <summary>Defines the <see cref="Selection"/> property.</summary>
     public static readonly DirectProperty<CodeEditor, TextSelection> SelectionProperty =
@@ -118,8 +123,8 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>
     /// The colors of the text area: a VS Code color theme. Default: the <c>CodeEditorColorTheme</c> resource, which
-    /// <see cref="CodeEditorStyles"/> defines as <see cref="CodeEditorTheme.LightPlus"/> for light theme variants and
-    /// <see cref="CodeEditorTheme.DarkPlus"/> for dark ones, so editors follow the app's theme variant and any
+    /// <see cref="CodeEditorStyles"/> defines as <see cref="CodeEditorColorTheme.LightPlus"/> for light theme variants and
+    /// <see cref="CodeEditorColorTheme.DarkPlus"/> for dark ones, so editors follow the app's theme variant and any
     /// <c>ThemeVariantScope</c> around them. Where no resource matches, Light+.
     /// </summary>
     /// <remarks>
@@ -127,7 +132,7 @@ public class CodeEditor : TemplatedControl
     /// Setting the property on one editor fixes its colors whatever the theme variant. To make one editor dark in a
     /// light app, prefer a <c>ThemeVariantScope</c> around it: its popups then turn dark too.
     /// </remarks>
-    public CodeEditorTheme ColorTheme
+    public CodeEditorColorTheme ColorTheme
     {
         get => GetValue(ColorThemeProperty);
         set => SetValue(ColorThemeProperty, value);
@@ -151,6 +156,20 @@ public class CodeEditor : TemplatedControl
     /// taller than the view shows from its start.
     /// </summary>
     public void ScrollTo(TextRange range) => throw new NotImplementedException();
+
+    /// <summary>
+    /// Saves where the editor is in its document: the caret, the selection and the scroll position. Call it before
+    /// the editor shows another document or goes away, and give the state back with <see cref="RestoreViewState"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The editor shows no document.</exception>
+    public CodeEditorViewState SaveViewState() => throw new NotImplementedException();
+
+    /// <summary>
+    /// Returns to a saved place in the document the editor shows, following the edits made since. An editor that is
+    /// not laid out yet scrolls there once it is.
+    /// </summary>
+    /// <exception cref="ArgumentException">The state belongs to another document than <see cref="Document"/>.</exception>
+    public void RestoreViewState(CodeEditorViewState state) => throw new NotImplementedException();
 
     /// <summary>
     /// Opens the search bar, as Ctrl+F does, or the replace bar, as Ctrl+H does. A selection within one line becomes

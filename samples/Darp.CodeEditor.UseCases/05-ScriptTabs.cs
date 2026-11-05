@@ -9,16 +9,15 @@ namespace UseCases.Tabs;
 
 // Scenario: a script workbench with tabs. The user opens, edits, saves and closes scripts.
 //
-// - Each tab's document lives in the view model, so switching tabs keeps its text, undo history, caret and scroll
-//   position, even when the tab control recreates the editor.
+// - Each tab's document lives in the view model, so switching tabs keeps its text and undo history.
+// - The caret and the scroll position belong to the editor, as a list's scroll position does. A view that keeps one
+//   editor per open tab, such as an ItemsControl that shows only the selected one, keeps them without code. A view
+//   with one editor for all tabs saves and restores them, as SharedEditor below does.
 // - Closing a tab disposes its document. Closing the workbench disposes the rest.
 // - The error count covers every open tab, also those not shown: documents stay open in the server.
 // - A tab title shows "*" while its document has unsaved changes.
-// - The tab keeps the file's path. The C# server does not need it, so the document has none.
-//
-// Questions:
-// - One editor per tab (the tab control's default), or one editor whose Document switches? Both work.
-// - Should a document know its file, with Load and Save, or is a path next to it plus MarkUnmodified enough?
+// - The tab keeps the file's path and does the reading and writing; the document only learns what was saved, with
+//   MarkUnmodified. The C# server does not need the path, so the document has none.
 
 /// <summary>The script workbench.</summary>
 public sealed partial class ScriptTabsViewModel(CSharpScriptServer scripts) : ObservableObject, IDisposable
@@ -100,4 +99,30 @@ public sealed partial class ScriptTab : ObservableObject
 
     /// <summary>The file name, with "*" while there are unsaved changes.</summary>
     public string Title => Path.GetFileName(FilePath) + (Document.IsModified ? " *" : "");
+}
+
+/// <summary>
+/// For a view that shows every tab in one editor: shows a tab's document where the user left it. Call
+/// <see cref="Show"/> when the selected tab changes, instead of binding the editor's document.
+/// </summary>
+public sealed class SharedEditor
+{
+    private readonly CodeEditor _editor;
+    private readonly Dictionary<CodeDocument, CodeEditorViewState> _places = [];
+
+    /// <summary>Switches the documents of <paramref name="editor"/>.</summary>
+    public SharedEditor(CodeEditor editor) => _editor = editor;
+
+    /// <summary>Shows <paramref name="document"/>, at its caret and scroll position from last time.</summary>
+    public void Show(CodeDocument document)
+    {
+        if (_editor.Document is { } shown)
+            _places[shown] = _editor.SaveViewState();
+        _editor.Document = document;
+        if (_places.TryGetValue(document, out CodeEditorViewState? place))
+            _editor.RestoreViewState(place);
+    }
+
+    /// <summary>Forgets the place of a document whose tab was closed.</summary>
+    public void Forget(CodeDocument document) => _places.Remove(document);
 }

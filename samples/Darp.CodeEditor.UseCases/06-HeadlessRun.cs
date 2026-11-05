@@ -17,12 +17,10 @@ namespace UseCases.Headless;
 // - Each saved script gets a session of its own, set up through the bridge before the script starts. Its AppSide
 //   answers every question with "yes", since nobody is there to ask, and logs the values.
 // - Stop gives the script two seconds, then kills the session. Disposing the session afterwards is safe either way.
+// - Every failure ends up in the log, also a session that does not start.
 // - The runner package depends on the C# package, which depends on the editor package and Avalonia. A console tool can
-//   reference them without starting an Avalonia app; a package without Avalonia would only make it smaller (Q59).
-//
-// Questions:
-// - Is there an app that runs scripts without Avalonia?
-// - Should a compiled script be storable, so that later runs skip the compiler entirely?
+//   reference them without starting an Avalonia app; a package without Avalonia comes when an app needs one.
+// - Each run compiles again. Storing a compiled script, so that later runs skip the compiler, comes after v1.
 
 /// <summary>Runs saved scripts with nobody watching.</summary>
 public sealed class SavedScripts
@@ -42,7 +40,7 @@ public sealed class SavedScripts
     public async Task<bool> RunAsync(string path, CancellationToken stop)
     {
         string code = await File.ReadAllTextAsync(path, stop);
-        CSharpScriptCompilation<Session, RunInput> compilation = await _scripts.CompileAsync(
+        CSharpScriptCompilation<ScriptGlobals> compilation = await _scripts.CompileAsync(
             ScriptEnvironments.Default,
             code,
             stop
@@ -63,12 +61,10 @@ public sealed class SavedScripts
         string runId = Path.GetFileNameWithoutExtension(path);
         var appSide = new AppSide((question, _) => Task.FromResult("yes"));
         appSide.Received += (id, values) => _log.LogInformation("{RunId}: {Count} values", id, values.Length);
-        await using CSharpScriptSession<ISessionSide, Session> session = await Scripting.StartSessionAsync(
-            appSide,
-            stop
-        );
+        CSharpScriptSession<ISessionSide, Session>? session = null;
         try
         {
+            session = await Scripting.StartSessionAsync(appSide, stop);
             await session.Remote.InitializeAsync(runId, stop);
             CSharpScriptRun run = await session.StartScriptAsync(
                 compilation.Script,
@@ -76,6 +72,7 @@ public sealed class SavedScripts
                 stop
             );
             await run.RunToEndAsync(stop, killSessionAfter: TimeSpan.FromSeconds(2));
+            return true;
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested)
         {
@@ -84,15 +81,31 @@ public sealed class SavedScripts
         }
         catch (CSharpScriptException exception)
         {
+            // From the script, its globals, or the session object while the session starts.
             _log.LogError("{RunId}: {Type}: {Message}", runId, exception.ScriptExceptionType, exception.Message);
             return false;
         }
-        catch (ConnectionLostException)
+        catch (ConnectionLostException) when (session is { } ended)
         {
-            CSharpScriptSessionExit exit = await session.Exited;
-            _log.LogError("{RunId}: the session ended ({Reason})", runId, exit.Reason);
+            CSharpScriptSessionExit exit = await ended.Exited;
+            _log.LogError(
+                "{RunId}: the session ended ({Reason})\n{StandardError}",
+                runId,
+                exit.Reason,
+                exit.StandardError
+            );
             return false;
         }
-        return true;
+        catch (InvalidOperationException exception) when (session is null)
+        {
+            // The runner did not start or answer; the message has its standard error.
+            _log.LogError(exception, "{RunId}: the session did not start", runId);
+            return false;
+        }
+        finally
+        {
+            if (session is not null)
+                await session.DisposeAsync();
+        }
     }
 }

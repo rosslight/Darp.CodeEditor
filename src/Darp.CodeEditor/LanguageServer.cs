@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Text.Json.Nodes;
-using Microsoft.Extensions.Logging;
 
 namespace Darp.CodeEditor;
 
@@ -16,8 +15,12 @@ namespace Darp.CodeEditor;
 /// </para>
 /// <para>
 /// The server is safe to use from any thread. It raises <see cref="PropertyChanged"/> for <see cref="State"/> on the
-/// UI thread, for a status indicator to bind, and nothing waits for it, so a server also works before the app's UI
-/// runs.
+/// UI thread, for a status indicator to bind, and nothing waits for it. Before Avalonia is set up, it leaves Avalonia's
+/// dispatcher alone and raises the event where the state changed, so a server also works before the app's UI runs.
+/// </para>
+/// <para>
+/// When the process fails, <see cref="State"/> shows the restart, <see cref="StartAsync"/> throws why a process did
+/// not start, and the server's own messages arrive through <see cref="LanguageServerOptions.StandardError"/>.
 /// </para>
 /// </remarks>
 public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, IDisposable
@@ -25,7 +28,7 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
     /// <summary>Describes a language server. The process does not start yet.</summary>
     public LanguageServer(LanguageServerOptions options) => throw new NotImplementedException();
 
-    /// <summary>Raised on the UI thread after <see cref="State"/> changed.</summary>
+    /// <summary>Raised on the UI thread after <see cref="State"/> changed; see the remarks for before the UI runs.</summary>
     public event PropertyChangedEventHandler? PropertyChanged;
 
     /// <summary>Where the process is in its life, for a status indicator.</summary>
@@ -33,8 +36,12 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
 
     /// <summary>
     /// Starts the process now rather than with the first document, so that language features are ready sooner.
-    /// Completes when the server has answered the protocol's <c>initialize</c> request.
+    /// Completes when the server has answered the protocol's <c>initialize</c> request. After
+    /// <see cref="LanguageServerState.Failed"/>, it starts a new process.
     /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The process did not start or did not answer in time. The message says why, with the end of its standard error.
+    /// </exception>
     public Task StartAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
 
     /// <summary>
@@ -93,8 +100,18 @@ public sealed record LanguageServerOptions
     /// </summary>
     public Func<LanguageServerSettingsRequest, JsonNode?>? Settings { get; init; }
 
-    /// <summary>Receives the server's standard error and the client's own messages: starts, restarts, failures.</summary>
-    public ILogger? Logger { get; init; }
+    /// <summary>
+    /// Receives each line that the server writes to standard error, on any thread, for the app's log: servers explain
+    /// their failures there. Nothing else arrives here; <see cref="LanguageServer.State"/> and
+    /// <see cref="LanguageServer.StartAsync"/> report what the client does.
+    /// </summary>
+    public Action<string>? StandardError { get; init; }
+
+    /// <summary>
+    /// The clock for the delay before a restart and for how long the server may take to answer before it counts as
+    /// hung. Default: <see cref="TimeProvider.System"/>; tests pass their own.
+    /// </summary>
+    public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
 }
 
 /// <summary>A language server's question for settings.</summary>

@@ -14,14 +14,12 @@ namespace UseCases.Communication;
 //   app calls the calculation afterwards. A trigger that a script registers belongs to its run: the script waits
 //   until the app cancels it, and the trigger is gone when the run has ended.
 // - Fast data, such as thousands of values per second that the app itself receives: one call carries a batch. A call
-//   per value cost about 30 µs in the prototype, so about 30,000 values per second at best; batches of 1,024 reached
-//   about 1.5 million. Most fast data never crosses at all: drivers in the runner read their devices there.
+//   per value takes about 25 µs, so about 40,000 values per second at best; batches of 1,024 reached about 12 million
+//   in a spike. Batching is the script API's job, with a batch method on the bridge; the library adds a helper once a
+//   second app needs one. Most fast data never crosses at all: drivers in the runner read their devices there.
 //
 // Readiness belongs to the script API: the trigger script notifies the app once it has registered, and the app waits
-// for that before it triggers.
-//
-// Questions:
-// - Should the library batch single values behind the scenes, or is a batch method in the script API enough?
+// for that before it triggers. Whatever happens meanwhile, the app stops the trigger's run before it goes on.
 
 /// <summary>The app calls a session.</summary>
 public sealed class AppToScript
@@ -79,13 +77,20 @@ public sealed class AppToScript
             new RunInput("trigger", "none"),
             cancellationToken
         );
-        if (await Task.WhenAny(triggerReady.Task, triggering.Completion) == triggering.Completion)
+        try
         {
-            await triggering.Completion;
-            throw new InvalidOperationException("The trigger script ended before it was ready.");
+            await Task.WhenAny(triggerReady.Task, triggering.Completion).WaitAsync(cancellationToken);
+            if (triggering.Completion.IsCompleted)
+            {
+                await triggering.Completion;
+                throw new InvalidOperationException("The trigger script ended before it was ready.");
+            }
+            await session.Remote.TriggerAsync("reset", cancellationToken);
         }
-        await session.Remote.TriggerAsync("reset", cancellationToken);
-        await triggering.StopAsync();
+        finally
+        {
+            await triggering.StopAsync(killSessionAfter: TimeSpan.FromSeconds(2));
+        }
         await ScriptRuns.ObserveStoppedAsync(triggering);
         log(await session.Remote.GetStatusAsync(cancellationToken)); // the trigger is gone
 
@@ -95,8 +100,6 @@ public sealed class AppToScript
         log($"{results.Length} results, the last {results[^1]}");
     }
 
-    private Task<CSharpScriptAssembly<Session, RunInput>> CompileAsync(
-        string code,
-        CancellationToken cancellationToken
-    ) => ScriptRuns.CompileAsync(_scripts, ScriptEnvironments.Default, code, cancellationToken);
+    private Task<CSharpScriptAssembly<ScriptGlobals>> CompileAsync(string code, CancellationToken cancellationToken) =>
+        ScriptRuns.CompileAsync(_scripts, ScriptEnvironments.Default, code, cancellationToken);
 }

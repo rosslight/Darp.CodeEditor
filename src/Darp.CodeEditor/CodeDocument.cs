@@ -16,23 +16,23 @@ namespace Darp.CodeEditor;
 /// draw: setting <see cref="Text"/>, <see cref="FilePath"/> or <see cref="Indentation"/>, <see cref="Undo"/>,
 /// <see cref="Redo"/> and <see cref="MarkUnmodified"/> throw <see cref="InvalidOperationException"/> on other
 /// threads. Events are raised on the UI thread, also for documents created elsewhere. To read the text and its version
-/// together, take <see cref="CurrentSnapshot"/>.
+/// together, take <see cref="CurrentSnapshot"/>. Before Avalonia is set up there is no UI thread yet: the document
+/// leaves Avalonia's dispatcher alone, checks no thread and raises its events where the change happens.
 /// </para>
 /// <para>
 /// <see cref="Create"/> creates a document without a server. A server creates its own, with
 /// <see cref="LanguageServer.CreateDocument"/> or the C# script server's <c>CreateDocument</c>, which returns a typed
 /// C# script document; such a document is open in that server from creation until <see cref="Dispose"/>, whether an
-/// editor shows it or not, and the server starts with its first document. Apps don't derive from this type. Neither creating nor disposing a document waits for the server. A document without
-/// a server holds nothing that needs disposing.
+/// editor shows it or not, and the server starts with its first document. Apps don't derive from this type. Neither
+/// creating nor disposing a document waits for the server. Dispose every document, also one without a server.
 /// </para>
 /// <para>
-/// A document remembers the caret, selection and first visible line of the editor that showed it last, and an editor
-/// that shows it again starts there.
+/// A document holds no view state: the caret, the selection and the scroll position belong to each editor.
 /// </para>
 /// <para>
 /// <see cref="PropertyChanged"/> reports <see cref="IsModified"/>, <see cref="CanUndo"/>, <see cref="CanRedo"/>,
-/// <see cref="Indentation"/>, <see cref="Diagnostics"/> and <see cref="DiagnosticsSnapshot"/>, for bindings. It does not report <see cref="Text"/>: each read copies the whole text, so
-/// a binding would copy it on every keystroke. Listen to <see cref="TextChanged"/> and read the text when needed.
+/// <see cref="Indentation"/> and <see cref="Diagnostics"/>, for bindings. It does not report <see cref="Text"/>: each
+/// read copies the whole text, so a binding would copy it on every keystroke. Listen to <see cref="TextChanged"/> and read the text when needed.
 /// </para>
 /// </remarks>
 public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
@@ -105,17 +105,12 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     public bool CanRedo => throw new NotImplementedException();
 
     /// <summary>
-    /// The language server's latest diagnostics, with ranges in the text of <see cref="DiagnosticsSnapshot"/>. Servers
-    /// report again shortly after each change; meanwhile the editor's squiggles move with the text, these records do
-    /// not. To select one in the current text, map its range with <see cref="MapToCurrent"/>. Empty without a server.
+    /// The language server's latest diagnostics, each with the snapshot its range refers to. Servers report again
+    /// shortly after each change; meanwhile the editor's squiggles move with the text, these records do not. To select
+    /// one in the current text, map it: <c>MapToCurrent(diagnostic.Snapshot, diagnostic.Range)</c>. Empty without a
+    /// server.
     /// </summary>
     public IReadOnlyList<Diagnostic> Diagnostics => throw new NotImplementedException();
-
-    /// <summary>
-    /// The text that <see cref="Diagnostics"/> refer to. Both change together, on the UI thread; read them there to get
-    /// a matching pair.
-    /// </summary>
-    public TextSnapshot DiagnosticsSnapshot => throw new NotImplementedException();
 
     /// <summary>
     /// Replaces <paramref name="range"/> with <paramref name="text"/>, in one step that the user can undo; an empty

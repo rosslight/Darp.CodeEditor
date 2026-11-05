@@ -5,11 +5,8 @@ namespace UseCases.Viewer;
 // Scenario: a dialog shows JSON that the app produced, such as a device's configuration: colored, searchable,
 // read-only. No language server.
 //
-// The document has no server, so it holds nothing that needs disposing; the dialog disposes it anyway, so that the
-// code stays right if the language gets a server later.
-//
-// Questions:
-// - Is "dispose every document" a fair rule, or should documents without a server not be disposable at all?
+// The dialog disposes the document, although it has no server: every document is disposed, one rule for all, so the
+// code stays right if the document gets a server later.
 
 /// <summary>A read-only JSON view.</summary>
 public sealed class JsonViewer : IDisposable

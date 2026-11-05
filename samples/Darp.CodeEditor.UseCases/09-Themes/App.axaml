@@ -7,9 +7,7 @@
   - The override goes where Avalonia's theme resources go: the app's theme dictionaries. A custom theme variant gets
     the colors of the variant it inherits from, unless it has an entry of its own here.
   - Fonts come from the editor's FontFamily and FontSize, so one style sets them for every editor.
-
-  Questions:
-  - Do the apps ship their own theme files, or are Light+ and Dark+ enough?
+  - The library ships Light+ and Dark+ only. Other colors are the app's own theme files, as here.
 -->
 <Application
     xmlns="https://github.com/avaloniaui"
@@ -22,13 +20,13 @@
         <ResourceDictionary>
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Light">
-                    <ce:CodeEditorTheme
+                    <ce:CodeEditorColorTheme
                         x:Key="CodeEditorColorTheme"
                         Source="avares://Darp.CodeEditor.UseCases/Themes/brand-light.json"
                     />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Dark">
-                    <ce:CodeEditorTheme
+                    <ce:CodeEditorColorTheme
                         x:Key="CodeEditorColorTheme"
                         Source="avares://Darp.CodeEditor.UseCases/Themes/brand-dark.json"
                     />

@@ -12,14 +12,15 @@ namespace UseCases.Communication;
 internal static class ScriptRuns
 {
     /// <summary>Compiles <paramref name="code"/> in <paramref name="environment"/>. These scripts are fixed, so errors throw.</summary>
-    public static async Task<CSharpScriptAssembly<Session, TInput>> CompileAsync<TInput>(
+    public static async Task<CSharpScriptAssembly<TGlobals>> CompileAsync<TGlobals>(
         CSharpScriptServer scripts,
-        CSharpScriptEnvironment<Session, TInput> environment,
+        CSharpScriptEnvironment<TGlobals> environment,
         string code,
         CancellationToken cancellationToken
     )
+        where TGlobals : class
     {
-        CSharpScriptCompilation<Session, TInput> compilation = await scripts.CompileAsync(
+        CSharpScriptCompilation<TGlobals> compilation = await scripts.CompileAsync(
             environment,
             code,
             cancellationToken
@@ -32,8 +33,8 @@ internal static class ScriptRuns
     }
 
     /// <summary>
-    /// Observes how a stopped run ended. StopAsync doesn't throw for it: ending through the stop token is expected,
-    /// and anything else, such as a failure, throws here.
+    /// Observes how a run that the app stopped ended. StopAsync doesn't throw for it: ending through the stop token is
+    /// expected, and anything else, such as a failure or a kill, throws here.
     /// </summary>
     public static async Task ObserveStoppedAsync(CSharpScriptRun run)
     {

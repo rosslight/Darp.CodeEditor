@@ -13,10 +13,7 @@ namespace UseCases.Communication;
 //   AppSide.Notified gets it, marked with the run that sent it. Nothing has to be registered in the runner.
 // - Fast data: SendAsync queues values in the runner, and they reach the app in batches, in order. While a batch is on
 //   its way, new values wait for the next one, so batches grow with the load and a lone value goes out at once. When
-//   the run has ended, all its values have reached the app.
-//
-// Questions:
-// - Should a full queue make the script wait, as drafted, or drop old values?
+//   the run has ended, all its values have reached the app. A full queue makes the script wait: no value is lost.
 
 /// <summary>Scripts call the app.</summary>
 public sealed class ScriptToApp
@@ -69,15 +66,22 @@ public sealed class ScriptToApp
         // A call.
         await RunToEndAsync(session, Asks, "asking", cancellationToken);
 
-        // Notifications, until the app cancels the run after three seconds.
+        // Notifications, until the app stops the run after three seconds. RunToEndAsync reports how it ended.
         CSharpScriptRun ticking = await session.StartScriptAsync(
             await CompileAsync(Ticks, cancellationToken),
             new RunInput("ticking", "none"),
             cancellationToken
         );
-        await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
-        await ticking.StopAsync();
-        await ScriptRuns.ObserveStoppedAsync(ticking);
+        using var threeSeconds = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        threeSeconds.CancelAfter(TimeSpan.FromSeconds(3));
+        try
+        {
+            await ticking.RunToEndAsync(threeSeconds.Token, killSessionAfter: TimeSpan.FromSeconds(2));
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Stopped after three seconds, as planned.
+        }
 
         // Fast data. Once the run has ended, all its values have reached the app.
         await RunToEndAsync(session, Streams, "streaming", cancellationToken);
@@ -98,8 +102,6 @@ public sealed class ScriptToApp
         await run.RunToEndAsync(cancellationToken, killSessionAfter: TimeSpan.FromSeconds(2));
     }
 
-    private Task<CSharpScriptAssembly<Session, RunInput>> CompileAsync(
-        string code,
-        CancellationToken cancellationToken
-    ) => ScriptRuns.CompileAsync(_scripts, ScriptEnvironments.Default, code, cancellationToken);
+    private Task<CSharpScriptAssembly<ScriptGlobals>> CompileAsync(string code, CancellationToken cancellationToken) =>
+        ScriptRuns.CompileAsync(_scripts, ScriptEnvironments.Default, code, cancellationToken);
 }

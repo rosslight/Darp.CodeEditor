@@ -9,10 +9,8 @@ namespace UseCases.AnyLanguage;
 //
 // - The server needs settings: it asks for them with workspace/configuration, and `Settings` answers.
 // - Documents carry their file path, so the server can find a schema or configuration next to them.
-//
-// Questions:
-// - Do some servers need more than a command line, initialization options and settings answers?
-// - Should the editor bundle third-party servers, or does each app ship the ones it uses?
+// - Servers speak LSP over stdio; other transports come when a server needs one.
+// - Each app ships the servers it uses; the library bundles none.
 
 /// <summary>YAML editing with yaml-language-server.</summary>
 public sealed class YamlEditing : IAsyncDisposable

@@ -12,7 +12,7 @@ namespace Darp.CodeEditor;
 /// <code><![CDATA[
 /// <ResourceDictionary.ThemeDictionaries>
 ///   <ResourceDictionary x:Key="Dark">
-///     <ce:CodeEditorTheme x:Key="CodeEditorColorTheme" Source="avares://MyApp/Themes/brand-dark.json" />
+///     <ce:CodeEditorColorTheme x:Key="CodeEditorColorTheme" Source="avares://MyApp/Themes/brand-dark.json" />
 ///   </ResourceDictionary>
 /// </ResourceDictionary.ThemeDictionaries>
 /// ]]></code>
@@ -24,17 +24,17 @@ namespace Darp.CodeEditor;
 /// <c>LogToTrace()</c>.
 /// </para>
 /// </remarks>
-public sealed class CodeEditorTheme
+public sealed class CodeEditorColorTheme
 {
     /// <summary>Creates a theme from <see cref="Source"/>, for XAML. Setting the source starts loading it.</summary>
-    public CodeEditorTheme() { }
+    public CodeEditorColorTheme() { }
 
     /// <summary>VS Code's default dark theme.</summary>
-    public static CodeEditorTheme DarkPlus { get; } =
+    public static CodeEditorColorTheme DarkPlus { get; } =
         new() { Source = new Uri("avares://Darp.CodeEditor/Themes/dark_plus.json") };
 
     /// <summary>VS Code's default light theme.</summary>
-    public static CodeEditorTheme LightPlus { get; } =
+    public static CodeEditorColorTheme LightPlus { get; } =
         new() { Source = new Uri("avares://Darp.CodeEditor/Themes/light_plus.json") };
 
     /// <summary>

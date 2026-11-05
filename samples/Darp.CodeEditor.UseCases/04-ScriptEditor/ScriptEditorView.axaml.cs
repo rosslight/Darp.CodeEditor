@@ -10,12 +10,12 @@ public partial class ScriptEditorView : UserControl
     public ScriptEditorView() => InitializeComponent();
 
     // Moving the caret is the view's job: the view model knows the document, not the editors that show it.
-    // The diagnostics refer to the text the server analyzed; the user may have typed since.
+    // A diagnostic refers to the text the server analyzed; the user may have typed since.
     private void OnErrorSelected(object? sender, SelectionChangedEventArgs e)
     {
         if (Errors.SelectedItem is not Diagnostic diagnostic || Editor.Document is not { } document)
             return;
-        TextRange range = document.MapToCurrent(document.DiagnosticsSnapshot, diagnostic.Range);
+        TextRange range = document.MapToCurrent(diagnostic.Snapshot, diagnostic.Range);
         Editor.Selection = new TextSelection(range.Start, range.End);
         Editor.ScrollTo(range);
         Editor.Focus();

@@ -15,17 +15,15 @@ namespace UseCases.ScriptEditor;
 // The error list shows the document's diagnostics; clicking one moves the caret there (see the view).
 //
 // - The document lives in the view model: leaving the page and coming back keeps the text and its undo history.
-// - Run does not check the document's diagnostics first: the compilation has its own, for exactly the version it
+// - Run does not wait for the document's diagnostics: the compilation has its own, for exactly the version it
 //   compiled, and Run prints those.
 // - The page starts its session with the first Run and keeps it. A calculation a run sets belongs to the session, so
 //   it is still there after the run; anything the run owned ended with it.
 // - Each run gets its own input, so the output shows which run wrote it.
-// - Stop gives a script two seconds, then kills the session; the next Run starts a new one. Closing the page ends a
-//   Run in progress before it disposes the session.
-//
-// Questions:
-// - Should Run wait for the latest diagnostics, or is compiling and showing the compiler's errors enough?
-// - Should a session restart its process by itself after a kill or a crash, or is that the page's job, as drafted?
+// - Stop gives a script two seconds, then kills the session. RunToEndAsync reports the kill, and the next Run starts a
+//   new session: sessions don't restart by themselves. Closing the page ends a Run in progress before it disposes the
+//   session.
+// - A failure says where it happened in the current text, also one in the calculation that an earlier run left.
 
 /// <summary>The script editor page.</summary>
 public sealed partial class ScriptEditorViewModel : ObservableObject, IAsyncDisposable
@@ -52,7 +50,7 @@ public sealed partial class ScriptEditorViewModel : ObservableObject, IAsyncDisp
     }
 
     /// <summary>The script the editor shows: a document of the default kind of script.</summary>
-    public CSharpScriptDocument<Session, RunInput> Script { get; }
+    public CSharpScriptDocument<ScriptGlobals> Script { get; }
 
     /// <summary>What runs printed, for the output panel.</summary>
     [ObservableProperty]
@@ -72,7 +70,7 @@ public sealed partial class ScriptEditorViewModel : ObservableObject, IAsyncDisp
         }
         catch (CSharpScriptException exception)
         {
-            WriteLine($"The script failed: {exception.ScriptExceptionType}: {exception.Message}");
+            WriteLine($"The script failed{Where(exception)}: {exception.ScriptExceptionType}: {exception.Message}");
         }
         catch (ConnectionLostException)
         {
@@ -87,7 +85,7 @@ public sealed partial class ScriptEditorViewModel : ObservableObject, IAsyncDisp
 
     private async Task RunScriptAsync(CancellationToken stop)
     {
-        CSharpScriptCompilation<Session, RunInput> compilation = await Script.CompileAsync(stop);
+        CSharpScriptCompilation<ScriptGlobals> compilation = await Script.CompileAsync(stop);
         if (!compilation.Succeeded)
         {
             foreach (Diagnostic error in compilation.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error))
@@ -95,6 +93,8 @@ public sealed partial class ScriptEditorViewModel : ObservableObject, IAsyncDisp
             return;
         }
 
+        if (_session is { Exited.IsCompleted: true })
+            await EndSessionAsync();
         _session ??= await Scripting.StartSessionAsync(_appSide, stop);
         CSharpScriptSession<ISessionSide, Session> session = _session;
         var input = new RunInput($"run {++_runCount}", "editor");
@@ -110,6 +110,16 @@ public sealed partial class ScriptEditorViewModel : ObservableObject, IAsyncDisp
             _session = null;
             await session.DisposeAsync();
         }
+    }
+
+    // The failure's position refers to the text the script was compiled from; the user may have typed since.
+    private string Where(CSharpScriptException exception)
+    {
+        if (exception is not { ScriptSnapshot: { } compiled, ScriptPosition: { } position })
+            return "";
+        TextRange range = Script.MapToCurrent(compiled, new TextRange(compiled.GetOffset(position), 0));
+        TextPosition now = Script.CurrentSnapshot.GetPosition(range.Start);
+        return $" at ({now.Line},{now.Column})";
     }
 
     private void WriteLine(string line) => Output += line + "\n";

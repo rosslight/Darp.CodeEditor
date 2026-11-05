@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
-using Darp.CodeEditor.CSharpScript;
+using Darp.CodeEditor.CSharpScript.Runner;
 
 namespace UseCases.ScriptApi;
 
@@ -8,21 +8,30 @@ namespace UseCases.ScriptApi;
 // copying. Drivers and helpers belong here.
 //
 // - Session: once per session. It implements the session side of the bridge, holds what the session's scripts share,
-//   and owns what outlives a run.
-// - ScriptGlobals and ReaderGlobals: once per run, for two kinds of scripts over the same session object. They own
-//   what belongs to their run, and end it when the session disposes them at the run's end: triggers stop taking calls
-//   and wait for the ones already running, and queued values go out. IScriptGlobals tells the compiler what each
-//   needs: the session object and, for ScriptGlobals, the run's input.
+//   and owns what outlives a run. It also decides which kinds of scripts run in it: it creates the globals of each
+//   run, one factory per kind, and gives each kind only what it uses.
+// - ScriptGlobals and ReaderGlobals: once per run, for two kinds of scripts. They are ordinary classes: ScriptGlobals
+//   gets the session object and the run's input, ReaderGlobals only the messages and the app. They own what belongs
+//   to their run, and end it when the session disposes them at the run's end: triggers stop taking calls and wait for
+//   the ones already running, and queued values go out.
 //
 // Calls from the app and from overlapping scripts reach the session object on any thread, so its state is either
 // immutable, published with volatile, or in concurrent collections. Scripts must not hold a lock across a call to the
 // app: the app may call back meanwhile.
+//
+// Create, the factories and the disposal are implemented explicitly, and the globals' constructors are internal: the
+// public members of the globals are what scripts see, and only the session creates and disposes these objects.
 
 /// <summary>
 /// The session object: the session side of the bridge, and the memory that the session's scripts share. The session
 /// creates it once and disposes it at its end.
 /// </summary>
-public sealed class Session : ISessionSide, IScriptSession<Session, IAppSide>, IDisposable
+public sealed class Session
+    : ISessionSide,
+        IScriptSessionObject<Session, IAppSide>,
+        IScriptGlobalsFactory<ScriptGlobals, RunInput>,
+        IScriptGlobalsFactory<ReaderGlobals>,
+        IDisposable
 {
     private readonly ConcurrentDictionary<string, TriggerRegistration> _triggers = new();
     private volatile string _name = "";
@@ -31,7 +40,17 @@ public sealed class Session : ISessionSide, IScriptSession<Session, IAppSide>, I
     private Session(IAppSide app) => App = app;
 
     /// <inheritdoc />
-    public static Session Create(IAppSide app) => new(app);
+    static Session IScriptSessionObject<Session, IAppSide>.Create(IAppSide app) => new(app);
+
+    /// <inheritdoc />
+    ScriptGlobals IScriptGlobalsFactory<ScriptGlobals, RunInput>.CreateGlobals(
+        RunInput input,
+        CancellationToken stop
+    ) => new(this, input, stop);
+
+    /// <inheritdoc />
+    ReaderGlobals IScriptGlobalsFactory<ReaderGlobals>.CreateGlobals(CancellationToken stop) =>
+        new(App, Messages.Reader, stop);
 
     /// <summary>The app's half of the bridge.</summary>
     public IAppSide App { get; }
@@ -87,7 +106,7 @@ public sealed class Session : ISessionSide, IScriptSession<Session, IAppSide>, I
     }
 
     /// <summary>Tells the session's scripts that no more messages come.</summary>
-    public void Dispose() => Messages.Writer.TryComplete();
+    void IDisposable.Dispose() => Messages.Writer.TryComplete();
 
     private Func<double, double> Calculation() =>
         _calculate ?? throw new InvalidOperationException("No script has set a calculation yet.");
@@ -160,7 +179,7 @@ public sealed class Session : ISessionSide, IScriptSession<Session, IAppSide>, I
 }
 
 /// <summary>What ordinary scripts use without qualification. The session creates one per run.</summary>
-public sealed class ScriptGlobals : IScriptGlobals<ScriptGlobals, Session, RunInput>, IAsyncDisposable
+public sealed class ScriptGlobals : IAsyncDisposable
 {
     private readonly Session _session;
     private readonly ValueSender _values;
@@ -168,17 +187,13 @@ public sealed class ScriptGlobals : IScriptGlobals<ScriptGlobals, Session, RunIn
     private readonly List<IAsyncDisposable> _registrations = [];
     private bool _ending;
 
-    private ScriptGlobals(Session session, RunInput input, CancellationToken stop)
+    internal ScriptGlobals(Session session, RunInput input, CancellationToken stop)
     {
         _session = session;
         _values = new ValueSender(session.App, input.RunId);
         Input = input;
         Stop = stop;
     }
-
-    /// <inheritdoc />
-    public static ScriptGlobals Create(Session session, RunInput input, CancellationToken stop) =>
-        new(session, input, stop);
 
     /// <summary>What the app gave this run.</summary>
     public RunInput Input { get; }
@@ -230,7 +245,7 @@ public sealed class ScriptGlobals : IScriptGlobals<ScriptGlobals, Session, RunIn
     /// Ends this run's triggers, waiting for the calls already running, then sends its last values. The session calls
     /// it when the run's code has finished, before the run's Completion.
     /// </summary>
-    public async ValueTask DisposeAsync()
+    async ValueTask IAsyncDisposable.DisposeAsync()
     {
         IAsyncDisposable[] registrations;
         lock (_gate)
@@ -248,20 +263,17 @@ public sealed class ScriptGlobals : IScriptGlobals<ScriptGlobals, Session, RunIn
 /// What reader scripts use without qualification: a second kind of script, which only reads the session's messages
 /// and sends values on. Its runs take no input. The session creates one per run.
 /// </summary>
-public sealed class ReaderGlobals : IScriptGlobals<ReaderGlobals, Session>, IAsyncDisposable
+public sealed class ReaderGlobals : IAsyncDisposable
 {
     private const string RunId = "reader";
     private readonly ValueSender _values;
 
-    private ReaderGlobals(Session session, CancellationToken stop)
+    internal ReaderGlobals(IAppSide app, ChannelReader<string> messages, CancellationToken stop)
     {
-        _values = new ValueSender(session.App, RunId);
-        Messages = session.Messages.Reader;
+        _values = new ValueSender(app, RunId);
+        Messages = messages;
         Stop = stop;
     }
-
-    /// <inheritdoc />
-    public static ReaderGlobals Create(Session session, CancellationToken stop) => new(session, stop);
 
     /// <summary>Cancelled when the app cancels this run, or when the run ends.</summary>
     public CancellationToken Stop { get; }
@@ -273,7 +285,7 @@ public sealed class ReaderGlobals : IScriptGlobals<ReaderGlobals, Session>, IAsy
     public ValueTask SendAsync(double value) => _values.WriteAsync(value, Stop);
 
     /// <summary>Sends this run's last values. The session calls it when the run's code has finished.</summary>
-    public ValueTask DisposeAsync() => _values.DisposeAsync();
+    ValueTask IAsyncDisposable.DisposeAsync() => _values.DisposeAsync();
 }
 
 /// <summary>

@@ -14,9 +14,10 @@
   <ItemGroup>
     <ProjectReference Include="..\Darp.CodeEditor.UseCases.ScriptApi\Darp.CodeEditor.UseCases.ScriptApi.csproj" />
     <!--
-      For IScriptSession and IScriptGlobals, the contracts the runner side implements. The C# package brings the editor
-      and Avalonia into the build, but nothing of them loads in the runner: nothing there touches their types.
+      For IScriptSessionObject and IScriptGlobalsFactory, the contracts the runner side implements. The runner package
+      brings the editor and Avalonia into the build, but nothing of them loads in the runner: nothing there touches
+      their types.
     -->
-    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharpScript\Darp.CodeEditor.CSharpScript.csproj" />
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharpScript.Runner\Darp.CodeEditor.CSharpScript.Runner.csproj" />
   </ItemGroup>
 </Project>

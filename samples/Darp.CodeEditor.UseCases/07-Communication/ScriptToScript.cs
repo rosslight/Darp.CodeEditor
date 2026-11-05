@@ -9,14 +9,11 @@ namespace UseCases.Communication;
 // An ordinary script writes messages; a reader script reads them and sends their lengths to the app. The messages
 // never leave the runner.
 //
-// - The two kinds see different globals, ScriptGlobals and ReaderGlobals, over the same session object. Reader runs
-//   take no input.
+// - The two kinds see different globals, which the session object creates: ScriptGlobals get the session object,
+//   ReaderGlobals only its messages. Reader runs take no input.
 // - Scripts of one session share a process: when one has to be killed, the other ends with it. Scripts in different
 //   sessions talk through the app instead.
-// - The app keeps both runs: when one fails early, it stops the other and reports the failure.
-//
-// Questions:
-// - Do scripts of different kinds need to share a session, or is one globals type for everything enough?
+// - The app keeps both runs: when one fails early, or the other does not start, it stops both and reports the failure.
 
 /// <summary>Two scripts talk to each other.</summary>
 public sealed class ScriptToScript
@@ -58,13 +55,13 @@ public sealed class ScriptToScript
             cancellationToken
         );
 
-        CSharpScriptAssembly<Session, RunInput> writerScript = await ScriptRuns.CompileAsync(
+        CSharpScriptAssembly<ScriptGlobals> writerScript = await ScriptRuns.CompileAsync(
             _scripts,
             ScriptEnvironments.Default,
             Writer,
             cancellationToken
         );
-        CSharpScriptAssembly<Session, ValueTuple> readerScript = await ScriptRuns.CompileAsync(
+        CSharpScriptAssembly<ReaderGlobals> readerScript = await ScriptRuns.CompileAsync(
             _scripts,
             ScriptEnvironments.Reader,
             Reader,
@@ -75,11 +72,17 @@ public sealed class ScriptToScript
             new RunInput("writer", "none"),
             cancellationToken
         );
-        CSharpScriptRun reader = await session.StartScriptAsync(readerScript, cancellationToken);
-
-        // Until the duration has passed, or one of them has ended early, for example because it failed.
-        await Task.WhenAny(writer.Completion, reader.Completion, Task.Delay(duration, cancellationToken));
-        await Task.WhenAll(writer.StopAsync(), reader.StopAsync());
+        CSharpScriptRun? reader = null;
+        try
+        {
+            reader = await session.StartScriptAsync(readerScript, cancellationToken);
+            // Until the duration has passed, or one of them has ended early, for example because it failed.
+            await Task.WhenAny(writer.Completion, reader.Completion, Task.Delay(duration, cancellationToken));
+        }
+        finally
+        {
+            await Task.WhenAll(writer.StopAsync(), reader?.StopAsync() ?? Task.CompletedTask);
+        }
         // Observe both outcomes; a failure of either throws here.
         await Task.WhenAll(ScriptRuns.ObserveStoppedAsync(writer), ScriptRuns.ObserveStoppedAsync(reader));
         cancellationToken.ThrowIfCancellationRequested();
