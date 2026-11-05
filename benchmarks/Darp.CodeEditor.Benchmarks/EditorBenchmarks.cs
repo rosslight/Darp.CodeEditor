@@ -20,6 +20,8 @@ namespace Darp.CodeEditor.Benchmarks;
 /// </summary>
 [NotInBaseline]
 [InvocationCount(1)]
+[WarmupCount(2)]
+[IterationCount(10)]
 public class FirstFrameBenchmarks
 {
     private CodeDocument? _document;
@@ -70,6 +72,8 @@ public class FirstFrameBenchmarks
 /// Each call types a character or deletes it again, so the text stays the same.
 /// </summary>
 [NotInBaseline]
+[WarmupCount(2)]
+[IterationCount(10)]
 public class TypingBenchmarks
 {
     private Window? _window;
@@ -133,6 +137,8 @@ public class TypingBenchmarks
 /// </summary>
 [NotInBaseline]
 [InvocationCount(Pages)]
+[WarmupCount(2)]
+[IterationCount(10)]
 public class ScrollingBenchmarks
 {
     /// <summary>About 150 pages of 31 lines: the view shows 31 lines.</summary>

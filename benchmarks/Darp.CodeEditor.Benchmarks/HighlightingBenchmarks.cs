@@ -13,6 +13,8 @@ namespace Darp.CodeEditor.Benchmarks;
 /// </summary>
 [MemoryDiagnoser]
 [NotInBaseline]
+[WarmupCount(2)]
+[IterationCount(10)]
 public class HighlightingBenchmarks
 {
     private const int Lines = 5000;
