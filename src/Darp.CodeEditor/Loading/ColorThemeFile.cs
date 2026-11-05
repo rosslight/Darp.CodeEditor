@@ -124,7 +124,8 @@ internal sealed record ColorThemeFile(
         Color? foreground = style.TryGetProperty("foreground", out JsonElement color) ? ReadColor(color) : null;
         if (style.TryGetProperty("fontStyle", out JsonElement fontStyle))
         {
-            string[] names = (fontStyle.GetString() ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            // As VS Code does, finds each name anywhere in the value, whatever separates them.
+            string names = fontStyle.GetString() ?? "";
             return new SemanticTokenStyle(
                 foreground,
                 names.Contains("bold"),

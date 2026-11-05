@@ -80,7 +80,8 @@ public sealed class CodeEditorColorThemeTests
             """
             { "include": "./base.json", "semanticTokenColors": {
                 "variable": { "italic": true, "bold": false },
-                "keyword": { "fontStyle": "italic" } } }
+                "keyword": { "fontStyle": "italic" },
+                "string": { "fontStyle": "bold\titalic\n underline", "bold": false, "strikethrough": true } } }
             """,
             TestContext.Current.CancellationToken
         );
@@ -95,6 +96,8 @@ public sealed class CodeEditorColorThemeTests
         Assert.Equal(new SemanticTokenStyle(null, null, null, true, null), styles["number"]);
         // fontStyle sets all four styles.
         Assert.Equal(new SemanticTokenStyle(null, false, true, false, false), styles["keyword"]);
+        // As in VS Code, any whitespace separates its names, and it wins over the flags.
+        Assert.Equal(new SemanticTokenStyle(null, true, true, true, false), styles["string"]);
         Directory.Delete(directory, recursive: true);
     }
 }
