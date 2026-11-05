@@ -539,8 +539,7 @@ Documents, languages and themes (sections 1 and 4) are implemented and tested. P
 - nothing in them touches Avalonia's dispatcher before Avalonia is set up: a test process loads YAML and Dark+, and
   creates, edits, undoes and maps a document on a pool thread, then sets up Avalonia on its main thread. The setup
   succeeds, and the document then belongs to the UI thread: it changes there and throws elsewhere;
-- `avares://` files load before setup, with Avalonia's standard asset loader, and built-in languages and themes
-  load only when first used;
+- `avares://` files load before setup, with Avalonia's standard asset loader;
 - TextMateSharp, without its grammar package, tokenizes VS Code's JSON grammar, comments included, and its YAML
   grammar with the five grammars it includes, also in a NativeAOT app published without warnings;
 - on linux-x64 (BenchmarkDotNet): an edit plus its snapshot takes about 0.9 µs on 5,000 lines, and allocates
