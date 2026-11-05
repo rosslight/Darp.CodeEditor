@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Runs compiled C# scripts in sessions: separate processes with a typed bridge between the app and its scripts.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Darp.CodeEditor.CSharpScript\Darp.CodeEditor.CSharpScript.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!--
+      Part of the public API: the bridge's interfaces are StreamJsonRpc contracts, their failures are its exceptions,
+      and PolyType shapes describe them for NativeAOT.
+    -->
+    <PackageReference Include="StreamJsonRpc" />
+  </ItemGroup>
+</Project>

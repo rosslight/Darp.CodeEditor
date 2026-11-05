@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Darp.CodeEditor/Darp.CodeEditor.csproj" />
+    <Project Path="src/Darp.CodeEditor.CSharpScript/Darp.CodeEditor.CSharpScript.csproj" />
+    <Project Path="src/Darp.CodeEditor.CSharpScript.Runner/Darp.CodeEditor.CSharpScript.Runner.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/Darp.CodeEditor.UseCases/Darp.CodeEditor.UseCases.csproj" />
+    <Project Path="samples/Darp.CodeEditor.UseCases.ScriptApi/Darp.CodeEditor.UseCases.ScriptApi.csproj" />
+    <Project Path="samples/Darp.CodeEditor.UseCases.ScriptApi.Runner/Darp.CodeEditor.UseCases.ScriptApi.Runner.csproj" />
+  </Folder>
+</Solution>
