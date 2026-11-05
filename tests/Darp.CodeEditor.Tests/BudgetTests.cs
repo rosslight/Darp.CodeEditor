@@ -32,15 +32,19 @@ public sealed class BudgetTests(UiFixture ui)
             await codeLanguage.Loaded;
             await CodeEditorColorTheme.LightPlus.Loaded;
             TimeSpan first = await FirstColoredFrame(codeLanguage, text, syntax);
-            CodeDocument document = CodeDocument.Create(codeLanguage, text);
 
-            TimeSpan elapsed = await FirstColoredFrame(codeLanguage, document, syntax);
+            // The median of five editors, each of a new document: one delay of a busy machine does not decide it.
+            var samples = new List<TimeSpan>();
+            for (int i = 0; i < 5; i++)
+                samples.Add(await FirstColoredFrame(codeLanguage, text, syntax));
+            TimeSpan median = samples.Order().ElementAt(samples.Count / 2);
 
             TestContext.Current.TestOutputHelper?.WriteLine(
-                $"{language}: syntax colors {elapsed.TotalMilliseconds:F1} ms after creating the editor "
+                $"{language}: syntax colors {median.TotalMilliseconds:F1} ms after creating the editor, the median of "
+                    + $"{string.Join(", ", samples.Select(sample => sample.TotalMilliseconds.ToString("F1")))} ms "
                     + $"(the test's first editor: {first.TotalMilliseconds:F1} ms)"
             );
-            elapsed.ShouldBeLessThan(s_highlightingBudget);
+            median.ShouldBeLessThan(s_highlightingBudget);
         });
 
     [Fact]
@@ -128,16 +132,13 @@ public sealed class BudgetTests(UiFixture ui)
         }
     }
 
-    /// <summary>Creates an editor of a new document of <paramref name="text"/>, and waits for its colors.</summary>
-    private static Task<TimeSpan> FirstColoredFrame(CodeLanguage language, string text, Color syntax) =>
-        FirstColoredFrame(language, CodeDocument.Create(language, text), syntax);
-
     /// <summary>
-    /// Creates and shows an editor of <paramref name="document"/>, renders frames, and returns how long after creating
-    /// the editor a frame first showed the <paramref name="syntax"/> color in its pixels.
+    /// Creates and shows an editor of a new document of <paramref name="text"/>, renders frames, and returns how long
+    /// after creating the editor a frame first showed the <paramref name="syntax"/> color in its pixels.
     /// </summary>
-    private static async Task<TimeSpan> FirstColoredFrame(CodeLanguage language, CodeDocument document, Color syntax)
+    private static async Task<TimeSpan> FirstColoredFrame(CodeLanguage language, string text, Color syntax)
     {
+        CodeDocument document = CodeDocument.Create(language, text);
         long start = Stopwatch.GetTimestamp();
         using var window = new EditorWindow(new CodeEditor { Document = document });
         while (true)
