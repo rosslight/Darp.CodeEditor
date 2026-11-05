@@ -1,11 +1,13 @@
 using System.Diagnostics;
-using Avalonia.Headless.XUnit;
 
 namespace Darp.CodeEditor.Tests;
 
 /// <summary>A document belongs to the app's main UI thread: it changes and raises its events there; any thread reads it.</summary>
-public sealed class DocumentThreadTests
+[Collection(UiFixture.Collection)]
+public sealed class DocumentThreadTests(UiFixture ui)
 {
+    private readonly UiFixture _ui = ui;
+
     /// <summary>Every member that changes a document.</summary>
     public static TheoryData<string> Changes => [.. s_changes.Keys];
 
@@ -20,47 +22,50 @@ public sealed class DocumentThreadTests
         ["FilePath"] = d => d.FilePath = "other.txt",
     };
 
-    [AvaloniaTheory]
+    [Theory]
     [MemberData(nameof(Changes))]
-    public async Task Changes_on_another_thread_throw(string change)
-    {
-        CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "text");
-        document.Replace(new TextRange(0, 0), "a");
-        document.Undo();
+    public Task Changes_on_another_thread_throw(string change) =>
+        _ui.Run(async () =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "text");
+            document.Replace(new TextRange(0, 0), "a");
+            document.Undo();
 
-        InvalidOperationException exception = await Task.Run(() =>
-            Assert.ThrowsAny<InvalidOperationException>(() => s_changes[change](document))
-        );
+            InvalidOperationException exception = await Task.Run(() =>
+                Assert.ThrowsAny<InvalidOperationException>(() => s_changes[change](document))
+            );
 
-        Assert.Contains("main UI thread", exception.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal("text", document.Text);
-    }
+            Assert.Contains("main UI thread", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal("text", document.Text);
+        });
 
-    [AvaloniaFact]
-    public async Task Any_thread_reads_the_text()
-    {
-        CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "line 1\nline 2");
+    [Fact]
+    public Task Any_thread_reads_the_text() =>
+        _ui.Run(async () =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "line 1\nline 2");
 
-        (string text, TextPosition position) = await Task.Run(() =>
-            (document.Text, document.CurrentSnapshot.GetPosition(9))
-        );
+            (string text, TextPosition position) = await Task.Run(() =>
+                (document.Text, document.CurrentSnapshot.GetPosition(9))
+            );
 
-        Assert.Equal("line 1\nline 2", text);
-        Assert.Equal(new TextPosition(2, 3), position);
-    }
+            Assert.Equal("line 1\nline 2", text);
+            Assert.Equal(new TextPosition(2, 3), position);
+        });
 
-    [AvaloniaFact]
-    public async Task A_document_created_on_the_thread_pool_belongs_to_the_main_UI_thread()
-    {
-        CodeDocument document = await Task.Run(() => CodeDocument.Create(CodeLanguage.PlainText, "a"));
-        Thread? raisedOn = null;
-        document.TextChanged += (_, _) => raisedOn = Thread.CurrentThread;
+    [Fact]
+    public Task A_document_created_on_the_thread_pool_belongs_to_the_main_UI_thread() =>
+        _ui.Run(async () =>
+        {
+            CodeDocument document = await Task.Run(() => CodeDocument.Create(CodeLanguage.PlainText, "a"));
+            Thread? raisedOn = null;
+            document.TextChanged += (_, _) => raisedOn = Thread.CurrentThread;
 
-        document.Replace(new TextRange(1, 0), "b");
+            document.Replace(new TextRange(1, 0), "b");
 
-        Assert.Equal(Thread.CurrentThread, raisedOn);
-        await Task.Run(() => Assert.ThrowsAny<InvalidOperationException>(() => document.Undo()));
-    }
+            Assert.Equal(Thread.CurrentThread, raisedOn);
+            await Task.Run(() => Assert.ThrowsAny<InvalidOperationException>(() => document.Undo()));
+        });
 
     [Fact]
     public async Task Nothing_touches_Avalonias_dispatcher_before_Avalonia_is_set_up()

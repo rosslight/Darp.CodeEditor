@@ -1,10 +1,11 @@
-using Avalonia.Headless.XUnit;
-
 namespace Darp.CodeEditor.Tests;
 
 /// <summary>Positions follow one rule everywhere: lines end at \r\n, \n or \r, and columns count UTF-16 units from 1.</summary>
-public sealed class TextSnapshotTests
+[Collection(UiFixture.Collection)]
+public sealed class TextSnapshotTests(UiFixture ui)
 {
+    private readonly UiFixture _ui = ui;
+
     [Theory]
     [InlineData("a\nb", 2, 2, 1)]
     [InlineData("a\r\nb", 3, 2, 1)]
@@ -63,68 +64,71 @@ public sealed class TextSnapshotTests
         Assert.Equal(0, snapshot.GetOffset(new TextPosition(3, 3)));
     }
 
-    [AvaloniaFact]
-    public void Long_texts_follow_the_same_rule()
-    {
-        // A \r\n across 4096 characters, and line breaks of every kind at every distance.
-        string text =
-            new string('x', 4095)
-            + "\r\n"
-            + string.Concat(
-                Enumerable
-                    .Range(0, 3000)
-                    .Select(i =>
-                        new string('x', i % 7)
-                        + (i % 3) switch
-                        {
-                            0 => "\r\n",
-                            1 => "\n",
-                            _ => "\r",
-                        }
-                    )
-            );
-        TextPosition[] expected = PositionsOf(text);
-
-        foreach (
-            TextSnapshot snapshot in (TextSnapshot[])
-                [TextSnapshot.FromString(text), CodeDocument.Create(CodeLanguage.PlainText, text).CurrentSnapshot]
-        )
+    [Fact]
+    public Task Long_texts_follow_the_same_rule() =>
+        _ui.Run(() =>
         {
-            for (int offset = 0; offset <= text.Length; offset++)
+            // A \r\n across 4096 characters, and line breaks of every kind at every distance.
+            string text =
+                new string('x', 4095)
+                + "\r\n"
+                + string.Concat(
+                    Enumerable
+                        .Range(0, 3000)
+                        .Select(i =>
+                            new string('x', i % 7)
+                            + (i % 3) switch
+                            {
+                                0 => "\r\n",
+                                1 => "\n",
+                                _ => "\r",
+                            }
+                        )
+                );
+            TextPosition[] expected = PositionsOf(text);
+
+            foreach (
+                TextSnapshot snapshot in (TextSnapshot[])
+                    [TextSnapshot.FromString(text), CodeDocument.Create(CodeLanguage.PlainText, text).CurrentSnapshot]
+            )
             {
-                Assert.Equal(expected[offset], snapshot.GetPosition(offset));
-                // Between \r and \n is no position of its own.
-                bool insideLineBreak = offset > 0 && offset < text.Length && text[(offset - 1)..(offset + 1)] == "\r\n";
-                if (!insideLineBreak)
-                    Assert.Equal(offset, snapshot.GetOffset(expected[offset]));
+                for (int offset = 0; offset <= text.Length; offset++)
+                {
+                    Assert.Equal(expected[offset], snapshot.GetPosition(offset));
+                    // Between \r and \n is no position of its own.
+                    bool insideLineBreak =
+                        offset > 0 && offset < text.Length && text[(offset - 1)..(offset + 1)] == "\r\n";
+                    if (!insideLineBreak)
+                        Assert.Equal(offset, snapshot.GetOffset(expected[offset]));
+                }
             }
-        }
-    }
+        });
 
-    [AvaloniaFact]
-    public async Task Threads_that_use_a_new_snapshot_at_once_see_the_same_lines()
-    {
-        string text = string.Concat(Enumerable.Range(0, 2000).Select(i => $"line {i}\r\n"));
-        TextPosition[] expected = PositionsOf(text);
-
-        for (int round = 0; round < 20; round++)
+    [Fact]
+    public Task Threads_that_use_a_new_snapshot_at_once_see_the_same_lines() =>
+        _ui.Run(async () =>
         {
-            // Each round a snapshot without its line index, used by eight threads at once.
-            TextSnapshot snapshot = CodeDocument.Create(CodeLanguage.PlainText, text).CurrentSnapshot;
-            await Task.WhenAll(
-                Enumerable
-                    .Range(0, 8)
-                    .Select(thread =>
-                        Task.Run(() =>
-                        {
-                            int offset = Array.IndexOf(expected, new TextPosition(thread * 200 + 1, 3));
-                            Assert.Equal(expected[offset], snapshot.GetPosition(offset));
-                            Assert.Equal(offset, snapshot.GetOffset(expected[offset]));
-                        })
-                    )
-            );
-        }
-    }
+            string text = string.Concat(Enumerable.Range(0, 2000).Select(i => $"line {i}\r\n"));
+            TextPosition[] expected = PositionsOf(text);
+
+            for (int round = 0; round < 20; round++)
+            {
+                // Each round a snapshot without its line index, used by eight threads at once.
+                TextSnapshot snapshot = CodeDocument.Create(CodeLanguage.PlainText, text).CurrentSnapshot;
+                await Task.WhenAll(
+                    Enumerable
+                        .Range(0, 8)
+                        .Select(thread =>
+                            Task.Run(() =>
+                            {
+                                int offset = Array.IndexOf(expected, new TextPosition(thread * 200 + 1, 3));
+                                Assert.Equal(expected[offset], snapshot.GetPosition(offset));
+                                Assert.Equal(offset, snapshot.GetOffset(expected[offset]));
+                            })
+                        )
+                );
+            }
+        });
 
     /// <summary>The position of every offset, counted character by character.</summary>
     private static TextPosition[] PositionsOf(string text)

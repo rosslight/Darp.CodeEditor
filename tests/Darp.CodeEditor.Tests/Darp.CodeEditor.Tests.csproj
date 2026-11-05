@@ -5,8 +5,8 @@
     <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Avalonia.Headless.XUnit" />
-    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="Avalonia.Headless" />
+    <PackageReference Include="xunit.v3.aot" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
