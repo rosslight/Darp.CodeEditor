@@ -55,14 +55,26 @@ public class HighlightingBenchmarks
 
     private TextMateGrammar Grammar => _grammar ?? throw new InvalidOperationException("Not set up.");
 
-    /// <summary>The background's work: all 5,000 lines, one after another, as requests tokenize them.</summary>
+    /// <summary>
+    /// The background's throughput with compiled expressions: all 5,000 lines, one after another, as requests tokenize
+    /// them. Fails if a line ran out of time.
+    /// </summary>
     [Benchmark]
-    public int TokenizeInBackground() =>
-        BackgroundTextMateHighlighter.Tokenize(Grammar, null, _lines, CancellationToken.None).Length;
+    public int TokenizeAllLinesWarm()
+    {
+        LineResult[] lines = BackgroundTextMateHighlighter.Tokenize(Grammar, null, _lines, CancellationToken.None);
+        if (lines.Length != _lines.Length || Array.Exists(lines, line => line.Tokens is null))
+            throw new InvalidOperationException("A line ran out of time.");
+        return lines.Length;
+    }
 
-    /// <summary>The UI thread's work for one screen of invalid lines, each from the state the line above ends in.</summary>
+    /// <summary>
+    /// The UI thread's tokenizing for one screen of invalid lines, each from the state the line above ends in, without
+    /// a time limit, so that every line is complete. A layout pass may spend 4 ms on it; with a limit, one pause of the
+    /// process would cut a measured run short.
+    /// </summary>
     [Benchmark]
-    public int TokenizeScreenOnUiThread()
+    public int TokenizeScreenWarm()
     {
         TextMateGrammar grammar = Grammar;
         IStateStack? state = _screenStart;
@@ -76,7 +88,7 @@ public class HighlightingBenchmarks
                 ITokenizeLineResult2 result = grammar.Grammar.TokenizeLine2(
                     new LineText(_lines[i].AsMemory()),
                     state,
-                    s_frameBudget
+                    TimeSpan.MaxValue
                 );
                 state = result.RuleStack;
                 tokens += result.Tokens.Length;
