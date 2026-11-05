@@ -59,7 +59,11 @@ public sealed class BudgetTests(UiFixture ui)
 
             foreach (StallReport report in reports)
                 TestContext.Current.TestOutputHelper?.WriteLine(report.ToString());
-            reports.ShouldAllBe(report => report.MaxMs < StallReport.FailureMs);
+            // On failure, the phases' worst stalls say how much of each overlapped a GC pause.
+            reports.ShouldAllBe(
+                report => report.MaxMs < StallReport.FailureMs,
+                string.Join(Environment.NewLine, reports)
+            );
         });
 
     /// <summary>
