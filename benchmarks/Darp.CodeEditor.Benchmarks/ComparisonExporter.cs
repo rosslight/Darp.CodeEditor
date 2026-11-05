@@ -1,10 +1,12 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
-using BenchmarkDotNet.Columns;
+using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Exporters;
 using BenchmarkDotNet.Loggers;
+using BenchmarkDotNet.Mathematics;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
+using Perfolizer.Mathematics.Common;
 
 namespace Darp.CodeEditor.Benchmarks;
 
@@ -12,10 +14,8 @@ namespace Darp.CodeEditor.Benchmarks;
 /// Writes one row per benchmark that compares the current version with the baseline. Meant to be read in a pull
 /// request; the full BenchmarkDotNet report holds the details.
 /// </summary>
-internal sealed class ComparisonExporter(StatisticalTestColumn timeVerdict) : ExporterBase
+internal sealed class ComparisonExporter : ExporterBase
 {
-    private readonly StatisticalTestColumn _timeVerdict = timeVerdict;
-
     protected override string FileExtension => "md";
     protected override string FileNameSuffix => "-comparison";
 
@@ -30,6 +30,9 @@ internal sealed class ComparisonExporter(StatisticalTestColumn timeVerdict) : Ex
         ];
 
         logger.WriteLine(Summarize(comparisons));
+        logger.WriteLine(
+            "Time: 95% confidence intervals of the process means, with at least three launches and a 10% margin. Cold-start allocations are not compared."
+        );
         logger.WriteLine();
         logger.WriteLine("| Benchmark | Baseline | Current | Change | Time | Allocated |");
         logger.WriteLine("| --- | ---: | ---: | ---: | --- | ---: |");
@@ -44,8 +47,7 @@ internal sealed class ComparisonExporter(StatisticalTestColumn timeVerdict) : Ex
         return new Comparison(
             Benchmark: current.HasParameters ? $"{name} {current.Parameters.DisplayInfo}" : name,
             Baseline: baseline is null ? null : Measurement.From(summary, baseline),
-            Current: Measurement.From(summary, current),
-            TimeVerdict: _timeVerdict.GetValue(summary, current)
+            Current: Measurement.From(summary, current)
         );
     }
 
@@ -64,35 +66,47 @@ internal sealed class ComparisonExporter(StatisticalTestColumn timeVerdict) : Ex
         int allocatingMore = comparisons.Count(comparison => comparison.AllocatesMore);
         int allocatingLess = comparisons.Count(comparison => comparison.AllocatesLess);
         if (slower + faster + allocatingMore + allocatingLess == 0)
-            return $"No significant change in {benchmarks}.";
+            return $"No detected change in {benchmarks}.";
 
         return $"{benchmarks}: {slower} slower, {faster} faster, "
             + $"{allocatingMore} allocating more, {allocatingLess} allocating less.";
     }
 
     /// <summary>Mean time and allocation per operation. Null when the benchmark could not be built or run.</summary>
-    private sealed record Measurement(double Nanoseconds, long AllocatedBytes)
+    private sealed record Measurement(double Nanoseconds, double Lower, double Upper, long? AllocatedBytes)
     {
         public static Measurement? From(Summary summary, BenchmarkCase benchmarkCase)
         {
             BenchmarkReport? report = summary[benchmarkCase];
             if (report?.ResultStatistics is null)
                 return null;
+            // Iterations within one process are not independent observations of process-to-process noise.
+            double[] launches = report
+                .GetResultRuns()
+                .GroupBy(measurement => measurement.LaunchIndex)
+                .Select(launch => launch.Average(measurement => measurement.Nanoseconds / measurement.Operations))
+                .ToArray();
+            var statistics = new Statistics(launches);
+            var interval = statistics.GetConfidenceInterval(ConfidenceLevel.L95);
             return new Measurement(
-                report.ResultStatistics.Mean,
-                report.GcStats.GetBytesAllocatedPerOperation(benchmarkCase) ?? 0
+                statistics.Mean,
+                launches.Length < 3 ? double.NegativeInfinity : interval.Lower,
+                launches.Length < 3 ? double.PositiveInfinity : interval.Upper,
+                benchmarkCase.Job.Run.RunStrategy == RunStrategy.ColdStart
+                    ? null
+                    : report.GcStats.GetBytesAllocatedPerOperation(benchmarkCase)
             );
         }
     }
 
-    private sealed record Comparison(string Benchmark, Measurement? Baseline, Measurement? Current, string TimeVerdict)
+    private sealed record Comparison(string Benchmark, Measurement? Baseline, Measurement? Current)
     {
         /// <summary>Whether both versions were measured.</summary>
         [MemberNotNullWhen(true, nameof(Baseline), nameof(Current))]
         public bool IsCompared => Baseline is not null && Current is not null;
 
-        public bool IsSlower => TimeVerdict == "Slower";
-        public bool IsFaster => TimeVerdict == "Faster";
+        public bool IsSlower => IsCompared && Current.Lower > Baseline.Upper * 1.10;
+        public bool IsFaster => IsCompared && Current.Upper < Baseline.Lower * 0.90;
         public bool AllocatesMore => Current?.AllocatedBytes > Baseline?.AllocatedBytes;
         public bool AllocatesLess => Current?.AllocatedBytes < Baseline?.AllocatedBytes;
 
@@ -113,14 +127,16 @@ internal sealed class ComparisonExporter(StatisticalTestColumn timeVerdict) : Ex
                 return "no comparison";
             if (IsSlower)
                 return "🔴 slower";
-            return IsFaster ? "🟢 faster" : "same";
+            return IsFaster ? "🟢 faster" : "no detected change";
         }
 
         private string FormatAllocation()
         {
             if (Current is null)
                 return "–";
-            if (Baseline is null || Baseline.AllocatedBytes == Current.AllocatedBytes)
+            if (Current.AllocatedBytes is null)
+                return "not compared";
+            if (Baseline?.AllocatedBytes is null || Baseline.AllocatedBytes == Current.AllocatedBytes)
                 return $"{Current.AllocatedBytes} B";
             string marker = AllocatesMore ? "🔴" : "🟢";
             return $"{marker} {Baseline.AllocatedBytes} B → {Current.AllocatedBytes} B";
