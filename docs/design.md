@@ -31,13 +31,18 @@ These are the prototype's requirements; R4 changed with the restart.
 
 | Budget | Target |
 |---|---|
-| Highlighted text | within 100 ms of creating the editor, without waiting for a language server |
+| Highlighted text | within 100 ms of creating an editor, without waiting for a language server: every editor in NativeAOT apps, and from the second editor on in JIT apps (#103) |
 | UI thread | no language work over 16 ms |
 | C# ready | within 1.5 s of a cold start, in JIT apps too |
 | Completion | within 50 ms (p95) once warm, on scripts of 5,000 lines |
 
 The budgets are targets. Benchmarks measure them, and the benchmark comparison of each pull request tracks them; unit
 tests assert no latency (#102).
+
+The first editor of a JIT app takes about 450 ms to its first colors, and about 150 ms with ReadyToRun once the app has
+shown its first window. Almost all of it is Avalonia's and AvaloniaEdit's code running for the first time: a plain
+AvaloniaEdit editor without highlighting takes about 440 ms. Highlighting adds about 28 ms, on a background thread.
+Apps that need a fast first editor publish with NativeAOT, where it takes about 45 ms, or with ReadyToRun.
 
 ### 1.3 Scope of v1
 
@@ -148,6 +153,7 @@ Question numbers continue the prototype's log. The prototype's decisions still h
 | 100 | Documents and editors on the main UI thread | Documents belong to the app's main UI thread, wherever they were created; their events come there, and their changes are checked against it. Editors work only there, and fail at once on another thread. Servers raise `State` and send diagnostics there. Replaces #98 | AvaloniaEdit's editor checks `Dispatcher.UIThread`: its text view on every layout, its text area, caret, line list and segment collections. A fix may go upstream later. Product owner's choice |
 | 101 | Tests as NativeAOT | Unit tests run with `dotnet test` and also as a NativeAOT app, from one project: xunit's AOT runner (`xunit.v3.aot`), Shouldly's assertions, and Avalonia's `HeadlessUnitTestSession` for the UI thread. Fixture processes are published as NativeAOT too | Failures that only NativeAOT has, such as trimmed code, reflection, native libraries and resources, show up in tests, not in apps. Shouldly supports NativeAOT from 5.0 on; `Avalonia.Headless.XUnit` doesn't work with the AOT runner. Product owner's choice |
 | 102 | Budgets as benchmarks | Latency budgets are measured by benchmarks and compared per pull request, not asserted in unit tests | Product owner: latency depends on the hardware; flaky tests cost more than they protect. On a loaded 2-core machine, single editors took 129–144 ms to their first colored frame where a quiet one takes 23 ms, and a dispatcher stall of 59.5 ms appeared with no GC overlap |
+| 103 | The first editor of a JIT app | The highlighting budget holds for every editor in NativeAOT apps, and from the second editor on in JIT apps. The first editor's cost in a JIT app is documented, not budgeted | Measured in 350 fresh processes: about 464 ms to the first colors, of which a plain AvaloniaEdit editor already takes about 440 ms, almost all JIT compilation of Avalonia and AvaloniaEdit. The editor's own TextMate setup takes about 28 ms on a background thread. ReadyToRun leaves about 150 ms after the app's first window. Product owner's choice |
 
 ## 4. Lessons from the prototype
 

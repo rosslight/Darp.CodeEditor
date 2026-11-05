@@ -584,14 +584,12 @@ Still open:
 - calls that must stay quick, such as prompts, callback replies and stopping a run, while the bridge carries bulk data
   in both directions: a test measures their latency under load;
 - integration tests on GitHub Actions for Windows, Linux and macOS, once the API is decided;
-- the highlighting budget for the first editor of a JIT process: it takes 0.4 to 0.5 s, most of it compiling the
-  editor's code; the benchmarks measure warm processes;
-- lines over 3,000 characters: AvaloniaEdit's preview draws and edits only their first 3,000 characters, a change it
-  took from upstream, not one of the editor's fixes.
+- lines over 3,000 characters: AvaloniaEdit draws and edits only their first 3,000 characters, since its upstream
+  #607. The editor raises that limit once AvaloniaEdit makes it an option.
 
 ## 10. Open questions
 
 Question numbers continue the decision log in [design.md](design.md). Decisions taken in the API discussion are
-recorded there too (#61, #64–#102).
+recorded there too (#61, #64–#103).
 
 None right now. Section 9 lists what still needs proving.
