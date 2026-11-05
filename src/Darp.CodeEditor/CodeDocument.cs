@@ -19,10 +19,10 @@ namespace Darp.CodeEditor;
 /// together, take <see cref="CurrentSnapshot"/>.
 /// </para>
 /// <para>
-/// The constructor creates a document without a server. A server creates its own, with
-/// <see cref="LanguageServer.CreateDocument"/> or the C# script server's <c>CreateDocument</c>; such a document is
-/// open in that server from creation until <see cref="Dispose"/>, whether an editor shows it or not, and the server
-/// starts with its first document. Neither creating nor disposing a document waits for the server. A document without
+/// <see cref="Create"/> creates a document without a server. A server creates its own, with
+/// <see cref="LanguageServer.CreateDocument"/> or the C# script server's <c>CreateDocument</c>, which returns a typed
+/// C# script document; such a document is open in that server from creation until <see cref="Dispose"/>, whether an
+/// editor shows it or not, and the server starts with its first document. Apps don't derive from this type. Neither creating nor disposing a document waits for the server. A document without
 /// a server holds nothing that needs disposing.
 /// </para>
 /// <para>
@@ -36,14 +36,16 @@ namespace Darp.CodeEditor;
 /// a binding would copy it on every keystroke. Listen to <see cref="TextChanged"/> and read the text when needed.
 /// </para>
 /// </remarks>
-public sealed class CodeDocument : INotifyPropertyChanged, IDisposable
+public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
 {
+    private protected CodeDocument() { }
+
     /// <summary>
     /// Creates a document without a language server, with <paramref name="text"/> and an empty undo history.
     /// </summary>
     /// <param name="language">The language: highlighting and editing rules.</param>
     /// <param name="text">The initial text.</param>
-    public CodeDocument(CodeLanguage language, string text = "") => throw new NotImplementedException();
+    public static CodeDocument Create(CodeLanguage language, string text = "") => throw new NotImplementedException();
 
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;

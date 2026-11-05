@@ -25,5 +25,10 @@
       Include="..\Darp.CodeEditor.UseCases.ScriptApi\Darp.CodeEditor.UseCases.ScriptApi.csproj"
       CSharpScriptReference="true"
     />
+    <!-- The runner side: the app only names its types, for StartAsync and the environments. -->
+    <ProjectReference
+      Include="..\Darp.CodeEditor.UseCases.ScriptApi.Runner\Darp.CodeEditor.UseCases.ScriptApi.Runner.csproj"
+      CSharpScriptReference="true"
+    />
   </ItemGroup>
 </Project>

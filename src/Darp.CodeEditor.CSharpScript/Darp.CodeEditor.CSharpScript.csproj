@@ -4,5 +4,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Darp.CodeEditor\Darp.CodeEditor.csproj" />
+    <ProjectReference Include="..\Darp.CodeEditor.CSharpScript.Abstractions\Darp.CodeEditor.CSharpScript.Abstractions.csproj" />
   </ItemGroup>
 </Project>

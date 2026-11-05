@@ -7,7 +7,7 @@
     <RootNamespace>UseCases.ScriptApi</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Script API interfaces cross the process boundary through StreamJsonRpc's generated proxies. -->
+    <!-- The bridge crosses the process boundary through StreamJsonRpc's generated proxies. -->
     <PackageReference Include="StreamJsonRpc" />
   </ItemGroup>
 </Project>

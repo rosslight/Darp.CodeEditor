@@ -1,48 +1,56 @@
+using Darp.CodeEditor.CSharpScript;
 using Darp.CodeEditor.CSharpScript.Runner;
 using StreamJsonRpc;
 using UseCases.ScriptApi;
+using UseCases.Startup;
 
 namespace UseCases.Failures;
 
-// Scenario: scripts fail in every way: they throw, loop forever or crash the process. The app reports each failure
-// and keeps working; the next run starts a fresh runner process.
+// Scenario: scripts fail in every way: they throw, ignore their stop token or crash the process. The app reports each
+// failure and keeps working.
 //
-// - An exception in the script reaches the app as ScriptException, with the script's stack trace.
-// - A call that takes longer than CallTimeout fails with TimeoutException, and the script is asked to stop. If it does
-//   not stop, the process is killed: every handler of that runner is gone then, and their calls fail with
-//   StreamJsonRpc's ConnectionLostException.
-// - Exited tells the app when and why handlers died, so it can rerun the scripts it depends on.
+// - An exception ends the run: Completion throws ScriptException, with the script's stack trace. So does an
+//   OperationCanceledException from any token other than the run's stop token, such as a timeout inside the script.
+//   The session stays usable.
+// - A script that ignores its stop token never ends. The app decides how long to wait, then kills the session: every
+//   script in it ends.
+// - A crash ends the session the same way. Runs and calls on Remote then fail with StreamJsonRpc's
+//   ConnectionLostException; the session's Exited task says why, and the app starts a new session.
 //
 // Questions:
-// - Should the runner rerun scripts on its own after a crash, or is that always the app's decision?
-// - Is one CallTimeout per runner enough, or do some handler methods need their own?
+// - Should a session restart its process by itself after a crash, or is that always the app's decision?
 
-/// <summary>Calls a packet handler and reports what went wrong.</summary>
-public sealed class GuardedHandler
+/// <summary>Runs scripts in a session and reports what went wrong.</summary>
+public sealed class GuardedRuns
 {
+    private readonly CSharpScriptSession<ISessionSide, Session> _session;
     private readonly Action<string> _report;
-    private IPacketHandler? _handler;
 
-    /// <summary>Watches <paramref name="runner"/> and reports to <paramref name="report"/>.</summary>
-    public GuardedHandler(CSharpScriptRunner runner, IPacketHandler handler, Action<string> report)
+    /// <summary>Runs scripts in <paramref name="session"/> and reports to <paramref name="report"/>.</summary>
+    public GuardedRuns(CSharpScriptSession<ISessionSide, Session> session, Action<string> report)
     {
-        _handler = handler;
+        _session = session;
         _report = report;
-        runner.Exited += (_, e) =>
-        {
-            _handler = null;
-            _report($"The script runner ended ({e.Reason}); run the script again.\n{e.StandardError}");
-        };
     }
 
-    /// <summary>Decodes a packet, or returns null and reports why it could not.</summary>
-    public async Task<Reading?> TryHandleAsync(Packet packet, CancellationToken cancellationToken)
+    /// <summary>
+    /// Runs <paramref name="script"/> to its end. When <paramref name="stop"/> is cancelled, stops it, and kills the
+    /// session if the script has not ended two seconds later.
+    /// </summary>
+    public async Task RunAsync(CompiledScript<Session, RunInput> script, RunInput input, CancellationToken stop)
     {
-        if (_handler is null)
-            return null;
         try
         {
-            return await _handler.HandleAsync(packet, cancellationToken);
+            ScriptRun run = await _session.StartScriptAsync(script, input, stop);
+            await run.WaitAsync(stop, killSessionAfter: TimeSpan.FromSeconds(2));
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested)
+        {
+            _report("Stopped.");
+        }
+        catch (OperationCanceledException)
+        {
+            _report("The session ended the run: someone else disposed it.");
         }
         catch (ScriptException exception)
         {
@@ -50,14 +58,12 @@ public sealed class GuardedHandler
                 $"The script failed: {exception.ScriptExceptionType}: {exception.Message}\n{exception.ScriptStackTrace}"
             );
         }
-        catch (TimeoutException)
-        {
-            _report("The script took too long and was asked to stop.");
-        }
         catch (ConnectionLostException)
         {
-            // Exited reports why.
+            ScriptSessionExit exit = await _session.Exited;
+            _report(
+                $"The session ended ({exit.Reason}, exit code {exit.ExitCode}); start a new one.\n{exit.StandardError}"
+            );
         }
-        return null;
     }
 }

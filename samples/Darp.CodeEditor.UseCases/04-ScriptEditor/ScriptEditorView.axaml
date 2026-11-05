@@ -2,9 +2,9 @@
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ce="using:Darp.CodeEditor"
-    xmlns:local="using:UseCases.PacketScripts"
-    x:Class="UseCases.PacketScripts.PacketScriptView"
-    x:DataType="local:PacketScriptViewModel"
+    xmlns:local="using:UseCases.ScriptEditor"
+    x:Class="UseCases.ScriptEditor.ScriptEditorView"
+    x:DataType="local:ScriptEditorViewModel"
 >
     <DockPanel>
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8">

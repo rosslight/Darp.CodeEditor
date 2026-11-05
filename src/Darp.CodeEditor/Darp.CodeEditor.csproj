@@ -6,4 +6,8 @@
     <PackageReference Include="Avalonia" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- C# script documents derive from CodeDocument, whose constructor is for the library's own documents only. -->
+    <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript" />
+  </ItemGroup>
 </Project>

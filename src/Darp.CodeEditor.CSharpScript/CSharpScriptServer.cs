@@ -31,8 +31,8 @@ public sealed class CSharpScriptServer : IAsyncDisposable
     /// <summary>The server process: its state, and starting it early.</summary>
     /// <remarks>
     /// Its <see cref="Darp.CodeEditor.LanguageServer.CreateDocument"/> takes only <c>CodeLanguage.CSharp</c> and
-    /// throws <see cref="ArgumentException"/> for other languages. Its documents are in the default environment, as if
-    /// created with <c>CreateDocument(new CSharpScriptEnvironment(), text)</c>.
+    /// throws <see cref="ArgumentException"/> for other languages. Its documents have no globals and see .NET and the
+    /// marked assemblies; they are for editing, since compiling needs a kind of script.
     /// </remarks>
     public LanguageServer LanguageServer => throw new NotImplementedException();
 
@@ -45,10 +45,12 @@ public sealed class CSharpScriptServer : IAsyncDisposable
     /// </remarks>
     /// <exception cref="ArgumentException">
     /// A reference or the globals type's assembly is not next to the app, because its project reference is not marked
-    /// with <c>CSharpScriptReference</c>; or the globals type has no public constructor.
+    /// with <c>CSharpScriptReference</c>.
     /// </exception>
-    public CodeDocument CreateDocument(CSharpScriptEnvironment environment, string text = "") =>
-        throw new NotImplementedException();
+    public CSharpScriptDocument<TSession, TInput> CreateDocument<TSession, TInput>(
+        CSharpScriptEnvironment<TSession, TInput> environment,
+        string text = ""
+    ) => throw new NotImplementedException();
 
     /// <summary>
     /// Compiles the document's <see cref="CodeDocument.CurrentSnapshot"/> at the time of the call, in the environment
@@ -57,12 +59,9 @@ public sealed class CSharpScriptServer : IAsyncDisposable
     /// <remarks>
     /// Later edits do not cancel the compilation, and disposing the document does not affect it.
     /// </remarks>
-    /// <exception cref="ArgumentException">
-    /// This server did not create the document, through <see cref="CreateDocument"/> or its
-    /// <see cref="LanguageServer"/>.
-    /// </exception>
-    public Task<CSharpScriptCompilation> CompileAsync(
-        CodeDocument document,
+    /// <exception cref="ArgumentException">This server did not create the document.</exception>
+    public Task<CSharpScriptCompilation<TSession, TInput>> CompileAsync<TSession, TInput>(
+        CSharpScriptDocument<TSession, TInput> document,
         CancellationToken cancellationToken = default
     ) => throw new NotImplementedException();
 
@@ -71,9 +70,9 @@ public sealed class CSharpScriptServer : IAsyncDisposable
     /// from any thread.
     /// </summary>
     /// <exception cref="ArgumentException">The environment is invalid, as for <see cref="CreateDocument"/>.</exception>
-    public Task<CSharpScriptCompilation> CompileAsync(
+    public Task<CSharpScriptCompilation<TSession, TInput>> CompileAsync<TSession, TInput>(
         string code,
-        CSharpScriptEnvironment environment,
+        CSharpScriptEnvironment<TSession, TInput> environment,
         CancellationToken cancellationToken = default
     ) => throw new NotImplementedException();
 
@@ -89,7 +88,9 @@ public sealed record CSharpScriptServerOptions
 }
 
 /// <summary>The result of compiling a script: its diagnostics and, without errors, the compiled script.</summary>
-public sealed class CSharpScriptCompilation
+/// <typeparam name="TSession">The session object's type that the script runs with.</typeparam>
+/// <typeparam name="TInput">The input each run of the script gets.</typeparam>
+public sealed class CSharpScriptCompilation<TSession, TInput>
 {
     private CSharpScriptCompilation() { }
 
@@ -107,17 +108,20 @@ public sealed class CSharpScriptCompilation
     public bool Succeeded => throw new NotImplementedException();
 
     /// <summary>The compiled script, ready to run; null when the script has errors.</summary>
-    public CompiledScript? Script => throw new NotImplementedException();
+    public CompiledScript<TSession, TInput>? Script => throw new NotImplementedException();
 }
 
 /// <summary>
-/// A script compiled for its environment, ready to run in a runner as often as needed. It needs no server: it stays
+/// A script compiled for its environment, ready to run as often as needed in sessions whose object is a
+/// <typeparamref name="TSession"/>, with a <typeparamref name="TInput"/> per run. It needs no server: it stays
 /// runnable after the server restarts or is disposed.
 /// </summary>
-public sealed class CompiledScript
+/// <typeparam name="TSession">The session object's type that the script runs with.</typeparam>
+/// <typeparam name="TInput">The input each run of the script gets.</typeparam>
+public sealed class CompiledScript<TSession, TInput>
 {
     private CompiledScript() { }
 
     /// <summary>The environment the script was compiled for.</summary>
-    public CSharpScriptEnvironment Environment => throw new NotImplementedException();
+    public CSharpScriptEnvironment<TSession, TInput> Environment => throw new NotImplementedException();
 }

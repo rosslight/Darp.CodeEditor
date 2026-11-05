@@ -19,7 +19,7 @@ public sealed class JsonViewer : IDisposable
     /// <summary>Creates the view of <paramref name="json"/>.</summary>
     public JsonViewer(string json)
     {
-        _document = new CodeDocument(CodeLanguage.Json, json);
+        _document = CodeDocument.Create(CodeLanguage.Json, json);
         Editor = new CodeEditor
         {
             Document = _document,

@@ -7,7 +7,7 @@ using UseCases.Startup;
 
 namespace UseCases.Tabs;
 
-// Scenario: a script workbench with tabs. The user opens, edits, saves and closes sequence scripts.
+// Scenario: a script workbench with tabs. The user opens, edits, saves and closes scripts.
 //
 // - Each tab's document lives in the view model, so switching tabs keeps its text, undo history, caret and scroll
 //   position, even when the tab control recreates the editor.
@@ -36,11 +36,11 @@ public sealed partial class ScriptTabsViewModel(CSharpScriptServer scripts) : Ob
     public int ErrorCount =>
         Tabs.Sum(tab => tab.Document.Diagnostics.Count(d => d.Severity == DiagnosticSeverity.Error));
 
-    /// <summary>Opens a sequence script in a new tab.</summary>
+    /// <summary>Opens a script in a new tab.</summary>
     public async Task OpenAsync(string path, CancellationToken cancellationToken)
     {
         string text = await File.ReadAllTextAsync(path, cancellationToken);
-        var tab = new ScriptTab(_scripts.CreateDocument(ScriptEnvironments.Sequences, text), path);
+        var tab = new ScriptTab(_scripts.CreateDocument(ScriptEnvironments.Default, text), path);
         tab.Document.PropertyChanged += OnDocumentChanged;
         Tabs.Add(tab);
         SelectedTab = tab;

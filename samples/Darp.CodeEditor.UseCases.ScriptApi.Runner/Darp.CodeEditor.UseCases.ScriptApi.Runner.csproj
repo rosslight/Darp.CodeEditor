@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The runner side of the use cases' script API: the session object and the globals. They run only in the JIT runner
+    process, so this project is not analysed for NativeAOT: real drivers here may use reflection or native interop. The
+    app names these types, which compiles none of their code into a NativeAOT app.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>false</IsAotCompatible>
+    <!-- The docs show up in the editor's hover and completion for scripts. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <RootNamespace>UseCases.ScriptApi</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Darp.CodeEditor.UseCases.ScriptApi\Darp.CodeEditor.UseCases.ScriptApi.csproj" />
+    <!-- IScriptGlobals: the one library contract the runner side implements. It brings neither Avalonia nor the editor. -->
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharpScript.Abstractions\Darp.CodeEditor.CSharpScript.Abstractions.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,13 +1,13 @@
 using Avalonia.Controls;
 using Darp.CodeEditor;
 
-namespace UseCases.PacketScripts;
+namespace UseCases.ScriptEditor;
 
-/// <summary>The packet script page: editor, Run and Stop, output and error list.</summary>
-public partial class PacketScriptView : UserControl
+/// <summary>The script editor page: editor, Run and Stop, output and error list.</summary>
+public partial class ScriptEditorView : UserControl
 {
     /// <summary>Creates the view.</summary>
-    public PacketScriptView() => InitializeComponent();
+    public ScriptEditorView() => InitializeComponent();
 
     // Moving the caret is the view's job: the view model knows the document, not the editors that show it.
     private void OnErrorSelected(object? sender, SelectionChangedEventArgs e)
