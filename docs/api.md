@@ -564,6 +564,10 @@ with Skia:
   headless renderer, which allocates a bitmap per frame: plain text without a grammar has as many;
 - tokenizing 5,000 lines in the background takes about 62 ms for JSON and YAML (BenchmarkDotNet); one screen of 50
   lines takes the UI thread about 0.6 ms of the 4 ms it may spend per frame;
+- an editor out of the visual tree is collected while its document lives on, also one that had the focus and showed
+  edits. That needs AvaloniaEdit 12.0.999-ci3-alpha, a preview with fixes not yet released (see CONTRIBUTING.md):
+  its undo steps no longer keep the text areas that showed an edit, and its commands hold the last focused element
+  weakly;
 - an editor created on another thread than the app's main UI thread fails at once with `InvalidOperationException`.
 
 Still open:
@@ -580,10 +584,7 @@ Still open:
   in both directions: a test measures their latency under load;
 - integration tests on GitHub Actions for Windows, Linux and macOS, once the API is decided;
 - the highlighting budget for the first editor of a JIT process: it takes 0.4 to 0.5 s, most of it compiling the
-  editor's code, and later editors 20 to 55 ms;
-- editors that showed an edit are collected while their document lives on: AvaloniaEdit 12.0.0 keeps the selection
-  of every text area that showed the document when it changed on the document's undo stack, and a selection holds
-  its text area. Its undo step should keep the selection's positions instead.
+  editor's code, and later editors 20 to 50 ms.
 
 ## 10. Open questions
 
