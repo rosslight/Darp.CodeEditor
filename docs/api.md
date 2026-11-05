@@ -548,6 +548,20 @@ Documents, languages and themes (sections 1 and 4) are implemented and tested. P
   18 ms as the first load in a process, and 30 to 80 µs after that; YAML's included grammars take about 28 ms and
   0.8 ms.
 
+The editor (section 2) shows documents with background TextMate highlighting; search, the editing helpers and the
+language features come next. Proven on linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered
+with Skia:
+
+- the budgets of the design's section 1.2 without a language server: a 5,000-line JSON or YAML document shows syntax
+  colors in the pixels of a frame 20 to 55 ms after its editor is created, with its language and theme loaded. The
+  first editor of a NativeAOT process took about 45 ms;
+- the UI thread never stalled over 32 ms while 5,000 lines loaded, while typing in them and scrolling through them,
+  and while typing on a line of 20,000 characters. A few stalls went over 16 ms, most of them frames of fast
+  scrolling, which plain text without a grammar has too;
+- tokenizing 5,000 lines in the background takes about 66 ms for JSON and 69 ms for YAML (BenchmarkDotNet); one
+  screen of 50 lines takes the UI thread about 0.7 ms of the 4 ms it may spend per frame;
+- an editor created on another thread than the app's main UI thread fails at once with `InvalidOperationException`.
+
 Still open:
 
 - runner-side dependencies on arm64 and macOS, the real bridge and contracts loaded once for both sides, two versions
@@ -560,7 +574,12 @@ Still open:
   step of disposing, and call `DisposeAsync` and `KillAsync` together;
 - calls that must stay quick, such as prompts, callback replies and stopping a run, while the bridge carries bulk data
   in both directions: a test measures their latency under load;
-- integration tests on GitHub Actions for Windows, Linux and macOS, once the API is decided.
+- integration tests on GitHub Actions for Windows, Linux and macOS, once the API is decided;
+- the highlighting budget for the first editor of a JIT process: it takes 0.4 to 0.5 s, most of it compiling the
+  editor's code, and later editors 20 to 55 ms;
+- editors that showed an edit are collected while their document lives on: AvaloniaEdit 12.0.0 keeps the selection
+  of every text area that showed the document when it changed on the document's undo stack, and a selection holds
+  its text area. Its undo step should keep the selection's positions instead.
 
 ## 10. Open questions
 
