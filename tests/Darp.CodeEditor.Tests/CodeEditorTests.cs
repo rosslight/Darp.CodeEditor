@@ -386,7 +386,8 @@ public sealed class CodeEditorTests(UiFixture ui)
         });
 
     [Fact(
-        Skip = "AvaloniaEdit 12.0.0 keeps the selection of each text area that showed an edit on the document's undo stack"
+        Skip = "AvaloniaEdit 12.0.0 bug: the undo step RestoreCaretAndSelectionUndoAction keeps the text area's Selection, "
+            + "which holds the text area, on the document's undo stack"
     )]
     public Task An_editor_that_showed_edits_is_collected_while_its_document_lives() =>
         _ui.Run(async () =>

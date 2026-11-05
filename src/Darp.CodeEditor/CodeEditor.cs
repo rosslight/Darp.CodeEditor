@@ -408,9 +408,10 @@ public class CodeEditor : TemplatedControl
     }
 
     /// <summary>
-    /// AvaloniaEdit's commands act on the element that got the focus last, which they keep in a static field: an editor
-    /// whose text area had the focus would stay alive until another element gets it. When nothing else has the focus,
-    /// a focus event on an element of no tree takes its place.
+    /// AvaloniaEdit's commands act on the element that got the focus last, which <c>RoutedCommand</c> keeps in a static
+    /// field: an editor whose text area had the focus would stay alive until another element gets it. When nothing else
+    /// has the focus, a focus event on an element of no tree takes its place. This goes once AvaloniaEdit holds that
+    /// element weakly.
     /// </summary>
     private void ReleaseCommandTarget(Visual root)
     {
