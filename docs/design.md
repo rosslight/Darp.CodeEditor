@@ -156,7 +156,7 @@ findings are contracts to design in from the start:
 |---|---|
 | Closing a window kept its editors alive as long as the language service lived | Documents have an owner and an end; editors hold nothing while out of the visual tree |
 | The editor and the server split lines differently with CR-only line breaks; a huge column overflowed | One line-break rule (`\r\n`, `\n`, `\r`) and UTF-16 columns everywhere, with tests on both sides |
-| A skipped long line passed a wrong lexical state on, so the lines after it were colored wrong | Skipped lines have an unknown state, and highlighting recovers after them |
+| A skipped long line passed a wrong lexical state on, so the lines after it were colored wrong | Lines of any length are tokenized within a time limit (50 ms in the background). A line that runs out of time has an unknown state, and the line after it starts from the start of the grammar |
 | Outdated tokenizing kept running after an edit | Highlighting work stops between lines when the text changed |
 | One grammar call can take longer than the UI thread's budget | Still open: grammar work on the UI thread is cooperative, so the first frame's colors have no hard deadline |
 | The regex `(a+)+$` on 29 characters froze search for 21 s | Search has a time limit and a limit on the matches it keeps, and says so when it hits one; replace never acts on a partial result |

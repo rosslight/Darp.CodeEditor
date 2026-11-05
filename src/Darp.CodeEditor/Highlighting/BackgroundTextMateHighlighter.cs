@@ -26,15 +26,18 @@ namespace Darp.CodeEditor.Highlighting;
 /// background task tokenizes them. A change of the text stops it between lines; its results are applied only to the
 /// lines above the change. A line is invalid after it was edited, or when the line above ended in a different state
 /// than before. Lines below the view are tokenized once they scroll into view, so an edit costs work in proportion to
-/// the view. Lines longer than <see cref="MaxTokenizedLineLength"/> are not tokenized, as in VS Code: TextMate's
-/// regex matching is quadratic on long lines, and a 20,000-character line takes seconds. The state at their end is
-/// unknown, so the line after them starts from the start of the grammar.
+/// the view.
+/// </para>
+/// <para>
+/// The background tokenizes lines of any length, each within 50 ms. TextMate's regex
+/// matching can be quadratic on long lines: 20,000 characters of a JSON array take seconds, while a JSON string of the
+/// same length takes about a millisecond. A line that runs out of time keeps no colors, and the state at its end is
+/// unknown, so the line after it starts from the start of the grammar. The UI thread leaves lines over 1,000
+/// characters to the background.
 /// </para>
 /// </remarks>
 internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransformer, IDisposable
 {
-    public const int MaxTokenizedLineLength = 5_000;
-
     /// <summary>Lines tokenized while a grammar loads: about what a screen shows.</summary>
     public const int FirstScreenLines = 60;
 
@@ -47,7 +50,9 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
     /// <summary>Id 1 is the theme's default foreground: such text keeps the editor's foreground.</summary>
     private const int DefaultForegroundId = 1;
 
-    private static readonly TimeSpan s_backgroundLineTimeLimit = TimeSpan.FromMilliseconds(200);
+    /// <summary>How long the background may tokenize one line, which holds the grammar meanwhile.</summary>
+    private static readonly TimeSpan s_backgroundLineTimeLimit = TimeSpan.FromMilliseconds(50);
+
     private static readonly TimeSpan s_frameBudget = TimeSpan.FromMilliseconds(4);
     private static readonly long s_frameBudgetTicks = (long)(s_frameBudget.TotalSeconds * Stopwatch.Frequency);
 
@@ -171,11 +176,8 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         {
             if (cancellationToken.IsCancellationRequested)
                 break;
-            // Not tokenized, or out of time: the line keeps the default color, and the state at its end is unknown.
-            if (
-                text.Length > MaxTokenizedLineLength
-                || grammar.TokenizeInBackground(text, state, s_backgroundLineTimeLimit) is not { } result
-            )
+            // Out of time: the line keeps the default color, and the state at its end is unknown.
+            if (grammar.TokenizeInBackground(text, state, s_backgroundLineTimeLimit) is not { } result)
             {
                 state = null;
                 results.Add(new LineResult(null, null));

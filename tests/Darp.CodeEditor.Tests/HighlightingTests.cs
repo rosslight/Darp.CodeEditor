@@ -36,45 +36,44 @@ public sealed class HighlightingTests(UiFixture ui)
     }
 
     [Fact]
-    public async Task After_a_line_over_the_length_limit_tokenizing_starts_from_the_start_of_the_grammar()
+    public async Task A_line_that_runs_out_of_time_stays_uncolored_and_the_next_starts_from_the_start_of_the_grammar()
     {
         TextMateGrammar grammar = await JsonGrammar();
-        // The long line ends the comment that the first line opens; a state passed over it would keep it open.
-        string longLine = new string('x', BackgroundTextMateHighlighter.MaxTokenizedLineLength) + " */";
 
         LineResult[] lines = BackgroundTextMateHighlighter.Tokenize(
             grammar,
             null,
-            ["/* a comment", longLine, "\"key\": 1"],
+            ["{", SlowLine, "  \"after\": 2"],
             TestContext.Current.CancellationToken
         );
 
         lines[1].ShouldBe(new LineResult(null, null));
+        // In the object, the key would be a property name; from the start of the grammar, it is a string.
         HashSet<Color> after = Colors(grammar, lines[2]);
         after.ShouldContain(s_string);
         after.ShouldContain(s_number);
-        after.ShouldNotContain(s_comment);
+        after.ShouldNotContain(s_propertyName);
     }
 
     [Fact]
-    public Task A_line_over_the_length_limit_stays_uncolored_between_colored_lines() =>
+    public Task A_long_line_that_tokenizes_in_time_passes_its_state_on() =>
         _ui.Run(async () =>
         {
-            string longValue = new('x', BackgroundTextMateHighlighter.MaxTokenizedLineLength);
             CodeDocument document = CodeDocument.Create(
                 CodeLanguage.Json,
-                $"{{\n  \"before\": 1,\n  \"long\": \"{longValue}\",\n  \"after\": 2\n}}"
+                $"{{\n  \"before\": 1,\n{LongStringLine},\n  \"after\": 2\n}}"
             );
             using var window = new EditorWindow(new CodeEditor { Document = document });
 
+            // The UI thread leaves the long line to the background, and colors the next one from a guess first.
             await Wait.UntilAsync(() =>
             {
                 window.Render();
-                return window.ColorsOfLine(4).Contains(s_string);
+                return window.ColorsOfLine(4).Contains(s_propertyName);
             });
 
-            window.ColorsOfLine(2).ShouldContain(s_propertyName);
-            window.ColorsOfLine(3).ShouldBe([Avalonia.Media.Colors.Black]);
+            window.ColorsOfLine(3).ShouldContain(s_propertyName);
+            window.ColorsOfLine(3).ShouldContain(s_string);
         });
 
     [Fact]
@@ -126,6 +125,12 @@ public sealed class HighlightingTests(UiFixture ui)
                 return window.ColorsOfLine(20).Contains(s_propertyName);
             });
         });
+
+    /// <summary>A property of 20,000 characters whose value is one string: it tokenizes in about a millisecond.</summary>
+    private static string LongStringLine { get; } = $"  \"long\": \"{new string('x', 20_000)}\"";
+
+    /// <summary>A property of 20,000 characters whose value is an array: tokenizing it takes seconds.</summary>
+    private static string SlowLine { get; } = "  \"slow\": [" + string.Concat(Enumerable.Repeat("1, ", 6_666)) + "1],";
 
     private static async Task<TextMateGrammar> JsonGrammar()
     {

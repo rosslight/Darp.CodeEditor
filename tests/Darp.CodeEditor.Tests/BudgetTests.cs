@@ -58,7 +58,10 @@ public sealed class BudgetTests(UiFixture ui)
             reports.ShouldAllBe(report => report.MaxMs < StallReport.FailureMs);
         });
 
-    /// <summary>Loading, typing and scrolling 5,000 lines of JSON, and typing on a line of 20,000 characters.</summary>
+    /// <summary>
+    /// Loading, typing and scrolling 5,000 lines of JSON, and typing on lines of 20,000 characters: one that tokenizes
+    /// quickly, and one that runs out of time.
+    /// </summary>
     private static async Task<IReadOnlyList<StallReport>> RunScenarios(UiStallProbe? probe)
     {
         var reports = new List<StallReport>();
@@ -90,21 +93,32 @@ public sealed class BudgetTests(UiFixture ui)
         await Task.Delay(300);
         End();
 
-        probe?.BeginPhase("typing on a 20,000-character line");
-        CodeDocument longLine = CodeDocument.Create(
-            CodeLanguage.Json,
-            "{\n  \"long\": \"" + string.Concat(Enumerable.Repeat("0123456789", 2_000)) + "\",\n  \"after\": 1\n}"
-        );
-        window.Editor.Document = longLine;
-        await Task.Delay(300);
-        window.Editor.Selection = new TextSelection(longLine.CurrentSnapshot.GetOffset(new TextPosition(2, 20_010)));
-        foreach (char c in " /*x*/")
+        // A string tokenizes in about a millisecond; an array takes seconds, so the background stops at its time limit.
+        (string Kind, string Value)[] longValues =
+        [
+            ("string", "\"" + string.Concat(Enumerable.Repeat("0123456789", 2_000)) + "\""),
+            ("array", "[" + string.Concat(Enumerable.Repeat("1, ", 6_666)) + "1]"),
+        ];
+        foreach ((string kind, string value) in longValues)
         {
-            window.Type(c.ToString());
-            await Task.Delay(16);
+            probe?.BeginPhase($"typing on a 20,000-character {kind}");
+            CodeDocument longLine = CodeDocument.Create(
+                CodeLanguage.Json,
+                $"{{\n  \"long\": {value},\n  \"after\": 1\n}}"
+            );
+            window.Editor.Document = longLine;
+            await Task.Delay(300);
+            window.Editor.Selection = new TextSelection(
+                longLine.CurrentSnapshot.GetOffset(new TextPosition(2, 10_000))
+            );
+            foreach (char c in "1, ")
+            {
+                window.Type(c.ToString());
+                await Task.Delay(16);
+            }
+            await Task.Delay(300);
+            End();
         }
-        await Task.Delay(300);
-        End();
         return reports;
 
         void End()

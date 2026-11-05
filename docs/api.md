@@ -556,7 +556,8 @@ with Skia:
   colors in the pixels of a frame 20 to 55 ms after its editor is created, with its language and theme loaded. The
   first editor of a NativeAOT process took about 45 ms;
 - the UI thread never stalled over 32 ms while 5,000 lines loaded, while typing in them and scrolling through them,
-  and while typing on a line of 20,000 characters. A few stalls went over 16 ms, most of them frames of fast
+  and while typing on lines of 20,000 characters: a JSON string, which tokenizes in about 2 ms, and an array, whose
+  tokenizing stops at the background's limit of 50 ms per line. A few stalls went over 16 ms, most of them frames of fast
   scrolling, which plain text without a grammar has too;
 - tokenizing 5,000 lines in the background takes about 66 ms for JSON and 69 ms for YAML (BenchmarkDotNet); one
   screen of 50 lines takes the UI thread about 0.7 ms of the 4 ms it may spend per frame;
