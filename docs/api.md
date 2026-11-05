@@ -554,14 +554,15 @@ The editor (section 2) shows documents with background TextMate highlighting; se
 language features come next. Proven on linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered
 with Skia:
 
-- the budgets of the design's section 1.2 without a language server: a 5,000-line JSON or YAML document shows syntax
-  colors in the pixels of a frame 20 to 50 ms after its editor is created, the median of five editors, with its
-  language and theme loaded, also on a busy machine. The first editor of a NativeAOT process took about 45 ms;
-- the UI thread never stalled over 40 ms while 5,000 lines loaded, while typing in them and scrolling through them,
-  and while typing on lines of 20,000 characters: a JSON string, which tokenizes in about 2 ms, and an array, whose
-  tokenizing stops at the background's limit of 50 ms per line. On two cores, also shared with two busy loops, no
-  stall went over 16 ms. The longer ones came on a busy machine, some of them with a GC pause. The GCs come from the
-  headless renderer, which allocates a bitmap per frame: plain text without a grammar has as many;
+- the budgets of the design's section 1.2 without a language server, on a quiet machine. Benchmarks measure them
+  (BenchmarkDotNet, i7-13700, a warm process), and the comparison of each pull request tracks them; tests assert no
+  latency (#102). A new editor of 5,000 lines of JSON or YAML shows syntax colors in a rendered frame 24 to 25 ms
+  after it is created. With the layout and the frame after it, a keystroke takes the UI thread 17 ms in 5,000 lines
+  and 11 ms on a line of 20,000 characters, and a page down 13 ms. A bare AvaloniaEdit editor takes 12 ms per
+  keystroke in the same headless app; the editor adds about 2 ms, and highlighting about 3 ms more;
+- without a clock, tests check that such an editor shows syntax colors in its pixels, and that typing on a line of
+  20,000 characters edits it and colors it by the background's time limit of 50 ms per line: a JSON string, which
+  tokenizes in about 2 ms, fully, and an array, which takes seconds, not at all;
 - tokenizing 5,000 lines in the background takes about 62 ms for JSON and YAML (BenchmarkDotNet); one screen of 50
   lines takes the UI thread about 0.6 ms of the 4 ms it may spend per frame;
 - an editor out of the visual tree is collected while its document lives on, also one that had the focus and showed
@@ -584,11 +585,13 @@ Still open:
   in both directions: a test measures their latency under load;
 - integration tests on GitHub Actions for Windows, Linux and macOS, once the API is decided;
 - the highlighting budget for the first editor of a JIT process: it takes 0.4 to 0.5 s, most of it compiling the
-  editor's code, and later editors 20 to 50 ms.
+  editor's code; the benchmarks measure warm processes;
+- lines over 3,000 characters: AvaloniaEdit's preview draws and edits only their first 3,000 characters, a change it
+  took from upstream, not one of the editor's fixes.
 
 ## 10. Open questions
 
 Question numbers continue the decision log in [design.md](design.md). Decisions taken in the API discussion are
-recorded there too (#61, #64–#100).
+recorded there too (#61, #64–#102).
 
 None right now. Section 9 lists what still needs proving.
