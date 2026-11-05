@@ -31,13 +31,14 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
 
-      # Into the benchmark-baseline source of nuget.config. The checkout is removed after packing: BenchmarkDotNet looks
-      # for the benchmark project by name below the repository root and stops when it finds the target branch's copy too.
+      # Into the benchmark-baseline source of nuget.config. The target branch is packed outside this checkout, so that
+      # it builds with its own nuget.config and build files, not with this pull request's, which NuGet and MSBuild find
+      # in parent folders. Outside, BenchmarkDotNet also doesn't find the target branch's copy of the benchmark project.
       - name: Pack target branch as baseline
         run: |
-          dotnet pack tmp/benchmark-baseline/src/Darp.CodeEditor/Darp.CodeEditor.csproj -c Release \
+          mv tmp/benchmark-baseline "$RUNNER_TEMP/benchmark-baseline"
+          dotnet pack "$RUNNER_TEMP/benchmark-baseline/src/Darp.CodeEditor/Darp.CodeEditor.csproj" -c Release \
             -o artifacts/benchmark-baseline -p:Version="$DARP_CODEEDITOR_BASELINE_VERSION"
-          rm -rf tmp/benchmark-baseline
 
       # Both versions are measured in one run on the same machine, so that differences between runners cancel out.
       - name: Run benchmarks
