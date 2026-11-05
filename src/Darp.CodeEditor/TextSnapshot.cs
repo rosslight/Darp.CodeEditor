@@ -16,7 +16,10 @@ public sealed class TextSnapshot
     /// <summary>A document's snapshot is a rope that shares its nodes with the document; a compiled string is a string.</summary>
     private readonly ITextSource _text;
 
-    /// <summary>The offset where each line starts, built on first use: ropes have no line index.</summary>
+    /// <summary>
+    /// The offset where each line starts, built on first use: ropes have no line index. Threads that race build the
+    /// same index, and either one is kept.
+    /// </summary>
     private int[]? _lineStarts;
 
     internal TextSnapshot(ITextSource text, int version)
