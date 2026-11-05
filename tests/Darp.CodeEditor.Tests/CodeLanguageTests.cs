@@ -18,7 +18,8 @@ public sealed class CodeLanguageTests
         json.Configuration.BlockComment.ShouldBe(new CharacterPair("/*", "*/"));
         json.Configuration.Brackets.ShouldBe([new CharacterPair("{", "}"), new CharacterPair("[", "]")]);
         json.Configuration.AutoClosingPairs.ShouldContain(new AutoClosingPair("\"", "\"", true, true));
-        json.Configuration.IndentationRules.ShouldNotBeNull().DecreaseIndentPattern.ShouldBe("^\\s*[}\\]],?\\s*$");
+        json.Configuration.IndentationRules.ShouldNotBeNull()
+            .DecreaseIndentPattern.ShouldBe(new IndentationPattern("^\\s*[}\\]],?\\s*$", null));
     }
 
     [Fact]
@@ -86,6 +87,33 @@ public sealed class CodeLanguageTests
 
         (await language.Loaded).ShouldBe(LoadedLanguage.None);
         TestLog.EntriesOf(language).ShouldBe([(LogEventLevel.Error, "CodeEditor")]);
+        File.Delete(file);
+    }
+
+    [Fact]
+    public async Task Indentation_rules_keep_their_flags()
+    {
+        string file = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.language-configuration.json");
+        await File.WriteAllTextAsync(
+            file,
+            """
+            { "indentationRules": {
+                "increaseIndentPattern": { "pattern": "^\\s*begin\\b", "flags": "i" },
+                "decreaseIndentPattern": "^\\s*end\\b" } }
+            """,
+            TestContext.Current.CancellationToken
+        );
+
+        IndentationRules? rules = (await new CodeLanguage("pascal", configuration: new Uri(file)).Loaded)
+            .Configuration
+            .IndentationRules;
+
+        rules.ShouldBe(
+            new IndentationRules(
+                new IndentationPattern("^\\s*begin\\b", "i"),
+                new IndentationPattern("^\\s*end\\b", null)
+            )
+        );
         File.Delete(file);
     }
 }

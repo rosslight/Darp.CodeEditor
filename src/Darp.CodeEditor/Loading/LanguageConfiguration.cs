@@ -78,9 +78,14 @@ internal sealed record LanguageConfiguration(
         );
     }
 
-    /// <summary>A regular expression as a string, or as an object with its <c>pattern</c>.</summary>
-    private static string Pattern(JsonElement pattern) =>
-        pattern.ValueKind == JsonValueKind.Object ? Text(pattern.GetProperty("pattern")) : Text(pattern);
+    /// <summary>A regular expression as a string, or as an object with its <c>pattern</c> and <c>flags</c>.</summary>
+    private static IndentationPattern Pattern(JsonElement pattern) =>
+        pattern.ValueKind == JsonValueKind.Object
+            ? new IndentationPattern(
+                Text(pattern.GetProperty("pattern")),
+                Property(pattern, "flags") is { } flags ? Text(flags) : null
+            )
+            : new IndentationPattern(Text(pattern), null);
 
     /// <summary>A string value; anything else makes the file invalid.</summary>
     private static string Text(JsonElement value) =>
@@ -98,4 +103,10 @@ internal readonly record struct CharacterPair(string Open, string Close);
 internal readonly record struct AutoClosingPair(string Open, string Close, bool NotInString, bool NotInComment);
 
 /// <summary>When a new line indents or outdents: regular expressions on the line, in VS Code's syntax.</summary>
-internal sealed record IndentationRules(string IncreaseIndentPattern, string DecreaseIndentPattern);
+internal sealed record IndentationRules(
+    IndentationPattern IncreaseIndentPattern,
+    IndentationPattern DecreaseIndentPattern
+);
+
+/// <summary>A regular expression in VS Code's syntax, and its flags, such as <c>i</c>, if the file gives any.</summary>
+internal readonly record struct IndentationPattern(string Pattern, string? Flags);
