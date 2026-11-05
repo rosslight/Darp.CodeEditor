@@ -33,11 +33,11 @@ public sealed class DocumentThreadTests(UiFixture ui)
             document.Undo();
 
             InvalidOperationException exception = await Task.Run(() =>
-                Assert.ThrowsAny<InvalidOperationException>(() => s_changes[change](document))
+                Should.Throw<InvalidOperationException>(() => s_changes[change](document))
             );
 
-            Assert.Contains("main UI thread", exception.Message, StringComparison.OrdinalIgnoreCase);
-            Assert.Equal("text", document.Text);
+            exception.Message.ShouldContain("main UI thread", Case.Insensitive);
+            document.Text.ShouldBe("text");
         });
 
     [Fact]
@@ -50,8 +50,8 @@ public sealed class DocumentThreadTests(UiFixture ui)
                 (document.Text, document.CurrentSnapshot.GetPosition(9))
             );
 
-            Assert.Equal("line 1\nline 2", text);
-            Assert.Equal(new TextPosition(2, 3), position);
+            text.ShouldBe("line 1\nline 2");
+            position.ShouldBe(new TextPosition(2, 3));
         });
 
     [Fact]
@@ -64,8 +64,8 @@ public sealed class DocumentThreadTests(UiFixture ui)
 
             document.Replace(new TextRange(1, 0), "b");
 
-            Assert.Equal(Thread.CurrentThread, raisedOn);
-            await Task.Run(() => Assert.ThrowsAny<InvalidOperationException>(() => document.Undo()));
+            raisedOn.ShouldBe(Thread.CurrentThread);
+            await Task.Run(() => Should.Throw<InvalidOperationException>(() => document.Undo()));
         });
 
     [Fact]
@@ -91,6 +91,6 @@ public sealed class DocumentThreadTests(UiFixture ui)
         Task<string> errors = process.StandardError.ReadToEndAsync(timeout.Token);
         await process.WaitForExitAsync(timeout.Token);
 
-        Assert.True(process.ExitCode == 0, $"Exit code {process.ExitCode}\n{await output}\n{await errors}");
+        process.ExitCode.ShouldBe(0, $"{await output}\n{await errors}");
     }
 }

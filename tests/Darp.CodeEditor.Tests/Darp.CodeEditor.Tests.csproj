@@ -8,9 +8,11 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia.Headless" />
+    <PackageReference Include="Shouldly" />
     <PackageReference Include="xunit.v3.aot" />
   </ItemGroup>
   <ItemGroup>
+    <Using Include="Shouldly" />
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup>

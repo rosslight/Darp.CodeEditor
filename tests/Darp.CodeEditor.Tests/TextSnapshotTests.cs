@@ -17,8 +17,8 @@ public sealed class TextSnapshotTests(UiFixture ui)
     {
         TextSnapshot snapshot = TextSnapshot.FromString(text);
 
-        Assert.Equal(new TextPosition(line, column), snapshot.GetPosition(offset));
-        Assert.Equal(offset, snapshot.GetOffset(new TextPosition(line, column)));
+        snapshot.GetPosition(offset).ShouldBe(new TextPosition(line, column));
+        snapshot.GetOffset(new TextPosition(line, column)).ShouldBe(offset);
     }
 
     [Theory]
@@ -26,7 +26,7 @@ public sealed class TextSnapshotTests(UiFixture ui)
     [InlineData(int.MaxValue, 2, 4)]
     public void Offsets_outside_the_text_are_clamped(int offset, int line, int column)
     {
-        Assert.Equal(new TextPosition(line, column), TextSnapshot.FromString("ab\r\ncde").GetPosition(offset));
+        TextSnapshot.FromString("ab\r\ncde").GetPosition(offset).ShouldBe(new TextPosition(line, column));
     }
 
     [Theory]
@@ -41,7 +41,7 @@ public sealed class TextSnapshotTests(UiFixture ui)
     [InlineData(int.MaxValue, int.MaxValue, 7)]
     public void Positions_outside_the_text_are_clamped(int line, int column, int offset)
     {
-        Assert.Equal(offset, TextSnapshot.FromString("ab\r\ncde").GetOffset(new TextPosition(line, column)));
+        TextSnapshot.FromString("ab\r\ncde").GetOffset(new TextPosition(line, column)).ShouldBe(offset);
     }
 
     [Theory]
@@ -52,7 +52,7 @@ public sealed class TextSnapshotTests(UiFixture ui)
     [InlineData(3, -2, "")]
     public void Ranges_are_clamped_to_the_text(int start, int length, string expected)
     {
-        Assert.Equal(expected, TextSnapshot.FromString("abcd").GetText(new TextRange(start, length)));
+        TextSnapshot.FromString("abcd").GetText(new TextRange(start, length)).ShouldBe(expected);
     }
 
     [Fact]
@@ -60,8 +60,8 @@ public sealed class TextSnapshotTests(UiFixture ui)
     {
         TextSnapshot snapshot = TextSnapshot.FromString("");
 
-        Assert.Equal(new TextPosition(1, 1), snapshot.GetPosition(0));
-        Assert.Equal(0, snapshot.GetOffset(new TextPosition(3, 3)));
+        snapshot.GetPosition(0).ShouldBe(new TextPosition(1, 1));
+        snapshot.GetOffset(new TextPosition(3, 3)).ShouldBe(0);
     }
 
     [Fact]
@@ -94,12 +94,12 @@ public sealed class TextSnapshotTests(UiFixture ui)
             {
                 for (int offset = 0; offset <= text.Length; offset++)
                 {
-                    Assert.Equal(expected[offset], snapshot.GetPosition(offset));
+                    snapshot.GetPosition(offset).ShouldBe(expected[offset]);
                     // Between \r and \n is no position of its own.
                     bool insideLineBreak =
                         offset > 0 && offset < text.Length && text[(offset - 1)..(offset + 1)] == "\r\n";
                     if (!insideLineBreak)
-                        Assert.Equal(offset, snapshot.GetOffset(expected[offset]));
+                        snapshot.GetOffset(expected[offset]).ShouldBe(offset);
                 }
             }
         });
@@ -122,8 +122,8 @@ public sealed class TextSnapshotTests(UiFixture ui)
                             Task.Run(() =>
                             {
                                 int offset = Array.IndexOf(expected, new TextPosition(thread * 200 + 1, 3));
-                                Assert.Equal(expected[offset], snapshot.GetPosition(offset));
-                                Assert.Equal(offset, snapshot.GetOffset(expected[offset]));
+                                snapshot.GetPosition(offset).ShouldBe(expected[offset]);
+                                snapshot.GetOffset(expected[offset]).ShouldBe(offset);
                             })
                         )
                 );

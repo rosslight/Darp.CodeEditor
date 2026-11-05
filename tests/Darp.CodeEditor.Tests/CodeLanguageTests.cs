@@ -12,29 +12,21 @@ public sealed class CodeLanguageTests
     {
         LoadedLanguage json = await CodeLanguage.Json.Loaded;
 
-        Assert.NotNull(json.Grammar);
-        Assert.Equal("source.json", json.Grammar.GetScopeName());
-        Assert.Equal("//", json.Configuration.LineComment);
-        Assert.Equal(new CharacterPair("/*", "*/"), json.Configuration.BlockComment);
-        Assert.Equal([new CharacterPair("{", "}"), new CharacterPair("[", "]")], json.Configuration.Brackets);
-        Assert.Contains(new AutoClosingPair("\"", "\"", true, true), json.Configuration.AutoClosingPairs);
-        Assert.NotNull(json.Configuration.IndentationRules);
-        Assert.Equal(
-            new IndentationPattern("^\\s*[}\\]],?\\s*$", null),
-            json.Configuration.IndentationRules.DecreaseIndentPattern
-        );
+        json.Grammar.ShouldNotBeNull().GetScopeName().ShouldBe("source.json");
+        json.Configuration.LineComment.ShouldBe("//");
+        json.Configuration.BlockComment.ShouldBe(new CharacterPair("/*", "*/"));
+        json.Configuration.Brackets.ShouldBe([new CharacterPair("{", "}"), new CharacterPair("[", "]")]);
+        json.Configuration.AutoClosingPairs.ShouldContain(new AutoClosingPair("\"", "\"", true, true));
+        json.Configuration.IndentationRules.ShouldNotBeNull()
+            .DecreaseIndentPattern.ShouldBe(new IndentationPattern("^\\s*[}\\]],?\\s*$", null));
     }
 
     [Fact]
     public async Task Json_colors_comments()
     {
-        IRawGrammar? grammar = (await CodeLanguage.Json.Loaded).Grammar;
+        IRawGrammar grammar = (await CodeLanguage.Json.Loaded).Grammar.ShouldNotBeNull();
 
-        Assert.NotNull(grammar);
-        Assert.Contains(
-            TextMate.Tokenize(grammar, "{ // note"),
-            scopes => scopes.Any(s => s.StartsWith("comment.line"))
-        );
+        TextMate.Tokenize(grammar, "{ // note").ShouldContain(scopes => scopes.Any(s => s.StartsWith("comment.line")));
     }
 
     [Fact]
@@ -42,12 +34,11 @@ public sealed class CodeLanguageTests
     {
         LoadedLanguage xml = await CodeLanguage.Xml.Loaded;
 
-        Assert.NotNull(xml.Grammar);
-        Assert.Equal("text.xml", xml.Grammar.GetScopeName());
-        Assert.Null(xml.Configuration.LineComment);
-        Assert.Equal(new CharacterPair("<!--", "-->"), xml.Configuration.BlockComment);
-        Assert.Contains(new CharacterPair("<", ">"), xml.Configuration.SurroundingPairs);
-        Assert.Contains(new AutoClosingPair("<!--", "-->", true, true), xml.Configuration.AutoClosingPairs);
+        xml.Grammar.ShouldNotBeNull().GetScopeName().ShouldBe("text.xml");
+        xml.Configuration.LineComment.ShouldBeNull();
+        xml.Configuration.BlockComment.ShouldBe(new CharacterPair("<!--", "-->"));
+        xml.Configuration.SurroundingPairs.ShouldContain(new CharacterPair("<", ">"));
+        xml.Configuration.AutoClosingPairs.ShouldContain(new AutoClosingPair("<!--", "-->", true, true));
     }
 
     [Fact]
@@ -55,14 +46,16 @@ public sealed class CodeLanguageTests
     {
         LoadedLanguage yaml = await CodeLanguage.Yaml.Loaded;
 
-        Assert.Equal("#", yaml.Configuration.LineComment);
-        Assert.Contains(new AutoClosingPair("'", "'", false, false), yaml.Configuration.AutoClosingPairs);
-        Assert.NotNull(yaml.Configuration.IndentationRules);
+        yaml.Configuration.LineComment.ShouldBe("#");
+        yaml.Configuration.AutoClosingPairs.ShouldContain(new AutoClosingPair("'", "'", false, false));
+        yaml.Configuration.IndentationRules.ShouldNotBeNull();
         // The entry grammar only delegates: keys and comments come from the included YAML 1.2 grammar.
-        Assert.NotNull(yaml.Grammar);
-        IReadOnlyList<IReadOnlyList<string>> tokens = TextMate.Tokenize(yaml.Grammar, "key: value # note");
-        Assert.Contains(tokens, scopes => scopes.Any(s => s.StartsWith("entity.name.tag")));
-        Assert.Contains(tokens, scopes => scopes.Any(s => s.StartsWith("comment.line")));
+        IReadOnlyList<IReadOnlyList<string>> tokens = TextMate.Tokenize(
+            yaml.Grammar.ShouldNotBeNull(),
+            "key: value # note"
+        );
+        tokens.ShouldContain(scopes => scopes.Any(s => s.StartsWith("entity.name.tag")));
+        tokens.ShouldContain(scopes => scopes.Any(s => s.StartsWith("comment.line")));
     }
 
     [Theory]
@@ -78,8 +71,8 @@ public sealed class CodeLanguageTests
             new Uri("avares://Darp.CodeEditor/Languages/json.language-configuration.json")
         );
 
-        Assert.Equal(LoadedLanguage.None, await language.Loaded);
-        Assert.Equal([(LogEventLevel.Error, "CodeEditor")], TestLog.EntriesOf(language));
+        (await language.Loaded).ShouldBe(LoadedLanguage.None);
+        TestLog.EntriesOf(language).ShouldBe([(LogEventLevel.Error, "CodeEditor")]);
     }
 
     [Fact]
@@ -91,8 +84,8 @@ public sealed class CodeLanguageTests
 
         var language = new CodeLanguage("broken", configuration: new Uri(file));
 
-        Assert.Equal(LoadedLanguage.None, await language.Loaded);
-        Assert.Equal([(LogEventLevel.Error, "CodeEditor")], TestLog.EntriesOf(language));
+        (await language.Loaded).ShouldBe(LoadedLanguage.None);
+        TestLog.EntriesOf(language).ShouldBe([(LogEventLevel.Error, "CodeEditor")]);
         File.Delete(file);
     }
 
@@ -114,12 +107,11 @@ public sealed class CodeLanguageTests
             .Configuration
             .IndentationRules;
 
-        Assert.Equal(
+        rules.ShouldBe(
             new IndentationRules(
                 new IndentationPattern("^\\s*begin\\b", "i"),
                 new IndentationPattern("^\\s*end\\b", null)
-            ),
-            rules
+            )
         );
         File.Delete(file);
     }

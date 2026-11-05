@@ -15,10 +15,10 @@ public sealed class CodeDocumentTests(UiFixture ui)
 
             document.Replace(new TextRange(0, 3), "first");
 
-            Assert.Equal("one\ntwo", before.GetText());
-            Assert.Equal(new TextPosition(2, 1), before.GetPosition(4));
-            Assert.Equal("first\ntwo", document.CurrentSnapshot.GetText());
-            Assert.True(document.CurrentSnapshot.Version > before.Version);
+            before.GetText().ShouldBe("one\ntwo");
+            before.GetPosition(4).ShouldBe(new TextPosition(2, 1));
+            document.CurrentSnapshot.GetText().ShouldBe("first\ntwo");
+            document.CurrentSnapshot.Version.ShouldBeGreaterThan(before.Version);
         });
 
     [Theory]
@@ -33,7 +33,7 @@ public sealed class CodeDocumentTests(UiFixture ui)
 
             document.Replace(new TextRange(start, length), "x");
 
-            Assert.Equal(expected, document.Text);
+            document.Text.ShouldBe(expected);
         });
 
     [Fact]
@@ -41,21 +41,21 @@ public sealed class CodeDocumentTests(UiFixture ui)
         _ui.Run(() =>
         {
             CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "abc");
-            Assert.False(document.CanUndo);
+            document.CanUndo.ShouldBeFalse();
 
             document.Replace(new TextRange(1, 1), "XY");
             document.Text = "new";
             document.Undo();
 
-            Assert.Equal("aXYc", document.Text);
-            Assert.True(document.CanRedo);
+            document.Text.ShouldBe("aXYc");
+            document.CanRedo.ShouldBeTrue();
             document.Undo();
-            Assert.Equal("abc", document.Text);
-            Assert.False(document.CanUndo);
+            document.Text.ShouldBe("abc");
+            document.CanUndo.ShouldBeFalse();
             document.Redo();
             document.Redo();
-            Assert.Equal("new", document.Text);
-            Assert.False(document.CanRedo);
+            document.Text.ShouldBe("new");
+            document.CanRedo.ShouldBeFalse();
         });
 
     [Fact]
@@ -63,22 +63,22 @@ public sealed class CodeDocumentTests(UiFixture ui)
         _ui.Run(() =>
         {
             CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "abc");
-            Assert.False(document.IsModified);
+            document.IsModified.ShouldBeFalse();
 
             document.Replace(new TextRange(3, 0), "d");
-            Assert.True(document.IsModified);
-            Assert.True(document.MarkUnmodified(document.CurrentSnapshot));
-            Assert.False(document.IsModified);
+            document.IsModified.ShouldBeTrue();
+            document.MarkUnmodified(document.CurrentSnapshot).ShouldBeTrue();
+            document.IsModified.ShouldBeFalse();
 
             document.Undo();
-            Assert.True(document.IsModified);
+            document.IsModified.ShouldBeTrue();
             document.Redo();
-            Assert.False(document.IsModified);
+            document.IsModified.ShouldBeFalse();
 
             // Typing the same text again is a change.
             document.Replace(new TextRange(3, 1), "");
             document.Replace(new TextRange(3, 0), "d");
-            Assert.True(document.IsModified);
+            document.IsModified.ShouldBeTrue();
         });
 
     [Fact]
@@ -90,9 +90,9 @@ public sealed class CodeDocumentTests(UiFixture ui)
             TextSnapshot saved = document.CurrentSnapshot;
             document.Replace(new TextRange(4, 0), "e");
 
-            Assert.False(document.MarkUnmodified(saved));
+            document.MarkUnmodified(saved).ShouldBeFalse();
 
-            Assert.True(document.IsModified);
+            document.IsModified.ShouldBeTrue();
         });
 
     [Fact]
@@ -103,10 +103,10 @@ public sealed class CodeDocumentTests(UiFixture ui)
             TextSnapshot other = CodeDocument.Create(CodeLanguage.PlainText, "abc").CurrentSnapshot;
             TextSnapshot compiled = TextSnapshot.FromString("abc");
 
-            Assert.ThrowsAny<ArgumentException>(() => document.MarkUnmodified(other));
-            Assert.ThrowsAny<ArgumentException>(() => document.MarkUnmodified(compiled));
-            Assert.ThrowsAny<ArgumentException>(() => document.MapToCurrent(other, new TextRange(0, 1)));
-            Assert.ThrowsAny<ArgumentException>(() => document.MapToCurrent(compiled, new TextRange(0, 1)));
+            Should.Throw<ArgumentException>(() => document.MarkUnmodified(other));
+            Should.Throw<ArgumentException>(() => document.MarkUnmodified(compiled));
+            Should.Throw<ArgumentException>(() => document.MapToCurrent(other, new TextRange(0, 1)));
+            Should.Throw<ArgumentException>(() => document.MapToCurrent(compiled, new TextRange(0, 1)));
         });
 
     [Fact]
@@ -118,17 +118,17 @@ public sealed class CodeDocumentTests(UiFixture ui)
             var y = new TextRange(8, 1);
 
             document.Replace(new TextRange(0, 0), "// note\n");
-            Assert.Equal(new TextRange(16, 1), document.MapToCurrent(analyzed, y));
+            document.MapToCurrent(analyzed, y).ShouldBe(new TextRange(16, 1));
 
             // Typing at either edge stays outside the range.
             document.Replace(new TextRange(16, 0), "(");
             document.Replace(new TextRange(18, 0), ")");
-            Assert.Equal(new TextRange(17, 1), document.MapToCurrent(analyzed, y));
-            Assert.Equal("// note\nlet x = (y);", document.Text);
+            document.MapToCurrent(analyzed, y).ShouldBe(new TextRange(17, 1));
+            document.Text.ShouldBe("// note\nlet x = (y);");
 
             // Deleting the range's text shrinks it to where it was.
             document.Replace(new TextRange(12, 7), "");
-            Assert.Equal(new TextRange(12, 0), document.MapToCurrent(analyzed, y));
+            document.MapToCurrent(analyzed, y).ShouldBe(new TextRange(12, 0));
         });
 
     [Fact]
@@ -144,7 +144,7 @@ public sealed class CodeDocumentTests(UiFixture ui)
             document.Undo();
             document.Redo();
 
-            Assert.Equal(["ab", "c", "ab", "c"], seen);
+            seen.ShouldBe(["ab", "c", "ab", "c"]);
         });
 
     [Fact]
@@ -156,30 +156,26 @@ public sealed class CodeDocumentTests(UiFixture ui)
             document.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
 
             document.Replace(new TextRange(1, 0), "b");
-            // In any order: the names are compared sorted, as they are listed.
-            Assert.Equal(
-                [nameof(CodeDocument.CanUndo), nameof(CodeDocument.IsModified)],
-                changed.Order(StringComparer.Ordinal)
-            );
+            changed.ShouldBe([nameof(CodeDocument.CanUndo), nameof(CodeDocument.IsModified)], ignoreOrder: true);
 
             changed.Clear();
             document.Undo();
-            Assert.Equal(
-                [nameof(CodeDocument.CanRedo), nameof(CodeDocument.CanUndo), nameof(CodeDocument.IsModified)],
-                changed.Order(StringComparer.Ordinal)
+            changed.ShouldBe(
+                [nameof(CodeDocument.CanUndo), nameof(CodeDocument.CanRedo), nameof(CodeDocument.IsModified)],
+                ignoreOrder: true
             );
 
             changed.Clear();
             document.Indentation = Indentation.Tabs();
             document.Indentation = Indentation.Tabs();
-            Assert.Equal([nameof(CodeDocument.Indentation)], changed);
+            changed.ShouldBe([nameof(CodeDocument.Indentation)]);
         });
 
     [Fact]
     public Task Indentation_starts_as_in_VS_Code() =>
         _ui.Run(() =>
         {
-            Assert.Equal(Indentation.Spaces(2), CodeDocument.Create(CodeLanguage.Yaml).Indentation);
-            Assert.Equal(Indentation.Spaces(4), CodeDocument.Create(CodeLanguage.Json).Indentation);
+            CodeDocument.Create(CodeLanguage.Yaml).Indentation.ShouldBe(Indentation.Spaces(2));
+            CodeDocument.Create(CodeLanguage.Json).Indentation.ShouldBe(Indentation.Spaces(4));
         });
 }

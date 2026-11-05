@@ -30,17 +30,17 @@ public sealed class CodeEditorColorThemeTests
                 ? CodeEditorColorTheme.DarkPlus
                 : CodeEditorColorTheme.LightPlus;
 
-        ColorThemeFile? file = await theme.Loaded;
+        ColorThemeFile file = (await theme.Loaded).ShouldNotBeNull();
 
-        Assert.NotNull(file);
-        Assert.Equal(Color.Parse(background), file.Colors["editor.background"]);
-        Assert.Equal(Color.Parse(newOperator), file.SemanticTokenColors["newOperator"].Foreground);
+        file.Colors["editor.background"].ShouldBe(Color.Parse(background));
+        file.SemanticTokenColors["newOperator"].Foreground.ShouldBe(Color.Parse(newOperator));
         // Comments are colored by a rule of the included theme.
         var textMateTheme = TextMateSharp.Themes.Theme.CreateFromRawTheme(file.TokenRules, null);
-        Assert.Contains(
-            textMateTheme.Match(["comment"]),
-            rule => textMateTheme.GetColor(rule.foreground).Equals(comment, StringComparison.OrdinalIgnoreCase)
-        );
+        textMateTheme
+            .Match(["comment"])
+            .ShouldContain(rule =>
+                textMateTheme.GetColor(rule.foreground).Equals(comment, StringComparison.OrdinalIgnoreCase)
+            );
     }
 
     [Theory]
@@ -57,8 +57,8 @@ public sealed class CodeEditorColorThemeTests
 
         var theme = new CodeEditorColorTheme { Source = new Uri(file) };
 
-        Assert.Null(await theme.Loaded);
-        Assert.Equal([(LogEventLevel.Error, "CodeEditor")], TestLog.EntriesOf(theme));
+        (await theme.Loaded).ShouldBeNull();
+        TestLog.EntriesOf(theme).ShouldBe([(LogEventLevel.Error, "CodeEditor")]);
         Directory.Delete(directory, recursive: true);
     }
 
@@ -87,17 +87,17 @@ public sealed class CodeEditorColorThemeTests
         );
 
         var theme = new CodeEditorColorTheme { Source = new Uri(Path.Combine(directory, "theme.json")) };
-        ColorThemeFile? file = await theme.Loaded;
-        Assert.NotNull(file);
-        IReadOnlyDictionary<string, SemanticTokenStyle> styles = file.SemanticTokenColors;
+        IReadOnlyDictionary<string, SemanticTokenStyle> styles = (await theme.Loaded)
+            .ShouldNotBeNull()
+            .SemanticTokenColors;
 
         // The included foreground stays; bold is cleared, italic set, the rest left to TextMate.
-        Assert.Equal(new SemanticTokenStyle(Color.Parse("#ff0000"), false, true, null, null), styles["variable"]);
-        Assert.Equal(new SemanticTokenStyle(null, null, null, true, null), styles["number"]);
+        styles["variable"].ShouldBe(new SemanticTokenStyle(Color.Parse("#ff0000"), false, true, null, null));
+        styles["number"].ShouldBe(new SemanticTokenStyle(null, null, null, true, null));
         // fontStyle sets all four styles.
-        Assert.Equal(new SemanticTokenStyle(null, false, true, false, false), styles["keyword"]);
+        styles["keyword"].ShouldBe(new SemanticTokenStyle(null, false, true, false, false));
         // As in VS Code, any whitespace separates its names, and it wins over the flags.
-        Assert.Equal(new SemanticTokenStyle(null, true, true, true, false), styles["string"]);
+        styles["string"].ShouldBe(new SemanticTokenStyle(null, true, true, true, false));
         Directory.Delete(directory, recursive: true);
     }
 }
