@@ -284,7 +284,8 @@ Two limits come with it:
 - **Base .NET only.** The runner starts on the base .NET runtime. A runner-side project that needs another shared
   framework, such as ASP.NET Core, fails the build with a clear error.
 - **Compatible frameworks.** The app references the runner-side project, so their target frameworks must fit: a
-  `net10.0` app can't reference a `net10.0-windows` project.
+  `net10.0` app can't reference a `net10.0-windows` project (NU1201). The runner itself loads a `net10.0-windows`
+  runner side on Windows, so a Windows-only app targets `net10.0-windows` itself.
 
 **Writing a script API.** The checklist, which the use cases' sample follows:
 
@@ -407,7 +408,11 @@ again after a kill or a crash, and does not restart by itself: an app that keeps
 `session.Exited.IsCompleted` before it starts a run, and starts a new session then.
 
 **Children of the app.** The C# server and every session's process end when the app ends, even when the app is
-killed, so no runner keeps a device open after a crash.
+killed, so no runner keeps a device open after a crash. Both watch their standard input and exit when it closes, and
+on Windows they also run in a Job Object that ends them with the app; the Job Object covers a runner that is stuck,
+and standard input covers the moment before the runner is assigned to the Job Object. In a test on Windows, runners
+that did neither kept running after the app was killed; with either, they ended 2 to 3 ms after it, also while busy in
+a loop or blocked in a sleep.
 
 **Isolation.** Each session is its own process, so a kill or a crash takes only its own scripts down. Group scripts
 into sessions by what may fail together: scripts that share objects belong in one session, scripts that must survive
@@ -507,15 +512,22 @@ generated proxies, and a JIT runner with precompiled classes standing in for scr
 - naming runner-side types in a NativeAOT app without compiling their code: about 700 bytes of metadata;
 - the cost of a minimal session: 80 to 110 ms to the first answered call, about 17 MiB each;
 - fast data, with the numbers in section 7;
-- loading runner-side dependencies on linux-x64, next to a NativeAOT app: SQLite with its native library and
-  System.IO.Ports with its per-platform code, from an untrimmed publish through its dependency manifest. Avalonia's
-  DLLs were in the payload, and none of them loaded.
+- loading runner-side dependencies next to a NativeAOT app, on linux-x64 and win-x64: SQLite with its native library
+  and System.IO.Ports with its per-platform code, from an untrimmed publish for the platform, through its dependency
+  manifest, with the contracts shared across the load contexts. On Windows a portable publish worked too; on Linux it
+  picked the wrong per-platform code, so the rule stays a publish per platform. Avalonia's DLLs were in the payload,
+  and none of them loaded;
+- runners ending with a NativeAOT app that is killed hard, on win-x64: with standard input watched, a Job Object, or
+  both, 27 of 27 runners ended 2 to 3 ms after the app; without either, 9 of 9 kept running;
+- touching `Dispatcher.UIThread` from a pool thread before Avalonia is set up breaks the app's setup, on Linux and
+  Windows; `Dispatcher.FromThread` returns null then, without creating a dispatcher.
 
 Still open:
 
-- runner-side dependencies on Windows and arm64, the bridge and contracts loaded once for both sides, two versions of
-  one package in the app and the runner side, and the build step that deploys them;
-- the C# server and the runners ending with the app, when the app is killed: a test per platform;
+- runner-side dependencies on arm64 and macOS, the real bridge and contracts loaded once for both sides, two versions
+  of one package in the app and the runner side, and the build step that deploys them;
+- processes ending with a killed app on Linux and macOS, and for third-party language servers, which may not watch
+  their standard input;
 - nothing touching Avalonia's dispatcher before Avalonia is set up: a test creates a server, a document and a
   compilation on a pool thread, then starts the app;
 - the exit reason rule and `Exited` completing before failures, when causes race: tests that kill the runner at every
