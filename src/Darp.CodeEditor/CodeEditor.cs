@@ -377,7 +377,6 @@ public class CodeEditor : TemplatedControl
         base.OnDetachedFromVisualTree(e);
         _isAttached = false;
         UpdateShownDocument();
-        ReleaseCommandTarget(e.RootVisual);
     }
 
     /// <inheritdoc />
@@ -405,19 +404,6 @@ public class CodeEditor : TemplatedControl
             || change.Property == ThemeVariantScope.ActualThemeVariantProperty
         )
             UpdateHighlighting();
-    }
-
-    /// <summary>
-    /// AvaloniaEdit's commands act on the element that got the focus last, which <c>RoutedCommand</c> keeps in a static
-    /// field: an editor whose text area had the focus would stay alive until another element gets it. When nothing else
-    /// has the focus, a focus event on an element of no tree takes its place. This goes once AvaloniaEdit holds that
-    /// element weakly.
-    /// </summary>
-    private void ReleaseCommandTarget(Visual root)
-    {
-        IInputElement? focused = (root as TopLevel)?.FocusManager?.GetFocusedElement();
-        if (focused is null || (focused is Visual visual && this.IsVisualAncestorOf(visual)))
-            new Border().RaiseEvent(new FocusChangedEventArgs(GotFocusEvent));
     }
 
     /// <summary>Whether a theme variant is dark: Dark, or one that inherits from it.</summary>
