@@ -8,8 +8,8 @@ using TextMateSharp.Grammars;
 namespace Darp.CodeEditor.Benchmarks;
 
 /// <summary>
-/// TextMate highlighting of 5,000 lines with a grammar whose expressions are compiled: the background's throughput,
-/// and the UI thread's work for one screen.
+/// TextMate highlighting of 5,000 lines of JSON with a grammar whose expressions are compiled: the background's
+/// throughput, and the UI thread's work for one screen.
 /// </summary>
 [MemoryDiagnoser]
 [NotInBaseline]
@@ -30,27 +30,22 @@ public class HighlightingBenchmarks
     /// <summary>The state at the end of the line above the screen, in the middle of the text.</summary>
     private IStateStack? _screenStart;
 
-    [Params("json", "yaml")]
-    public string Language { get; set; } = "json";
-
     [GlobalSetup]
     public void LoadGrammar()
     {
-        (CodeLanguage language, string text) =
-            Language == "json" ? (CodeLanguage.Json, Json()) : (CodeLanguage.Yaml, Yaml());
         ColorThemeFile theme =
             CodeEditorColorTheme.LightPlus.Loaded.GetAwaiter().GetResult()
             ?? throw new InvalidOperationException("Light+ did not load.");
         TextMateGrammar grammar = TextMateGrammar.Load(
             theme,
-            language.Loaded.GetAwaiter().GetResult().Grammar
-                ?? throw new InvalidOperationException($"{Language} did not load.")
+            CodeLanguage.Json.Loaded.GetAwaiter().GetResult().Grammar
+                ?? throw new InvalidOperationException("JSON did not load.")
         );
-        _lines = text.Split('\n');
+        _lines = Json().Split('\n');
         // Compiles the grammar's expressions, as the first screen does when a grammar loads.
         LineResult[] all = BackgroundTextMateHighlighter.Tokenize(grammar, null, _lines, CancellationToken.None);
         if (all.Length != _lines.Length || all.Any(line => line.Tokens is null))
-            throw new InvalidOperationException($"{Language} did not tokenize every line.");
+            throw new InvalidOperationException("JSON did not tokenize every line.");
         _screenStart = all[Lines / 2 - 1].EndState;
         _grammar = grammar;
     }
@@ -107,16 +102,5 @@ public class HighlightingBenchmarks
         "{\n"
         + string.Concat(Enumerable.Range(2, Lines - 3).Select(i => $"  \"key{i}\": [\"value {i}\", {i}, true],\n"))
         + "  \"end\": null\n}";
-
-    private static string Yaml() =>
-        string.Concat(
-            Enumerable
-                .Range(1, Lines)
-                .Select(i =>
-                    i % 10 == 0
-                        ? $"# section {i}" + (i < Lines ? "\n" : "")
-                        : $"key{i}: value {i} # note" + (i < Lines ? "\n" : "")
-                )
-        );
 }
 #endif

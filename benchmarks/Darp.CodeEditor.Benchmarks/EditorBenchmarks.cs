@@ -15,8 +15,8 @@ using BenchmarkDotNet.Attributes;
 namespace Darp.CodeEditor.Benchmarks;
 
 /// <summary>
-/// The first colored frame of a new editor of 5,000 lines: from creating the editor until a rendered frame shows its
-/// visible lines in syntax colors, without a language server. The budget is 100 ms (design, section 1.2).
+/// The first colored frame of a new editor of 5,000 lines of JSON: from creating the editor until a rendered frame shows
+/// its visible lines in syntax colors, without a language server. The budget is 100 ms (design, section 1.2).
 /// </summary>
 [NotInBaseline]
 [InvocationCount(1)]
@@ -27,35 +27,24 @@ public class FirstFrameBenchmarks
     private CodeDocument? _document;
     private Window? _window;
 
-    [Params("json", "yaml")]
-    public string Language { get; set; } = "json";
-
     /// <summary>The app, with its language and theme loaded at startup.</summary>
     [GlobalSetup]
     public void SetUp()
     {
         HeadlessEditor.SetUpApp();
-        _ = Language == "json" ? CodeLanguage.Json.Loaded.Result : CodeLanguage.Yaml.Loaded.Result;
+        _ = CodeLanguage.Json.Loaded.Result;
         _ = CodeEditorColorTheme.LightPlus.Loaded.Result;
     }
 
     [IterationSetup]
-    public void CreateDocument() =>
-        _document = CodeDocument.Create(
-            Language == "json" ? CodeLanguage.Json : CodeLanguage.Yaml,
-            Language == "json" ? HeadlessEditor.Json(5000) : HeadlessEditor.Yaml(5000)
-        );
+    public void CreateDocument() => _document = CodeDocument.Create(CodeLanguage.Json, HeadlessEditor.Json(5000));
 
     [Benchmark]
     public void FirstColoredFrame()
     {
         var editor = new CodeEditor { Document = _document };
         _window = HeadlessEditor.Show(editor);
-        HeadlessEditor.RenderUntilColored(
-            _window,
-            editor,
-            Language == "json" ? HeadlessEditor.JsonKey : HeadlessEditor.YamlKey
-        );
+        HeadlessEditor.RenderUntilColored(_window, editor, HeadlessEditor.JsonKey);
     }
 
     [IterationCleanup]
@@ -213,9 +202,6 @@ internal static class HeadlessEditor
     /// <summary>JSON's keys, in Light+.</summary>
     public static Expected JsonKey { get; } = Expect("\"key", Color.Parse("#0451A5"));
 
-    /// <summary>YAML's keys, in Light+.</summary>
-    public static Expected YamlKey { get; } = Expect("key", Color.Parse("#800000"));
-
     public static Expected Expect(string text, Color color) => new(text, color);
 
     /// <summary>
@@ -240,11 +226,6 @@ internal static class HeadlessEditor
         "{\n"
         + string.Concat(Enumerable.Range(2, lines - 3).Select(i => $"  \"key{i}\": \"value {i}\",\n"))
         + "  \"end\": 0\n}";
-
-    public static string Yaml(int lines) =>
-        string.Concat(
-            Enumerable.Range(1, lines).Select(i => i % 10 == 0 ? $"# section {i}\n" : $"key{i}: value {i} # note\n")
-        );
 
     private static bool IsColored(TextView textView, Expected expected) =>
         textView.VisualLinesValid
