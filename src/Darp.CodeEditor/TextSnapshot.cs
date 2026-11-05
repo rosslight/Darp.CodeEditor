@@ -43,7 +43,7 @@ public sealed class TextSnapshot
     /// <summary>The document's version in AvaloniaEdit, to follow its changes; null for a compiled string.</summary>
     internal ITextSourceVersion? SourceVersion => _text.Version;
 
-    /// <summary>The text. Each call copies it into a new string.</summary>
+    /// <summary>The text. For a document's snapshot, each call copies it into a new string.</summary>
     public string GetText() => _text.Text;
 
     /// <summary>The text of <paramref name="range"/>, clamped to the text.</summary>
