@@ -32,7 +32,10 @@ jobs:
             --coverlet --coverlet-output-format cobertura \
             --coverlet-include "[Darp.CodeEditor]*" --coverlet-exclude "[*.Tests*]*"
 
+      # Pull requests from forks get a read-only token, and the action fails without write access. On main it writes
+      # the coverage to the step summary.
       - name: Attach code-coverage comment
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
         uses: rosslight/pr-code-coverage-visualizer@v2.2.0
         with:
           files: |

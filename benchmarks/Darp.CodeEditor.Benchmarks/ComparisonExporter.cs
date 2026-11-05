@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Exporters;
@@ -50,14 +51,22 @@ internal sealed class ComparisonExporter(StatisticalTestColumn timeVerdict) : Ex
 
     private static string Summarize(Comparison[] comparisons)
     {
+        int compared = comparisons.Count(comparison => comparison.IsCompared);
+        if (compared == 0)
+            return "No benchmark could be compared with the target branch.";
+        string benchmarks =
+            compared == comparisons.Length
+                ? $"{compared} benchmarks"
+                : $"{compared} of {comparisons.Length} benchmarks compared";
+
         int slower = comparisons.Count(comparison => comparison.IsSlower);
         int faster = comparisons.Count(comparison => comparison.IsFaster);
         int allocatingMore = comparisons.Count(comparison => comparison.AllocatesMore);
         int allocatingLess = comparisons.Count(comparison => comparison.AllocatesLess);
         if (slower + faster + allocatingMore + allocatingLess == 0)
-            return $"No significant change in {comparisons.Length} benchmarks.";
+            return $"No significant change in {benchmarks}.";
 
-        return $"{comparisons.Length} benchmarks: {slower} slower, {faster} faster, "
+        return $"{benchmarks}: {slower} slower, {faster} faster, "
             + $"{allocatingMore} allocating more, {allocatingLess} allocating less.";
     }
 
@@ -78,6 +87,10 @@ internal sealed class ComparisonExporter(StatisticalTestColumn timeVerdict) : Ex
 
     private sealed record Comparison(string Benchmark, Measurement? Baseline, Measurement? Current, string TimeVerdict)
     {
+        /// <summary>Whether both versions were measured.</summary>
+        [MemberNotNullWhen(true, nameof(Baseline), nameof(Current))]
+        public bool IsCompared => Baseline is not null && Current is not null;
+
         public bool IsSlower => TimeVerdict == "Slower";
         public bool IsFaster => TimeVerdict == "Faster";
         public bool AllocatesMore => Current?.AllocatedBytes > Baseline?.AllocatedBytes;
@@ -88,7 +101,7 @@ internal sealed class ComparisonExporter(StatisticalTestColumn timeVerdict) : Ex
 
         private string FormatChange()
         {
-            if (Baseline is null || Current is null)
+            if (!IsCompared)
                 return "–";
             double percent = (Current.Nanoseconds / Baseline.Nanoseconds - 1) * 100;
             return percent.ToString("+0.0;-0.0;0.0", CultureInfo.InvariantCulture) + "%";
@@ -96,7 +109,7 @@ internal sealed class ComparisonExporter(StatisticalTestColumn timeVerdict) : Ex
 
         private string FormatVerdict()
         {
-            if (Baseline is null || Current is null)
+            if (!IsCompared)
                 return "no comparison";
             if (IsSlower)
                 return "🔴 slower";
