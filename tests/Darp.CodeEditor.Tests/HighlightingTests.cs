@@ -81,6 +81,64 @@ public sealed class HighlightingTests(UiFixture ui)
             window.ColorsOfLine(3).ShouldContain(s_string);
         });
 
+    /// <summary>The languages of a new editor's first frames.</summary>
+    public static TheoryData<string> FirstFrameLanguages => ["json", "yaml"];
+
+    [Theory]
+    [MemberData(nameof(FirstFrameLanguages))]
+    public Task A_new_editor_of_5000_lines_shows_syntax_colors_in_its_pixels(string language) =>
+        _ui.Run(async () =>
+        {
+            (CodeLanguage codeLanguage, string text, Color syntax) =
+                language == "json"
+                    ? (CodeLanguage.Json, Texts.Json(5000), s_propertyName)
+                    : (CodeLanguage.Yaml, Texts.Yaml(5000), s_tag);
+            using var window = new EditorWindow(new CodeEditor { Document = CodeDocument.Create(codeLanguage, text) });
+
+            // Some glyphs' worth of pixels: anti-aliasing blends the edges of the rest.
+            await Wait.UntilAsync(() => EditorWindow.CountPixels(window.Render(), syntax) > 100);
+        });
+
+    /// <summary>
+    /// Lines of 20,000 characters: a JSON string, which tokenizes in about a millisecond, and an array, which takes
+    /// seconds and runs out of the background's time.
+    /// </summary>
+    public static TheoryData<string> LongValues => ["string", "array"];
+
+    [Theory]
+    [MemberData(nameof(LongValues))]
+    public Task Typing_on_a_line_of_20000_characters_edits_it_and_colors_it_by_its_time(string kind) =>
+        _ui.Run(async () =>
+        {
+            string value =
+                kind == "string"
+                    ? "\"" + new string('x', 20_000) + "\""
+                    : "[" + string.Concat(Enumerable.Repeat("1, ", 6_666)) + "1]";
+            CodeDocument document = CodeDocument.Create(
+                CodeLanguage.Json,
+                $"{{\n  \"long\": {value},\n  \"after\": 1\n}}"
+            );
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            // Near the line's start: AvaloniaEdit edits and draws only the first 3,000 characters of a longer line.
+            window.Editor.Selection = new TextSelection(document.CurrentSnapshot.GetOffset(new TextPosition(2, 100)));
+
+            window.Type("1, ");
+
+            document.CurrentSnapshot.GetText(new TextRange(window.Editor.Selection.Caret - 3, 3)).ShouldBe("1, ");
+            // A line that tokenizes in time passes its state on; the next line after one that runs out of time starts
+            // from the start of the grammar, where its key is a string.
+            Color after = kind == "string" ? s_propertyName : s_string;
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return window.ColorsOfLine(3).Contains(after);
+            });
+            if (kind == "string")
+                window.ColorsOfLine(2).ShouldContain(s_string);
+            else
+                window.ColorsOfLine(2).ShouldBe([Avalonia.Media.Colors.Black]);
+        });
+
     [Fact]
     public Task The_first_lines_that_come_into_view_are_colored_without_waiting_for_the_background() =>
         _ui.Run(async () =>

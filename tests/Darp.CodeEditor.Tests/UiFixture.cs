@@ -36,11 +36,8 @@ public sealed class UiFixture : IAsyncDisposable
     public ValueTask DisposeAsync() => _session.DisposeAsync();
 }
 
-/// <summary>
-/// The tests that run on the UI thread of <see cref="UiFixture"/>. They run after the other tests, not beside them, so
-/// that the budget tests measure the UI thread without other tests competing for the processor.
-/// </summary>
-[CollectionDefinition(UiFixture.Collection, DisableParallelization = true)]
+/// <summary>The tests that run on the UI thread of <see cref="UiFixture"/>.</summary>
+[CollectionDefinition(UiFixture.Collection)]
 public sealed class UiCollection : ICollectionFixture<UiFixture>;
 
 /// <summary>
