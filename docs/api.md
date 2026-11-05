@@ -540,8 +540,10 @@ Documents, languages and themes (sections 1 and 4) are implemented and tested. P
   creates, edits, undoes and maps a document on a pool thread, then sets up Avalonia on its main thread. The setup
   succeeds, and the document then belongs to the UI thread: it changes there and throws elsewhere;
 - `avares://` files load before setup, with Avalonia's standard asset loader;
-- TextMateSharp, without its grammar package, tokenizes VS Code's JSON grammar, comments included, and its YAML
-  grammar with the five grammars it includes, also in a NativeAOT app published without warnings;
+- TextMateSharp 2.0.5, without its grammar package, tokenizes VS Code's JSON grammar, comments included, its YAML
+  grammar with the five grammars it includes, and its XML grammar, also in a NativeAOT app published without
+  warnings. Reading a grammar tolerates two things that vscode-textmate tolerates and TextMateSharp does not:
+  comments among YAML's captures, and XML's begin rules without an end;
 - on linux-x64 (BenchmarkDotNet): an edit plus its snapshot takes about 0.9 µs on 5,000 lines, and allocates
   3.5 KB; the first position in a snapshot reads its line breaks in about 60 µs, later ones take about 12 ns; mapping
   a range takes about 50 ns after one edit and 0.7 µs after 100; loading a built-in language or theme takes about
@@ -553,14 +555,15 @@ language features come next. Proven on linux-x64, with `dotnet test` and as Nati
 with Skia:
 
 - the budgets of the design's section 1.2 without a language server: a 5,000-line JSON or YAML document shows syntax
-  colors in the pixels of a frame 20 to 55 ms after its editor is created, with its language and theme loaded. The
-  first editor of a NativeAOT process took about 45 ms;
-- the UI thread never stalled over 32 ms while 5,000 lines loaded, while typing in them and scrolling through them,
+  colors in the pixels of a frame 20 to 50 ms after its editor is created, the median of five editors, with its
+  language and theme loaded, also on a busy machine. The first editor of a NativeAOT process took about 45 ms;
+- the UI thread never stalled over 40 ms while 5,000 lines loaded, while typing in them and scrolling through them,
   and while typing on lines of 20,000 characters: a JSON string, which tokenizes in about 2 ms, and an array, whose
-  tokenizing stops at the background's limit of 50 ms per line. A few stalls went over 16 ms, most of them frames of fast
-  scrolling, which plain text without a grammar has too;
-- tokenizing 5,000 lines in the background takes about 66 ms for JSON and 69 ms for YAML (BenchmarkDotNet); one
-  screen of 50 lines takes the UI thread about 0.7 ms of the 4 ms it may spend per frame;
+  tokenizing stops at the background's limit of 50 ms per line. On two cores, also shared with two busy loops, no
+  stall went over 16 ms. The longer ones came on a busy machine, some of them with a GC pause. The GCs come from the
+  headless renderer, which allocates a bitmap per frame: plain text without a grammar has as many;
+- tokenizing 5,000 lines in the background takes about 62 ms for JSON and YAML (BenchmarkDotNet); one screen of 50
+  lines takes the UI thread about 0.6 ms of the 4 ms it may spend per frame;
 - an editor created on another thread than the app's main UI thread fails at once with `InvalidOperationException`.
 
 Still open:
