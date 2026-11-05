@@ -40,7 +40,9 @@ public static class CSharpScriptEnvironment
 /// app, NativeAOT apps included: the language server reads those files, and the runner loads them.
 /// </para>
 /// <para>
-/// Documents and compilations keep a copy of the environment, so changing its lists afterwards has no effect.
+/// Documents and compilations keep a copy of the environment, so changing its lists afterwards has no effect. Two
+/// environments are equal when their globals type and all settings are, lists compared by content; the server
+/// prepares an environment's references once and reuses them for equal ones.
 /// </para>
 /// </remarks>
 /// <typeparam name="TSession">The session object's type that scripts of this kind run with.</typeparam>
@@ -64,7 +66,17 @@ public sealed record CSharpScriptEnvironment<TSession, TInput>
     /// </summary>
     public IReadOnlyList<string>? References { get; init; }
 
-    /// <summary>The namespaces every script uses without a <c>using</c> directive, such as <c>System.Linq</c>.</summary>
+    /// <summary>
+    /// Whether scripts get the .NET SDK's implicit usings: <c>System</c>, <c>System.Collections.Generic</c>,
+    /// <c>System.IO</c>, <c>System.Linq</c>, <c>System.Net.Http</c>, <c>System.Threading</c> and
+    /// <c>System.Threading.Tasks</c>. Default: yes.
+    /// </summary>
+    public bool ImplicitImports { get; init; } = true;
+
+    /// <summary>
+    /// Further namespaces every script uses without a <c>using</c> directive, such as the script API's, besides the
+    /// implicit ones.
+    /// </summary>
     public IReadOnlyList<string> Imports { get; init; } = [];
 
     /// <summary>The C# language version, such as <c>13</c> or <c>latest</c>. Default: <c>latest</c>.</summary>
@@ -73,9 +85,12 @@ public sealed record CSharpScriptEnvironment<TSession, TInput>
     /// <summary>Whether nullable reference types are on, with their warnings. Default: on.</summary>
     public bool Nullable { get; init; } = true;
 
-    /// <summary>Whether scripts may use <c>unsafe</c> code. Default: no.</summary>
-    public bool AllowUnsafe { get; init; }
-
     /// <summary>Whether integer arithmetic checks for overflow, as in a <c>checked</c> block. Default: no.</summary>
     public bool CheckOverflow { get; init; }
+
+    /// <summary>Compares the globals type and all settings, lists by content.</summary>
+    public bool Equals(CSharpScriptEnvironment<TSession, TInput>? other) => throw new NotImplementedException();
+
+    /// <inheritdoc />
+    public override int GetHashCode() => throw new NotImplementedException();
 }

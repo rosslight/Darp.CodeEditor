@@ -21,25 +21,24 @@ public static class CSharpScriptSession
     /// </typeparam>
     /// <typeparam name="TSession">
     /// The session object's type, from an assembly marked <c>CSharpScriptReference</c>. The runner creates one
-    /// instance, through its public constructor, which may ask for <typeparamref name="TAppSide"/>. The session's
-    /// scripts must be compiled for it. Naming the type here compiles none of its code into a NativeAOT app.
+    /// instance through its <see cref="IScriptSession{TSelf, TAppSide}.Create"/>. The session's scripts must be
+    /// compiled for it. Naming the type here compiles none of its code into a NativeAOT app.
     /// </typeparam>
     /// <param name="appSide">The app's half of the bridge. Calls arrive on any thread, until the session ends.</param>
     /// <param name="cancellationToken">Stops starting. It has no effect once the session is started.</param>
-    /// <exception cref="ArgumentException"><typeparamref name="TSession"/> has no fitting public constructor.</exception>
-    /// <exception cref="ScriptException">
-    /// The session object's constructor threw. The process is ended.
-    /// </exception>
     /// <exception cref="InvalidOperationException">
-    /// The process did not start or did not answer in time. The message includes its standard error.
+    /// The bridge's interfaces have no build-time proxies, because the script API lacks
+    /// <c>[assembly: ExportRpcContractProxies]</c>; checked in every build, so the mistake shows before a NativeAOT
+    /// app fails. Or the process did not start or answer in time; the message includes its standard error.
     /// </exception>
+    /// <exception cref="CSharpScriptException">The session object's <c>Create</c> threw. The process is ended.</exception>
     public static Task<CSharpScriptSession<TSessionSide, TSession>> StartAsync<TAppSide, TSessionSide, TSession>(
         TAppSide appSide,
         CancellationToken cancellationToken = default
     )
         where TAppSide : class, IShapeable<TAppSide>
         where TSessionSide : class, IShapeable<TSessionSide>
-        where TSession : class, TSessionSide => throw new NotImplementedException();
+        where TSession : class, TSessionSide, IScriptSession<TSession, TAppSide> => throw new NotImplementedException();
 
     /// <inheritdoc cref="StartAsync{TAppSide, TSessionSide, TSession}(TAppSide, CancellationToken)"/>
     /// <param name="appSide">The app's half of the bridge. Calls arrive on any thread, until the session ends.</param>
@@ -52,7 +51,7 @@ public static class CSharpScriptSession
     )
         where TAppSide : class, IShapeable<TAppSide>
         where TSessionSide : class, IShapeable<TSessionSide>
-        where TSession : class, TSessionSide => throw new NotImplementedException();
+        where TSession : class, TSessionSide, IScriptSession<TSession, TAppSide> => throw new NotImplementedException();
 }
 
 /// <summary>
@@ -68,8 +67,8 @@ public static class CSharpScriptSession
 /// The session object, the globals and everything they use are ordinary .NET objects in the runner.
 /// </para>
 /// <para>
-/// Scripts start with <see cref="StartScriptAsync"/> and may overlap. They share the session object; calls from the
-/// app and from scripts reach it on any thread, and the script API makes it safe for that. Sessions share no objects:
+/// Scripts start with <c>StartScriptAsync</c> and may overlap. They share the session object; calls from the app and
+/// from scripts reach it on any thread, and the script API makes it safe for that. Sessions share no objects:
 /// scripts that must not take each other down belong in separate sessions.
 /// </para>
 /// <para>
@@ -103,7 +102,7 @@ public sealed class CSharpScriptSession<TSessionSide, TSession> : IAsyncDisposab
 
     /// <summary>
     /// The session side of the bridge: a proxy of the session object. Calls cross into the runner; failures in the
-    /// runner arrive as <see cref="ScriptException"/>.
+    /// runner arrive as <see cref="CSharpScriptException"/>.
     /// </summary>
     public TSessionSide Remote => throw new NotImplementedException();
 
@@ -111,20 +110,19 @@ public sealed class CSharpScriptSession<TSessionSide, TSession> : IAsyncDisposab
     /// Completes once the process has ended, for any reason, before the session's runs fail because of it. Never
     /// faults. After a <see cref="ConnectionLostException"/>, await it to learn why the session ended.
     /// </summary>
-    public Task<ScriptSessionExit> Exited => throw new NotImplementedException();
+    public Task<CSharpScriptSessionExit> Exited => throw new NotImplementedException();
 
-    /// <summary>
-    /// Loads <paramref name="script"/>, creates its globals and starts it, for scripts whose runs take no input.
-    /// </summary>
-    /// <inheritdoc cref="StartScriptAsync{TInput}(CompiledScript{TSession, TInput}, TInput, CancellationToken)"/>
-    public Task<ScriptRun> StartScriptAsync(
-        CompiledScript<TSession, ValueTuple> script,
+    /// <summary>Starts <paramref name="script"/>, for scripts whose runs take no input.</summary>
+    /// <inheritdoc cref="StartScriptAsync{TInput}(CSharpScriptAssembly{TSession, TInput}, TInput, CancellationToken)"/>
+    public Task<CSharpScriptRun> StartScriptAsync(
+        CSharpScriptAssembly<TSession, ValueTuple> script,
         CancellationToken cancellationToken = default
     ) => throw new NotImplementedException();
 
     /// <summary>
-    /// Loads <paramref name="script"/>, creates its globals with <paramref name="input"/> and starts it. Returns once
-    /// the script runs; the returned run says when it has ended.
+    /// Starts <paramref name="script"/> with <paramref name="input"/>. Returns once the runner has accepted the run,
+    /// before the globals are created: creating them is part of the run, so a <c>Create</c> that hangs can be stopped
+    /// like the script, and one that throws ends the run's <see cref="CSharpScriptRun.Completion"/>.
     /// </summary>
     /// <typeparam name="TInput">
     /// The run's input, marked <c>[GenerateShape]</c>: data that this run alone gets, such as its identity. It is
@@ -136,14 +134,13 @@ public sealed class CSharpScriptSession<TSessionSide, TSession> : IAsyncDisposab
     /// </param>
     /// <param name="input">The run's input, which the globals receive.</param>
     /// <param name="cancellationToken">
-    /// Stops starting. Once the runner has accepted the script, the method returns the run even if the token is
-    /// cancelled, so that no run is left without a handle. Afterwards, use <see cref="ScriptRun.StopAsync"/>.
+    /// Stops starting. Once the runner has accepted the run, the method returns it even if the token is cancelled, so
+    /// that no run is left without a handle. Afterwards, use <see cref="CSharpScriptRun.StopAsync"/>.
     /// </param>
-    /// <exception cref="ScriptException">Creating the globals threw.</exception>
     /// <exception cref="ObjectDisposedException">The session is being disposed.</exception>
     /// <exception cref="ConnectionLostException">The session's process has ended.</exception>
-    public Task<ScriptRun> StartScriptAsync<TInput>(
-        CompiledScript<TSession, TInput> script,
+    public Task<CSharpScriptRun> StartScriptAsync<TInput>(
+        CSharpScriptAssembly<TSession, TInput> script,
         TInput input,
         CancellationToken cancellationToken = default
     )
@@ -168,48 +165,58 @@ public sealed class CSharpScriptSession<TSessionSide, TSession> : IAsyncDisposab
 
 /// <summary>One run of a compiled script in a session.</summary>
 /// <remarks>
-/// A run lasts as long as its script's code. When the code has finished, for any reason, the session cancels the
-/// run's stop token, disposes its globals if they are disposable, while the bridge is still up, and then completes
-/// <see cref="Completion"/>. So when <see cref="Completion"/> completes, nothing of the run is left: what its globals
-/// registered is gone, and what they sent has reached the app. What must outlive a run belongs to the session object.
+/// <para>
+/// A run lasts as long as its code: creating its globals, the script, and disposing the globals. When the script's
+/// code has finished, for any reason, the session cancels the run's stop token, disposes its globals if they are
+/// disposable, while the bridge is still up, and then completes <see cref="Completion"/>.
+/// </para>
+/// <para>
+/// What the run started belongs to its globals: they end it when they are disposed, closing what the run registered
+/// to new calls and awaiting the calls already running. Queued values are sent before disposal ends. The library
+/// cannot see inside the globals, so this holds as far as the script API keeps it. What must outlive a run belongs to
+/// the session object. A kill runs no cleanup and delivers nothing still queued.
+/// </para>
 /// </remarks>
-public sealed class ScriptRun
+public sealed class CSharpScriptRun
 {
-    private ScriptRun() { }
+    private CSharpScriptRun() { }
 
     /// <summary>
     /// Completes when the run has ended: its code has finished and its globals are disposed. It completes normally;
     /// cancelled, when the script ended with <see cref="OperationCanceledException"/> through its stop token; with
-    /// <see cref="ScriptException"/> when the script threw, also <see cref="OperationCanceledException"/> from any
-    /// other token, or when disposing the globals failed after the script succeeded; or with
-    /// <see cref="ConnectionLostException"/> when the session's process ended first. When both the script and the
-    /// disposal fail, the script's exception wins, and the disposal's goes to the session's logger.
+    /// <see cref="CSharpScriptException"/> when creating the globals or the script threw, also
+    /// <see cref="OperationCanceledException"/> from any other token, or when disposing the globals failed after the
+    /// script succeeded; or with <see cref="ConnectionLostException"/> when the session's process ended first. When
+    /// both the script and the disposal fail, the script's exception wins, and the disposal's goes to the session's
+    /// logger. To only stop waiting, use <c>Completion.WaitAsync</c>.
     /// </summary>
     public Task Completion => throw new NotImplementedException();
 
     /// <summary>
-    /// Cancels the run's stop token and waits until the run has ended. Does not throw for how the run ended; see
-    /// <see cref="Completion"/>. No effect on a run that has ended.
+    /// Cancels the run's stop token and waits until the run has ended. Does not throw for how the run ended: observe
+    /// <see cref="Completion"/> for that. No effect on a run that has ended.
     /// </summary>
     /// <param name="killSessionAfter">
-    /// How long the script may take to stop before the whole session is killed, and with it every other run in it.
-    /// Null, the default: wait as long as the script takes; a script that ignores its stop token then keeps this
-    /// waiting until the session ends.
+    /// How long the script may take to stop before the whole session is killed, and with it every other run in it;
+    /// <see cref="CSharpScriptSession{TSessionSide, TSession}.Exited"/> then says
+    /// <see cref="CSharpScriptSessionExitReason.StopTimedOut"/>. Null, the default: wait as long as the script takes; a
+    /// script that ignores its stop token then keeps this waiting until the session ends. When several stops pass a
+    /// time, the earliest deadline wins.
     /// </param>
     public Task StopAsync(TimeSpan? killSessionAfter = null) => throw new NotImplementedException();
 
     /// <summary>
-    /// Waits until the run has ended, and throws what <see cref="Completion"/> throws. When
-    /// <paramref name="cancellationToken"/> is cancelled first, stops the run as <see cref="StopAsync"/> does, then
-    /// throws <see cref="OperationCanceledException"/>, or the run's failure if it failed while stopping, or
-    /// <see cref="ConnectionLostException"/> if the session was killed.
+    /// Waits until the run has ended, and stops it when <paramref name="stopToken"/> is cancelled first, as
+    /// <see cref="StopAsync"/> does. Before stopping begins, it throws what <see cref="Completion"/> throws. Once it
+    /// stops the run, it throws <see cref="OperationCanceledException"/> for <paramref name="stopToken"/>, whatever the
+    /// run's outcome, which stays in <see cref="Completion"/>.
     /// </summary>
-    /// <param name="cancellationToken">Stops the run.</param>
+    /// <param name="stopToken">Stops the run. To only stop waiting, use <c>Completion.WaitAsync</c> instead.</param>
     /// <param name="killSessionAfter">
     /// After the token was cancelled, how long the script may take to stop before the whole session is killed. Null,
     /// the default: wait as long as the script takes.
     /// </param>
-    public Task WaitAsync(CancellationToken cancellationToken, TimeSpan? killSessionAfter = null) =>
+    public Task RunToEndAsync(CancellationToken stopToken, TimeSpan? killSessionAfter = null) =>
         throw new NotImplementedException();
 }
 
@@ -217,8 +224,9 @@ public sealed class ScriptRun
 public sealed record CSharpScriptSessionOptions
 {
     /// <summary>
-    /// How long the runner's part of <see cref="CSharpScriptSession{TSessionSide, TSession}.DisposeAsync"/> may take before the
-    /// process is killed: ending the runs, finishing calls in the session object, disposing it. Default: 5 s.
+    /// How long the runner's part of <see cref="CSharpScriptSession{TSessionSide, TSession}.DisposeAsync"/> may take
+    /// before the process is killed: ending the runs, finishing calls in the session object, disposing it. Default:
+    /// 5 s.
     /// </summary>
     public TimeSpan DisposeTimeout { get; init; } = TimeSpan.FromSeconds(5);
 
@@ -242,12 +250,12 @@ public sealed record CSharpScriptSessionOptions
 }
 
 /// <summary>How a session's process ended.</summary>
-public sealed class ScriptSessionExit
+public sealed class CSharpScriptSessionExit
 {
-    private ScriptSessionExit() { }
+    private CSharpScriptSessionExit() { }
 
     /// <summary>Why the process ended.</summary>
-    public ScriptSessionExitReason Reason => throw new NotImplementedException();
+    public CSharpScriptSessionExitReason Reason => throw new NotImplementedException();
 
     /// <summary>The process's exit code.</summary>
     public int ExitCode => throw new NotImplementedException();
@@ -257,13 +265,20 @@ public sealed class ScriptSessionExit
 }
 
 /// <summary>Why a session's process ended.</summary>
-public enum ScriptSessionExitReason
+public enum CSharpScriptSessionExitReason
 {
     /// <summary>The app disposed the session, and the runner ended in time.</summary>
     Disposed,
 
     /// <summary>The app called <see cref="CSharpScriptSession{TSessionSide, TSession}.KillAsync"/>.</summary>
     Killed,
+
+    /// <summary>
+    /// A run did not stop within the <c>killSessionAfter</c> that the app passed to
+    /// <see cref="CSharpScriptRun.StopAsync"/> or <see cref="CSharpScriptRun.RunToEndAsync"/>, so the process was
+    /// killed.
+    /// </summary>
+    StopTimedOut,
 
     /// <summary>It crashed, for example from a stack overflow in a script.</summary>
     Crashed,
@@ -282,9 +297,9 @@ public enum ScriptSessionExitReason
 /// from <see cref="RemoteInvocationException"/>, which StreamJsonRpc's proxies throw for failed calls, so code that
 /// catches that keeps working.
 /// </remarks>
-public sealed class ScriptException : RemoteInvocationException
+public sealed class CSharpScriptException : RemoteInvocationException
 {
-    private ScriptException()
+    private CSharpScriptException()
         : base(null, 0, (object?)null) { }
 
     /// <summary>The full name of the exception type that was thrown, such as <c>System.FormatException</c>.</summary>
@@ -292,4 +307,10 @@ public sealed class ScriptException : RemoteInvocationException
 
     /// <summary>The stack trace in the runner, with script line numbers.</summary>
     public string? ScriptStackTrace => throw new NotImplementedException();
+
+    /// <summary>
+    /// Where in the script it was thrown: the innermost frame in the script's own code, in the compiled text. Null
+    /// when no frame of the script is on the stack, such as for a failure in the session object.
+    /// </summary>
+    public TextPosition? ScriptPosition => throw new NotImplementedException();
 }

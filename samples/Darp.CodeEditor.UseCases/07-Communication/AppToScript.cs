@@ -34,7 +34,7 @@ public sealed class AppToScript
     private const string AnswersTrigger = """
         // Answers the "reset" trigger until the app cancels this run.
         int resets = 0;
-        OnTrigger("reset", async () => await NotifyAsync($"reset {++resets}"));
+        OnTrigger("reset", async cancellationToken => await NotifyAsync($"reset {++resets}"));
         await NotifyAsync("ready");
         await WaitUntilStoppedAsync();
         """;
@@ -65,7 +65,7 @@ public sealed class AppToScript
         log(await session.Remote.GetStatusAsync(cancellationToken));
 
         // A callback that the session owns: set by a run that has already ended.
-        ScriptRun setting = await session.StartScriptAsync(
+        CSharpScriptRun setting = await session.StartScriptAsync(
             await CompileAsync(SetsCalculation, cancellationToken),
             new RunInput("calculation", "none"),
             cancellationToken
@@ -74,7 +74,7 @@ public sealed class AppToScript
         log($"3 -> {await session.Remote.CalculateAsync(3, cancellationToken)}");
 
         // A callback that the run owns: there while the run lasts.
-        ScriptRun triggering = await session.StartScriptAsync(
+        CSharpScriptRun triggering = await session.StartScriptAsync(
             await CompileAsync(AnswersTrigger, cancellationToken),
             new RunInput("trigger", "none"),
             cancellationToken
@@ -86,6 +86,7 @@ public sealed class AppToScript
         }
         await session.Remote.TriggerAsync("reset", cancellationToken);
         await triggering.StopAsync();
+        await ScriptRuns.ObserveStoppedAsync(triggering);
         log(await session.Remote.GetStatusAsync(cancellationToken)); // the trigger is gone
 
         // Fast data: many inputs in one call.
@@ -94,6 +95,8 @@ public sealed class AppToScript
         log($"{results.Length} results, the last {results[^1]}");
     }
 
-    private Task<CompiledScript<Session, RunInput>> CompileAsync(string code, CancellationToken cancellationToken) =>
-        ScriptRuns.CompileAsync(_scripts, code, ScriptEnvironments.Default, cancellationToken);
+    private Task<CSharpScriptAssembly<Session, RunInput>> CompileAsync(
+        string code,
+        CancellationToken cancellationToken
+    ) => ScriptRuns.CompileAsync(_scripts, ScriptEnvironments.Default, code, cancellationToken);
 }

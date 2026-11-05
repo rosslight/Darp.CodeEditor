@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
 
@@ -10,21 +11,22 @@ namespace Darp.CodeEditor;
 /// <remarks>
 /// <para>
 /// The process starts with the first document it creates, or with <see cref="StartAsync"/>. It is restarted after
-/// a crash or when it stops answering, and stopped by <see cref="DisposeAsync"/>. It is a child of the app: it ends
-/// when the app ends, even when the app is killed.
+/// a crash or when it stops answering, and stopped by <see cref="DisposeAsync"/>, or at once by <see cref="Dispose"/>.
+/// It is a child of the app: it ends when the app ends, even when the app is killed.
 /// </para>
 /// <para>
-/// The server is safe to use from any thread. It posts <see cref="StateChanged"/> to the UI thread, and nothing waits
-/// for it, so a server also works before the app's UI runs.
+/// The server is safe to use from any thread. It raises <see cref="PropertyChanged"/> for <see cref="State"/> on the
+/// UI thread, for a status indicator to bind, and nothing waits for it, so a server also works before the app's UI
+/// runs.
 /// </para>
 /// </remarks>
-public sealed class LanguageServer : IAsyncDisposable
+public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, IDisposable
 {
     /// <summary>Describes a language server. The process does not start yet.</summary>
     public LanguageServer(LanguageServerOptions options) => throw new NotImplementedException();
 
     /// <summary>Raised on the UI thread after <see cref="State"/> changed.</summary>
-    public event EventHandler? StateChanged;
+    public event PropertyChangedEventHandler? PropertyChanged;
 
     /// <summary>Where the process is in its life, for a status indicator.</summary>
     public LanguageServerState State => throw new NotImplementedException();
@@ -56,6 +58,12 @@ public sealed class LanguageServer : IAsyncDisposable
 
     /// <summary>Stops the process. Its documents keep their text and lose their language features.</summary>
     public ValueTask DisposeAsync() => throw new NotImplementedException();
+
+    /// <summary>
+    /// Kills the process at once, without the protocol's shutdown, for app exits where only synchronous disposal
+    /// runs. Its documents keep their text and lose their language features.
+    /// </summary>
+    public void Dispose() => throw new NotImplementedException();
 }
 
 /// <summary>How to start a language server and what to tell it.</summary>

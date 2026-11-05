@@ -13,7 +13,10 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Darp.CodeEditor.UseCases.ScriptApi\Darp.CodeEditor.UseCases.ScriptApi.csproj" />
-    <!-- IScriptGlobals: the one library contract the runner side implements. It brings neither Avalonia nor the editor. -->
-    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharpScript.Abstractions\Darp.CodeEditor.CSharpScript.Abstractions.csproj" />
+    <!--
+      For IScriptSession and IScriptGlobals, the contracts the runner side implements. The C# package brings the editor
+      and Avalonia into the build, but nothing of them loads in the runner: nothing there touches their types.
+    -->
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharpScript\Darp.CodeEditor.CSharpScript.csproj" />
   </ItemGroup>
 </Project>

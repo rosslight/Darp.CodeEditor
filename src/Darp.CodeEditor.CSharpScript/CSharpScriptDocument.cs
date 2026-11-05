@@ -12,4 +12,13 @@ public sealed class CSharpScriptDocument<TSession, TInput> : CodeDocument
 
     /// <summary>The environment the document was created in.</summary>
     public CSharpScriptEnvironment<TSession, TInput> Environment => throw new NotImplementedException();
+
+    /// <summary>
+    /// Compiles the document's <see cref="CodeDocument.CurrentSnapshot"/> at the time of the call, in its environment,
+    /// from the same Roslyn snapshot that the editor's diagnostics come from. Later edits do not cancel the
+    /// compilation, and disposing the document does not affect it. Safe to call from any thread.
+    /// </summary>
+    public Task<CSharpScriptCompilation<TSession, TInput>> CompileAsync(
+        CancellationToken cancellationToken = default
+    ) => throw new NotImplementedException();
 }

@@ -35,9 +35,11 @@ namespace Darp.CodeEditor;
 /// font defaults to a monospace one; set <c>FontFamily</c> and <c>FontSize</c> as for any control.
 /// </para>
 /// <para>
-/// The editor handles only its own keys: editing, navigation, search (Ctrl+F, Ctrl+H, F3), completion (Ctrl+Space),
-/// comments (Ctrl+/) and indentation (Tab, Shift+Tab). Other keys, such as F5 or Ctrl+S, go on to the app's key
-/// bindings.
+/// The editor handles only its own keys: editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation, search
+/// (Ctrl+F, Ctrl+H, F3), completion (Ctrl+Space), comments (Ctrl+/) and indentation (Tab, Shift+Tab). Other keys, such
+/// as F5 or Ctrl+S, go on to the app's key bindings. A right click opens the editor's context menu: Cut, Copy, Paste
+/// and Select All. For an app's Edit menu, <see cref="Cut"/>, <see cref="Copy"/>, <see cref="Paste"/> and
+/// <see cref="SelectAll"/> do the same, and the document's <c>Undo</c> and <c>Redo</c> the rest.
 /// </para>
 /// <para>Members that take offsets or ranges clamp them to the text.</para>
 /// </remarks>
@@ -155,4 +157,16 @@ public class CodeEditor : TemplatedControl
     /// the search text.
     /// </summary>
     public void OpenSearch(bool replace = false) => throw new NotImplementedException();
+
+    /// <summary>Moves the selection to the clipboard, as Ctrl+X does. No effect in a read-only editor.</summary>
+    public void Cut() => throw new NotImplementedException();
+
+    /// <summary>Copies the selection to the clipboard, as Ctrl+C does.</summary>
+    public void Copy() => throw new NotImplementedException();
+
+    /// <summary>Replaces the selection with the clipboard's text, as Ctrl+V does. No effect in a read-only editor.</summary>
+    public void Paste() => throw new NotImplementedException();
+
+    /// <summary>Selects the whole text, as Ctrl+A does.</summary>
+    public void SelectAll() => throw new NotImplementedException();
 }

@@ -9,7 +9,7 @@ namespace UseCases.Failures;
 // Scenario: scripts fail in every way: they throw, ignore their stop token or crash the process. The app reports each
 // failure and keeps working.
 //
-// - An exception ends the run: Completion throws ScriptException, with the script's stack trace. So does an
+// - An exception ends the run: Completion throws CSharpScriptException, with the script's stack trace. So does an
 //   OperationCanceledException from any token other than the run's stop token, such as a timeout inside the script.
 //   The session stays usable.
 // - A script that ignores its stop token never ends. The app decides how long to wait, then kills the session: every
@@ -37,12 +37,12 @@ public sealed class GuardedRuns
     /// Runs <paramref name="script"/> to its end. When <paramref name="stop"/> is cancelled, stops it, and kills the
     /// session if the script has not ended two seconds later.
     /// </summary>
-    public async Task RunAsync(CompiledScript<Session, RunInput> script, RunInput input, CancellationToken stop)
+    public async Task RunAsync(CSharpScriptAssembly<Session, RunInput> script, RunInput input, CancellationToken stop)
     {
         try
         {
-            ScriptRun run = await _session.StartScriptAsync(script, input, stop);
-            await run.WaitAsync(stop, killSessionAfter: TimeSpan.FromSeconds(2));
+            CSharpScriptRun run = await _session.StartScriptAsync(script, input, stop);
+            await run.RunToEndAsync(stop, killSessionAfter: TimeSpan.FromSeconds(2));
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested)
         {
@@ -52,7 +52,7 @@ public sealed class GuardedRuns
         {
             _report("The session ended the run: someone else disposed it.");
         }
-        catch (ScriptException exception)
+        catch (CSharpScriptException exception)
         {
             _report(
                 $"The script failed: {exception.ScriptExceptionType}: {exception.Message}\n{exception.ScriptStackTrace}"
@@ -60,7 +60,7 @@ public sealed class GuardedRuns
         }
         catch (ConnectionLostException)
         {
-            ScriptSessionExit exit = await _session.Exited;
+            CSharpScriptSessionExit exit = await _session.Exited;
             _report(
                 $"The session ended ({exit.Reason}, exit code {exit.ExitCode}); start a new one.\n{exit.StandardError}"
             );

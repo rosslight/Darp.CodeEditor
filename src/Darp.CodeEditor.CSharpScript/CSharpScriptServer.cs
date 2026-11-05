@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 
@@ -10,8 +11,9 @@ namespace Darp.CodeEditor.CSharpScript;
 /// <remarks>
 /// <para>
 /// The process runs on the .NET runtime that ships with the app, so user machines need no SDK and no installed .NET.
-/// It starts with the first document or compilation, or with <see cref="LanguageServer"/>'s
-/// <see cref="Darp.CodeEditor.LanguageServer.StartAsync"/>, and stops on <see cref="DisposeAsync"/>.
+/// It starts with the first document or compilation, or with <see cref="StartAsync"/>, and stops on
+/// <see cref="DisposeAsync"/>, or at once on <see cref="Dispose"/>. <see cref="PropertyChanged"/> reports
+/// <see cref="State"/> on the UI thread, for a status indicator to bind.
 /// </para>
 /// <para>
 /// Compiling runs beside the editor's requests: completion keeps answering while a script compiles. A compilation
@@ -23,18 +25,29 @@ namespace Darp.CodeEditor.CSharpScript;
 /// in an environment with the same settings.
 /// </para>
 /// </remarks>
-public sealed class CSharpScriptServer : IAsyncDisposable
+public sealed class CSharpScriptServer : INotifyPropertyChanged, IAsyncDisposable, IDisposable
 {
     /// <summary>Describes the server. The process does not start yet.</summary>
     public CSharpScriptServer(CSharpScriptServerOptions? options = null) => throw new NotImplementedException();
 
-    /// <summary>The server process: its state, and starting it early.</summary>
-    /// <remarks>
-    /// Its <see cref="Darp.CodeEditor.LanguageServer.CreateDocument"/> takes only <c>CodeLanguage.CSharp</c> and
-    /// throws <see cref="ArgumentException"/> for other languages. Its documents have no globals and see .NET and the
-    /// marked assemblies; they are for editing, since compiling needs a kind of script.
-    /// </remarks>
-    public LanguageServer LanguageServer => throw new NotImplementedException();
+    /// <inheritdoc />
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>Where the server process is in its life, for a status indicator.</summary>
+    public LanguageServerState State => throw new NotImplementedException();
+
+    /// <summary>
+    /// Starts the process now rather than with the first document, so that C# features are ready sooner. Completes
+    /// when the server is ready.
+    /// </summary>
+    public Task StartAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+
+    /// <summary>
+    /// Creates a C# document for editing only: it has no globals, sees .NET and the marked assemblies, and cannot be
+    /// compiled for running, since that needs a kind of script. Open in this server until its
+    /// <see cref="CodeDocument.Dispose"/>.
+    /// </summary>
+    public CodeDocument CreateDocument(string text = "") => throw new NotImplementedException();
 
     /// <summary>
     /// Creates a C# script document in <paramref name="environment"/>, open in this server until the document's
@@ -53,31 +66,24 @@ public sealed class CSharpScriptServer : IAsyncDisposable
     ) => throw new NotImplementedException();
 
     /// <summary>
-    /// Compiles the document's <see cref="CodeDocument.CurrentSnapshot"/> at the time of the call, in the environment
-    /// the document was created in, from the same Roslyn snapshot that the editor's diagnostics come from.
-    /// </summary>
-    /// <remarks>
-    /// Later edits do not cancel the compilation, and disposing the document does not affect it.
-    /// </remarks>
-    /// <exception cref="ArgumentException">This server did not create the document.</exception>
-    public Task<CSharpScriptCompilation<TSession, TInput>> CompileAsync<TSession, TInput>(
-        CSharpScriptDocument<TSession, TInput> document,
-        CancellationToken cancellationToken = default
-    ) => throw new NotImplementedException();
-
-    /// <summary>
     /// Compiles <paramref name="code"/> in <paramref name="environment"/>, with no document or editor. Safe to call
-    /// from any thread.
+    /// from any thread. Documents compile themselves, with their <c>CompileAsync</c>.
     /// </summary>
     /// <exception cref="ArgumentException">The environment is invalid, as for <see cref="CreateDocument"/>.</exception>
     public Task<CSharpScriptCompilation<TSession, TInput>> CompileAsync<TSession, TInput>(
-        string code,
         CSharpScriptEnvironment<TSession, TInput> environment,
+        string code,
         CancellationToken cancellationToken = default
     ) => throw new NotImplementedException();
 
     /// <summary>Stops the process. Its documents keep their text and lose their language features.</summary>
     public ValueTask DisposeAsync() => throw new NotImplementedException();
+
+    /// <summary>
+    /// Kills the process at once, for app exits where only synchronous disposal runs. Its documents keep their text
+    /// and lose their language features.
+    /// </summary>
+    public void Dispose() => throw new NotImplementedException();
 }
 
 /// <summary>Settings of a <see cref="CSharpScriptServer"/>.</summary>
@@ -108,19 +114,19 @@ public sealed class CSharpScriptCompilation<TSession, TInput>
     public bool Succeeded => throw new NotImplementedException();
 
     /// <summary>The compiled script, ready to run; null when the script has errors.</summary>
-    public CompiledScript<TSession, TInput>? Script => throw new NotImplementedException();
+    public CSharpScriptAssembly<TSession, TInput>? Script => throw new NotImplementedException();
 }
 
 /// <summary>
-/// A script compiled for its environment, ready to run as often as needed in sessions whose object is a
-/// <typeparamref name="TSession"/>, with a <typeparamref name="TInput"/> per run. It needs no server: it stays
-/// runnable after the server restarts or is disposed.
+/// A compiled script: the assembly the server emitted for it, with its environment, ready to run as often as needed
+/// in sessions whose object is a <typeparamref name="TSession"/>, with a <typeparamref name="TInput"/> per run. It
+/// needs no server: it stays runnable after the server restarts or is disposed.
 /// </summary>
 /// <typeparam name="TSession">The session object's type that the script runs with.</typeparam>
 /// <typeparam name="TInput">The input each run of the script gets.</typeparam>
-public sealed class CompiledScript<TSession, TInput>
+public sealed class CSharpScriptAssembly<TSession, TInput>
 {
-    private CompiledScript() { }
+    private CSharpScriptAssembly() { }
 
     /// <summary>The environment the script was compiled for.</summary>
     public CSharpScriptEnvironment<TSession, TInput> Environment => throw new NotImplementedException();

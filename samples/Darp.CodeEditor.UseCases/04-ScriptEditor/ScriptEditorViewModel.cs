@@ -70,7 +70,7 @@ public sealed partial class ScriptEditorViewModel : ObservableObject, IAsyncDisp
         {
             WriteLine("Stopped.");
         }
-        catch (ScriptException exception)
+        catch (CSharpScriptException exception)
         {
             WriteLine($"The script failed: {exception.ScriptExceptionType}: {exception.Message}");
         }
@@ -78,7 +78,7 @@ public sealed partial class ScriptEditorViewModel : ObservableObject, IAsyncDisp
         {
             if (_session is { } session)
             {
-                ScriptSessionExit exit = await session.Exited;
+                CSharpScriptSessionExit exit = await session.Exited;
                 WriteLine($"The session ended ({exit.Reason}); the next Run starts a new one.");
             }
             await EndSessionAsync();
@@ -87,7 +87,7 @@ public sealed partial class ScriptEditorViewModel : ObservableObject, IAsyncDisp
 
     private async Task RunScriptAsync(CancellationToken stop)
     {
-        CSharpScriptCompilation<Session, RunInput> compilation = await _scripts.CompileAsync(Script, stop);
+        CSharpScriptCompilation<Session, RunInput> compilation = await Script.CompileAsync(stop);
         if (!compilation.Succeeded)
         {
             foreach (Diagnostic error in compilation.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error))
@@ -98,8 +98,8 @@ public sealed partial class ScriptEditorViewModel : ObservableObject, IAsyncDisp
         _session ??= await Scripting.StartSessionAsync(_appSide, stop);
         CSharpScriptSession<ISessionSide, Session> session = _session;
         var input = new RunInput($"run {++_runCount}", "editor");
-        ScriptRun run = await session.StartScriptAsync(compilation.Script, input, stop);
-        await run.WaitAsync(stop, killSessionAfter: TimeSpan.FromSeconds(2));
+        CSharpScriptRun run = await session.StartScriptAsync(compilation.Script, input, stop);
+        await run.RunToEndAsync(stop, killSessionAfter: TimeSpan.FromSeconds(2));
         WriteLine($"21 -> {await session.Remote.CalculateAsync(21, stop)}");
     }
 

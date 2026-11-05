@@ -11,9 +11,10 @@
             <Button Content="Run" Command="{Binding RunCommand}" HotKey="F5" />
             <Button Content="Stop" Command="{Binding RunCancelCommand}" HotKey="Shift+F5" />
             <Button Content="Find" Click="OnFind" />
+            <Button Content="Insert template" Click="OnInsertTemplate" />
         </StackPanel>
 
-        <!-- Diagnostics follow the text: the list updates as the user types. -->
+        <!-- Diagnostics follow the text: the list updates as the user types, and a click maps the range to the current text. -->
         <ListBox
             x:Name="Errors"
             DockPanel.Dock="Bottom"

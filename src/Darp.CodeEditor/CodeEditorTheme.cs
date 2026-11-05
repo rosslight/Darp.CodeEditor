@@ -42,7 +42,4 @@ public sealed class CodeEditorTheme
     /// includes are found relative to it.
     /// </summary>
     public Uri? Source { get; init; }
-
-    /// <summary>A VS Code color theme file, such as one from a theme extension.</summary>
-    public static CodeEditorTheme FromFile(string path) => new() { Source = new Uri(Path.GetFullPath(path)) };
 }

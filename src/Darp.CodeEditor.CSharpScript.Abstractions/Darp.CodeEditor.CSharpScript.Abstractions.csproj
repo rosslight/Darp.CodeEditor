@@ -1,9 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <!--
-    The contract that runner-side script APIs implement. A package of its own, so that they reference neither the
-    editor nor Avalonia: they run in the runner process.
-  -->
-  <PropertyGroup>
-    <Description>Contracts for Darp.CodeEditor's C# script APIs: the globals a kind of script sees, typed by its session and input.</Description>
-  </PropertyGroup>
-</Project>

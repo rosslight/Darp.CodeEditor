@@ -31,8 +31,7 @@ namespace Darp.CodeEditor;
 /// </para>
 /// <para>
 /// <see cref="PropertyChanged"/> reports <see cref="IsModified"/>, <see cref="CanUndo"/>, <see cref="CanRedo"/>,
-/// <see cref="Indentation"/> and
-/// <see cref="Diagnostics"/>, for bindings. It does not report <see cref="Text"/>: each read copies the whole text, so
+/// <see cref="Indentation"/>, <see cref="Diagnostics"/> and <see cref="DiagnosticsSnapshot"/>, for bindings. It does not report <see cref="Text"/>: each read copies the whole text, so
 /// a binding would copy it on every keystroke. Listen to <see cref="TextChanged"/> and read the text when needed.
 /// </para>
 /// </remarks>
@@ -55,9 +54,6 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
 
     /// <summary>The language: highlighting and editing rules.</summary>
     public CodeLanguage Language => throw new NotImplementedException();
-
-    /// <summary>The server that created the document and provides its language features; null for none.</summary>
-    public LanguageServer? Server => throw new NotImplementedException();
 
     /// <summary>
     /// The file the text belongs to, if any. Setting it, for example after "Save as", moves the document to the new
@@ -109,11 +105,31 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     public bool CanRedo => throw new NotImplementedException();
 
     /// <summary>
-    /// The language server's latest diagnostics, with ranges in the text the server analyzed. Servers report again
-    /// shortly after each change; meanwhile the editor's squiggles move with the text, these records do not. Empty
-    /// without a server.
+    /// The language server's latest diagnostics, with ranges in the text of <see cref="DiagnosticsSnapshot"/>. Servers
+    /// report again shortly after each change; meanwhile the editor's squiggles move with the text, these records do
+    /// not. To select one in the current text, map its range with <see cref="MapToCurrent"/>. Empty without a server.
     /// </summary>
     public IReadOnlyList<Diagnostic> Diagnostics => throw new NotImplementedException();
+
+    /// <summary>
+    /// The text that <see cref="Diagnostics"/> refer to. Both change together, on the UI thread; read them there to get
+    /// a matching pair.
+    /// </summary>
+    public TextSnapshot DiagnosticsSnapshot => throw new NotImplementedException();
+
+    /// <summary>
+    /// Replaces <paramref name="range"/> with <paramref name="text"/>, in one step that the user can undo; an empty
+    /// range inserts. Editors keep their scroll position, and a caret behind the range moves with the text.
+    /// </summary>
+    public void Replace(TextRange range, string text) => throw new NotImplementedException();
+
+    /// <summary>
+    /// Maps <paramref name="range"/> in the text of <paramref name="snapshot"/> to the current text, following the
+    /// edits made since: for example the range of a diagnostic or of a compile error after the user typed above it. A
+    /// range whose text was deleted shrinks to where it was.
+    /// </summary>
+    /// <exception cref="ArgumentException">The snapshot is of another document.</exception>
+    public TextRange MapToCurrent(TextSnapshot snapshot, TextRange range) => throw new NotImplementedException();
 
     /// <summary>
     /// Makes <paramref name="snapshot"/> the unmodified point, for example after saving its text.

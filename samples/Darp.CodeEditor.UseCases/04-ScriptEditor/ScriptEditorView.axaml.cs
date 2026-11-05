@@ -10,14 +10,20 @@ public partial class ScriptEditorView : UserControl
     public ScriptEditorView() => InitializeComponent();
 
     // Moving the caret is the view's job: the view model knows the document, not the editors that show it.
+    // The diagnostics refer to the text the server analyzed; the user may have typed since.
     private void OnErrorSelected(object? sender, SelectionChangedEventArgs e)
     {
-        if (Errors.SelectedItem is not Diagnostic diagnostic)
+        if (Errors.SelectedItem is not Diagnostic diagnostic || Editor.Document is not { } document)
             return;
-        Editor.Selection = new TextSelection(diagnostic.Range.Start, diagnostic.Range.End);
-        Editor.ScrollTo(diagnostic.Range);
+        TextRange range = document.MapToCurrent(document.DiagnosticsSnapshot, diagnostic.Range);
+        Editor.Selection = new TextSelection(range.Start, range.End);
+        Editor.ScrollTo(range);
         Editor.Focus();
     }
+
+    // Inserts at the caret, or replaces the selection, in one step the user can undo.
+    private void OnInsertTemplate(object? sender, Avalonia.Interactivity.RoutedEventArgs e) =>
+        Editor.Document?.Replace(Editor.Selection.Range, "SetCalculation(x => x);\n");
 
     // For users who don't know Ctrl+F.
     private void OnFind(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => Editor.OpenSearch();

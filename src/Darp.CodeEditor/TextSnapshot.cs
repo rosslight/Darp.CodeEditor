@@ -20,6 +20,9 @@ public sealed class TextSnapshot
     /// <summary>The text. Each call copies it into a new string.</summary>
     public string GetText() => throw new NotImplementedException();
 
+    /// <summary>The text of <paramref name="range"/>, clamped to the text.</summary>
+    public string GetText(TextRange range) => throw new NotImplementedException();
+
     /// <summary>The line and column of <paramref name="offset"/>, clamped to the text.</summary>
     public TextPosition GetPosition(int offset) => throw new NotImplementedException();
 

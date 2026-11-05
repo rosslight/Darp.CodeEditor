@@ -58,33 +58,30 @@ public sealed class ScriptToScript
             cancellationToken
         );
 
-        CompiledScript<Session, RunInput> writerScript = await ScriptRuns.CompileAsync(
+        CSharpScriptAssembly<Session, RunInput> writerScript = await ScriptRuns.CompileAsync(
             _scripts,
-            Writer,
             ScriptEnvironments.Default,
+            Writer,
             cancellationToken
         );
-        CompiledScript<Session, ValueTuple> readerScript = await ScriptRuns.CompileAsync(
+        CSharpScriptAssembly<Session, ValueTuple> readerScript = await ScriptRuns.CompileAsync(
             _scripts,
-            Reader,
             ScriptEnvironments.Reader,
+            Reader,
             cancellationToken
         );
-        ScriptRun writer = await session.StartScriptAsync(
+        CSharpScriptRun writer = await session.StartScriptAsync(
             writerScript,
             new RunInput("writer", "none"),
             cancellationToken
         );
-        ScriptRun reader = await session.StartScriptAsync(readerScript, cancellationToken);
+        CSharpScriptRun reader = await session.StartScriptAsync(readerScript, cancellationToken);
 
         // Until the duration has passed, or one of them has ended early, for example because it failed.
         await Task.WhenAny(writer.Completion, reader.Completion, Task.Delay(duration, cancellationToken));
         await Task.WhenAll(writer.StopAsync(), reader.StopAsync());
-        foreach (ScriptRun run in new[] { writer, reader })
-        {
-            if (run.Completion.IsFaulted)
-                await run.Completion;
-        }
+        // Observe both outcomes; a failure of either throws here.
+        await Task.WhenAll(ScriptRuns.ObserveStoppedAsync(writer), ScriptRuns.ObserveStoppedAsync(reader));
         cancellationToken.ThrowIfCancellationRequested();
     }
 }

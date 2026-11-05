@@ -70,13 +70,14 @@ public sealed class ScriptToApp
         await RunToEndAsync(session, Asks, "asking", cancellationToken);
 
         // Notifications, until the app cancels the run after three seconds.
-        ScriptRun ticking = await session.StartScriptAsync(
+        CSharpScriptRun ticking = await session.StartScriptAsync(
             await CompileAsync(Ticks, cancellationToken),
             new RunInput("ticking", "none"),
             cancellationToken
         );
         await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
         await ticking.StopAsync();
+        await ScriptRuns.ObserveStoppedAsync(ticking);
 
         // Fast data. Once the run has ended, all its values have reached the app.
         await RunToEndAsync(session, Streams, "streaming", cancellationToken);
@@ -89,14 +90,16 @@ public sealed class ScriptToApp
         CancellationToken cancellationToken
     )
     {
-        ScriptRun run = await session.StartScriptAsync(
+        CSharpScriptRun run = await session.StartScriptAsync(
             await CompileAsync(code, cancellationToken),
             new RunInput(runId, "none"),
             cancellationToken
         );
-        await run.WaitAsync(cancellationToken, killSessionAfter: TimeSpan.FromSeconds(2));
+        await run.RunToEndAsync(cancellationToken, killSessionAfter: TimeSpan.FromSeconds(2));
     }
 
-    private Task<CompiledScript<Session, RunInput>> CompileAsync(string code, CancellationToken cancellationToken) =>
-        ScriptRuns.CompileAsync(_scripts, code, ScriptEnvironments.Default, cancellationToken);
+    private Task<CSharpScriptAssembly<Session, RunInput>> CompileAsync(
+        string code,
+        CancellationToken cancellationToken
+    ) => ScriptRuns.CompileAsync(_scripts, ScriptEnvironments.Default, code, cancellationToken);
 }

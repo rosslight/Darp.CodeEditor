@@ -14,8 +14,8 @@ namespace UseCases.Startup;
 //   input.
 // - Sessions are started where scripts run, such as a page: each is a runner process of its own, with its own
 //   AppSide. A script that has to be killed takes only its own session down.
-// - The container disposes the server on exit; that takes `await provider.DisposeAsync()`, since it is only
-//   async-disposable.
+// - The container disposes the server on exit. `await provider.DisposeAsync()` shuts it down properly; a synchronous
+//   `Dispose()`, as in Avalonia's exit handlers, kills its process at once.
 // - A minimal session takes 80 to 110 ms to answer its first call. An app that wants no wait starts its session
 //   ahead of time, for example when a page opens, and only starts scripts later.
 //
@@ -29,14 +29,13 @@ public static class ScriptEnvironments
     public static CSharpScriptEnvironment<Session, RunInput> Default { get; } =
         CSharpScriptEnvironment.For<ScriptGlobals, Session, RunInput>() with
         {
-            Imports = ["System", "System.Linq", "System.Threading", "System.Threading.Tasks", "UseCases.ScriptApi"],
+            Imports = ["UseCases.ScriptApi"],
         };
 
     /// <summary>Reader scripts: they only read the session's messages and send values on. Their runs take no input.</summary>
     public static CSharpScriptEnvironment<Session, ValueTuple> Reader { get; } =
         CSharpScriptEnvironment.For<ReaderGlobals, Session>() with
         {
-            Imports = ["System", "System.Threading", "System.Threading.Tasks"],
             CheckOverflow = true,
         };
 }
@@ -58,7 +57,7 @@ public static class Scripting
     /// document starts it otherwise. The C# grammar needs no warm-up; it starts loading with the first document.
     /// </summary>
     public static Task WarmUpAsync(IServiceProvider services, CancellationToken cancellationToken) =>
-        services.GetRequiredService<CSharpScriptServer>().LanguageServer.StartAsync(cancellationToken);
+        services.GetRequiredService<CSharpScriptServer>().StartAsync(cancellationToken);
 
     /// <summary>Starts a session of the use cases' script API, with <paramref name="appSide"/>.</summary>
     public static Task<CSharpScriptSession<ISessionSide, Session>> StartSessionAsync(

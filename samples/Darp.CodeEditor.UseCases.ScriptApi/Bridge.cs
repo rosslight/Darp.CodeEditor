@@ -34,7 +34,7 @@ public partial interface IAppSide
 
 /// <summary>
 /// The session's half of the bridge: the session object implements it in the runner, the app calls it. Failures in
-/// the runner reach the app as ScriptException.
+/// the runner reach the app as CSharpScriptException.
 /// </summary>
 [JsonRpcContract, GenerateShape(IncludeMethods = MethodShapeFlags.PublicInstance)]
 public partial interface ISessionSide

@@ -1,5 +1,6 @@
 using Darp.CodeEditor;
 using Darp.CodeEditor.CSharpScript;
+using Darp.CodeEditor.CSharpScript.Runner;
 using UseCases.ScriptApi;
 
 namespace UseCases.Communication;
@@ -11,16 +12,16 @@ namespace UseCases.Communication;
 internal static class ScriptRuns
 {
     /// <summary>Compiles <paramref name="code"/> in <paramref name="environment"/>. These scripts are fixed, so errors throw.</summary>
-    public static async Task<CompiledScript<Session, TInput>> CompileAsync<TInput>(
+    public static async Task<CSharpScriptAssembly<Session, TInput>> CompileAsync<TInput>(
         CSharpScriptServer scripts,
-        string code,
         CSharpScriptEnvironment<Session, TInput> environment,
+        string code,
         CancellationToken cancellationToken
     )
     {
         CSharpScriptCompilation<Session, TInput> compilation = await scripts.CompileAsync(
-            code,
             environment,
+            code,
             cancellationToken
         );
         return compilation.Succeeded
@@ -28,6 +29,22 @@ internal static class ScriptRuns
             : throw new InvalidOperationException(
                 compilation.Diagnostics.First(d => d.Severity == DiagnosticSeverity.Error).Message
             );
+    }
+
+    /// <summary>
+    /// Observes how a stopped run ended. StopAsync doesn't throw for it: ending through the stop token is expected,
+    /// and anything else, such as a failure, throws here.
+    /// </summary>
+    public static async Task ObserveStoppedAsync(CSharpScriptRun run)
+    {
+        try
+        {
+            await run.Completion;
+        }
+        catch (OperationCanceledException)
+        {
+            // The run ended through its stop token.
+        }
     }
 
     /// <summary>The answer for scripts that ask nothing.</summary>

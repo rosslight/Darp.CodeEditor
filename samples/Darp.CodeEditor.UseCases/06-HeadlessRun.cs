@@ -17,8 +17,8 @@ namespace UseCases.Headless;
 // - Each saved script gets a session of its own, set up through the bridge before the script starts. Its AppSide
 //   answers every question with "yes", since nobody is there to ask, and logs the values.
 // - Stop gives the script two seconds, then kills the session. Disposing the session afterwards is safe either way.
-// - The runner package depends on the C# package, which depends on the editor package and Avalonia. Running scripts
-//   in an app without Avalonia, such as a console tool, would need the compiler in a package of its own.
+// - The runner package depends on the C# package, which depends on the editor package and Avalonia. A console tool can
+//   reference them without starting an Avalonia app; a package without Avalonia would only make it smaller (Q59).
 //
 // Questions:
 // - Is there an app that runs scripts without Avalonia?
@@ -43,8 +43,8 @@ public sealed class SavedScripts
     {
         string code = await File.ReadAllTextAsync(path, stop);
         CSharpScriptCompilation<Session, RunInput> compilation = await _scripts.CompileAsync(
-            code,
             ScriptEnvironments.Default,
+            code,
             stop
         );
         if (!compilation.Succeeded)
@@ -67,26 +67,29 @@ public sealed class SavedScripts
             appSide,
             stop
         );
-        await session.Remote.InitializeAsync(runId, stop);
-
-        ScriptRun run = await session.StartScriptAsync(compilation.Script, new RunInput(runId, "bench"), stop);
         try
         {
-            await run.WaitAsync(stop, killSessionAfter: TimeSpan.FromSeconds(2));
+            await session.Remote.InitializeAsync(runId, stop);
+            CSharpScriptRun run = await session.StartScriptAsync(
+                compilation.Script,
+                new RunInput(runId, "bench"),
+                stop
+            );
+            await run.RunToEndAsync(stop, killSessionAfter: TimeSpan.FromSeconds(2));
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested)
         {
             _log.LogInformation("{RunId}: stopped", runId);
             return false;
         }
-        catch (ScriptException exception)
+        catch (CSharpScriptException exception)
         {
             _log.LogError("{RunId}: {Type}: {Message}", runId, exception.ScriptExceptionType, exception.Message);
             return false;
         }
         catch (ConnectionLostException)
         {
-            ScriptSessionExit exit = await session.Exited;
+            CSharpScriptSessionExit exit = await session.Exited;
             _log.LogError("{RunId}: the session ended ({Reason})", runId, exit.Reason);
             return false;
         }
