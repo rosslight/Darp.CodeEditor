@@ -1,6 +1,10 @@
 namespace Darp.CodeEditor;
 
 /// <summary>Adds <c>CodeLanguage.CSharp</c> to the editor's languages.</summary>
+/// <remarks>
+/// <c>CodeLanguage.CSharp</c> is a C# 14 extension member. XAML's <c>x:Static</c> does not find extension members; script
+/// documents come from <see cref="CSharpScript.CSharpScriptServer.CreateDocument"/> in code, which needs none.
+/// </remarks>
 public static class CSharpCodeLanguage
 {
     private static readonly CodeLanguage CSharpLanguage = new(

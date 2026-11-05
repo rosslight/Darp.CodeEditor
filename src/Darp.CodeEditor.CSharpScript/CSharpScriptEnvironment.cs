@@ -41,8 +41,8 @@ public sealed record CSharpScriptEnvironment
     /// <summary>The C# language version, such as <c>13</c> or <c>latest</c>. Default: <c>latest</c>.</summary>
     public string LanguageVersion { get; init; } = "latest";
 
-    /// <summary>Whether nullable reference types are on, with their warnings. Default: off.</summary>
-    public bool Nullable { get; init; }
+    /// <summary>Whether nullable reference types are on, with their warnings. Default: on.</summary>
+    public bool Nullable { get; init; } = true;
 
     /// <summary>Whether scripts may use <c>unsafe</c> code. Default: no.</summary>
     public bool AllowUnsafe { get; init; }

@@ -73,10 +73,13 @@ editing rules (comments, brackets, auto-closing pairs). Servers and script envir
 - **Servers create their documents:** `yamlServer.CreateDocument(CodeLanguage.Yaml, text, filePath)` for any LSP
   server, which may serve several languages. The C# server's `CreateDocument(environment, text)` needs no language:
   it is always `CodeLanguage.CSharp`. `CodeDocument.Server` says which server a document belongs to, and the
-  constructor creates documents without one. Headless compiling takes the environment.
+  constructor creates documents without one. Headless compiling takes the environment, and needs no grammar.
+- **C# 14:** `CodeLanguage.CSharp` is an extension member, so apps need C# 14, the default for .NET 10. XAML's
+  `x:Static` can't reach it; script documents are created in code.
 - **Loading:** a language starts loading its files in the background when it is created, so there is nothing to
-  preload. Themes do the same. A missing or invalid file leaves documents uncolored, and the error goes to Avalonia's
-  log, as binding errors do.
+  preload. Themes do the same. Loading doesn't use Avalonia's services, so languages and themes created before the
+  app's `AppBuilder` runs load too. A missing or invalid file leaves documents uncolored, and the error goes to
+  Avalonia's log, as binding errors do. Apps see it once they set up a log sink, such as `LogToTrace()`.
 
 ## 2. The editor
 

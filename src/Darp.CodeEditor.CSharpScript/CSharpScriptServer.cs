@@ -32,6 +32,11 @@ public sealed class CSharpScriptServer : IAsyncDisposable
     public CSharpScriptServer(CSharpScriptServerOptions? options = null) => throw new NotImplementedException();
 
     /// <summary>The server process: its state, and starting it early.</summary>
+    /// <remarks>
+    /// Its <see cref="Darp.CodeEditor.LanguageServer.CreateDocument"/> takes only <c>CodeLanguage.CSharp</c> and
+    /// throws <see cref="ArgumentException"/> for other languages. Its documents are in the default environment, as if
+    /// created with <c>CreateDocument(new CSharpScriptEnvironment(), text)</c>.
+    /// </remarks>
     public LanguageServer LanguageServer => throw new NotImplementedException();
 
     /// <summary>
@@ -39,9 +44,7 @@ public sealed class CSharpScriptServer : IAsyncDisposable
     /// <see cref="CodeDocument.Dispose"/>. Its language is <c>CodeLanguage.CSharp</c>. Call it on the UI thread.
     /// </summary>
     /// <remarks>
-    /// The document keeps a copy of the environment: later changes to its lists have no effect. Documents created
-    /// through <see cref="LanguageServer"/>'s <see cref="Darp.CodeEditor.LanguageServer.CreateDocument"/> see the
-    /// default environment: no globals, no references beyond .NET's, no imports.
+    /// The document keeps a copy of the environment: later changes to its lists have no effect.
     /// </remarks>
     /// <exception cref="ArgumentException">
     /// A reference or the globals type's assembly is not next to the app, because its project reference is not marked
@@ -58,7 +61,10 @@ public sealed class CSharpScriptServer : IAsyncDisposable
     /// Call it on the UI thread: it takes the document's version before it returns. Later edits do not cancel the
     /// compilation, and disposing the document does not affect it.
     /// </remarks>
-    /// <exception cref="ArgumentException">This server did not create the document.</exception>
+    /// <exception cref="ArgumentException">
+    /// This server did not create the document, through <see cref="CreateDocument"/> or its
+    /// <see cref="LanguageServer"/>.
+    /// </exception>
     public Task<CSharpScriptCompilation> CompileAsync(
         CodeDocument document,
         CancellationToken cancellationToken = default

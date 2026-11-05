@@ -14,9 +14,10 @@ namespace Darp.CodeEditor;
 /// <para>
 /// Grammars and editing rules use the formats of VS Code extensions (<c>.tmLanguage.json</c> and
 /// <c>language-configuration.json</c>), so any language with a VS Code extension can be added from its files. A
-/// language starts loading them in the background when it is created; built-in languages when first used. When a file
-/// is missing or invalid, documents of the language show plain text without editing rules, and the error goes to
-/// Avalonia's log, as binding errors do.
+/// language starts loading them in the background when it is created; built-in languages when first used. Loading
+/// reads <c>avares://</c> files without Avalonia's services, so it works before the app's <c>AppBuilder</c> runs. When
+/// a file is missing or invalid, documents of the language show plain text without editing rules, and the error goes
+/// to Avalonia's log, as binding errors do; apps see it once they set up a log sink, such as <c>LogToTrace()</c>.
 /// </para>
 /// <para>Create a language once and share it between documents. It is immutable and safe to use from any thread.</para>
 /// </remarks>

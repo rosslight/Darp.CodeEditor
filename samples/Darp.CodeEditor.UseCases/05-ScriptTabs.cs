@@ -21,12 +21,9 @@ namespace UseCases.Tabs;
 // - Should a document know its file, with Load and Save, or is a path next to it plus MarkUnmodified enough?
 
 /// <summary>The script workbench.</summary>
-public sealed partial class ScriptTabsViewModel : ObservableObject, IDisposable
+public sealed partial class ScriptTabsViewModel(CSharpScriptServer scripts) : ObservableObject, IDisposable
 {
-    private readonly CSharpScriptServer _scripts;
-
-    /// <summary>Creates the workbench with no open scripts.</summary>
-    public ScriptTabsViewModel(CSharpScriptServer scripts) => _scripts = scripts;
+    private readonly CSharpScriptServer _scripts = scripts;
 
     /// <summary>The open scripts.</summary>
     public ObservableCollection<ScriptTab> Tabs { get; } = [];

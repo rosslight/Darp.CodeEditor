@@ -17,9 +17,11 @@ namespace Darp.CodeEditor;
 /// </ResourceDictionary.ThemeDictionaries>
 /// ]]></code>
 /// <para>
-/// A theme starts loading in the background when it is created; built-in themes when first used. When its file is
-/// missing or invalid, editors show <see cref="LightPlus"/> or <see cref="DarkPlus"/> by their theme variant, and the
-/// error goes to Avalonia's log, as binding errors do.
+/// A theme starts loading in the background when it is created; built-in themes when first used. Loading reads
+/// <c>avares://</c> files without Avalonia's services, so it works before the app's <c>AppBuilder</c> runs. When its
+/// file is missing or invalid, editors show <see cref="LightPlus"/> or <see cref="DarkPlus"/> by their theme variant,
+/// and the error goes to Avalonia's log, as binding errors do; apps see it once they set up a log sink, such as
+/// <c>LogToTrace()</c>.
 /// </para>
 /// </remarks>
 public sealed class CodeEditorTheme
