@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using AvaloniaEdit;
 using AvaloniaEdit.Rendering;
 
 namespace Darp.CodeEditor.Tests;
@@ -350,6 +351,25 @@ public sealed class CodeEditorTests(UiFixture ui)
 
             EditorWindow.TextViewOf(second).Document.ShouldBeNull();
             first.Document.ShouldBeSameAs(document);
+            document.Text.ShouldBe("{}");
+        });
+
+    [Fact]
+    public Task A_document_disposed_while_its_editor_starts_showing_it_is_not_shown() =>
+        _ui.Run(() =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.Json, "{}");
+            using var window = new EditorWindow(new CodeEditor());
+            TextEditor part = EditorWindow.PartOf(window.Editor);
+            // Disposed as soon as the part has the buffer, in the middle of showing it.
+            part.DocumentChanged += (_, _) => document.Dispose();
+
+            window.Editor.Document = document;
+            window.Layout();
+            window.Type("x");
+
+            part.Document.ShouldBeNull();
+            part.IsReadOnly.ShouldBeTrue();
             document.Text.ShouldBe("{}");
         });
 

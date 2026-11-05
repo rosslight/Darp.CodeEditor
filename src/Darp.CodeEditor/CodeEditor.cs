@@ -444,13 +444,23 @@ public class CodeEditor : TemplatedControl
                 Hide(part, shown);
             }
             if (target is not null)
+            {
                 Show(part, target);
+                // Disposed meanwhile, before or while the editor started listening: it shows nothing after all.
+                if (target.IsDisposed)
+                {
+                    _place = CaptureViewState(part, target);
+                    Hide(part, target);
+                }
+            }
         }
         UpdateHighlighting();
     }
 
     private void Show(TextEditor part, CodeDocument document)
     {
+        // Before the part shows the buffer, so that no disposal from here on goes unnoticed.
+        document.Disposed += OnDocumentDisposed;
         TextDocument buffer = document.Buffer;
         part.Document = buffer;
         part.IsReadOnly = IsReadOnly;
@@ -458,7 +468,6 @@ public class CodeEditor : TemplatedControl
         _place = place;
         _shown = document;
         Select(part, place?.Selection ?? new TextSelection(0));
-        document.Disposed += OnDocumentDisposed;
         TextView textView = part.TextArea.TextView;
         _highlighter = new BackgroundTextMateHighlighter(textView, buffer, Dispatcher, null);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
@@ -484,13 +493,11 @@ public class CodeEditor : TemplatedControl
         part.IsReadOnly = true;
     }
 
-    private void OnDocumentDisposed(object? sender, EventArgs e)
-    {
-        if (Dispatcher.CheckAccess())
-            UpdateShownDocument();
-        else
-            Dispatcher.Post(UpdateShownDocument);
-    }
+    /// <summary>
+    /// Raised on the thread that disposes. Posted, also on the UI thread, so that it never runs in the middle of
+    /// showing the document.
+    /// </summary>
+    private void OnDocumentDisposed(object? sender, EventArgs e) => Dispatcher.Post(UpdateShownDocument);
 
     /// <summary>Scrolls to where the editor was asked to, once the shown document is laid out.</summary>
     private void OnTextViewLayoutUpdated(object? sender, EventArgs e)
