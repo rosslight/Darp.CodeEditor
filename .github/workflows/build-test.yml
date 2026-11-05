@@ -13,6 +13,10 @@ jobs:
   build-test:
     name: Build and test on Linux x64
     runs-on: ubuntu-24.04
+    # The AvaloniaEdit preview of nuget.config: GitHub Packages needs a token even for public packages, and this
+    # repository's own token can't read another repository's packages.
+    env:
+      NuGetPackageSourceCredentials_AvaloniaEditPreview: Username=x;Password=${{ secrets.AVALONIAEDIT_PACKAGES_TOKEN }}
     permissions:
       contents: read
       pull-requests: write
@@ -55,6 +59,10 @@ jobs:
   warnings-release:
     name: Build without warnings
     runs-on: ubuntu-24.04
+    # The AvaloniaEdit preview of nuget.config: GitHub Packages needs a token even for public packages, and this
+    # repository's own token can't read another repository's packages.
+    env:
+      NuGetPackageSourceCredentials_AvaloniaEditPreview: Username=x;Password=${{ secrets.AVALONIAEDIT_PACKAGES_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - name: Setup .NET
@@ -78,6 +86,10 @@ jobs:
 
     name: Test on ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    # The AvaloniaEdit preview of nuget.config: GitHub Packages needs a token even for public packages, and this
+    # repository's own token can't read another repository's packages.
+    env:
+      NuGetPackageSourceCredentials_AvaloniaEditPreview: Username=x;Password=${{ secrets.AVALONIAEDIT_PACKAGES_TOKEN }}
     steps:
       - name: git configure long path
         if: runner.os == 'Windows'

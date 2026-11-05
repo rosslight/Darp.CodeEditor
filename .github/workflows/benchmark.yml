@@ -16,8 +16,11 @@ jobs:
   compare:
     name: Compare against target branch
     runs-on: ubuntu-24.04
+    # The AvaloniaEdit preview of nuget.config: GitHub Packages needs a token even for public packages, and this
+    # repository's own token can't read another repository's packages.
     env:
       DARP_CODEEDITOR_BASELINE_VERSION: 0.0.0-baseline
+      NuGetPackageSourceCredentials_AvaloniaEditPreview: Username=x;Password=${{ secrets.AVALONIAEDIT_PACKAGES_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - name: Checkout target branch
