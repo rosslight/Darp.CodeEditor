@@ -87,7 +87,8 @@ The C# server and the runner run on one .NET runtime that the app ships, with Re
 
 ### 2.3 Tests, samples and benchmarks
 
-- **Tests:** one test project per package. Fixture projects only where a separate DLL or process is what a test checks.
+- **Tests:** one test project per package. Fixture projects only where a separate DLL or process is what a test checks. Tests
+  also run as a NativeAOT app (#101).
 - **Samples:** one sample app from the Avalonia template, published both JIT and NativeAOT from the same source. It
   shows how to use the API, nothing else. `samples/Darp.CodeEditor.UseCases` holds the API draft's use cases.
 - **Benchmarks:** a BenchmarkDotNet project for most measurements. Measurements of a published app, such as the first
@@ -142,6 +143,7 @@ Question numbers continue the prototype's log. The prototype's decisions still h
 | 98 | Documents belong to one UI thread | Replaced by #100 | |
 | 99 | Compiled scripts | A compiled script carries the emitted assembly with an embedded portable PDB, its own identity, the compiled text and its entry point, so it runs and its failures map without the server. The runner keeps, per session, which loaded assembly belongs to which compilation, so a failure in a callback from an earlier run still names its text. `#r`, `#load` and `#line` are compile errors in v1. A script's return value is ignored. Positions are as precise as the debug symbols: a statement | The spike for #52: a separate Roslyn process emitted scripts, and a JIT runner without any Roslyn assembly ran them, 14 compilations side by side. `#line` moved a reported position from line 2 to line 700, so remapping directives would break `ScriptSnapshot`. A runner with Roslyn loaded used about 40 MiB more working set |
 | 100 | Documents and editors on the main UI thread | Documents belong to the app's main UI thread, wherever they were created; their events come there, and their changes are checked against it. Editors work only there, and fail at once on another thread. Servers raise `State` and send diagnostics there. Replaces #98 | AvaloniaEdit's editor checks `Dispatcher.UIThread`: its text view on every layout, its text area, caret, line list and segment collections. A fix may go upstream later. Product owner's choice |
+| 101 | Tests as NativeAOT | Unit tests run with `dotnet test` and also as a NativeAOT app, from one project: xunit's AOT runner (`xunit.v3.aot`), its own assertions, and Avalonia's `HeadlessUnitTestSession` for the UI thread. Fixture processes are published as NativeAOT too | Failures that only NativeAOT has, such as trimmed code, reflection, native libraries and resources, show up in tests, not in apps. Shouldly and `Avalonia.Headless.XUnit` don't work with the AOT runner. Product owner's choice |
 
 ## 4. Lessons from the prototype
 
