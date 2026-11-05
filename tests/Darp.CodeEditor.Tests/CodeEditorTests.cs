@@ -163,6 +163,32 @@ public sealed class CodeEditorTests(UiFixture ui)
         });
 
     [Fact]
+    public Task ScrollTo_centers_a_range_whose_end_is_out_of_view_to_the_right() =>
+        _ui.Run(() =>
+        {
+            using var window = new EditorWindow(
+                new CodeEditor { Document = CodeDocument.Create(CodeLanguage.PlainText, new string('x', 500)) },
+                width: 400
+            );
+            window.Layout();
+            TextView textView = window.TextView;
+            // From the middle of the view to past its right edge: narrower than the view.
+            int columns = (int)(textView.Bounds.Width / textView.WideSpaceWidth);
+            var range = TextRange.FromBounds(columns / 2, columns + 5);
+            X(range.Start).ShouldBeLessThan(textView.Bounds.Width);
+            X(range.End).ShouldBeGreaterThan(textView.Bounds.Width);
+
+            window.Editor.ScrollTo(range);
+            window.Layout();
+
+            X(range.Start).ShouldBeGreaterThanOrEqualTo(textView.ScrollOffset.X);
+            X(range.End).ShouldBeLessThanOrEqualTo(textView.ScrollOffset.X + textView.Bounds.Width);
+
+            double X(int offset) =>
+                textView.GetVisualPosition(new TextViewPosition(1, offset + 1), VisualYPosition.LineTop).X;
+        });
+
+    [Fact]
     public Task ScrollTo_before_the_first_layout_scrolls_once_laid_out() =>
         _ui.Run(() =>
         {

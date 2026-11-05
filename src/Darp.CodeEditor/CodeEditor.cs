@@ -244,7 +244,7 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>
     /// Scrolls <paramref name="range"/> into view: not at all when it is visible, centered when it is not. A range
-    /// taller than the view shows from its start.
+    /// taller or wider than the view shows from its start.
     /// </summary>
     public void ScrollTo(TextRange range)
     {
@@ -585,7 +585,7 @@ public class CodeEditor : TemplatedControl
     }
 
     /// <summary>
-    /// Brings a range into view: centered unless it is visible, from its start when it is taller than the view.
+    /// Brings a range into view: centered unless it is visible, from its start when it is taller or wider than the view.
     /// </summary>
     private static void Reveal(TextEditor part, TextRange range)
     {
@@ -595,18 +595,25 @@ public class CodeEditor : TemplatedControl
             new TextViewPosition(buffer.GetLocation(range.Start)),
             VisualYPosition.LineTop
         );
-        double bottom = textView
-            .GetVisualPosition(new TextViewPosition(buffer.GetLocation(range.End)), VisualYPosition.LineBottom)
-            .Y;
+        Point end = textView.GetVisualPosition(
+            new TextViewPosition(buffer.GetLocation(range.End)),
+            VisualYPosition.LineBottom
+        );
         Vector offset = textView.ScrollOffset;
         Size view = textView.Bounds.Size;
-        double y = offset.Y;
-        if (start.Y < offset.Y || bottom > offset.Y + view.Height)
-            y = bottom - start.Y > view.Height ? start.Y : (start.Y + bottom - view.Height) / 2;
-        double x = offset.X;
-        if (start.X < offset.X || start.X > offset.X + view.Width)
-            x = start.X - view.Width / 2;
-        SetScrollOffset(part, new Vector(Math.Max(0, x), Math.Max(0, y)));
+        SetScrollOffset(
+            part,
+            new Vector(
+                Math.Max(0, OffsetToShow(Math.Min(start.X, end.X), Math.Max(start.X, end.X), offset.X, view.Width)),
+                Math.Max(0, OffsetToShow(start.Y, end.Y, offset.Y, view.Height))
+            )
+        );
+
+        // The offset that shows [from, to] in a view of length at offset: the same when it shows already.
+        static double OffsetToShow(double from, double to, double offset, double length) =>
+            from >= offset && to <= offset + length ? offset
+            : to - from > length ? from
+            : (from + to - length) / 2;
     }
 
     /// <summary>Scrolls through the part's scroll viewer, which keeps its scroll bars in step with the text.</summary>
