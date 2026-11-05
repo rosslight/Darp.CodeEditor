@@ -2,7 +2,6 @@ using System.Text.Json;
 using Avalonia.Media;
 using TextMateSharp.Internal.Themes;
 using TextMateSharp.Themes;
-using FontStyle = TextMateSharp.Themes.FontStyle;
 
 namespace Darp.CodeEditor.Loading;
 
@@ -58,8 +57,14 @@ internal sealed record ColorThemeFile(
                 rules.AddRange(tokenColors.EnumerateArray().Select(TokenRule));
             if (root.TryGetProperty("semanticTokenColors", out JsonElement semantic))
             {
+                // A theme's rule overrides only what it sets of an included rule for the same selector.
                 foreach (JsonProperty style in semantic.EnumerateObject())
-                    semanticTokenColors[style.Name] = SemanticStyle(style.Value);
+                {
+                    SemanticTokenStyle read = SemanticStyle(style.Value);
+                    semanticTokenColors[style.Name] = semanticTokenColors.TryGetValue(style.Name, out var included)
+                        ? read.Over(included)
+                        : read;
+                }
             }
         }
     }
@@ -108,44 +113,64 @@ internal sealed record ColorThemeFile(
         return raw;
     }
 
-    /// <summary>A color, or an object with <c>foreground</c> and <c>fontStyle</c>.</summary>
+    /// <summary>
+    /// A color, or an object with <c>foreground</c>, <c>fontStyle</c>, and <c>bold</c>, <c>italic</c>,
+    /// <c>underline</c> and <c>strikethrough</c>. As in VS Code, <c>fontStyle</c> sets all four styles and wins over them.
+    /// </summary>
     private static SemanticTokenStyle SemanticStyle(JsonElement style)
     {
         if (style.ValueKind == JsonValueKind.String)
-            return new SemanticTokenStyle(ReadColor(style), FontStyle.NotSet);
+            return new SemanticTokenStyle(ReadColor(style), null, null, null, null);
+        Color? foreground = style.TryGetProperty("foreground", out JsonElement color) ? ReadColor(color) : null;
+        if (style.TryGetProperty("fontStyle", out JsonElement fontStyle))
+        {
+            string[] names = (fontStyle.GetString() ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return new SemanticTokenStyle(
+                foreground,
+                names.Contains("bold"),
+                names.Contains("italic"),
+                names.Contains("underline"),
+                names.Contains("strikethrough")
+            );
+        }
         return new SemanticTokenStyle(
-            style.TryGetProperty("foreground", out JsonElement foreground) ? ReadColor(foreground) : null,
-            style.TryGetProperty("fontStyle", out JsonElement fontStyle)
-                ? ParseFontStyle(fontStyle.GetString() ?? "")
-                : FontStyle.NotSet
+            foreground,
+            Flag("bold"),
+            Flag("italic"),
+            Flag("underline"),
+            Flag("strikethrough")
         );
+
+        bool? Flag(string name) => style.TryGetProperty(name, out JsonElement value) ? value.GetBoolean() : null;
 
         static Color ReadColor(JsonElement value) =>
             value.GetString() is { } text && TryParseColor(text, out Color parsed)
                 ? parsed
                 : throw new InvalidDataException($"Not a color: {value}");
     }
-
-    /// <summary>A font style as VS Code writes it: names separated by spaces, such as <c>italic bold</c>.</summary>
-    private static FontStyle ParseFontStyle(string names)
-    {
-        FontStyle style = FontStyle.None;
-        foreach (string name in names.Split(' ', StringSplitOptions.RemoveEmptyEntries))
-        {
-            style |= name switch
-            {
-                "italic" => FontStyle.Italic,
-                "bold" => FontStyle.Bold,
-                "underline" => FontStyle.Underline,
-                "strikethrough" => FontStyle.Strikethrough,
-                _ => FontStyle.None,
-            };
-        }
-        return style;
-    }
 }
 
-/// <summary>How a theme shows a kind of semantic token.</summary>
-/// <param name="Foreground">The text color; null to keep the TextMate color.</param>
-/// <param name="FontStyle">The font style; <see cref="FontStyle.NotSet"/> to keep the TextMate style.</param>
-internal readonly record struct SemanticTokenStyle(Color? Foreground, FontStyle FontStyle);
+/// <summary>How a theme shows a kind of semantic token. Null keeps what the TextMate rules give.</summary>
+/// <param name="Foreground">The text color.</param>
+/// <param name="Bold">Whether the text is bold.</param>
+/// <param name="Italic">Whether the text is italic.</param>
+/// <param name="Underline">Whether the text is underlined.</param>
+/// <param name="Strikethrough">Whether the text is struck through.</param>
+internal readonly record struct SemanticTokenStyle(
+    Color? Foreground,
+    bool? Bold,
+    bool? Italic,
+    bool? Underline,
+    bool? Strikethrough
+)
+{
+    /// <summary>This style, with what it leaves null taken from <paramref name="included"/>.</summary>
+    public SemanticTokenStyle Over(SemanticTokenStyle included) =>
+        new(
+            Foreground ?? included.Foreground,
+            Bold ?? included.Bold,
+            Italic ?? included.Italic,
+            Underline ?? included.Underline,
+            Strikethrough ?? included.Strikethrough
+        );
+}

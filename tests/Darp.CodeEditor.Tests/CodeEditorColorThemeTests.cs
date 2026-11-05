@@ -62,4 +62,40 @@ public sealed class CodeEditorColorThemeTests
         TestLog.EntriesOf(theme).ShouldBe([(LogEventLevel.Error, "CodeEditor")]);
         Directory.Delete(directory, recursive: true);
     }
+
+    [Fact]
+    public async Task Semantic_styles_set_clear_and_inherit_each_property()
+    {
+        string directory = Directory.CreateTempSubdirectory().FullName;
+        await File.WriteAllTextAsync(
+            Path.Combine(directory, "base.json"),
+            """
+            { "semanticTokenColors": {
+                "variable": { "foreground": "#ff0000", "bold": true },
+                "number": { "underline": true } } }
+            """,
+            TestContext.Current.CancellationToken
+        );
+        await File.WriteAllTextAsync(
+            Path.Combine(directory, "theme.json"),
+            """
+            { "include": "./base.json", "semanticTokenColors": {
+                "variable": { "italic": true, "bold": false },
+                "keyword": { "fontStyle": "italic" } } }
+            """,
+            TestContext.Current.CancellationToken
+        );
+
+        var theme = new CodeEditorColorTheme { Source = new Uri(Path.Combine(directory, "theme.json")) };
+        IReadOnlyDictionary<string, SemanticTokenStyle> styles = (await theme.Loaded)
+            .ShouldNotBeNull()
+            .SemanticTokenColors;
+
+        // The included foreground stays; bold is cleared, italic set, the rest left to TextMate.
+        styles["variable"].ShouldBe(new SemanticTokenStyle(Color.Parse("#ff0000"), false, true, null, null));
+        styles["number"].ShouldBe(new SemanticTokenStyle(null, null, null, true, null));
+        // fontStyle sets all four styles.
+        styles["keyword"].ShouldBe(new SemanticTokenStyle(null, false, true, false, false));
+        Directory.Delete(directory, recursive: true);
+    }
 }
