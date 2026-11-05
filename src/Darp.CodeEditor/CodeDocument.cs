@@ -1,4 +1,7 @@
 using System.ComponentModel;
+using Avalonia;
+using Avalonia.Threading;
+using AvaloniaEdit.Document;
 
 namespace Darp.CodeEditor;
 
@@ -39,14 +42,43 @@ namespace Darp.CodeEditor;
 /// </remarks>
 public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
 {
-    private protected CodeDocument() { }
+    private readonly TextDocument _document;
+
+    /// <summary>
+    /// The dispatcher of the UI thread the document belongs to; null before Avalonia is set up, until the document
+    /// binds to the app's main UI thread.
+    /// </summary>
+    private Dispatcher? _owner;
+
+    /// <summary>Replaced on the owner's thread after each change, so that any thread can read it.</summary>
+    private TextSnapshot _currentSnapshot;
+
+    private Indentation _indentation;
+
+    private string? _filePath;
+
+    private protected CodeDocument(CodeLanguage language, string text)
+    {
+        Language = language;
+        _indentation = language.Id == "yaml" ? Indentation.Spaces(2) : Indentation.Spaces(4);
+        _document = new TextDocument(text);
+        _currentSnapshot = new TextSnapshot(_document.CreateSnapshot(), 0);
+        // Dispatcher.FromThread creates no dispatcher, and Application.Current is null before setup, so neither ties
+        // Avalonia's UI thread to this one.
+        _owner = Dispatcher.FromThread(Thread.CurrentThread) ?? Application.Current?.Dispatcher;
+        // AvaloniaEdit's document belongs to the thread that created it. Unbound, it belongs to none between changes.
+        _document.SetOwnerThread(_owner?.Thread);
+        _document.TextChanged += OnTextChanged;
+        _document.UndoStack.PropertyChanged += OnUndoStackPropertyChanged;
+    }
 
     /// <summary>
     /// Creates a document without a language server, with <paramref name="text"/> and an empty undo history.
     /// </summary>
     /// <param name="language">The language: highlighting and editing rules.</param>
     /// <param name="text">The initial text.</param>
-    public static CodeDocument Create(CodeLanguage language, string text = "") => throw new NotImplementedException();
+    public static CodeDocument Create(CodeLanguage language, string text = "") =>
+        new StandaloneDocument(language, text);
 
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -55,7 +87,7 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     public event EventHandler? TextChanged;
 
     /// <summary>The language: highlighting and editing rules.</summary>
-    public CodeLanguage Language => throw new NotImplementedException();
+    public CodeLanguage Language { get; }
 
     /// <summary>
     /// The file the text belongs to, if any. Setting it, for example after "Save as", moves the document to the new
@@ -66,8 +98,12 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     /// </exception>
     public string? FilePath
     {
-        get => throw new NotImplementedException();
-        set => throw new NotImplementedException();
+        get => _filePath;
+        set
+        {
+            VerifyAccess();
+            _filePath = value;
+        }
     }
 
     /// <summary>
@@ -76,12 +112,12 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     /// </summary>
     public string Text
     {
-        get => throw new NotImplementedException();
-        set => throw new NotImplementedException();
+        get => _currentSnapshot.GetText();
+        set => Change(document => document.Text = value);
     }
 
     /// <summary>The text as it is now, with its version.</summary>
-    public TextSnapshot CurrentSnapshot => throw new NotImplementedException();
+    public TextSnapshot CurrentSnapshot => _currentSnapshot;
 
     /// <summary>
     /// How Tab and new lines indent, in every editor that shows the document. It starts as in VS Code: 2 spaces for
@@ -90,21 +126,28 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     /// </summary>
     public Indentation Indentation
     {
-        get => throw new NotImplementedException();
-        set => throw new NotImplementedException();
+        get => _indentation;
+        set
+        {
+            VerifyAccess();
+            if (value == _indentation)
+                return;
+            _indentation = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Indentation)));
+        }
     }
 
     /// <summary>
     /// Whether the document moved away from its unmodified point in the undo history: creation, or the last
     /// <see cref="MarkUnmodified"/>. Undoing back to that point clears it; typing the same text again does not.
     /// </summary>
-    public bool IsModified => throw new NotImplementedException();
+    public bool IsModified => !_document.UndoStack.IsOriginalFile;
 
     /// <summary>Whether <see cref="Undo"/> has a step to undo.</summary>
-    public bool CanUndo => throw new NotImplementedException();
+    public bool CanUndo => _document.UndoStack.CanUndo;
 
     /// <summary>Whether <see cref="Redo"/> has a step to redo.</summary>
-    public bool CanRedo => throw new NotImplementedException();
+    public bool CanRedo => _document.UndoStack.CanRedo;
 
     /// <summary>
     /// The language server's latest diagnostics, each with the snapshot its range refers to. Servers report again
@@ -112,13 +155,18 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     /// one in the current text, map it: <c>MapToCurrent(diagnostic.Snapshot, diagnostic.Range)</c>. Empty without a
     /// server.
     /// </summary>
-    public IReadOnlyList<Diagnostic> Diagnostics => throw new NotImplementedException();
+    public IReadOnlyList<Diagnostic> Diagnostics => [];
 
     /// <summary>
     /// Replaces <paramref name="range"/> with <paramref name="text"/>, in one step that the user can undo; an empty
-    /// range inserts. Editors keep their scroll position, and a caret behind the range moves with the text.
+    /// range inserts. The range is clamped to the text. Editors keep their scroll position, and a caret behind the
+    /// range moves with the text.
     /// </summary>
-    public void Replace(TextRange range, string text) => throw new NotImplementedException();
+    public void Replace(TextRange range, string text)
+    {
+        (int start, int length) = _currentSnapshot.Clamp(range);
+        Change(document => document.Replace(start, length, text));
+    }
 
     /// <summary>
     /// Maps <paramref name="range"/> in the text of <paramref name="snapshot"/> to the current text, following the
@@ -126,7 +174,15 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     /// range whose text was deleted shrinks to where it was.
     /// </summary>
     /// <exception cref="ArgumentException">The snapshot is of another document.</exception>
-    public TextRange MapToCurrent(TextSnapshot snapshot, TextRange range) => throw new NotImplementedException();
+    public TextRange MapToCurrent(TextSnapshot snapshot, TextRange range)
+    {
+        (ITextSourceVersion from, ITextSourceVersion to) = Versions(snapshot);
+        (int start, int length) = snapshot.Clamp(range);
+        // Text typed at either edge of the range stays outside it.
+        int newStart = from.MoveOffsetTo(to, start, AnchorMovementType.AfterInsertion);
+        int newEnd = from.MoveOffsetTo(to, start + length, AnchorMovementType.BeforeInsertion);
+        return TextRange.FromBounds(newStart, Math.Max(newStart, newEnd));
+    }
 
     /// <summary>
     /// Makes <paramref name="snapshot"/> the unmodified point, for example after saving its text.
@@ -136,16 +192,102 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     /// document's, so the document stays modified.
     /// </returns>
     /// <exception cref="ArgumentException">The snapshot is of another document.</exception>
-    public bool MarkUnmodified(TextSnapshot snapshot) => throw new NotImplementedException();
+    public bool MarkUnmodified(TextSnapshot snapshot)
+    {
+        VerifyAccess();
+        Versions(snapshot);
+        if (snapshot.Version != _currentSnapshot.Version)
+            return false;
+        Change(document => document.UndoStack.MarkAsOriginalFile());
+        return true;
+    }
 
     /// <summary>Undoes the last step, as Ctrl+Z does.</summary>
-    public void Undo() => throw new NotImplementedException();
+    public void Undo() => Change(document => document.UndoStack.Undo());
 
     /// <summary>Redoes the last undone step, as Ctrl+Y does.</summary>
-    public void Redo() => throw new NotImplementedException();
+    public void Redo() => Change(document => document.UndoStack.Redo());
 
     /// <summary>
     /// Closes the document in its language server, without waiting for it. Editors that still show it become empty.
     /// </summary>
-    public void Dispose() => throw new NotImplementedException();
+    public void Dispose()
+    {
+        // Without a server and without editors there is nothing to close yet.
+    }
+
+    /// <summary>
+    /// The versions in AvaloniaEdit of <paramref name="snapshot"/> and of the current text, after checking that the
+    /// snapshot is one of this document.
+    /// </summary>
+    private (ITextSourceVersion Snapshot, ITextSourceVersion Current) Versions(TextSnapshot snapshot) =>
+        snapshot.SourceVersion is { } version
+        && _currentSnapshot.SourceVersion is { } current
+        && version.BelongsToSameDocumentAs(current)
+            ? (version, current)
+            : throw new ArgumentException("The snapshot is of another document.", nameof(snapshot));
+
+    /// <summary>Changes AvaloniaEdit's document on the owner's thread, or on any thread while the document is unbound.</summary>
+    private void Change(Action<TextDocument> change)
+    {
+        VerifyAccess();
+        if (_owner is not null)
+        {
+            change(_document);
+            return;
+        }
+        _document.SetOwnerThread(Thread.CurrentThread);
+        try
+        {
+            change(_document);
+        }
+        finally
+        {
+            _document.SetOwnerThread(null);
+        }
+    }
+
+    /// <summary>
+    /// Throws unless the current thread may change the document. An unbound document binds to the app's main UI
+    /// thread as soon as Avalonia is set up.
+    /// </summary>
+    private void VerifyAccess()
+    {
+        if (_owner is null && Application.Current?.Dispatcher is { } main)
+        {
+            _document.SetOwnerThread(main.Thread);
+            _owner = main;
+        }
+        if (_owner is not null && !_owner.CheckAccess())
+        {
+            throw new InvalidOperationException(
+                $"The document belongs to the UI thread {Describe(_owner.Thread)}, and changes only there; this is thread {Describe(Thread.CurrentThread)}."
+            );
+        }
+
+        static string Describe(Thread thread) =>
+            thread.Name is { } name ? $"'{name}' ({thread.ManagedThreadId})" : $"{thread.ManagedThreadId}";
+    }
+
+    private void OnTextChanged(object? sender, EventArgs e)
+    {
+        _currentSnapshot = new TextSnapshot(_document.CreateSnapshot(), _currentSnapshot.Version + 1);
+        TextChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnUndoStackPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        string? property = e.PropertyName switch
+        {
+            nameof(UndoStack.IsOriginalFile) => nameof(IsModified),
+            nameof(UndoStack.CanUndo) => nameof(CanUndo),
+            nameof(UndoStack.CanRedo) => nameof(CanRedo),
+            _ => null,
+        };
+        if (property is not null)
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));
+    }
 }
+
+/// <summary>A document without a language server, from <see cref="CodeDocument.Create"/>.</summary>
+internal sealed class StandaloneDocument(CodeLanguage language, string text) : CodeDocument(language, text);
