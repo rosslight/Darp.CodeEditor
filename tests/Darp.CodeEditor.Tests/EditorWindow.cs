@@ -54,8 +54,15 @@ internal sealed class EditorWindow : IDisposable
     }
 
     /// <summary>Renders a frame, after the jobs and layout before it.</summary>
-    public WriteableBitmap Render() =>
-        Window.CaptureRenderedFrame() ?? throw new InvalidOperationException("Nothing was rendered.");
+    public void Render() => Window.CaptureRenderedFrame()?.Dispose();
+
+    /// <summary>Renders a frame, and counts its pixels of <paramref name="color"/>, give or take a little.</summary>
+    public int RenderAndCountPixels(Color color, int tolerance = 8)
+    {
+        using WriteableBitmap frame =
+            Window.CaptureRenderedFrame() ?? throw new InvalidOperationException("Nothing was rendered.");
+        return CountPixels(frame, color, tolerance);
+    }
 
     public void Type(string text)
     {
@@ -102,8 +109,7 @@ internal sealed class EditorWindow : IDisposable
                 .ToHashSet()
             : new HashSet<Color>();
 
-    /// <summary>How many pixels of <paramref name="frame"/> have <paramref name="color"/>, give or take a little.</summary>
-    public static int CountPixels(WriteableBitmap frame, Color color, int tolerance = 8)
+    private static int CountPixels(WriteableBitmap frame, Color color, int tolerance = 8)
     {
         using ILockedFramebuffer buffer = frame.Lock();
         bool bgra = buffer.Format == PixelFormat.Bgra8888;

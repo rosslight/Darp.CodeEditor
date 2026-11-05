@@ -95,7 +95,7 @@ public sealed class HighlightingTests(UiFixture ui)
             using var window = new EditorWindow(new CodeEditor { Document = CodeDocument.Create(codeLanguage, text) });
 
             // Some glyphs' worth of pixels: anti-aliasing blends the edges of the rest.
-            await Wait.UntilAsync(() => EditorWindow.CountPixels(window.Render(), syntax) > 100);
+            await Wait.UntilAsync(() => window.RenderAndCountPixels(syntax) > 100);
         });
 
     /// <summary>

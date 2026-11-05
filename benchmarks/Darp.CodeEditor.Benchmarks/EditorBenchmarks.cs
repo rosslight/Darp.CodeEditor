@@ -117,7 +117,7 @@ public class TypingBenchmarks
             window.KeyPress(Key.Back, RawInputModifiers.None, PhysicalKey.Backspace, null);
             window.KeyRelease(Key.Back, RawInputModifiers.None, PhysicalKey.Backspace, null);
         }
-        window.CaptureRenderedFrame();
+        HeadlessEditor.Render(window);
     }
 }
 
@@ -154,7 +154,7 @@ public class ScrollingBenchmarks
         Window window = _window ?? throw new InvalidOperationException("Not set up.");
         window.KeyPress(Key.PageDown, RawInputModifiers.None, PhysicalKey.PageDown, null);
         window.KeyRelease(Key.PageDown, RawInputModifiers.None, PhysicalKey.PageDown, null);
-        window.CaptureRenderedFrame();
+        HeadlessEditor.Render(window);
     }
 
     [IterationCleanup]
@@ -180,6 +180,12 @@ internal static class HeadlessEditor
             .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false })
             .SetupWithoutStarting();
 
+    /// <summary>
+    /// Renders a frame, after the jobs and layout before it. The copy of the frame that the headless window hands back
+    /// is disposed at once: it holds 1.9 MB.
+    /// </summary>
+    public static void Render(Window window) => window.CaptureRenderedFrame()?.Dispose();
+
     public static Window Show(CodeEditor editor)
     {
         var window = new Window
@@ -199,7 +205,7 @@ internal static class HeadlessEditor
         TextView textView = editor.GetVisualDescendants().OfType<AvaloniaEdit.TextEditor>().Single().TextArea.TextView;
         while (true)
         {
-            window.CaptureRenderedFrame();
+            Render(window);
             if (TextColors(textView) > 1)
                 return;
             if (Stopwatch.GetElapsedTime(start) > TimeSpan.FromSeconds(10))
