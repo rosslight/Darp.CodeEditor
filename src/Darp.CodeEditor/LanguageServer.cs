@@ -4,18 +4,18 @@ using Microsoft.Extensions.Logging;
 namespace Darp.CodeEditor;
 
 /// <summary>
-/// A language server process that speaks the Language Server Protocol over stdio. All documents of the languages it
-/// serves share it.
+/// A language server process that speaks the Language Server Protocol over stdio. It serves the documents it creates,
+/// in one or more languages.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The process starts with the first document that needs it, or with <see cref="StartAsync"/>. It is restarted after
+/// The process starts with the first document it creates, or with <see cref="StartAsync"/>. It is restarted after
 /// a crash or when it stops answering, and stopped by <see cref="DisposeAsync"/>. It is a child of the app: it ends
 /// when the app ends, even when the app is killed.
 /// </para>
 /// <para>
-/// The server is safe to use from any thread. It posts <see cref="StateChanged"/> to the UI thread, and nothing waits
-/// for it, so a server also works before the app's UI runs.
+/// The server is safe to use from any thread, except <see cref="CreateDocument"/>. It posts <see cref="StateChanged"/>
+/// to the UI thread, and nothing waits for it, so a server also works before the app's UI runs.
 /// </para>
 /// </remarks>
 public sealed class LanguageServer : IAsyncDisposable
@@ -36,12 +36,26 @@ public sealed class LanguageServer : IAsyncDisposable
     public Task StartAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
 
     /// <summary>
+    /// Creates a document that the server serves, open in it until the document's <see cref="CodeDocument.Dispose"/>.
+    /// Call it on the UI thread, like everything on documents.
+    /// </summary>
+    /// <param name="language">The language: highlighting, editing rules and the identifier the server receives.</param>
+    /// <param name="text">The initial text.</param>
+    /// <param name="filePath">
+    /// The file the text belongs to, if any. Servers that look at nearby files or configuration use it. The document
+    /// never reads or writes it.
+    /// </param>
+    /// <exception cref="InvalidOperationException">Another open document of this server has <paramref name="filePath"/>.</exception>
+    public CodeDocument CreateDocument(CodeLanguage language, string text = "", string? filePath = null) =>
+        throw new NotImplementedException();
+
+    /// <summary>
     /// Tells the server that the answers of <see cref="LanguageServerOptions.Settings"/> may have changed, so that it
     /// asks again.
     /// </summary>
     public void NotifySettingsChanged() => throw new NotImplementedException();
 
-    /// <summary>Stops the process. Documents of its languages keep their text and lose their language features.</summary>
+    /// <summary>Stops the process. Its documents keep their text and lose their language features.</summary>
     public ValueTask DisposeAsync() => throw new NotImplementedException();
 }
 

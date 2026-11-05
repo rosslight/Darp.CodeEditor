@@ -1,9 +1,9 @@
 namespace Darp.CodeEditor;
 
 /// <summary>
-/// What kind of text a document holds: its TextMate grammar for colors, its editing rules (comments, brackets,
-/// auto-closing pairs, indentation rules) and, optionally, the language server that provides completion, hover,
-/// signature help and diagnostics.
+/// What kind of text a document holds: its TextMate grammar for colors and its editing rules (comments, brackets,
+/// auto-closing pairs, indentation rules). Language servers are not part of it: a server creates the documents it
+/// serves, see <see cref="LanguageServer.CreateDocument"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -75,16 +75,4 @@ public sealed class CodeLanguage
 
     /// <summary>The editing rules; null for none.</summary>
     public Uri? Configuration { get; }
-
-    /// <summary>The language server of the language's documents, if any.</summary>
-    public LanguageServer? Server { get; private init; }
-
-    /// <summary>
-    /// A copy of the language whose documents <paramref name="server"/> serves, such as
-    /// <c>CodeLanguage.Yaml.WithServer(yamlServer)</c>. The copy shares the grammar and editing rules, loaded once.
-    /// </summary>
-    /// <exception cref="InvalidOperationException">
-    /// The language belongs to the server that created it, as C# script languages do.
-    /// </exception>
-    public CodeLanguage WithServer(LanguageServer server) => throw new NotImplementedException();
 }

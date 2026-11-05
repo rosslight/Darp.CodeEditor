@@ -19,7 +19,7 @@ public sealed class YamlEditing : IAsyncDisposable
 {
     private readonly LanguageServer _server;
 
-    /// <summary>Describes the server; it starts with the first YAML document.</summary>
+    /// <summary>Describes the server; it starts with the first document it creates.</summary>
     public YamlEditing()
     {
         _server = new LanguageServer(
@@ -37,15 +37,11 @@ public sealed class YamlEditing : IAsyncDisposable
                         : null,
             }
         );
-        Yaml = CodeLanguage.Yaml.WithServer(_server);
     }
 
-    /// <summary>The language of YAML documents.</summary>
-    public CodeLanguage Yaml { get; }
-
-    /// <summary>Opens a YAML file in a document.</summary>
+    /// <summary>Opens a YAML file in a document that the server serves.</summary>
     public async Task<CodeDocument> OpenAsync(string path, CancellationToken cancellationToken) =>
-        new(Yaml, await File.ReadAllTextAsync(path, cancellationToken), path);
+        _server.CreateDocument(CodeLanguage.Yaml, await File.ReadAllTextAsync(path, cancellationToken), path);
 
     /// <inheritdoc />
     public ValueTask DisposeAsync() => _server.DisposeAsync();

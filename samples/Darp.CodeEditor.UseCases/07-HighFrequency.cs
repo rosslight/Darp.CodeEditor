@@ -12,9 +12,17 @@ namespace UseCases.HighFrequency;
 // - Do packets need an order guarantee across batches? The batcher keeps it.
 
 /// <summary>Decodes the packets of one device with a packet script's handler.</summary>
-public sealed class PacketPipeline(IPacketHandler handler) : IAsyncDisposable
+public sealed class PacketPipeline : IAsyncDisposable
 {
-    private readonly ScriptBatcher<Packet, Reading> _batcher = new(packets => handler.HandleBatchAsync(packets));
+    private readonly IPacketHandler _handler;
+    private readonly ScriptBatcher<Packet, Reading> _batcher;
+
+    /// <summary>Decodes packets with <paramref name="handler"/>, and disposes it with the pipeline.</summary>
+    public PacketPipeline(IPacketHandler handler)
+    {
+        _handler = handler;
+        _batcher = new ScriptBatcher<Packet, Reading>(packets => _handler.HandleBatchAsync(packets));
+    }
 
     /// <summary>
     /// Decodes one packet; called for every packet the device sends. The token only stops waiting for room in the
@@ -27,6 +35,6 @@ public sealed class PacketPipeline(IPacketHandler handler) : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await _batcher.DisposeAsync();
-        handler.Dispose();
+        _handler.Dispose();
     }
 }

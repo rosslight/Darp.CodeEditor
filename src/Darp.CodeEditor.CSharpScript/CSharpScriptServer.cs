@@ -10,14 +10,21 @@ namespace Darp.CodeEditor.CSharpScript;
 /// <remarks>
 /// <para>
 /// The process runs on the .NET runtime that ships with the app, so user machines need no SDK and no installed .NET.
-/// It starts with the first C# document or compilation, or with <see cref="LanguageServer"/>'s
+/// It starts with the first document or compilation, or with <see cref="LanguageServer"/>'s
 /// <see cref="Darp.CodeEditor.LanguageServer.StartAsync"/>, and stops on <see cref="DisposeAsync"/>.
 /// </para>
 /// <para>
 /// Compiling runs beside the editor's requests: completion keeps answering while a script compiles. A compilation
 /// waits while the server starts or restarts, like completion does.
 /// </para>
-/// <para>Safe to use from any thread, except <see cref="CompileAsync(CodeDocument, CancellationToken)"/>.</para>
+/// <para>
+/// Safe to use from any thread, except <see cref="CreateDocument"/> and
+/// <see cref="CompileAsync(CodeDocument, CancellationToken)"/>, which work on documents.
+/// </para>
+/// <para>
+/// The server checks and loads an environment's references once, and reuses them for every document and compilation
+/// in an environment with the same settings.
+/// </para>
 /// </remarks>
 public sealed class CSharpScriptServer : IAsyncDisposable
 {
@@ -28,42 +35,47 @@ public sealed class CSharpScriptServer : IAsyncDisposable
     public LanguageServer LanguageServer => throw new NotImplementedException();
 
     /// <summary>
-    /// The language of scripts in <paramref name="environment"/>, for <see cref="CodeDocument"/>s and for compiling:
-    /// <c>CodeLanguage.CSharp</c>, served by this server, with the environment. Create it once per environment and
-    /// share it. The language keeps a copy of the environment: later changes to its lists have no effect.
+    /// Creates a C# script document in <paramref name="environment"/>, open in this server until the document's
+    /// <see cref="CodeDocument.Dispose"/>. Its language is <c>CodeLanguage.CSharp</c>. Call it on the UI thread.
     /// </summary>
+    /// <remarks>
+    /// The document keeps a copy of the environment: later changes to its lists have no effect. Documents created
+    /// through <see cref="LanguageServer"/>'s <see cref="Darp.CodeEditor.LanguageServer.CreateDocument"/> see the
+    /// default environment: no globals, no references beyond .NET's, no imports.
+    /// </remarks>
     /// <exception cref="ArgumentException">
     /// A reference or the globals type's assembly is not next to the app, because its project reference is not marked
     /// with <c>CSharpScriptReference</c>; or the globals type has no public constructor.
     /// </exception>
-    public CodeLanguage CreateLanguage(CSharpScriptEnvironment environment) => throw new NotImplementedException();
+    public CodeDocument CreateDocument(CSharpScriptEnvironment environment, string text = "") =>
+        throw new NotImplementedException();
 
     /// <summary>
-    /// Compiles <paramref name="document"/>'s current version, in its language's environment, from the same snapshot
-    /// of that version that the editor's diagnostics come from.
+    /// Compiles <paramref name="document"/>'s current version, in the environment it was created in, from the same
+    /// snapshot of that version that the editor's diagnostics come from.
     /// </summary>
     /// <remarks>
     /// Call it on the UI thread: it takes the document's version before it returns. Later edits do not cancel the
     /// compilation, and disposing the document does not affect it.
     /// </remarks>
-    /// <exception cref="ArgumentException">The document's language does not come from this server.</exception>
+    /// <exception cref="ArgumentException">This server did not create the document.</exception>
     public Task<CSharpScriptCompilation> CompileAsync(
         CodeDocument document,
         CancellationToken cancellationToken = default
     ) => throw new NotImplementedException();
 
     /// <summary>
-    /// Compiles <paramref name="code"/> in <paramref name="language"/>'s environment, with no document or editor. Safe
-    /// to call from any thread.
+    /// Compiles <paramref name="code"/> in <paramref name="environment"/>, with no document or editor. Safe to call
+    /// from any thread.
     /// </summary>
-    /// <exception cref="ArgumentException">The language does not come from this server.</exception>
+    /// <exception cref="ArgumentException">The environment is invalid, as for <see cref="CreateDocument"/>.</exception>
     public Task<CSharpScriptCompilation> CompileAsync(
         string code,
-        CodeLanguage language,
+        CSharpScriptEnvironment environment,
         CancellationToken cancellationToken = default
     ) => throw new NotImplementedException();
 
-    /// <summary>Stops the process. C# documents keep their text and lose their language features.</summary>
+    /// <summary>Stops the process. Its documents keep their text and lose their language features.</summary>
     public ValueTask DisposeAsync() => throw new NotImplementedException();
 }
 

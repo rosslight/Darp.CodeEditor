@@ -3,8 +3,8 @@ using System.ComponentModel;
 namespace Darp.CodeEditor;
 
 /// <summary>
-/// The text of one script or file, with its language, its undo history and, when the language has a server, the
-/// server's diagnostics. One or more <see cref="CodeEditor"/>s show it.
+/// The text of one script or file, with its language, its undo history and, when a server created it, the server's
+/// diagnostics. One or more <see cref="CodeEditor"/>s show it.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -12,9 +12,11 @@ namespace Darp.CodeEditor;
 /// the document, and with it the undo history. Use it on the UI thread; it raises its events there.
 /// </para>
 /// <para>
-/// A document whose language has a server is open in that server from creation until <see cref="Dispose"/>, whether
-/// an editor shows it or not, and the server starts with the first such document. Neither creating nor disposing a
-/// document waits for the server. A document without a server holds nothing that needs disposing.
+/// The constructor creates a document without a server. A server creates its own, with
+/// <see cref="LanguageServer.CreateDocument"/> or the C# script server's <c>CreateDocument</c>; such a document is
+/// open in that server from creation until <see cref="Dispose"/>, whether an editor shows it or not, and the server
+/// starts with its first document. Neither creating nor disposing a document waits for the server. A document without
+/// a server holds nothing that needs disposing.
 /// </para>
 /// <para>
 /// A document remembers the caret, selection and first visible line of the editor that showed it last, and an editor
@@ -29,18 +31,12 @@ namespace Darp.CodeEditor;
 /// </remarks>
 public sealed class CodeDocument : INotifyPropertyChanged, IDisposable
 {
-    /// <summary>Creates a document with <paramref name="text"/> and an empty undo history.</summary>
-    /// <param name="language">The language: highlighting, editing rules and the language server, if any.</param>
+    /// <summary>
+    /// Creates a document without a language server, with <paramref name="text"/> and an empty undo history.
+    /// </summary>
+    /// <param name="language">The language: highlighting and editing rules.</param>
     /// <param name="text">The initial text.</param>
-    /// <param name="filePath">
-    /// The file the text belongs to, if any. Language servers that look at nearby files or configuration use it. The
-    /// document never reads or writes it.
-    /// </param>
-    /// <exception cref="InvalidOperationException">
-    /// Another open document of the same language server has <paramref name="filePath"/>.
-    /// </exception>
-    public CodeDocument(CodeLanguage language, string text = "", string? filePath = null) =>
-        throw new NotImplementedException();
+    public CodeDocument(CodeLanguage language, string text = "") => throw new NotImplementedException();
 
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -48,8 +44,11 @@ public sealed class CodeDocument : INotifyPropertyChanged, IDisposable
     /// <summary>Raised after every change of the text, by the user or by the app.</summary>
     public event EventHandler? TextChanged;
 
-    /// <summary>The language: highlighting, editing rules and the language server, if any.</summary>
+    /// <summary>The language: highlighting and editing rules.</summary>
     public CodeLanguage Language => throw new NotImplementedException();
+
+    /// <summary>The server that created the document and provides its language features; null for none.</summary>
+    public LanguageServer? Server => throw new NotImplementedException();
 
     /// <summary>
     /// The file the text belongs to, if any. Setting it, for example after "Save as", moves the document to the new

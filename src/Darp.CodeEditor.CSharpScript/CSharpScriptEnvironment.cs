@@ -11,7 +11,7 @@ namespace Darp.CodeEditor.CSharpScript;
 /// app, NativeAOT apps included: the language server reads those files, and the runner loads them.
 /// </para>
 /// <para>
-/// Languages and compilations keep a copy of the environment, so changing its lists afterwards has no effect.
+/// Documents and compilations keep a copy of the environment, so changing its lists afterwards has no effect.
 /// </para>
 /// </remarks>
 public sealed record CSharpScriptEnvironment

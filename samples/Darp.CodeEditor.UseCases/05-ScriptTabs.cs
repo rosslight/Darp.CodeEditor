@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Darp.CodeEditor;
+using Darp.CodeEditor.CSharpScript;
 using UseCases.Startup;
 
 namespace UseCases.Tabs;
@@ -13,14 +14,20 @@ namespace UseCases.Tabs;
 // - Closing a tab disposes its document. Closing the workbench disposes the rest.
 // - The error count covers every open tab, also those not shown: documents stay open in the server.
 // - A tab title shows "*" while its document has unsaved changes.
+// - The tab keeps the file's path. The C# server does not need it, so the document has none.
 //
 // Questions:
 // - One editor per tab (the tab control's default), or one editor whose Document switches? Both work.
-// - Should a document know its file, with Load and Save, or is FilePath plus MarkUnmodified enough?
+// - Should a document know its file, with Load and Save, or is a path next to it plus MarkUnmodified enough?
 
 /// <summary>The script workbench.</summary>
-public sealed partial class ScriptTabsViewModel(ScriptLanguages languages) : ObservableObject, IDisposable
+public sealed partial class ScriptTabsViewModel : ObservableObject, IDisposable
 {
+    private readonly CSharpScriptServer _scripts;
+
+    /// <summary>Creates the workbench with no open scripts.</summary>
+    public ScriptTabsViewModel(CSharpScriptServer scripts) => _scripts = scripts;
+
     /// <summary>The open scripts.</summary>
     public ObservableCollection<ScriptTab> Tabs { get; } = [];
 
@@ -36,7 +43,7 @@ public sealed partial class ScriptTabsViewModel(ScriptLanguages languages) : Obs
     public async Task OpenAsync(string path, CancellationToken cancellationToken)
     {
         string text = await File.ReadAllTextAsync(path, cancellationToken);
-        var tab = new ScriptTab(new CodeDocument(languages.Sequences, text, path));
+        var tab = new ScriptTab(_scripts.CreateDocument(ScriptEnvironments.Sequences, text), path);
         tab.Document.PropertyChanged += OnDocumentChanged;
         Tabs.Add(tab);
         SelectedTab = tab;
@@ -46,7 +53,7 @@ public sealed partial class ScriptTabsViewModel(ScriptLanguages languages) : Obs
     public async Task SaveAsync(ScriptTab tab, CancellationToken cancellationToken)
     {
         int version = tab.Document.Version;
-        await File.WriteAllTextAsync(tab.Document.FilePath!, tab.Document.Text, cancellationToken);
+        await File.WriteAllTextAsync(tab.FilePath, tab.Document.Text, cancellationToken);
         tab.Document.MarkUnmodified(version);
     }
 
@@ -76,10 +83,11 @@ public sealed partial class ScriptTabsViewModel(ScriptLanguages languages) : Obs
 /// <summary>One open script. Its view is a <see cref="CodeEditor"/> bound to <see cref="Document"/>.</summary>
 public sealed partial class ScriptTab : ObservableObject
 {
-    /// <summary>Creates the tab of <paramref name="document"/>.</summary>
-    public ScriptTab(CodeDocument document)
+    /// <summary>Creates the tab of <paramref name="document"/>, saved in <paramref name="filePath"/>.</summary>
+    public ScriptTab(CodeDocument document, string filePath)
     {
         Document = document;
+        FilePath = filePath;
         document.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(CodeDocument.IsModified))
@@ -90,6 +98,9 @@ public sealed partial class ScriptTab : ObservableObject
     /// <summary>The script.</summary>
     public CodeDocument Document { get; }
 
+    /// <summary>The file the script is saved in.</summary>
+    public string FilePath { get; }
+
     /// <summary>The file name, with "*" while there are unsaved changes.</summary>
-    public string Title => Path.GetFileName(Document.FilePath) + (Document.IsModified ? " *" : "");
+    public string Title => Path.GetFileName(FilePath) + (Document.IsModified ? " *" : "");
 }

@@ -12,8 +12,8 @@ public static class CSharpCodeLanguage
     extension(CodeLanguage)
     {
         /// <summary>
-        /// C#, from VS Code's C# extension, without a language server: colors and editing rules. For scripts,
-        /// <see cref="CSharpScript.CSharpScriptServer.CreateLanguage"/> adds the server and a script environment.
+        /// C#, from VS Code's C# extension: colors and editing rules. Script documents get it from
+        /// <see cref="CSharpScript.CSharpScriptServer.CreateDocument"/>, which adds the server and the environment.
         /// </summary>
         public static CodeLanguage CSharp => CSharpLanguage;
     }

@@ -8,20 +8,23 @@ scenarios there to try the API.
 ## 1. The model
 
 ```csharp
-// Any language: a grammar, editing rules and, optionally, a language server.
-var yamlServer = new LanguageServer(new LanguageServerOptions { FileName = "yaml-language-server", Arguments = ["--stdio"] });
-CodeLanguage yaml = CodeLanguage.Yaml.WithServer(yamlServer);
+// A language is syntax: a grammar and editing rules. Without a server, a document is just colored text.
+var config = new CodeDocument(CodeLanguage.Json, json);
 
-// C# scripts: one server for the app, one language per kind of script.
+// A language server creates the documents it serves.
+var yamlServer = new LanguageServer(new LanguageServerOptions { FileName = "yaml-language-server", Arguments = ["--stdio"] });
+CodeDocument settings = yamlServer.CreateDocument(CodeLanguage.Yaml, yaml, filePath);
+
+// C# scripts: one server for the app; an environment per kind of script says what its scripts see.
 var scripts = new CSharpScriptServer();
-CodeLanguage packetScripts = scripts.CreateLanguage(new CSharpScriptEnvironment
+var packetScripts = new CSharpScriptEnvironment
 {
     GlobalsType = typeof(PacketScriptGlobals),
     Imports = ["System", "System.Linq", "MyApp.ScriptApi"],
-});
+};
+CodeDocument document = scripts.CreateDocument(packetScripts, text);
 
 // The app owns documents; editors show them.
-var document = new CodeDocument(packetScripts, text);
 editor.Document = document;
 
 // Run: compile the version the editor shows, run it, keep calling its handler.
@@ -52,8 +55,8 @@ if (compilation.Succeeded)
   - its exceptions for failed handler calls.
 - **The resource key `CodeEditorColorTheme`**: the color theme of editors that don't set `ColorTheme` (section 2).
 
-**Languages.** A `CodeLanguage` says what kind of text a document holds: a TextMate grammar for colors, VS Code's
-editing rules (comments, brackets, auto-closing pairs) and, optionally, a language server.
+**Languages.** A `CodeLanguage` says what kind of text a document holds: a TextMate grammar for colors and VS Code's
+editing rules (comments, brackets, auto-closing pairs). Servers and script environments are not part of it.
 
 - **Built in:** `CodeLanguage.PlainText`, `Json`, `Xml` and `Yaml`. Packages add theirs as extension members:
   `CodeLanguage.CSharp` from the C# package, and Luau's from its package later. IntelliSense lists them all.
@@ -67,9 +70,10 @@ editing rules (comments, brackets, auto-closing pairs) and, optionally, a langua
       configuration: new Uri("avares://MyApp/Languages/toml.language-configuration.json"));
   ```
 
-- **A server:** `WithServer` returns a copy whose documents the server serves, such as
-  `CodeLanguage.Yaml.WithServer(yamlServer)`. C# script languages come from `CSharpScriptServer.CreateLanguage`, one
-  per kind of script, and compiling takes them too, with or without a document.
+- **Servers create their documents:** `yamlServer.CreateDocument(CodeLanguage.Yaml, text, filePath)` for any LSP
+  server, which may serve several languages. The C# server's `CreateDocument(environment, text)` needs no language:
+  it is always `CodeLanguage.CSharp`. `CodeDocument.Server` says which server a document belongs to, and the
+  constructor creates documents without one. Headless compiling takes the environment.
 - **Loading:** a language starts loading its files in the background when it is created, so there is nothing to
   preload. Themes do the same. A missing or invalid file leaves documents uncolored, and the error goes to Avalonia's
   log, as binding errors do.
@@ -160,8 +164,8 @@ documents, indentation detected from the text, markers that the app adds, and a 
 | Object | Created by | Shared by | Ends with |
 |---|---|---|---|
 | `LanguageServer`, `CSharpScriptServer` | the app, once (a singleton) | all documents of its languages | `DisposeAsync`, at app exit |
-| `CodeLanguage` | the app, once per language or script environment | documents | nothing to dispose |
-| `CodeDocument` | the app, usually a view model, one per script or file | the editors that show it | `Dispose`, when the user closes it for good |
+| `CodeLanguage` | built in, or the app once per language | documents | nothing to dispose |
+| `CodeDocument` | the app, usually a view model, one per script or file: with the constructor, or a server's `CreateDocument` | the editors that show it | `Dispose`, when the user closes it for good |
 | `CodeEditor` | the view | | the visual tree; out of it, the editor drops its subscriptions, requests and rendering resources |
 | `CSharpScriptRunner` | the app, once per isolation boundary | the scripts and handlers in its process | `DisposeAsync` |
 | The runner's services | the app | all runs of the runner | the runner's `DisposeAsync` |
@@ -170,7 +174,7 @@ documents, indentation detected from the text, markers that the app adds, and a 
 
 ## 4. Threads
 
-- **UI thread only:** `CodeEditor` and `CodeDocument`, which raise their events there. The same goes for `CompileAsync(CodeDocument)`, because it takes the document's version when called.
+- **UI thread only:** `CodeEditor` and `CodeDocument`, which raise their events there. The same goes for the servers' `CreateDocument`, and for `CompileAsync(CodeDocument)`, because it takes the document's version when called.
 - **Immutable, any thread:** `CodeLanguage` and `CodeEditorTheme`.
 - **Any thread:** `LanguageServer`, `CSharpScriptServer`, `CSharpScriptRunner` and `ScriptBatcher`.
   - `LanguageServer.StateChanged` is posted to the UI thread for status indicators. Nothing waits for it, so servers and compiling also work before the UI runs.
@@ -242,7 +246,7 @@ Nobody has done it here yet.
 ## 10. Open questions
 
 Question numbers continue the decision log in [design.md](design.md). Decisions taken in the API discussion are
-recorded there too (#61, #64–#77).
+recorded there too (#61, #64–#78).
 
 - **Q55 – Logging.**
   - **Draft:** takes `Microsoft.Extensions.Logging.ILogger`.

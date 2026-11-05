@@ -50,18 +50,13 @@ public sealed partial class PacketScriptViewModel : ObservableObject, IDisposabl
     private IPacketHandler? _handler;
 
     /// <summary>Creates the page with the default script.</summary>
-    public PacketScriptViewModel(
-        CSharpScriptServer scripts,
-        CSharpScriptRunner runner,
-        ScriptOutput output,
-        ScriptLanguages languages
-    )
+    public PacketScriptViewModel(CSharpScriptServer scripts, CSharpScriptRunner runner, ScriptOutput output)
     {
         _scripts = scripts;
         _runner = runner;
         _output = output;
         _output.Written += OnScriptOutput;
-        Script = new CodeDocument(languages.Packets, DefaultScript);
+        Script = scripts.CreateDocument(ScriptEnvironments.Packets, DefaultScript);
     }
 
     /// <summary>The script the editor shows.</summary>
