@@ -33,18 +33,20 @@ internal static class TextMateGrammars
         if (string.IsNullOrEmpty(grammar.GetScopeName()))
             throw new InvalidDataException("The grammar has no scopeName.");
         if (grammar is Raw raw)
-            RemoveCaptureComments(raw);
+            TolerateAsVsCode(raw);
         return grammar;
     }
 
     private static readonly string[] s_captureKeys = ["captures", "beginCaptures", "endCaptures", "whileCaptures"];
 
     /// <summary>
-    /// Removes the <c>comment</c> strings that VS Code's YAML grammars put among captures. vscode-textmate skips them;
-    /// TextMateSharp takes every entry for a rule and fails on them.
+    /// Tolerates in <paramref name="rule"/> and the rules below it what vscode-textmate tolerates and TextMateSharp
+    /// does not. The grammar files stay as VS Code ships them.
     /// </summary>
-    private static void RemoveCaptureComments(Raw rule)
+    private static void TolerateAsVsCode(Raw rule)
     {
+        // VS Code's YAML grammars put comment strings among captures. vscode-textmate skips them; TextMateSharp takes
+        // every entry for a rule and fails on them.
         foreach (string key in s_captureKeys)
         {
             if (rule.TryGetValue(key, out object? value) && value is Raw captures)
@@ -53,14 +55,18 @@ internal static class TextMateGrammars
                     captures.Remove(comment);
             }
         }
+        // VS Code's XML grammar has begin rules without an end or a while. vscode-textmate ends them with \uFFFF, which
+        // text does not contain; TextMateSharp throws on the first line.
+        if (rule.ContainsKey("begin") && !rule.ContainsKey("end") && !rule.ContainsKey("while"))
+            rule["end"] = "\uFFFF";
         foreach (object value in rule.Values)
         {
             if (value is Raw child)
-                RemoveCaptureComments(child);
+                TolerateAsVsCode(child);
             else if (value is IList list)
             {
                 foreach (Raw item in list.OfType<Raw>())
-                    RemoveCaptureComments(item);
+                    TolerateAsVsCode(item);
             }
         }
     }

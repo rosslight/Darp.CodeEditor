@@ -1,0 +1,32 @@
+<Styles
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ce="using:Darp.CodeEditor"
+    xmlns:ae="using:AvaloniaEdit"
+    x:Class="Darp.CodeEditor.CodeEditorStyles"
+>
+    <!-- AvaloniaEdit's templates, in the Fluent variant that takes its colors from the app's theme resources. -->
+    <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
+
+    <Styles.Resources>
+        <ResourceDictionary>
+            <!-- The CodeEditorColorTheme resource, per theme variant, comes from the code: XAML cannot key a static value. -->
+            <ControlTheme x:Key="{x:Type ce:CodeEditor}" TargetType="ce:CodeEditor">
+                <Setter Property="ColorTheme" Value="{DynamicResource CodeEditorColorTheme}" />
+                <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, Menlo, DejaVu Sans Mono, monospace" />
+                <Setter Property="Template">
+                    <ControlTemplate>
+                        <ae:TextEditor
+                            Name="PART_TextEditor"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            Padding="{TemplateBinding Padding}"
+                            WordWrap="{TemplateBinding WordWrap}"
+                            ShowLineNumbers="{TemplateBinding ShowLineNumbers}"
+                        />
+                    </ControlTemplate>
+                </Setter>
+            </ControlTheme>
+        </ResourceDictionary>
+    </Styles.Resources>
+</Styles>

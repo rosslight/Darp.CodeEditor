@@ -540,13 +540,36 @@ Documents, languages and themes (sections 1 and 4) are implemented and tested. P
   creates, edits, undoes and maps a document on a pool thread, then sets up Avalonia on its main thread. The setup
   succeeds, and the document then belongs to the UI thread: it changes there and throws elsewhere;
 - `avares://` files load before setup, with Avalonia's standard asset loader;
-- TextMateSharp, without its grammar package, tokenizes VS Code's JSON grammar, comments included, and its YAML
-  grammar with the five grammars it includes, also in a NativeAOT app published without warnings;
+- TextMateSharp 2.0.5, without its grammar package, tokenizes VS Code's JSON grammar, comments included, its YAML
+  grammar with the five grammars it includes, and its XML grammar, also in a NativeAOT app published without
+  warnings. Reading a grammar tolerates two things that vscode-textmate tolerates and TextMateSharp does not:
+  comments among YAML's captures, and XML's begin rules without an end;
 - on linux-x64 (BenchmarkDotNet): an edit plus its snapshot takes about 0.9 µs on 5,000 lines, and allocates
   3.5 KB; the first position in a snapshot reads its line breaks in about 60 µs, later ones take about 12 ns; mapping
   a range takes about 50 ns after one edit and 0.7 µs after 100; loading a built-in language or theme takes about
   18 ms as the first load in a process, and 30 to 80 µs after that; YAML's included grammars take about 28 ms and
   0.8 ms.
+
+The editor (section 2) shows documents with background TextMate highlighting; search, the editing helpers and the
+language features come next. Proven on linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered
+with Skia:
+
+- the budgets of the design's section 1.2 without a language server, on a quiet machine. Benchmarks measure them
+  (BenchmarkDotNet, i7-13700, a warm process), and the comparison of each pull request tracks them; tests assert no
+  latency (#102). A new editor of 5,000 lines of JSON or YAML shows syntax colors in a rendered frame 24 to 25 ms
+  after it is created. With the layout and the frame after it, a keystroke takes the UI thread 17 ms in 5,000 lines
+  and 11 ms on a line of 20,000 characters, and a page down 13 ms. A bare AvaloniaEdit editor takes 12 ms per
+  keystroke in the same headless app; the editor adds about 2 ms, and highlighting about 3 ms more;
+- without a clock, tests check that such an editor shows syntax colors in its pixels, and that typing on a line of
+  20,000 characters edits it and colors it by the background's time limit of 50 ms per line: a JSON string, which
+  tokenizes in about 2 ms, fully, and an array, which takes seconds, not at all;
+- tokenizing 5,000 lines in the background takes about 62 ms for JSON and YAML (BenchmarkDotNet); one screen of 50
+  lines takes the UI thread about 0.6 ms of the 4 ms it may spend per frame;
+- an editor out of the visual tree is collected while its document lives on, also one that had the focus and showed
+  edits. That needs AvaloniaEdit 12.0.999-ci3-alpha, a preview with fixes not yet released (see CONTRIBUTING.md):
+  its undo steps no longer keep the text areas that showed an edit, and its commands hold the last focused element
+  weakly;
+- an editor created on another thread than the app's main UI thread fails at once with `InvalidOperationException`.
 
 Still open:
 
@@ -560,11 +583,13 @@ Still open:
   step of disposing, and call `DisposeAsync` and `KillAsync` together;
 - calls that must stay quick, such as prompts, callback replies and stopping a run, while the bridge carries bulk data
   in both directions: a test measures their latency under load;
-- integration tests on GitHub Actions for Windows, Linux and macOS, once the API is decided.
+- integration tests on GitHub Actions for Windows, Linux and macOS, once the API is decided;
+- lines over 3,000 characters: AvaloniaEdit draws and edits only their first 3,000 characters, since its upstream
+  #607. The editor raises that limit once AvaloniaEdit makes it an option.
 
 ## 10. Open questions
 
 Question numbers continue the decision log in [design.md](design.md). Decisions taken in the API discussion are
-recorded there too (#61, #64–#100).
+recorded there too (#61, #64–#103).
 
 None right now. Section 9 lists what still needs proving.

@@ -37,6 +37,10 @@ jobs:
       - release-please
     if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || needs.release-please.outputs.release_created == 'true') }}
     runs-on: ubuntu-24.04
+    # The AvaloniaEdit preview of nuget.config: GitHub Packages needs a token even for public packages, and this
+    # repository's own token can't read another repository's packages.
+    env:
+      NuGetPackageSourceCredentials_AvaloniaEditPreview: Username=x;Password=${{ secrets.AVALONIAEDIT_PACKAGES_TOKEN }}
     permissions:
       contents: read
       # Trusted publishing: nuget.org exchanges the workflow's OIDC token for a short-lived API key

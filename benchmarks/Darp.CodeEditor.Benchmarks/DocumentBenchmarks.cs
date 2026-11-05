@@ -64,6 +64,7 @@ public class DocumentBenchmarks
 
     /// <summary>Typing one character in the middle, on the UI thread: the edit, its undo step and its snapshot.</summary>
     [Benchmark]
+    [BenchmarkCategory("CI")]
     [InvocationCount(20_000)]
     public TextSnapshot EditAndSnapshot()
     {

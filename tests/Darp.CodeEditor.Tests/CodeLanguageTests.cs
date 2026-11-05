@@ -21,6 +21,32 @@ public sealed class CodeLanguageTests
             .DecreaseIndentPattern.ShouldBe(new IndentationPattern("^\\s*[}\\]],?\\s*$", null));
     }
 
+    /// <summary>Each built-in language, with a line that its grammar gives scopes of its own.</summary>
+    public static TheoryData<string, string> BuiltInSamples =>
+        new()
+        {
+            { "json", "{ \"key\": [1, true] }" },
+            { "xml", "<root a=\"v\"><!-- note --></root>" },
+            { "yaml", "key: value # note" },
+        };
+
+    [Theory]
+    [MemberData(nameof(BuiltInSamples))]
+    public async Task Each_built_in_language_tokenizes_into_scopes_below_its_root(string id, string sample)
+    {
+        CodeLanguage language = id switch
+        {
+            "json" => CodeLanguage.Json,
+            "xml" => CodeLanguage.Xml,
+            _ => CodeLanguage.Yaml,
+        };
+        IRawGrammar grammar = (await language.Loaded).Grammar.ShouldNotBeNull();
+
+        IReadOnlyList<IReadOnlyList<string>> tokens = TextMate.Tokenize(grammar, sample);
+
+        tokens.ShouldContain(scopes => scopes.Any(scope => scope != grammar.GetScopeName()));
+    }
+
     [Fact]
     public async Task Json_colors_comments()
     {

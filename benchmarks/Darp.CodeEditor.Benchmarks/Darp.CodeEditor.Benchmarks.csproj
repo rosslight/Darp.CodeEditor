@@ -5,13 +5,19 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia.Headless" />
+    <!-- The editor benchmarks render their frames, with the app theme that editors are checked against. -->
+    <PackageReference Include="Avalonia.Skia" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
     <PackageReference Include="BenchmarkDotNet" />
   </ItemGroup>
   <!-- Default: benchmark the library in this working tree. -->
   <ItemGroup Condition="'$(DarpCodeEditorBaselineVersion)' == ''">
     <ProjectReference Include="..\..\src\Darp.CodeEditor\Darp.CodeEditor.csproj" />
   </ItemGroup>
-  <!-- Baseline job: benchmark a packed version of the library. -->
+  <!-- Baseline job: benchmark a packed version of the library, without the benchmarks of code it lacks ([NotInBaseline]). -->
+  <PropertyGroup Condition="'$(DarpCodeEditorBaselineVersion)' != ''">
+    <DefineConstants>$(DefineConstants);BENCHMARK_BASELINE</DefineConstants>
+  </PropertyGroup>
   <ItemGroup Condition="'$(DarpCodeEditorBaselineVersion)' != ''">
     <PackageReference Include="Darp.CodeEditor" VersionOverride="$(DarpCodeEditorBaselineVersion)" />
   </ItemGroup>

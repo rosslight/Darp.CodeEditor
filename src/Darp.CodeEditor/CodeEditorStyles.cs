@@ -1,3 +1,5 @@
+using Avalonia.Controls;
+using Avalonia.Markup.Xaml;
 using Avalonia.Styling;
 
 namespace Darp.CodeEditor;
@@ -22,8 +24,16 @@ namespace Darp.CodeEditor;
 /// signature help use the app's flyout and tooltip looks, and the search bar uses its text boxes and buttons.
 /// </para>
 /// </remarks>
-public sealed class CodeEditorStyles : Styles
+public sealed partial class CodeEditorStyles : Styles
 {
     /// <summary>Creates the styles.</summary>
-    public CodeEditorStyles() { }
+    public CodeEditorStyles()
+    {
+        AvaloniaXamlLoader.Load(this);
+        Resources.ThemeDictionaries[ThemeVariant.Light] = ColorTheme(CodeEditorColorTheme.LightPlus);
+        Resources.ThemeDictionaries[ThemeVariant.Dark] = ColorTheme(CodeEditorColorTheme.DarkPlus);
+    }
+
+    private static ResourceDictionary ColorTheme(CodeEditorColorTheme theme) =>
+        new() { ["CodeEditorColorTheme"] = theme };
 }

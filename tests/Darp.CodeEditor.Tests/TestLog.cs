@@ -1,9 +1,13 @@
 using System.Collections.Concurrent;
 using Avalonia.Logging;
+using Darp.CodeEditor.Loading;
 
 namespace Darp.CodeEditor.Tests;
 
-/// <summary>Collects Avalonia's log entries, for tests of load errors.</summary>
+/// <summary>
+/// Collects the library's entries in Avalonia's log, for tests of load errors. Only those: an entry keeps its source
+/// alive, and tests check that discarded editors are collected.
+/// </summary>
 internal sealed class TestLog : ILogSink
 {
     private static readonly TestLog s_instance = new();
@@ -17,7 +21,7 @@ internal sealed class TestLog : ILogSink
     /// <summary>Makes this log Avalonia's sink, before the code under test logs.</summary>
     public static void Install() => Logger.Sink = s_instance;
 
-    public bool IsEnabled(LogEventLevel level, string area) => true;
+    public bool IsEnabled(LogEventLevel level, string area) => area == AssetFiles.LogArea;
 
     public void Log(LogEventLevel level, string area, object? source, string messageTemplate) =>
         _entries.Enqueue((level, area, source));
