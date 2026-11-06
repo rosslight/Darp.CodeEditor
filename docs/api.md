@@ -120,7 +120,9 @@ A document holds no view state, so several editors of one document never fight o
 template at the caret: `document.Replace(editor.Selection.Range, snippet)`. Setting `Text` replaces everything.
 
 **Keys:** the editor handles only its own: editing, navigation, search (Ctrl+F, Ctrl+H, F3), completion (Ctrl+Space),
-comments (Ctrl+/) and indentation (Tab, Shift+Tab). Other keys, such as F5 or Ctrl+S, reach the app's key bindings.
+comments (Ctrl+/) and indentation (Tab, Shift+Tab). On macOS, Cmd takes Ctrl's place, except for completion, and
+Cmd+Alt+F opens the replace bar, as AvaloniaEdit decides by the operating system. Other keys, such as F5 or Ctrl+S,
+reach the app's key bindings.
 
 **Indentation** belongs to the document (`CodeDocument.Indentation`), so all editors of one document agree. It starts
 as in VS Code, 2 spaces for YAML and 4 otherwise, and is not detected from the text.
@@ -550,7 +552,7 @@ Documents, languages and themes (sections 1 and 4) are implemented and tested. P
   18 ms as the first load in a process, and 30 to 80 µs after that; YAML's included grammars take about 28 ms and
   0.8 ms.
 
-The editor (section 2) shows documents with background TextMate highlighting; search, the editing helpers and the
+The editor (section 2) shows documents with background TextMate highlighting, search and the editing helpers; the
 language features come next. Proven on linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered
 with Skia:
 
@@ -569,7 +571,29 @@ with Skia:
   edits. That needs AvaloniaEdit 12.0.999-ci3-alpha, a preview with fixes not yet released (see CONTRIBUTING.md):
   its undo steps no longer keep the text areas that showed an edit, and its commands hold the last focused element
   weakly;
-- an editor created on another thread than the app's main UI thread fails at once with `InvalidOperationException`.
+- an editor created on another thread than the app's main UI thread fails at once with `InvalidOperationException`;
+- the editing helpers follow VS Code's rules, read from the language's `language-configuration.json`: Enter keeps the
+  indentation, indents after an opening bracket and by the increase pattern, with its flags, and puts the closing
+  bracket of `{|}` on a line of its own; typing a line that matches the decrease pattern outdents it; pairs close
+  unless the token types where the user types are a string or comment that the pair's `notIn` excludes, typed closing
+  characters step over, Backspace deletes an empty pair the editor closed, and opening characters surround the
+  selection; Ctrl+/ toggles line comments, or block comments in XML. Each is one step that the user undoes. The token
+  types come from tokenizing the line up to the caret on the UI thread, within 2 ms, from the state at its start;
+- the document's `Indentation` reaches every editor that shows it at once: Tab, Shift+Tab, new lines and the width of
+  tabs;
+- the bracket next to the caret and its match are boxed in the theme's colors, ignoring brackets in strings and
+  comments by the lines' tokens. The search for a match reads at most 100,000 characters: about 0.5 ms, the most a
+  caret move or keystroke spends on it (BenchmarkDotNet). With its frame, a keystroke that closes a pair takes 15 ms
+  in 5,000 lines, as any other, and toggling the comments of 1,000 lines 17 ms;
+- spaces and tabs show inside the selection only, in the theme's `editorWhitespace.foreground`, in a layer of the text
+  view above the selection;
+- search runs in the background, so a regular expression such as `(a+)+$`, which froze the prototype for 21 s, leaves
+  the UI thread free; it stops after the time limit of 1 s with a message. A search keeps 10,000 matches at most. In
+  5,000 lines of JSON, a word on every line takes 1.2 ms and a regular expression with 10,000 matches 2.3 ms, so the
+  time limit leaves about 400 times that; Replace All of 10,000 matches takes the UI thread about 0.1 s with its
+  frame. Tests check that a search at either limit says so, and that Replace All then changes nothing. AvaloniaEdit's
+  own search panel could not keep this contract: it creates its search strategy itself, searches on the UI thread at
+  every change of the text, and keeps every match.
 
 Still open:
 
@@ -585,7 +609,12 @@ Still open:
   in both directions: a test measures their latency under load;
 - integration tests on GitHub Actions for Windows, Linux and macOS, once the API is decided;
 - lines over 3,000 characters: AvaloniaEdit draws and edits only their first 3,000 characters, since its upstream
-  #607. The editor raises that limit once AvaloniaEdit makes it an option.
+  #607. The editor raises that limit once AvaloniaEdit makes it an option;
+- the parts of VS Code's editing rules that the editor does not read yet: `onEnterRules`, such as JSON's line comment
+  continued on Enter, `indentNextLinePattern` and `unIndentedLinePattern`, brackets of several characters for
+  matching, and the outdent of a closing bracket typed on an empty line by its opening bracket's line, without a
+  decrease pattern. VS Code also strips strings and comments from a line before matching its indentation patterns;
+  the editor matches the line as it is.
 
 ## 10. Open questions
 
