@@ -11,6 +11,7 @@ using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
+using AvaloniaEdit.Search;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.Loading;
@@ -151,6 +152,12 @@ public class CodeEditor : TemplatedControl
     private SearchBar? _searchBar;
 
     /// <summary>
+    /// AvaloniaEdit's search commands, for the part's text area: they open and use the editor's bar, also when code
+    /// executes them, instead of AvaloniaEdit's search panel.
+    /// </summary>
+    private readonly RoutedCommandBinding[] _searchCommands;
+
+    /// <summary>
     /// Where the editor is in <see cref="Document"/> while the part cannot tell: while it shows nothing, and while the
     /// scroll position waits for the first layout.
     /// </summary>
@@ -198,6 +205,13 @@ public class CodeEditor : TemplatedControl
         if (Application.Current?.Dispatcher != Dispatcher)
             throw new InvalidOperationException("The editor works only on the app's main UI thread.");
         ContextMenu = CreateContextMenu();
+        _searchCommands =
+        [
+            new(ApplicationCommands.Find, (_, _) => OpenSearch()),
+            new(ApplicationCommands.Replace, (_, _) => OpenSearch(replace: true)),
+            new(SearchCommands.FindNext, (_, _) => FindNext(previous: false)),
+            new(SearchCommands.FindPrevious, (_, _) => FindNext(previous: true)),
+        ];
         // Ahead of AvaloniaEdit's own keys, which its text area handles as they bubble.
         AddHandler(KeyDownEvent, OnKeyDownTunnel, RoutingStrategies.Tunnel);
     }
@@ -381,6 +395,9 @@ public class CodeEditor : TemplatedControl
             }
             previous.TextArea.Caret.PositionChanged -= OnPartSelectionChanged;
             previous.TextArea.SelectionChanged -= OnPartSelectionChanged;
+            previous.TemplateApplied -= OnPartTemplateApplied;
+            foreach (RoutedCommandBinding binding in _searchCommands)
+                previous.TextArea.CommandBindings.Remove(binding);
         }
         _part = e.NameScope.Find<TextEditor>("PART_TextEditor");
         _searchBar = e.NameScope.Find<SearchBar>("PART_SearchBar");
@@ -398,6 +415,9 @@ public class CodeEditor : TemplatedControl
             options.EnableEmailHyperlinks = false;
             part.TextArea.Caret.PositionChanged += OnPartSelectionChanged;
             part.TextArea.SelectionChanged += OnPartSelectionChanged;
+            part.TemplateApplied += OnPartTemplateApplied;
+            foreach (RoutedCommandBinding binding in _searchCommands)
+                part.TextArea.CommandBindings.Add(binding);
         }
         UpdateShownDocument();
     }
@@ -569,16 +589,7 @@ public class CodeEditor : TemplatedControl
             e.Handled = true;
         }
         else if (e.Key == Key.F3 && (e.KeyModifiers == KeyModifiers.None || shift))
-        {
-            if (_shown is null || _part is not { } part || _searchBar is not { } bar)
-                return;
-            string? text = bar.IsOpen ? null : SelectedLineText(part.TextArea);
-            if (shift)
-                bar.FindPrevious(text);
-            else
-                bar.FindNext(text);
-            e.Handled = true;
-        }
+            e.Handled = FindNext(previous: shift);
         else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && _searchBar is { IsOpen: true } bar)
         {
             bar.Close();
@@ -586,6 +597,32 @@ public class CodeEditor : TemplatedControl
         }
         else if (_helpers is { } helpers && _part is { } part && part.TextArea.IsFocused)
             helpers.OnKeyDown(e);
+    }
+
+    /// <summary>
+    /// Selects the next or previous match, as F3 and Shift+F3 do, opening the bar for the selection if it is closed.
+    /// </summary>
+    /// <returns>Whether there is a document to search.</returns>
+    private bool FindNext(bool previous)
+    {
+        if (_shown is null || _part is not { } part || _searchBar is not { } bar)
+            return false;
+        string? text = bar.IsOpen ? null : SelectedLineText(part.TextArea);
+        if (previous)
+            bar.FindPrevious(text);
+        else
+            bar.FindNext(text);
+        return true;
+    }
+
+    /// <summary>
+    /// Removes the search panel that AvaloniaEdit's editor installs with each template, its input handler and its
+    /// subscriptions: the editor's own bar takes its place.
+    /// </summary>
+    private static void OnPartTemplateApplied(object? sender, TemplateAppliedEventArgs e)
+    {
+        if (sender is TextEditor { SearchPanel: { } panel })
+            panel.Uninstall();
     }
 
     /// <summary>The selected text, if it is within one line: what a search starts with.</summary>

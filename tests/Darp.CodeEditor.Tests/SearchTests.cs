@@ -4,6 +4,7 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using AvaloniaEdit;
+using AvaloniaEdit.Search;
 using Darp.CodeEditor.Search;
 
 namespace Darp.CodeEditor.Tests;
@@ -76,6 +77,26 @@ public sealed class SearchTests(UiFixture ui)
             await Wait.UntilAsync(() => window.Editor.Selection == new TextSelection(6, 7));
             bar.FindBox.Text.ShouldBe("b");
             EditorWindow.PartOf(window.Editor).TextArea.IsFocused.ShouldBeTrue();
+        });
+
+    [Fact]
+    public Task AvaloniaEdits_search_commands_open_the_editors_own_bar() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("|a b a", CodeLanguage.PlainText);
+            TextEditor part = EditorWindow.PartOf(window.Editor);
+            SearchBar bar = BarOf(window);
+
+            ApplicationCommands.Find.Execute(null, part.TextArea);
+            bar.IsOpen.ShouldBeTrue();
+            window.Type("a");
+            await Wait.UntilAsync(() => bar.Count == "1 of 2");
+            SearchCommands.FindNext.Execute(null, part.TextArea);
+            window.Editor.Selection.ShouldBe(new TextSelection(4, 5));
+            ApplicationCommands.Replace.Execute(null, part.TextArea);
+            bar.ReplaceBox.IsEffectivelyVisible.ShouldBeTrue();
+
+            part.SearchPanel.IsOpened.ShouldBeFalse();
         });
 
     [Fact]

@@ -595,7 +595,8 @@ with Skia:
   time limit leaves about 400 times that; Replace All of 10,000 matches takes the UI thread about 0.1 s with its
   frame. Tests check that a search at either limit says so, and that Replace All then changes nothing. AvaloniaEdit's
   own search panel could not keep this contract: it creates its search strategy itself, searches on the UI thread at
-  every change of the text, and keeps every match.
+  every change of the text, and keeps every match. The editor removes it each time AvaloniaEdit's editor is
+  templated, and AvaloniaEdit's search commands open the editor's bar instead.
 
 Still open:
 
