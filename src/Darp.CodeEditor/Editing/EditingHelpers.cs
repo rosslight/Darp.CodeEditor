@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Avalonia.Input;
+using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using Darp.CodeEditor.Highlighting;
@@ -76,8 +77,8 @@ internal sealed class EditingHelpers : IDisposable
     /// <summary>Backspace and Ctrl+/, from the editor's key handler, while the text area has the keyboard.</summary>
     public void OnKeyDown(KeyEventArgs e)
     {
-        if (e.Key == Key.Back && e.KeyModifiers == KeyModifiers.None)
-            e.Handled = DeletePair();
+        if (e.Key == Key.Back && e.KeyModifiers == KeyModifiers.None && TypingOffsets() is { } offsets)
+            e.Handled = DeletePairs(offsets);
         else if (IsToggleComment(e))
         {
             ToggleComment();
@@ -108,51 +109,101 @@ internal sealed class EditingHelpers : IDisposable
         }
         else if (e.Text is [char typed])
         {
-            if (!_textArea.Selection.IsEmpty)
+            if (TypingOffsets() is not { } offsets)
                 e.Handled = Surround(typed);
-            else if (TypeOver(typed, caret))
+            else if (TypeOver(typed, offsets))
                 e.Handled = true;
             else
-                _closing = PairToClose(typed, caret);
+                _closing = PairToClose(typed, offsets);
         }
     }
 
     /// <summary>
     /// Once a character is in: outdents its line, or closes its pair. As in VS Code, a line that outdents closes no
-    /// pair.
+    /// pair. A rectangle selection outdents no line, so that it keeps its shape.
     /// </summary>
     private void OnTextEntered(object? sender, TextInputEventArgs e)
     {
         AutoClosingPair? closing = _closing;
         _closing = null;
-        if (e.Text is not [_] || !_textArea.Selection.IsEmpty || Outdent())
+        if (e.Text is not [_] || TypingOffsets() is not { } offsets)
+            return;
+        if (_textArea.Selection is not RectangleSelection && Outdent())
             return;
         if (closing is { } pair)
-            Close(pair);
+            Close(pair, offsets);
     }
 
-    /// <summary>Forgets the closing characters that the caret left, or that are gone.</summary>
+    /// <summary>
+    /// Where typed text goes in: at the caret, or on every line of an empty rectangle selection, as AvaloniaEdit types
+    /// there. Null for a selection with text, which typing replaces.
+    /// </summary>
+    private int[]? TypingOffsets() =>
+        _textArea.Selection switch
+        {
+            RectangleSelection { Length: 0 } rectangle => [.. rectangle.Segments.Select(s => s.StartOffset)],
+            { IsEmpty: true } => [_textArea.Caret.Offset],
+            _ => null,
+        };
+
+    /// <summary>
+    /// Moves the caret, or every line of an empty rectangle selection, by <paramref name="columns"/>, after the text
+    /// changed or instead of a change.
+    /// </summary>
+    private void MoveTyping(int columns)
+    {
+        if (_textArea.Selection is RectangleSelection rectangle)
+        {
+            TextViewPosition start = rectangle.StartPosition;
+            TextViewPosition end = rectangle.EndPosition;
+            _textArea.Selection = new RectangleSelection(
+                _textArea,
+                new TextViewPosition(start.Line, start.Column + columns),
+                new TextViewPosition(end.Line, end.Column + columns)
+            );
+            _textArea.Caret.Position = new TextViewPosition(end.Line, end.Column + columns);
+        }
+        else
+            _textArea.Caret.Offset += columns;
+        _textArea.Caret.BringCaretToView();
+    }
+
+    /// <summary>
+    /// Forgets the closing characters that the caret left, or every line of a rectangle selection, or that are gone.
+    /// </summary>
     private void OnCaretPositionChanged(object? sender, EventArgs e)
     {
-        int caret = _textArea.Caret.Offset;
-        _autoClosed.RemoveAll(pair => !pair.Encloses(caret, Buffer));
+        int[] positions = TypingOffsets() ?? [_textArea.Caret.Offset];
+        _autoClosed.RemoveAll(pair => !Array.Exists(positions, position => pair.Encloses(position, Buffer)));
     }
 
     /// <summary>
     /// Typing the closing character that the editor typed, right before it, steps over it, as in VS Code: only a
-    /// single character, and not a quote after a backslash, which escapes it.
+    /// single character, and not a quote after a backslash, which escapes it. In a rectangle selection, on every
+    /// line or none.
     /// </summary>
-    private bool TypeOver(char typed, int caret)
+    private bool TypeOver(char typed, int[] offsets)
     {
-        if (caret >= Buffer.TextLength || Buffer.GetCharAt(caret) != typed)
+        if (!Array.TrueForAll(offsets, IsClosedBefore))
             return false;
-        if (IsQuote(typed) && caret > 0 && Buffer.GetCharAt(caret - 1) == '\\')
-            return false;
-        if (!_autoClosed.Exists(pair => pair.Close.Offset == caret && pair.CloseText.Length == 1))
-            return false;
-        _textArea.Caret.Offset = caret + 1;
-        _textArea.Caret.BringCaretToView();
+        MoveTyping(1);
         return true;
+
+        bool IsClosedBefore(int offset) =>
+            offset < Buffer.TextLength
+            && Buffer.GetCharAt(offset) == typed
+            && !(IsQuote(typed) && offset > 0 && Buffer.GetCharAt(offset - 1) == '\\')
+            && _autoClosed.Exists(pair => pair.Close.Offset == offset && pair.CloseText.Length == 1);
+    }
+
+    /// <summary>
+    /// The pair to close when <paramref name="typed"/> goes in at all of <paramref name="offsets"/>: the same one at
+    /// each, as in VS Code with several cursors, or none.
+    /// </summary>
+    private AutoClosingPair? PairToClose(char typed, int[] offsets)
+    {
+        AutoClosingPair? found = PairToClose(typed, offsets[0]);
+        return Array.TrueForAll(offsets, offset => PairToClose(typed, offset) == found) ? found : null;
     }
 
     /// <summary>
@@ -212,76 +263,119 @@ internal sealed class EditingHelpers : IDisposable
             && !pairs.Any(pair => after.StartsWith(pair.Open, StringComparison.Ordinal));
     }
 
-    /// <summary>Types the closing characters of <paramref name="pair"/> after the caret, with the opening ones.</summary>
-    private void Close(AutoClosingPair pair)
+    /// <summary>
+    /// Types the closing characters of <paramref name="pair"/> at <paramref name="offsets"/>, right after the opening
+    /// ones, in their undo step. The caret and the selection stay before them.
+    /// </summary>
+    private void Close(AutoClosingPair pair, int[] offsets)
     {
-        int caret = _textArea.Caret.Offset;
-        InTypedUndoStep(() => Buffer.Insert(caret, pair.Close));
-        _textArea.Caret.Offset = caret;
-        TextAnchor open = Buffer.CreateAnchor(caret - pair.Open.Length);
-        TextAnchor close = Buffer.CreateAnchor(caret);
-        // Text typed right before either one goes before it.
-        open.MovementType = AnchorMovementType.AfterInsertion;
-        close.MovementType = AnchorMovementType.AfterInsertion;
-        _autoClosed.Add(new AutoClosed(open, close, pair.Close));
+        Selection selection = _textArea.Selection;
+        TextViewPosition caret = _textArea.Caret.Position;
+        InTypedUndoStep(() =>
+        {
+            // From the end, so that the offsets still to close stay where they are.
+            for (int i = offsets.Length - 1; i >= 0; i--)
+                Buffer.Insert(offsets[i], pair.Close);
+        });
+        if (selection is RectangleSelection rectangle)
+            _textArea.Selection = new RectangleSelection(_textArea, rectangle.StartPosition, rectangle.EndPosition);
+        _textArea.Caret.Position = caret;
+        for (int i = 0; i < offsets.Length; i++)
+        {
+            // Each line above got its closing characters too.
+            int offset = offsets[i] + i * pair.Close.Length;
+            TextAnchor open = Buffer.CreateAnchor(offset - pair.Open.Length);
+            TextAnchor close = Buffer.CreateAnchor(offset);
+            // Text typed right before either one goes before it.
+            open.MovementType = AnchorMovementType.AfterInsertion;
+            close.MovementType = AnchorMovementType.AfterInsertion;
+            _autoClosed.Add(new AutoClosed(open, close, pair.Close));
+        }
     }
 
     /// <summary>
     /// Backspace between an opening character and the closing one that the editor typed deletes both, as in VS Code:
-    /// for pairs of single characters.
+    /// for pairs of single characters. In a rectangle selection, on every line in one step, or none.
     /// </summary>
-    private bool DeletePair()
+    private bool DeletePairs(int[] offsets)
     {
-        int caret = _textArea.Caret.Offset;
-        if (!_textArea.Selection.IsEmpty || caret == 0 || caret >= Buffer.TextLength)
+        if (!Array.TrueForAll(offsets, IsInEmptyPair))
             return false;
-        string open = Buffer.GetCharAt(caret - 1).ToString();
-        string close = Buffer.GetCharAt(caret).ToString();
-        if (
-            !Configuration.AutoClosingPairs.Any(pair => pair.Open == open && pair.Close == close)
-            || !_autoClosed.Exists(pair => pair.Close.Offset == caret)
-            || !CanChange(caret - 1, 2)
-        )
-            return false;
-        Buffer.Remove(caret - 1, 2);
+        using (Buffer.RunUpdate())
+        {
+            for (int i = offsets.Length - 1; i >= 0; i--)
+                Buffer.Remove(offsets[i] - 1, 2);
+        }
+        if (_textArea.Selection is RectangleSelection)
+            MoveTyping(-1);
         return true;
+
+        bool IsInEmptyPair(int offset)
+        {
+            if (offset == 0 || offset >= Buffer.TextLength)
+                return false;
+            string open = Buffer.GetCharAt(offset - 1).ToString();
+            string close = Buffer.GetCharAt(offset).ToString();
+            return Configuration.AutoClosingPairs.Any(pair => pair.Open == open && pair.Close == close)
+                && _autoClosed.Exists(pair => pair.Close.Offset == offset)
+                && CanChange(offset - 1, 2);
+        }
     }
 
     /// <summary>
     /// Typing the opening character of a surrounding pair puts the pair around the selection, and keeps the text
     /// inside selected, as in VS Code: not around whitespace only, and a quote typed over a single quote replaces it.
+    /// In a rectangle selection, around every line's part in one step, if each has more than whitespace.
     /// </summary>
     private bool Surround(char typed)
     {
-        if (_textArea.Selection is not SimpleSelection selection)
-            return false;
         CharacterPair? found = null;
         foreach (CharacterPair pair in Configuration.SurroundingPairs)
         {
             if (pair.Open is [char open] && open == typed)
                 found = pair;
         }
-        ISegment segment = selection.SurroundingSegment;
-        string selected = Buffer.GetText(segment);
-        if (
-            found is not { } surrounding
-            || string.IsNullOrWhiteSpace(selected)
-            || (IsQuote(typed) && selected is [char quote] && IsQuote(quote))
-            || !CanInsert(segment.Offset)
-            || !CanInsert(segment.EndOffset)
-        )
+        Selection selection = _textArea.Selection;
+        SelectionSegment[] segments = [.. selection.Segments];
+        if (found is not { } surrounding || !Array.TrueForAll(segments, CanSurround))
             return false;
-        int start = segment.Offset;
-        int end = segment.EndOffset;
         using (Buffer.RunUpdate())
         {
-            Buffer.Insert(end, surrounding.Close);
-            Buffer.Insert(start, surrounding.Open);
+            for (int i = segments.Length - 1; i >= 0; i--)
+            {
+                Buffer.Insert(segments[i].EndOffset, surrounding.Close);
+                Buffer.Insert(segments[i].StartOffset, surrounding.Open);
+            }
         }
-        _textArea.Selection = Selection.Create(_textArea, start + 1, end + 1);
-        _textArea.Caret.Offset = end + 1;
+        if (selection is RectangleSelection rectangle)
+        {
+            TextViewPosition start = rectangle.StartPosition;
+            TextViewPosition end = rectangle.EndPosition;
+            _textArea.Selection = new RectangleSelection(
+                _textArea,
+                new TextViewPosition(start.Line, start.Column + 1),
+                new TextViewPosition(end.Line, end.Column + 1)
+            );
+            _textArea.Caret.Position = new TextViewPosition(end.Line, end.Column + 1);
+        }
+        else
+        {
+            int start = segments[0].StartOffset;
+            int end = segments[0].EndOffset;
+            _textArea.Selection = Selection.Create(_textArea, start + 1, end + 1);
+            _textArea.Caret.Offset = end + 1;
+        }
         _textArea.Caret.BringCaretToView();
         return true;
+
+        bool CanSurround(SelectionSegment segment)
+        {
+            string selected = Buffer.GetText(segment);
+            return !string.IsNullOrWhiteSpace(selected)
+                && !(IsQuote(typed) && selected is [char quote] && IsQuote(quote))
+                && CanInsert(segment.StartOffset)
+                && CanInsert(segment.EndOffset);
+        }
     }
 
     /// <summary>Enter: the new line, indented, in one step.</summary>
@@ -292,6 +386,8 @@ internal sealed class EditingHelpers : IDisposable
             // Removes only what is not read-only.
             if (!_textArea.Selection.IsEmpty)
                 _textArea.Selection.ReplaceSelectionWithText("");
+            // Also an empty rectangle selection ends: the new line goes in at the caret.
+            _textArea.ClearSelection();
             int caret = _textArea.Caret.Offset;
             DocumentLine line = Buffer.GetLineByOffset(caret);
             NewLine newLine = NewLineAt(

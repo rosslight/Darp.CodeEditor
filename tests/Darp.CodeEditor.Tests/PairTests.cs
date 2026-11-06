@@ -1,4 +1,6 @@
 using Avalonia.Input;
+using AvaloniaEdit;
+using AvaloniaEdit.Editing;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -103,6 +105,80 @@ public sealed class PairTests(UiFixture ui)
 
             document.Undo();
             document.Text.ShouldBe("{\n    \"a\": value\n}");
+        });
+
+    [Fact]
+    public Task In_a_rectangle_selection_pairs_close_step_over_and_delete_on_every_line() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = await ShowColored("[1,\n 2,|\n]", CodeLanguage.Json);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+            // Empty, after the commas of the first two lines.
+            textArea.Selection = new RectangleSelection(
+                textArea,
+                new TextViewPosition(1, 4),
+                new TextViewPosition(2, 4)
+            );
+
+            window.Type("[");
+            document.Text.ShouldBe("[1,[]\n 2,[]\n]");
+            window.Type("3]");
+            document.Text.ShouldBe("[1,[3]\n 2,[3]\n]");
+            window.Type("[");
+            window.Press(Key.Back);
+            document.Text.ShouldBe("[1,[3]\n 2,[3]\n]");
+
+            // Each was one step on both lines: Backspace, the second pair, the 3, and the first pair.
+            document.Undo();
+            document.Text.ShouldBe("[1,[3][]\n 2,[3][]\n]");
+            document.Undo();
+            document.Undo();
+            document.Text.ShouldBe("[1,[]\n 2,[]\n]");
+            document.Undo();
+            document.Text.ShouldBe("[1,\n 2,\n]");
+        });
+
+    [Fact]
+    public Task Enter_in_a_rectangle_selection_breaks_the_carets_line_only() =>
+        _ui.Run(async () =>
+        {
+            // AvaloniaEdit has no carets on several lines: the rectangle ends.
+            using EditorWindow window = await ShowColored("[1,\n 2,|\n]", CodeLanguage.Json);
+            TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+            textArea.Selection = new RectangleSelection(
+                textArea,
+                new TextViewPosition(1, 4),
+                new TextViewPosition(2, 4)
+            );
+            textArea.Caret.Position = new TextViewPosition(2, 4);
+
+            window.Press(Key.Enter);
+
+            MarkedText.Of(window).ShouldBe("[1,\n 2,\n |\n]");
+            textArea.Selection.ShouldNotBeOfType<RectangleSelection>();
+            textArea.Selection.IsEmpty.ShouldBeTrue();
+        });
+
+    [Fact]
+    public Task In_a_rectangle_selection_an_opening_character_surrounds_every_line() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = await ShowColored("[1, \"a\",\n 2, \"b\"|\n]", CodeLanguage.Json);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+            // The two strings.
+            textArea.Selection = new RectangleSelection(
+                textArea,
+                new TextViewPosition(1, 5),
+                new TextViewPosition(2, 8)
+            );
+
+            window.Type("[");
+
+            document.Text.ShouldBe("[1, [\"a\"],\n 2, [\"b\"]\n]");
+            document.Undo();
+            document.Text.ShouldBe("[1, \"a\",\n 2, \"b\"\n]");
         });
 
     [Fact]
