@@ -63,6 +63,20 @@ public sealed partial class MainWindow : FAAppWindow
     public static FuncMultiValueConverter<object?, string?> IndentationText { get; } =
         new(values => values.ToList() is [_, _, Indentation indentation] ? Describe(indentation) : null);
 
+    /// <summary>
+    /// The title bar's text after a document's name for its state. Its values are the state and the texts for no file
+    /// and for unsaved changes, which change with the language.
+    /// </summary>
+    public static FuncMultiValueConverter<object?, string> StateText { get; } =
+        new(values =>
+            values.ToList() switch
+            {
+                [DocumentState.NoFile, string noFile, _] => $" · {noFile}",
+                [DocumentState.Unsaved, _, string unsaved] => $" · {unsaved}",
+                _ => "",
+            }
+        );
+
     private static FilePickerFileType AllFiles => new(Strings.Current.AllFiles) { Patterns = ["*"] };
 
     private Workspace? Workspace => _viewModel?.Workspace;
@@ -101,7 +115,7 @@ public sealed partial class MainWindow : FAAppWindow
     }
 
     private void OnDisplayModeChanged(object? sender, FANavigationViewDisplayModeChangedEventArgs e) =>
-        PaneButton.IsVisible = e.DisplayMode == FANavigationViewDisplayMode.Minimal;
+        PaneButton.IsVisible = e.DisplayMode != FANavigationViewDisplayMode.Expanded;
 
     private void OnPaneButtonClick(object? sender, RoutedEventArgs e) => Navigation.IsPaneOpen = !Navigation.IsPaneOpen;
 

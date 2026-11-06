@@ -101,12 +101,12 @@
         <Grid
             Height="44"
             Margin="{OnPlatform '8,0', Windows='8,0,140,0', macOS='76,0,8,0'}"
-            ColumnDefinitions="*,Auto,*"
+            ColumnDefinitions="Auto,*"
             Background="Transparent"
             WindowDecorationProperties.ElementRole="TitleBar"
         >
             <StackPanel Orientation="Horizontal" Spacing="2">
-                <!-- Opens the pane once it hides, in narrow windows. -->
+                <!-- Opens the pane while it shows icons only, or hides. -->
                 <Button Name="PaneButton" Classes="command" IsVisible="False" Click="OnPaneButtonClick">
                     <ToolTip.Tip>
                         <TextBlock Text="{Binding Strings.Documents}" />
@@ -174,26 +174,32 @@
                 </Button>
             </StackPanel>
 
-            <!-- What the page shows: the settings, or the document's name and state. -->
-            <Panel Grid.Column="1" VerticalAlignment="Center" IsHitTestVisible="False">
-                <TextBlock Text="{Binding Strings.Settings}" IsVisible="{Binding ShowsSettings}" />
-                <StackPanel
-                    Orientation="Horizontal"
-                    Spacing="6"
+            <!--
+              What the page shows: the settings, or the document's name and state. It is centered in the space next
+              to the commands, and shortened with "…" where that space runs out.
+            -->
+            <Panel Grid.Column="1" Margin="12,0" VerticalAlignment="Center" IsHitTestVisible="False">
+                <TextBlock
+                    HorizontalAlignment="Center"
+                    Text="{Binding Strings.Settings}"
+                    IsVisible="{Binding ShowsSettings}"
+                />
+                <TextBlock
+                    HorizontalAlignment="Center"
+                    TextTrimming="CharacterEllipsis"
                     IsVisible="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
                 >
-                    <TextBlock Text="{Binding ShownDocument.Name}" />
-                    <TextBlock
-                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                        Text="{Binding Strings.StateNoFile, StringFormat='· {0}'}"
-                        IsVisible="{Binding ShownDocument.State, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static documents:DocumentState.NoFile}}"
-                    />
-                    <TextBlock
-                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                        Text="{Binding Strings.StateUnsaved, StringFormat='· {0}'}"
-                        IsVisible="{Binding ShownDocument.State, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static documents:DocumentState.Unsaved}}"
-                    />
-                </StackPanel>
+                    <Run Text="{Binding ShownDocument.Name}" />
+                    <Run Foreground="{DynamicResource TextFillColorSecondaryBrush}">
+                        <Run.Text>
+                            <MultiBinding Converter="{x:Static local:MainWindow.StateText}">
+                                <Binding Path="ShownDocument.State" />
+                                <Binding Path="Strings.StateNoFile" />
+                                <Binding Path="Strings.StateUnsaved" />
+                            </MultiBinding>
+                        </Run.Text>
+                    </Run>
+                </TextBlock>
             </Panel>
         </Grid>
 
