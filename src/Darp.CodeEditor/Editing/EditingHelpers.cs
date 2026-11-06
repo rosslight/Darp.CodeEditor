@@ -542,7 +542,7 @@ internal sealed class EditingHelpers : IDisposable
     /// indented it on purpose. Otherwise the lines above it are searched for one that does.
     /// </param>
     /// <param name="lineText">The text of a line by its number.</param>
-    private static Inherited? InheritedIndentation(
+    internal static Inherited? InheritedIndentation(
         IndentationMatching matching,
         int lineNumber,
         bool honorIntentional,
@@ -551,31 +551,33 @@ internal sealed class EditingHelpers : IDisposable
     {
         if (lineNumber <= 1)
             return new Inherited("", false);
+        // Every line read counts against the time, also the empty ones that the scans skip.
+        string Read(int number) => matching.Read(lineText, number);
         // The first line with text above empty lines takes no indentation.
         for (int prior = lineNumber - 1; prior > 0; prior--)
         {
-            if (lineText(prior).Length > 0)
+            if (Read(prior).Length > 0)
                 break;
             if (prior == 1)
                 return new Inherited("", false);
         }
-        int preceding = PrecedingLineWithText(lineNumber, lineText);
+        int preceding = PrecedingLineWithText(lineNumber, Read);
         if (preceding < 1)
             return null;
-        string text = lineText(preceding);
+        string text = Read(preceding);
         if (matching.Increases(text))
             return new Inherited(Leading(text), true);
         if (matching.Decreases(text) || preceding == 1 || honorIntentional)
             return new Inherited(Leading(text), false);
         for (int above = preceding - 1; above > 0; above--)
         {
-            string aboveText = lineText(above);
+            string aboveText = Read(above);
             if (matching.Increases(aboveText))
                 return new Inherited(Leading(aboveText), true);
             if (matching.Decreases(aboveText))
                 return new Inherited(Leading(aboveText), false);
         }
-        return new Inherited(Leading(lineText(1)), false);
+        return new Inherited(Leading(Read(1)), false);
 
         static string Leading(string line) => line[..LeadingWhitespace(line)];
     }
@@ -782,7 +784,7 @@ internal sealed class EditingHelpers : IDisposable
     private readonly record struct NewLine(string Text, int Caret, int Replaced);
 
     /// <summary>An indentation that lines above give, and whether it is one level more.</summary>
-    private readonly record struct Inherited(string Indentation, bool Increases);
+    internal readonly record struct Inherited(string Indentation, bool Increases);
 
     /// <summary>A closing text that the editor typed, and where its pair starts.</summary>
     private sealed record AutoClosed(TextAnchor Open, TextAnchor Close, string CloseText)

@@ -144,9 +144,9 @@ internal sealed record IndentationRules(Regex IncreaseIndentPattern, Regex Decre
 }
 
 /// <summary>
-/// Matches lines against the indentation rules for one indentation. A match after its time limit, or one that takes
-/// longer than <see cref="IndentationRules.MatchTimeout"/>, throws <see cref="RegexMatchTimeoutException"/>, and the
-/// indentation keeps what the line has.
+/// Reads and matches lines against the indentation rules for one indentation. A line read or a match after its time
+/// limit, or a match that takes longer than <see cref="IndentationRules.MatchTimeout"/>, throws
+/// <see cref="RegexMatchTimeoutException"/>, and the indentation keeps what the line has.
 /// </summary>
 internal readonly struct IndentationMatching(IndentationRules rules, long deadline)
 {
@@ -154,6 +154,15 @@ internal readonly struct IndentationMatching(IndentationRules rules, long deadli
 
     /// <summary>The <see cref="Stopwatch"/> timestamp after which no match starts.</summary>
     private readonly long _deadline = deadline;
+
+    /// <summary>
+    /// Reads line <paramref name="number"/> with <paramref name="lineText"/>, within the time limit: a scan over
+    /// whitespace lines reads many without matching any.
+    /// </summary>
+    public string Read(Func<int, string> lineText, int number) =>
+        Stopwatch.GetTimestamp() < _deadline
+            ? lineText(number)
+            : throw new RegexMatchTimeoutException("", "", IndentationRules.TimeLimit);
 
     /// <summary>Whether lines after <paramref name="line"/> are indented one level more.</summary>
     public bool Increases(string line) => Matches(_rules.IncreaseIndentPattern, line);

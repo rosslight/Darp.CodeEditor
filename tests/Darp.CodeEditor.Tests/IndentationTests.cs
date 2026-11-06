@@ -1,7 +1,10 @@
+using System.Text.RegularExpressions;
 using Avalonia.Controls;
 using Avalonia.Input;
 using AvaloniaEdit;
 using AvaloniaEdit.Rendering;
+using Darp.CodeEditor.Editing;
+using Darp.CodeEditor.Loading;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -139,6 +142,29 @@ public sealed class IndentationTests(UiFixture ui)
 
             window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(above + "    end");
         });
+
+    [Fact]
+    public void Indentation_out_of_time_reads_no_more_lines()
+    {
+        // As after 500,000 empty lines: the scan for a line with text ends with the time, not only the matching.
+        var rules = new IndentationRules(new Regex("x"), new Regex("y"));
+        int reads = 0;
+
+        Should.Throw<RegexMatchTimeoutException>(() =>
+            EditingHelpers.InheritedIndentation(
+                new IndentationMatching(rules, deadline: 0),
+                500_001,
+                honorIntentional: true,
+                _ =>
+                {
+                    reads++;
+                    return "";
+                }
+            )
+        );
+
+        reads.ShouldBe(0);
+    }
 
     /// <summary>A language with word brackets, and indentation patterns that ignore case.</summary>
     private static CodeLanguage Pascal { get; } =
