@@ -5,6 +5,7 @@ using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Media.TextFormatting;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -103,6 +104,25 @@ internal sealed class EditorWindow : IDisposable
                 .Select(brush => brush.Color)
                 .ToHashSet()
             : new HashSet<Color>();
+
+    /// <summary>
+    /// The text color that the rendered line shows at <paramref name="offset"/>, on a line without tabs; null while the
+    /// line is not rendered.
+    /// </summary>
+    public Color? ColorAt(int offset)
+    {
+        DocumentLine line = TextView.Document.GetLineByOffset(offset);
+        if (!TextView.VisualLinesValid || TextView.GetVisualLine(line.LineNumber) is not { } visualLine)
+            return null;
+        int column = offset - line.Offset;
+        foreach (TextRun run in visualLine.TextLines.SelectMany(t => t.TextRuns))
+        {
+            if (column < run.Length)
+                return (run.Properties?.ForegroundBrush as ISolidColorBrush)?.Color;
+            column -= run.Length;
+        }
+        return null;
+    }
 
     /// <summary>The text colors that the rendered lines use.</summary>
     public IReadOnlySet<Color> RenderedColors() =>

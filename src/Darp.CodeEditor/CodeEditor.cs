@@ -53,14 +53,15 @@ namespace Darp.CodeEditor;
 /// </para>
 /// <para>
 /// Built in, with no settings: the current line is highlighted, whitespace shows inside the selection, and the view
-/// scrolls past the last line. Editing follows the language's rules, as VS Code applies them: the bracket next to the
-/// caret and its match are boxed, pairs close as you type, typing their closing character steps over it and Backspace
-/// deletes an empty pair, opening characters surround the selection, new lines are indented by the brackets and the
-/// indentation rules, a line that comes to match the decrease rule outdents, and comments toggle with the line
-/// comment, or else the block comment. Brackets in strings and comments don't match, and pairs that the language
-/// excludes there don't close. In a rectangle selection, pairs close, step over and delete, and opening characters
-/// surround, on every line; Enter breaks only the caret's line and ends the rectangle. Tab and new lines indent by the
-/// document's <see cref="CodeDocument.Indentation"/>.
+/// scrolls past the last line. Lines of up to 3,000 characters show and edit in full; a longer line shows its first
+/// 3,000 characters and collapses the rest into "...", which can't be edited. Editing follows the language's rules, as
+/// VS Code applies them: the bracket next to the caret and its match are boxed, pairs close as you type, typing their
+/// closing character steps over it and Backspace deletes an empty pair, opening characters surround the selection, new
+/// lines are indented by the brackets and the indentation rules, a line that comes to match the decrease rule outdents,
+/// and comments toggle with the line comment, or else the block comment. Brackets in strings and comments don't match,
+/// and pairs that the language excludes there don't close. In a rectangle selection, pairs close, step over and delete,
+/// and opening characters surround, on every line; Enter breaks only the caret's line and ends the rectangle. Tab and
+/// new lines indent by the document's <see cref="CodeDocument.Indentation"/>.
 /// Hover shows the server's Markdown, with code blocks highlighted by the document's grammar, below the messages of
 /// the diagnostics under the pointer. Completion items show VS Code's codicons, in the color theme's symbol colors.
 /// The font defaults to a monospace one; set <c>FontFamily</c> and <c>FontSize</c> as for any control.
@@ -418,6 +419,8 @@ public class CodeEditor : TemplatedControl
             part.Document = null;
             part.IsReadOnly = true;
             TextEditorOptions options = part.Options;
+            // AvaloniaEdit's default, until Avalonia's wrapping and font fallback get fast on longer wrapped lines.
+            options.LongLineLimit = 3_000;
             options.HighlightCurrentLine = true;
             options.AllowScrollBelowDocument = true;
             // Links would be drawn in AvaloniaEdit's blue, not in the theme's colors.

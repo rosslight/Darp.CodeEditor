@@ -1,5 +1,3 @@
-// Left out of the baseline's build while the target branch has no editor: see NotInBaselineAttribute.
-#if !BENCHMARK_BASELINE
 using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
@@ -18,7 +16,6 @@ namespace Darp.CodeEditor.Benchmarks;
 /// The first colored frame of a new editor of 5,000 lines of JSON: from creating the editor until a rendered frame shows
 /// its visible lines in syntax colors, without a language server. The budget is 100 ms (design, section 1.2).
 /// </summary>
-[NotInBaseline]
 [InvocationCount(1)]
 [WarmupCount(2)]
 [IterationCount(10)]
@@ -61,29 +58,31 @@ public class FirstFrameBenchmarks
 /// One keystroke on the UI thread, with the layout and the frame that follow it: the cost the user feels while typing.
 /// Each call types a character or deletes it again, so the text stays the same.
 /// </summary>
-[NotInBaseline]
 [WarmupCount(2)]
 [IterationCount(10)]
 public class TypingBenchmarks
 {
     private Window? _window;
+    private CodeDocument? _document;
     private bool _typed;
 
     /// <summary>In the middle of 5,000 lines of JSON, at the start of a key.</summary>
     [GlobalSetup(Target = nameof(KeystrokeIn5000Lines))]
-    public void ShowJson() => Show(HeadlessEditor.Json(5000), new TextPosition(2500, 4), HeadlessEditor.JsonKey);
+    public void ShowJson() =>
+        Show(HeadlessEditor.Json(5000), new TextPosition(2500, 4), HeadlessEditor.JsonKey, wordWrap: false);
 
     /// <summary>
-    /// On a line of 20,000 characters, a JSON array that runs out of the background's time limit, near its start:
-    /// AvaloniaEdit edits only the first 3,000 characters of a longer line.
+    /// Near the start of a wrapped line of 2,900 characters, just under the editor's limit of 3,000: a JSON string of
+    /// ASCII letters, in which Avalonia's wrapping finds no break and searches far ahead for every row.
     /// </summary>
-    [GlobalSetup(Target = nameof(KeystrokeOnA20000CharacterLine))]
+    [GlobalSetup(Target = nameof(KeystrokeOnAWrapped2900CharacterLine))]
     public void ShowLongLine() =>
         Show(
-            "{\n  \"long\": [" + string.Concat(Enumerable.Repeat("1, ", 6_666)) + "1],\n  \"after\": 1\n}",
+            "{\n  \"long\": \"" + new string('x', 2_887) + "\",\n  \"after\": 1\n}",
             new TextPosition(2, 100),
-            // The long line keeps no colors, and the next one starts from the start of the grammar.
-            HeadlessEditor.Expect("\"after\"", Color.Parse("#A31515"))
+            // The line's key, in its color once the background has tokenized the line.
+            HeadlessEditor.Expect("\"long\"", Color.Parse("#0451A5")),
+            wordWrap: true
         );
 
     [Benchmark]
@@ -92,16 +91,17 @@ public class TypingBenchmarks
 
     [Benchmark]
     [BenchmarkCategory("CI")]
-    public void KeystrokeOnA20000CharacterLine() => TypeOrDelete();
+    public void KeystrokeOnAWrapped2900CharacterLine() => TypeOrDelete();
 
     [GlobalCleanup]
     public void Close() => _window?.Close();
 
-    private void Show(string json, TextPosition caret, HeadlessEditor.Expected colored)
+    private void Show(string json, TextPosition caret, HeadlessEditor.Expected colored, bool wordWrap)
     {
         HeadlessEditor.SetUpApp();
         CodeDocument document = CodeDocument.Create(CodeLanguage.Json, json);
-        var editor = new CodeEditor { Document = document };
+        _document = document;
+        var editor = new CodeEditor { Document = document, WordWrap = wordWrap };
         _window = HeadlessEditor.Show(editor);
         HeadlessEditor.RenderUntilColored(_window, editor, colored);
         editor.Selection = new TextSelection(document.CurrentSnapshot.GetOffset(caret));
@@ -111,6 +111,8 @@ public class TypingBenchmarks
     private void TypeOrDelete()
     {
         Window window = _window ?? throw new InvalidOperationException("Not set up.");
+        CodeDocument document = _document ?? throw new InvalidOperationException("Not set up.");
+        int length = document.CurrentSnapshot.Length;
         _typed = !_typed;
         if (_typed)
             window.KeyTextInput("1");
@@ -120,6 +122,9 @@ public class TypingBenchmarks
             window.KeyRelease(Key.Back, RawInputModifiers.None, PhysicalKey.Backspace, null);
         }
         HeadlessEditor.Render(window);
+        // A keystroke that edits nothing would look fast.
+        if (document.CurrentSnapshot.Length != length + (_typed ? 1 : -1))
+            throw new InvalidOperationException("The keystroke did not edit the text.");
     }
 }
 
@@ -127,7 +132,6 @@ public class TypingBenchmarks
 /// One page down through 5,000 lines of JSON, just opened, on the UI thread, with the layout and the frame that follow:
 /// each page shows lines that are not tokenized yet. An iteration goes through the document once.
 /// </summary>
-[NotInBaseline]
 [InvocationCount(Pages)]
 [WarmupCount(2)]
 [IterationCount(10)]
@@ -252,4 +256,3 @@ internal static class HeadlessEditor
         }
     }
 }
-#endif

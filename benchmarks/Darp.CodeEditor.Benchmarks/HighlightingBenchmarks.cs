@@ -1,5 +1,3 @@
-// Left out of the baseline's build while the target branch has no highlighter: see NotInBaselineAttribute.
-#if !BENCHMARK_BASELINE
 using BenchmarkDotNet.Attributes;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.Loading;
@@ -12,7 +10,6 @@ namespace Darp.CodeEditor.Benchmarks;
 /// throughput, and the UI thread's work for one screen.
 /// </summary>
 [MemoryDiagnoser]
-[NotInBaseline]
 [WarmupCount(2)]
 [IterationCount(10)]
 public class HighlightingBenchmarks
@@ -104,4 +101,3 @@ public class HighlightingBenchmarks
         + string.Concat(Enumerable.Range(2, Lines - 3).Select(i => $"  \"key{i}\": [\"value {i}\", {i}, true],\n"))
         + "  \"end\": null\n}";
 }
-#endif

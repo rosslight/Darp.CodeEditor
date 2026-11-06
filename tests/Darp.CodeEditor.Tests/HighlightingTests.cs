@@ -1,4 +1,5 @@
 using Avalonia.Media;
+using AvaloniaEdit.Rendering;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.Loading;
 using TextMateSharp.Internal.Grammars;
@@ -16,6 +17,9 @@ public sealed class HighlightingTests(UiFixture ui)
     private static readonly Color s_propertyName = Color.Parse("#0451A5");
     private static readonly Color s_number = Color.Parse("#098658");
     private static readonly Color s_keyword = Color.Parse("#0000FF");
+
+    /// <summary>The Light+ color of text that the grammar finds invalid.</summary>
+    private static readonly Color s_invalid = Color.Parse("#CD3131");
 
     /// <summary>The Light+ color of XML's tag names and YAML's keys.</summary>
     private static readonly Color s_tag = Color.Parse("#800000");
@@ -129,7 +133,7 @@ public sealed class HighlightingTests(UiFixture ui)
                 $"{{\n  \"long\": {value},\n  \"after\": 1\n}}"
             );
             using var window = new EditorWindow(new CodeEditor { Document = document });
-            // Near the line's start: AvaloniaEdit edits and draws only the first 3,000 characters of a longer line.
+            // Near the line's start: the editor edits and draws only the first 3,000 characters of a longer line.
             window.Editor.Selection = new TextSelection(document.CurrentSnapshot.GetOffset(new TextPosition(2, 100)));
 
             window.Type("1, ");
@@ -289,6 +293,112 @@ public sealed class HighlightingTests(UiFixture ui)
             });
         });
 
+    [Fact]
+    public Task Typing_inside_a_long_string_builds_its_line_once() =>
+        _ui.Run(async () =>
+        {
+            CodeDocument document = CodeDocument.Create(
+                CodeLanguage.Json,
+                $"{{\n{StringLineShownInFull},\n  \"after\": 2\n}}"
+            );
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return window.ColorsOfLine(3).Contains(s_propertyName);
+            });
+            BackgroundTextMateHighlighter highlighter = window
+                .TextView.LineTransformers.OfType<BackgroundTextMateHighlighter>()
+                .Single();
+            var builds = new BuildCounter(lineNumber: 2);
+            window.TextView.LineTransformers.Add(builds);
+            window.Editor.Selection = new TextSelection(document.CurrentSnapshot.GetOffset(new TextPosition(2, 100)));
+            window.Render();
+            int before = builds.Count;
+
+            // Typing builds the line to place the caret. Without the dispatcher's jobs, the background's tokens for the
+            // typed line come later.
+            EditorWindow.PartOf(window.Editor).TextArea.PerformTextInput("x");
+            window.Window.UpdateLayout();
+            int[]? moved = highlighter.TokensOf(2);
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return highlighter.TokensOf(2) != moved;
+            });
+            window.Render();
+
+            // They are the tokens from before, moved with the typed character, so the line is not built again.
+            highlighter.TokensOf(2).ShouldBe(moved);
+            (builds.Count - before).ShouldBe(1);
+        });
+
+    [Fact]
+    public Task Typing_a_quote_that_ends_a_long_string_recolors_its_line() =>
+        _ui.Run(async () =>
+        {
+            CodeDocument document = CodeDocument.Create(
+                CodeLanguage.Json,
+                $"{{\n{StringLineShownInFull},\n  \"after\": 2\n}}"
+            );
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return window.ColorsOfLine(3).Contains(s_propertyName);
+            });
+            // Ten characters before the string's end: TextMate searches once per character of invalid text, and the
+            // rest of a longer string would run out of the background's time.
+            int end = document.CurrentSnapshot.GetOffset(new TextPosition(2, StringLineShownInFull.Length));
+            window.Editor.Selection = new TextSelection(end - 10);
+
+            window.Type("\"");
+
+            // The rest of the old string follows the end of the value, where JSON expects a comma.
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return window.ColorsOfLine(2).Contains(s_invalid);
+            });
+        });
+
+    [Fact]
+    public Task A_line_that_the_app_lays_out_while_the_text_changes_shows_the_new_colors() =>
+        _ui.Run(async () =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.Json, "{\n  \"a\": 1,\n  \"b\": 2\n}");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return window.ColorsOfLine(2).Contains(s_number);
+            });
+            // The number selected, and an app that scrolls to the selection when it changes, which lays out its line.
+            int number = document.CurrentSnapshot.GetOffset(new TextPosition(2, 8));
+            editor.Selection = new TextSelection(number, number + 1);
+            editor.PropertyChanged += (_, e) =>
+            {
+                if (e.Property == CodeEditor.SelectionProperty)
+                    editor.ScrollTo(editor.Selection.Range);
+            };
+
+            // A space at the line's start, which moves the selection while the text changes.
+            document.Replace(new TextRange(number - 7, 0), " ");
+
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return window.ColorAt(number + 1) == s_number;
+            });
+        });
+
+    /// <summary>
+    /// A property of 2,000 characters whose value is one string: the editor shows it in full, and the UI thread leaves
+    /// it to the background.
+    /// </summary>
+    private static string StringLineShownInFull { get; } = $"  \"long\": \"{new string('x', 2_000)}\"";
+
     /// <summary>A property of 20,000 characters whose value is one string: it tokenizes in about a millisecond.</summary>
     private static string LongStringLine { get; } = $"  \"long\": \"{new string('x', 20_000)}\"";
 
@@ -313,5 +423,19 @@ public sealed class HighlightingTests(UiFixture ui)
                 colors.Add(brush.Color);
         }
         return colors;
+    }
+
+    /// <summary>Counts how often the text view builds the visual line of one document line.</summary>
+    private sealed class BuildCounter(int lineNumber) : IVisualLineTransformer
+    {
+        private readonly int _lineNumber = lineNumber;
+
+        public int Count { get; private set; }
+
+        public void Transform(ITextRunConstructionContext context, IList<VisualLineElement> elements)
+        {
+            if (context.VisualLine.FirstDocumentLine.LineNumber == _lineNumber)
+                Count++;
+        }
     }
 }

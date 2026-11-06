@@ -29,6 +29,11 @@ namespace Darp.CodeEditor.Highlighting;
 /// the view.
 /// </para>
 /// <para>
+/// An edited line keeps its old tokens until it is tokenized again. An edit inside the line moves them with the text,
+/// and typed text takes the color of the token before it. Results draw again only the lines whose tokens changed:
+/// building a long wrapped line again would cost as much as the keystroke did.
+/// </para>
+/// <para>
 /// The background tokenizes lines of any length, each within 50 ms. TextMate's regex
 /// matching can be quadratic on long lines: 20,000 characters of a JSON array take seconds, while a JSON string of the
 /// same length takes about a millisecond. A line that runs out of time keeps no colors, and the state at its end is
@@ -64,6 +69,8 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
 
     /// <summary>Lines that compile the most common expressions of a grammar, for a document without text.</summary>
     private static readonly string[] s_warmUpLines = ["x = f(1, \"s\") // c", "{ [ ] } /* c */ 'c' 0.5"];
+
+    private static readonly char[] s_lineBreaks = ['\r', '\n'];
 
     private readonly TextView _textView;
     private readonly TextDocument _document;
@@ -105,12 +112,18 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         Schedule();
     }
 
+    /// <summary>
+    /// Raised when the background's results changed lines' tokens, in view or not: drawing again reaches only the
+    /// lines in view. Lines tokenized while the view builds them come with <see cref="TextView.VisualLinesChanged"/>.
+    /// </summary>
+    public event EventHandler? TokensChanged;
+
     /// <summary>The grammar the tokens come from; null for none.</summary>
     public TextMateGrammar? Grammar => _grammar;
 
     /// <summary>
-    /// The tokens of the line <paramref name="lineNumber"/> as last tokenized, which may be from before an edit; null
-    /// for none yet, or a line that ran out of time.
+    /// The tokens of the line <paramref name="lineNumber"/> as last tokenized, which may be from before an edit, moved
+    /// with the edits inside the line since; null for none yet, or a line that ran out of time.
     /// </summary>
     public int[]? TokensOf(int lineNumber) => _lines[lineNumber - 1].Tokens;
 
@@ -275,7 +288,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
             TokenizeNow(grammar, line, index, entry);
         if (entry.Tokens is not { } tokens)
             return;
-        // Tokens may be from before an edit: clamp them to the line as it is now.
+        // Tokens may be from before an edit that joined or split lines: clamp them to the line as it is now.
         int length = line.Length;
         for (int i = 0; i < tokens.Length; i += 2)
         {
@@ -379,10 +392,19 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
             _lines.RemoveRange(first + 1, -delta);
         for (int i = first; i <= lastInserted; i++)
             _lines[i].Invalidate();
+        // Inside one line, the tokens move with the text: the line keeps its colors meanwhile, and the results for it,
+        // when they bring the same tokens, need not draw it again.
+        if (!ContainsLineBreak(e.RemovedText) && !ContainsLineBreak(e.InsertedText))
+            _lines[first].MoveTokens(e.Offset - firstLine.Offset, e.RemovalLength, e.InsertionLength);
+        // The text view drops the changed lines before the change. A handler of the change that ran before this one,
+        // such as the app's for the selection that the change moved, may have built them again from the old tokens.
+        _textView.Redraw(e.Offset, e.InsertionLength);
         _firstInvalid = Math.Min(_firstInvalid, first);
         _firstEditedSinceRequest = Math.Min(_firstEditedSinceRequest, first);
         Schedule();
     }
+
+    private static bool ContainsLineBreak(ITextSource text) => text.IndexOfAny(s_lineBreaks, 0, text.TextLength) >= 0;
 
     /// <summary>Requests tokenizing once the current input and layout are done; repeated calls coalesce.</summary>
     private void Schedule()
@@ -468,21 +490,26 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         LineResult[] results = request.Results.Result;
         int first = request.First;
         int applicable = Math.Min(results.Length, _firstEditedSinceRequest - first);
+        bool anyChanged = false;
         for (int i = 0; i < applicable; i++)
         {
             LineEntry line = _lines[first + i];
             bool endStateChanged = !Equals(line.EndState, results[i].EndState);
+            // The view built the line from its tokens as they are now, moved with the edits since, so the same tokens
+            // need no new layout.
+            bool tokensChanged = !line.Tokens.AsSpan().SequenceEqual(results[i].Tokens);
             line.Tokenized(results[i].Tokens, results[i].EndState, exact: true);
             // The next line starts in a different state, so its tokens may be wrong too.
             if (endStateChanged && first + i + 1 < _lines.Count)
                 _lines[first + i + 1].Invalidate();
+            if (tokensChanged)
+            {
+                _textView.Redraw(_document.GetLineByNumber(first + i + 1));
+                anyChanged = true;
+            }
         }
-        if (applicable > 0)
-        {
-            int start = _document.GetLineByNumber(first + 1).Offset;
-            DocumentLine lastLine = _document.GetLineByNumber(first + applicable);
-            _textView.Redraw(start, lastLine.EndOffset - start);
-        }
+        if (anyChanged)
+            TokensChanged?.Invoke(this, EventArgs.Empty);
         Schedule();
     }
 
@@ -529,6 +556,23 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         {
             IsValid = false;
             TooSlowForUiThread = false;
+        }
+
+        /// <summary>
+        /// Moves the tokens with an edit inside the line that replaced <paramref name="removed"/> characters at
+        /// <paramref name="column"/> with <paramref name="inserted"/> characters. The inserted text joins the token
+        /// before it; at the line's start, the first token.
+        /// </summary>
+        public void MoveTokens(int column, int removed, int inserted)
+        {
+            if (Tokens is not { } tokens)
+                return;
+            // The first token starts the line, at 0, whatever the edit.
+            for (int i = 2; i < tokens.Length; i += 2)
+            {
+                if (tokens[i] >= column)
+                    tokens[i] = Math.Max(tokens[i] - removed, column) + inserted;
+            }
         }
     }
 }

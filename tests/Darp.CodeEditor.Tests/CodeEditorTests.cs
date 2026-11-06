@@ -333,6 +333,23 @@ public sealed class CodeEditorTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Lines_of_up_to_3000_characters_are_edited_in_full_and_longer_ones_up_to_their_collapsed_rest() =>
+        _ui.Run(() =>
+        {
+            string line = new('a', 3_000);
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, $"{line}\n{line}b");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            // At the end of each line: the first is 3,000 characters long, the second one more.
+            window.Editor.Selection = new TextSelection(3_000);
+            window.Type("x");
+            window.Editor.Selection = new TextSelection(document.CurrentSnapshot.GetOffset(new TextPosition(2, 3_002)));
+            window.Type("x");
+
+            document.Text.ShouldBe($"{line}x\n{line}b");
+        });
+
+    [Fact]
     public Task Cut_copy_paste_and_select_all_go_through_the_apps_clipboard() =>
         _ui.Run(async () =>
         {
