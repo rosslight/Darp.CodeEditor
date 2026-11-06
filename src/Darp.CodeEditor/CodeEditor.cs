@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -462,6 +463,8 @@ public class CodeEditor : TemplatedControl
     {
         // Before the part shows the buffer, so that no disposal from here on goes unnoticed.
         document.Disposed += OnDocumentDisposed;
+        document.PropertyChanged += OnDocumentPropertyChanged;
+        ApplyIndentation(part.Options, document.Indentation);
         TextDocument buffer = document.Buffer;
         part.Document = buffer;
         part.IsReadOnly = IsReadOnly;
@@ -481,6 +484,7 @@ public class CodeEditor : TemplatedControl
     private void Hide(TextEditor part, CodeDocument shown)
     {
         shown.Disposed -= OnDocumentDisposed;
+        shown.PropertyChanged -= OnDocumentPropertyChanged;
         CancelLoading();
         _highlighter?.Dispose();
         _highlighter = null;
@@ -499,6 +503,23 @@ public class CodeEditor : TemplatedControl
     /// showing the document.
     /// </summary>
     private void OnDocumentDisposed(object? sender, EventArgs e) => Dispatcher.Post(UpdateShownDocument);
+
+    /// <summary>Applies a new indentation of the shown document at once. Raised on the UI thread.</summary>
+    private void OnDocumentPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(CodeDocument.Indentation) && _shown is { } shown && _part is { } part)
+            ApplyIndentation(part.Options, shown.Indentation);
+    }
+
+    /// <summary>
+    /// AvaloniaEdit's indentation: Tab inserts spaces to the next stop or a tab, Shift+Tab removes one level, and a
+    /// tab is drawn one level wide.
+    /// </summary>
+    private static void ApplyIndentation(TextEditorOptions options, Indentation indentation)
+    {
+        options.IndentationSize = indentation.Size;
+        options.ConvertTabsToSpaces = !indentation.UseTabs;
+    }
 
     /// <summary>Scrolls to where the editor was asked to, once the shown document is laid out.</summary>
     private void OnTextViewLayoutUpdated(object? sender, EventArgs e)
