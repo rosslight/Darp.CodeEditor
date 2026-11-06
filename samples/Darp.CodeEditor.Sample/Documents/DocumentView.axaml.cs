@@ -196,7 +196,11 @@ public sealed partial class DocumentView : UserControl
             FAContentDialogResult result = await dialog.ShowAsync(Window);
             if (result == FAContentDialogResult.None)
                 return;
-            if (result == FAContentDialogResult.Primary && !await SaveAsync(document, saveAs: false))
+            // A document that wasn't saved stays open, and so does one that was edited while it was saved.
+            if (
+                result == FAContentDialogResult.Primary
+                && (!await SaveAsync(document, saveAs: false) || document.Document.IsModified)
+            )
                 return;
         }
         workspace.Close(document);

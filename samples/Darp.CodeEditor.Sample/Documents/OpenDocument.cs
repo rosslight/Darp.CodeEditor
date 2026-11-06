@@ -11,6 +11,9 @@ namespace Sample.Documents;
 /// </summary>
 public sealed partial class OpenDocument : ObservableObject, IDisposable
 {
+    /// <summary>The save that runs, or ran last. It never fails, so a later save can wait for it.</summary>
+    private Task _lastSave = Task.CompletedTask;
+
     public OpenDocument(string name, FileType type, string text, IStorageFile? file)
     {
         Name = name;
@@ -46,19 +49,31 @@ public sealed partial class OpenDocument : ObservableObject, IDisposable
     /// <summary>Saves the text in <paramref name="file"/>, which then becomes the document's file.</summary>
     public async Task SaveAsync(IStorageFile file)
     {
-        // The snapshot is the text as it is now. Edits made while the file is written keep the document modified.
-        TextSnapshot snapshot = Document.CurrentSnapshot;
-        await using (Stream stream = await file.OpenWriteAsync())
-        await using (var writer = new StreamWriter(stream))
-            await writer.WriteAsync(snapshot.GetText());
-        Document.MarkUnmodified(snapshot);
+        // Saves run one after another, so that the file ends with the newest text.
+        Task previous = _lastSave;
+        var saved = new TaskCompletionSource();
+        _lastSave = saved.Task;
+        try
+        {
+            await previous;
+            // The snapshot is the text as it is now. Edits made while the file is written keep the document modified.
+            TextSnapshot snapshot = Document.CurrentSnapshot;
+            await using (Stream stream = await file.OpenWriteAsync())
+            await using (var writer = new StreamWriter(stream))
+                await writer.WriteAsync(snapshot.GetText());
+            Document.MarkUnmodified(snapshot);
 
-        if (file == File)
-            return;
-        File?.Dispose();
-        File = file;
-        Name = file.Name;
-        Document.FilePath = file.TryGetLocalPath();
+            if (file == File)
+                return;
+            File?.Dispose();
+            File = file;
+            Name = file.Name;
+            Document.FilePath = file.TryGetLocalPath();
+        }
+        finally
+        {
+            saved.SetResult();
+        }
     }
 
     /// <inheritdoc />
