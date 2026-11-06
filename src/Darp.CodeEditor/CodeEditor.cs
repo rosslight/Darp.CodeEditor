@@ -128,6 +128,9 @@ public class CodeEditor : TemplatedControl
     /// <summary>The editing helpers of the shown document.</summary>
     private EditingHelpers? _helpers;
 
+    /// <summary>Marks the bracket next to the caret in the shown document, and its match.</summary>
+    private BracketHighlighter? _brackets;
+
     /// <summary>
     /// Where the editor is in <see cref="Document"/> while the part cannot tell: while it shows nothing, and while the
     /// scroll position waits for the first layout.
@@ -152,6 +155,9 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>The theme whose colors the part shows.</summary>
     private ColorThemeFile? _theme;
+
+    /// <summary>The colors of <see cref="_theme"/> besides the tokens.</summary>
+    private TextAreaColors? _colors;
 
     /// <summary>The grammar loaded last, with the theme it was loaded with.</summary>
     private TextMateGrammar? _grammar;
@@ -482,6 +488,7 @@ public class CodeEditor : TemplatedControl
         TextView textView = part.TextArea.TextView;
         _highlighter = new BackgroundTextMateHighlighter(textView, buffer, Dispatcher, null);
         _helpers = new EditingHelpers(part.TextArea, document, _highlighter);
+        _brackets = new BracketHighlighter(part.TextArea, document, _highlighter) { Colors = _colors };
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
         _waitingForLayout = true;
         textView.LayoutUpdated += OnTextViewLayoutUpdated;
@@ -496,6 +503,8 @@ public class CodeEditor : TemplatedControl
         CancelLoading();
         _helpers?.Dispose();
         _helpers = null;
+        _brackets?.Dispose();
+        _brackets = null;
         _highlighter?.Dispose();
         _highlighter = null;
         part.TextArea.TextView.LayoutUpdated -= OnTextViewLayoutUpdated;
@@ -777,6 +786,8 @@ public class CodeEditor : TemplatedControl
         {
             _theme = theme;
             TextAreaColors colors = TextAreaColors.From(theme);
+            _colors = colors;
+            _brackets?.Colors = colors;
             TextArea textArea = part.TextArea;
             part.Background = colors.Background;
             part.Foreground = colors.Foreground;

@@ -8,6 +8,15 @@ namespace Darp.CodeEditor.Highlighting;
 /// The colors of the text area besides the tokens, from a VS Code theme. Colors the theme leaves out take VS Code's
 /// defaults for dark or light themes, as VS Code shows them.
 /// </summary>
+/// <param name="Background">The text area's background.</param>
+/// <param name="Foreground">Text without a token color of its own.</param>
+/// <param name="Selection">The background of the selection.</param>
+/// <param name="Caret">The caret.</param>
+/// <param name="LineNumbers">The line numbers in the left margin.</param>
+/// <param name="CurrentLineBackground">The background of the caret's line.</param>
+/// <param name="CurrentLineBorder">The border around the caret's line.</param>
+/// <param name="BracketMatchBackground">The box around a bracket next to the caret and its match.</param>
+/// <param name="BracketMatchBorder">The border of that box.</param>
 internal sealed record TextAreaColors(
     IBrush Background,
     IBrush Foreground,
@@ -15,7 +24,9 @@ internal sealed record TextAreaColors(
     IBrush Caret,
     IBrush LineNumbers,
     IBrush CurrentLineBackground,
-    IPen CurrentLineBorder
+    IPen CurrentLineBorder,
+    IBrush BracketMatchBackground,
+    IPen BracketMatchBorder
 )
 {
     /// <summary>Reads the colors of <paramref name="theme"/>.</summary>
@@ -37,7 +48,9 @@ internal sealed record TextAreaColors(
             new ImmutablePen(
                 Brush("editor.lineHighlightBorder")
                     ?? (currentLine is null ? Solid(dark ? 0xFF282828 : 0xFFEEEEEE) : Solid(0))
-            )
+            ),
+            Brush("editorBracketMatch.background") ?? Solid(0x1A006400),
+            new ImmutablePen(Brush("editorBracketMatch.border") ?? Solid(dark ? 0xFF888888 : 0xFFB9B9B9))
         );
 
         ImmutableSolidColorBrush? Brush(string key) =>

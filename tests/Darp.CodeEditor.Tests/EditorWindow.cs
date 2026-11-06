@@ -9,6 +9,7 @@ using Avalonia.Platform;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using AvaloniaEdit;
+using AvaloniaEdit.Document;
 using AvaloniaEdit.Rendering;
 
 namespace Darp.CodeEditor.Tests;
@@ -115,16 +116,45 @@ internal sealed class EditorWindow : IDisposable
                 .ToHashSet()
             : new HashSet<Color>();
 
-    private static int CountPixels(WriteableBitmap frame, Color color, int tolerance = 8)
+    /// <summary>
+    /// Renders a frame, and counts its pixels of <paramref name="color"/> where the text view draws the characters of
+    /// <paramref name="range"/>, on one line.
+    /// </summary>
+    public int RenderAndCountPixels(Color color, TextRange range)
+    {
+        TextView textView = TextView;
+        textView.EnsureVisualLines();
+        Point start = Position(range.Start);
+        Point end = Position(range.End) + new Point(0, textView.DefaultLineHeight);
+        using WriteableBitmap frame =
+            Window.CaptureRenderedFrame() ?? throw new InvalidOperationException("Nothing was rendered.");
+        return CountPixels(
+            frame,
+            color,
+            area: new PixelRect(PixelPoint.FromPoint(start, 1), PixelPoint.FromPoint(end, 1))
+        );
+
+        Point Position(int offset) =>
+            textView.TranslatePoint(
+                textView.GetVisualPosition(
+                    new TextViewPosition(textView.Document.GetLocation(offset)),
+                    VisualYPosition.LineTop
+                ) - textView.ScrollOffset,
+                Window
+            ) ?? throw new InvalidOperationException("The text view is not in the window.");
+    }
+
+    private static int CountPixels(WriteableBitmap frame, Color color, int tolerance = 8, PixelRect? area = null)
     {
         using ILockedFramebuffer buffer = frame.Lock();
         bool bgra = buffer.Format == PixelFormat.Bgra8888;
+        PixelRect bounds = area?.Intersect(new PixelRect(buffer.Size)) ?? new PixelRect(buffer.Size);
         var row = new byte[buffer.RowBytes];
         int count = 0;
-        for (int y = 0; y < buffer.Size.Height; y++)
+        for (int y = bounds.Y; y < bounds.Bottom; y++)
         {
             Marshal.Copy(buffer.Address + y * buffer.RowBytes, row, 0, row.Length);
-            for (int x = 0; x < buffer.Size.Width; x++)
+            for (int x = bounds.X; x < bounds.Right; x++)
             {
                 int i = x * 4;
                 (byte r, byte b) = bgra ? (row[i + 2], row[i]) : (row[i], row[i + 2]);
