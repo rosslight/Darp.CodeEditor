@@ -1,5 +1,3 @@
-// Left out of the baseline's build while the target branch has no editor: see NotInBaselineAttribute.
-#if !BENCHMARK_BASELINE
 using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
@@ -18,7 +16,6 @@ namespace Darp.CodeEditor.Benchmarks;
 /// The first colored frame of a new editor of 5,000 lines of JSON: from creating the editor until a rendered frame shows
 /// its visible lines in syntax colors, without a language server. The budget is 100 ms (design, section 1.2).
 /// </summary>
-[NotInBaseline]
 [InvocationCount(1)]
 [WarmupCount(2)]
 [IterationCount(10)]
@@ -61,12 +58,12 @@ public class FirstFrameBenchmarks
 /// One keystroke on the UI thread, with the layout and the frame that follow it: the cost the user feels while typing.
 /// Each call types a character or deletes it again, so the text stays the same.
 /// </summary>
-[NotInBaseline]
 [WarmupCount(2)]
 [IterationCount(10)]
 public class TypingBenchmarks
 {
     private Window? _window;
+    private CodeDocument? _document;
     private bool _typed;
 
     /// <summary>In the middle of 5,000 lines of JSON, at the start of a key.</summary>
@@ -103,6 +100,7 @@ public class TypingBenchmarks
     {
         HeadlessEditor.SetUpApp();
         CodeDocument document = CodeDocument.Create(CodeLanguage.Json, json);
+        _document = document;
         var editor = new CodeEditor { Document = document, WordWrap = wordWrap };
         _window = HeadlessEditor.Show(editor);
         HeadlessEditor.RenderUntilColored(_window, editor, colored);
@@ -113,6 +111,8 @@ public class TypingBenchmarks
     private void TypeOrDelete()
     {
         Window window = _window ?? throw new InvalidOperationException("Not set up.");
+        CodeDocument document = _document ?? throw new InvalidOperationException("Not set up.");
+        int length = document.CurrentSnapshot.Length;
         _typed = !_typed;
         if (_typed)
             window.KeyTextInput("1");
@@ -122,6 +122,9 @@ public class TypingBenchmarks
             window.KeyRelease(Key.Back, RawInputModifiers.None, PhysicalKey.Backspace, null);
         }
         HeadlessEditor.Render(window);
+        // A keystroke that edits nothing would look fast.
+        if (document.CurrentSnapshot.Length != length + (_typed ? 1 : -1))
+            throw new InvalidOperationException("The keystroke did not edit the text.");
     }
 }
 
@@ -129,7 +132,6 @@ public class TypingBenchmarks
 /// One page down through 5,000 lines of JSON, just opened, on the UI thread, with the layout and the frame that follow:
 /// each page shows lines that are not tokenized yet. An iteration goes through the document once.
 /// </summary>
-[NotInBaseline]
 [InvocationCount(Pages)]
 [WarmupCount(2)]
 [IterationCount(10)]
@@ -254,4 +256,3 @@ internal static class HeadlessEditor
         }
     }
 }
-#endif
