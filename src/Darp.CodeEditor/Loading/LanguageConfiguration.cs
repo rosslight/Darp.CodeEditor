@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Darp.CodeEditor.Loading;
 
@@ -25,6 +26,14 @@ internal sealed record LanguageConfiguration(
         using JsonDocument json = JsonDocument.Parse(stream, AssetFiles.Jsonc);
         JsonElement root = json.RootElement;
         JsonElement? comments = Property(root, "comments");
+        // As in VS Code, auto-closing pairs default to the brackets, and surrounding pairs to the auto-closing pairs.
+        List<CharacterPair> brackets = List(root, "brackets", Pair);
+        List<AutoClosingPair> autoClosingPairs = Property(root, "autoClosingPairs") is not null
+            ? List(root, "autoClosingPairs", AutoClosing)
+            : [.. brackets.Select(b => new AutoClosingPair(b.Open, b.Close, NotInString: false, NotInComment: false))];
+        List<CharacterPair> surroundingPairs = Property(root, "surroundingPairs") is not null
+            ? List(root, "surroundingPairs", Pair)
+            : [.. autoClosingPairs.Select(p => new CharacterPair(p.Open, p.Close))];
         return new LanguageConfiguration(
             LineComment: Property(comments, "lineComment") switch
             {
@@ -34,9 +43,9 @@ internal sealed record LanguageConfiguration(
                 null => null,
             },
             BlockComment: Property(comments, "blockComment") is { } blockComment ? Pair(blockComment) : null,
-            Brackets: List(root, "brackets", Pair),
-            AutoClosingPairs: List(root, "autoClosingPairs", AutoClosing),
-            SurroundingPairs: List(root, "surroundingPairs", Pair),
+            Brackets: brackets,
+            AutoClosingPairs: autoClosingPairs,
+            SurroundingPairs: surroundingPairs,
             IndentationRules: Property(root, "indentationRules") is { } rules
                 ? new IndentationRules(
                     Pattern(rules.GetProperty("increaseIndentPattern")),
@@ -78,14 +87,25 @@ internal sealed record LanguageConfiguration(
         );
     }
 
-    /// <summary>A regular expression as a string, or as an object with its <c>pattern</c> and <c>flags</c>.</summary>
-    private static IndentationPattern Pattern(JsonElement pattern) =>
-        pattern.ValueKind == JsonValueKind.Object
-            ? new IndentationPattern(
-                Text(pattern.GetProperty("pattern")),
-                Property(pattern, "flags") is { } flags ? Text(flags) : null
-            )
-            : new IndentationPattern(Text(pattern), null);
+    /// <summary>
+    /// A regular expression as a string, or as an object with its <c>pattern</c> and JavaScript's <c>flags</c>, of
+    /// which <c>i</c>, <c>m</c> and <c>s</c> change how .NET matches.
+    /// </summary>
+    private static Regex Pattern(JsonElement pattern)
+    {
+        (string source, string flags) =
+            pattern.ValueKind == JsonValueKind.Object
+                ? (Text(pattern.GetProperty("pattern")), Property(pattern, "flags") is { } value ? Text(value) : "")
+                : (Text(pattern), "");
+        RegexOptions options = RegexOptions.CultureInvariant;
+        if (flags.Contains('i'))
+            options |= RegexOptions.IgnoreCase;
+        if (flags.Contains('m'))
+            options |= RegexOptions.Multiline;
+        if (flags.Contains('s'))
+            options |= RegexOptions.Singleline;
+        return new Regex(source, options, IndentationRules.MatchTimeout);
+    }
 
     /// <summary>A string value; anything else makes the file invalid.</summary>
     private static string Text(JsonElement value) =>
@@ -102,11 +122,32 @@ internal readonly record struct CharacterPair(string Open, string Close);
 /// <param name="NotInComment">Not closed automatically inside a comment.</param>
 internal readonly record struct AutoClosingPair(string Open, string Close, bool NotInString, bool NotInComment);
 
-/// <summary>When a new line indents or outdents: regular expressions on the line, in VS Code's syntax.</summary>
-internal sealed record IndentationRules(
-    IndentationPattern IncreaseIndentPattern,
-    IndentationPattern DecreaseIndentPattern
-);
+/// <summary>When a line indents or outdents: regular expressions on its text, with the flags the file gives.</summary>
+/// <param name="IncreaseIndentPattern">The lines after a matching line are indented one level more.</param>
+/// <param name="DecreaseIndentPattern">A matching line is indented one level less than the lines before.</param>
+internal sealed record IndentationRules(Regex IncreaseIndentPattern, Regex DecreaseIndentPattern)
+{
+    /// <summary>
+    /// How long one match may take. The patterns run on the UI thread as the user types, and some backtrack on long
+    /// lines; a match that takes longer counts as none.
+    /// </summary>
+    public static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(10);
 
-/// <summary>A regular expression in VS Code's syntax, and its flags, such as <c>i</c>, if the file gives any.</summary>
-internal readonly record struct IndentationPattern(string Pattern, string? Flags);
+    /// <summary>Whether lines after <paramref name="line"/> are indented one level more.</summary>
+    public bool Increases(string line) => Matches(IncreaseIndentPattern, line);
+
+    /// <summary>Whether <paramref name="line"/> is indented one level less than the lines before.</summary>
+    public bool Decreases(string line) => Matches(DecreaseIndentPattern, line);
+
+    private static bool Matches(Regex pattern, string line)
+    {
+        try
+        {
+            return pattern.IsMatch(line);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return false;
+        }
+    }
+}

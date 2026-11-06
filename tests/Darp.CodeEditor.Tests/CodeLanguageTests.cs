@@ -17,8 +17,9 @@ public sealed class CodeLanguageTests
         json.Configuration.BlockComment.ShouldBe(new CharacterPair("/*", "*/"));
         json.Configuration.Brackets.ShouldBe([new CharacterPair("{", "}"), new CharacterPair("[", "]")]);
         json.Configuration.AutoClosingPairs.ShouldContain(new AutoClosingPair("\"", "\"", true, true));
-        json.Configuration.IndentationRules.ShouldNotBeNull()
-            .DecreaseIndentPattern.ShouldBe(new IndentationPattern("^\\s*[}\\]],?\\s*$", null));
+        // Without surrounding pairs of its own, the auto-closing pairs surround, as in VS Code.
+        json.Configuration.SurroundingPairs.ShouldContain(new CharacterPair("(", ")"));
+        json.Configuration.IndentationRules.ShouldNotBeNull().Decreases("  },").ShouldBeTrue();
     }
 
     /// <summary>Each built-in language, with a line that its grammar gives scopes of its own.</summary>
@@ -129,16 +130,13 @@ public sealed class CodeLanguageTests
             TestContext.Current.CancellationToken
         );
 
-        IndentationRules? rules = (await new CodeLanguage("pascal", configuration: new Uri(file)).Loaded)
-            .Configuration
-            .IndentationRules;
+        IndentationRules rules = (
+            await new CodeLanguage("pascal", configuration: new Uri(file)).Loaded
+        ).Configuration.IndentationRules.ShouldNotBeNull();
 
-        rules.ShouldBe(
-            new IndentationRules(
-                new IndentationPattern("^\\s*begin\\b", "i"),
-                new IndentationPattern("^\\s*end\\b", null)
-            )
-        );
+        rules.Increases("BEGIN").ShouldBeTrue();
+        rules.Decreases("end").ShouldBeTrue();
+        rules.Decreases("END").ShouldBeFalse();
         File.Delete(file);
     }
 }
