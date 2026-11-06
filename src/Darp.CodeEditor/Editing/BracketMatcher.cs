@@ -91,7 +91,10 @@ internal static class BracketMatcher
                 else if (depth-- == 0)
                     return line.Offset + column;
             }
+            // A line break is read too, and an empty line has nothing else: the search ends before the next line.
             left -= line.DelimiterLength;
+            if (left < 0)
+                return null;
             line = forward ? line.NextLine : line.PreviousLine;
             column = forward ? 0 : (line?.Length ?? 0) - 1;
         }

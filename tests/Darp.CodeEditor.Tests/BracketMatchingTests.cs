@@ -1,5 +1,7 @@
 using Avalonia.Media;
+using AvaloniaEdit.Document;
 using Darp.CodeEditor.Editing;
+using Darp.CodeEditor.Loading;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -57,6 +59,29 @@ public sealed class BracketMatchingTests(UiFixture ui)
 
             (window.RenderAndCountPixels(s_bracketMatch, new TextRange(2, 1)) > 0).ShouldBe(boxed);
         });
+
+    [Fact]
+    public void Line_breaks_count_against_what_the_search_reads()
+    {
+        // Empty lines have no characters to read: each line break counts, and the search visits no line past it all.
+        var document = new TextDocument("(" + new string('\n', 500_000) + ")");
+        int lines = 0;
+
+        BracketMatcher
+            .FindPair(
+                document,
+                0,
+                [new CharacterPair("(", ")")],
+                _ =>
+                {
+                    lines++;
+                    return null;
+                }
+            )
+            .ShouldBeNull();
+
+        lines.ShouldBeLessThanOrEqualTo(BracketMatcher.MaxDistance + 2);
+    }
 
     private static async Task<EditorWindow> ShowColored(string marked)
     {
