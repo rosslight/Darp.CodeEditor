@@ -43,6 +43,27 @@ public sealed class SearchTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Tab_goes_between_the_query_and_the_replacement_as_in_VS_Code() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("one «two»", CodeLanguage.PlainText);
+            SearchBar bar = BarOf(window);
+
+            window.Editor.OpenSearch(replace: true);
+            bar.FindBox.IsFocused.ShouldBeTrue();
+            window.Press(Key.Tab);
+            bar.ReplaceBox.IsFocused.ShouldBeTrue();
+            window.Press(Key.Tab, KeyModifiers.Shift);
+            bar.FindBox.IsFocused.ShouldBeTrue();
+
+            // Without the replace row, Tab goes on to the toggles.
+            window.Editor.OpenSearch();
+            window.Press(Key.Tab);
+            bar.FindBox.IsFocused.ShouldBeFalse();
+            bar.ReplaceBox.IsFocused.ShouldBeFalse();
+        });
+
+    [Fact]
     public Task The_keys_open_the_bars_go_through_the_matches_and_close() =>
         _ui.Run(async () =>
         {

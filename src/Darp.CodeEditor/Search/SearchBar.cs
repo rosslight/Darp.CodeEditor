@@ -549,21 +549,29 @@ internal sealed class SearchBar : UserControl
             UpdateStatus();
     }
 
-    /// <summary>Enter selects the next match, and Shift+Enter the previous one.</summary>
+    /// <summary>
+    /// Enter selects the next match, and Shift+Enter the previous one. Tab goes on to the replacement, as in VS Code.
+    /// </summary>
     private void OnFindKeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.Key != Key.Enter)
+        if (e.Key == Key.Tab && e.KeyModifiers == KeyModifiers.None && _replaceRow.IsVisible)
+            _replace.Focus(NavigationMethod.Tab);
+        else if (e.Key == Key.Enter)
+            Go(e.KeyModifiers == KeyModifiers.Shift ? Move.Previous : Move.Next, null);
+        else
             return;
-        Go(e.KeyModifiers == KeyModifiers.Shift ? Move.Previous : Move.Next, null);
         e.Handled = true;
     }
 
-    /// <summary>Enter replaces the selected match.</summary>
+    /// <summary>Enter replaces the selected match. Shift+Tab goes back to the query, as in VS Code.</summary>
     private void OnReplaceKeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.Key != Key.Enter)
+        if (e.Key == Key.Tab && e.KeyModifiers == KeyModifiers.Shift)
+            _find.Focus(NavigationMethod.Tab);
+        else if (e.Key == Key.Enter)
+            ReplaceOne();
+        else
             return;
-        ReplaceOne();
         e.Handled = true;
     }
 
