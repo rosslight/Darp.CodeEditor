@@ -560,8 +560,8 @@ with Skia:
   (BenchmarkDotNet, i7-13700, a warm process), and the comparison of each pull request tracks them; tests assert no
   latency (#102). A new editor of 5,000 lines of JSON or YAML shows syntax colors in a rendered frame 24 to 25 ms
   after it is created. With the layout and the frame after it, a keystroke takes the UI thread 11 ms in 5,000 lines
-  and 15 ms on a wrapped line of 2,900 characters, and a page down 13 ms. A bare AvaloniaEdit editor takes as long
-  per keystroke in the same headless app, as the background's results lay out only lines whose tokens changed;
+  and 15 ms on a wrapped line of 2,900 characters, and a page down 13 ms. The background's results lay out again only
+  the lines whose tokens changed, so typing inside a long string builds its line once, not twice;
 - without a clock, tests check that such an editor shows syntax colors in its pixels, and that typing on a line of
   20,000 characters edits it and colors it by the background's time limit of 50 ms per line: a JSON string, which
   tokenizes in about 2 ms, fully, and an array, which takes seconds, not at all. Typing inside a long string builds
