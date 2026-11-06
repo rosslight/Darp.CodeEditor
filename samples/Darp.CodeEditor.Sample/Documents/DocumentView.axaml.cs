@@ -30,6 +30,12 @@ public sealed partial class DocumentView : UserControl
     /// <summary>The document the editor shows.</summary>
     private OpenDocument? _shown;
 
+    /// <summary>
+    /// Whether a save or a close runs. They ask the user and write files, so the view runs one at a time and ignores
+    /// the commands meanwhile.
+    /// </summary>
+    private bool _isSavingOrClosing;
+
     public DocumentView()
     {
         InitializeComponent();
@@ -138,7 +144,7 @@ public sealed partial class DocumentView : UserControl
     private async Task SaveCurrentAsync(bool saveAs)
     {
         if (_workspace?.Current is { } document)
-            await SaveAsync(document, saveAs);
+            await OneAtATimeAsync(() => SaveAsync(document, saveAs));
         Editor.Focus();
     }
 
@@ -177,8 +183,10 @@ public sealed partial class DocumentView : UserControl
         }
     }
 
+    private Task CloseCurrentAsync() => OneAtATimeAsync(CloseAsync);
+
     /// <summary>Closes the current document, after asking to save its changes.</summary>
-    private async Task CloseCurrentAsync()
+    private async Task CloseAsync()
     {
         if (_workspace is not { Current: { } document } workspace)
             return;
@@ -205,6 +213,21 @@ public sealed partial class DocumentView : UserControl
         }
         workspace.Close(document);
         Editor.Focus();
+    }
+
+    private async Task OneAtATimeAsync(Func<Task> operation)
+    {
+        if (_isSavingOrClosing)
+            return;
+        _isSavingOrClosing = true;
+        try
+        {
+            await operation();
+        }
+        finally
+        {
+            _isSavingOrClosing = false;
+        }
     }
 
     private Task ShowErrorAsync(string title, string message) =>
