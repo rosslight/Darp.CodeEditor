@@ -32,10 +32,11 @@ public sealed class SearchTests(UiFixture ui)
             bar.FindBox.IsFocused.ShouldBeTrue();
             await Wait.UntilAsync(() => bar.Count == "1 of 1");
 
-            // The first match from where the search started.
+            // The first match from where the search started. "on" also has three matches, and its result may still be
+            // shown, so wait for the selection of "one".
             window.Type("one");
-            await Wait.UntilAsync(() => bar.Count == "2 of 3");
-            window.Editor.Selection.ShouldBe(new TextSelection(8, 11));
+            await Wait.UntilAsync(() => window.Editor.Selection == new TextSelection(8, 11));
+            bar.Count.ShouldBe("2 of 3");
 
             // The text changed: the bar searches again.
             window.Editor.Document.ShouldNotBeNull().Replace(new TextRange(0, 0), "one ");
