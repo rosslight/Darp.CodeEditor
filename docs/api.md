@@ -587,7 +587,7 @@ with Skia:
   tabs;
 - the bracket next to the caret and its match are boxed in the theme's colors, ignoring brackets in strings and
   comments by the lines' tokens. The search for a match reads at most 100,000 characters, in blocks without a string
-  per line: about 0.6 ms with six brackets on every line, the most a caret move or keystroke spends on it
+  per line: about 0.5 ms with six brackets on every line, the most a caret move or keystroke spends on it
   (BenchmarkDotNet). In 5,000 lines, from text that an undo just changed and
   with the frame after it, typing a bracket that closes takes 28 ms where a digit takes 27 ms, Backspace between the
   pair 13 ms, and commenting all 5,000 lines 41 ms;

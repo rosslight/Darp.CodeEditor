@@ -77,12 +77,19 @@ internal static class BracketMatcher
         // The line of the last bracket: its bounds, as DocumentLine computes them anew each time, and its tokens.
         (int Start, int End) line = (-1, -1);
         int[]? tokens = null;
+        // Going forward, one reader through the window; going backward, one for each block, from the end.
+        using TextReader? ahead = forward ? document.CreateReader(start, end - start) : null;
         for (int done = 0; done < end - start; )
         {
             int length = Math.Min(block.Length, end - start - done);
             int blockStart = forward ? start + done : end - done - length;
-            using (TextReader reader = document.CreateReader(blockStart, length))
-                reader.ReadBlock(block[..length]);
+            if (ahead is not null)
+                ahead.ReadBlock(block[..length]);
+            else
+            {
+                using TextReader behind = document.CreateReader(blockStart, length);
+                behind.ReadBlock(block[..length]);
+            }
             ReadOnlySpan<char> text = block[..length];
             for (int index = Next(text, forward ? -1 : length); index >= 0; index = Next(text, index))
             {
