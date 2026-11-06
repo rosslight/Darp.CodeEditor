@@ -585,8 +585,9 @@ with Skia:
   tabs;
 - the bracket next to the caret and its match are boxed in the theme's colors, ignoring brackets in strings and
   comments by the lines' tokens. The search for a match reads at most 100,000 characters: about 0.5 ms, the most a
-  caret move or keystroke spends on it (BenchmarkDotNet). With its frame, a keystroke that closes a pair takes 15 ms
-  in 5,000 lines, as any other, and toggling the comments of 1,000 lines 17 ms;
+  caret move or keystroke spends on it (BenchmarkDotNet). In 5,000 lines, from text that an undo just changed and
+  with the frame after it, typing a bracket that closes takes 32 ms where a digit takes 30 ms, Backspace between the
+  pair 15 ms, and commenting 1,000 lines 36 ms;
 - spaces and tabs show inside the selection only, in the theme's `editorWhitespace.foreground`, in a layer of the text
   view above the selection;
 - search runs in the background, so a regular expression such as `(a+)+$`, which froze the prototype for 21 s, leaves
