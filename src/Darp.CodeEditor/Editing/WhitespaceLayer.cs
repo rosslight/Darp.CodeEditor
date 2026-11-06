@@ -1,5 +1,4 @@
 using Avalonia;
-using Avalonia.Controls;
 using Avalonia.Media;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
@@ -12,24 +11,9 @@ namespace Darp.CodeEditor.Editing;
 /// Draws the spaces and tabs inside the selection as faint dots and arrows, in the color theme's whitespace color, as
 /// VS Code's <c>renderWhitespace: selection</c> does. Nothing outside the selection.
 /// </summary>
-/// <remarks>
-/// A layer of the text view of its own, above the selection, which would hide marks drawn in the layers below it, and
-/// below the text. It draws again when the selection, the lines or the scroll position change.
-/// </remarks>
-internal sealed class WhitespaceLayer : Control, IDisposable
+internal sealed class WhitespaceLayer(TextArea textArea) : SelectionOverlay(textArea)
 {
-    private readonly TextArea _textArea;
     private TextAreaColors? _colors;
-
-    public WhitespaceLayer(TextArea textArea)
-    {
-        _textArea = textArea;
-        IsHitTestVisible = false;
-        textArea.SelectionChanged += OnChanged;
-        textArea.TextView.VisualLinesChanged += OnChanged;
-        textArea.TextView.ScrollOffsetChanged += OnChanged;
-        textArea.TextView.InsertLayer(this, KnownLayer.Selection, LayerInsertionPosition.Above);
-    }
 
     /// <summary>The colors of the color theme, once it is loaded.</summary>
     public TextAreaColors? Colors
@@ -43,8 +27,8 @@ internal sealed class WhitespaceLayer : Control, IDisposable
 
     public override void Render(DrawingContext context)
     {
-        TextView textView = _textArea.TextView;
-        Selection selection = _textArea.Selection;
+        TextView textView = TextArea.TextView;
+        Selection selection = TextArea.Selection;
         if (_colors is not { } colors || selection.IsEmpty || !textView.VisualLinesValid)
             return;
         var pen = new Pen(colors.Whitespace);
@@ -79,14 +63,6 @@ internal sealed class WhitespaceLayer : Control, IDisposable
         }
     }
 
-    public void Dispose()
-    {
-        _textArea.SelectionChanged -= OnChanged;
-        _textArea.TextView.VisualLinesChanged -= OnChanged;
-        _textArea.TextView.ScrollOffsetChanged -= OnChanged;
-        _textArea.TextView.Layers.Remove(this);
-    }
-
     /// <summary>An arrow to the right, as VS Code draws a tab.</summary>
     private static void DrawArrow(DrawingContext context, IPen pen, double from, double to, double y)
     {
@@ -95,6 +71,4 @@ internal sealed class WhitespaceLayer : Control, IDisposable
         context.DrawLine(pen, new Point(to - head, y - head), new Point(to, y));
         context.DrawLine(pen, new Point(to - head, y + head), new Point(to, y));
     }
-
-    private void OnChanged(object? sender, EventArgs e) => InvalidateVisual();
 }

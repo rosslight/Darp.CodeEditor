@@ -18,6 +18,10 @@ namespace Darp.CodeEditor.Highlighting;
 /// <param name="BracketMatchBackground">The box around a bracket next to the caret and its match.</param>
 /// <param name="BracketMatchBorder">The border of that box.</param>
 /// <param name="Whitespace">The dots and arrows of spaces and tabs inside the selection.</param>
+/// <param name="FindMatch">The background of the current search match.</param>
+/// <param name="FindMatchBorder">Its border, if the theme has one.</param>
+/// <param name="FindMatchHighlight">The background of the other search matches.</param>
+/// <param name="FindMatchHighlightBorder">Their border, if the theme has one.</param>
 internal sealed record TextAreaColors(
     IBrush Background,
     IBrush Foreground,
@@ -28,7 +32,11 @@ internal sealed record TextAreaColors(
     IPen CurrentLineBorder,
     IBrush BracketMatchBackground,
     IPen BracketMatchBorder,
-    IBrush Whitespace
+    IBrush Whitespace,
+    IBrush FindMatch,
+    IPen? FindMatchBorder,
+    IBrush FindMatchHighlight,
+    IPen? FindMatchHighlightBorder
 )
 {
     /// <summary>Reads the colors of <paramref name="theme"/>.</summary>
@@ -53,11 +61,17 @@ internal sealed record TextAreaColors(
             ),
             Brush("editorBracketMatch.background") ?? Solid(0x1A006400u),
             new ImmutablePen(Brush("editorBracketMatch.border") ?? Solid(dark ? 0xFF888888 : 0xFFB9B9B9)),
-            Brush("editorWhitespace.foreground") ?? Solid(dark ? 0x29E3E4E2u : 0x33333333u)
+            Brush("editorWhitespace.foreground") ?? Solid(dark ? 0x29E3E4E2u : 0x33333333u),
+            Brush("editor.findMatchBackground") ?? Solid(dark ? 0xFF515C6A : 0xFFA8AC94),
+            Pen("editor.findMatchBorder"),
+            Brush("editor.findMatchHighlightBackground") ?? Solid(0x55EA5C00u),
+            Pen("editor.findMatchHighlightBorder")
         );
 
         ImmutableSolidColorBrush? Brush(string key) =>
             colors.TryGetValue(key, out Color color) ? new ImmutableSolidColorBrush(color) : null;
+
+        ImmutablePen? Pen(string key) => Brush(key) is { } brush ? new ImmutablePen(brush) : null;
     }
 
     private static ImmutableSolidColorBrush Solid(uint argb) => new(Color.FromUInt32(argb));

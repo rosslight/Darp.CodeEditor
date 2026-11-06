@@ -7,6 +7,8 @@
 		"editor.selectionBackground": "#FFFF00",
 		"editorBracketMatch.background": "#FF00FF",
 		"editorBracketMatch.border": "#FF00FF",
-		"editorWhitespace.foreground": "#FF0000"
+		"editorWhitespace.foreground": "#FF0000",
+		"editor.findMatchBackground": "#00C000",
+		"editor.findMatchHighlightBackground": "#0000FF"
 	}
 }

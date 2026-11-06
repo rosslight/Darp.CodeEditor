@@ -3,6 +3,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ce="using:Darp.CodeEditor"
     xmlns:ae="using:AvaloniaEdit"
+    xmlns:search="using:Darp.CodeEditor.Search"
     x:Class="Darp.CodeEditor.CodeEditorStyles"
 >
     <!-- AvaloniaEdit's templates, in the Fluent variant that takes its colors from the app's theme resources. -->
@@ -16,14 +17,18 @@
                 <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, Menlo, DejaVu Sans Mono, monospace" />
                 <Setter Property="Template">
                     <ControlTemplate>
-                        <ae:TextEditor
-                            Name="PART_TextEditor"
-                            BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}"
-                            Padding="{TemplateBinding Padding}"
-                            WordWrap="{TemplateBinding WordWrap}"
-                            ShowLineNumbers="{TemplateBinding ShowLineNumbers}"
-                        />
+                        <Panel>
+                            <ae:TextEditor
+                                Name="PART_TextEditor"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}"
+                                WordWrap="{TemplateBinding WordWrap}"
+                                ShowLineNumbers="{TemplateBinding ShowLineNumbers}"
+                            />
+                            <!-- The search and replace bar, over the text at the top right, in the app's look. -->
+                            <search:SearchBar Name="PART_SearchBar" />
+                        </Panel>
                     </ControlTemplate>
                 </Setter>
             </ControlTheme>
