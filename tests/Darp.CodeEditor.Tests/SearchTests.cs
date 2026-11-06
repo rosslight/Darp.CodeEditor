@@ -205,6 +205,87 @@ public sealed class SearchTests(UiFixture ui)
             window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(text);
         });
 
+    [Fact]
+    public Task An_invalid_regular_expression_says_why_and_matches_nothing() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("|a (b)", CodeLanguage.PlainText);
+            SearchBar bar = BarOf(window);
+            window.Editor.OpenSearch(replace: true);
+            bar.RegexToggle.IsChecked = true;
+
+            window.Type("(b");
+            await Wait.UntilAsync(() => bar.Message is not null);
+
+            bar.Count.ShouldBeNull();
+            bar.ReplaceAllButton.IsEnabled.ShouldBeFalse();
+            window.Editor.Selection.ShouldBe(new TextSelection(0));
+        });
+
+    [Fact]
+    public Task Clearing_the_query_clears_the_matches() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("|a b a", CodeLanguage.PlainText);
+            SearchBar bar = BarOf(window);
+            window.Editor.OpenSearch();
+            window.Type("a");
+            await Wait.UntilAsync(() => bar.Count == "1 of 2");
+
+            window.Press(Key.Back);
+
+            bar.Count.ShouldBeNull();
+            bar.Message.ShouldBeNull();
+        });
+
+    [Fact]
+    public Task Empty_matches_are_found_gone_through_and_replaced() =>
+        _ui.Run(async () =>
+        {
+            // ^ matches the start of every line, whatever its line break.
+            using EditorWindow window = MarkedText.Show("|a\nb\r\nc", CodeLanguage.PlainText);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            SearchBar bar = BarOf(window);
+            window.Editor.OpenSearch(replace: true);
+            bar.RegexToggle.IsChecked = true;
+            bar.ReplaceBox.Text = "> ";
+            window.Type("^");
+            await Wait.UntilAsync(() => bar.Count == "1 of 3" && bar.ReplaceAllButton.IsEnabled);
+
+            window.Press(Key.F3);
+            window.Editor.Selection.ShouldBe(new TextSelection(2));
+            window.Press(Key.F3);
+            window.Editor.Selection.ShouldBe(new TextSelection(5));
+            window.Press(Key.F3);
+            window.Editor.Selection.ShouldBe(new TextSelection(0));
+
+            Click(bar, "Replace All");
+            document.Text.ShouldBe("> a\n> b\r\n> c");
+        });
+
+    [Fact]
+    public Task A_search_of_the_document_shown_before_never_shows_for_the_next_one() =>
+        _ui.Run(async () =>
+        {
+            // The first document's search runs into the time limit; the second's finds one match at once.
+            CodeDocument slow = CodeDocument.Create(CodeLanguage.PlainText, new string('a', 29) + "!");
+            using EditorWindow window = MarkedText.Show("|aaa", CodeLanguage.PlainText);
+            SearchBar bar = BarOf(window);
+            CodeDocument quick = window.Editor.Document.ShouldNotBeNull();
+            window.Editor.Document = slow;
+            window.Editor.OpenSearch();
+            bar.RegexToggle.IsChecked = true;
+            window.Type("(a+)+$");
+
+            window.Editor.Document = quick;
+            await Wait.UntilAsync(() => bar.Count == "? of 1");
+            // Long enough for the first search to end.
+            await Task.Delay(TextSearch.TimeLimit * 2, TestContext.Current.CancellationToken);
+
+            bar.Count.ShouldBe("? of 1");
+            bar.Message.ShouldBeNull();
+        });
+
     private static SearchBar BarOf(EditorWindow window) =>
         window.Editor.GetVisualDescendants().OfType<SearchBar>().Single();
 
