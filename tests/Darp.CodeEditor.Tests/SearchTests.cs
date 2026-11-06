@@ -135,8 +135,9 @@ public sealed class SearchTests(UiFixture ui)
             editor.OpenSearch();
             await Wait.UntilAsync(() => BarOf(window).Count == "1 of 2");
 
-            // The selected match in the current match's color, the other in the highlight color.
-            window.RenderAndCountPixels(Color.Parse("#00C000"), new TextRange(0, 3)).ShouldBeGreaterThan(0);
+            // The selected match in the current match's color, once the theme is loaded, the other in the highlight
+            // color.
+            await Wait.UntilAsync(() => window.RenderAndCountPixels(Color.Parse("#00C000"), new TextRange(0, 3)) > 0);
             window.RenderAndCountPixels(Color.Parse("#0000FF"), new TextRange(8, 3)).ShouldBeGreaterThan(0);
             window.RenderAndCountPixels(Color.Parse("#0000FF"), new TextRange(4, 3)).ShouldBe(0);
         });

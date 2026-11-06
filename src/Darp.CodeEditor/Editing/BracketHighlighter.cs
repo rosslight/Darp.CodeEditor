@@ -12,8 +12,8 @@ namespace Darp.CodeEditor.Editing;
 /// as VS Code does.
 /// </summary>
 /// <remarks>
-/// The pair is found when the text view draws, after the caret moved or the text changed: once per frame, however
-/// many changes came before it.
+/// The pair is found when the text view draws, after the caret moved, the text changed or the lines were drawn again,
+/// as they are when their tokens change: once per frame, however many changes came before it.
 /// </remarks>
 internal sealed class BracketHighlighter : IBackgroundRenderer, IDisposable
 {
@@ -24,7 +24,7 @@ internal sealed class BracketHighlighter : IBackgroundRenderer, IDisposable
     private TextAreaColors? _colors;
     private (int Open, int Close)? _pair;
 
-    /// <summary>Whether the caret moved or the text changed since the pair was found.</summary>
+    /// <summary>Whether the caret, the text or the lines' tokens changed since the pair was found.</summary>
     private bool _stale = true;
 
     public BracketHighlighter(TextArea textArea, CodeDocument document, BackgroundTextMateHighlighter highlighter)
@@ -35,6 +35,7 @@ internal sealed class BracketHighlighter : IBackgroundRenderer, IDisposable
         _highlighter = highlighter;
         textArea.Caret.PositionChanged += OnChanged;
         _buffer.TextChanged += OnChanged;
+        textArea.TextView.VisualLinesChanged += OnVisualLinesChanged;
         textArea.TextView.BackgroundRenderers.Add(this);
     }
 
@@ -77,8 +78,12 @@ internal sealed class BracketHighlighter : IBackgroundRenderer, IDisposable
     {
         _textArea.Caret.PositionChanged -= OnChanged;
         _buffer.TextChanged -= OnChanged;
+        _textArea.TextView.VisualLinesChanged -= OnVisualLinesChanged;
         _textArea.TextView.BackgroundRenderers.Remove(this);
     }
+
+    /// <summary>The lines were built again, with new tokens maybe: the frame that follows finds the pair again.</summary>
+    private void OnVisualLinesChanged(object? sender, EventArgs e) => _stale = true;
 
     /// <summary>Draws again where a pair shows or may show now: next to a bracket, or instead of the last pair.</summary>
     private void OnChanged(object? sender, EventArgs e)
