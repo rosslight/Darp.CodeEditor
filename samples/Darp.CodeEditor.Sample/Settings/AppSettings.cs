@@ -6,7 +6,10 @@ using Sample.Localization;
 
 namespace Sample.Settings;
 
-/// <summary>The user's choices on the settings page. They last as long as the app runs.</summary>
+/// <summary>
+/// The user's choices: the themes and the language on the settings page, and the view's options in the title bar.
+/// They last as long as the app runs.
+/// </summary>
 public sealed partial class AppSettings : ObservableObject
 {
     public AppSettings()

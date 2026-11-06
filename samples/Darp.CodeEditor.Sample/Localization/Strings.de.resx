@@ -39,6 +39,9 @@
   <data name="Find" xml:space="preserve">
     <value>Suchen</value>
   </data>
+  <data name="View" xml:space="preserve">
+    <value>Ansicht</value>
+  </data>
   <data name="Replace" xml:space="preserve">
     <value>Ersetzen</value>
   </data>
@@ -138,26 +141,14 @@
   <data name="LanguageDescription" xml:space="preserve">
     <value>Die Sprache der Befehle und Meldungen der App</value>
   </data>
-  <data name="Editor" xml:space="preserve">
-    <value>Editor</value>
-  </data>
   <data name="WordWrap" xml:space="preserve">
     <value>Zeilenumbruch</value>
-  </data>
-  <data name="WordWrapDescription" xml:space="preserve">
-    <value>Lange Zeilen am Rand des Editors umbrechen</value>
   </data>
   <data name="LineNumbers" xml:space="preserve">
     <value>Zeilennummern</value>
   </data>
-  <data name="LineNumbersDescription" xml:space="preserve">
-    <value>Zeilennummern am linken Rand anzeigen</value>
-  </data>
   <data name="FontSize" xml:space="preserve">
     <value>Schriftgröße</value>
-  </data>
-  <data name="FontSizeDescription" xml:space="preserve">
-    <value>Die Größe des Texts im Editor</value>
   </data>
   <data name="About" xml:space="preserve">
     <value>Info</value>

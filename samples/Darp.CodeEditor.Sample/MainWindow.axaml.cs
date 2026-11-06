@@ -12,6 +12,7 @@ using FluentAvalonia.UI.Controls;
 using FluentAvalonia.UI.Windowing;
 using Sample.Documents;
 using Sample.Localization;
+using Sample.Settings;
 
 namespace Sample;
 
@@ -51,6 +52,7 @@ public sealed partial class MainWindow : FAAppWindow
         AddShortcut("Ctrl+Shift+S", () => SaveShownAsync(saveAs: true));
         AddShortcut("Ctrl+W", () => ShownDocument is { } document ? CloseAsync(document) : Task.CompletedTask);
         AddShortcut("Ctrl+G", OpenGoToLine);
+        AddShortcut("Alt+Z", ToggleWordWrap);
         AddShortcut("Ctrl+OemComma", () => Navigation.SelectedItem = SettingsItem);
     }
 
@@ -64,6 +66,8 @@ public sealed partial class MainWindow : FAAppWindow
     private static FilePickerFileType AllFiles => new(Strings.Current.AllFiles) { Patterns = ["*"] };
 
     private Workspace? Workspace => _viewModel?.Workspace;
+
+    private AppSettings? Settings => _viewModel?.Settings;
 
     private OpenDocument? ShownDocument => _viewModel?.ShownDocument;
 
@@ -148,6 +152,13 @@ public sealed partial class MainWindow : FAAppWindow
                 MenuItem(strings.Redo, FASymbol.Redo, DocumentPage.Redo, ShownDocument?.Document.CanRedo == true)
             );
             menu.Items.Add(MenuItem(strings.Find, FASymbol.Find, DocumentPage.Find, shows));
+            var viewItem = new FAMenuFlyoutSubItem
+            {
+                Text = strings.View,
+                IconSource = new FASymbolIconSource { Symbol = FASymbol.View },
+            };
+            FillViewMenu(viewItem.Items);
+            menu.Items.Add(viewItem);
             menu.Items.Add(new FAMenuFlyoutSeparator());
         }
         menu.Items.Add(
@@ -156,6 +167,54 @@ public sealed partial class MainWindow : FAAppWindow
         menu.Items.Add(MenuItem(strings.Replace, FASymbol.Switch, DocumentPage.Replace, shows));
         menu.Items.Add(MenuItem(strings.GoToLine, FASymbol.Go, OpenGoToLine, shows));
         menu.Items.Add(MenuItem(strings.InsertDateTime, FASymbol.Calendar, DocumentPage.InsertDateTime, shows));
+    }
+
+    private void ToggleWordWrap()
+    {
+        if (Settings is { } settings)
+            settings.WordWrap = !settings.WordWrap;
+    }
+
+    private void OnViewMenuOpening(object? sender, EventArgs e)
+    {
+        if (sender is FAMenuFlyout menu)
+            FillViewMenu(menu.Items);
+    }
+
+    /// <summary>The view's options: how every editor shows its text. They last as long as the app runs.</summary>
+    private void FillViewMenu(System.Collections.IList items)
+    {
+        items.Clear();
+        if (Settings is not { } settings)
+            return;
+        var wordWrap = new FAToggleMenuFlyoutItem
+        {
+            Text = Strings.Current.WordWrap,
+            IsChecked = settings.WordWrap,
+            InputGesture = KeyGesture.Parse("Alt+Z"),
+        };
+        wordWrap.Click += (_, _) => ToggleWordWrap();
+        var lineNumbers = new FAToggleMenuFlyoutItem
+        {
+            Text = Strings.Current.LineNumbers,
+            IsChecked = settings.ShowLineNumbers,
+        };
+        lineNumbers.Click += (_, _) => settings.ShowLineNumbers = !settings.ShowLineNumbers;
+        var fontSize = new FAMenuFlyoutSubItem { Text = Strings.Current.FontSize };
+        foreach (double size in settings.FontSizes)
+        {
+            var item = new FARadioMenuFlyoutItem
+            {
+                Text = size.ToString(Strings.Current.Culture),
+                IsChecked = settings.FontSize == size,
+            };
+            item.Click += (_, _) => settings.FontSize = size;
+            fontSize.Items.Add(item);
+        }
+        items.Add(wordWrap);
+        items.Add(lineNumbers);
+        items.Add(new FAMenuFlyoutSeparator());
+        items.Add(fontSize);
     }
 
     private static FAMenuFlyoutItem MenuItem(string text, FASymbol? icon, Action action, bool isEnabled = true)
@@ -289,6 +348,8 @@ public sealed partial class MainWindow : FAAppWindow
     private void OnNew(object? sender, RoutedEventArgs e) => ShowAttachedFlyout(sender);
 
     private void OnMore(object? sender, RoutedEventArgs e) => ShowAttachedFlyout(sender);
+
+    private void OnView(object? sender, RoutedEventArgs e) => ShowAttachedFlyout(sender);
 
     private static void ShowAttachedFlyout(object? sender)
     {

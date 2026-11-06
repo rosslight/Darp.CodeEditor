@@ -157,6 +157,14 @@
                 >
                     <fa:FASymbolIcon Symbol="Find" />
                 </Button>
+                <Rectangle Classes="divider wide" />
+                <Button Classes="command wide" ToolTip.Tip="{Binding Strings.View}" Click="OnView">
+                    <FlyoutBase.AttachedFlyout>
+                        <!-- Word wrap, line numbers and the font size, from the code when it opens. -->
+                        <fa:FAMenuFlyout Placement="BottomEdgeAlignedLeft" Opening="OnViewMenuOpening" />
+                    </FlyoutBase.AttachedFlyout>
+                    <fa:FASymbolIcon Symbol="View" />
+                </Button>
                 <Button Classes="command" Click="OnMore">
                     <FlyoutBase.AttachedFlyout>
                         <!-- The commands that don't fit, from the code when it opens. -->
@@ -292,16 +300,15 @@
             </Border>
         </fa:FANavigationView>
 
-        <!-- The status bar, under the pane and the page, for the document the page shows. -->
-        <Grid
-            Grid.Row="2"
-            Classes="status"
-            Height="28"
-            Margin="12,0"
-            ColumnDefinitions="Auto,*,Auto,Auto"
-            IsVisible="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
-        >
-            <Button Name="CaretButton">
+        <!--
+          The status bar, under the pane and the page, for the document the page shows. It stays while the settings
+          show, empty, so that the pane keeps its height.
+        -->
+        <Grid Grid.Row="2" Classes="status" Height="28" Margin="12,0" ColumnDefinitions="Auto,*,Auto,Auto">
+            <Button
+                Name="CaretButton"
+                IsVisible="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
+            >
                 <Button.Flyout>
                     <Flyout Placement="TopEdgeAlignedLeft" Opened="OnGoToLineOpened">
                         <StackPanel Width="220" Spacing="8">
@@ -329,7 +336,7 @@
                 </TextBlock>
             </Button>
 
-            <Panel Grid.Column="1">
+            <Panel Grid.Column="1" IsVisible="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}">
                 <TextBlock
                     Classes="plain"
                     Text="{Binding Strings.NoFile}"
@@ -343,7 +350,10 @@
                 />
             </Panel>
 
-            <DropDownButton Grid.Column="2">
+            <DropDownButton
+                Grid.Column="2"
+                IsVisible="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
+            >
                 <DropDownButton.Flyout>
                     <!-- The choices, from the code when it opens. -->
                     <fa:FAMenuFlyout Placement="TopEdgeAlignedRight" Opening="OnIndentationMenuOpening" />

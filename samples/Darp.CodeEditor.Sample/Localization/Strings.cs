@@ -52,6 +52,7 @@ public sealed class Strings : INotifyPropertyChanged
     public string Undo => Get();
     public string Redo => Get();
     public string Find => Get();
+    public string View => Get();
     public string Replace => Get();
     public string GoToLine => Get();
     public string Go => Get();
@@ -85,13 +86,9 @@ public sealed class Strings : INotifyPropertyChanged
     public string ThemeDark => Get();
     public string Language => Get();
     public string LanguageDescription => Get();
-    public string Editor => Get();
     public string WordWrap => Get();
-    public string WordWrapDescription => Get();
     public string LineNumbers => Get();
-    public string LineNumbersDescription => Get();
     public string FontSize => Get();
-    public string FontSizeDescription => Get();
     public string About => Get();
     public string AboutDescription => Get();
     public string SourceCode => Get();

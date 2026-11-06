@@ -19,16 +19,6 @@
         <Style Selector="fa|FASettingsExpander ComboBox">
             <Setter Property="MinWidth" Value="200" />
         </Style>
-        <!--
-          Switches without the On and Off text, and as tall as the combo boxes (they reserve 44 px for a header), so
-          that every row has the same height.
-        -->
-        <Style Selector="fa|FASettingsExpander ToggleSwitch">
-            <Setter Property="OnContent" Value="{x:Null}" />
-            <Setter Property="OffContent" Value="{x:Null}" />
-            <Setter Property="MinWidth" Value="0" />
-            <Setter Property="Margin" Value="0,-6" />
-        </Style>
     </UserControl.Styles>
 
     <ScrollViewer Padding="24,16,24,24">
@@ -86,38 +76,6 @@
                                 </DataTemplate>
                             </ComboBox.ItemTemplate>
                         </ComboBox>
-                    </fa:FASettingsExpander.Footer>
-                </fa:FASettingsExpander>
-
-                <TextBlock Classes="section" Text="{Binding Strings.Editor}" />
-                <fa:FASettingsExpander
-                    IconSource="AlignLeft"
-                    Header="{Binding Strings.WordWrap}"
-                    Description="{Binding Strings.WordWrapDescription}"
-                >
-                    <fa:FASettingsExpander.Footer>
-                        <ToggleSwitch IsChecked="{Binding Settings.WordWrap}" />
-                    </fa:FASettingsExpander.Footer>
-                </fa:FASettingsExpander>
-                <fa:FASettingsExpander
-                    IconSource="BulletList"
-                    Header="{Binding Strings.LineNumbers}"
-                    Description="{Binding Strings.LineNumbersDescription}"
-                >
-                    <fa:FASettingsExpander.Footer>
-                        <ToggleSwitch IsChecked="{Binding Settings.ShowLineNumbers}" />
-                    </fa:FASettingsExpander.Footer>
-                </fa:FASettingsExpander>
-                <fa:FASettingsExpander
-                    IconSource="FontSize"
-                    Header="{Binding Strings.FontSize}"
-                    Description="{Binding Strings.FontSizeDescription}"
-                >
-                    <fa:FASettingsExpander.Footer>
-                        <ComboBox
-                            ItemsSource="{Binding Settings.FontSizes}"
-                            SelectedItem="{Binding Settings.FontSize}"
-                        />
                     </fa:FASettingsExpander.Footer>
                 </fa:FASettingsExpander>
 
