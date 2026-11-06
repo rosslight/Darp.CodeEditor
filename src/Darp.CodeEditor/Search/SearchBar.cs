@@ -64,7 +64,10 @@ internal sealed class SearchBar : UserControl
     /// <summary>The search under way in the background; null for none.</summary>
     private CancellationTokenSource? _searching;
 
-    /// <summary>Where to move once the search under way has its result.</summary>
+    /// <summary>
+    /// Where to move once the search under way has its result. A newer search that takes over keeps it: it replaces
+    /// the search, not what the search was for.
+    /// </summary>
     private Move _move;
 
     /// <summary>Where a search for a new query looks for its first match.</summary>
@@ -184,6 +187,7 @@ internal sealed class SearchBar : UserControl
         if (_shown is not { } shown)
             return;
         CancelSearch();
+        _move = Move.None;
         shown.Buffer.Changed -= OnBufferChanged;
         shown.Buffer.TextChanged -= OnTextChanged;
         shown.TextArea.SelectionChanged -= OnSelectionChanged;
@@ -210,6 +214,7 @@ internal sealed class SearchBar : UserControl
     {
         IsVisible = false;
         CancelSearch();
+        _move = Move.None;
         _result = null;
         _shown?.Layer.Matches = null;
         UpdateStatus();
@@ -310,13 +315,17 @@ internal sealed class SearchBar : UserControl
 
     /// <summary>
     /// Starts a search of the current text in the background, in place of the one under way, if the bar is open and
-    /// has a query; it moves the selection as <paramref name="move"/> says once its result is in.
+    /// has a query; it moves the selection as <paramref name="move"/> says once its result is in, or as the search it
+    /// replaces was to.
     /// </summary>
     private void Search(Move move)
     {
         CancelSearch();
+        if (move != Move.None)
+            _move = move;
         if (!IsOpen || _shown is not { } shown || _find.Text is not { Length: > 0 } text)
         {
+            _move = Move.None;
             _result = null;
             _shown?.Layer.Matches = null;
             UpdateStatus();
@@ -332,7 +341,6 @@ internal sealed class SearchBar : UserControl
         TextSnapshot snapshot = shown.Document.CurrentSnapshot;
         var searching = new CancellationTokenSource();
         _searching = searching;
-        _move = move;
         // Cancelled, the task ends as cancelled, not as failed.
         Task<SearchResult> search = Task.Run(
             () => TextSearch.Find(snapshot, query, replacement, searching.Token),
@@ -377,7 +385,6 @@ internal sealed class SearchBar : UserControl
     {
         _searching?.Cancel();
         _searching = null;
-        _move = Move.None;
     }
 
     /// <summary>Selects a match as <paramref name="move"/> says, and scrolls it into view.</summary>

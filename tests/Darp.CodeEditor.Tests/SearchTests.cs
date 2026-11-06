@@ -160,6 +160,31 @@ public sealed class SearchTests(UiFixture ui)
             document.Text.ShouldBe("1:one two=2 three=3");
         });
 
+    /// <summary>
+    /// A new query selects its first match also when a newer search replaces the query's own before its result is in:
+    /// the replacement or the text changes right after the query, with no dispatcher pass for the result between.
+    /// </summary>
+    [Theory]
+    [InlineData("replacement")]
+    [InlineData("text")]
+    public Task A_new_query_selects_its_first_match_also_when_a_newer_search_takes_over(string change) =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("|a b a b", CodeLanguage.PlainText);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            window.Editor.OpenSearch(replace: true);
+            SearchBar bar = BarOf(window);
+
+            bar.FindBox.Text = "b";
+            if (change == "replacement")
+                bar.ReplaceBox.Text = "c";
+            else
+                document.Replace(new TextRange(7, 0), " b");
+            await Wait.UntilAsync(() => bar.ReplaceAllButton.IsEnabled);
+
+            window.Editor.Selection.ShouldBe(new TextSelection(2, 3));
+        });
+
     [Fact]
     public Task A_read_only_editor_opens_the_search_bar_without_replacing() =>
         _ui.Run(() =>
