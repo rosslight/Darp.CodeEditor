@@ -179,8 +179,7 @@ internal sealed class EditingHelpers : IDisposable
 
     /// <summary>
     /// Typing the closing character that the editor typed, right before it, steps over it, as in VS Code: only a
-    /// single character, and not a quote after a backslash, which escapes it. In a rectangle selection, on every
-    /// line or none.
+    /// single character, and not a quote that a backslash escapes. In a rectangle selection, on every line or none.
     /// </summary>
     private bool TypeOver(char typed, int[] offsets)
     {
@@ -192,8 +191,20 @@ internal sealed class EditingHelpers : IDisposable
         bool IsClosedBefore(int offset) =>
             offset < Buffer.TextLength
             && Buffer.GetCharAt(offset) == typed
-            && !(IsQuote(typed) && offset > 0 && Buffer.GetCharAt(offset - 1) == '\\')
+            && !(IsQuote(typed) && IsEscaped(offset))
             && _autoClosed.Exists(pair => pair.Close.Offset == offset && pair.CloseText.Length == 1);
+    }
+
+    /// <summary>
+    /// Whether text typed at <paramref name="offset"/> is escaped: after an odd number of backslashes, as two of them
+    /// are an escaped backslash.
+    /// </summary>
+    private bool IsEscaped(int offset)
+    {
+        int backslashes = 0;
+        while (offset - backslashes > 0 && Buffer.GetCharAt(offset - backslashes - 1) == '\\')
+            backslashes++;
+        return backslashes % 2 == 1;
     }
 
     /// <summary>

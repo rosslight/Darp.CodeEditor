@@ -25,6 +25,20 @@ public sealed class PairTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe("{\n    \"a\": [1]]|\n}");
         });
 
+    /// <summary>A quote after an odd number of backslashes is escaped: it goes into the string.</summary>
+    [Theory]
+    [InlineData("\\\\", "{\n    \"a\": \"\\\\\"|\n}")]
+    [InlineData("\\", "{\n    \"a\": \"\\\"|\"\n}")]
+    public Task A_closing_quote_steps_over_unless_a_backslash_escapes_it(string backslashes, string expected) =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = await ShowColored("{\n    \"a\": |\n}", CodeLanguage.Json);
+
+            window.Type("\"" + backslashes + "\"");
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
     [Fact]
     public Task Undo_removes_the_closing_character_with_the_opening_one() =>
         _ui.Run(async () =>
