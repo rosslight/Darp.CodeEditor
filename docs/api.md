@@ -619,6 +619,6 @@ Still open:
 ## 10. Open questions
 
 Question numbers continue the decision log in [design.md](design.md). Decisions taken in the API discussion are
-recorded there too (#61, #64–#103).
+recorded there too (#61, #64–#105).
 
 None right now. Section 9 lists what still needs proving.
