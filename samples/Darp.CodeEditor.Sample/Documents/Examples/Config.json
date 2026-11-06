@@ -1,0 +1,16 @@
+{
+  "window": {
+    "width": 1200,
+    "height": 760,
+    "maximized": false
+  },
+  "recentFiles": ["notes/today.txt", "scripts/report.py"],
+  "autosave": {
+    "enabled": true,
+    "intervalSeconds": 30
+  },
+  "logging": {
+    "level": "information",
+    "file": null
+  }
+}

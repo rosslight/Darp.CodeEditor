@@ -1,0 +1,77 @@
+<windowing:FAAppWindow
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:windowing="using:FluentAvalonia.UI.Windowing"
+    xmlns:fa="using:FluentAvalonia.UI.Controls"
+    xmlns:local="using:Sample"
+    xmlns:documents="using:Sample.Documents"
+    xmlns:settings="using:Sample.Settings"
+    x:Class="Sample.MainWindow"
+    x:DataType="local:MainViewModel"
+    Title="Darp.CodeEditor Sample"
+    Width="1200"
+    Height="760"
+    MinWidth="640"
+    MinHeight="400"
+    RequestedThemeVariant="{Binding Settings.AppTheme.Variant}"
+>
+    <Grid RowDefinitions="Auto,*">
+        <!--
+          The title bar, where the window's content extends into it, as on Windows and macOS. The window's buttons are
+          drawn over it: on the right on Windows, on the left on macOS.
+        -->
+        <StackPanel
+            IsVisible="{Binding $parent[Window].IsExtendedIntoWindowDecorations}"
+            Height="44"
+            Margin="{OnPlatform '16,0', macOS='80,0'}"
+            Orientation="Horizontal"
+            Spacing="12"
+            Background="Transparent"
+            WindowDecorationProperties.ElementRole="TitleBar"
+        >
+            <fa:FASymbolIcon Symbol="Code" FontSize="16" VerticalAlignment="Center" />
+            <TextBlock Text="Darp.CodeEditor Sample" FontSize="12" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <fa:FANavigationView
+            Grid.Row="1"
+            Name="Navigation"
+            PaneDisplayMode="Left"
+            IsPaneToggleButtonVisible="False"
+            IsSettingsVisible="False"
+            OpenPaneLength="240"
+            MenuItemsSource="{Binding Workspace.Documents}"
+            SelectionChanged="OnNavigationSelectionChanged"
+        >
+            <fa:FANavigationView.Resources>
+                <!-- No gap above the pages: the title bar is above them already. -->
+                <Thickness x:Key="NavigationViewContentMargin">0</Thickness>
+            </fa:FANavigationView.Resources>
+            <fa:FANavigationView.MenuItemTemplateSelector>
+                <local:NavigationItemSelector>
+                    <local:NavigationItemSelector.Document>
+                        <DataTemplate x:DataType="documents:OpenDocument">
+                            <fa:FANavigationViewItem
+                                Content="{Binding Title}"
+                                IconSource="{Binding File, Converter={x:Static local:MainWindow.DocumentIcon}}"
+                                ToolTip.Tip="{Binding File.Path.LocalPath}"
+                            />
+                        </DataTemplate>
+                    </local:NavigationItemSelector.Document>
+                </local:NavigationItemSelector>
+            </fa:FANavigationView.MenuItemTemplateSelector>
+            <fa:FANavigationView.FooterMenuItems>
+                <fa:FANavigationViewItem
+                    Name="SettingsItem"
+                    Content="{Binding Strings.Settings}"
+                    IconSource="Settings"
+                />
+            </fa:FANavigationView.FooterMenuItems>
+
+            <Panel>
+                <documents:DocumentView Name="DocumentPage" />
+                <settings:SettingsView Name="SettingsPage" IsVisible="False" />
+            </Panel>
+        </fa:FANavigationView>
+    </Grid>
+</windowing:FAAppWindow>

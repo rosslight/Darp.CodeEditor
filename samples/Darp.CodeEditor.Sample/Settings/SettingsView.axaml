@@ -1,0 +1,127 @@
+<UserControl
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:fa="using:FluentAvalonia.UI.Controls"
+    xmlns:globalization="using:System.Globalization"
+    xmlns:local="using:Sample"
+    xmlns:settings="using:Sample.Settings"
+    x:Class="Sample.Settings.SettingsView"
+    x:DataType="local:MainViewModel"
+>
+    <UserControl.Styles>
+        <Style Selector="TextBlock.section">
+            <Setter Property="Margin" Value="0,16,0,4" />
+            <Setter Property="Theme" Value="{StaticResource BodyStrongTextBlockStyle}" />
+        </Style>
+        <Style Selector="fa|FASettingsExpander ComboBox">
+            <Setter Property="MinWidth" Value="200" />
+        </Style>
+        <Style Selector="ToggleSwitch" x:DataType="local:MainViewModel">
+            <Setter Property="OnContent" Value="{Binding Strings.On}" />
+            <Setter Property="OffContent" Value="{Binding Strings.Off}" />
+        </Style>
+    </UserControl.Styles>
+
+    <ScrollViewer Padding="24,8,24,32">
+        <StackPanel MaxWidth="1000" Spacing="4">
+            <TextBlock
+                Text="{Binding Strings.Settings}"
+                Theme="{StaticResource TitleTextBlockStyle}"
+                Margin="0,0,0,8"
+            />
+
+            <TextBlock Classes="section" Text="{Binding Strings.Appearance}" />
+            <fa:FASettingsExpander
+                IconSource="DarkTheme"
+                Header="{Binding Strings.AppTheme}"
+                Description="{Binding Strings.AppThemeDescription}"
+            >
+                <fa:FASettingsExpander.Footer>
+                    <ComboBox ItemsSource="{Binding Settings.AppThemes}" SelectedItem="{Binding Settings.AppTheme}">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="settings:ThemeChoice">
+                                <TextBlock Text="{Binding Name}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </fa:FASettingsExpander.Footer>
+            </fa:FASettingsExpander>
+            <fa:FASettingsExpander
+                IconSource="Code"
+                Header="{Binding Strings.EditorTheme}"
+                Description="{Binding Strings.EditorThemeDescription}"
+            >
+                <fa:FASettingsExpander.Footer>
+                    <ComboBox
+                        ItemsSource="{Binding Settings.EditorThemes}"
+                        SelectedItem="{Binding Settings.EditorTheme}"
+                    >
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="settings:ThemeChoice">
+                                <TextBlock Text="{Binding Name}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </fa:FASettingsExpander.Footer>
+            </fa:FASettingsExpander>
+            <fa:FASettingsExpander
+                IconSource="Globe"
+                Header="{Binding Strings.Language}"
+                Description="{Binding Strings.LanguageDescription}"
+            >
+                <fa:FASettingsExpander.Footer>
+                    <ComboBox ItemsSource="{Binding Settings.Cultures}" SelectedItem="{Binding Settings.Culture}">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="globalization:CultureInfo">
+                                <TextBlock Text="{Binding NativeName}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </fa:FASettingsExpander.Footer>
+            </fa:FASettingsExpander>
+
+            <TextBlock Classes="section" Text="{Binding Strings.Editor}" />
+            <fa:FASettingsExpander
+                IconSource="AlignLeft"
+                Header="{Binding Strings.WordWrap}"
+                Description="{Binding Strings.WordWrapDescription}"
+            >
+                <fa:FASettingsExpander.Footer>
+                    <ToggleSwitch IsChecked="{Binding Settings.WordWrap}" />
+                </fa:FASettingsExpander.Footer>
+            </fa:FASettingsExpander>
+            <fa:FASettingsExpander
+                IconSource="BulletList"
+                Header="{Binding Strings.LineNumbers}"
+                Description="{Binding Strings.LineNumbersDescription}"
+            >
+                <fa:FASettingsExpander.Footer>
+                    <ToggleSwitch IsChecked="{Binding Settings.ShowLineNumbers}" />
+                </fa:FASettingsExpander.Footer>
+            </fa:FASettingsExpander>
+            <fa:FASettingsExpander
+                IconSource="FontSize"
+                Header="{Binding Strings.FontSize}"
+                Description="{Binding Strings.FontSizeDescription}"
+            >
+                <fa:FASettingsExpander.Footer>
+                    <ComboBox ItemsSource="{Binding Settings.FontSizes}" SelectedItem="{Binding Settings.FontSize}" />
+                </fa:FASettingsExpander.Footer>
+            </fa:FASettingsExpander>
+
+            <TextBlock Classes="section" Text="{Binding Strings.About}" />
+            <fa:FASettingsExpander
+                IconSource="Help"
+                Header="Darp.CodeEditor"
+                Description="{Binding Strings.AboutDescription}"
+            >
+                <fa:FASettingsExpander.Footer>
+                    <HyperlinkButton
+                        Content="{Binding Strings.SourceCode}"
+                        NavigateUri="https://github.com/rosslight/Darp.CodeEditor"
+                    />
+                </fa:FASettingsExpander.Footer>
+            </fa:FASettingsExpander>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

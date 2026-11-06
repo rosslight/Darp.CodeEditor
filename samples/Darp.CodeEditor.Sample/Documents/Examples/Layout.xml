@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The main window: a sidebar and a list of entries. -->
+<layout name="main">
+  <sidebar width="240" collapsible="true">
+    <item id="inbox" icon="mail" />
+    <item id="archive" icon="folder" />
+  </sidebar>
+  <content>
+    <list source="inbox" sort="date" descending="true" />
+  </content>
+</layout>

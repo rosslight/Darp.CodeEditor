@@ -1,0 +1,167 @@
+<UserControl
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:fa="using:FluentAvalonia.UI.Controls"
+    xmlns:ce="using:Darp.CodeEditor"
+    xmlns:local="using:Sample"
+    xmlns:documents="using:Sample.Documents"
+    xmlns:loc="using:Sample.Localization"
+    x:Class="Sample.Documents.DocumentView"
+    x:DataType="local:MainViewModel"
+>
+    <UserControl.Styles>
+        <!-- The status bar's buttons look like its text until the pointer is over them. -->
+        <Style Selector="Button.status, DropDownButton.status">
+            <Setter Property="Theme" Value="{StaticResource TransparentButton}" />
+            <Setter Property="Padding" Value="8,2" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+        <Style Selector="TextBlock.status">
+            <Setter Property="Margin" Value="8,0" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+    </UserControl.Styles>
+
+    <Grid RowDefinitions="Auto,*,Auto">
+        <fa:FACommandBar Margin="8,0" DefaultLabelPosition="Right">
+            <fa:FACommandBar.PrimaryCommands>
+                <!-- An attached flyout, which the click opens: a button's own flyout draws its chevron over the label. -->
+                <fa:FACommandBarButton Label="{Binding Strings.New}" IconSource="Add" Click="OnNew">
+                    <FlyoutBase.AttachedFlyout>
+                        <!-- One item per file type, from the code when it opens. -->
+                        <fa:FAMenuFlyout Placement="BottomEdgeAlignedLeft" Opening="OnNewMenuOpening" />
+                    </FlyoutBase.AttachedFlyout>
+                </fa:FACommandBarButton>
+                <fa:FACommandBarButton Label="{Binding Strings.Open}" IconSource="OpenFile" Click="OnOpen" />
+                <fa:FACommandBarButton
+                    Label="{Binding Strings.Save}"
+                    IconSource="Save"
+                    Click="OnSave"
+                    IsEnabled="{Binding Workspace.Current, Converter={x:Static ObjectConverters.IsNotNull}}"
+                />
+                <fa:FACommandBarSeparator />
+                <fa:FACommandBarButton
+                    Label="{Binding Strings.Undo}"
+                    IconSource="Undo"
+                    Click="OnUndo"
+                    IsEnabled="{Binding Workspace.Current.Document.CanUndo, FallbackValue=False}"
+                />
+                <fa:FACommandBarButton
+                    Label="{Binding Strings.Redo}"
+                    IconSource="Redo"
+                    Click="OnRedo"
+                    IsEnabled="{Binding Workspace.Current.Document.CanRedo, FallbackValue=False}"
+                />
+                <fa:FACommandBarSeparator />
+                <fa:FACommandBarButton Label="{Binding Strings.Find}" IconSource="Find" Click="OnFind" />
+                <fa:FACommandBarButton Label="{Binding Strings.Replace}" IconSource="Switch" Click="OnReplace" />
+            </fa:FACommandBar.PrimaryCommands>
+            <fa:FACommandBar.SecondaryCommands>
+                <fa:FACommandBarButton Label="{Binding Strings.SaveAs}" IconSource="SaveAs" Click="OnSaveAs" />
+                <fa:FACommandBarButton Label="{Binding Strings.Close}" IconSource="Dismiss" Click="OnClose" />
+                <fa:FACommandBarSeparator />
+                <fa:FACommandBarButton Label="{Binding Strings.Cut}" IconSource="Cut" Click="OnCut" />
+                <fa:FACommandBarButton Label="{Binding Strings.Copy}" IconSource="Copy" Click="OnCopy" />
+                <fa:FACommandBarButton Label="{Binding Strings.Paste}" IconSource="Paste" Click="OnPaste" />
+                <fa:FACommandBarButton Label="{Binding Strings.SelectAll}" IconSource="SelectAll" Click="OnSelectAll" />
+                <fa:FACommandBarSeparator />
+                <fa:FACommandBarButton Label="{Binding Strings.GoToLine}" IconSource="Go" Click="OnGoToLine" />
+                <fa:FACommandBarButton
+                    Label="{Binding Strings.InsertDateTime}"
+                    IconSource="Calendar"
+                    Click="OnInsertDateTime"
+                />
+            </fa:FACommandBar.SecondaryCommands>
+        </fa:FACommandBar>
+
+        <Border
+            Grid.Row="1"
+            Margin="8,0"
+            CornerRadius="8"
+            ClipToBounds="True"
+            BorderThickness="1"
+            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+        >
+            <!-- Default follows the app; Light or Dark turn the editor's colors, popups and search bar so. -->
+            <ThemeVariantScope RequestedThemeVariant="{Binding Settings.EditorTheme.Variant}">
+                <ce:CodeEditor
+                    Name="Editor"
+                    WordWrap="{Binding Settings.WordWrap}"
+                    ShowLineNumbers="{Binding Settings.ShowLineNumbers}"
+                    FontSize="{Binding Settings.FontSize}"
+                />
+            </ThemeVariantScope>
+        </Border>
+
+        <Grid
+            Grid.Row="2"
+            Margin="8,2,8,4"
+            ColumnDefinitions="Auto,*,Auto,Auto"
+            IsVisible="{Binding Workspace.Current, Converter={x:Static ObjectConverters.IsNotNull}}"
+        >
+            <Button Name="CaretButton" Classes="status">
+                <Button.Flyout>
+                    <Flyout Placement="TopEdgeAlignedLeft" Opened="OnGoToLineOpened">
+                        <StackPanel Width="240" Spacing="12">
+                            <fa:FANumberBox
+                                Name="LineNumber"
+                                HorizontalAlignment="Stretch"
+                                Header="{Binding Strings.GoToLine}"
+                                Minimum="1"
+                                SimpleNumberFormat="F0"
+                            />
+                            <Button
+                                HorizontalAlignment="Right"
+                                Classes="accent"
+                                Content="{Binding Strings.Go}"
+                                Click="OnGoToLineConfirmed"
+                            />
+                        </StackPanel>
+                    </Flyout>
+                </Button.Flyout>
+                <TextBlock>
+                    <TextBlock.Text>
+                        <MultiBinding Converter="{x:Static loc:FormatConverter.Instance}">
+                            <Binding Path="Strings.CaretPosition" />
+                            <Binding Path="#Editor.CaretPosition.Line" />
+                            <Binding Path="#Editor.CaretPosition.Column" />
+                        </MultiBinding>
+                    </TextBlock.Text>
+                </TextBlock>
+            </Button>
+
+            <Panel Grid.Column="1">
+                <TextBlock
+                    Classes="status"
+                    Text="{Binding Strings.InMemory}"
+                    IsVisible="{Binding Workspace.Current.File, Converter={x:Static ObjectConverters.IsNull}}"
+                />
+                <TextBlock
+                    Classes="status"
+                    Text="{Binding Workspace.Current.File.Path.LocalPath}"
+                    TextTrimming="PrefixCharacterEllipsis"
+                    IsVisible="{Binding Workspace.Current.File, Converter={x:Static ObjectConverters.IsNotNull}}"
+                />
+            </Panel>
+
+            <DropDownButton Grid.Column="2" Classes="status">
+                <DropDownButton.Flyout>
+                    <!-- The choices, from the code when it opens. -->
+                    <fa:FAMenuFlyout Placement="TopEdgeAlignedRight" Opening="OnIndentationMenuOpening" />
+                </DropDownButton.Flyout>
+                <TextBlock>
+                    <TextBlock.Text>
+                        <MultiBinding Converter="{x:Static documents:DocumentView.IndentationText}">
+                            <Binding Path="Strings.IndentSpaces" />
+                            <Binding Path="Strings.IndentTabs" />
+                            <Binding Path="Workspace.Current.Document.Indentation" />
+                        </MultiBinding>
+                    </TextBlock.Text>
+                </TextBlock>
+            </DropDownButton>
+
+            <TextBlock Grid.Column="3" Classes="status" Text="{Binding Workspace.Current.Type.Name}" />
+        </Grid>
+    </Grid>
+</UserControl>
