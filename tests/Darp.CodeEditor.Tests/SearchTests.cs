@@ -23,9 +23,9 @@ public sealed class SearchTests(UiFixture ui)
         _ui.Run(async () =>
         {
             using EditorWindow window = MarkedText.Show("one «two» one\nthree one", CodeLanguage.PlainText);
-            SearchBar bar = BarOf(window);
 
             window.Editor.OpenSearch();
+            SearchBar bar = BarOf(window);
 
             bar.IsOpen.ShouldBeTrue();
             bar.FindBox.Text.ShouldBe("two");
@@ -47,9 +47,9 @@ public sealed class SearchTests(UiFixture ui)
         _ui.Run(() =>
         {
             using EditorWindow window = MarkedText.Show("one «two»", CodeLanguage.PlainText);
-            SearchBar bar = BarOf(window);
 
             window.Editor.OpenSearch(replace: true);
+            SearchBar bar = BarOf(window);
             bar.FindBox.IsFocused.ShouldBeTrue();
             window.Press(Key.Tab);
             bar.ReplaceBox.IsFocused.ShouldBeTrue();
@@ -64,15 +64,29 @@ public sealed class SearchTests(UiFixture ui)
         });
 
     [Fact]
+    public Task An_editor_makes_its_search_bar_the_first_time_it_opens() =>
+        _ui.Run(async () =>
+        {
+            // Every editor shows; few are searched: those pay for the bar.
+            using EditorWindow window = MarkedText.Show("a «b» a b", CodeLanguage.PlainText);
+            window.Editor.GetVisualDescendants().OfType<SearchBar>().ShouldBeEmpty();
+
+            window.Press(Key.F3);
+
+            await Wait.UntilAsync(() => window.Editor.Selection == new TextSelection(6, 7));
+            BarOf(window).IsOpen.ShouldBeTrue();
+        });
+
+    [Fact]
     public Task The_keys_open_the_bars_go_through_the_matches_and_close() =>
         _ui.Run(async () =>
         {
             using EditorWindow window = MarkedText.Show("|a b a b a", CodeLanguage.PlainText);
-            SearchBar bar = BarOf(window);
             KeyGesture find = ApplicationCommands.Find.Gesture;
             KeyGesture replace = ApplicationCommands.Replace.Gesture;
 
             window.Press(find.Key, find.KeyModifiers);
+            SearchBar bar = BarOf(window);
             bar.IsOpen.ShouldBeTrue();
             bar.ReplaceBox.IsEffectivelyVisible.ShouldBeFalse();
             window.Type("a");
@@ -106,9 +120,9 @@ public sealed class SearchTests(UiFixture ui)
         {
             using EditorWindow window = MarkedText.Show("|a b a", CodeLanguage.PlainText);
             TextEditor part = EditorWindow.PartOf(window.Editor);
-            SearchBar bar = BarOf(window);
 
             ApplicationCommands.Find.Execute(null, part.TextArea);
+            SearchBar bar = BarOf(window);
             bar.IsOpen.ShouldBeTrue();
             window.Type("a");
             await Wait.UntilAsync(() => bar.Count == "1 of 2");
@@ -126,9 +140,9 @@ public sealed class SearchTests(UiFixture ui)
         {
             using EditorWindow window = MarkedText.Show("|one=1 two=2 three=3", CodeLanguage.PlainText);
             CodeDocument document = window.Editor.Document.ShouldNotBeNull();
-            SearchBar bar = BarOf(window);
 
             window.Editor.OpenSearch(replace: true);
+            SearchBar bar = BarOf(window);
             bar.RegexToggle.IsChecked = true;
             window.Type("(\\w+)=(\\d)");
             bar.ReplaceBox.Text = "$2:$1";
@@ -190,9 +204,9 @@ public sealed class SearchTests(UiFixture ui)
         {
             string text = string.Concat(Enumerable.Repeat("a\n", TextSearch.MaxMatches + 1));
             using EditorWindow window = MarkedText.Show("|" + text, CodeLanguage.PlainText);
-            SearchBar bar = BarOf(window);
 
             window.Editor.OpenSearch(replace: true);
+            SearchBar bar = BarOf(window);
             bar.ReplaceBox.Text = "b";
             window.Type("a");
             await Wait.UntilAsync(() => bar.Message is not null);
@@ -211,8 +225,8 @@ public sealed class SearchTests(UiFixture ui)
             // The prototype's search froze for 21 s on this expression and line.
             string text = new string('a', 29) + "!";
             using EditorWindow window = MarkedText.Show("|" + text, CodeLanguage.PlainText);
-            SearchBar bar = BarOf(window);
             window.Editor.OpenSearch(replace: true);
+            SearchBar bar = BarOf(window);
             bar.RegexToggle.IsChecked = true;
             bar.ReplaceBox.Text = "b";
 
@@ -231,8 +245,8 @@ public sealed class SearchTests(UiFixture ui)
         _ui.Run(async () =>
         {
             using EditorWindow window = MarkedText.Show("|a (b)", CodeLanguage.PlainText);
-            SearchBar bar = BarOf(window);
             window.Editor.OpenSearch(replace: true);
+            SearchBar bar = BarOf(window);
             bar.RegexToggle.IsChecked = true;
 
             window.Type("(b");
@@ -248,8 +262,8 @@ public sealed class SearchTests(UiFixture ui)
         _ui.Run(async () =>
         {
             using EditorWindow window = MarkedText.Show("|a b a", CodeLanguage.PlainText);
-            SearchBar bar = BarOf(window);
             window.Editor.OpenSearch();
+            SearchBar bar = BarOf(window);
             window.Type("a");
             await Wait.UntilAsync(() => bar.Count == "1 of 2");
 
@@ -266,8 +280,8 @@ public sealed class SearchTests(UiFixture ui)
             // ^ matches the start of every line, whatever its line break.
             using EditorWindow window = MarkedText.Show("|a\nb\r\nc", CodeLanguage.PlainText);
             CodeDocument document = window.Editor.Document.ShouldNotBeNull();
-            SearchBar bar = BarOf(window);
             window.Editor.OpenSearch(replace: true);
+            SearchBar bar = BarOf(window);
             bar.RegexToggle.IsChecked = true;
             bar.ReplaceBox.Text = "> ";
             window.Type("^");
@@ -291,10 +305,10 @@ public sealed class SearchTests(UiFixture ui)
             // The first document's search runs into the time limit; the second's finds one match at once.
             CodeDocument slow = CodeDocument.Create(CodeLanguage.PlainText, new string('a', 29) + "!");
             using EditorWindow window = MarkedText.Show("|aaa", CodeLanguage.PlainText);
-            SearchBar bar = BarOf(window);
             CodeDocument quick = window.Editor.Document.ShouldNotBeNull();
             window.Editor.Document = slow;
             window.Editor.OpenSearch();
+            SearchBar bar = BarOf(window);
             bar.RegexToggle.IsChecked = true;
             window.Type("(a+)+$");
 

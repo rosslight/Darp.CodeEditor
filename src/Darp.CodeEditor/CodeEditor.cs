@@ -150,7 +150,13 @@ public class CodeEditor : TemplatedControl
     /// <summary>Shows the spaces and tabs inside the selection.</summary>
     private WhitespaceLayer? _whitespace;
 
-    /// <summary>The search and replace bar, from the template.</summary>
+    /// <summary>The template's panel, which the search bar goes into, over the text.</summary>
+    private Panel? _root;
+
+    /// <summary>
+    /// The search and replace bar, from the first time it opens: every editor shows, few are searched, so an editor
+    /// nobody searches in makes none.
+    /// </summary>
     private SearchBar? _searchBar;
 
     /// <summary>
@@ -356,8 +362,8 @@ public class CodeEditor : TemplatedControl
     /// </summary>
     public void OpenSearch(bool replace = false)
     {
-        if (_shown is not null && _part is { } part)
-            _searchBar?.Open(replace && !IsReadOnly, SelectedLineText(part.TextArea));
+        if (_part is { } part && CreatedSearchBar() is { } bar)
+            bar.Open(replace && !IsReadOnly, SelectedLineText(part.TextArea));
     }
 
     /// <summary>Moves the selection to the clipboard, as Ctrl+X does. No effect in a read-only editor.</summary>
@@ -402,7 +408,9 @@ public class CodeEditor : TemplatedControl
                 previous.TextArea.CommandBindings.Remove(binding);
         }
         _part = e.NameScope.Find<TextEditor>("PART_TextEditor");
-        _searchBar = e.NameScope.Find<SearchBar>("PART_SearchBar");
+        _root = e.NameScope.Find<Panel>("PART_Root");
+        // The bar of the old template goes with it.
+        _searchBar = null;
         // A new part has none of the theme's colors yet.
         _theme = null;
         if (_part is { } part)
@@ -607,7 +615,7 @@ public class CodeEditor : TemplatedControl
     /// <returns>Whether there is a document to search.</returns>
     private bool FindNext(bool previous)
     {
-        if (_shown is null || _part is not { } part || _searchBar is not { } bar)
+        if (_part is not { } part || CreatedSearchBar() is not { } bar)
             return false;
         string? text = bar.IsOpen ? null : SelectedLineText(part.TextArea);
         if (previous)
@@ -615,6 +623,22 @@ public class CodeEditor : TemplatedControl
         else
             bar.FindNext(text);
         return true;
+    }
+
+    /// <summary>
+    /// The search bar, made over the text the first time it is needed while the editor shows a document; null without
+    /// a document or a panel for it in the template.
+    /// </summary>
+    private SearchBar? CreatedSearchBar()
+    {
+        if (_searchBar is null && _root is { } root && _shown is { } shown && _part is { } part)
+        {
+            var bar = new SearchBar { Colors = _colors };
+            root.Children.Add(bar);
+            bar.Attach(this, part.TextArea, shown);
+            _searchBar = bar;
+        }
+        return _shown is null ? null : _searchBar;
     }
 
     /// <summary>
