@@ -6,6 +6,7 @@
 	"colors": {
 		"editor.selectionBackground": "#FFFF00",
 		"editorBracketMatch.background": "#FF00FF",
-		"editorBracketMatch.border": "#FF00FF"
+		"editorBracketMatch.border": "#FF00FF",
+		"editorWhitespace.foreground": "#FF0000"
 	}
 }

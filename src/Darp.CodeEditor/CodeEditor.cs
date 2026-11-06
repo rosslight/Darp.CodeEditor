@@ -131,6 +131,9 @@ public class CodeEditor : TemplatedControl
     /// <summary>Marks the bracket next to the caret in the shown document, and its match.</summary>
     private BracketHighlighter? _brackets;
 
+    /// <summary>Shows the spaces and tabs inside the selection.</summary>
+    private WhitespaceLayer? _whitespace;
+
     /// <summary>
     /// Where the editor is in <see cref="Document"/> while the part cannot tell: while it shows nothing, and while the
     /// scroll position waits for the first layout.
@@ -489,6 +492,7 @@ public class CodeEditor : TemplatedControl
         _highlighter = new BackgroundTextMateHighlighter(textView, buffer, Dispatcher, null);
         _helpers = new EditingHelpers(part.TextArea, document, _highlighter);
         _brackets = new BracketHighlighter(part.TextArea, document, _highlighter) { Colors = _colors };
+        _whitespace = new WhitespaceLayer(part.TextArea) { Colors = _colors };
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
         _waitingForLayout = true;
         textView.LayoutUpdated += OnTextViewLayoutUpdated;
@@ -505,6 +509,8 @@ public class CodeEditor : TemplatedControl
         _helpers = null;
         _brackets?.Dispose();
         _brackets = null;
+        _whitespace?.Dispose();
+        _whitespace = null;
         _highlighter?.Dispose();
         _highlighter = null;
         part.TextArea.TextView.LayoutUpdated -= OnTextViewLayoutUpdated;
@@ -788,6 +794,7 @@ public class CodeEditor : TemplatedControl
             TextAreaColors colors = TextAreaColors.From(theme);
             _colors = colors;
             _brackets?.Colors = colors;
+            _whitespace?.Colors = colors;
             TextArea textArea = part.TextArea;
             part.Background = colors.Background;
             part.Foreground = colors.Foreground;

@@ -17,6 +17,7 @@ namespace Darp.CodeEditor.Highlighting;
 /// <param name="CurrentLineBorder">The border around the caret's line.</param>
 /// <param name="BracketMatchBackground">The box around a bracket next to the caret and its match.</param>
 /// <param name="BracketMatchBorder">The border of that box.</param>
+/// <param name="Whitespace">The dots and arrows of spaces and tabs inside the selection.</param>
 internal sealed record TextAreaColors(
     IBrush Background,
     IBrush Foreground,
@@ -26,7 +27,8 @@ internal sealed record TextAreaColors(
     IBrush CurrentLineBackground,
     IPen CurrentLineBorder,
     IBrush BracketMatchBackground,
-    IPen BracketMatchBorder
+    IPen BracketMatchBorder,
+    IBrush Whitespace
 )
 {
     /// <summary>Reads the colors of <paramref name="theme"/>.</summary>
@@ -49,8 +51,9 @@ internal sealed record TextAreaColors(
                 Brush("editor.lineHighlightBorder")
                     ?? (currentLine is null ? Solid(dark ? 0xFF282828 : 0xFFEEEEEE) : Solid(0))
             ),
-            Brush("editorBracketMatch.background") ?? Solid(0x1A006400),
-            new ImmutablePen(Brush("editorBracketMatch.border") ?? Solid(dark ? 0xFF888888 : 0xFFB9B9B9))
+            Brush("editorBracketMatch.background") ?? Solid(0x1A006400u),
+            new ImmutablePen(Brush("editorBracketMatch.border") ?? Solid(dark ? 0xFF888888 : 0xFFB9B9B9)),
+            Brush("editorWhitespace.foreground") ?? Solid(dark ? 0x29E3E4E2u : 0x33333333u)
         );
 
         ImmutableSolidColorBrush? Brush(string key) =>
