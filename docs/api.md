@@ -623,7 +623,9 @@ Still open:
   continued on Enter, `indentNextLinePattern` and `unIndentedLinePattern`, brackets of several characters for
   matching, and the outdent of a closing bracket typed on an empty line by its opening bracket's line, without a
   decrease pattern. VS Code also strips strings and comments from a line before matching its indentation patterns;
-  the editor matches the line as it is.
+  the editor matches the line as it is;
+- the editor's own text, before v1: its context menu and its search bar are in English only, also in an app that
+  shows another language, such as the sample app in German. How apps get them in their language is not decided yet.
 
 ## 10. Open questions
 

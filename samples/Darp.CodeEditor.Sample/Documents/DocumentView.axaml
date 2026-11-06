@@ -1,0 +1,19 @@
+<UserControl
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ce="using:Darp.CodeEditor"
+    xmlns:local="using:Sample"
+    x:Class="Sample.Documents.DocumentView"
+    x:DataType="local:MainViewModel"
+>
+    <!-- Default follows the app; Light or Dark turn the editor's colors, popups and search bar so. -->
+    <ThemeVariantScope RequestedThemeVariant="{Binding Settings.EditorTheme.Variant}">
+        <ce:CodeEditor
+            Name="Editor"
+            WordWrap="{Binding Settings.WordWrap}"
+            ShowLineNumbers="{Binding Settings.ShowLineNumbers}"
+            FontSize="{Binding Settings.FontSize}"
+            Padding="8,6,0,0"
+        />
+    </ThemeVariantScope>
+</UserControl>

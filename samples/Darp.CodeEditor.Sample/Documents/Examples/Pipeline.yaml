@@ -1,0 +1,13 @@
+# Steps that run when a report is exported.
+name: export-report
+trigger:
+  schedule: "0 6 * * 1-5" # weekdays at 6:00
+steps:
+  - name: collect
+    run: python report.py --since yesterday
+  - name: compress
+    run: zip report.zip report.csv
+    when: success
+  - name: upload
+    run: upload report.zip --target archive
+    retries: 3

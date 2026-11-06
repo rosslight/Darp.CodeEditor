@@ -1,0 +1,5 @@
+Ideas for the next version
+
+- Keyboard shortcuts for every command
+- Remember the window size
+- Export the report as a PDF

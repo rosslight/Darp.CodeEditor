@@ -56,6 +56,10 @@ jobs:
         working-directory: ./artifacts/aot-tests
         run: ./Darp.CodeEditor.Tests
 
+      # The sample app as a NativeAOT app: any trim or AOT warning fails the publish.
+      - name: Publish the sample app with Native AOT
+        run: dotnet publish samples/Darp.CodeEditor.Sample -c Release -r linux-x64 -p:PublishAot=true -o ./artifacts/sample-aot /warnaserror
+
   warnings-release:
     name: Build without warnings
     runs-on: ubuntu-24.04
