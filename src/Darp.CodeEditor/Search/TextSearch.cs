@@ -86,8 +86,9 @@ internal static class TextSearch
     /// <summary>
     /// Finds the matches of <paramref name="query"/> in <paramref name="snapshot"/>, with the text that replaces each
     /// one when <paramref name="replacement"/> is given: itself, or for a regular expression with its substitutions,
-    /// such as <c>$1</c>. Stops early once <paramref name="cancellationToken"/> is cancelled.
+    /// such as <c>$1</c>.
     /// </summary>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
     public static SearchResult Find(
         TextSnapshot snapshot,
         SearchQuery query,
@@ -148,6 +149,9 @@ internal static class TextSearch
                     match = match.NextMatch()
                 )
                 {
+                    // Every match counts, also one that Match Whole Word rejects: each may have taken long to find.
+                    if (IsOutOfTime(start, cancellationToken))
+                        return SearchOutcome.OutOfTime;
                     if (query.WholeWord && !IsWholeWord(text, match.Index, match.Length))
                         continue;
                     if (matches.Count == MaxMatches)
@@ -163,13 +167,11 @@ internal static class TextSearch
                             Length = match.Length,
                         }
                     );
-                    if (Stopwatch.GetElapsedTime(start) >= TimeLimit)
-                        return SearchOutcome.OutOfTime;
                 }
-                if (lineEnd == text.Length || cancellationToken.IsCancellationRequested)
-                    return SearchOutcome.Complete;
-                if (Stopwatch.GetElapsedTime(start) >= TimeLimit)
+                if (IsOutOfTime(start, cancellationToken))
                     return SearchOutcome.OutOfTime;
+                if (lineEnd == text.Length)
+                    return SearchOutcome.Complete;
                 lineStart = text.AsSpan(lineEnd).StartsWith("\r\n") ? lineEnd + 2 : lineEnd + 1;
             }
         }
@@ -177,6 +179,13 @@ internal static class TextSearch
         {
             return SearchOutcome.OutOfTime;
         }
+    }
+
+    /// <summary>Whether the search took its time; throws once it is cancelled.</summary>
+    private static bool IsOutOfTime(long start, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Stopwatch.GetElapsedTime(start) >= TimeLimit;
     }
 
     /// <summary>

@@ -331,7 +331,11 @@ internal sealed class SearchBar : UserControl
         var searching = new CancellationTokenSource();
         _searching = searching;
         _move = move;
-        Task<SearchResult> search = Task.Run(() => TextSearch.Find(snapshot, query, replacement, searching.Token));
+        // Cancelled, the task ends as cancelled, not as failed.
+        Task<SearchResult> search = Task.Run(
+            () => TextSearch.Find(snapshot, query, replacement, searching.Token),
+            searching.Token
+        );
         search.ContinueWith(
             _ => Dispatcher.Post(() => OnSearched(search, searching)),
             CancellationToken.None,
