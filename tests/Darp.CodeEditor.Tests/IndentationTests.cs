@@ -58,9 +58,10 @@ public sealed class IndentationTests(UiFixture ui)
     [InlineData("{\n    \"a\": {|}\n}", "{\n    \"a\": {\n        |\n    }\n}")]
     [InlineData("{\r\n    \"a\": {|}\r\n}", "{\r\n    \"a\": {\r\n        |\r\n    }\r\n}")]
     public Task Enter_keeps_the_indentation_and_indents_after_and_between_brackets(string marked, string expected) =>
-        _ui.Run(() =>
+        _ui.Run(async () =>
         {
             // One level more goes to the next stop of the document's indentation; line breaks stay the document's.
+            await CodeLanguage.Json.Loaded;
             using EditorWindow window = MarkedText.Show(marked, CodeLanguage.Json);
 
             window.Press(Key.Enter);

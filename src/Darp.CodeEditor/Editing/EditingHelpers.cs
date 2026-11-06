@@ -10,7 +10,7 @@ namespace Darp.CodeEditor.Editing;
 /// The editing helpers of one editor's view of a document, from the language's editing rules, as VS Code applies
 /// them: Enter indents the new line, typing outdents a line that comes to match the decrease pattern, opening
 /// characters bring their closing ones, which are typed over and deleted with them, and opening characters surround a
-/// selection. Tab and Shift+Tab are AvaloniaEdit's, with the document's indentation.
+/// selection. Ctrl+/ toggles comments. Tab and Shift+Tab are AvaloniaEdit's, with the document's indentation.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -27,6 +27,11 @@ internal sealed class EditingHelpers : IDisposable
 {
     /// <summary>The characters before which a pair closes, as VS Code's default <c>autoCloseBefore</c>.</summary>
     private const string CloseBefore = ";:.,=}])> \n\t";
+
+    /// <summary>The key that commands hold with Ctrl elsewhere, as AvaloniaEdit decides it: Cmd on macOS.</summary>
+    private static readonly KeyModifiers s_command = OperatingSystem.IsMacOS()
+        ? KeyModifiers.Meta
+        : KeyModifiers.Control;
 
     private readonly TextArea _textArea;
     private readonly CodeDocument _document;
@@ -67,12 +72,26 @@ internal sealed class EditingHelpers : IDisposable
         _autoClosed.Clear();
     }
 
-    /// <summary>Backspace, from the editor's key handler, while the text area has the keyboard.</summary>
+    /// <summary>Backspace and Ctrl+/, from the editor's key handler, while the text area has the keyboard.</summary>
     public void OnKeyDown(KeyEventArgs e)
     {
         if (e.Key == Key.Back && e.KeyModifiers == KeyModifiers.None)
             e.Handled = DeletePair();
+        else if (IsToggleComment(e))
+        {
+            ToggleComment();
+            e.Handled = true;
+        }
     }
+
+    /// <summary>
+    /// Ctrl+/, or Cmd+/ on macOS: the key that types a slash, also on layouts where it needs Shift, or the slash key
+    /// of a US layout or the number pad.
+    /// </summary>
+    private static bool IsToggleComment(KeyEventArgs e) =>
+        e.KeyModifiers.HasFlag(s_command)
+        && !e.KeyModifiers.HasFlag(KeyModifiers.Alt)
+        && (e.KeySymbol == "/" || (e.KeyModifiers == s_command && e.Key is Key.Oem2 or Key.Divide));
 
     private void OnTextEntering(object? sender, TextInputEventArgs e)
     {
@@ -433,6 +452,120 @@ internal sealed class EditingHelpers : IDisposable
             found = number;
         }
         return found;
+    }
+
+    /// <summary>
+    /// Ctrl+/: toggles line comments on the selected lines, or the caret's, with the language's line comment, or else
+    /// with its block comment around them.
+    /// </summary>
+    private void ToggleComment()
+    {
+        LanguageConfiguration configuration = Configuration;
+        (int first, int last) = SelectedLines();
+        if (configuration.LineComment is { } token)
+            ToggleLineComment(token, first, last);
+        else if (configuration.BlockComment is { } block)
+            ToggleBlockComment(block, first, last);
+    }
+
+    /// <summary>
+    /// Comments the lines at their smallest indentation, with a space after the token, or uncomments them when every
+    /// line is commented, as in VS Code. Lines of whitespace only take no part, unless all lines are.
+    /// </summary>
+    private void ToggleLineComment(string token, int first, int last)
+    {
+        var lines = new List<(DocumentLine Line, string Text, int Indent)>();
+        for (int number = first; number <= last; number++)
+        {
+            DocumentLine line = Buffer.GetLineByNumber(number);
+            string text = Buffer.GetText(line);
+            lines.Add((line, text, LeadingWhitespace(text)));
+        }
+        List<(DocumentLine Line, string Text, int Indent)> withText = lines.FindAll(l => l.Indent < l.Text.Length);
+        bool blank = withText.Count == 0;
+        List<(DocumentLine Line, string Text, int Indent)> changed = blank ? lines : withText;
+        bool uncomment =
+            !blank && withText.TrueForAll(l => string.CompareOrdinal(l.Text, l.Indent, token, 0, token.Length) == 0);
+        if (!changed.TrueForAll(l => CanChange(l.Line.Offset, l.Line.Length)))
+            return;
+        int column = changed.Min(l => l.Indent);
+        using (Buffer.RunUpdate())
+        {
+            // Bottom up, so that the lines still to change keep their offsets.
+            for (int i = changed.Count - 1; i >= 0; i--)
+            {
+                (DocumentLine line, string text, int indent) = changed[i];
+                if (!uncomment)
+                {
+                    Buffer.Insert(line.Offset + (blank ? indent : column), token + " ");
+                    continue;
+                }
+                int end = indent + token.Length;
+                Buffer.Remove(
+                    line.Offset + indent,
+                    end < text.Length && text[end] == ' ' ? token.Length + 1 : token.Length
+                );
+            }
+        }
+    }
+
+    /// <summary>
+    /// Puts the block comment around the lines, from their first text to the end of the last, with a space inside
+    /// each token, or removes it when it is around them already, as VS Code does for languages without a line
+    /// comment. On a line of whitespace only, the caret goes inside an empty comment.
+    /// </summary>
+    private void ToggleBlockComment(CharacterPair block, int first, int last)
+    {
+        DocumentLine firstLine = Buffer.GetLineByNumber(first);
+        int start = firstLine.Offset + LeadingWhitespace(Buffer.GetText(firstLine));
+        int end = Buffer.GetLineByNumber(last).EndOffset;
+        if (!CanChange(start, end - start))
+            return;
+        string content = Buffer.GetText(start, end - start).TrimEnd();
+        (string open, string close) = block;
+        if (
+            content.Length >= open.Length + close.Length
+            && content.StartsWith(open, StringComparison.Ordinal)
+            && content.EndsWith(close, StringComparison.Ordinal)
+        )
+        {
+            int openLength =
+                content.Length > open.Length && content[open.Length] == ' ' ? open.Length + 1 : open.Length;
+            int closeStart = content.Length - close.Length;
+            if (closeStart > openLength && content[closeStart - 1] == ' ')
+                closeStart--;
+            using (Buffer.RunUpdate())
+            {
+                Buffer.Remove(start + closeStart, content.Length - closeStart);
+                Buffer.Remove(start, openLength);
+            }
+        }
+        else if (start == end)
+        {
+            Buffer.Insert(start, open + "  " + close);
+            _textArea.Caret.Offset = start + open.Length + 1;
+        }
+        else
+        {
+            using (Buffer.RunUpdate())
+            {
+                Buffer.Insert(end, " " + close);
+                Buffer.Insert(start, open + " ");
+            }
+        }
+    }
+
+    /// <summary>The lines of the selection, without a last line it only touches at its start; or the caret's line.</summary>
+    private (int First, int Last) SelectedLines()
+    {
+        if (_textArea.Selection.IsEmpty)
+            return (_textArea.Caret.Line, _textArea.Caret.Line);
+        ISegment selected = _textArea.Selection.SurroundingSegment;
+        DocumentLine first = Buffer.GetLineByOffset(selected.Offset);
+        DocumentLine last = Buffer.GetLineByOffset(selected.EndOffset);
+        if (last != first && last.Offset == selected.EndOffset)
+            last = last.PreviousLine;
+        return (first.LineNumber, last.LineNumber);
     }
 
     /// <summary>Changes the text as part of the undo step of the character just typed.</summary>
