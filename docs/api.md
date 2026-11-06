@@ -578,7 +578,9 @@ with Skia:
   unless the token types where the user types are a string or comment that the pair's `notIn` excludes, typed closing
   characters step over, Backspace deletes an empty pair the editor closed, and opening characters surround the
   selection; Ctrl+/ toggles line comments, or block comments in XML. Each is one step that the user undoes. The token
-  types come from tokenizing the line up to the caret on the UI thread, within 2 ms, from the state at its start;
+  types come from tokenizing the line up to the caret on the UI thread, within 2 ms, from the state at its start.
+  Matching the indentation patterns for one new or typed line stops after 10 ms, and a match after 5 ms, as with a
+  pattern that backtracks on the lines above: the line then keeps its indentation;
 - the document's `Indentation` reaches every editor that shows it at once: Tab, Shift+Tab, new lines and the width of
   tabs;
 - the bracket next to the caret and its match are boxed in the theme's colors, ignoring brackets in strings and

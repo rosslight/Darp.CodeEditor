@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -127,27 +128,41 @@ internal readonly record struct AutoClosingPair(string Open, string Close, bool 
 /// <param name="DecreaseIndentPattern">A matching line is indented one level less than the lines before.</param>
 internal sealed record IndentationRules(Regex IncreaseIndentPattern, Regex DecreaseIndentPattern)
 {
+    /// <summary>How long one match may take. Some patterns backtrack on long lines, as JSON's does on nested objects.</summary>
+    public static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(5);
+
     /// <summary>
-    /// How long one match may take. The patterns run on the UI thread as the user types, and some backtrack on long
-    /// lines; a match that takes longer counts as none.
+    /// How long one indentation, of a new line or of a line the user types, may match lines: on the UI thread, about
+    /// 10 ms, and with a match that starts just before then, at most 15 ms. A line above it all needs about a
+    /// microsecond per match.
     /// </summary>
-    public static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(10);
+    public static readonly TimeSpan TimeLimit = TimeSpan.FromMilliseconds(10);
+
+    /// <summary>Starts matching lines for one indentation, which may take <see cref="TimeLimit"/>.</summary>
+    public IndentationMatching StartMatching() =>
+        new(this, Stopwatch.GetTimestamp() + (long)(TimeLimit.TotalSeconds * Stopwatch.Frequency));
+}
+
+/// <summary>
+/// Matches lines against the indentation rules for one indentation. A match after its time limit, or one that takes
+/// longer than <see cref="IndentationRules.MatchTimeout"/>, throws <see cref="RegexMatchTimeoutException"/>, and the
+/// indentation keeps what the line has.
+/// </summary>
+internal readonly struct IndentationMatching(IndentationRules rules, long deadline)
+{
+    private readonly IndentationRules _rules = rules;
+
+    /// <summary>The <see cref="Stopwatch"/> timestamp after which no match starts.</summary>
+    private readonly long _deadline = deadline;
 
     /// <summary>Whether lines after <paramref name="line"/> are indented one level more.</summary>
-    public bool Increases(string line) => Matches(IncreaseIndentPattern, line);
+    public bool Increases(string line) => Matches(_rules.IncreaseIndentPattern, line);
 
     /// <summary>Whether <paramref name="line"/> is indented one level less than the lines before.</summary>
-    public bool Decreases(string line) => Matches(DecreaseIndentPattern, line);
+    public bool Decreases(string line) => Matches(_rules.DecreaseIndentPattern, line);
 
-    private static bool Matches(Regex pattern, string line)
-    {
-        try
-        {
-            return pattern.IsMatch(line);
-        }
-        catch (RegexMatchTimeoutException)
-        {
-            return false;
-        }
-    }
+    private bool Matches(Regex pattern, string line) =>
+        Stopwatch.GetTimestamp() < _deadline
+            ? pattern.IsMatch(line)
+            : throw new RegexMatchTimeoutException(line, pattern.ToString(), IndentationRules.TimeLimit);
 }

@@ -19,7 +19,7 @@ public sealed class CodeLanguageTests
         json.Configuration.AutoClosingPairs.ShouldContain(new AutoClosingPair("\"", "\"", true, true));
         // Without surrounding pairs of its own, the auto-closing pairs surround, as in VS Code.
         json.Configuration.SurroundingPairs.ShouldContain(new CharacterPair("(", ")"));
-        json.Configuration.IndentationRules.ShouldNotBeNull().Decreases("  },").ShouldBeTrue();
+        json.Configuration.IndentationRules.ShouldNotBeNull().StartMatching().Decreases("  },").ShouldBeTrue();
     }
 
     /// <summary>Each built-in language, with a line that its grammar gives scopes of its own.</summary>
@@ -134,9 +134,10 @@ public sealed class CodeLanguageTests
             await new CodeLanguage("pascal", configuration: new Uri(file)).Loaded
         ).Configuration.IndentationRules.ShouldNotBeNull();
 
-        rules.Increases("BEGIN").ShouldBeTrue();
-        rules.Decreases("end").ShouldBeTrue();
-        rules.Decreases("END").ShouldBeFalse();
+        IndentationMatching matching = rules.StartMatching();
+        matching.Increases("BEGIN").ShouldBeTrue();
+        matching.Decreases("end").ShouldBeTrue();
+        matching.Decreases("END").ShouldBeFalse();
         File.Delete(file);
     }
 }

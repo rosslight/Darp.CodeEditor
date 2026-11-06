@@ -120,6 +120,26 @@ public sealed class IndentationTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe("begin\n    x\nEnd|");
         });
 
+    [Fact]
+    public Task Indentation_that_runs_out_of_time_leaves_the_line_as_typed() =>
+        _ui.Run(async () =>
+        {
+            // The increase pattern backtracks on every line above: matching gives up as a whole, not line by line.
+            var language = new CodeLanguage(
+                "backtracking",
+                configuration: new Uri(
+                    "avares://Darp.CodeEditor.Tests/Languages/backtracking.language-configuration.json"
+                )
+            );
+            await language.Loaded;
+            string above = string.Concat(Enumerable.Repeat(new string('a', 29) + "!\n", 100));
+            using EditorWindow window = MarkedText.Show(above + "    en|", language);
+
+            window.Type("d");
+
+            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(above + "    end");
+        });
+
     /// <summary>A language with word brackets, and indentation patterns that ignore case.</summary>
     private static CodeLanguage Pascal { get; } =
         new(

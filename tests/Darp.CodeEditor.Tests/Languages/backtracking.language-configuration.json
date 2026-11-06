@@ -1,0 +1,7 @@
+{
+  "comment": "Editing rules for tests: an increase pattern that backtracks catastrophically on a line of a's that ends in another character.",
+  "indentationRules": {
+    "increaseIndentPattern": "(a+)+$",
+    "decreaseIndentPattern": "^\\s*end$"
+  }
+}

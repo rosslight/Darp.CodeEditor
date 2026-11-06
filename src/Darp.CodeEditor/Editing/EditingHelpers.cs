@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Avalonia.Input;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
@@ -333,27 +334,13 @@ internal sealed class EditingHelpers : IDisposable
             string inner = lineBreak + indenting.Shift(indentation);
             return new NewLine(inner, inner.Length, 0);
         }
-        if (configuration.IndentationRules is { } rules)
+        if (configuration.IndentationRules is { } rules && IndentByRules(rules, line, before, after) is { } byRules)
         {
-            // The line before the new one is the text before the caret.
-            Inherited? inherited = InheritedIndentation(
-                rules,
-                line.LineNumber + 1,
-                honorIntentional: true,
-                number => number == line.LineNumber ? before : LineText(number)
-            );
-            string afterEnter = indentation;
-            if (inherited is { } action)
-            {
-                afterEnter = action.Increases ? indenting.Shift(action.Indentation) : action.Indentation;
-                if (rules.Decreases(after))
-                    afterEnter = indenting.Unshift(afterEnter);
-            }
             // The new line replaces the indentation of the text it takes along; on a line of whitespace only, all of
             // the rest.
             int firstText = LeadingWhitespace(text);
             int replaced = firstText == text.Length ? text.Length - column : Math.Max(0, firstText - column);
-            string inserted = lineBreak + indenting.Normalize(afterEnter);
+            string inserted = lineBreak + indenting.Normalize(byRules);
             return new NewLine(inserted, inserted.Length, replaced);
         }
         string kept = lineBreak + indenting.Normalize(indentation);
@@ -361,8 +348,37 @@ internal sealed class EditingHelpers : IDisposable
     }
 
     /// <summary>
+    /// The indentation of a new line after <paramref name="before"/>, the text before the caret, by the indentation
+    /// rules: VS Code's <c>getIndentForEnter</c>. Null when matching runs out of time.
+    /// </summary>
+    private string? IndentByRules(IndentationRules rules, DocumentLine line, string before, string after)
+    {
+        var indenting = new Indenting(_document.Indentation);
+        IndentationMatching matching = rules.StartMatching();
+        try
+        {
+            // The line before the new one is the text before the caret.
+            Inherited? inherited = InheritedIndentation(
+                matching,
+                line.LineNumber + 1,
+                honorIntentional: true,
+                number => number == line.LineNumber ? before : LineText(number)
+            );
+            if (inherited is not { } action)
+                return before[..LeadingWhitespace(before)];
+            string indentation = action.Increases ? indenting.Shift(action.Indentation) : action.Indentation;
+            return matching.Decreases(after) ? indenting.Unshift(indentation) : indentation;
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Outdents the caret's line when the character just typed made it match the language's decrease pattern, as VS
-    /// Code does: to the indentation that the lines above give it, in the undo step of the character.
+    /// Code does: to the indentation that the lines above give it, in the undo step of the character. When matching
+    /// runs out of time, the line stays as typed.
     /// </summary>
     /// <returns>Whether the line's indentation changed.</returns>
     private bool Outdent()
@@ -373,14 +389,9 @@ internal sealed class EditingHelpers : IDisposable
         DocumentLine line = Buffer.GetLineByOffset(caret);
         string text = Buffer.GetText(line);
         int typed = caret - 1 - line.Offset;
-        if (typed < 0 || rules.Decreases(text.Remove(typed, 1)) || !rules.Decreases(text))
+        if (typed < 0 || OutdentedIndentation(rules, line.LineNumber, text, typed) is not { } outdented)
             return false;
-        if (InheritedIndentation(rules, line.LineNumber, honorIntentional: false, LineText) is not { } inherited)
-            return false;
-        var indenting = new Indenting(_document.Indentation);
-        string indentation = indenting.Normalize(
-            inherited.Increases ? inherited.Indentation : indenting.Unshift(inherited.Indentation)
-        );
+        string indentation = new Indenting(_document.Indentation).Normalize(outdented);
         int current = LeadingWhitespace(text);
         if (text[..current] == indentation || !CanChange(line.Offset, current))
             return false;
@@ -390,10 +401,34 @@ internal sealed class EditingHelpers : IDisposable
     }
 
     /// <summary>
+    /// The indentation of line <paramref name="lineNumber"/>, if the character typed at <paramref name="typed"/> made
+    /// its <paramref name="text"/> match the decrease pattern: VS Code's <c>getIndentActionForType</c>. Null when it
+    /// didn't, when no line above has text, or when matching runs out of time.
+    /// </summary>
+    private string? OutdentedIndentation(IndentationRules rules, int lineNumber, string text, int typed)
+    {
+        IndentationMatching matching = rules.StartMatching();
+        try
+        {
+            if (matching.Decreases(text.Remove(typed, 1)) || !matching.Decreases(text))
+                return null;
+            if (InheritedIndentation(matching, lineNumber, honorIntentional: false, LineText) is not { } inherited)
+                return null;
+            return inherited.Increases
+                ? inherited.Indentation
+                : new Indenting(_document.Indentation).Unshift(inherited.Indentation);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// The indentation that the lines above give line <paramref name="lineNumber"/>, and whether it is one level more:
     /// VS Code's <c>getInheritIndentForLine</c>. Null when no line above has text.
     /// </summary>
-    /// <param name="rules">The language's indentation rules.</param>
+    /// <param name="matching">The language's indentation rules, within the time of one indentation.</param>
     /// <param name="lineNumber">The line to indent.</param>
     /// <param name="honorIntentional">
     /// Whether a line above that neither increases nor decreases gives its own indentation, as the user may have
@@ -401,7 +436,7 @@ internal sealed class EditingHelpers : IDisposable
     /// </param>
     /// <param name="lineText">The text of a line by its number.</param>
     private static Inherited? InheritedIndentation(
-        IndentationRules rules,
+        IndentationMatching matching,
         int lineNumber,
         bool honorIntentional,
         Func<int, string> lineText
@@ -421,16 +456,16 @@ internal sealed class EditingHelpers : IDisposable
         if (preceding < 1)
             return null;
         string text = lineText(preceding);
-        if (rules.Increases(text))
+        if (matching.Increases(text))
             return new Inherited(Leading(text), true);
-        if (rules.Decreases(text) || preceding == 1 || honorIntentional)
+        if (matching.Decreases(text) || preceding == 1 || honorIntentional)
             return new Inherited(Leading(text), false);
         for (int above = preceding - 1; above > 0; above--)
         {
             string aboveText = lineText(above);
-            if (rules.Increases(aboveText))
+            if (matching.Increases(aboveText))
                 return new Inherited(Leading(aboveText), true);
-            if (rules.Decreases(aboveText))
+            if (matching.Decreases(aboveText))
                 return new Inherited(Leading(aboveText), false);
         }
         return new Inherited(Leading(lineText(1)), false);
