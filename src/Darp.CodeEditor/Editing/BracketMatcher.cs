@@ -13,8 +13,7 @@ internal static class BracketMatcher
 {
     /// <summary>
     /// How many characters the search for a match reads at most, line breaks included, so that it stays well within a
-    /// frame on the UI thread: about 0.5 ms for 100,000 characters of JSON (BracketMatchingBenchmarks, i7-13700),
-    /// about 5,000 lines of 20 characters. A match further away shows no pair.
+    /// frame on the UI thread: about 5,000 lines of 20 characters. A match further away shows no pair.
     /// </summary>
     public const int MaxDistance = 100_000;
 
@@ -59,7 +58,8 @@ internal static class BracketMatcher
 
     /// <summary>
     /// The bracket that matches the one at <paramref name="from"/>: the next closing bracket at the same depth going
-    /// forward, or the opening one going backward.
+    /// forward, or the opening one going backward, within <see cref="MaxDistance"/> characters. The text is read in
+    /// blocks into a buffer, and a line's tokens only where a bracket is, so the search allocates nothing per line.
     /// </summary>
     private static int? Find(
         TextDocument document,
@@ -70,35 +70,48 @@ internal static class BracketMatcher
         Func<int, int[]?> tokensOf
     )
     {
-        int step = forward ? 1 : -1;
+        int start = forward ? from + 1 : Math.Max(0, from - MaxDistance);
+        int end = forward ? Math.Min(document.TextLength, from + 1 + MaxDistance) : from;
+        Span<char> block = stackalloc char[4096];
         int depth = 0;
-        int left = MaxDistance;
-        DocumentLine? line = document.GetLineByOffset(from);
-        int column = from - line.Offset + step;
-        while (line is not null)
+        // The line of the last bracket: its bounds, as DocumentLine computes them anew each time, and its tokens.
+        (int Start, int End) line = (-1, -1);
+        int[]? tokens = null;
+        for (int done = 0; done < end - start; )
         {
-            string text = document.GetText(line);
-            int[]? tokens = tokensOf(line.LineNumber);
-            for (; column >= 0 && column < text.Length; column += step)
+            int length = Math.Min(block.Length, end - start - done);
+            int blockStart = forward ? start + done : end - done - length;
+            using (TextReader reader = document.CreateReader(blockStart, length))
+                reader.ReadBlock(block[..length]);
+            ReadOnlySpan<char> text = block[..length];
+            for (int index = Next(text, forward ? -1 : length); index >= 0; index = Next(text, index))
             {
-                if (--left < 0)
-                    return null;
-                char c = text[column];
-                if ((c != open && c != close) || IsIgnored(tokens, column))
+                char c = text[index];
+                int offset = blockStart + index;
+                if (offset < line.Start || offset > line.End)
+                {
+                    DocumentLine found = document.GetLineByOffset(offset);
+                    line = (found.Offset, found.EndOffset);
+                    tokens = tokensOf(found.LineNumber);
+                }
+                if (IsIgnored(tokens, offset - line.Start))
                     continue;
                 if (c == (forward ? open : close))
                     depth++;
                 else if (depth-- == 0)
-                    return line.Offset + column;
+                    return offset;
             }
-            // A line break is read too, and an empty line has nothing else: the search ends before the next line.
-            left -= line.DelimiterLength;
-            if (left < 0)
-                return null;
-            line = forward ? line.NextLine : line.PreviousLine;
-            column = forward ? 0 : (line?.Length ?? 0) - 1;
+            done += length;
         }
         return null;
+
+        // The next bracket after index in the block going forward, or before it going backward; -1 for none.
+        int Next(ReadOnlySpan<char> text, int index) =>
+            forward
+                ? text[(index + 1)..].IndexOfAny(open, close) is var found and >= 0
+                    ? index + 1 + found
+                    : -1
+                : text[..index].LastIndexOfAny(open, close);
     }
 
     /// <summary>Whether a bracket at <paramref name="column"/> is in a string, comment or regular expression.</summary>
