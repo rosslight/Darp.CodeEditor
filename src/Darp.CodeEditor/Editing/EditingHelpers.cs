@@ -600,8 +600,9 @@ internal sealed class EditingHelpers : IDisposable
     }
 
     /// <summary>
-    /// Comments the lines at their smallest indentation, with a space after the token, or uncomments them when every
-    /// line is commented, as in VS Code. Lines of whitespace only take no part, unless all lines are.
+    /// Comments the lines at their smallest indentation, by its width in columns, with a space after the token, or
+    /// uncomments them when every line is commented, as in VS Code. Lines of whitespace only take no part, unless all
+    /// lines are.
     /// </summary>
     private void ToggleLineComment(string token, int first, int last)
     {
@@ -619,7 +620,9 @@ internal sealed class EditingHelpers : IDisposable
             !blank && withText.TrueForAll(l => string.CompareOrdinal(l.Text, l.Indent, token, 0, token.Length) == 0);
         if (!changed.TrueForAll(l => CanChange(l.Line.Offset, l.Line.Length)))
             return;
-        int column = changed.Min(l => l.Indent);
+        // The smallest indentation by its width, so that tabs and spaces line up.
+        var indenting = new Indenting(_document.Indentation);
+        int column = changed.Min(l => indenting.Width(l.Text[..l.Indent]));
         using (Buffer.RunUpdate())
         {
             // Bottom up, so that the lines still to change keep their offsets.
@@ -628,7 +631,7 @@ internal sealed class EditingHelpers : IDisposable
                 (DocumentLine line, string text, int indent) = changed[i];
                 if (!uncomment)
                 {
-                    Buffer.Insert(line.Offset + (blank ? indent : column), token + " ");
+                    Buffer.Insert(line.Offset + (blank ? indent : indenting.OffsetOf(text, column)), token + " ");
                     continue;
                 }
                 int end = indent + token.Length;

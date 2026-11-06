@@ -14,10 +14,13 @@ public sealed class CommentTests(UiFixture ui)
     [InlineData("«    // a\n\n    //   b»", "    a\n\n      b")]
     [InlineData("«// a\nb»", "// // a\n// b")]
     [InlineData("«//a»", "a")]
+    [InlineData("«\tfoo\n    bar»", "\t// foo\n    // bar")]
+    [InlineData("«\tfoo\n  bar»", "// \tfoo\n  // bar")]
     public Task Ctrl_slash_comments_lines_or_uncomments_them_when_all_are_commented(string marked, string expected) =>
         _ui.Run(async () =>
         {
-            // Lines of whitespace only take no part; the comment goes at the lines' smallest indentation.
+            // Lines of whitespace only take no part; the comment goes at the lines' smallest indentation, by its width:
+            // before a tab that ends past it.
             await CodeLanguage.Json.Loaded;
             using EditorWindow window = MarkedText.Show(marked, CodeLanguage.Json);
             CodeDocument document = window.Editor.Document.ShouldNotBeNull();
