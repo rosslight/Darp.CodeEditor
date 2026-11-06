@@ -34,6 +34,12 @@ internal sealed class EditorWindow : IDisposable
         editor.Focus();
     }
 
+    /// <summary>
+    /// The key that commands hold: Cmd on macOS and Ctrl elsewhere, as AvaloniaEdit decides by the operating system.
+    /// The headless platform reports Ctrl on every system, so its hotkey settings can't tell.
+    /// </summary>
+    public static KeyModifiers Command { get; } = OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control;
+
     public Window Window { get; }
 
     public CodeEditor Editor { get; }

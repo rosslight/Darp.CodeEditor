@@ -4,12 +4,14 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
+using Avalonia.Interactivity;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
+using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.Loading;
 using TextMateSharp.Internal.Types;
@@ -123,6 +125,9 @@ public class CodeEditor : TemplatedControl
     /// <summary>Highlights the shown document.</summary>
     private BackgroundTextMateHighlighter? _highlighter;
 
+    /// <summary>The editing helpers of the shown document.</summary>
+    private EditingHelpers? _helpers;
+
     /// <summary>
     /// Where the editor is in <see cref="Document"/> while the part cannot tell: while it shows nothing, and while the
     /// scroll position waits for the first layout.
@@ -168,6 +173,8 @@ public class CodeEditor : TemplatedControl
         if (Application.Current?.Dispatcher != Dispatcher)
             throw new InvalidOperationException("The editor works only on the app's main UI thread.");
         ContextMenu = CreateContextMenu();
+        // Ahead of AvaloniaEdit's own keys, which its text area handles as they bubble.
+        AddHandler(KeyDownEvent, OnKeyDownTunnel, RoutingStrategies.Tunnel);
     }
 
     /// <summary>
@@ -474,6 +481,7 @@ public class CodeEditor : TemplatedControl
         Select(part, place?.Selection ?? new TextSelection(0));
         TextView textView = part.TextArea.TextView;
         _highlighter = new BackgroundTextMateHighlighter(textView, buffer, Dispatcher, null);
+        _helpers = new EditingHelpers(part.TextArea, document, _highlighter);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
         _waitingForLayout = true;
         textView.LayoutUpdated += OnTextViewLayoutUpdated;
@@ -486,6 +494,8 @@ public class CodeEditor : TemplatedControl
         shown.Disposed -= OnDocumentDisposed;
         shown.PropertyChanged -= OnDocumentPropertyChanged;
         CancelLoading();
+        _helpers?.Dispose();
+        _helpers = null;
         _highlighter?.Dispose();
         _highlighter = null;
         part.TextArea.TextView.LayoutUpdated -= OnTextViewLayoutUpdated;
@@ -503,6 +513,13 @@ public class CodeEditor : TemplatedControl
     /// showing the document.
     /// </summary>
     private void OnDocumentDisposed(object? sender, EventArgs e) => Dispatcher.Post(UpdateShownDocument);
+
+    /// <summary>The editor's own keys, before AvaloniaEdit's: those of the editing helpers, in the text area.</summary>
+    private void OnKeyDownTunnel(object? sender, KeyEventArgs e)
+    {
+        if (_helpers is { } helpers && _part is { } part && part.TextArea.IsFocused)
+            helpers.OnKeyDown(e);
+    }
 
     /// <summary>Applies a new indentation of the shown document at once. Raised on the UI thread.</summary>
     private void OnDocumentPropertyChanged(object? sender, PropertyChangedEventArgs e)

@@ -1,0 +1,8 @@
+{
+  "comment": "Editing rules for tests: word brackets and indentation patterns with a flag, as VS Code's files give them.",
+  "brackets": [["begin", "end"]],
+  "indentationRules": {
+    "increaseIndentPattern": { "pattern": "^\\s*begin\\b", "flags": "i" },
+    "decreaseIndentPattern": { "pattern": "^\\s*end\\b", "flags": "i" }
+  }
+}

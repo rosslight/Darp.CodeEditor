@@ -56,6 +56,12 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
     private static readonly TimeSpan s_frameBudget = TimeSpan.FromMilliseconds(4);
     private static readonly long s_frameBudgetTicks = (long)(s_frameBudget.TotalSeconds * Stopwatch.Frequency);
 
+    /// <summary>
+    /// How long finding the tokens around a typed character may take on the UI thread: one line up to the caret,
+    /// usually well under a millisecond.
+    /// </summary>
+    private static readonly TimeSpan s_insertionTimeLimit = TimeSpan.FromMilliseconds(2);
+
     /// <summary>Lines that compile the most common expressions of a grammar, for a document without text.</summary>
     private static readonly string[] s_warmUpLines = ["x = f(1, \"s\") // c", "{ [ ] } /* c */ 'c' 0.5"];
 
@@ -101,6 +107,63 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
 
     /// <summary>The grammar the tokens come from; null for none.</summary>
     public TextMateGrammar? Grammar => _grammar;
+
+    /// <summary>
+    /// The tokens of the line <paramref name="lineNumber"/> as last tokenized, which may be from before an edit; null
+    /// for none yet, or a line that ran out of time.
+    /// </summary>
+    public int[]? TokensOf(int lineNumber) => _lines[lineNumber - 1].Tokens;
+
+    /// <summary>
+    /// The token types around <paramref name="offset"/>, where the user types: of the character before it, and of
+    /// text typed there. The line is tokenized up to the offset, followed by a space for the typed text, from the
+    /// state at the line's start, so that a line after a line comment starts in code and one inside a block comment
+    /// in a comment. When that cannot run within a short time, the line's tokens give the type of the character before
+    /// for both, if they are exact. Null when neither is known: without a grammar, or while the lines above are not
+    /// tokenized.
+    /// </summary>
+    public InsertionContext? ContextAt(int offset)
+    {
+        if (_grammar is not { } grammar)
+            return null;
+        DocumentLine line = _document.GetLineByOffset(offset);
+        int index = line.LineNumber - 1;
+        int column = offset - line.Offset;
+        LineEntry entry = _lines[index];
+        LineEntry? previous = index > 0 ? _lines[index - 1] : null;
+        if (
+            column <= MaxSyncLineLength
+            && !entry.TooSlowForUiThread
+            && previous is null or { IsValid: true }
+            && grammar.TryEnterOnUiThread(s_insertionTimeLimit)
+        )
+        {
+            string text = _document.GetText(line.Offset, column) + " ";
+            int[] tokens;
+            long start = Stopwatch.GetTimestamp();
+            try
+            {
+                tokens = grammar
+                    .Grammar.TokenizeLine2(new LineText(text.AsMemory()), previous?.EndState, s_insertionTimeLimit)
+                    .Tokens;
+            }
+            finally
+            {
+                grammar.ExitOnUiThread();
+            }
+            // TextMate stops at the time limit without saying so, and the rest of the line keeps the type of the last
+            // token it reached: a string after "Log(" would read as code.
+            if (Stopwatch.GetElapsedTime(start) < s_insertionTimeLimit)
+                return new InsertionContext(
+                    TokenTypes.At(tokens, Math.Max(0, column - 1)),
+                    TokenTypes.At(tokens, column)
+                );
+        }
+        if (column == 0 || entry is not { IsValid: true, Tokens: { } exact })
+            return null;
+        TokenType before = TokenTypes.At(exact, column - 1);
+        return new InsertionContext(before, before);
+    }
 
     /// <summary>
     /// Switches to <paramref name="grammar"/>, or to none, and takes the lines of <paramref name="firstScreen"/> that
@@ -479,3 +542,8 @@ internal readonly record struct LineResult(IStateStack? EndState, int[]? Tokens)
 
 /// <summary>The lines from <paramref name="FirstLine"/> of the text at <paramref name="Version"/>, tokenized.</summary>
 internal sealed record FirstScreen(int FirstLine, LineResult[] Lines, ITextSourceVersion? Version);
+
+/// <summary>The token types where the user types.</summary>
+/// <param name="Before">The type of the character before.</param>
+/// <param name="At">The type of text typed there.</param>
+internal readonly record struct InsertionContext(TokenType Before, TokenType At);
