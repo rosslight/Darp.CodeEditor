@@ -129,7 +129,7 @@ public sealed class HighlightingTests(UiFixture ui)
                 $"{{\n  \"long\": {value},\n  \"after\": 1\n}}"
             );
             using var window = new EditorWindow(new CodeEditor { Document = document });
-            // Near the line's start: AvaloniaEdit edits and draws only the first 3,000 characters of a longer line.
+            // Near the line's start: the editor edits and draws only the first 3,000 characters of a longer line.
             window.Editor.Selection = new TextSelection(document.CurrentSnapshot.GetOffset(new TextPosition(2, 100)));
 
             window.Type("1, ");
