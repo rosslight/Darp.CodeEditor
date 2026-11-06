@@ -16,14 +16,17 @@
                 <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, Menlo, DejaVu Sans Mono, monospace" />
                 <Setter Property="Template">
                     <ControlTemplate>
-                        <ae:TextEditor
-                            Name="PART_TextEditor"
-                            BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}"
-                            Padding="{TemplateBinding Padding}"
-                            WordWrap="{TemplateBinding WordWrap}"
-                            ShowLineNumbers="{TemplateBinding ShowLineNumbers}"
-                        />
+                        <!-- The search bar goes in here, over the text at the top right, the first time it opens. -->
+                        <Panel Name="PART_Root">
+                            <ae:TextEditor
+                                Name="PART_TextEditor"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}"
+                                WordWrap="{TemplateBinding WordWrap}"
+                                ShowLineNumbers="{TemplateBinding ShowLineNumbers}"
+                            />
+                        </Panel>
                     </ControlTemplate>
                 </Setter>
             </ControlTheme>

@@ -178,4 +178,16 @@ public sealed class CodeDocumentTests(UiFixture ui)
             CodeDocument.Create(CodeLanguage.Yaml).Indentation.ShouldBe(Indentation.Spaces(2));
             CodeDocument.Create(CodeLanguage.Json).Indentation.ShouldBe(Indentation.Spaces(4));
         });
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1_001)]
+    public Task An_indentation_that_editors_cannot_show_is_rejected(int size) =>
+        _ui.Run(() =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.Json);
+
+            Should.Throw<ArgumentOutOfRangeException>(() => document.Indentation = Indentation.Spaces(size));
+            document.Indentation.ShouldBe(Indentation.Spaces(4));
+        });
 }

@@ -1,16 +1,21 @@
+using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
+using Avalonia.Interactivity;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
+using AvaloniaEdit.Search;
+using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.Loading;
+using Darp.CodeEditor.Search;
 using TextMateSharp.Internal.Types;
 using EditorSelection = AvaloniaEdit.Editing.Selection;
 
@@ -47,19 +52,33 @@ namespace Darp.CodeEditor;
 /// controls. Code inside popups keeps the editor's colors, background and font.
 /// </para>
 /// <para>
-/// Built in, with no settings: the current line is highlighted, brackets match, brackets and quotes close as you type,
-/// new lines are indented, whitespace shows inside the selection, and the view scrolls past the last line. Hover shows
-/// the server's Markdown, with code blocks highlighted by the document's grammar, below the messages of the
-/// diagnostics under the pointer. Completion items show VS Code's codicons, in the color theme's symbol colors. The
-/// font defaults to a monospace one; set <c>FontFamily</c> and <c>FontSize</c> as for any control.
+/// Built in, with no settings: the current line is highlighted, whitespace shows inside the selection, and the view
+/// scrolls past the last line. Editing follows the language's rules, as VS Code applies them: the bracket next to the
+/// caret and its match are boxed, pairs close as you type, typing their closing character steps over it and Backspace
+/// deletes an empty pair, opening characters surround the selection, new lines are indented by the brackets and the
+/// indentation rules, a line that comes to match the decrease rule outdents, and comments toggle with the line
+/// comment, or else the block comment. Brackets in strings and comments don't match, and pairs that the language
+/// excludes there don't close. In a rectangle selection, pairs close, step over and delete, and opening characters
+/// surround, on every line; Enter breaks only the caret's line and ends the rectangle. Tab and new lines indent by the
+/// document's <see cref="CodeDocument.Indentation"/>.
+/// Hover shows the server's Markdown, with code blocks highlighted by the document's grammar, below the messages of
+/// the diagnostics under the pointer. Completion items show VS Code's codicons, in the color theme's symbol colors.
+/// The font defaults to a monospace one; set <c>FontFamily</c> and <c>FontSize</c> as for any control.
 /// </para>
 /// <para>
-/// The editor handles only its own keys: editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A; Cmd on macOS),
-/// navigation, search (Ctrl+F, Ctrl+H, F3), completion (Ctrl+Space), comments (Ctrl+/) and indentation (Tab,
-/// Shift+Tab). Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A right click opens the editor's
-/// context menu: Cut, Copy, Paste and Select All. For an app's Edit menu, <see cref="Cut"/>, <see cref="Copy"/>,
-/// <see cref="Paste"/> and <see cref="SelectAll"/> do the same, and the document's <c>Undo</c> and <c>Redo</c> the
-/// rest.
+/// The search bar searches as the user types, in the background: plain text or a .NET regular expression, line by
+/// line, with Match Case and Match Whole Word. A search stops after 1 second, as a regular expression such as
+/// <c>(a+)+$</c> can take far longer, and keeps 10,000 matches at most. The bar says so when a search stops early, and
+/// Replace All then does nothing: it never replaces only some of the matches.
+/// </para>
+/// <para>
+/// The editor handles only its own keys: editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation, search
+/// (Ctrl+F, Ctrl+H, F3, Shift+F3), completion (Ctrl+Space), comments (Ctrl+/) and indentation (Tab, Shift+Tab). On
+/// macOS, Cmd takes Ctrl's place for the clipboard, search and comments, and Cmd+Alt+F opens the replace bar, as
+/// AvaloniaEdit decides by the operating system. Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A
+/// right click opens the editor's context menu: Cut, Copy, Paste and Select All. For an app's Edit menu,
+/// <see cref="Cut"/>, <see cref="Copy"/>, <see cref="Paste"/> and <see cref="SelectAll"/> do the same, and the
+/// document's <c>Undo</c> and <c>Redo</c> the rest.
 /// </para>
 /// <para>Members that take offsets or ranges clamp them to the text.</para>
 /// </remarks>
@@ -122,6 +141,30 @@ public class CodeEditor : TemplatedControl
     /// <summary>Highlights the shown document.</summary>
     private BackgroundTextMateHighlighter? _highlighter;
 
+    /// <summary>The editing helpers of the shown document.</summary>
+    private EditingHelpers? _helpers;
+
+    /// <summary>Marks the bracket next to the caret in the shown document, and its match.</summary>
+    private BracketHighlighter? _brackets;
+
+    /// <summary>Shows the spaces and tabs inside the selection.</summary>
+    private WhitespaceLayer? _whitespace;
+
+    /// <summary>The template's panel, which the search bar goes into, over the text.</summary>
+    private Panel? _root;
+
+    /// <summary>
+    /// The search and replace bar, from the first time it opens: every editor shows, few are searched, so an editor
+    /// nobody searches in makes none.
+    /// </summary>
+    private SearchBar? _searchBar;
+
+    /// <summary>
+    /// AvaloniaEdit's search commands, for the part's text area: they open and use the editor's bar, also when code
+    /// executes them, instead of AvaloniaEdit's search panel.
+    /// </summary>
+    private readonly RoutedCommandBinding[] _searchCommands;
+
     /// <summary>
     /// Where the editor is in <see cref="Document"/> while the part cannot tell: while it shows nothing, and while the
     /// scroll position waits for the first layout.
@@ -147,6 +190,9 @@ public class CodeEditor : TemplatedControl
     /// <summary>The theme whose colors the part shows.</summary>
     private ColorThemeFile? _theme;
 
+    /// <summary>The colors of <see cref="_theme"/> besides the tokens.</summary>
+    private TextAreaColors? _colors;
+
     /// <summary>The grammar loaded last, with the theme it was loaded with.</summary>
     private TextMateGrammar? _grammar;
 
@@ -167,6 +213,15 @@ public class CodeEditor : TemplatedControl
         if (Application.Current?.Dispatcher != Dispatcher)
             throw new InvalidOperationException("The editor works only on the app's main UI thread.");
         ContextMenu = CreateContextMenu();
+        _searchCommands =
+        [
+            new(ApplicationCommands.Find, (_, _) => OpenSearch()),
+            new(ApplicationCommands.Replace, (_, _) => OpenSearch(replace: true)),
+            new(SearchCommands.FindNext, (_, _) => FindNext(previous: false)),
+            new(SearchCommands.FindPrevious, (_, _) => FindNext(previous: true)),
+        ];
+        // Ahead of AvaloniaEdit's own keys, which its text area handles as they bubble.
+        AddHandler(KeyDownEvent, OnKeyDownTunnel, RoutingStrategies.Tunnel);
     }
 
     /// <summary>
@@ -302,10 +357,14 @@ public class CodeEditor : TemplatedControl
     }
 
     /// <summary>
-    /// Opens the search bar, as Ctrl+F does, or the replace bar, as Ctrl+H does. A selection within one line becomes
-    /// the search text.
+    /// Opens the search bar, as Ctrl+F does, or the replace bar, as Ctrl+H does, and puts the keyboard in its query. A
+    /// selection within one line becomes the search text. A read-only editor opens the search bar either way.
     /// </summary>
-    public void OpenSearch(bool replace = false) => throw new NotImplementedException();
+    public void OpenSearch(bool replace = false)
+    {
+        if (_part is { } part && CreatedSearchBar() is { } bar)
+            bar.Open(replace && !IsReadOnly, SelectedLineText(part.TextArea));
+    }
 
     /// <summary>Moves the selection to the clipboard, as Ctrl+X does. No effect in a read-only editor.</summary>
     public void Cut()
@@ -344,8 +403,14 @@ public class CodeEditor : TemplatedControl
             }
             previous.TextArea.Caret.PositionChanged -= OnPartSelectionChanged;
             previous.TextArea.SelectionChanged -= OnPartSelectionChanged;
+            previous.TemplateApplied -= OnPartTemplateApplied;
+            foreach (RoutedCommandBinding binding in _searchCommands)
+                previous.TextArea.CommandBindings.Remove(binding);
         }
         _part = e.NameScope.Find<TextEditor>("PART_TextEditor");
+        _root = e.NameScope.Find<Panel>("PART_Root");
+        // The bar of the old template goes with it.
+        _searchBar = null;
         // A new part has none of the theme's colors yet.
         _theme = null;
         if (_part is { } part)
@@ -360,6 +425,9 @@ public class CodeEditor : TemplatedControl
             options.EnableEmailHyperlinks = false;
             part.TextArea.Caret.PositionChanged += OnPartSelectionChanged;
             part.TextArea.SelectionChanged += OnPartSelectionChanged;
+            part.TemplateApplied += OnPartTemplateApplied;
+            foreach (RoutedCommandBinding binding in _searchCommands)
+                part.TextArea.CommandBindings.Add(binding);
         }
         UpdateShownDocument();
     }
@@ -399,7 +467,10 @@ public class CodeEditor : TemplatedControl
         if (change.Property == DocumentProperty)
             SwitchDocument();
         else if (change.Property == IsReadOnlyProperty)
+        {
             _part?.IsReadOnly = IsReadOnly || _shown is null;
+            _searchBar?.UpdateReplaceRow();
+        }
         else if (
             change.Property == ColorThemeProperty
             || change.Property == ThemeVariantScope.ActualThemeVariantProperty
@@ -462,6 +533,8 @@ public class CodeEditor : TemplatedControl
     {
         // Before the part shows the buffer, so that no disposal from here on goes unnoticed.
         document.Disposed += OnDocumentDisposed;
+        document.PropertyChanged += OnDocumentPropertyChanged;
+        ApplyIndentation(part.Options, document.Indentation);
         TextDocument buffer = document.Buffer;
         part.Document = buffer;
         part.IsReadOnly = IsReadOnly;
@@ -471,6 +544,10 @@ public class CodeEditor : TemplatedControl
         Select(part, place?.Selection ?? new TextSelection(0));
         TextView textView = part.TextArea.TextView;
         _highlighter = new BackgroundTextMateHighlighter(textView, buffer, Dispatcher, null);
+        _helpers = new EditingHelpers(part.TextArea, document, _highlighter);
+        _brackets = new BracketHighlighter(part.TextArea, document, _highlighter) { Colors = _colors };
+        _whitespace = new WhitespaceLayer(part.TextArea) { Colors = _colors };
+        _searchBar?.Attach(this, part.TextArea, document);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
         _waitingForLayout = true;
         textView.LayoutUpdated += OnTextViewLayoutUpdated;
@@ -481,7 +558,15 @@ public class CodeEditor : TemplatedControl
     private void Hide(TextEditor part, CodeDocument shown)
     {
         shown.Disposed -= OnDocumentDisposed;
+        shown.PropertyChanged -= OnDocumentPropertyChanged;
         CancelLoading();
+        _helpers?.Dispose();
+        _helpers = null;
+        _brackets?.Dispose();
+        _brackets = null;
+        _whitespace?.Dispose();
+        _whitespace = null;
+        _searchBar?.Detach();
         _highlighter?.Dispose();
         _highlighter = null;
         part.TextArea.TextView.LayoutUpdated -= OnTextViewLayoutUpdated;
@@ -499,6 +584,93 @@ public class CodeEditor : TemplatedControl
     /// showing the document.
     /// </summary>
     private void OnDocumentDisposed(object? sender, EventArgs e) => Dispatcher.Post(UpdateShownDocument);
+
+    /// <summary>
+    /// The editor's own keys, before AvaloniaEdit's: search, also in the search bar, as AvaloniaEdit decides them by
+    /// the operating system, and the editing helpers' keys in the text area. Ctrl+F and Ctrl+H are the editor's even
+    /// without a document, so that AvaloniaEdit's own search panel never opens.
+    /// </summary>
+    private void OnKeyDownTunnel(object? sender, KeyEventArgs e)
+    {
+        bool shift = e.KeyModifiers == KeyModifiers.Shift;
+        if (ApplicationCommands.Find.Gesture.Matches(e) || ApplicationCommands.Replace.Gesture.Matches(e))
+        {
+            OpenSearch(replace: ApplicationCommands.Replace.Gesture.Matches(e));
+            e.Handled = true;
+        }
+        else if (e.Key == Key.F3 && (e.KeyModifiers == KeyModifiers.None || shift))
+            e.Handled = FindNext(previous: shift);
+        else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && _searchBar is { IsOpen: true } bar)
+        {
+            bar.Close();
+            e.Handled = true;
+        }
+        else if (_helpers is { } helpers && _part is { } part && part.TextArea.IsFocused)
+            helpers.OnKeyDown(e);
+    }
+
+    /// <summary>
+    /// Selects the next or previous match, as F3 and Shift+F3 do, opening the bar for the selection if it is closed.
+    /// </summary>
+    /// <returns>Whether there is a document to search.</returns>
+    private bool FindNext(bool previous)
+    {
+        if (_part is not { } part || CreatedSearchBar() is not { } bar)
+            return false;
+        string? text = bar.IsOpen ? null : SelectedLineText(part.TextArea);
+        if (previous)
+            bar.FindPrevious(text);
+        else
+            bar.FindNext(text);
+        return true;
+    }
+
+    /// <summary>
+    /// The search bar, made over the text the first time it is needed while the editor shows a document; null without
+    /// a document or a panel for it in the template.
+    /// </summary>
+    private SearchBar? CreatedSearchBar()
+    {
+        if (_searchBar is null && _root is { } root && _shown is { } shown && _part is { } part)
+        {
+            var bar = new SearchBar { Colors = _colors };
+            root.Children.Add(bar);
+            bar.Attach(this, part.TextArea, shown);
+            _searchBar = bar;
+        }
+        return _shown is null ? null : _searchBar;
+    }
+
+    /// <summary>
+    /// Removes the search panel that AvaloniaEdit's editor installs with each template, its input handler and its
+    /// subscriptions: the editor's own bar takes its place.
+    /// </summary>
+    private static void OnPartTemplateApplied(object? sender, TemplateAppliedEventArgs e)
+    {
+        if (sender is TextEditor { SearchPanel: { } panel })
+            panel.Uninstall();
+    }
+
+    /// <summary>The selected text, if it is within one line: what a search starts with.</summary>
+    private static string? SelectedLineText(TextArea textArea) =>
+        textArea.Selection is { IsEmpty: false, IsMultiline: false } selection ? selection.GetText() : null;
+
+    /// <summary>Applies a new indentation of the shown document at once. Raised on the UI thread.</summary>
+    private void OnDocumentPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(CodeDocument.Indentation) && _shown is { } shown && _part is { } part)
+            ApplyIndentation(part.Options, shown.Indentation);
+    }
+
+    /// <summary>
+    /// AvaloniaEdit's indentation: Tab inserts spaces to the next stop or a tab, Shift+Tab removes one level, and a
+    /// tab is drawn one level wide.
+    /// </summary>
+    private static void ApplyIndentation(TextEditorOptions options, Indentation indentation)
+    {
+        options.IndentationSize = indentation.Size;
+        options.ConvertTabsToSpaces = !indentation.UseTabs;
+    }
 
     /// <summary>Scrolls to where the editor was asked to, once the shown document is laid out.</summary>
     private void OnTextViewLayoutUpdated(object? sender, EventArgs e)
@@ -739,6 +911,10 @@ public class CodeEditor : TemplatedControl
         {
             _theme = theme;
             TextAreaColors colors = TextAreaColors.From(theme);
+            _colors = colors;
+            _brackets?.Colors = colors;
+            _whitespace?.Colors = colors;
+            _searchBar?.Colors = colors;
             TextArea textArea = part.TextArea;
             part.Background = colors.Background;
             part.Foreground = colors.Foreground;

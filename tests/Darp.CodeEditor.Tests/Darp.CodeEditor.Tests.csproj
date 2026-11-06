@@ -18,8 +18,9 @@
     <PackageReference Include="xunit.v3.aot" />
   </ItemGroup>
   <ItemGroup>
-    <!-- Grammars of the tests' own languages. -->
+    <!-- Grammars of the tests' own languages, and a color theme whose marks tests find in pixels. -->
     <AvaloniaResource Include="Languages\*.json" />
+    <AvaloniaResource Include="Themes\*.json" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Shouldly" />

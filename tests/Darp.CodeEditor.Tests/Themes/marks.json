@@ -1,0 +1,14 @@
+{
+	"$schema": "vscode://schemas/color-theme",
+	"name": "Marks (tests)",
+	"comment": "Light+ with opaque, distinct colors for the marks that the editor draws, so that tests find them in pixels.",
+	"include": "avares://Darp.CodeEditor/Themes/light_plus.json",
+	"colors": {
+		"editor.selectionBackground": "#FFFF00",
+		"editorBracketMatch.background": "#FF00FF",
+		"editorBracketMatch.border": "#FF00FF",
+		"editorWhitespace.foreground": "#FF0000",
+		"editor.findMatchBackground": "#00C000",
+		"editor.findMatchHighlightBackground": "#0000FF"
+	}
+}

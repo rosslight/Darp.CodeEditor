@@ -413,6 +413,21 @@ public sealed class CodeEditorTests(UiFixture ui)
         });
 
     [Fact]
+    public Task An_editor_that_shows_up_leaves_the_keyboard_where_it_is() =>
+        _ui.Run(() =>
+        {
+            var box = new TextBox();
+            var panel = new StackPanel { Children = { box } };
+            using var window = new EditorWindow(new CodeEditor(), panel);
+            box.Focus();
+
+            panel.Children.Add(new CodeEditor { Document = CodeDocument.Create(CodeLanguage.Json, "{}") });
+            window.Render();
+
+            box.IsFocused.ShouldBeTrue();
+        });
+
+    [Fact]
     public Task Disposing_a_document_on_any_thread_empties_the_editors_that_show_it() =>
         _ui.Run(async () =>
         {

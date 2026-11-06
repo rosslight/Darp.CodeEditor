@@ -118,15 +118,19 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     public TextSnapshot CurrentSnapshot => _currentSnapshot;
 
     /// <summary>
-    /// How Tab and new lines indent, in every editor that shows the document. It starts as in VS Code: 2 spaces for
-    /// YAML, 4 spaces otherwise. The document does not detect it from the text. Changing it leaves the existing text
-    /// as it is.
+    /// How Tab and new lines indent, in every editor that shows the document, and how wide tabs are drawn. It starts
+    /// as in VS Code: 2 spaces for YAML, 4 spaces otherwise. The document does not detect it from the text. Changing it
+    /// leaves the existing text as it is, and editors apply it at once.
     /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The size is not from 1 to 1,000 columns.</exception>
     public Indentation Indentation
     {
         get => _indentation;
         set
         {
+            // AvaloniaEdit's limits: an editor would fail on the value later, and elsewhere.
+            ArgumentOutOfRangeException.ThrowIfLessThan(value.Size, 1, nameof(value));
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(value.Size, 1_000, nameof(value));
             VerifyAccess();
             if (value == _indentation)
                 return;
