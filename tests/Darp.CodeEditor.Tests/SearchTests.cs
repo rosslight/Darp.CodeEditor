@@ -257,10 +257,10 @@ public sealed class SearchTests(UiFixture ui)
             bar.ReplaceBox.Text = "b";
 
             window.Type("(a+)+$");
-            // Not a time limit for the test: a guard against a search that never returns.
-            await Wait.UntilAsync(() => bar.Message is not null);
+            // Not a time limit for the test: a guard against a search that never returns. An incomplete query on the
+            // way, such as "(a", has a message of its own, so wait for this one's.
+            await Wait.UntilAsync(() => bar.Message?.Contains("stopped", StringComparison.Ordinal) == true);
 
-            bar.Message.ShouldNotBeNull().ShouldContain("stopped");
             bar.ReplaceAllButton.IsEnabled.ShouldBeFalse();
             Click(bar, "Replace All");
             window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(text);
@@ -275,7 +275,8 @@ public sealed class SearchTests(UiFixture ui)
             SearchBar bar = BarOf(window);
             bar.RegexToggle.IsChecked = true;
 
-            window.Type("(b");
+            // The whole query at once: "(" alone is invalid too, and its message would end the wait early.
+            bar.FindBox.Text = "(b";
             await Wait.UntilAsync(() => bar.Message is not null);
 
             bar.Count.ShouldBeNull();
