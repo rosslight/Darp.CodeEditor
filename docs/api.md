@@ -577,17 +577,19 @@ with Skia:
   bracket of `{|}` on a line of its own; typing a line that matches the decrease pattern outdents it; pairs close
   unless the token types where the user types are a string or comment that the pair's `notIn` excludes, typed closing
   characters step over, Backspace deletes an empty pair the editor closed, and opening characters surround the
-  selection; Ctrl+/ toggles line comments, or block comments in XML. Each is one step that the user undoes. The token
-  types come from tokenizing the line up to the caret on the UI thread, within 2 ms, from the state at its start.
-  Matching the indentation patterns for one new or typed line stops after 10 ms, and a match after 5 ms, as with a
-  pattern that backtracks on the lines above: the line then keeps its indentation;
+  selection; Ctrl+/ toggles line comments, or block comments in XML, as one change of the text whose cost grows with
+  the selection, as Replace All's does: 41 ms for 5,000 lines and about 0.15 s for 100,000, with the frame after it.
+  Each is one step that the user undoes. The token types come from tokenizing the line up to the caret on the UI
+  thread, within 2 ms, from the state at its start. Matching the indentation patterns for one new or typed line stops
+  after 10 ms, and a match after 5 ms, as with a pattern that backtracks on the lines above: the line then keeps its
+  indentation;
 - the document's `Indentation` reaches every editor that shows it at once: Tab, Shift+Tab, new lines and the width of
   tabs;
 - the bracket next to the caret and its match are boxed in the theme's colors, ignoring brackets in strings and
   comments by the lines' tokens. The search for a match reads at most 100,000 characters: about 0.5 ms, the most a
   caret move or keystroke spends on it (BenchmarkDotNet). In 5,000 lines, from text that an undo just changed and
-  with the frame after it, typing a bracket that closes takes 32 ms where a digit takes 30 ms, Backspace between the
-  pair 15 ms, and commenting 1,000 lines 36 ms;
+  with the frame after it, typing a bracket that closes takes 28 ms where a digit takes 27 ms, Backspace between the
+  pair 13 ms, and commenting all 5,000 lines 41 ms;
 - spaces and tabs show inside the selection only, in the theme's `editorWhitespace.foreground`, in a layer of the text
   view above the selection;
 - search runs in the background, so a regular expression such as `(a+)+$`, which froze the prototype for 21 s, leaves

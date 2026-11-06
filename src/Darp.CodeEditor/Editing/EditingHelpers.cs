@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 using Avalonia.Input;
 using AvaloniaEdit;
@@ -636,24 +637,45 @@ internal sealed class EditingHelpers : IDisposable
         // The smallest indentation by its width, so that tabs and spaces line up.
         var indenting = new Indenting(_document.Indentation);
         int column = changed.Min(l => indenting.Width(l.Text[..l.Indent]));
-        using (Buffer.RunUpdate())
+        var edits = new List<(int Offset, int Length, string Text)>(changed.Count);
+        foreach ((DocumentLine line, string text, int indent) in changed)
         {
-            // Bottom up, so that the lines still to change keep their offsets.
-            for (int i = changed.Count - 1; i >= 0; i--)
+            if (!uncomment)
             {
-                (DocumentLine line, string text, int indent) = changed[i];
-                if (!uncomment)
-                {
-                    Buffer.Insert(line.Offset + (blank ? indent : indenting.OffsetOf(text, column)), token + " ");
-                    continue;
-                }
-                int end = indent + token.Length;
-                Buffer.Remove(
-                    line.Offset + indent,
-                    end < text.Length && text[end] == ' ' ? token.Length + 1 : token.Length
-                );
+                edits.Add((line.Offset + (blank ? indent : indenting.OffsetOf(text, column)), 0, token + " "));
+                continue;
             }
+            int end = indent + token.Length;
+            edits.Add(
+                (line.Offset + indent, end < text.Length && text[end] == ' ' ? token.Length + 1 : token.Length, "")
+            );
         }
+        ReplaceInOneChange(edits);
+    }
+
+    /// <summary>
+    /// Makes <paramref name="edits"/>, in order and apart, as one change of the text from the first to the last, with a
+    /// map of them, so that anchors such as the caret move as they would for each edit. AvaloniaEdit raises a change
+    /// per edit also within one update, so the editor's work per change, such as the highlighter's and the view's,
+    /// happens once instead of once per edit.
+    /// </summary>
+    private void ReplaceInOneChange(List<(int Offset, int Length, string Text)> edits)
+    {
+        int start = edits[0].Offset;
+        string text = Buffer.GetText(start, edits[^1].Offset + edits[^1].Length - start);
+        var replaced = new StringBuilder(text.Length);
+        var map = new OffsetChangeMap();
+        int copied = 0;
+        int delta = 0;
+        foreach ((int offset, int length, string inserted) in edits)
+        {
+            replaced.Append(text, copied, offset - start - copied).Append(inserted);
+            map.Add(new OffsetChangeMapEntry(offset + delta, length, inserted.Length));
+            delta += inserted.Length - length;
+            copied = offset - start + length;
+        }
+        replaced.Append(text, copied, text.Length - copied);
+        Buffer.Replace(start, text.Length, new StringTextSource(replaced.ToString()), map);
     }
 
     /// <summary>

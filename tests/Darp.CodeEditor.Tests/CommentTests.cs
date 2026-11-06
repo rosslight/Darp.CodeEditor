@@ -32,6 +32,25 @@ public sealed class CommentTests(UiFixture ui)
             document.Text.ShouldBe(MarkedText.Parse(marked).Text);
         });
 
+    [Fact]
+    public Task Comments_on_many_lines_are_one_change_of_the_text() =>
+        _ui.Run(async () =>
+        {
+            // The editor's work per change, such as the highlighter's and the view's, then happens once, not per line.
+            await CodeLanguage.Json.Loaded;
+            using EditorWindow window = MarkedText.Show("«a\n  b\nc»", CodeLanguage.Json);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            int changes = 0;
+            document.Buffer.Changed += (_, _) => changes++;
+
+            window.Press(Key.Oem2, EditorWindow.Command);
+            document.Text.ShouldBe("// a\n//   b\n// c");
+            window.Press(Key.Oem2, EditorWindow.Command);
+
+            document.Text.ShouldBe("a\n  b\nc");
+            changes.ShouldBe(2);
+        });
+
     [Theory]
     [InlineData("<a>\n  <b/>|\n</a>", "<a>\n  <!-- <b/> -->\n</a>")]
     [InlineData("«<a>\n  <b/>\n</a>»", "<!-- <a>\n  <b/>\n</a> -->")]

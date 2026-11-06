@@ -10,7 +10,7 @@ namespace Darp.CodeEditor.Benchmarks;
 /// <summary>
 /// The editing helpers on the UI thread, with the layout and the frame that follow, in 5,000 lines of JSON: typing an
 /// opening bracket, which tokenizes the line up to the caret, closes the pair and matches the brackets; Backspace
-/// between the pair; and commenting 1,000 lines, against a digit typed the same way. Each call starts from the same
+/// between the pair; and commenting all 5,000 lines, against a digit typed the same way. Each call starts from the same
 /// text, set up outside the measurement, and its edit is checked after it: a helper that does nothing fails the run
 /// instead of looking fast.
 /// </summary>
@@ -100,29 +100,25 @@ public class EditingBenchmarks
     [IterationCleanup(Targets = [nameof(BackspaceAnEmptyPair)])]
     public void CheckThePairIsGone() => Expect(Document.Text == _text, "Backspace did not delete the pair.");
 
-    [IterationSetup(Targets = [nameof(Comment1000Lines)])]
-    public void Select1000Lines()
-    {
-        TextSnapshot text = Document.CurrentSnapshot;
-        Select(new TextSelection(text.GetOffset(new TextPosition(2000, 1)), text.GetOffset(new TextPosition(3000, 1))));
-    }
+    [IterationSetup(Targets = [nameof(Comment5000Lines)])]
+    public void SelectAllLines() => Select(new TextSelection(0, Document.CurrentSnapshot.Length));
 
-    /// <summary>Comments 1,000 lines with Ctrl+/, or Cmd+/ on macOS.</summary>
+    /// <summary>Comments 5,000 lines with Ctrl+/, or Cmd+/ on macOS.</summary>
     [Benchmark]
-    public void Comment1000Lines()
+    public void Comment5000Lines()
     {
         Window window = Window;
         Press(window, Key.Oem2, OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control);
         HeadlessEditor.Render(window);
     }
 
-    [IterationCleanup(Targets = [nameof(Comment1000Lines)])]
+    [IterationCleanup(Targets = [nameof(Comment5000Lines)])]
     public void CheckTheCommentsAndUndo()
     {
         TextSnapshot text = Document.CurrentSnapshot;
         Expect(
-            text.Length == _text.Length + 1000 * "// ".Length
-                && text.GetText(new TextRange(text.GetOffset(new TextPosition(2999, 1)), 5)) == "  // ",
+            text.Length == _text.Length + 5000 * "// ".Length
+                && text.GetText(new TextRange(text.GetOffset(new TextPosition(2999, 1)), 6)) == "//   \"",
             "The lines were not commented."
         );
         Document.Undo();
