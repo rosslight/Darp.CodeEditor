@@ -12,8 +12,8 @@ namespace Darp.CodeEditor.Editing;
 /// as VS Code does.
 /// </summary>
 /// <remarks>
-/// The pair is found when the text view draws, after the caret moved, the text changed or the lines were drawn again,
-/// as they are when their tokens change: once per frame, however many changes came before it.
+/// The pair is found when the text view draws, after the caret moved, the text changed, the lines were drawn again or
+/// the background changed lines' tokens, also out of view: once per frame, however many changes came before it.
 /// </remarks>
 internal sealed class BracketHighlighter : IBackgroundRenderer, IDisposable
 {
@@ -36,6 +36,7 @@ internal sealed class BracketHighlighter : IBackgroundRenderer, IDisposable
         textArea.Caret.PositionChanged += OnChanged;
         _buffer.TextChanged += OnChanged;
         textArea.TextView.VisualLinesChanged += OnVisualLinesChanged;
+        highlighter.TokensChanged += OnChanged;
         textArea.TextView.BackgroundRenderers.Add(this);
     }
 
@@ -79,6 +80,7 @@ internal sealed class BracketHighlighter : IBackgroundRenderer, IDisposable
         _textArea.Caret.PositionChanged -= OnChanged;
         _buffer.TextChanged -= OnChanged;
         _textArea.TextView.VisualLinesChanged -= OnVisualLinesChanged;
+        _highlighter.TokensChanged -= OnChanged;
         _textArea.TextView.BackgroundRenderers.Remove(this);
     }
 

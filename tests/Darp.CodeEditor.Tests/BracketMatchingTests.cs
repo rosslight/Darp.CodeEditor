@@ -83,6 +83,24 @@ public sealed class BracketMatchingTests(UiFixture ui)
         lines.ShouldBeLessThanOrEqualTo(BracketMatcher.MaxDistance + 2);
     }
 
+    [Fact]
+    public Task A_pair_whose_match_becomes_a_comment_out_of_view_is_no_longer_boxed() =>
+        _ui.Run(async () =>
+        {
+            // The closing brace below the view.
+            using EditorWindow window = await ShowColored(
+                "|{ \"a\": 1,\n// b\n" + string.Concat(Enumerable.Repeat("// padding\n", 50)) + "}"
+            );
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)).ShouldBeGreaterThan(0);
+
+            // A block comment from the second line on, to the end. The lines in view keep their tokens' colors and
+            // types: comments.
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            document.Replace(new TextRange(document.CurrentSnapshot.GetOffset(new TextPosition(2, 2)), 1), "*");
+
+            await Wait.UntilAsync(() => window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)) == 0);
+        });
+
     private static async Task<EditorWindow> ShowColored(string marked)
     {
         (string text, TextSelection selection) = MarkedText.Parse(marked);
