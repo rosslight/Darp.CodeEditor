@@ -559,12 +559,13 @@ with Skia:
 - the budgets of the design's section 1.2 without a language server, on a quiet machine. Benchmarks measure them
   (BenchmarkDotNet, i7-13700, a warm process), and the comparison of each pull request tracks them; tests assert no
   latency (#102). A new editor of 5,000 lines of JSON or YAML shows syntax colors in a rendered frame 24 to 25 ms
-  after it is created. With the layout and the frame after it, a keystroke takes the UI thread 17 ms in 5,000 lines
-  and 11 ms on a line of 20,000 characters, and a page down 13 ms. A bare AvaloniaEdit editor takes 12 ms per
-  keystroke in the same headless app; the editor adds about 2 ms, and highlighting about 3 ms more;
+  after it is created. With the layout and the frame after it, a keystroke takes the UI thread 11 ms in 5,000 lines
+  and 15 ms on a wrapped line of 2,900 characters, and a page down 13 ms. A bare AvaloniaEdit editor takes as long
+  per keystroke in the same headless app, as the background's results lay out only lines whose tokens changed;
 - without a clock, tests check that such an editor shows syntax colors in its pixels, and that typing on a line of
   20,000 characters edits it and colors it by the background's time limit of 50 ms per line: a JSON string, which
-  tokenizes in about 2 ms, fully, and an array, which takes seconds, not at all;
+  tokenizes in about 2 ms, fully, and an array, which takes seconds, not at all. Typing inside a long string builds
+  its line once, and a quote that ends the string colors the line anew;
 - tokenizing 5,000 lines in the background takes about 62 ms for JSON and YAML (BenchmarkDotNet); one screen of 50
   lines takes the UI thread about 0.6 ms of the 4 ms it may spend per frame;
 - an editor out of the visual tree is collected while its document lives on, also one that had the focus and showed
@@ -586,11 +587,11 @@ with Skia:
 - the document's `Indentation` reaches every editor that shows it at once: Tab, Shift+Tab, new lines and the width of
   tabs;
 - the bracket next to the caret and its match are boxed in the theme's colors, ignoring brackets in strings and
-  comments by the lines' tokens. The search for a match reads at most 100,000 characters, in blocks without a string
-  per line: about 0.5 ms with six brackets on every line, the most a caret move or keystroke spends on it
-  (BenchmarkDotNet). In 5,000 lines, from text that an undo just changed and
-  with the frame after it, typing a bracket that closes takes 28 ms where a digit takes 27 ms, Backspace between the
-  pair 13 ms, and commenting all 5,000 lines 41 ms;
+  comments by the lines' tokens, also when an edit changes them out of view. The search for a match reads at most
+  100,000 characters, in blocks without a string per line: about 0.5 ms with six brackets on every line, the most a
+  caret move or keystroke spends on it (BenchmarkDotNet). In 5,000 lines, from text that an undo just changed and with
+  the frame after it, typing a bracket that closes takes 28 ms where a digit takes 27 ms, Backspace between the pair
+  13 ms, and commenting all 5,000 lines 41 ms;
 - spaces and tabs show inside the selection only, in the theme's `editorWhitespace.foreground`, in a layer of the text
   view above the selection;
 - search runs in the background, so a regular expression such as `(a+)+$`, which froze the prototype for 21 s, leaves
@@ -615,8 +616,9 @@ Still open:
 - calls that must stay quick, such as prompts, callback replies and stopping a run, while the bridge carries bulk data
   in both directions: a test measures their latency under load;
 - integration tests on GitHub Actions for Windows, Linux and macOS, once the API is decided;
-- lines over 3,000 characters: AvaloniaEdit draws and edits only their first 3,000 characters, since its upstream
-  #607. The editor raises that limit once AvaloniaEdit makes it an option;
+- lines over 3,000 characters: the editor shows and edits lines of up to 3,000 characters in full, AvaloniaEdit's
+  default, and a longer line collapses its tail (#106). The limit rises once Avalonia's text wrapping and font
+  fallback get faster on long lines;
 - the parts of VS Code's editing rules that the editor does not read yet: `onEnterRules`, such as JSON's line comment
   continued on Enter, `indentNextLinePattern` and `unIndentedLinePattern`, brackets of several characters for
   matching, and the outdent of a closing bracket typed on an empty line by its opening bracket's line, without a
@@ -626,6 +628,6 @@ Still open:
 ## 10. Open questions
 
 Question numbers continue the decision log in [design.md](design.md). Decisions taken in the API discussion are
-recorded there too (#61, #64–#105).
+recorded there too (#61, #64–#106).
 
 None right now. Section 9 lists what still needs proving.
