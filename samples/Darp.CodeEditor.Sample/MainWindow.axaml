@@ -18,6 +18,54 @@
     RequestedThemeVariant="{Binding Settings.AppTheme.Variant}"
 >
     <windowing:FAAppWindow.Styles>
+        <!-- The title bar's buttons: icons only, as in WinUI's title bars. -->
+        <Style Selector="Button.command">
+            <Setter Property="Theme" Value="{StaticResource TransparentButton}" />
+            <Setter Property="Width" Value="36" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="WindowDecorationProperties.ElementRole" Value="User" />
+        </Style>
+        <Style Selector="Button.command fa|FASymbolIcon">
+            <Setter Property="FontSize" Value="20" />
+        </Style>
+        <Style Selector="Button.command:disabled fa|FASymbolIcon">
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorDisabledBrush}" />
+        </Style>
+        <Style Selector="Rectangle.divider">
+            <Setter Property="Width" Value="1" />
+            <Setter Property="Height" Value="16" />
+            <Setter Property="Margin" Value="6,0" />
+            <Setter Property="Fill" Value="{DynamicResource DividerStrokeColorDefaultBrush}" />
+        </Style>
+
+        <!-- In narrow windows the title bar keeps ☰ and ⋯; the other commands move into ⋯. -->
+        <ContainerQuery Name="window" Query="max-width:640">
+            <Style Selector="Button.wide, Rectangle.wide">
+                <Setter Property="IsVisible" Value="False" />
+            </Style>
+        </ContainerQuery>
+
+        <!-- The status bar: small text, and buttons that look like it until the pointer is over them. -->
+        <Style Selector="Grid.status TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Grid.status Button, Grid.status DropDownButton">
+            <Setter Property="Theme" Value="{StaticResource TransparentButton}" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="Padding" Value="8,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Grid.status TextBlock.plain">
+            <Setter Property="Margin" Value="8,0" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        </Style>
+
         <!--
           A document's state is a badge on its icon, in every mode of the pane. The pseudo-class gives the style
           precedence over the values that FluentAvalonia's template sets.
@@ -43,140 +91,80 @@
             <Setter Property="BorderBrush" Value="{DynamicResource TextFillColorSecondaryBrush}" />
             <Setter Property="BorderThickness" Value="1.5" />
         </Style>
-        <!-- A document's close button shows while the pointer is over it, and for the selected one. -->
-        <Style Selector="Button.close">
-            <Setter Property="Theme" Value="{StaticResource TransparentButton}" />
-            <Setter Property="Padding" Value="4" />
-            <Setter Property="IsVisible" Value="False" />
-        </Style>
-        <Style Selector="fa|FANavigationViewItem:pointerover Button.close, fa|FANavigationViewItem:selected Button.close">
-            <Setter Property="IsVisible" Value="True" />
-        </Style>
-        <!-- Icon buttons in the title bar, as narrow as WinUI's. -->
-        <Style Selector="fa|FACommandBarButton:labelcollapsed">
-            <Setter Property="Width" Value="40" />
-        </Style>
-        <Style Selector="TextBlock.state">
-            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
-        </Style>
     </windowing:FAAppWindow.Styles>
 
-    <Grid RowDefinitions="Auto,*">
+    <Grid RowDefinitions="Auto,*,Auto" Container.Name="window" Container.Sizing="Width">
         <!--
           The title bar holds the commands. On Windows and macOS the window's content extends into it, and the
           window's buttons are drawn over it: on the right on Windows, on the left on macOS.
         -->
         <Grid
-            Height="48"
-            Margin="{OnPlatform '4,0', Windows='4,0,140,0', macOS='76,0,4,0'}"
+            Height="44"
+            Margin="{OnPlatform '8,0', Windows='8,0,140,0', macOS='76,0,8,0'}"
             ColumnDefinitions="*,Auto,*"
             Background="Transparent"
             WindowDecorationProperties.ElementRole="TitleBar"
         >
-            <DockPanel>
+            <StackPanel Orientation="Horizontal" Spacing="2">
                 <!-- Opens the pane once it hides, in narrow windows. -->
-                <Button
-                    Name="PaneButton"
-                    DockPanel.Dock="Left"
-                    VerticalAlignment="Center"
-                    Theme="{StaticResource TransparentButton}"
-                    IsVisible="False"
-                    ToolTip.Tip="{Binding Strings.Documents}"
-                    Click="OnPaneButtonClick"
-                    WindowDecorationProperties.ElementRole="User"
-                >
+                <Button Name="PaneButton" Classes="command" IsVisible="False" Click="OnPaneButtonClick">
+                    <ToolTip.Tip>
+                        <TextBlock Text="{Binding Strings.Documents}" />
+                    </ToolTip.Tip>
                     <fa:FASymbolIcon Symbol="GlobalNavigationButton" />
                 </Button>
-                <!-- Commands that don't fit go into the overflow menu, Find first. -->
-                <fa:FACommandBar
-                    HorizontalAlignment="Left"
-                    VerticalAlignment="Center"
-                    DefaultLabelPosition="Collapsed"
-                    WindowDecorationProperties.ElementRole="User"
+                <Button Classes="command wide" ToolTip.Tip="{Binding Strings.New}" Click="OnNew">
+                    <FlyoutBase.AttachedFlyout>
+                        <!-- One item per file type, from the code when it opens. -->
+                        <fa:FAMenuFlyout Placement="BottomEdgeAlignedLeft" Opening="OnNewMenuOpening" />
+                    </FlyoutBase.AttachedFlyout>
+                    <fa:FASymbolIcon Symbol="Add" />
+                </Button>
+                <Button Classes="command wide" ToolTip.Tip="{Binding Strings.Open}" Click="OnOpen">
+                    <fa:FASymbolIcon Symbol="OpenFile" />
+                </Button>
+                <Button
+                    Name="SaveButton"
+                    Classes="command wide"
+                    ToolTip.Tip="{Binding Strings.Save}"
+                    IsEnabled="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
+                    Click="OnSave"
                 >
-                    <fa:FACommandBar.PrimaryCommands>
-                        <!-- An attached flyout, which the click opens: a button's own flyout draws a chevron over it. -->
-                        <fa:FACommandBarButton
-                            Label="{Binding Strings.New}"
-                            ToolTip.Tip="{Binding Strings.New}"
-                            IconSource="Add"
-                            DynamicOverflowOrder="6"
-                            Click="OnNew"
-                        >
-                            <FlyoutBase.AttachedFlyout>
-                                <!-- One item per file type, from the code when it opens. -->
-                                <fa:FAMenuFlyout Placement="BottomEdgeAlignedLeft" Opening="OnNewMenuOpening" />
-                            </FlyoutBase.AttachedFlyout>
-                        </fa:FACommandBarButton>
-                        <fa:FACommandBarButton
-                            Label="{Binding Strings.Open}"
-                            ToolTip.Tip="{Binding Strings.Open}"
-                            IconSource="OpenFile"
-                            DynamicOverflowOrder="5"
-                            Click="OnOpen"
-                        />
-                        <fa:FACommandBarButton
-                            Label="{Binding Strings.Save}"
-                            ToolTip.Tip="{Binding Strings.Save}"
-                            IconSource="Save"
-                            DynamicOverflowOrder="4"
-                            IsEnabled="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
-                            Click="OnSave"
-                        />
-                        <fa:FACommandBarSeparator />
-                        <fa:FACommandBarButton
-                            Label="{Binding Strings.Undo}"
-                            ToolTip.Tip="{Binding Strings.Undo}"
-                            IconSource="Undo"
-                            DynamicOverflowOrder="3"
-                            IsEnabled="{Binding ShownDocument.Document.CanUndo, FallbackValue=False}"
-                            Click="OnUndo"
-                        />
-                        <fa:FACommandBarButton
-                            Label="{Binding Strings.Redo}"
-                            ToolTip.Tip="{Binding Strings.Redo}"
-                            IconSource="Redo"
-                            DynamicOverflowOrder="2"
-                            IsEnabled="{Binding ShownDocument.Document.CanRedo, FallbackValue=False}"
-                            Click="OnRedo"
-                        />
-                        <fa:FACommandBarButton
-                            Label="{Binding Strings.Find}"
-                            ToolTip.Tip="{Binding Strings.Find}"
-                            IconSource="Find"
-                            DynamicOverflowOrder="1"
-                            IsEnabled="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
-                            Click="OnFind"
-                        />
-                    </fa:FACommandBar.PrimaryCommands>
-                    <fa:FACommandBar.SecondaryCommands>
-                        <fa:FACommandBarButton
-                            Label="{Binding Strings.SaveAs}"
-                            IconSource="SaveAs"
-                            IsEnabled="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
-                            Click="OnSaveAs"
-                        />
-                        <fa:FACommandBarButton
-                            Label="{Binding Strings.Replace}"
-                            IconSource="Switch"
-                            IsEnabled="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
-                            Click="OnReplace"
-                        />
-                        <fa:FACommandBarButton
-                            Label="{Binding Strings.GoToLine}"
-                            IconSource="Go"
-                            IsEnabled="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
-                            Click="OnGoToLine"
-                        />
-                        <fa:FACommandBarButton
-                            Label="{Binding Strings.InsertDateTime}"
-                            IconSource="Calendar"
-                            IsEnabled="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
-                            Click="OnInsertDateTime"
-                        />
-                    </fa:FACommandBar.SecondaryCommands>
-                </fa:FACommandBar>
-            </DockPanel>
+                    <fa:FASymbolIcon Symbol="Save" />
+                </Button>
+                <Rectangle Classes="divider wide" />
+                <Button
+                    Classes="command wide"
+                    ToolTip.Tip="{Binding Strings.Undo}"
+                    IsEnabled="{Binding ShownDocument.Document.CanUndo, FallbackValue=False}"
+                    Click="OnUndo"
+                >
+                    <fa:FASymbolIcon Symbol="Undo" />
+                </Button>
+                <Button
+                    Classes="command wide"
+                    ToolTip.Tip="{Binding Strings.Redo}"
+                    IsEnabled="{Binding ShownDocument.Document.CanRedo, FallbackValue=False}"
+                    Click="OnRedo"
+                >
+                    <fa:FASymbolIcon Symbol="Redo" />
+                </Button>
+                <Button
+                    Classes="command wide"
+                    ToolTip.Tip="{Binding Strings.Find}"
+                    IsEnabled="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
+                    Click="OnFind"
+                >
+                    <fa:FASymbolIcon Symbol="Find" />
+                </Button>
+                <Button Classes="command" Click="OnMore">
+                    <FlyoutBase.AttachedFlyout>
+                        <!-- The commands that don't fit, from the code when it opens. -->
+                        <fa:FAMenuFlyout Placement="BottomEdgeAlignedLeft" Opening="OnMoreMenuOpening" />
+                    </FlyoutBase.AttachedFlyout>
+                    <fa:FASymbolIcon Symbol="More" />
+                </Button>
+            </StackPanel>
 
             <!-- What the page shows: the settings, or the document's name and state. -->
             <Panel Grid.Column="1" VerticalAlignment="Center" IsHitTestVisible="False">
@@ -188,12 +176,12 @@
                 >
                     <TextBlock Text="{Binding ShownDocument.Name}" />
                     <TextBlock
-                        Classes="state"
+                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                         Text="{Binding Strings.StateNoFile, StringFormat='· {0}'}"
                         IsVisible="{Binding ShownDocument.State, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static documents:DocumentState.NoFile}}"
                     />
                     <TextBlock
-                        Classes="state"
+                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                         Text="{Binding Strings.StateUnsaved, StringFormat='· {0}'}"
                         IsVisible="{Binding ShownDocument.State, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static documents:DocumentState.Unsaved}}"
                     />
@@ -216,13 +204,17 @@
             DisplayModeChanged="OnDisplayModeChanged"
         >
             <fa:FANavigationView.Resources>
-                <!-- No gap above the pages: the title bar is above them already. -->
+                <!-- The page fills the space next to the pane, with its own divider below. -->
                 <Thickness x:Key="NavigationViewContentMargin">0</Thickness>
                 <Thickness x:Key="NavigationViewMinimalContentMargin">0</Thickness>
+                <Thickness x:Key="NavigationViewContentGridBorderThickness">0</Thickness>
+                <Thickness x:Key="NavigationViewMinimalContentGridBorderThickness">0</Thickness>
+                <CornerRadius x:Key="NavigationViewContentGridCornerRadius">0</CornerRadius>
+                <CornerRadius x:Key="NavigationViewMinimalContentGridCornerRadius">0</CornerRadius>
             </fa:FANavigationView.Resources>
             <fa:FANavigationView.PaneHeader>
                 <TextBlock
-                    Margin="16,8,0,4"
+                    Margin="16,4,0,4"
                     Text="{Binding Strings.Documents}"
                     Theme="{StaticResource CaptionTextBlockStyle}"
                     Foreground="{DynamicResource TextFillColorSecondaryBrush}"
@@ -233,6 +225,7 @@
                     <local:NavigationItemSelector.Document>
                         <DataTemplate x:DataType="documents:OpenDocument">
                             <fa:FANavigationViewItem
+                                Content="{Binding Name}"
                                 IconSource="Document"
                                 ToolTip.Tip="{Binding Name}"
                                 PointerReleased="OnDocumentPointerReleased"
@@ -277,21 +270,6 @@
                                         />
                                     </fa:FAMenuFlyout>
                                 </fa:FANavigationViewItem.ContextFlyout>
-                                <Grid ColumnDefinitions="*,Auto">
-                                    <TextBlock
-                                        Text="{Binding Name}"
-                                        VerticalAlignment="Center"
-                                        TextTrimming="CharacterEllipsis"
-                                    />
-                                    <Button
-                                        Grid.Column="1"
-                                        Classes="close"
-                                        ToolTip.Tip="{Binding Close, Source={x:Static loc:Strings.Current}}"
-                                        Click="OnDocumentClose"
-                                    >
-                                        <fa:FASymbolIcon Symbol="Dismiss" FontSize="12" />
-                                    </Button>
-                                </Grid>
                             </fa:FANavigationViewItem>
                         </DataTemplate>
                     </local:NavigationItemSelector.Document>
@@ -305,10 +283,83 @@
                 />
             </fa:FANavigationView.FooterMenuItems>
 
-            <Panel>
-                <documents:DocumentView Name="DocumentPage" IsVisible="{Binding !ShowsSettings}" />
-                <settings:SettingsView IsVisible="{Binding ShowsSettings}" />
-            </Panel>
+            <!-- One line divides the page from the title bar and the pane, in either theme. -->
+            <Border BorderThickness="1,1,0,0" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+                <Panel>
+                    <documents:DocumentView Name="DocumentPage" IsVisible="{Binding !ShowsSettings}" />
+                    <settings:SettingsView IsVisible="{Binding ShowsSettings}" />
+                </Panel>
+            </Border>
         </fa:FANavigationView>
+
+        <!-- The status bar, under the pane and the page, for the document the page shows. -->
+        <Grid
+            Grid.Row="2"
+            Classes="status"
+            Height="28"
+            Margin="12,0"
+            ColumnDefinitions="Auto,*,Auto,Auto"
+            IsVisible="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
+        >
+            <Button Name="CaretButton">
+                <Button.Flyout>
+                    <Flyout Placement="TopEdgeAlignedLeft" Opened="OnGoToLineOpened">
+                        <StackPanel Width="220" Spacing="8">
+                            <TextBlock
+                                Text="{Binding Strings.GoToLine}"
+                                Theme="{StaticResource BodyStrongTextBlockStyle}"
+                            />
+                            <fa:FANumberBox
+                                Name="LineNumber"
+                                HorizontalAlignment="Stretch"
+                                Minimum="1"
+                                SimpleNumberFormat="F0"
+                            />
+                        </StackPanel>
+                    </Flyout>
+                </Button.Flyout>
+                <TextBlock>
+                    <TextBlock.Text>
+                        <MultiBinding Converter="{x:Static loc:FormatConverter.Instance}">
+                            <Binding Path="Strings.CaretPosition" />
+                            <Binding Path="#DocumentPage.CaretPosition.Line" />
+                            <Binding Path="#DocumentPage.CaretPosition.Column" />
+                        </MultiBinding>
+                    </TextBlock.Text>
+                </TextBlock>
+            </Button>
+
+            <Panel Grid.Column="1">
+                <TextBlock
+                    Classes="plain"
+                    Text="{Binding Strings.NoFile}"
+                    IsVisible="{Binding ShownDocument.File, Converter={x:Static ObjectConverters.IsNull}}"
+                />
+                <TextBlock
+                    Classes="plain"
+                    Text="{Binding ShownDocument.File.Path.LocalPath}"
+                    TextTrimming="PrefixCharacterEllipsis"
+                    IsVisible="{Binding ShownDocument.File, Converter={x:Static ObjectConverters.IsNotNull}}"
+                />
+            </Panel>
+
+            <DropDownButton Grid.Column="2">
+                <DropDownButton.Flyout>
+                    <!-- The choices, from the code when it opens. -->
+                    <fa:FAMenuFlyout Placement="TopEdgeAlignedRight" Opening="OnIndentationMenuOpening" />
+                </DropDownButton.Flyout>
+                <TextBlock>
+                    <TextBlock.Text>
+                        <MultiBinding Converter="{x:Static local:MainWindow.IndentationText}">
+                            <Binding Path="Strings.IndentSpaces" />
+                            <Binding Path="Strings.IndentTabs" />
+                            <Binding Path="ShownDocument.Document.Indentation" />
+                        </MultiBinding>
+                    </TextBlock.Text>
+                </TextBlock>
+            </DropDownButton>
+
+            <TextBlock Grid.Column="3" Classes="plain" Text="{Binding ShownDocument.Type.Name}" />
+        </Grid>
     </Grid>
 </windowing:FAAppWindow>

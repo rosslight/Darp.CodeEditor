@@ -89,8 +89,6 @@ public sealed class Strings : INotifyPropertyChanged
     public string WordWrap => Get();
     public string WordWrapDescription => Get();
     public string LineNumbers => Get();
-    public string On => Get();
-    public string Off => Get();
     public string LineNumbersDescription => Get();
     public string FontSize => Get();
     public string FontSizeDescription => Get();

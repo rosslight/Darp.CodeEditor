@@ -16,8 +16,8 @@ dotnet run --project samples/Darp.CodeEditor.Sample
 | `Documents/FileType.cs` | the built-in languages, and Python as a language of the app's own, from VS Code's files shipped as Avalonia resources |
 | `Documents/Workspace.cs` | documents in memory (`CodeDocument.Create`), and documents from files, with `FilePath` |
 | `Documents/OpenDocument.cs` | saving the text of a `TextSnapshot`, then `MarkUnmodified(snapshot)`; `IsModified` for a document's state: no file, unsaved changes, or saved |
-| `MainWindow.axaml.cs` | opening, saving and closing documents, from the title bar, a document's right-click menu and the shortcuts |
-| `Documents/DocumentView.axaml.cs` | one editor for every document, with `SaveViewState` and `RestoreViewState`; `Undo` and `Redo`, with `CanUndo` and `CanRedo` in the title bar; `OpenSearch`; go to line with `GetOffset`, `Selection` and `ScrollTo`; `Replace` at the selection; `Indentation` and `CaretPosition` in the status bar |
+| `MainWindow.axaml.cs` | opening, saving and closing documents, from the title bar, a document's right-click menu and the shortcuts; the status bar, with the document's `Indentation` |
+| `Documents/DocumentView.axaml.cs` | one editor for every document, with `SaveViewState` and `RestoreViewState`; `Undo` and `Redo`, with `CanUndo` and `CanRedo` in the title bar; `OpenSearch`; go to line with `GetOffset`, `Selection` and `ScrollTo`; `Replace` at the selection; `CaretPosition` for the status bar |
 | `Documents/DocumentView.axaml`, `Settings/` | `WordWrap`, `ShowLineNumbers` and `FontSize`; the app's theme variant, which editors follow, and a `ThemeVariantScope` that gives the editor and its popups another one |
 
 Cut, Copy, Paste and Select All are the editor's own right-click menu. The app's own text is in English and German

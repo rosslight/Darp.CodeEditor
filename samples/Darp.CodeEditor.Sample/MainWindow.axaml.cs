@@ -1,11 +1,13 @@
 using System.ComponentModel;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Data.Converters;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using CommunityToolkit.Mvvm.Input;
+using Darp.CodeEditor;
 using FluentAvalonia.UI.Controls;
 using FluentAvalonia.UI.Windowing;
 using Sample.Documents;
@@ -14,12 +16,19 @@ using Sample.Localization;
 namespace Sample;
 
 /// <summary>
-/// The title bar with the commands, the open documents in the pane, and the page: the document page, which shows
-/// every document in one editor, or the settings. The window does what involves files and dialogs; the document page
-/// does what involves the editor.
+/// The title bar with the commands, the open documents in the pane, the page, and the status bar. The page is the
+/// document page, which shows every document in one editor, or the settings. The window does what involves files and
+/// dialogs; the document page does what involves the editor.
 /// </summary>
 public sealed partial class MainWindow : FAAppWindow
 {
+    private static readonly Indentation[] s_indentations =
+    [
+        Indentation.Spaces(2),
+        Indentation.Spaces(4),
+        Indentation.Tabs(4),
+    ];
+
     private MainViewModel? _viewModel;
 
     /// <summary>
@@ -32,23 +41,31 @@ public sealed partial class MainWindow : FAAppWindow
     {
         InitializeComponent();
         TitleBar.ExtendsContentIntoTitleBar = true;
-        TitleBar.Height = 48;
+        TitleBar.Height = 44;
+        // The number box handles Enter itself, to commit its value.
+        LineNumber.AddHandler(KeyUpEvent, OnLineNumberKeyUp, handledEventsToo: true);
         // The app's shortcuts. The editor handles its own keys, such as Ctrl+F, and leaves these to the app.
         AddShortcut("Ctrl+N", () => New(FileType.Text));
         AddShortcut("Ctrl+O", OpenAsync);
-        AddShortcut("Ctrl+S", () => SaveCurrentAsync(saveAs: false));
-        AddShortcut("Ctrl+Shift+S", () => SaveCurrentAsync(saveAs: true));
-        AddShortcut(
-            "Ctrl+W",
-            () => _viewModel?.ShownDocument is { } document ? CloseAsync(document) : Task.CompletedTask
-        );
-        AddShortcut("Ctrl+G", () => DocumentPage.OpenGoToLine());
+        AddShortcut("Ctrl+S", () => SaveShownAsync(saveAs: false));
+        AddShortcut("Ctrl+Shift+S", () => SaveShownAsync(saveAs: true));
+        AddShortcut("Ctrl+W", () => ShownDocument is { } document ? CloseAsync(document) : Task.CompletedTask);
+        AddShortcut("Ctrl+G", OpenGoToLine);
         AddShortcut("Ctrl+OemComma", () => Navigation.SelectedItem = SettingsItem);
     }
+
+    /// <summary>
+    /// The status bar's text for a document's indentation. Its values are the texts for spaces and for tabs, which
+    /// change with the language, and the indentation.
+    /// </summary>
+    public static FuncMultiValueConverter<object?, string?> IndentationText { get; } =
+        new(values => values.ToList() is [_, _, Indentation indentation] ? Describe(indentation) : null);
 
     private static FilePickerFileType AllFiles => new(Strings.Current.AllFiles) { Patterns = ["*"] };
 
     private Workspace? Workspace => _viewModel?.Workspace;
+
+    private OpenDocument? ShownDocument => _viewModel?.ShownDocument;
 
     protected override void OnDataContextChanged(EventArgs e)
     {
@@ -86,23 +103,71 @@ public sealed partial class MainWindow : FAAppWindow
 
     private void New(FileType type) => Workspace?.New(type);
 
-    private void OnNew(object? sender, RoutedEventArgs e)
+    private void OnNewMenuOpening(object? sender, EventArgs e)
     {
-        if (sender is Control button)
-            FlyoutBase.ShowAttachedFlyout(button);
+        if (sender is FAMenuFlyout menu)
+            FillNewMenu(menu.Items);
     }
 
-    private void OnNewMenuOpening(object? sender, EventArgs e)
+    private void FillNewMenu(System.Collections.IList items)
+    {
+        items.Clear();
+        foreach (FileType type in FileType.All)
+            items.Add(MenuItem(type.Name, icon: null, () => New(type)));
+    }
+
+    /// <summary>
+    /// Fills the ⋯ menu: the commands that have no button, and in narrow windows also those whose buttons are
+    /// hidden.
+    /// </summary>
+    private void OnMoreMenuOpening(object? sender, EventArgs e)
     {
         if (sender is not FAMenuFlyout menu)
             return;
+        Strings strings = Strings.Current;
+        bool shows = ShownDocument is not null;
         menu.Items.Clear();
-        foreach (FileType type in FileType.All)
+        if (!SaveButton.IsVisible)
         {
-            var item = new FAMenuFlyoutItem { Text = type.Name };
-            item.Click += (_, _) => New(type);
-            menu.Items.Add(item);
+            var newItem = new FAMenuFlyoutSubItem
+            {
+                Text = strings.New,
+                IconSource = new FASymbolIconSource { Symbol = FASymbol.Add },
+            };
+            FillNewMenu(newItem.Items);
+            menu.Items.Add(newItem);
+            menu.Items.Add(MenuItem(strings.Open, FASymbol.OpenFile, async () => await OpenAsync()));
+            menu.Items.Add(
+                MenuItem(strings.Save, FASymbol.Save, async () => await SaveShownAsync(saveAs: false), shows)
+            );
+            menu.Items.Add(new FAMenuFlyoutSeparator());
+            menu.Items.Add(
+                MenuItem(strings.Undo, FASymbol.Undo, DocumentPage.Undo, ShownDocument?.Document.CanUndo == true)
+            );
+            menu.Items.Add(
+                MenuItem(strings.Redo, FASymbol.Redo, DocumentPage.Redo, ShownDocument?.Document.CanRedo == true)
+            );
+            menu.Items.Add(MenuItem(strings.Find, FASymbol.Find, DocumentPage.Find, shows));
+            menu.Items.Add(new FAMenuFlyoutSeparator());
         }
+        menu.Items.Add(
+            MenuItem(strings.SaveAs, FASymbol.SaveAs, async () => await SaveShownAsync(saveAs: true), shows)
+        );
+        menu.Items.Add(MenuItem(strings.Replace, FASymbol.Switch, DocumentPage.Replace, shows));
+        menu.Items.Add(MenuItem(strings.GoToLine, FASymbol.Go, OpenGoToLine, shows));
+        menu.Items.Add(MenuItem(strings.InsertDateTime, FASymbol.Calendar, DocumentPage.InsertDateTime, shows));
+    }
+
+    private static FAMenuFlyoutItem MenuItem(string text, FASymbol? icon, Action action, bool isEnabled = true)
+    {
+        var item = new FAMenuFlyoutItem
+        {
+            Text = text,
+            IconSource = icon is { } symbol ? new FASymbolIconSource { Symbol = symbol } : null,
+            IsEnabled = isEnabled,
+        };
+        item.Click += (_, _) => action();
+        return item;
     }
 
     private async Task OpenAsync()
@@ -130,10 +195,8 @@ public sealed partial class MainWindow : FAAppWindow
         }
     }
 
-    private Task SaveCurrentAsync(bool saveAs) =>
-        _viewModel?.ShownDocument is { } document
-            ? OneAtATimeAsync(() => SaveAsync(document, saveAs))
-            : Task.CompletedTask;
+    private Task SaveShownAsync(bool saveAs) =>
+        ShownDocument is { } document ? OneAtATimeAsync(() => SaveAsync(document, saveAs)) : Task.CompletedTask;
 
     /// <summary>Saves <paramref name="document"/>, asking for a file if it has none yet or <paramref name="saveAs"/> is set.</summary>
     /// <returns>Whether the document was saved.</returns>
@@ -223,11 +286,19 @@ public sealed partial class MainWindow : FAAppWindow
             CloseButtonText = Strings.Current.Ok,
         }.ShowAsync(this);
 
+    private void OnNew(object? sender, RoutedEventArgs e) => ShowAttachedFlyout(sender);
+
+    private void OnMore(object? sender, RoutedEventArgs e) => ShowAttachedFlyout(sender);
+
+    private static void ShowAttachedFlyout(object? sender)
+    {
+        if (sender is Control button)
+            FlyoutBase.ShowAttachedFlyout(button);
+    }
+
     private async void OnOpen(object? sender, RoutedEventArgs e) => await OpenAsync();
 
-    private async void OnSave(object? sender, RoutedEventArgs e) => await SaveCurrentAsync(saveAs: false);
-
-    private async void OnSaveAs(object? sender, RoutedEventArgs e) => await SaveCurrentAsync(saveAs: true);
+    private async void OnSave(object? sender, RoutedEventArgs e) => await SaveShownAsync(saveAs: false);
 
     private void OnUndo(object? sender, RoutedEventArgs e) => DocumentPage.Undo();
 
@@ -235,13 +306,59 @@ public sealed partial class MainWindow : FAAppWindow
 
     private void OnFind(object? sender, RoutedEventArgs e) => DocumentPage.Find();
 
-    private void OnReplace(object? sender, RoutedEventArgs e) => DocumentPage.Replace();
+    // The status bar.
 
-    private void OnGoToLine(object? sender, RoutedEventArgs e) => DocumentPage.OpenGoToLine();
+    private void OpenGoToLine()
+    {
+        if (ShownDocument is not null)
+            CaretButton.Flyout?.ShowAt(CaretButton);
+    }
 
-    private void OnInsertDateTime(object? sender, RoutedEventArgs e) => DocumentPage.InsertDateTime();
+    private void OnGoToLineOpened(object? sender, EventArgs e)
+    {
+        if (ShownDocument is not { } document)
+            return;
+        TextSnapshot snapshot = document.Document.CurrentSnapshot;
+        LineNumber.Maximum = snapshot.GetPosition(snapshot.Length).Line;
+        LineNumber.Value = DocumentPage.CaretPosition.Line;
+        // Once the flyout shows, which is after it opened.
+        Dispatcher.Post(() => LineNumber.Focus());
+    }
 
-    // A document's own commands: its right-click menu, its close button and a middle click on it.
+    private void OnLineNumberKeyUp(object? sender, KeyEventArgs e)
+    {
+        // The key going down committed the value.
+        if (e.Key != Key.Enter || double.IsNaN(LineNumber.Value))
+            return;
+        CaretButton.Flyout?.Hide();
+        DocumentPage.GoToLine((int)LineNumber.Value);
+    }
+
+    private void OnIndentationMenuOpening(object? sender, EventArgs e)
+    {
+        if (sender is not FAMenuFlyout menu || ShownDocument?.Document is not { } document)
+            return;
+        menu.Items.Clear();
+        foreach (Indentation indentation in s_indentations)
+        {
+            var item = new FARadioMenuFlyoutItem
+            {
+                Text = Describe(indentation),
+                IsChecked = document.Indentation == indentation,
+            };
+            // Every editor that shows the document indents so from now on. The text stays as it is.
+            item.Click += (_, _) => document.Indentation = indentation;
+            menu.Items.Add(item);
+        }
+    }
+
+    private static string Describe(Indentation indentation) =>
+        Strings.Current.Format(
+            indentation.UseTabs ? Strings.Current.IndentTabs : Strings.Current.IndentSpaces,
+            indentation.Size
+        );
+
+    // A document's own commands: its right-click menu and a middle click on it.
 
     private async void OnDocumentSave(object? sender, RoutedEventArgs e)
     {

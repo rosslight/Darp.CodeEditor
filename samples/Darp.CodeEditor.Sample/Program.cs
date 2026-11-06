@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Media;
 
 namespace Sample;
 
@@ -18,6 +19,8 @@ internal static class Program
             .WithDeveloperTools()
 #endif
             .WithInterFont()
+            // Inter where FluentAvalonia takes the system's font: Windows has Segoe UI, other systems vary.
+            .With(new FontManagerOptions { DefaultFamilyName = "fonts:Inter#Inter" })
             // The editor reports languages and color themes that fail to load to Avalonia's log.
             .LogToTrace();
 }

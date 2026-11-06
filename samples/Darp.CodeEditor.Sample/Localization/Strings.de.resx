@@ -150,12 +150,6 @@
   <data name="LineNumbers" xml:space="preserve">
     <value>Zeilennummern</value>
   </data>
-  <data name="On" xml:space="preserve">
-    <value>Ein</value>
-  </data>
-  <data name="Off" xml:space="preserve">
-    <value>Aus</value>
-  </data>
   <data name="LineNumbersDescription" xml:space="preserve">
     <value>Zeilennummern am linken Rand anzeigen</value>
   </data>

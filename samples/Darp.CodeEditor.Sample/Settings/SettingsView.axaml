@@ -10,118 +10,131 @@
 >
     <UserControl.Styles>
         <Style Selector="TextBlock.section">
-            <Setter Property="Margin" Value="0,16,0,4" />
+            <Setter Property="Margin" Value="0,20,0,6" />
             <Setter Property="Theme" Value="{StaticResource BodyStrongTextBlockStyle}" />
+        </Style>
+        <Style Selector="TextBlock.section.first">
+            <Setter Property="Margin" Value="0,0,0,6" />
         </Style>
         <Style Selector="fa|FASettingsExpander ComboBox">
             <Setter Property="MinWidth" Value="200" />
         </Style>
-        <Style Selector="ToggleSwitch" x:DataType="local:MainViewModel">
-            <Setter Property="OnContent" Value="{Binding Strings.On}" />
-            <Setter Property="OffContent" Value="{Binding Strings.Off}" />
+        <!--
+          Switches without the On and Off text, and as tall as the combo boxes (they reserve 44 px for a header), so
+          that every row has the same height.
+        -->
+        <Style Selector="fa|FASettingsExpander ToggleSwitch">
+            <Setter Property="OnContent" Value="{x:Null}" />
+            <Setter Property="OffContent" Value="{x:Null}" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Margin" Value="0,-6" />
         </Style>
     </UserControl.Styles>
 
-    <ScrollViewer Padding="24,8,24,32">
-        <StackPanel MaxWidth="1000" Spacing="4">
-            <TextBlock
-                Text="{Binding Strings.Settings}"
-                Theme="{StaticResource TitleTextBlockStyle}"
-                Margin="0,0,0,8"
-            />
+    <ScrollViewer Padding="24,16,24,24">
+        <!-- The cards grow with the window up to 900 px, and stay at the left beyond. -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MaxWidth="900" />
+                <ColumnDefinition Width="0.001*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Spacing="4">
+                <TextBlock Classes="section first" Text="{Binding Strings.Appearance}" />
+                <fa:FASettingsExpander
+                    IconSource="DarkTheme"
+                    Header="{Binding Strings.AppTheme}"
+                    Description="{Binding Strings.AppThemeDescription}"
+                >
+                    <fa:FASettingsExpander.Footer>
+                        <ComboBox ItemsSource="{Binding Settings.AppThemes}" SelectedItem="{Binding Settings.AppTheme}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="settings:ThemeChoice">
+                                    <TextBlock Text="{Binding Name}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </fa:FASettingsExpander.Footer>
+                </fa:FASettingsExpander>
+                <fa:FASettingsExpander
+                    IconSource="Code"
+                    Header="{Binding Strings.EditorTheme}"
+                    Description="{Binding Strings.EditorThemeDescription}"
+                >
+                    <fa:FASettingsExpander.Footer>
+                        <ComboBox
+                            ItemsSource="{Binding Settings.EditorThemes}"
+                            SelectedItem="{Binding Settings.EditorTheme}"
+                        >
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="settings:ThemeChoice">
+                                    <TextBlock Text="{Binding Name}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </fa:FASettingsExpander.Footer>
+                </fa:FASettingsExpander>
+                <fa:FASettingsExpander
+                    IconSource="Globe"
+                    Header="{Binding Strings.Language}"
+                    Description="{Binding Strings.LanguageDescription}"
+                >
+                    <fa:FASettingsExpander.Footer>
+                        <ComboBox ItemsSource="{Binding Settings.Cultures}" SelectedItem="{Binding Settings.Culture}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="globalization:CultureInfo">
+                                    <TextBlock Text="{Binding NativeName}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </fa:FASettingsExpander.Footer>
+                </fa:FASettingsExpander>
 
-            <TextBlock Classes="section" Text="{Binding Strings.Appearance}" />
-            <fa:FASettingsExpander
-                IconSource="DarkTheme"
-                Header="{Binding Strings.AppTheme}"
-                Description="{Binding Strings.AppThemeDescription}"
-            >
-                <fa:FASettingsExpander.Footer>
-                    <ComboBox ItemsSource="{Binding Settings.AppThemes}" SelectedItem="{Binding Settings.AppTheme}">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate x:DataType="settings:ThemeChoice">
-                                <TextBlock Text="{Binding Name}" />
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-                </fa:FASettingsExpander.Footer>
-            </fa:FASettingsExpander>
-            <fa:FASettingsExpander
-                IconSource="Code"
-                Header="{Binding Strings.EditorTheme}"
-                Description="{Binding Strings.EditorThemeDescription}"
-            >
-                <fa:FASettingsExpander.Footer>
-                    <ComboBox
-                        ItemsSource="{Binding Settings.EditorThemes}"
-                        SelectedItem="{Binding Settings.EditorTheme}"
-                    >
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate x:DataType="settings:ThemeChoice">
-                                <TextBlock Text="{Binding Name}" />
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-                </fa:FASettingsExpander.Footer>
-            </fa:FASettingsExpander>
-            <fa:FASettingsExpander
-                IconSource="Globe"
-                Header="{Binding Strings.Language}"
-                Description="{Binding Strings.LanguageDescription}"
-            >
-                <fa:FASettingsExpander.Footer>
-                    <ComboBox ItemsSource="{Binding Settings.Cultures}" SelectedItem="{Binding Settings.Culture}">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate x:DataType="globalization:CultureInfo">
-                                <TextBlock Text="{Binding NativeName}" />
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-                </fa:FASettingsExpander.Footer>
-            </fa:FASettingsExpander>
+                <TextBlock Classes="section" Text="{Binding Strings.Editor}" />
+                <fa:FASettingsExpander
+                    IconSource="AlignLeft"
+                    Header="{Binding Strings.WordWrap}"
+                    Description="{Binding Strings.WordWrapDescription}"
+                >
+                    <fa:FASettingsExpander.Footer>
+                        <ToggleSwitch IsChecked="{Binding Settings.WordWrap}" />
+                    </fa:FASettingsExpander.Footer>
+                </fa:FASettingsExpander>
+                <fa:FASettingsExpander
+                    IconSource="BulletList"
+                    Header="{Binding Strings.LineNumbers}"
+                    Description="{Binding Strings.LineNumbersDescription}"
+                >
+                    <fa:FASettingsExpander.Footer>
+                        <ToggleSwitch IsChecked="{Binding Settings.ShowLineNumbers}" />
+                    </fa:FASettingsExpander.Footer>
+                </fa:FASettingsExpander>
+                <fa:FASettingsExpander
+                    IconSource="FontSize"
+                    Header="{Binding Strings.FontSize}"
+                    Description="{Binding Strings.FontSizeDescription}"
+                >
+                    <fa:FASettingsExpander.Footer>
+                        <ComboBox
+                            ItemsSource="{Binding Settings.FontSizes}"
+                            SelectedItem="{Binding Settings.FontSize}"
+                        />
+                    </fa:FASettingsExpander.Footer>
+                </fa:FASettingsExpander>
 
-            <TextBlock Classes="section" Text="{Binding Strings.Editor}" />
-            <fa:FASettingsExpander
-                IconSource="AlignLeft"
-                Header="{Binding Strings.WordWrap}"
-                Description="{Binding Strings.WordWrapDescription}"
-            >
-                <fa:FASettingsExpander.Footer>
-                    <ToggleSwitch IsChecked="{Binding Settings.WordWrap}" />
-                </fa:FASettingsExpander.Footer>
-            </fa:FASettingsExpander>
-            <fa:FASettingsExpander
-                IconSource="BulletList"
-                Header="{Binding Strings.LineNumbers}"
-                Description="{Binding Strings.LineNumbersDescription}"
-            >
-                <fa:FASettingsExpander.Footer>
-                    <ToggleSwitch IsChecked="{Binding Settings.ShowLineNumbers}" />
-                </fa:FASettingsExpander.Footer>
-            </fa:FASettingsExpander>
-            <fa:FASettingsExpander
-                IconSource="FontSize"
-                Header="{Binding Strings.FontSize}"
-                Description="{Binding Strings.FontSizeDescription}"
-            >
-                <fa:FASettingsExpander.Footer>
-                    <ComboBox ItemsSource="{Binding Settings.FontSizes}" SelectedItem="{Binding Settings.FontSize}" />
-                </fa:FASettingsExpander.Footer>
-            </fa:FASettingsExpander>
-
-            <TextBlock Classes="section" Text="{Binding Strings.About}" />
-            <fa:FASettingsExpander
-                IconSource="Help"
-                Header="Darp.CodeEditor"
-                Description="{Binding Strings.AboutDescription}"
-            >
-                <fa:FASettingsExpander.Footer>
-                    <HyperlinkButton
-                        Content="{Binding Strings.SourceCode}"
-                        NavigateUri="https://github.com/rosslight/Darp.CodeEditor"
-                    />
-                </fa:FASettingsExpander.Footer>
-            </fa:FASettingsExpander>
-        </StackPanel>
+                <TextBlock Classes="section" Text="{Binding Strings.About}" />
+                <fa:FASettingsExpander
+                    IconSource="Help"
+                    Header="Darp.CodeEditor"
+                    Description="{Binding Strings.AboutDescription}"
+                >
+                    <fa:FASettingsExpander.Footer>
+                        <HyperlinkButton
+                            Content="{Binding Strings.SourceCode}"
+                            NavigateUri="https://github.com/rosslight/Darp.CodeEditor"
+                        />
+                    </fa:FASettingsExpander.Footer>
+                </fa:FASettingsExpander>
+            </StackPanel>
+        </Grid>
     </ScrollViewer>
 </UserControl>
