@@ -1,11 +1,8 @@
 using System.ComponentModel;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Data.Converters;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.Platform.Storage;
-using CommunityToolkit.Mvvm.Input;
 using Darp.CodeEditor;
 using FluentAvalonia.UI.Controls;
 using Sample.Localization;
@@ -13,8 +10,8 @@ using Sample.Localization;
 namespace Sample.Documents;
 
 /// <summary>
-/// The document page: one editor for every open document, the commands of a text editor, and a status bar. The
-/// commands live here, not in a view model, because they work with the editor, file pickers and dialogs.
+/// The document page: one editor for every open document, and a status bar. Its public methods are the editor's
+/// commands, which the title bar calls.
 /// </summary>
 public sealed partial class DocumentView : UserControl
 {
@@ -30,24 +27,11 @@ public sealed partial class DocumentView : UserControl
     /// <summary>The document the editor shows.</summary>
     private OpenDocument? _shown;
 
-    /// <summary>
-    /// Whether a save or a close runs. They ask the user and write files, so the view runs one at a time and ignores
-    /// the commands meanwhile.
-    /// </summary>
-    private bool _isSavingOrClosing;
-
     public DocumentView()
     {
         InitializeComponent();
         // The number box handles Enter itself, to commit its value.
         LineNumber.AddHandler(KeyUpEvent, OnLineNumberKeyUp, handledEventsToo: true);
-        // The app's shortcuts. The editor handles its own keys, such as Ctrl+F, and leaves these to the app.
-        AddShortcut("Ctrl+N", () => New(FileType.Text));
-        AddShortcut("Ctrl+O", OpenAsync);
-        AddShortcut("Ctrl+S", () => SaveCurrentAsync(saveAs: false));
-        AddShortcut("Ctrl+Shift+S", () => SaveCurrentAsync(saveAs: true));
-        AddShortcut("Ctrl+W", CloseCurrentAsync);
-        AddShortcut("Ctrl+G", OpenGoToLine);
     }
 
     /// <summary>The status bar's text for a document's indentation: the texts for spaces and tabs, and the indentation.</summary>
@@ -58,10 +42,30 @@ public sealed partial class DocumentView : UserControl
                 : null
         );
 
-    private static FilePickerFileType AllFiles => new(Strings.Current.AllFiles) { Patterns = ["*"] };
+    public void Undo()
+    {
+        Editor.Document?.Undo();
+        Editor.Focus();
+    }
 
-    private TopLevel Window =>
-        TopLevel.GetTopLevel(this) ?? throw new InvalidOperationException("The view isn't shown.");
+    public void Redo()
+    {
+        Editor.Document?.Redo();
+        Editor.Focus();
+    }
+
+    public void Find() => Editor.OpenSearch();
+
+    public void Replace() => Editor.OpenSearch(replace: true);
+
+    public void OpenGoToLine() => CaretButton.Flyout?.ShowAt(CaretButton);
+
+    public void InsertDateTime()
+    {
+        // Replaces the selection, as typing does, in one step that the user can undo.
+        Editor.Document?.Replace(Editor.Selection.Range, DateTime.Now.ToString("g", Strings.Current.Culture));
+        Editor.Focus();
+    }
 
     protected override void OnDataContextChanged(EventArgs e)
     {
@@ -94,151 +98,8 @@ public sealed partial class DocumentView : UserControl
         Editor.Document = document?.Document;
         if (document?.ViewState is { } state)
             Editor.RestoreViewState(state);
-    }
-
-    private void New(FileType type)
-    {
-        _workspace?.New(type);
         Editor.Focus();
     }
-
-    private void OnNewMenuOpening(object? sender, EventArgs e)
-    {
-        if (sender is not FAMenuFlyout menu)
-            return;
-        menu.Items.Clear();
-        foreach (FileType type in FileType.All)
-        {
-            var item = new FAMenuFlyoutItem { Text = type.Name };
-            item.Click += (_, _) => New(type);
-            menu.Items.Add(item);
-        }
-    }
-
-    private async Task OpenAsync()
-    {
-        if (_workspace is not { } workspace)
-            return;
-        IReadOnlyList<IStorageFile> files = await Window.StorageProvider.OpenFilePickerAsync(
-            new FilePickerOpenOptions
-            {
-                Title = Strings.Current.Open,
-                AllowMultiple = true,
-                FileTypeFilter = [AllFiles, .. FileType.All.Select(type => type.ToPickerType())],
-            }
-        );
-        foreach (IStorageFile file in files)
-        {
-            try
-            {
-                await workspace.OpenAsync(file);
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                await ShowErrorAsync(Strings.Current.Format(Strings.Current.OpenFailed, file.Name), e.Message);
-            }
-        }
-        Editor.Focus();
-    }
-
-    private async Task SaveCurrentAsync(bool saveAs)
-    {
-        if (_workspace?.Current is { } document)
-            await OneAtATimeAsync(() => SaveAsync(document, saveAs));
-        Editor.Focus();
-    }
-
-    /// <summary>Saves <paramref name="document"/>, asking for a file if it has none yet or <paramref name="saveAs"/> is set.</summary>
-    /// <returns>Whether the document was saved.</returns>
-    private async Task<bool> SaveAsync(OpenDocument document, bool saveAs)
-    {
-        IStorageFile? file = saveAs ? null : document.File;
-        if (file is null)
-        {
-            // The document keeps its language, also if the file gets another extension.
-            string extension = document.Type.Extensions[0];
-            file = await Window.StorageProvider.SaveFilePickerAsync(
-                new FilePickerSaveOptions
-                {
-                    Title = Strings.Current.SaveAs,
-                    SuggestedFileName = document.File?.Name ?? document.Name + extension,
-                    DefaultExtension = extension,
-                    FileTypeChoices = [document.Type.ToPickerType(), AllFiles],
-                }
-            );
-            if (file is null)
-                return false;
-        }
-        try
-        {
-            await document.SaveAsync(file);
-            return true;
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            if (file != document.File)
-                file.Dispose();
-            await ShowErrorAsync(Strings.Current.Format(Strings.Current.SaveFailed, file.Name), e.Message);
-            return false;
-        }
-    }
-
-    private Task CloseCurrentAsync() => OneAtATimeAsync(CloseAsync);
-
-    /// <summary>Closes the current document, after asking to save its changes.</summary>
-    private async Task CloseAsync()
-    {
-        if (_workspace is not { Current: { } document } workspace)
-            return;
-        if (document.Document.IsModified)
-        {
-            var dialog = new FAContentDialog
-            {
-                Title = Strings.Current.Format(Strings.Current.SaveChanges, document.Name),
-                Content = Strings.Current.SaveChangesMessage,
-                PrimaryButtonText = Strings.Current.Save,
-                SecondaryButtonText = Strings.Current.DontSave,
-                CloseButtonText = Strings.Current.Cancel,
-                DefaultButton = FAContentDialogButton.Primary,
-            };
-            FAContentDialogResult result = await dialog.ShowAsync(Window);
-            if (result == FAContentDialogResult.None)
-                return;
-            // A document that wasn't saved stays open, and so does one that was edited while it was saved.
-            if (
-                result == FAContentDialogResult.Primary
-                && (!await SaveAsync(document, saveAs: false) || document.Document.IsModified)
-            )
-                return;
-        }
-        workspace.Close(document);
-        Editor.Focus();
-    }
-
-    private async Task OneAtATimeAsync(Func<Task> operation)
-    {
-        if (_isSavingOrClosing)
-            return;
-        _isSavingOrClosing = true;
-        try
-        {
-            await operation();
-        }
-        finally
-        {
-            _isSavingOrClosing = false;
-        }
-    }
-
-    private Task ShowErrorAsync(string title, string message) =>
-        new FAContentDialog
-        {
-            Title = title,
-            Content = message,
-            CloseButtonText = Strings.Current.Ok,
-        }.ShowAsync(Window);
-
-    private void OpenGoToLine() => CaretButton.Flyout?.ShowAt(CaretButton);
 
     private void OnGoToLineOpened(object? sender, EventArgs e)
     {
@@ -291,59 +152,4 @@ public sealed partial class DocumentView : UserControl
             menu.Items.Add(item);
         }
     }
-
-    private void OnNew(object? sender, RoutedEventArgs e)
-    {
-        if (sender is Control button)
-            FlyoutBase.ShowAttachedFlyout(button);
-    }
-
-    private async void OnOpen(object? sender, RoutedEventArgs e) => await OpenAsync();
-
-    private async void OnSave(object? sender, RoutedEventArgs e) => await SaveCurrentAsync(saveAs: false);
-
-    private async void OnSaveAs(object? sender, RoutedEventArgs e) => await SaveCurrentAsync(saveAs: true);
-
-    private async void OnClose(object? sender, RoutedEventArgs e) => await CloseCurrentAsync();
-
-    private void OnUndo(object? sender, RoutedEventArgs e)
-    {
-        Editor.Document?.Undo();
-        Editor.Focus();
-    }
-
-    private void OnRedo(object? sender, RoutedEventArgs e)
-    {
-        Editor.Document?.Redo();
-        Editor.Focus();
-    }
-
-    private void OnCut(object? sender, RoutedEventArgs e) => Editor.Cut();
-
-    private void OnCopy(object? sender, RoutedEventArgs e) => Editor.Copy();
-
-    private void OnPaste(object? sender, RoutedEventArgs e) => Editor.Paste();
-
-    private void OnSelectAll(object? sender, RoutedEventArgs e) => Editor.SelectAll();
-
-    private void OnFind(object? sender, RoutedEventArgs e) => Editor.OpenSearch();
-
-    private void OnReplace(object? sender, RoutedEventArgs e) => Editor.OpenSearch(replace: true);
-
-    private void OnGoToLine(object? sender, RoutedEventArgs e) => OpenGoToLine();
-
-    private void OnInsertDateTime(object? sender, RoutedEventArgs e)
-    {
-        // Replaces the selection, as typing does, in one step that the user can undo.
-        Editor.Document?.Replace(Editor.Selection.Range, DateTime.Now.ToString("g", Strings.Current.Culture));
-        Editor.Focus();
-    }
-
-    private void AddShortcut(string gesture, Action action) =>
-        KeyBindings.Add(new KeyBinding { Gesture = KeyGesture.Parse(gesture), Command = new RelayCommand(action) });
-
-    private void AddShortcut(string gesture, Func<Task> action) =>
-        KeyBindings.Add(
-            new KeyBinding { Gesture = KeyGesture.Parse(gesture), Command = new AsyncRelayCommand(action) }
-        );
 }

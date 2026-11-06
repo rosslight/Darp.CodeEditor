@@ -43,6 +43,7 @@ public sealed class Strings : INotifyPropertyChanged
         }
     }
 
+    public string Documents => Get();
     public string New => Get();
     public string Open => Get();
     public string Save => Get();
@@ -50,10 +51,6 @@ public sealed class Strings : INotifyPropertyChanged
     public string Close => Get();
     public string Undo => Get();
     public string Redo => Get();
-    public string Cut => Get();
-    public string Copy => Get();
-    public string Paste => Get();
-    public string SelectAll => Get();
     public string Find => Get();
     public string Replace => Get();
     public string GoToLine => Get();
@@ -62,10 +59,12 @@ public sealed class Strings : INotifyPropertyChanged
     public string CaretPosition => Get();
     public string IndentSpaces => Get();
     public string IndentTabs => Get();
-    public string IndentWithSpaces => Get();
-    public string IndentWithTabs => Get();
-    public string InMemory => Get();
     public string Untitled => Get();
+    public string NoFile => Get();
+    public string StateNoFile => Get();
+    public string StateUnsaved => Get();
+    public string CopyPath => Get();
+    public string ShowInFolder => Get();
     public string AllFiles => Get();
     public string OpenFailed => Get();
     public string SaveFailed => Get();
@@ -90,9 +89,9 @@ public sealed class Strings : INotifyPropertyChanged
     public string WordWrap => Get();
     public string WordWrapDescription => Get();
     public string LineNumbers => Get();
-    public string LineNumbersDescription => Get();
     public string On => Get();
     public string Off => Get();
+    public string LineNumbersDescription => Get();
     public string FontSize => Get();
     public string FontSizeDescription => Get();
     public string About => Get();

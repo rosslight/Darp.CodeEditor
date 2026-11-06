@@ -23,79 +23,19 @@
         </Style>
     </UserControl.Styles>
 
-    <Grid RowDefinitions="Auto,*,Auto">
-        <fa:FACommandBar Margin="8,0" DefaultLabelPosition="Right">
-            <fa:FACommandBar.PrimaryCommands>
-                <!-- An attached flyout, which the click opens: a button's own flyout draws its chevron over the label. -->
-                <fa:FACommandBarButton Label="{Binding Strings.New}" IconSource="Add" Click="OnNew">
-                    <FlyoutBase.AttachedFlyout>
-                        <!-- One item per file type, from the code when it opens. -->
-                        <fa:FAMenuFlyout Placement="BottomEdgeAlignedLeft" Opening="OnNewMenuOpening" />
-                    </FlyoutBase.AttachedFlyout>
-                </fa:FACommandBarButton>
-                <fa:FACommandBarButton Label="{Binding Strings.Open}" IconSource="OpenFile" Click="OnOpen" />
-                <fa:FACommandBarButton
-                    Label="{Binding Strings.Save}"
-                    IconSource="Save"
-                    Click="OnSave"
-                    IsEnabled="{Binding Workspace.Current, Converter={x:Static ObjectConverters.IsNotNull}}"
-                />
-                <fa:FACommandBarSeparator />
-                <fa:FACommandBarButton
-                    Label="{Binding Strings.Undo}"
-                    IconSource="Undo"
-                    Click="OnUndo"
-                    IsEnabled="{Binding Workspace.Current.Document.CanUndo, FallbackValue=False}"
-                />
-                <fa:FACommandBarButton
-                    Label="{Binding Strings.Redo}"
-                    IconSource="Redo"
-                    Click="OnRedo"
-                    IsEnabled="{Binding Workspace.Current.Document.CanRedo, FallbackValue=False}"
-                />
-                <fa:FACommandBarSeparator />
-                <fa:FACommandBarButton Label="{Binding Strings.Find}" IconSource="Find" Click="OnFind" />
-                <fa:FACommandBarButton Label="{Binding Strings.Replace}" IconSource="Switch" Click="OnReplace" />
-            </fa:FACommandBar.PrimaryCommands>
-            <fa:FACommandBar.SecondaryCommands>
-                <fa:FACommandBarButton Label="{Binding Strings.SaveAs}" IconSource="SaveAs" Click="OnSaveAs" />
-                <fa:FACommandBarButton Label="{Binding Strings.Close}" IconSource="Dismiss" Click="OnClose" />
-                <fa:FACommandBarSeparator />
-                <fa:FACommandBarButton Label="{Binding Strings.Cut}" IconSource="Cut" Click="OnCut" />
-                <fa:FACommandBarButton Label="{Binding Strings.Copy}" IconSource="Copy" Click="OnCopy" />
-                <fa:FACommandBarButton Label="{Binding Strings.Paste}" IconSource="Paste" Click="OnPaste" />
-                <fa:FACommandBarButton Label="{Binding Strings.SelectAll}" IconSource="SelectAll" Click="OnSelectAll" />
-                <fa:FACommandBarSeparator />
-                <fa:FACommandBarButton Label="{Binding Strings.GoToLine}" IconSource="Go" Click="OnGoToLine" />
-                <fa:FACommandBarButton
-                    Label="{Binding Strings.InsertDateTime}"
-                    IconSource="Calendar"
-                    Click="OnInsertDateTime"
-                />
-            </fa:FACommandBar.SecondaryCommands>
-        </fa:FACommandBar>
-
-        <Border
-            Grid.Row="1"
-            Margin="8,0"
-            CornerRadius="8"
-            ClipToBounds="True"
-            BorderThickness="1"
-            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-        >
-            <!-- Default follows the app; Light or Dark turn the editor's colors, popups and search bar so. -->
-            <ThemeVariantScope RequestedThemeVariant="{Binding Settings.EditorTheme.Variant}">
-                <ce:CodeEditor
-                    Name="Editor"
-                    WordWrap="{Binding Settings.WordWrap}"
-                    ShowLineNumbers="{Binding Settings.ShowLineNumbers}"
-                    FontSize="{Binding Settings.FontSize}"
-                />
-            </ThemeVariantScope>
-        </Border>
+    <Grid RowDefinitions="*,Auto">
+        <!-- Default follows the app; Light or Dark turn the editor's colors, popups and search bar so. -->
+        <ThemeVariantScope RequestedThemeVariant="{Binding Settings.EditorTheme.Variant}">
+            <ce:CodeEditor
+                Name="Editor"
+                WordWrap="{Binding Settings.WordWrap}"
+                ShowLineNumbers="{Binding Settings.ShowLineNumbers}"
+                FontSize="{Binding Settings.FontSize}"
+            />
+        </ThemeVariantScope>
 
         <Grid
-            Grid.Row="2"
+            Grid.Row="1"
             Margin="8,2,8,4"
             ColumnDefinitions="Auto,*,Auto,Auto"
             IsVisible="{Binding Workspace.Current, Converter={x:Static ObjectConverters.IsNotNull}}"
@@ -134,7 +74,7 @@
             <Panel Grid.Column="1">
                 <TextBlock
                     Classes="status"
-                    Text="{Binding Strings.InMemory}"
+                    Text="{Binding Strings.NoFile}"
                     IsVisible="{Binding Workspace.Current.File, Converter={x:Static ObjectConverters.IsNull}}"
                 />
                 <TextBlock
