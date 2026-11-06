@@ -52,8 +52,9 @@ public class SearchBenchmarks
 }
 
 /// <summary>
-/// Replace All on the UI thread, with the frame that follows: about 10,000 matches in 5,000 lines of JSON, the most a
-/// search keeps. Each match is replaced with its own text, so that every call starts from the same text.
+/// Replace All on the UI thread, with the frame that follows: about 10,000 matches in 5,000 lines of JSON, close to the
+/// most a search keeps. Calls replace every "e" with "E" and back in turn, so that each one starts from one of two
+/// texts and its replacements can be checked.
 /// </summary>
 [NotInBaseline]
 [InvocationCount(1)]
@@ -63,26 +64,32 @@ public class ReplaceAllBenchmarks
 {
     private Window? _window;
     private SearchBar? _bar;
+    private CodeDocument? _document;
+
+    /// <summary>Whether the call replaces "e" with "E", rather than back.</summary>
+    private bool _upper;
 
     [GlobalSetup]
     public void SetUp()
     {
         HeadlessEditor.SetUpApp();
-        var editor = new CodeEditor { Document = CodeDocument.Create(CodeLanguage.Json, HeadlessEditor.Json(5000)) };
+        _document = CodeDocument.Create(CodeLanguage.Json, HeadlessEditor.Json(5000));
+        var editor = new CodeEditor { Document = _document };
         _window = HeadlessEditor.Show(editor);
         HeadlessEditor.RenderUntilColored(_window, editor, HeadlessEditor.JsonKey);
         editor.OpenSearch(replace: true);
         _bar = editor.GetVisualDescendants().OfType<SearchBar>().Single();
-        _bar.RegexToggle.IsChecked = true;
-        _bar.ReplaceBox.Text = "$0";
-        _bar.FindBox.Text = "\\d+";
+        _bar.MatchCaseToggle.IsChecked = true;
     }
 
-    /// <summary>Waits for the search after the last replacement, as the user would before clicking.</summary>
+    /// <summary>Searches for the call's letter, and waits for the result, as the user would before clicking.</summary>
     [IterationSetup]
     public void Search()
     {
-        SearchBar bar = _bar ?? throw new InvalidOperationException("Not set up.");
+        SearchBar bar = Bar;
+        _upper = !_upper;
+        bar.FindBox.Text = _upper ? "e" : "E";
+        bar.ReplaceBox.Text = _upper ? "E" : "e";
         long start = Stopwatch.GetTimestamp();
         while (!bar.ReplaceAllButton.IsEnabled)
         {
@@ -92,17 +99,28 @@ public class ReplaceAllBenchmarks
         }
         if (bar.Count is null || bar.Message is not null)
             throw new InvalidOperationException($"The search did not find every match: {bar.Count}, {bar.Message}");
+        HeadlessEditor.Render(_window ?? throw new InvalidOperationException("Not set up."));
     }
 
     [Benchmark]
     public void ReplaceAll10000Matches()
     {
-        SearchBar bar = _bar ?? throw new InvalidOperationException("Not set up.");
-        bar.ReplaceAllButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Bar.ReplaceAllButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         HeadlessEditor.Render(_window ?? throw new InvalidOperationException("Not set up."));
+    }
+
+    /// <summary>Fails the run if Replace All left a letter, instead of measuring a click that did nothing.</summary>
+    [IterationCleanup]
+    public void CheckTheReplacements()
+    {
+        string text = (_document ?? throw new InvalidOperationException("Not set up.")).Text;
+        if (text.Contains(_upper ? 'e' : 'E', StringComparison.Ordinal))
+            throw new InvalidOperationException("Replace All did not replace every match.");
     }
 
     [GlobalCleanup]
     public void Close() => _window?.Close();
+
+    private SearchBar Bar => _bar ?? throw new InvalidOperationException("Not set up.");
 }
 #endif

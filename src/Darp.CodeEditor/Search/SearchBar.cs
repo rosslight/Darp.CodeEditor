@@ -148,6 +148,8 @@ internal sealed class SearchBar : UserControl
 
     internal TextBox ReplaceBox => _replace;
 
+    internal ToggleButton MatchCaseToggle => _matchCase;
+
     internal ToggleButton RegexToggle => _regex;
 
     internal Button ReplaceAllButton => _replaceAll;
