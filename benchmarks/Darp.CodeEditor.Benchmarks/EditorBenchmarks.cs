@@ -71,19 +71,21 @@ public class TypingBenchmarks
 
     /// <summary>In the middle of 5,000 lines of JSON, at the start of a key.</summary>
     [GlobalSetup(Target = nameof(KeystrokeIn5000Lines))]
-    public void ShowJson() => Show(HeadlessEditor.Json(5000), new TextPosition(2500, 4), HeadlessEditor.JsonKey);
+    public void ShowJson() =>
+        Show(HeadlessEditor.Json(5000), new TextPosition(2500, 4), HeadlessEditor.JsonKey, wordWrap: false);
 
     /// <summary>
-    /// On a line of 20,000 characters, a JSON array that runs out of the background's time limit, near its start:
-    /// AvaloniaEdit edits only the first 3,000 characters of a longer line.
+    /// Near the start of a wrapped line of 2,900 characters, just under the editor's limit of 3,000: a JSON string of
+    /// ASCII letters, in which Avalonia's wrapping finds no break and searches far ahead for every row.
     /// </summary>
-    [GlobalSetup(Target = nameof(KeystrokeOnA20000CharacterLine))]
+    [GlobalSetup(Target = nameof(KeystrokeOnAWrapped2900CharacterLine))]
     public void ShowLongLine() =>
         Show(
-            "{\n  \"long\": [" + string.Concat(Enumerable.Repeat("1, ", 6_666)) + "1],\n  \"after\": 1\n}",
+            "{\n  \"long\": \"" + new string('x', 2_887) + "\",\n  \"after\": 1\n}",
             new TextPosition(2, 100),
-            // The long line keeps no colors, and the next one starts from the start of the grammar.
-            HeadlessEditor.Expect("\"after\"", Color.Parse("#A31515"))
+            // The line's key, in its color once the background has tokenized the line.
+            HeadlessEditor.Expect("\"long\"", Color.Parse("#0451A5")),
+            wordWrap: true
         );
 
     [Benchmark]
@@ -92,16 +94,16 @@ public class TypingBenchmarks
 
     [Benchmark]
     [BenchmarkCategory("CI")]
-    public void KeystrokeOnA20000CharacterLine() => TypeOrDelete();
+    public void KeystrokeOnAWrapped2900CharacterLine() => TypeOrDelete();
 
     [GlobalCleanup]
     public void Close() => _window?.Close();
 
-    private void Show(string json, TextPosition caret, HeadlessEditor.Expected colored)
+    private void Show(string json, TextPosition caret, HeadlessEditor.Expected colored, bool wordWrap)
     {
         HeadlessEditor.SetUpApp();
         CodeDocument document = CodeDocument.Create(CodeLanguage.Json, json);
-        var editor = new CodeEditor { Document = document };
+        var editor = new CodeEditor { Document = document, WordWrap = wordWrap };
         _window = HeadlessEditor.Show(editor);
         HeadlessEditor.RenderUntilColored(_window, editor, colored);
         editor.Selection = new TextSelection(document.CurrentSnapshot.GetOffset(caret));
