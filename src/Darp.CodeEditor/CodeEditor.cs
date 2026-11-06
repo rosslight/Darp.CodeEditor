@@ -58,7 +58,9 @@ namespace Darp.CodeEditor;
 /// deletes an empty pair, opening characters surround the selection, new lines are indented by the brackets and the
 /// indentation rules, a line that comes to match the decrease rule outdents, and comments toggle with the line
 /// comment, or else the block comment. Brackets in strings and comments don't match, and pairs that the language
-/// excludes there don't close. Tab and new lines indent by the document's <see cref="CodeDocument.Indentation"/>.
+/// excludes there don't close. In a rectangle selection, pairs close, step over and delete, and opening characters
+/// surround, on every line; Enter breaks only the caret's line and ends the rectangle. Tab and new lines indent by the
+/// document's <see cref="CodeDocument.Indentation"/>.
 /// Hover shows the server's Markdown, with code blocks highlighted by the document's grammar, below the messages of
 /// the diagnostics under the pointer. Completion items show VS Code's codicons, in the color theme's symbol colors.
 /// The font defaults to a monospace one; set <c>FontFamily</c> and <c>FontSize</c> as for any control.
