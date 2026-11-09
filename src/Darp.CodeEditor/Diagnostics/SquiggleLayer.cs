@@ -93,6 +93,10 @@ internal sealed class SquiggleLayer : SelectionOverlay
         return diagnostics;
     }
 
+    /// <remarks>
+    /// Diagnostics that overlap draw one squiggle, so their ranges are merged first, by severity: the waves and dots
+    /// drawn grow with the text in view, not with the diagnostics, of which a server may put thousands on one line.
+    /// </remarks>
     public override void Render(DrawingContext context)
     {
         TextView textView = TextArea.TextView;
@@ -101,41 +105,55 @@ internal sealed class SquiggleLayer : SelectionOverlay
         if (textView.VisualLines is not [VisualLine first, ..] || textView.VisualLines[^1] is not { } last)
             return;
         int start = first.FirstDocumentLine.Offset;
-        IReadOnlyList<Marker> markers = _markers.FindOverlappingSegments(
-            start,
-            last.LastDocumentLine.EndOffset - start
-        );
-        // One shape per severity, with errors drawn last, over the others.
-        var shapes = new StreamGeometry?[4];
-        var figures = new StreamGeometryContext?[4];
-        foreach (Marker marker in markers)
+        // In the order of their starts: by severity, the ranges in view merged, and the empty ones and the hints by
+        // their starts, each start once.
+        var ranges = new List<(int Start, int End)>[4];
+        var starts = new List<int>[4];
+        for (int severity = 0; severity < 4; severity++)
+            (ranges[severity], starts[severity]) = ([], []);
+        foreach (Marker marker in _markers.FindOverlappingSegments(start, last.LastDocumentLine.EndOffset - start))
         {
             int severity = (int)marker.Diagnostic.Severity;
-            if (figures[severity] is not { } figure)
+            // Reading the offset walks the segments' tree: once each.
+            int markerStart = marker.StartOffset;
+            int markerEnd = markerStart + marker.Length;
+            if (marker.Diagnostic.Severity == DiagnosticSeverity.Hint || marker.Length == 0)
             {
-                var shape = new StreamGeometry();
-                shapes[severity] = shape;
-                figure = figures[severity] = shape.Open();
+                // An empty range is in view where it starts; dots under the start of a hint that starts above the view
+                // would be out of it too.
+                List<int> points = starts[severity];
+                if (markerStart >= start && (points.Count == 0 || points[^1] != markerStart))
+                    points.Add(markerStart);
             }
-            if (marker.Diagnostic.Severity == DiagnosticSeverity.Hint)
-            {
-                // Dots under the start of a hint that starts above the view would be out of it too.
-                if (marker.StartOffset >= start)
-                    AddDots(figure, textView, marker.StartOffset);
-            }
-            else if (marker.Length == 0)
-                AddWave(figure, TextViewBoxes.CharacterAt(textView, marker.StartOffset));
+            else if (ranges[severity] is [.., var (lastStart, lastEnd)] && markerStart <= lastEnd)
+                ranges[severity][^1] = (lastStart, Math.Max(lastEnd, markerEnd));
             else
-            {
-                foreach (Rect rect in BackgroundGeometryBuilder.GetRectsForSegment(textView, marker))
-                    AddWave(figure, rect);
-            }
+                ranges[severity].Add((markerStart, markerEnd));
         }
-        for (int severity = 0; severity < shapes.Length; severity++)
+        // Errors last, over the others.
+        for (int severity = 0; severity < 4; severity++)
         {
-            figures[severity]?.Dispose();
-            if (shapes[severity] is not { } shape)
+            if (ranges[severity].Count == 0 && starts[severity].Count == 0)
                 continue;
+            var shape = new StreamGeometry();
+            using (StreamGeometryContext figure = shape.Open())
+            {
+                // Where shapes of one severity overlap, as an empty range's inside another's, both show.
+                figure.SetFillRule(FillRule.NonZero);
+                foreach (int point in starts[severity])
+                {
+                    if (severity == (int)DiagnosticSeverity.Hint)
+                        AddDots(figure, textView, point);
+                    else
+                        AddWave(figure, TextViewBoxes.CharacterAt(textView, point));
+                }
+                foreach ((int rangeStart, int rangeEnd) in ranges[severity])
+                {
+                    var segment = new SimpleSegment(rangeStart, rangeEnd - rangeStart);
+                    foreach (Rect rect in BackgroundGeometryBuilder.GetRectsForSegment(textView, segment))
+                        AddWave(figure, rect);
+                }
+            }
             IBrush brush = (DiagnosticSeverity)severity switch
             {
                 DiagnosticSeverity.Error => colors.Error,

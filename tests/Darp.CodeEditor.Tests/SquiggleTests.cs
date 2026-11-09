@@ -100,6 +100,63 @@ public sealed class SquiggleTests(UiFixture ui)
             await Wait.UntilAsync(() => window.RenderAndCountPixels(s_error, Smoothed) == 0);
         });
 
+    [Fact]
+    public Task Squiggles_of_one_severity_that_overlap_all_show() =>
+        _ui.Run(async () =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "an error here");
+            using var window = new EditorWindow(new CodeEditor { Document = document, ColorTheme = Marks() });
+
+            // An empty one inside another, and two on the same text: shapes that cover each other.
+            document.SetDiagnostics([
+                Diagnostic(document, new TextRange(3, 5), DiagnosticSeverity.Error),
+                Diagnostic(document, new TextRange(5, 0), DiagnosticSeverity.Error),
+                Diagnostic(document, new TextRange(9, 4), DiagnosticSeverity.Error),
+                Diagnostic(document, new TextRange(9, 4), DiagnosticSeverity.Error),
+            ]);
+
+            await Wait.UntilAsync(() => IsUnderEach(window, s_error, new TextRange(3, 5)));
+            IsUnderEach(window, s_error, new TextRange(9, 4)).ShouldBeTrue();
+        });
+
+    [Fact]
+    public Task Overlapping_squiggles_cost_a_frame_what_one_squiggle_costs() =>
+        _ui.Run(() =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "a word here");
+            using var window = new EditorWindow(new CodeEditor { Document = document, ColorTheme = Marks() });
+
+            long one = FrameAllocations(window, document, 1);
+            long many = FrameAllocations(window, document, 10_000);
+
+            // Their ranges merge before any shape is made; AvaloniaEdit's search still lists each, a few bytes each.
+            // Drawn one by one, they took 9.7 MB more.
+            (many - one).ShouldBeLessThan(1_000_000);
+            IsUnderEach(window, s_error, new TextRange(2, 4)).ShouldBeTrue();
+        });
+
+    /// <summary>
+    /// What a frame allocates on the UI thread with <paramref name="count"/> errors on one word, the squiggles drawing
+    /// again in it.
+    /// </summary>
+    private static long FrameAllocations(EditorWindow window, CodeDocument document, int count)
+    {
+        TextSnapshot snapshot = document.CurrentSnapshot;
+        document.SetDiagnostics([
+            .. Enumerable
+                .Range(0, count)
+                .Select(_ => Diagnostic(document, new TextRange(2, 4), DiagnosticSeverity.Error, snapshot)),
+        ]);
+        window.Render();
+        // Lines built again draw the layers again; the first frame of them also builds what later ones reuse.
+        window.TextView.Redraw();
+        window.Render();
+        window.TextView.Redraw();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        window.Render();
+        return GC.GetAllocatedBytesForCurrentThread() - before;
+    }
+
     /// <summary>Whether a frame shows <paramref name="color"/> under each character of <paramref name="range"/>.</summary>
     private static bool IsUnderEach(EditorWindow window, Color color, TextRange range) =>
         Enumerable
