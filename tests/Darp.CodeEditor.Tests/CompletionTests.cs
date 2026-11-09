@@ -197,6 +197,58 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task An_edit_that_leaves_the_caret_drops_the_commit_that_waits_for_a_filter() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("Console", "Convert"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "Con");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await OpenAsync(window, 3);
+            // "Console" shows selected and does not match "Conv": Enter waits for the filter of "Conv".
+            TypeAlone(window, "v");
+            PressAlone(window, Key.Enter);
+
+            // As code replaces the "v" with an "s": the caret stays where it was.
+            document.Replace(new TextRange(3, 1), "s");
+            window.Editor.Selection.Caret.ShouldBe(4);
+
+            // The list then shows the filter of "Cons", and nothing is committed.
+            await Wait.UntilAsync(() => document.Text != "Cons" || Labels(window).SequenceEqual(["Console"]));
+            document.Text.ShouldBe("Cons");
+        });
+
+    [Fact]
+    public Task An_edit_by_another_editor_of_the_document_drops_the_commit_that_waits_for_a_filter() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("Console", "Convert"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "Con\nx");
+            var editor = new CodeEditor { Document = document };
+            var other = new CodeEditor { Document = document };
+            Grid.SetColumn(other, 1);
+            using var window = new EditorWindow(
+                editor,
+                new Grid { ColumnDefinitions = new ColumnDefinitions("*,*"), Children = { editor, other } }
+            );
+            await OpenAsync(window, 3);
+            TypeAlone(window, "v");
+            PressAlone(window, Key.Enter);
+
+            // The other editor types on the next line, without taking the keyboard focus.
+            other.Selection = new TextSelection(document.Text.Length);
+            TextArea otherTextArea = EditorWindow.PartOf(other).TextArea;
+            otherTextArea.RaiseEvent(new TextInputEventArgs { RoutedEvent = InputElement.TextInputEvent, Text = "y" });
+            document.Text.ShouldBe("Conv\nxy");
+
+            await Wait.UntilAsync(() => document.Text != "Conv\nxy" || Labels(window).SequenceEqual(["Convert"]));
+            document.Text.ShouldBe("Conv\nxy");
+        });
+
+    [Fact]
     public Task A_read_only_editor_neither_completes_nor_commits() =>
         _ui.Run(async () =>
         {
@@ -863,6 +915,16 @@ public sealed class CompletionTests(UiFixture ui)
             : throw new InvalidOperationException("Not shown.");
 
     private static string Id(string line) => line.Split(' ')[1];
+
+    /// <summary>
+    /// Presses <paramref name="key"/> in the editor without running the UI thread's other work, as
+    /// <see cref="TypeAlone"/> types.
+    /// </summary>
+    private static void PressAlone(EditorWindow window, Key key)
+    {
+        TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+        textArea.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = key });
+    }
 
     /// <summary>
     /// Types <paramref name="text"/> into the editor without running the UI thread's other work, as the headless
