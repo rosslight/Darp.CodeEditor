@@ -241,7 +241,9 @@ follows the edits made since, so clicking an error after typing above it still l
 - **Not in v1:** pulled diagnostics, workspace edits, file watching, code actions, formatting, rename. The client does not advertise them.
 
 A server that needs pulled diagnostics would add them to v1. The client advertises only what it implements, so
-servers fall back where they can.
+servers fall back where they can. So far that is the lifecycle, documents, pushed diagnostics, hover (Markdown and plain
+text) and semantic tokens (range and full, in the relative format, with the protocol's standard token types and
+modifiers); completion and signature help follow.
 
 How the client talks to a server, where the protocol leaves a choice:
 
@@ -276,6 +278,30 @@ How the client talks to a server, where the protocol leaves a choice:
   with it, through a Job Object. On Linux and macOS the process ends once the server notices that its standard input
   closed or that the app's process, whose id it gets in `initialize`, is gone, as the protocol asks servers to do.
 - **Capabilities** of the server that have another JSON type than the protocol says count as not given.
+- **Editors ask, documents don't.** Only an editor that shows a document asks for its hover and semantic tokens; a
+  document that no editor shows costs the server nothing but its text. Editors never wait for an answer. Their
+  requests take the path of every request, with its hang limit, and a server's error or an answer of another shape
+  shows nothing. An answer counts only for the text that was current when the editor asked: the document's changes
+  reach the server before the request, and an answer that comes after an edit is dropped.
+- **Hover** is asked when the pointer rests on a character for 400 ms, as long as Avalonia's tooltips wait (it is
+  AvaloniaEdit's hover time), at that character's position. A `MarkedString` with a language becomes a Markdown code
+  block. The popup stays while the pointer is over the word, the range that the answer names, or the popup itself;
+  resting on another word, typing, scrolling, Escape and the editor losing the keyboard focus close it, and cancel the
+  request still under way with `$/cancelRequest`.
+- **Semantic tokens** are asked for the lines in view with `semanticTokens/range` when the server offers it, otherwise
+  for the whole text with `semanticTokens/full`; never as deltas. An editor asks once it shows its first lines, 300 ms
+  after the last edit, 100 ms after scrolling shows lines without current tokens (VS Code's shortest pauses for a
+  document and for the view), and when a server starts or stops serving the document. An edit, or a newer request,
+  cancels the request under way. Tokens stay with their unchanged text until new ones arrive: an edit inside a line
+  moves the tokens after it and drops those it touches, and an edit across lines drops the rest of the lines it
+  changed; after an edit every line's tokens count as outdated and are asked for again when in view, as an edit can
+  change the meaning of text elsewhere. Tokens of a type that the server's legend does not name, outside the lines
+  asked for, or empty are ignored, and a process's tokens go when it ends, as its diagnostics do.
+- **Token colors** come from the color theme as in VS Code: its `semanticTokenColors`, matched by type, modifiers and
+  language with VS Code's scores; otherwise its TextMate color of the scopes that VS Code's standard mapping gives the
+  type and modifiers, such as `entity.name.type` for a class or `variable.other.constant` for a read-only variable.
+  Tokens without either keep their TextMate color. Only the color is drawn, not bold, italic or underline: the TextMate
+  colors draw no font styles either.
 - **Messages** from a server that are not valid JSON get an error response. A message over 64 MiB, or broken framing,
   ends the process as a crash: skipping it would lose a request or a response without notice.
 
@@ -594,8 +620,8 @@ Documents, languages and themes (sections 1 and 4) are implemented and tested. P
   18 ms as the first load in a process, and 30 to 80 µs after that; YAML's included grammars take about 28 ms and
   0.8 ms.
 
-The editor (section 2) shows documents with background TextMate highlighting, search and the editing helpers; the
-language features come next. Proven on linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered
+The editor (section 2) shows documents with background TextMate highlighting, search and the editing helpers, and a
+server's diagnostics, hover and semantic tokens (below); completion and signature help come next. Proven on linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered
 with Skia:
 
 - the budgets of the design's section 1.2 without a language server, on a quiet machine. Benchmarks measure them
@@ -678,7 +704,36 @@ own, and with a clock that tests advance:
 - the package carries the internal assembly in its `lib` folder and depends on no package of it;
 - on win-x64, on CI: a server ends when the app that started it is killed, through the Job Object.
 
+The look of a server's diagnostics, its hover and its semantic tokens (sections 2 and 6) is implemented. Proven on
+linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered with Skia, against the fake server:
+
+- squiggles in the color theme's error, warning and information colors, and in VS Code's where a theme sets none, in
+  the rendered pixels under each character of their text and nowhere else; a hint as three dots under its first two
+  characters. They follow typing, with text typed at their edges outside them, and go when the diagnostics clear;
+- hover: the diagnostics' messages, with their codes, above the server's Markdown, whose code block is highlighted with
+  the document's grammar in the editor's font, colors and background; in the app's tooltip, in the window's overlay
+  layer, inside a window narrower than the tooltip. An editor in a dark `ThemeVariantScope` of a light window shows a
+  dark popup, in its pixels. The popup stays while the pointer is over its word or over the popup, and closes when the
+  pointer leaves both, rests on another word under the same diagnostic, and on typing, Escape, scrolling and focus
+  loss. Resting on another word cancels the request still under way with `$/cancelRequest`;
+- the Markdown subset: emphasis, also nested, inline code, escapes, links that open only http and https pages, nested
+  lists, hard line breaks, headings, rules and fenced code blocks; and hover answers as `MarkupContent`, `MarkedString`
+  and arrays of them;
+- semantic tokens in the rendered pixels, with the server's own legend: a type that Light+'s `semanticTokenColors`
+  names, and types and modifiers that it colors through VS Code's scopes; asked by range from a server that offers
+  ranges, in full from one that does not; asked for again after an edit, whose next edit cancels the request; a token
+  that an edit touches loses its color at once, and one that it moves keeps it;
+- the client advertises exactly what it implements, and only editors that show a document ask for its hover and
+  tokens, not an editor out of the visual tree;
+- on linux-x64 (BenchmarkDotNet, i7-13700): taking a server's tokens for all 5,000 lines of JSON with a warning under
+  every key, and drawing the frame after it, takes the UI thread 7.1 ms; every line in view draws again.
+
 Still open:
+
+- hover and semantic tokens against a real server, such as yaml-language-server, and the C# server's once it exists;
+- opening a link through the app's launcher: headless windows have none, so tests check only which links open;
+- code blocks are highlighted with the document's grammar whatever language their fence names, and the hover is as
+  wide as the app's tooltips allow, 320 pixels in Fluent; both wait for a use case that needs more;
 
 - runner-side dependencies on arm64 and macOS, the real bridge and contracts loaded once for both sides, two versions
   of one package in the app and the runner side, and the build step that deploys them;
