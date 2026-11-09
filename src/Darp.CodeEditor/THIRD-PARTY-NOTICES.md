@@ -8,6 +8,9 @@ The grammars, language configurations and color themes in `Languages/` and `Them
 Visual Studio Code, release tag `1.145.0` (https://github.com/microsoft/vscode/tree/1.145.0/extensions): the
 extensions `json`, `xml`, `yaml` and `theme-defaults`. Only the file names changed.
 
+The ranking of completion items in `Darp.CodeEditor.Lsp.dll` ports VS Code's fuzzy matching, `fuzzyScore` and
+`anyScore` in `src/vs/base/common/filters.ts` at the same tag, under the same license.
+
 ```
 MIT License
 
@@ -117,4 +120,21 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+## Codicons
+
+The completion icons are VS Code's codicons, from the npm package `@vscode/codicons` 0.0.46-24
+(https://github.com/microsoft/vscode-codicons). The path data of these SVG files in its `src/icons` folder is copied
+unchanged and drawn as vector shapes: `symbol-key`, `symbol-method`, `symbol-field`, `symbol-variable`,
+`symbol-class`, `symbol-interface`, `symbol-namespace`, `symbol-property`, `symbol-ruler`, `symbol-enum`,
+`symbol-keyword`, `symbol-snippet`, `symbol-color`, `symbol-file`, `go-to-file`, `folder`, `symbol-enum-member`,
+`symbol-constant`, `symbol-structure`, `symbol-event`, `symbol-operator` and `symbol-parameter`. The designs are not
+changed.
+
+```
+Codicons, copyright (c) Microsoft Corporation.
+
+Licensed under the Creative Commons Attribution 4.0 International license (CC BY 4.0):
+https://creativecommons.org/licenses/by/4.0/
 ```
