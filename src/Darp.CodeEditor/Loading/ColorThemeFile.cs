@@ -10,10 +10,15 @@ namespace Darp.CodeEditor.Loading;
 /// semantic token colors. Immutable once read.
 /// </summary>
 /// <param name="TokenRules">The <c>tokenColors</c>, included themes first, as TextMateSharp reads a theme.</param>
+/// <param name="TokenColors">
+/// The <c>tokenColors</c> that set a foreground, in the same order, for finding the color of a scope as VS Code does
+/// for semantic tokens.
+/// </param>
 /// <param name="Colors">The <c>colors</c>, such as <c>editor.background</c>; the theme's own override included ones.</param>
 /// <param name="SemanticTokenColors">The <c>semanticTokenColors</c>, by selector, such as <c>stringLiteral</c>.</param>
 internal sealed record ColorThemeFile(
     IRawTheme TokenRules,
+    IReadOnlyList<TokenColorRule> TokenColors,
     IReadOnlyDictionary<string, Color> Colors,
     IReadOnlyDictionary<string, SemanticTokenStyle> SemanticTokenColors
 )
@@ -22,6 +27,7 @@ internal sealed record ColorThemeFile(
     public static ColorThemeFile Read(Uri source)
     {
         var rules = new List<object>();
+        var tokenColors = new List<TokenColorRule>();
         var colors = new Dictionary<string, Color>();
         var semanticTokenColors = new Dictionary<string, SemanticTokenStyle>();
         var files = new HashSet<Uri>();
@@ -33,7 +39,7 @@ internal sealed record ColorThemeFile(
         if (colors.TryGetValue("editor.background", out Color background))
             defaults["background"] = Hex(background);
         rules.Insert(0, new ThemeRaw { ["settings"] = defaults });
-        return new ColorThemeFile(new ThemeRaw { ["tokenColors"] = rules }, colors, semanticTokenColors);
+        return new ColorThemeFile(new ThemeRaw { ["tokenColors"] = rules }, tokenColors, colors, semanticTokenColors);
 
         void ReadFile(Uri file)
         {
@@ -53,8 +59,11 @@ internal sealed record ColorThemeFile(
                         colors[color.Name] = parsed;
                 }
             }
-            if (root.TryGetProperty("tokenColors", out JsonElement tokenColors))
-                rules.AddRange(tokenColors.EnumerateArray().Select(TokenRule));
+            if (root.TryGetProperty("tokenColors", out JsonElement tokenRules))
+            {
+                rules.AddRange(tokenRules.EnumerateArray().Select(TokenRule));
+                tokenColors.AddRange(tokenRules.EnumerateArray().Select(TokenColor).OfType<TokenColorRule>());
+            }
             if (root.TryGetProperty("semanticTokenColors", out JsonElement semantic))
             {
                 // A theme's rule overrides only what it sets of an included rule for the same selector.
@@ -113,6 +122,26 @@ internal sealed record ColorThemeFile(
         return raw;
     }
 
+    /// <summary>A rule of <c>tokenColors</c> with its scopes, if it sets a foreground that VS Code can read.</summary>
+    private static TokenColorRule? TokenColor(JsonElement rule)
+    {
+        if (
+            !rule.TryGetProperty("settings", out JsonElement settings)
+            || !settings.TryGetProperty("foreground", out JsonElement foreground)
+            || foreground.GetString() is not { } value
+            || !TryParseColor(value, out Color color)
+            || !rule.TryGetProperty("scope", out JsonElement scope)
+        )
+        {
+            return null;
+        }
+        IEnumerable<string?> scopes =
+            scope.ValueKind == JsonValueKind.Array
+                ? scope.EnumerateArray().Select(s => s.GetString())
+                : (scope.GetString() ?? "").Split(',');
+        return new TokenColorRule([.. scopes.OfType<string>().Select(s => s.Trim())], color);
+    }
+
     /// <summary>
     /// A color, or an object with <c>foreground</c>, <c>fontStyle</c>, and <c>bold</c>, <c>italic</c>,
     /// <c>underline</c> and <c>strikethrough</c>. As in VS Code, <c>fontStyle</c> sets all four styles and wins over them.
@@ -150,6 +179,11 @@ internal sealed record ColorThemeFile(
                 : throw new InvalidDataException($"Not a color: {value}");
     }
 }
+
+/// <summary>A rule of a theme's <c>tokenColors</c> that sets a foreground.</summary>
+/// <param name="Scopes">Its scope selectors, such as <c>entity.name.type</c> or <c>source.cs keyword</c>.</param>
+/// <param name="Foreground">The color of the scopes it selects.</param>
+internal sealed record TokenColorRule(IReadOnlyList<string> Scopes, Color Foreground);
 
 /// <summary>How a theme shows a kind of semantic token. Null keeps what the TextMate rules give.</summary>
 /// <param name="Foreground">The text color.</param>

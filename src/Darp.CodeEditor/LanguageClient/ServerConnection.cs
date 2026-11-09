@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.Lsp;
 
 namespace Darp.CodeEditor.LanguageClient;
@@ -17,6 +18,11 @@ namespace Darp.CodeEditor.LanguageClient;
 /// <para>
 /// When the process has ended and nothing more arrives from it, its documents' diagnostics are cleared: they came from
 /// this process.
+/// </para>
+/// <para>
+/// Editors that show a document ask for its hover and semantic tokens. Their requests take the path of every request,
+/// with its hang limit, and their caller's cancellation sends <c>$/cancelRequest</c>. Each document's text goes out
+/// before a request that follows it, so a server answers about the text that was current when the editor asked.
 /// </para>
 /// </remarks>
 internal sealed class ServerConnection
@@ -89,9 +95,9 @@ internal sealed class ServerConnection
     /// Guarded: the server answered <c>initialize</c>, and <c>initialized</c> went out. It runs; its documents open once
     /// the start's settings went out, in <see cref="OpenDocuments"/>.
     /// </summary>
-    public void OnRunning(JsonRpcConnection rpc, bool isFullSync)
+    public void OnRunning(JsonRpcConnection rpc, bool isFullSync, ServerFeatures features)
     {
-        _running = new Running(rpc, _options.TimeProvider.GetTimestamp(), isFullSync);
+        _running = new Running(rpc, _options.TimeProvider.GetTimestamp(), isFullSync, features);
         _isComputingSettings = true;
     }
 
@@ -113,11 +119,17 @@ internal sealed class ServerConnection
         SettingsComputed();
     }
 
-    /// <summary>Guarded: opens a document in the running server, with its current text.</summary>
+    /// <summary>
+    /// Guarded: opens a document in the running server, with its current text. Its editors learn that its features
+    /// changed.
+    /// </summary>
     public void Open(ServerDocument document)
     {
-        if (_running is { } running && _areDocumentsOpen)
-            _documents[document] = new OpenDocument(this, running, document);
+        // Not before the start's settings went out: until then, the server has not heard of the document.
+        if (_running is not { } running || !_areDocumentsOpen)
+            return;
+        _documents[document] = new OpenDocument(this, running, document);
+        document.OnLanguageFeaturesChanged();
     }
 
     /// <summary>Guarded: sends a change of an open document.</summary>
@@ -143,6 +155,82 @@ internal sealed class ServerConnection
     {
         Close(document);
         Open(document);
+    }
+
+    /// <summary>
+    /// The server's hover at <paramref name="position"/> of an open document, for an editor. Null when the server does
+    /// not run, offers no hover or failed, and when <paramref name="cancellationToken"/> cancelled the request.
+    /// </summary>
+    /// <param name="document">The document.</param>
+    /// <param name="snapshot">The document's text that <paramref name="position"/> is in, for the hover's range.</param>
+    /// <param name="position">Where the pointer rests.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    public Task<HoverInfo?> HoverAsync(
+        ServerDocument document,
+        TextSnapshot snapshot,
+        TextPosition position,
+        CancellationToken cancellationToken
+    )
+    {
+        if (Target(document) is not { Features.Hover: true } target)
+            return Task.FromResult<HoverInfo?>(null);
+        var parameters = new TextDocumentPositionParams(
+            new TextDocumentIdentifier(target.Uri),
+            Positions.ToLsp(position)
+        );
+        return RequestForEditorAsync(
+            target.Rpc,
+            "textDocument/hover",
+            writer => JsonSerializer.Serialize(writer, parameters, LspJsonContext.Default.TextDocumentPositionParams),
+            result => HoverInfo.Read(result, snapshot),
+            cancellationToken
+        );
+    }
+
+    /// <summary>
+    /// The server's semantic tokens of an open document, for an editor: of the lines from <paramref name="start"/> to
+    /// <paramref name="end"/> when it answers ranges, otherwise of all <paramref name="lineCount"/> lines. Null when the
+    /// server does not run, offers no semantic tokens or failed, and when <paramref name="cancellationToken"/>
+    /// cancelled the request.
+    /// </summary>
+    /// <param name="document">The document.</param>
+    /// <param name="start">The start of the first line the editor shows.</param>
+    /// <param name="end">The end of the last line the editor shows.</param>
+    /// <param name="lineCount">The number of lines of the text.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    public Task<SemanticTokenLines?> SemanticTokensAsync(
+        ServerDocument document,
+        TextPosition start,
+        TextPosition end,
+        int lineCount,
+        CancellationToken cancellationToken
+    )
+    {
+        if (Target(document) is not { Features.SemanticTokens: { } provider } target)
+            return Task.FromResult<SemanticTokenLines?>(null);
+        var textDocument = new TextDocumentIdentifier(target.Uri);
+        if (provider.Range)
+        {
+            var range = new SemanticTokensRangeParams(
+                textDocument,
+                new LspRange(Positions.ToLsp(start), Positions.ToLsp(end))
+            );
+            return RequestForEditorAsync(
+                target.Rpc,
+                "textDocument/semanticTokens/range",
+                writer => JsonSerializer.Serialize(writer, range, LspJsonContext.Default.SemanticTokensRangeParams),
+                result => SemanticTokenLines.Read(result, provider.Legend, start.Line - 1, end.Line - 1),
+                cancellationToken
+            );
+        }
+        var full = new SemanticTokensParams(textDocument);
+        return RequestForEditorAsync(
+            target.Rpc,
+            "textDocument/semanticTokens/full",
+            writer => JsonSerializer.Serialize(writer, full, LspJsonContext.Default.SemanticTokensParams),
+            result => SemanticTokenLines.Read(result, provider.Legend, 0, lineCount - 1),
+            cancellationToken
+        );
     }
 
     /// <summary>
@@ -238,7 +326,7 @@ internal sealed class ServerConnection
         Task ended = Task.WhenAny(rpc.Ended, process.WaitForExitAsync());
         try
         {
-            if (await InitializeAsync(rpc).ConfigureAwait(false) is { } isFullSync)
+            if (await InitializeAsync(rpc).ConfigureAwait(false) is var (isFullSync, features))
             {
                 rpc.Notify(
                     "initialized",
@@ -248,7 +336,7 @@ internal sealed class ServerConnection
                         writer.WriteEndObject();
                     }
                 );
-                _server.OnInitialized(this, rpc, isFullSync);
+                _server.OnInitialized(this, rpc, isFullSync, features);
                 _initialized.TrySetResult(null);
                 // All settings go before the documents. The app's callback may block: the end of the process
                 // abandons the wait, and the answer is dropped.
@@ -291,7 +379,10 @@ internal sealed class ServerConnection
                 );
         }
         foreach (ServerDocument document in documents)
+        {
             document.SetDiagnostics([]);
+            document.OnLanguageFeaturesChanged();
+        }
         string tail = process.StandardErrorTail;
         process.Dispose();
         failure = failure.TrimEnd('.');
@@ -308,8 +399,11 @@ internal sealed class ServerConnection
     }
 
     /// <summary>Sends <c>initialize</c>.</summary>
-    /// <returns>Whether the server wants the full text with every change; null when it did not answer.</returns>
-    private async Task<bool?> InitializeAsync(JsonRpcConnection rpc)
+    /// <returns>
+    /// Whether the server wants the full text with every change, and what it offers the editors; null when it did not
+    /// answer.
+    /// </returns>
+    private async Task<(bool IsFullSync, ServerFeatures Features)?> InitializeAsync(JsonRpcConnection rpc)
     {
         string? rootUri = null;
         WorkspaceFolder[]? workspaceFolders = null;
@@ -347,7 +441,8 @@ internal sealed class ServerConnection
             InitializeResult initialized =
                 result.Deserialize(LspJsonContext.Default.InitializeResult)
                 ?? throw new JsonException("The result is null.");
-            return IsFullSync(initialized.Capabilities.TextDocumentSync);
+            ServerCapabilities capabilities = initialized.Capabilities;
+            return (IsFullSync(capabilities.TextDocumentSync), ServerFeatures.Read(capabilities));
         }
         catch (TimeoutException e)
         {
@@ -367,7 +462,7 @@ internal sealed class ServerConnection
             return null;
         }
 
-        bool? Failed(string failure)
+        (bool, ServerFeatures)? Failed(string failure)
         {
             lock (_lock)
                 _failure = failure;
@@ -375,23 +470,65 @@ internal sealed class ServerConnection
         }
     }
 
+    /// <summary>The running server and the URI it knows an open document by; null while it does not run or the
+    /// document is not open in it.</summary>
+    private (JsonRpcConnection Rpc, string Uri, ServerFeatures Features)? Target(ServerDocument document)
+    {
+        lock (_lock)
+        {
+            return _running is { } running && _documents.TryGetValue(document, out OpenDocument? open)
+                ? (running.Rpc, open.Uri, running.Features)
+                : null;
+        }
+    }
+
+    /// <summary>
+    /// Sends an editor's request and reads its result, off the UI thread. The connection deals with a server that
+    /// failed, so the editor gets null then, as it does when it cancelled the request.
+    /// </summary>
+    private async Task<T?> RequestForEditorAsync<T>(
+        JsonRpcConnection rpc,
+        string method,
+        Action<Utf8JsonWriter> writeParams,
+        Func<JsonElement, T?> read,
+        CancellationToken cancellationToken
+    )
+        where T : class
+    {
+        try
+        {
+            return read(await RequestAsync(rpc, method, writeParams, cancellationToken).ConfigureAwait(false));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+        // The process ended or hung, and restarts; or the server refused, or answered with something else.
+        catch (Exception e) when (e is IOException or TimeoutException or JsonRpcException or JsonException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>
     /// Sends a request. A server that does not answer within the server's hang limit counts as hung: the process is
-    /// killed.
+    /// killed. Cancelling <paramref name="cancellationToken"/> cancels the request in the server.
     /// </summary>
     /// <exception cref="TimeoutException">The server did not answer in time.</exception>
     private async Task<JsonElement> RequestAsync(
         JsonRpcConnection rpc,
         string method,
-        Action<Utf8JsonWriter>? writeParams
+        Action<Utf8JsonWriter>? writeParams,
+        CancellationToken cancellationToken = default
     )
     {
         TimeSpan limit = _server.HangLimit(this);
         // The time runs from before the server can see the request.
         using var timeout = new CancellationTokenSource(limit, _options.TimeProvider);
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, cancellationToken);
         try
         {
-            return await rpc.SendRequestAsync(method, writeParams, timeout.Token).ConfigureAwait(false);
+            return await rpc.SendRequestAsync(method, writeParams, cancellation.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (timeout.IsCancellationRequested)
         {
@@ -582,6 +719,20 @@ internal sealed class ServerConnection
             {
                 ["synchronization"] = new JsonObject { ["dynamicRegistration"] = false },
                 ["publishDiagnostics"] = new JsonObject { ["versionSupport"] = true },
+                ["hover"] = new JsonObject { ["contentFormat"] = new JsonArray("markdown", "plaintext") },
+                ["semanticTokens"] = new JsonObject
+                {
+                    ["requests"] = new JsonObject { ["range"] = true, ["full"] = true },
+                    ["tokenTypes"] = new JsonArray([
+                        .. SemanticTokenStyles.TokenTypes.Select(t => JsonValue.Create(t)),
+                    ]),
+                    ["tokenModifiers"] = new JsonArray([
+                        .. SemanticTokenStyles.TokenModifiers.Select(m => JsonValue.Create(m)),
+                    ]),
+                    ["formats"] = new JsonArray("relative"),
+                    // Semantic colors are drawn over the TextMate colors.
+                    ["augmentsSyntaxTokens"] = true,
+                },
             },
         };
 
@@ -605,7 +756,8 @@ internal sealed class ServerConnection
     /// <param name="Rpc">Its connection.</param>
     /// <param name="Since">When it answered, as a timestamp of the options' clock.</param>
     /// <param name="IsFullSync">Whether it wants the full text with every change.</param>
-    private sealed record Running(JsonRpcConnection Rpc, long Since, bool IsFullSync);
+    /// <param name="Features">What it offers the editors.</param>
+    private sealed record Running(JsonRpcConnection Rpc, long Since, bool IsFullSync, ServerFeatures Features);
 
     /// <summary>
     /// A document open in the server: what the server has of it, and what is still to send. At most one of its messages

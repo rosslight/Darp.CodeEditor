@@ -29,7 +29,13 @@ internal sealed record InitializeParams(
 internal sealed record InitializeResult(ServerCapabilities Capabilities);
 
 /// <param name="TextDocumentSync">A <c>TextDocumentSyncKind</c> number, or an object with a <c>change</c> kind.</param>
-internal sealed record ServerCapabilities(JsonElement? TextDocumentSync = null);
+/// <param name="HoverProvider">True, or an object of options.</param>
+/// <param name="SemanticTokensProvider">An object with a <c>legend</c>, and <c>range</c> and <c>full</c> when offered.</param>
+internal sealed record ServerCapabilities(
+    JsonElement? TextDocumentSync = null,
+    JsonElement? HoverProvider = null,
+    JsonElement? SemanticTokensProvider = null
+);
 
 internal sealed record TextDocumentItem(string Uri, string LanguageId, int Version, string Text);
 
@@ -66,6 +72,15 @@ internal sealed record LspDiagnostic(
     int? Severity = null,
     [property: JsonConverter(typeof(DiagnosticCodeConverter))] string? Code = null
 );
+
+/// <summary>The params of <c>textDocument/hover</c>.</summary>
+internal sealed record TextDocumentPositionParams(TextDocumentIdentifier TextDocument, LspPosition Position);
+
+/// <summary>The params of <c>textDocument/semanticTokens/full</c>.</summary>
+internal sealed record SemanticTokensParams(TextDocumentIdentifier TextDocument);
+
+/// <summary>The params of <c>textDocument/semanticTokens/range</c>.</summary>
+internal sealed record SemanticTokensRangeParams(TextDocumentIdentifier TextDocument, LspRange Range);
 
 internal sealed record ConfigurationParams(IReadOnlyList<ConfigurationItem> Items);
 
@@ -105,6 +120,9 @@ internal static class TextDocumentSyncKind
 [JsonSerializable(typeof(DidChangeTextDocumentParams))]
 [JsonSerializable(typeof(DidCloseTextDocumentParams))]
 [JsonSerializable(typeof(PublishDiagnosticsParams))]
+[JsonSerializable(typeof(TextDocumentPositionParams))]
+[JsonSerializable(typeof(SemanticTokensParams))]
+[JsonSerializable(typeof(SemanticTokensRangeParams))]
 [JsonSerializable(typeof(ConfigurationParams))]
 [JsonSerializable(typeof(DidChangeConfigurationParams))]
 internal sealed partial class LspJsonContext : JsonSerializerContext;

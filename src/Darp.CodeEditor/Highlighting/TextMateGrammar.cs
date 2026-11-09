@@ -3,6 +3,7 @@ using Avalonia.Media;
 using Avalonia.Media.Immutable;
 using Darp.CodeEditor.Loading;
 using TextMateSharp.Grammars;
+using TextMateSharp.Internal.Grammars;
 using TextMateSharp.Internal.Types;
 using TextMateSharp.Registry;
 using TextMateSharp.Themes;
@@ -20,6 +21,9 @@ namespace Darp.CodeEditor.Highlighting;
 /// </remarks>
 internal sealed class TextMateGrammar
 {
+    /// <summary>Id 1 is the theme's default foreground.</summary>
+    private const int DefaultForegroundId = 1;
+
     /// <summary>How long background tokenizing yields to the UI thread at most, before it takes the grammar anyway.</summary>
     private static readonly TimeSpan s_maxYield = TimeSpan.FromMilliseconds(20);
 
@@ -50,6 +54,16 @@ internal sealed class TextMateGrammar
 
     /// <summary>The theme's token colors, by the color id that tokens carry.</summary>
     public IBrush?[] Brushes { get; }
+
+    /// <summary>
+    /// The color of a token, from its encoded attributes; null for the theme's default foreground, which keeps the
+    /// editor's foreground.
+    /// </summary>
+    public IBrush? Foreground(int attributes)
+    {
+        int id = EncodedTokenAttributes.GetForeground(attributes);
+        return id > DefaultForegroundId && id < Brushes.Length ? Brushes[id] : null;
+    }
 
     /// <summary>Loads <paramref name="grammar"/> with <paramref name="theme"/>, in a registry of its own.</summary>
     public static TextMateGrammar Load(ColorThemeFile theme, IRawGrammar grammar)

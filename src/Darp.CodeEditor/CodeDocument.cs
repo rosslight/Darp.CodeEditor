@@ -2,6 +2,7 @@ using System.ComponentModel;
 using Avalonia;
 using Avalonia.Threading;
 using AvaloniaEdit.Document;
+using Darp.CodeEditor.LanguageClient;
 
 namespace Darp.CodeEditor;
 
@@ -249,6 +250,47 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
 
     /// <summary>Raised by <see cref="Dispose"/>, on the thread that disposes, for the editors that show the document.</summary>
     internal event EventHandler? Disposed;
+
+    /// <summary>
+    /// Raised on the UI thread when a server started or stopped serving the document, for the editors that show it:
+    /// what they asked the server before is outdated, and they ask again.
+    /// </summary>
+    internal event EventHandler? LanguageFeaturesChanged;
+
+    /// <summary>
+    /// The server's hover at <paramref name="position"/> of <paramref name="snapshot"/>, the current text, for an
+    /// editor; null when there is none, and when <paramref name="cancellationToken"/> cancelled it. Never waits on the
+    /// calling thread.
+    /// </summary>
+    internal virtual Task<HoverInfo?> HoverAsync(
+        TextSnapshot snapshot,
+        TextPosition position,
+        CancellationToken cancellationToken
+    ) => Task.FromResult<HoverInfo?>(null);
+
+    /// <summary>
+    /// The server's semantic tokens of the current text, for an editor that shows the lines from
+    /// <paramref name="start"/> to <paramref name="end"/>: of those lines, or of all <paramref name="lineCount"/> lines
+    /// for a server that answers only for the whole text. Null when there are none, and when
+    /// <paramref name="cancellationToken"/> cancelled them. Never waits on the calling thread.
+    /// </summary>
+    internal virtual Task<SemanticTokenLines?> SemanticTokensAsync(
+        TextPosition start,
+        TextPosition end,
+        int lineCount,
+        CancellationToken cancellationToken
+    ) => Task.FromResult<SemanticTokenLines?>(null);
+
+    /// <summary>
+    /// Raises <see cref="LanguageFeaturesChanged"/> on the UI thread, from any thread. Before Avalonia is set up there
+    /// are no editors to tell.
+    /// </summary>
+    internal void OnLanguageFeaturesChanged()
+    {
+        // Application.Current is null before setup, so reading it ties no dispatcher to this thread.
+        if (Application.Current?.Dispatcher is { } dispatcher)
+            dispatcher.Post(() => LanguageFeaturesChanged?.Invoke(this, EventArgs.Empty));
+    }
 
     /// <summary>
     /// Replaces <see cref="Diagnostics"/>, from any thread: on the app's main UI thread, or where it is called before

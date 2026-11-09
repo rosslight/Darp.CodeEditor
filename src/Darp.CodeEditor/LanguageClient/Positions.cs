@@ -12,6 +12,9 @@ internal static class Positions
     /// <summary>A location in AvaloniaEdit's document, which counts from 1.</summary>
     public static LspPosition ToLsp(TextLocation location) => new(location.Line - 1, location.Column - 1);
 
+    /// <summary>A line and column of the editor, which count from 1.</summary>
+    public static LspPosition ToLsp(TextPosition position) => new(position.Line - 1, position.Column - 1);
+
     /// <summary>
     /// The offset of a server's position in <paramref name="snapshot"/>. A position outside the text is clamped to it,
     /// and no value overflows.

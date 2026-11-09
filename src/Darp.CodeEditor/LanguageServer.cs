@@ -257,15 +257,44 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
         }
     }
 
+    /// <summary>
+    /// The hover of an editor that shows <paramref name="document"/>, from the running server; null without one.
+    /// </summary>
+    internal Task<HoverInfo?> HoverAsync(
+        ServerDocument document,
+        TextSnapshot snapshot,
+        TextPosition position,
+        CancellationToken cancellationToken
+    ) => Connection()?.HoverAsync(document, snapshot, position, cancellationToken) ?? Task.FromResult<HoverInfo?>(null);
+
+    /// <summary>
+    /// The semantic tokens for an editor that shows <paramref name="document"/>, from the running server; null without
+    /// one.
+    /// </summary>
+    internal Task<SemanticTokenLines?> SemanticTokensAsync(
+        ServerDocument document,
+        TextPosition start,
+        TextPosition end,
+        int lineCount,
+        CancellationToken cancellationToken
+    ) =>
+        Connection()?.SemanticTokensAsync(document, start, end, lineCount, cancellationToken)
+        ?? Task.FromResult<SemanticTokenLines?>(null);
+
     /// <summary>The server answered <c>initialize</c>: it runs. Its documents open once its settings went out.</summary>
-    internal void OnInitialized(ServerConnection connection, JsonRpcConnection rpc, bool isFullSync)
+    internal void OnInitialized(
+        ServerConnection connection,
+        JsonRpcConnection rpc,
+        bool isFullSync,
+        ServerFeatures features
+    )
     {
         bool changed;
         lock (_lock)
         {
             if (_connection != connection)
                 return;
-            connection.OnRunning(rpc, isFullSync);
+            connection.OnRunning(rpc, isFullSync, features);
             changed = SetState(LanguageServerState.Running);
         }
         if (changed)
@@ -321,6 +350,12 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
         }
         if (changed)
             OnStateChanged();
+    }
+
+    private ServerConnection? Connection()
+    {
+        lock (_lock)
+            return _connection;
     }
 
     /// <summary>The delay before a restart: it doubles with each failure in a row.</summary>

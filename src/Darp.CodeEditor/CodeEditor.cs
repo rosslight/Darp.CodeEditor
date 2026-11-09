@@ -155,6 +155,9 @@ public class CodeEditor : TemplatedControl
     /// <summary>Draws the squiggles under the shown document's diagnostics.</summary>
     private SquiggleLayer? _squiggles;
 
+    /// <summary>Colors the server's semantic tokens of the shown document.</summary>
+    private SemanticHighlighter? _semantic;
+
     /// <summary>The template's panel, which the search bar goes into, over the text.</summary>
     private Panel? _root;
 
@@ -302,6 +305,9 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>The caret's line and column, for a status bar.</summary>
     public TextPosition CaretPosition => _caretPosition;
+
+    /// <summary>The semantic colors of the shown document, for benchmarks; null while it shows none.</summary>
+    internal SemanticHighlighter? SemanticHighlighter => _semantic;
 
     /// <summary>
     /// Scrolls <paramref name="range"/> into view: not at all when it is visible, centered when it is not. A range
@@ -555,6 +561,7 @@ public class CodeEditor : TemplatedControl
         _brackets = new BracketHighlighter(part.TextArea, document, _highlighter) { Colors = _colors };
         _whitespace = new WhitespaceLayer(part.TextArea) { Colors = _colors };
         _squiggles = new SquiggleLayer(part.TextArea, document) { Colors = _colors };
+        _semantic = new SemanticHighlighter(textView, document, Dispatcher) { Theme = _theme };
         _searchBar?.Attach(this, part.TextArea, document);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
         _waitingForLayout = true;
@@ -576,6 +583,8 @@ public class CodeEditor : TemplatedControl
         _whitespace = null;
         _squiggles?.Dispose();
         _squiggles = null;
+        _semantic?.Dispose();
+        _semantic = null;
         _searchBar?.Detach();
         _highlighter?.Dispose();
         _highlighter = null;
@@ -925,6 +934,7 @@ public class CodeEditor : TemplatedControl
             _brackets?.Colors = colors;
             _whitespace?.Colors = colors;
             _squiggles?.Colors = colors;
+            _semantic?.Theme = theme;
             _searchBar?.Colors = colors;
             TextArea textArea = part.TextArea;
             part.Background = colors.Background;

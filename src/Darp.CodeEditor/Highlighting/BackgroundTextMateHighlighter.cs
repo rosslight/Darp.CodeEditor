@@ -52,9 +52,6 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
     private const int MaxLinesPerRequest = 400;
     private const int LinesBeyondView = 40;
 
-    /// <summary>Id 1 is the theme's default foreground: such text keeps the editor's foreground.</summary>
-    private const int DefaultForegroundId = 1;
-
     /// <summary>How long the background may tokenize one line, which holds the grammar meanwhile.</summary>
     private static readonly TimeSpan s_backgroundLineTimeLimit = TimeSpan.FromMilliseconds(50);
 
@@ -294,13 +291,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         {
             int start = Math.Min(tokens[i], length);
             int end = Math.Min(i + 2 < tokens.Length ? tokens[i + 2] : length, length);
-            int foreground = EncodedTokenAttributes.GetForeground(tokens[i + 1]);
-            if (
-                end > start
-                && foreground > DefaultForegroundId
-                && foreground < grammar.Brushes.Length
-                && grammar.Brushes[foreground] is { } brush
-            )
+            if (end > start && grammar.Foreground(tokens[i + 1]) is { } brush)
             {
                 ChangeLinePart(
                     line.Offset + start,
