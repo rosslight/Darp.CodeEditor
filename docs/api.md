@@ -242,6 +242,23 @@ follows the edits made since, so clicking an error after typing above it still l
 A server that needs pulled diagnostics would add them to v1. The client advertises only what it implements, so
 servers fall back where they can.
 
+How the client talks to a server, where the protocol leaves a choice:
+
+- **Documents** open with their language's `Id` and, as their URI, their file's `file:` URI, or `untitled:Untitled-1`,
+  `-2` and so on without a file. Setting `FilePath` closes the old URI and opens the new one. Versions are the
+  snapshots' versions. Edits go out as incremental changes, in order; a server that asks for the full text with every
+  change gets it. While a server does not read, a document's changes wait as one message; past 1,000 changes or a
+  million characters, its full text replaces them.
+- **Diagnostics** with a version are about the text sent with that version; the client keeps the last 64 versions it
+  sent, and drops diagnostics of an older one as outdated. Diagnostics without a version are about the text last sent
+  when they arrive. A diagnostic without a severity is an error, as in VS Code. Diagnostics belong to the process that
+  sent them: when it ends, by a crash, a hang or disposal, the documents' diagnostics are cleared.
+- **Server requests** run on the thread pool, at most 16 at once: `workspace/configuration` calls `Settings` once per
+  item, with the scope's path for a `file:` URI. Registrations are acknowledged; other requests get `MethodNotFound`.
+  Notifications other than `publishDiagnostics`, such as `window/logMessage`, are ignored.
+- **Messages** from a server that are not valid JSON get an error response. A message over 64 MiB, or broken framing,
+  ends the process as a crash: skipping it would lose a request or a response without notice.
+
 ## 7. Sessions
 
 Draft for review; not proven yet (section 9).
@@ -480,7 +497,11 @@ StreamJsonRpc's error hook, and maps a refused call to `ConnectionLostException`
   part of ours. `CodeEditorStyles` includes its styles.
 - **Popups and policies.** Completion, hover and signature help have no settings yet, and their parts have no style
   classes for apps to restyle. They take the app's look instead. Restart and hang timeouts keep the prototype's
-  defaults. Their clock, like a session's time limits, is the options' `TimeProvider`, so tests can pass their own.
+  defaults: a restart waits 0.5 s, doubling up to 30 s; a request unanswered for 30 s counts as a hang, a new server
+  gets twice that before its first answer, and each hang doubles the limit up to 2 minutes; 30 s of running forgives
+  the failures and hangs before. After 5 failures in a row, which take about 8 s for a server that fails at once, the
+  server is `Failed`. `DisposeAsync` waits 2 s for `shutdown` and `exit`, as VS Code does, then kills. Their clock,
+  like a session's time limits, is the options' `TimeProvider`, so tests can pass their own.
 - **Logging.** The library takes no logger and no logging package. Each signal has one purpose:
   - what an app acts on is in the API: `State`, the exceptions of `StartAsync`, a run's `Completion`, a session's
     `Exited`;
@@ -603,14 +624,40 @@ with Skia:
   every change of the text, and keeps every match. The editor removes it each time AvaloniaEdit's editor is
   templated, and AvaloniaEdit's search commands open the editor's bar instead.
 
+The client for any language server (sections 4 and 6) is implemented: `LanguageServer`, its documents and their
+diagnostics, on an internal JSON-RPC layer in its own assembly, which the C# server will share. Proven on linux-x64,
+with `dotnet test` and as NativeAOT, against a fake server that speaks the protocol with framing and messages of its
+own, and with a clock that tests advance:
+
+- `State` from start through a crash, the restart after its delay and disposal, raised once per change on the UI
+  thread; `StartAsync`'s failure with the end of standard error, also for an executable that does not start; delays of
+  0.5, 1, 2 and 4 s, then `Failed` after 5 failures, and `StartAsync` after `Failed` starting anew; an unanswered
+  `initialize` restarted after 60 s, and the next one after 120 s;
+- documents open at creation, with `file:` or untitled URIs; edits reproduced on the server in order, as incremental
+  changes, with `\r\n`, `\r` alone, line breaks split by an edit, surrogate pairs, undo and redo, and 200 edits at once;
+  documents opened again with their current text after a restart, closed when disposed, moved by `FilePath`, one per
+  file path;
+- diagnostics about the snapshot the server analyzed, by version or the text last sent, mapped with `MapToCurrent`,
+  set on the UI thread with `PropertyChanged`, and positions outside the text clamped, `int.MaxValue` included;
+- `workspace/configuration` answered by `Settings` off the UI thread, `NotifySettingsChanged`, registrations, unknown
+  requests, malformed JSON and an oversized message; framing split across reads and merged into one, cancellation
+  both ways, a message that cannot be built failing alone, and a failed write ending the connection;
+- `DisposeAsync` with `shutdown` and `exit`, its kill after 2 s, and `Dispose` killing at once;
+- a server and its document before Avalonia is set up, in the test process of documents: events where the change
+  happens, and nothing touching the dispatcher; after setup, the server's `State` and the diagnostics arrive on the UI
+  thread;
+- the package carries the internal assembly in its `lib` folder and depends on no package of it.
+
 Still open:
 
 - runner-side dependencies on arm64 and macOS, the real bridge and contracts loaded once for both sides, two versions
   of one package in the app and the runner side, and the build step that deploys them;
 - processes ending with a killed app on Linux and macOS, and for third-party language servers, which may not watch
   their standard input;
-- nothing touching Avalonia's dispatcher before Avalonia is set up, for servers and compiling: the test of documents
-  extended with a server and a compilation;
+- nothing touching Avalonia's dispatcher before Avalonia is set up, for compiling: the test of documents extended
+  with a compilation;
+- language servers ending with a killed app on Windows: a test kills a host process and checks that its server
+  ends; it runs on CI's Windows job only;
 - the exit reason rule and `Exited` completing before failures, when causes race: tests that kill the runner at every
   step of disposing, and call `DisposeAsync` and `KillAsync` together;
 - calls that must stay quick, such as prompts, callback replies and stopping a run, while the bridge carries bulk data
