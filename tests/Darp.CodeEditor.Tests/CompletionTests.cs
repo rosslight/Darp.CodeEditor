@@ -103,8 +103,9 @@ public sealed class CompletionTests(UiFixture ui)
                 Parse(
                     """
                     { "items": [
-                      { "label": "readConsole" }, { "label": "Console" }, { "label": "Convert", "preselect": true },
-                      { "label": "Math" }, { "label": "Cos", "sortText": "0" } ] }
+                      { "label": "readConsole", "tags": [1] }, { "label": "Console" },
+                      { "label": "Convert", "preselect": true }, { "label": "Math", "deprecated": true },
+                      { "label": "Cos", "sortText": "0" } ] }
                     """
                 )
             );
@@ -117,6 +118,11 @@ public sealed class CompletionTests(UiFixture ui)
             // Before anything is typed: by sort text, then label; the preselected item selected.
             (await WaitForLabelsAsync(window)).ShouldBe(["Cos", "Console", "Convert", "Math", "readConsole"]);
             List(window).ShouldNotBeNull().SelectedIndex.ShouldBe(2);
+            // Deprecated by its flag or its tag: struck through.
+            window.Render();
+            LabelOf(window, "Math").TextDecorations.ShouldBeSameAs(TextDecorations.Strikethrough);
+            LabelOf(window, "readConsole").TextDecorations.ShouldBeSameAs(TextDecorations.Strikethrough);
+            LabelOf(window, "Console").TextDecorations.ShouldBeNull();
 
             window.Type("Con");
 
@@ -712,14 +718,14 @@ public sealed class CompletionTests(UiFixture ui)
     /// <summary>The runs of the label of the row of <paramref name="label"/>, each with whether it is bold.</summary>
     private static IReadOnlyList<(string Text, bool Bold)> RowRuns(EditorWindow window, string label) =>
         [
-            .. Row(window, label)
-                .GetVisualDescendants()
-                .OfType<TextBlock>()
-                .Single()
+            .. LabelOf(window, label)
                 .Inlines.ShouldNotBeNull()
                 .OfType<Run>()
                 .Select(run => (run.Text ?? "", run.FontWeight == FontWeight.Bold)),
         ];
+
+    private static TextBlock LabelOf(EditorWindow window, string label) =>
+        Row(window, label).GetVisualDescendants().OfType<TextBlock>().Single();
 
     private static ListBoxItem Row(EditorWindow window, string label) =>
         List(window)
