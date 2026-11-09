@@ -1,3 +1,5 @@
+using Avalonia;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Logging;
 using AvaloniaEdit.Document;
@@ -316,7 +318,9 @@ internal sealed class CompletionController : IDisposable
         int preselected = ranked.FindIndex(r => r.Score == ranked[0].Score && items[r.Index].IsPreselected);
         session.Selected = preselected > 0 ? preselected : 0;
         int wordStart = request.Word.Start;
-        session.Place = () => TextViewBoxes.CharacterAt(_textView, Math.Min(wordStart, _buffer.TextLength));
+        Func<Rect> place = () => TextViewBoxes.CharacterAt(_textView, Math.Min(wordStart, _buffer.TextLength));
+        session.Place = place;
+        _view.Room = () => RoomFrom(place);
         session.IsShowing = true;
         _view.Show(session.Items, session.Selected, Look(), _icons, Math.Ceiling(_textView.DefaultLineHeight) + 4);
         _popup.Show(_textView, session.Place);
@@ -324,6 +328,15 @@ internal sealed class CompletionController : IDisposable
         if (_session == session)
             ResolveSelected(session);
     }
+
+    /// <summary>
+    /// The width from <paramref name="place"/>, where the popup starts, to the window's right edge; the popup moves left
+    /// of it only when even the list does not fit there.
+    /// </summary>
+    private double RoomFrom(Func<Rect> place) =>
+        OverlayLayer.GetOverlayLayer(_editor) is { } layer && _textView.TranslatePoint(place().TopLeft, layer) is { } at
+            ? layer.Bounds.Width - Math.Max(0, at.X)
+            : double.PositiveInfinity;
 
     private void Select(Session session, int index)
     {
@@ -698,7 +711,7 @@ internal sealed class CompletionController : IDisposable
         public int Selected { get; set; }
 
         /// <summary>Where the list is: the box of the first character of the word it completes.</summary>
-        public Func<Avalonia.Rect>? Place { get; set; }
+        public Func<Rect>? Place { get; set; }
 
         /// <summary>The resolves of the items, under way or done.</summary>
         public Dictionary<CompletionItem, Resolve> Resolves { get; } = new(ReferenceEqualityComparer.Instance);

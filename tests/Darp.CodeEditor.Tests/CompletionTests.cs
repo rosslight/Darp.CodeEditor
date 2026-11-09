@@ -373,6 +373,66 @@ public sealed class CompletionTests(UiFixture ui)
             DetailTexts(window).ShouldContain("the alpha");
         });
 
+    [Theory]
+    [InlineData(420, "below")]
+    [InlineData(640, "beside, narrower")]
+    [InlineData(900, "beside")]
+    public Task The_details_fit_beside_the_list_where_there_is_room_and_below_it_otherwise(int width, string where) =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            string documentation = string.Join(" ", Enumerable.Repeat("Writes the **value** to the output.", 12));
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                new JsonObject
+                {
+                    ["items"] = new JsonArray(
+                        new JsonObject
+                        {
+                            ["label"] = "WriteLine",
+                            ["data"] = new JsonObject
+                            {
+                                ["detail"] = "void Console.WriteLine(string value)",
+                                ["documentation"] = new JsonObject { ["kind"] = "markdown", ["value"] = documentation },
+                            },
+                        }
+                    ),
+                }
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "    Wr");
+            using var window = new EditorWindow(new CodeEditor { Document = document }, width: width, height: 500);
+
+            await OpenAsync(window, 6);
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return DetailTexts(window).Contains("void Console.WriteLine(string value)");
+            });
+
+            Rect list = BoundsInWindow(Flyout(window).ShouldNotBeNull());
+            Rect details = BoundsInWindow(Details(window).ShouldNotBeNull());
+            var client = new Rect(window.Window.ClientSize);
+            client.Contains(list).ShouldBeTrue($"{list} in {client}");
+            client.Contains(details).ShouldBeTrue($"{details} in {client}");
+            // The documentation wraps to the width the details have.
+            foreach (TextBlock text in Details(window)!.GetVisualDescendants().OfType<TextBlock>())
+                details.Contains(BoundsInWindow(text)).ShouldBeTrue($"{BoundsInWindow(text)} in {details}");
+            // The list stays at the word it completes, where the window has room for it.
+            Point word = window.PointAt(4);
+            list.Left.ShouldBeInRange(word.X - 10, word.X);
+            if (where == "below")
+            {
+                details.Top.ShouldBeGreaterThanOrEqualTo(list.Bottom);
+            }
+            else
+            {
+                details.Left.ShouldBeGreaterThanOrEqualTo(list.Right);
+                details.Top.ShouldBe(list.Top, tolerance: 1);
+            }
+        });
+
     [Fact]
     public Task Additional_edits_commit_with_the_item_in_one_step() =>
         _ui.Run(async () =>

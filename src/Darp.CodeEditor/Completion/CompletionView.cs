@@ -16,9 +16,10 @@ namespace Darp.CodeEditor.Completion;
 
 /// <summary>
 /// What the completion popup shows: the items in a list in the app's flyout look, each with its icon and its label in
-/// the editor's font, the characters that matched in bold and deprecated items struck through; and beside the list, in
-/// a flyout of its own, the selected item's details. Neither takes the keyboard focus, so the editor keeps it; clicking
-/// an item commits it.
+/// the editor's font, the characters that matched in bold and deprecated items struck through; and in a flyout of its
+/// own the selected item's details, beside the list where the window has room for them, narrower if need be, and below
+/// it otherwise, as VS Code places them. Neither takes the keyboard focus, so the editor keeps it; clicking an item
+/// commits it.
 /// </summary>
 internal sealed class CompletionView
 {
@@ -28,8 +29,14 @@ internal sealed class CompletionView
     private const double ListWidth = 300;
     private const double DetailsWidth = 360;
 
+    /// <summary>The narrowest the details get beside the list; with less room, they go below it.</summary>
+    private const double MinDetailsWidth = 200;
+
+    private const double Gap = 2;
+
     private readonly ListBox _list;
     private readonly FlyoutPresenter _details;
+    private readonly Layout _layout;
 
     private readonly ScrollViewer _detailsContent = new()
     {
@@ -62,26 +69,26 @@ internal sealed class CompletionView
             }
         );
         _list.AddHandler(InputElement.PointerPressedEvent, OnPointerPressed, RoutingStrategies.Tunnel);
-        _details = new FlyoutPresenter
-        {
-            Content = _detailsContent,
-            IsVisible = false,
-            VerticalAlignment = VerticalAlignment.Top,
-        };
-        Root = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 2,
-            Children =
-            {
-                new FlyoutPresenter { Content = _list, VerticalAlignment = VerticalAlignment.Top },
-                _details,
-            },
-        };
+        _details = new FlyoutPresenter { Content = _detailsContent, IsVisible = false };
+        var listFlyout = new FlyoutPresenter { Content = _list };
+        // A theme's flyout may scroll across, as Fluent's does: its content then takes no width from it, and the
+        // details would not wrap.
+        ScrollViewer.SetHorizontalScrollBarVisibility(listFlyout, ScrollBarVisibility.Disabled);
+        ScrollViewer.SetHorizontalScrollBarVisibility(_details, ScrollBarVisibility.Disabled);
+        _layout = new Layout(listFlyout, _details);
     }
 
     /// <summary>The view's outermost control.</summary>
-    public Control Root { get; }
+    public Control Root => _layout;
+
+    /// <summary>
+    /// The width from where the popup starts to the window's right edge, as it is placed now: the room for the list and
+    /// the details beside it. By default, the width the popup is measured with.
+    /// </summary>
+    public Func<double> Room
+    {
+        set => _layout.Room = value;
+    }
 
     /// <summary>Raised when an item is clicked, with its index.</summary>
     public event Action<int>? Clicked;
@@ -143,6 +150,63 @@ internal sealed class CompletionView
             start = end;
         }
         return inlines;
+    }
+
+    /// <summary>
+    /// Places the details beside the list when the room right of where the popup starts takes them at least
+    /// <see cref="MinDetailsWidth"/> wide, narrowed to that room; otherwise below the list, at least as wide as it.
+    /// </summary>
+    private sealed class Layout : Panel
+    {
+        private readonly Control _list;
+        private readonly Control _details;
+        private bool _beside;
+
+        public Layout(Control list, Control details)
+        {
+            _list = list;
+            _details = details;
+            Children.Add(list);
+            Children.Add(details);
+        }
+
+        public Func<double>? Room { get; set; }
+
+        protected override Size MeasureOverride(Size availableSize)
+        {
+            _list.Measure(availableSize);
+            Size list = _list.DesiredSize;
+            if (!_details.IsVisible)
+                return list;
+            double room = Math.Min(availableSize.Width, Room?.Invoke() ?? double.PositiveInfinity);
+            double beside = room - list.Width - Gap;
+            _beside = beside >= MinDetailsWidth;
+            if (_beside)
+            {
+                _details.Measure(availableSize.WithWidth(beside));
+                Size details = _details.DesiredSize;
+                return new Size(list.Width + Gap + details.Width, Math.Max(list.Height, details.Height));
+            }
+            double below = Math.Max(0, availableSize.Height - list.Height - Gap);
+            _details.Measure(new Size(Math.Max(list.Width, Math.Min(room, DetailsWidth)), below));
+            Size under = _details.DesiredSize;
+            return new Size(Math.Max(list.Width, under.Width), list.Height + Gap + under.Height);
+        }
+
+        protected override Size ArrangeOverride(Size finalSize)
+        {
+            Size list = _list.DesiredSize;
+            _list.Arrange(new Rect(list));
+            if (!_details.IsVisible)
+                return finalSize;
+            Size details = _details.DesiredSize;
+            _details.Arrange(
+                _beside
+                    ? new Rect(list.Width + Gap, 0, details.Width, details.Height)
+                    : new Rect(0, list.Height + Gap, details.Width, details.Height)
+            );
+            return finalSize;
+        }
     }
 
     /// <summary>
