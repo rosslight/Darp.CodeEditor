@@ -281,6 +281,39 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
         Connection()?.SemanticTokensAsync(document, start, end, lineCount, cancellationToken)
         ?? Task.FromResult<SemanticTokenLines?>(null);
 
+    /// <summary>The completion of an editor that shows <paramref name="document"/>, from the running server; null without one.</summary>
+    internal Task<CompletionList?> CompletionAsync(
+        ServerDocument document,
+        TextSnapshot snapshot,
+        TextRange word,
+        CompletionTrigger trigger,
+        CancellationToken cancellationToken
+    ) =>
+        Connection()?.CompletionAsync(document, snapshot, word, trigger, cancellationToken)
+        ?? Task.FromResult<CompletionList?>(null);
+
+    /// <summary>
+    /// The signature help of an editor that shows <paramref name="document"/>, from the running server; null without one.
+    /// </summary>
+    internal Task<SignatureHelpInfo?> SignatureHelpAsync(
+        ServerDocument document,
+        TextSnapshot snapshot,
+        int offset,
+        SignatureHelpTrigger trigger,
+        CancellationToken cancellationToken
+    ) =>
+        Connection()?.SignatureHelpAsync(document, snapshot, offset, trigger, cancellationToken)
+        ?? Task.FromResult<SignatureHelpInfo?>(null);
+
+    /// <summary>
+    /// What the running server offers the editors of <paramref name="document"/>; null while none runs or the document
+    /// is not open in it yet.
+    /// </summary>
+    internal ServerFeatures? FeaturesOf(ServerDocument document) => Connection()?.FeaturesOf(document);
+
+    /// <summary>The clock of the server and of its documents' editors: the options' <c>TimeProvider</c>.</summary>
+    internal TimeProvider TimeProvider => _options.TimeProvider;
+
     /// <summary>The server answered <c>initialize</c>: it runs. Its documents open once its settings went out.</summary>
     internal void OnInitialized(
         ServerConnection connection,

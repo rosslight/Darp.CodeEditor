@@ -74,6 +74,24 @@ internal sealed class ServerDocument : CodeDocument
         CancellationToken cancellationToken
     ) => _server.SemanticTokensAsync(this, start, end, lineCount, cancellationToken);
 
+    internal override Task<CompletionList?> CompletionAsync(
+        TextSnapshot snapshot,
+        TextRange word,
+        CompletionTrigger trigger,
+        CancellationToken cancellationToken
+    ) => _server.CompletionAsync(this, snapshot, word, trigger, cancellationToken);
+
+    internal override Task<SignatureHelpInfo?> SignatureHelpAsync(
+        TextSnapshot snapshot,
+        int offset,
+        SignatureHelpTrigger trigger,
+        CancellationToken cancellationToken
+    ) => _server.SignatureHelpAsync(this, snapshot, offset, trigger, cancellationToken);
+
+    internal override ServerFeatures? Features => _server.FeaturesOf(this);
+
+    internal override TimeProvider TimeProvider => _server.TimeProvider;
+
     private protected override void OnDisposed() => _server.Close(this);
 
     private static bool IsInsideLineBreak(TextDocument buffer, int offset) =>

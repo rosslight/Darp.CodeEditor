@@ -20,7 +20,8 @@ namespace Darp.CodeEditor.LanguageClient;
 /// this process.
 /// </para>
 /// <para>
-/// Editors that show a document ask for its hover and semantic tokens. Their requests take the path of every request,
+/// Editors that show a document ask for its hover, semantic tokens, completion and signature help. Their requests take
+/// the path of every request,
 /// with its hang limit, and their caller's cancellation sends <c>$/cancelRequest</c>. Each document's text goes out
 /// before a request that follows it, so a server answers about the text that was current when the editor asked.
 /// </para>
@@ -232,6 +233,96 @@ internal sealed class ServerConnection
             cancellationToken
         );
     }
+
+    /// <summary>
+    /// The server's completion at the end of <paramref name="word"/> in an open document, for an editor. Null when the
+    /// server does not run, offers no completion or failed, and when <paramref name="cancellationToken"/> cancelled the
+    /// request. The list resolves its items with this process only.
+    /// </summary>
+    /// <param name="document">The document.</param>
+    /// <param name="snapshot">The document's text that the word is in.</param>
+    /// <param name="word">The word before the caret, which ends at the caret: what items without an edit replace.</param>
+    /// <param name="trigger">How completion was asked for.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    public Task<CompletionList?> CompletionAsync(
+        ServerDocument document,
+        TextSnapshot snapshot,
+        TextRange word,
+        CompletionTrigger trigger,
+        CancellationToken cancellationToken
+    )
+    {
+        if (Target(document) is not { Features.Completion: { } provider } target)
+            return Task.FromResult<CompletionList?>(null);
+        var parameters = new CompletionParams(
+            new TextDocumentIdentifier(target.Uri),
+            Positions.ToLsp(snapshot.GetPosition(word.End)),
+            new CompletionContext(trigger.Kind, trigger.Character?.ToString())
+        );
+        JsonRpcConnection rpc = target.Rpc;
+        Func<CompletionItem, CancellationToken, Task<CompletionItem?>>? resolve = provider.Resolves
+            ? (item, token) =>
+                RequestForEditorAsync(
+                    rpc,
+                    "completionItem/resolve",
+                    writer => item.Source.WriteTo(writer),
+                    result => CompletionList.Resolved(item, result, snapshot),
+                    token
+                )
+            : null;
+        return RequestForEditorAsync(
+            rpc,
+            "textDocument/completion",
+            writer => JsonSerializer.Serialize(writer, parameters, LspJsonContext.Default.CompletionParams),
+            result => CompletionList.Read(result, snapshot, word, provider.CommitCharacters, resolve),
+            cancellationToken
+        );
+    }
+
+    /// <summary>
+    /// The server's signature help at <paramref name="offset"/> of an open document, for an editor. Null when the
+    /// server does not run, offers no signature help, failed or has none there, and when
+    /// <paramref name="cancellationToken"/> cancelled the request.
+    /// </summary>
+    /// <param name="document">The document.</param>
+    /// <param name="snapshot">The document's text that the offset is in.</param>
+    /// <param name="offset">The caret.</param>
+    /// <param name="trigger">How signature help was asked for.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    public Task<SignatureHelpInfo?> SignatureHelpAsync(
+        ServerDocument document,
+        TextSnapshot snapshot,
+        int offset,
+        SignatureHelpTrigger trigger,
+        CancellationToken cancellationToken
+    )
+    {
+        if (Target(document) is not { Features.SignatureHelp: not null } target)
+            return Task.FromResult<SignatureHelpInfo?>(null);
+        var parameters = new SignatureHelpParams(
+            new TextDocumentIdentifier(target.Uri),
+            Positions.ToLsp(snapshot.GetPosition(offset)),
+            new SignatureHelpContext(
+                trigger.Kind,
+                IsRetrigger: trigger.Showing is not null,
+                trigger.Character?.ToString(),
+                trigger.Showing?.ToContext()
+            )
+        );
+        return RequestForEditorAsync(
+            target.Rpc,
+            "textDocument/signatureHelp",
+            writer => JsonSerializer.Serialize(writer, parameters, LspJsonContext.Default.SignatureHelpParams),
+            SignatureHelpInfo.Read,
+            cancellationToken
+        );
+    }
+
+    /// <summary>
+    /// What the running server offers the editors of a document; null while it does not run or the document is not
+    /// open in it.
+    /// </summary>
+    public ServerFeatures? FeaturesOf(ServerDocument document) => Target(document)?.Features;
 
     /// <summary>
     /// Guarded: sends all settings again to the running server, once the app's callback has answered on the thread
@@ -720,6 +811,39 @@ internal sealed class ServerConnection
                 ["synchronization"] = new JsonObject { ["dynamicRegistration"] = false },
                 ["publishDiagnostics"] = new JsonObject { ["versionSupport"] = true },
                 ["hover"] = new JsonObject { ["contentFormat"] = new JsonArray("markdown", "plaintext") },
+                ["completion"] = new JsonObject
+                {
+                    ["completionItem"] = new JsonObject
+                    {
+                        // Items insert their text as it is.
+                        ["snippetSupport"] = false,
+                        ["commitCharactersSupport"] = true,
+                        ["documentationFormat"] = new JsonArray("markdown", "plaintext"),
+                        ["deprecatedSupport"] = true,
+                        ["preselectSupport"] = true,
+                        ["tagSupport"] = new JsonObject { ["valueSet"] = new JsonArray(1) },
+                        ["insertReplaceSupport"] = true,
+                        ["resolveSupport"] = new JsonObject
+                        {
+                            ["properties"] = new JsonArray("detail", "documentation", "additionalTextEdits"),
+                        },
+                    },
+                    ["completionItemKind"] = new JsonObject
+                    {
+                        ["valueSet"] = new JsonArray([.. Enumerable.Range(1, 25).Select(k => JsonValue.Create(k))]),
+                    },
+                    ["contextSupport"] = true,
+                },
+                ["signatureHelp"] = new JsonObject
+                {
+                    ["signatureInformation"] = new JsonObject
+                    {
+                        ["documentationFormat"] = new JsonArray("markdown", "plaintext"),
+                        ["parameterInformation"] = new JsonObject { ["labelOffsetSupport"] = true },
+                        ["activeParameterSupport"] = true,
+                    },
+                    ["contextSupport"] = true,
+                },
                 ["semanticTokens"] = new JsonObject
                 {
                     ["requests"] = new JsonObject { ["range"] = true, ["full"] = true },

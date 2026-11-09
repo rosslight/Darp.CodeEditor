@@ -358,6 +358,30 @@ public sealed class LanguageServerTests(UiFixture ui)
                             "synchronization": { "dynamicRegistration": false },
                             "publishDiagnostics": { "versionSupport": true },
                             "hover": { "contentFormat": ["markdown", "plaintext"] },
+                            "completion": {
+                              "completionItem": {
+                                "snippetSupport": false,
+                                "commitCharactersSupport": true,
+                                "documentationFormat": ["markdown", "plaintext"],
+                                "deprecatedSupport": true,
+                                "preselectSupport": true,
+                                "tagSupport": { "valueSet": [1] },
+                                "insertReplaceSupport": true,
+                                "resolveSupport": { "properties": ["detail", "documentation", "additionalTextEdits"] }
+                              },
+                              "completionItemKind": {
+                                "valueSet": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+                              },
+                              "contextSupport": true
+                            },
+                            "signatureHelp": {
+                              "signatureInformation": {
+                                "documentationFormat": ["markdown", "plaintext"],
+                                "parameterInformation": { "labelOffsetSupport": true },
+                                "activeParameterSupport": true
+                              },
+                              "contextSupport": true
+                            },
                             "semanticTokens": {
                               "requests": { "range": true, "full": true },
                               "tokenTypes": [
