@@ -1,7 +1,9 @@
 using System.Text.Json;
 using Avalonia.Input;
 using Avalonia.Media;
+using AvaloniaEdit.Document;
 using Darp.CodeEditor.Editing;
+using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.LanguageClient;
 
 namespace Darp.CodeEditor.Tests;
@@ -155,6 +157,47 @@ public sealed class SemanticTokensTests(UiFixture ui)
 
         (tokens.Lines[0].Length / SemanticTokenLines.Stride).ShouldBe(1);
         (tokens.Lines[1].Length / SemanticTokenLines.Stride).ShouldBe(VisibleText.LineLimit);
+    }
+
+    [Fact]
+    public Task Lines_that_join_keep_at_most_one_token_per_character_of_their_shown_part() =>
+        _ui.Run(() =>
+        {
+            // 30 lines as long as the shown part, a token on each character.
+            const int count = 30;
+            const int width = VisibleText.LineLimit;
+            string text = string.Join("\n", Enumerable.Repeat(new string('x', width), count));
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, text);
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            SemanticHighlighter highlighter =
+                editor.SemanticHighlighter ?? throw new InvalidOperationException("The editor shows no document.");
+            int[] line = [.. Enumerable.Range(0, width).SelectMany(column => (int[])[column, 1, 0, 0])];
+            var legend = new SemanticTokensLegend(["variable"], []);
+            highlighter.Show(
+                SemanticHighlighter.Prepare(new SemanticTokenLines(legend, 0, [.. Enumerable.Repeat(line, count)]), 0)
+            );
+
+            // Each line joins the first, as Delete at its end does.
+            for (int i = 1; i < count; i++)
+                document.Replace(new TextRange(i * width, 1), "");
+
+            // Moved past the shown part, the tokens of the joined lines went.
+            IReadOnlyList<int> kept = highlighter.TokensOf(0);
+            kept.Count.ShouldBe(line.Length);
+            kept.Where((_, i) => i % SemanticTokenLines.Stride == 0).Max().ShouldBe(width - 1);
+        });
+
+    [Fact]
+    public void Removed_text_is_read_back_to_its_last_line_break_within_the_shown_part()
+    {
+        // A line break and a hidden tail of ten million characters, as when they are deleted.
+        var removed = new StringTextSource("ab\n" + new string('x', 10_000_000));
+
+        SemanticHighlighter.ShownLastLineLength(removed).ShouldBe(VisibleText.LineLimit);
+        SemanticHighlighter.ShownLastLineLength(new StringTextSource("ab\ncd")).ShouldBe(2);
+        SemanticHighlighter.ShownLastLineLength(new StringTextSource("ab\r\n")).ShouldBe(0);
+        SemanticHighlighter.ShownLastLineLength(new StringTextSource("abc")).ShouldBe(3);
     }
 
     [Fact]

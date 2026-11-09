@@ -142,6 +142,9 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
             _textView.Redraw(visualLine);
     }
 
+    /// <summary>The tokens kept for <paramref name="line"/>, from 0, as <see cref="SemanticTokenLines"/> has them.</summary>
+    internal IReadOnlyList<int> TokensOf(int line) => _lines[line]?.Tokens ?? [];
+
     public void Dispose()
     {
         _timer.Stop();
@@ -203,7 +206,7 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
         int removedBreaks = last - first - delta;
         LineTokens? head = _lines[first];
         LineTokens? end = _lines[first + removedBreaks];
-        int oldEnd = removedBreaks == 0 ? column + e.RemovalLength : LastLineLength(e.RemovedText);
+        int oldEnd = removedBreaks == 0 ? column + e.RemovalLength : ShownLastLineLength(e.RemovedText);
         int newEnd = e.Offset + e.InsertionLength - lastLine.Offset;
         // The entries right after the changed line come and go, so the entries of the lines after keep their tokens.
         if (delta > 0)
@@ -366,11 +369,20 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
     }
 
     /// <summary>The length of the last line of <paramref name="text"/>, after its last line break.</summary>
-    private static int LastLineLength(ITextSource text)
+    /// <summary>
+    /// The length of the last line of <paramref name="text"/>, up to <see cref="VisibleText.LineLimit"/>: a line's tokens
+    /// start in its shown part, so none starts after a longer stretch. Reads at most that many characters.
+    /// </summary>
+    internal static int ShownLastLineLength(ITextSource text)
     {
         int length = 0;
-        while (length < text.TextLength && text.GetCharAt(text.TextLength - 1 - length) is not ('\r' or '\n'))
+        while (
+            length < Math.Min(text.TextLength, VisibleText.LineLimit)
+            && text.GetCharAt(text.TextLength - 1 - length) is not ('\r' or '\n')
+        )
+        {
             length++;
+        }
         return length;
     }
 
@@ -412,15 +424,17 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
 
         /// <summary>
         /// The tokens that start at or after <paramref name="column"/>, where an edit ends, moved to start from
-        /// <paramref name="newColumn"/> as their text does.
+        /// <paramref name="newColumn"/> as their text does; those moved out of the shown part of the line go, so that a
+        /// line keeps at most one token per character of it, also when lines join.
         /// </summary>
         public int[] After(int column, int newColumn)
         {
             var after = new List<int>(Tokens.Length);
             for (int i = 0; i < Tokens.Length; i += SemanticTokenLines.Stride)
             {
-                if (Tokens[i] >= column)
-                    after.AddRange([Tokens[i] - column + newColumn, Tokens[i + 1], Tokens[i + 2], Tokens[i + 3]]);
+                long moved = (long)Tokens[i] - column + newColumn;
+                if (Tokens[i] >= column && moved < VisibleText.LineLimit)
+                    after.AddRange([(int)moved, Tokens[i + 1], Tokens[i + 2], Tokens[i + 3]]);
             }
             return [.. after];
         }
