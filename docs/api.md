@@ -410,9 +410,9 @@ How the client talks to a server, where the protocol leaves a choice:
   - **Resolving:** the selected item is resolved when it is selected, and the resolve of an item that is no longer
     selected is cancelled. Its detail, as code highlighted with the document's grammar, and its documentation show
     beside the list, as much of both as a hover shows: they share one budget of the hover's size, cut before anything
-    reads them. A row shows at most 256 characters of a label, with "…". Additional edits that the resolve brings only after the item was committed join the commit's
-    undo step while it is the last one; once the user moved on, they are dropped. Items resolve only in the process
-    that sent them.
+    reads them. A row shows at most 256 characters of a label, with "…". Additional edits that the resolve brings only
+    after the item was committed join the commit's undo step while it is the last one; once the user moved on, they
+    are dropped. Items resolve only in the process that sent them, while the document stays open there as it was.
   - **Ending:** Escape, the caret leaving the line or moving back past the word, a selection, the editor becoming
     read-only, the list's line scrolling out of view, the editor losing the keyboard focus, a server that starts or stops serving the document,
     new colors, nothing left that matches a complete list, and the editor no longer showing the document.
@@ -933,6 +933,9 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   the last 1,000 characters of a word of two million;
 - an editor that becomes read-only closes completion and signature help, and Tab and Ctrl+Space then change
   nothing;
+- while the start's settings block, a running server gets no completion or signature help request for a document not
+  yet open in it, and editors get nothing; right after it opens there, completion, resolve and signature help work,
+  and once the document is no longer open there as it was, its items no longer resolve;
 - a detail of 2,000 lines with long documentation shows 50 lines, its budget's, and no documentation; a label of
   5,000 characters shows 256 with "…"; a signature of 5,000 characters shows 2,000 with "…", and its documentation
   not;
