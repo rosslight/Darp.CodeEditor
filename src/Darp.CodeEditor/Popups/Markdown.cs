@@ -28,7 +28,8 @@ internal static class Markdown
     )
     {
         var reader = new BlockReader(code, cancellationToken);
-        string[] lines = markdown.ReplaceLineEndings("\n").Split('\n');
+        // Lines end at \r\n, \n or \r, as everywhere in the library and in the hover's budget.
+        string[] lines = markdown.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         for (int i = 0; i < lines.Length; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();

@@ -1,3 +1,4 @@
+using System.Text;
 using Avalonia.Media;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.LanguageClient;
@@ -57,8 +58,11 @@ internal static class HoverBlocks
         var blocks = new List<HoverBlock>();
         foreach (Diagnostic diagnostic in diagnostics)
         {
-            string message = diagnostic.Code is { } code ? $"{diagnostic.Message} ({code})" : diagnostic.Message;
-            if (budget.Take(message) is not { } text)
+            // Cut before it is put together: the work is bounded by the budget, not by the server's message.
+            string? text = diagnostic.Code is { } code
+                ? budget.Take(diagnostic.Message, " (", code, ")")
+                : budget.Take(diagnostic.Message);
+            if (text is null)
                 break;
             blocks.Add(new HoverParagraph([new HoverSpan(text)]));
         }
@@ -173,31 +177,49 @@ internal sealed class HoverBudget
     private int _runs = MaxRuns;
 
     /// <summary>
-    /// The start of <paramref name="text"/> that the characters and lines left allow, a part of a hover on lines of its
-    /// own, with "…" at its end when it was cut; null when nothing is left.
+    /// The start of a part of a hover, on lines of its own, that the characters and lines left allow, with "…" at its
+    /// end when it was cut; null when nothing is left. The part is <paramref name="pieces"/> one after another, and each
+    /// is read only as far as it is kept, so the work is bounded by the budget, not by the text. Every piece of a
+    /// hover's text passes here before anything else reads it.
     /// </summary>
-    public string? Take(string text)
+    /// <remarks>
+    /// Lines break at <c>\r\n</c>, <c>\n</c> and <c>\r</c>, as everywhere in the library, and also where the layout of
+    /// text breaks them: at a vertical tab, a form feed, and the Unicode line and paragraph separators. A cut never
+    /// splits a surrogate pair.
+    /// </remarks>
+    public string? Take(params ReadOnlySpan<string> pieces)
     {
         if (_characters <= 0 || _lines <= 0)
             return null;
+        var kept = new StringBuilder();
         int lines = 1;
-        int end = 0;
-        for (; end < text.Length && end < _characters; end++)
+        bool afterCarriageReturn = false;
+        foreach (string piece in pieces)
         {
-            if (text[end] == '\n' && ++lines > _lines)
-                break;
+            int end = 0;
+            for (; end < piece.Length; end++)
+            {
+                char c = piece[end];
+                bool lineBreak = IsLineBreak(c) && !(c == '\n' && afterCarriageReturn);
+                afterCarriageReturn = c == '\r';
+                if (kept.Length + end == _characters || (lineBreak && ++lines > _lines))
+                {
+                    // Nothing follows a cut.
+                    if (end > 0 && char.IsHighSurrogate(piece[end - 1]) && char.IsLowSurrogate(c))
+                        end--;
+                    kept.Append(piece, 0, end).Append('…');
+                    (_characters, _lines) = (0, 0);
+                    return kept.ToString();
+                }
+            }
+            kept.Append(piece);
         }
-        if (end == text.Length)
-        {
-            _characters -= end;
-            _lines -= lines;
-            return text;
-        }
-        // Nothing follows a cut.
-        _characters = 0;
-        _lines = 0;
-        return text[..end] + "…";
+        _characters -= kept.Length;
+        _lines -= lines;
+        return kept.ToString();
     }
+
+    private static bool IsLineBreak(char c) => c is '\n' or '\r' or '\v' or '\f' or '\u0085' or '\u2028' or '\u2029';
 
     /// <summary>
     /// The blocks that the runs left allow: those that fit, and as much of the next as fits, ending with "…". Nothing

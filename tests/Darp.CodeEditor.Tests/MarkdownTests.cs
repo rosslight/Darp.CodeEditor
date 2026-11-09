@@ -140,6 +140,64 @@ public sealed class MarkdownTests
     }
 
     [Fact]
+    public void A_diagnostic_is_cut_to_the_budget_before_its_message_and_code_are_put_together()
+    {
+        var diagnostic = new Diagnostic(
+            TextSnapshot.FromString(""),
+            default,
+            DiagnosticSeverity.Error,
+            "CS0001",
+            new string('m', 10_000_000)
+        );
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        string shown = TextOf(HoverBlocks.Of([diagnostic], new HoverBudget()));
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        shown.ShouldBe(new string('m', HoverBudget.MaxCharacters) + "…");
+        // The message alone takes 20 MB: putting it together with its code would copy all of it.
+        allocated.ShouldBeLessThan(1_000_000);
+        TextOf(HoverBlocks.Of([diagnostic with { Message = "short" }], new HoverBudget())).ShouldBe("short (CS0001)");
+    }
+
+    /// <summary>The line breaks of the library, and one where only the layout of text breaks lines.</summary>
+    public static TheoryData<string> LineBreaks => ["\r\n", "\n", "\r", "\u2028"];
+
+    [Theory]
+    [MemberData(nameof(LineBreaks))]
+    public void A_hovers_lines_are_counted_at_every_line_break(string lineBreak)
+    {
+        // Two spaces end each line of Markdown with a hard break; plain text keeps its line breaks.
+        string text = string.Join(lineBreak, Enumerable.Repeat("x  ", 400));
+        var diagnostic = new Diagnostic(TextSnapshot.FromString(""), default, DiagnosticSeverity.Error, null, text);
+
+        string markdown = TextOf(
+            HoverBlocks.Of(Hover(text, true), null, new HoverBudget(), TestContext.Current.CancellationToken)
+        );
+        string message = TextOf(HoverBlocks.Of([diagnostic], new HoverBudget()));
+
+        LineCount(markdown).ShouldBe(HoverBudget.MaxLines);
+        markdown.ShouldEndWith("…");
+        LineCount(message).ShouldBe(HoverBudget.MaxLines);
+        message.ShouldEndWith("…");
+    }
+
+    [Fact]
+    public void A_cut_never_splits_a_surrogate_pair()
+    {
+        // The budget ends between the two halves of the emoji.
+        string text = new string('x', HoverBudget.MaxCharacters - 1) + "😀tail";
+        var diagnostic = new Diagnostic(TextSnapshot.FromString(""), default, DiagnosticSeverity.Error, null, text);
+        string expected = new string('x', HoverBudget.MaxCharacters - 1) + "…";
+
+        TextOf(HoverBlocks.Of([diagnostic], new HoverBudget())).ShouldBe(expected);
+        TextOf(HoverBlocks.Of(Hover(text, false), null, new HoverBudget(), TestContext.Current.CancellationToken))
+            .ShouldBe(expected);
+        TextOf(HoverBlocks.Of(Hover(text, true), null, new HoverBudget(), TestContext.Current.CancellationToken))
+            .ShouldBe(expected);
+    }
+
+    [Fact]
     public void Links_open_web_pages_only()
     {
         var page = new Uri("https://example.com/a_(b)");
@@ -236,6 +294,11 @@ public sealed class MarkdownTests
                 }
             )
         );
+
+    /// <summary>The lines of a text as the layout of text breaks them.</summary>
+    private static int LineCount(string text) =>
+        1
+        + text.Replace("\r\n", "\n").Count(c => c is '\n' or '\r' or '\v' or '\f' or '\u0085' or '\u2028' or '\u2029');
 
     private static async Task<TextMateGrammar> JsonGrammarAsync()
     {
