@@ -7,6 +7,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
+using AvaloniaEdit.Editing;
 using Darp.CodeEditor.Completion;
 
 namespace Darp.CodeEditor.Tests;
@@ -77,7 +78,7 @@ public sealed class CompletionTests(UiFixture ui)
             window.Type("x");
             (await WaitForLabelsAsync(window)).ShouldBe(["xenon", "xylophone"]);
             window.Type("y");
-            Labels(window).ShouldBe(["xylophone"]);
+            await WaitForLabelsAsync(window, ["xylophone"]);
             window.Press(Key.Escape);
 
             // On in the same word, before a word, and in a comment: no request.
@@ -128,11 +129,71 @@ public sealed class CompletionTests(UiFixture ui)
 
             // Prefixes first, equal scores in their order, the preselected one selected among the best; "Cos" lacks
             // the "n". The client filters: no other request.
-            Labels(window).ShouldBe(["Console", "Convert", "readConsole"]);
+            await WaitForLabelsAsync(window, ["Console", "Convert", "readConsole"]);
             List(window).ShouldNotBeNull().SelectedIndex.ShouldBe(1);
             window.Render();
             RowRuns(window, "readConsole").ShouldBe([("read", false), ("Con", true), ("sole", false)]);
             fake.LinesStartingWith("completion ").Count.ShouldBe(1);
+        });
+
+    [Fact]
+    public Task Typing_filters_the_list_off_the_UI_thread_and_the_list_shows_the_newest_result() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("Console", "Convert", "Math"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await OpenAsync(window, 0);
+
+            // Typed, and no other work run on the UI thread since: the list still shows what it showed.
+            TypeAlone(window, "C");
+            TypeAlone(window, "o");
+            TypeAlone(window, "n");
+            Labels(window).ShouldBe(["Console", "Convert", "Math"]);
+
+            // Then the filter of what was typed last.
+            await WaitForLabelsAsync(window, ["Console", "Convert"]);
+            Row(window, "Console")
+                .GetVisualDescendants()
+                .OfType<TextBlock>()
+                .Single()
+                .Inlines.ShouldNotBeNull()
+                .OfType<Run>()
+                .First()
+                .Text.ShouldBe("Con");
+        });
+
+    [Fact]
+    public Task While_a_filter_runs_a_commit_takes_the_shown_item_if_it_still_matches_and_otherwise_waits_or_types() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("Console", "Convert"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "Con");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            // "Console" shows selected, and still matches "Cons": Enter commits it at once.
+            await OpenAsync(window, 3);
+            TypeAlone(window, "s");
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("Console");
+
+            // It does not match "Conv": Enter commits what the filter of "Conv" selects, once it has run.
+            document.Text = "Con";
+            await OpenAsync(window, 3);
+            TypeAlone(window, "v");
+            window.Press(Key.Enter);
+            await Wait.UntilAsync(() => document.Text == "Convert");
+
+            // A commit character, which the server gives every item, goes in as text then.
+            document.Text = "Con";
+            await OpenAsync(window, 3);
+            TypeAlone(window, "v");
+            TypeAlone(window, ";");
+            document.Text.ShouldBe("Conv;");
         });
 
     [Fact]
@@ -221,7 +282,7 @@ public sealed class CompletionTests(UiFixture ui)
             await OpenAsync(window, 10);
             window.Type(";");
             document.Text.ShouldBe("Console.Wr;");
-            Labels(window).ShouldBeEmpty();
+            await Wait.UntilAsync(() => List(window) is null);
         });
 
     [Fact]
@@ -777,6 +838,14 @@ public sealed class CompletionTests(UiFixture ui)
         return Labels(window);
     }
 
+    /// <summary>Waits until the list shows the items with <paramref name="labels"/>, in order: filters run off the UI thread.</summary>
+    internal static Task WaitForLabelsAsync(EditorWindow window, IReadOnlyList<string> labels) =>
+        Wait.UntilAsync(() =>
+        {
+            window.Render();
+            return Labels(window).SequenceEqual(labels);
+        });
+
     /// <summary>The labels of the items that the list shows, in order; none while it is closed.</summary>
     internal static IReadOnlyList<string> Labels(EditorWindow window) =>
         List(window) is { ItemsSource: IEnumerable<ShownItem> items } ? [.. items.Select(i => i.Item.Label)] : [];
@@ -794,6 +863,16 @@ public sealed class CompletionTests(UiFixture ui)
             : throw new InvalidOperationException("Not shown.");
 
     private static string Id(string line) => line.Split(' ')[1];
+
+    /// <summary>
+    /// Types <paramref name="text"/> into the editor without running the UI thread's other work, as the headless
+    /// window's input does before each event: a filter's result that is due cannot show before the next check.
+    /// </summary>
+    private static void TypeAlone(EditorWindow window, string text)
+    {
+        TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+        textArea.RaiseEvent(new TextInputEventArgs { RoutedEvent = InputElement.TextInputEvent, Text = text });
+    }
 
     /// <summary>Waits until the text area shows a color theme's background: its colors are the editor's then.</summary>
     private static Task WaitForBackgroundAsync(EditorWindow window, Color background) =>

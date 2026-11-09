@@ -27,14 +27,20 @@ public sealed class CompletionMatcherTests
     {
         string[] labels = ["readConsole", "Console", "console", "consoleKey", "ToConsoleString", "cos"];
 
-        List<RankedCompletion> ranked = _matcher.Rank([.. labels.Select(l => new CompletionCandidate("Cons", l, l))]);
+        List<RankedCompletion> ranked = _matcher.Rank(
+            [.. labels.Select(l => new CompletionCandidate("Cons", l, l))],
+            TestContext.Current.CancellationToken
+        );
 
         // A prefix in the typed case first; then in the other case, where the longer word keeps its place; then capitals
         // inside a word, the fewer characters skipped before them the better. "cos" lacks the "n".
         ranked
             .Select(r => labels[r.Index])
             .ShouldBe(["Console", "console", "consoleKey", "ToConsoleString", "readConsole"]);
-        _matcher.Rank([new("x", "x1", "x1"), new("x", "x2", "x2")]).Select(r => r.Index).ShouldBe([0, 1]);
+        _matcher
+            .Rank([new("x", "x1", "x1"), new("x", "x2", "x2")], TestContext.Current.CancellationToken)
+            .Select(r => r.Index)
+            .ShouldBe([0, 1]);
     }
 
     [Fact]
@@ -53,10 +59,21 @@ public sealed class CompletionMatcherTests
     {
         CompletionCandidate[] items = [new("", "b", "b"), new("", "a", "a"), new(" \t", "c", "c")];
 
-        List<RankedCompletion> ranked = _matcher.Rank(items);
+        List<RankedCompletion> ranked = _matcher.Rank(items, TestContext.Current.CancellationToken);
 
         ranked.Select(r => r.Index).ShouldBe([0, 1, 2]);
         ranked.ShouldAllBe(r => r.Highlights.Length == 0);
+    }
+
+    [Fact]
+    public void Ranking_stops_once_cancelled()
+    {
+        CompletionCandidate[] items =
+        [
+            .. Enumerable.Range(0, 1000).Select(i => new CompletionCandidate("a", $"a{i}", $"a{i}")),
+        ];
+
+        Should.Throw<OperationCanceledException>(() => _matcher.Rank(items, new CancellationToken(canceled: true)));
     }
 
     [Fact]

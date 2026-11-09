@@ -23,7 +23,9 @@ namespace Darp.CodeEditor.Completion;
 /// Completion opens on Ctrl+Space, also on macOS, on the server's trigger characters, and when typing starts a word
 /// outside a comment. Until the server answers, nothing shows; what is typed meanwhile filters its answer. The list
 /// is the server's for where it was asked: typing on filters and ranks it on the client, with the matching of
-/// <see cref="CompletionMatcher"/>, and selects the first item, or the one the server preselects among the best. A list
+/// <see cref="CompletionMatcher"/>, and selects the first item, or the one the server preselects among the best. The
+/// matching runs off the UI thread, whatever the list's length: each change cancels the filter under way, and the list
+/// shows the newest result, the previous one meanwhile. A list
 /// that the server marks incomplete is asked for again as the user types on, and shows meanwhile. Moving back before
 /// where completion was asked, and any edit before it, as by another editor of the document, asks again while a word
 /// is left, as VS Code does when the caret moves back: the list's positions no longer fit the text.
@@ -31,10 +33,13 @@ namespace Darp.CodeEditor.Completion;
 /// <para>
 /// Up, Down, Page Up and Page Down select, and Enter, Tab, a click or one of the selected item's commit characters
 /// commit it: its edit, or its text over the word, and its additional edits, such as an import, in one step that the
-/// user undoes. The server resolves the selected item, so that its detail and documentation show beside the list. An
+/// user undoes. While the filter of the current text still runs, they commit the item that shows if it matches the
+/// current text, checked on the UI thread for that item alone; otherwise Enter and Tab commit what that filter selects
+/// once it has run, unless the text changes before, and a commit character goes in as text, as it does when nothing
+/// matches: deciding later would hold back or reorder what the user types. A read-only editor neither completes nor
+/// commits. The server resolves the selected item, so that its detail and documentation show beside the list. An
 /// item whose additional edits are still to come when it is committed gets them when they come, in its step, if that
-/// step is still the last one: otherwise they are dropped, as the user moved on. A read-only editor neither completes
-/// nor commits.
+/// step is still the last one: otherwise they are dropped, as the user moved on.
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends completion, for every reason it ends: Escape, the caret leaving the line or moving back
@@ -52,7 +57,6 @@ internal sealed class CompletionController : IDisposable
     private readonly TextDocument _buffer;
     private readonly CodeDocument _document;
     private readonly BackgroundTextMateHighlighter _highlighter;
-    private readonly CompletionMatcher _matcher = new();
     private readonly CompletionView _view = new();
     private readonly EditorPopup _popup;
     private TextAreaColors? _colors;
@@ -66,6 +70,21 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>Whether the change of the text under way made a request stale.</summary>
     private bool _madeStale;
+
+    /// <summary>
+    /// Ranks lists off the UI thread, for one filter at a time; made the first time a list is filtered, as it takes
+    /// about 150 KB.
+    /// </summary>
+    private CompletionMatcher? _filterMatcher;
+
+    /// <summary>Checks a single item on the UI thread; made the first time one is checked.</summary>
+    private CompletionMatcher? _itemMatcher;
+
+    /// <summary>
+    /// The filter given <see cref="_filterMatcher"/> last: the next one runs after it, so that the matcher serves one
+    /// thread at a time.
+    /// </summary>
+    private Task _matching = Task.CompletedTask;
 
     public CompletionController(
         CodeEditor editor,
@@ -146,7 +165,10 @@ internal sealed class CompletionController : IDisposable
                 Select(session, Math.Max(0, session.Selected - page));
                 return true;
             case Key.Enter or Key.Tab:
-                Commit(session, session.Selected);
+                if (CanCommit(session, session.Selected))
+                    Commit(session, session.Selected);
+                else
+                    CommitWhenFiltered(session);
                 return true;
             default:
                 return false;
@@ -155,7 +177,7 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>
     /// Text the user types, before it goes in: one of the selected item's commit characters commits it, and then goes in
-    /// after it.
+    /// after it, if the item is known to match the current text.
     /// </summary>
     public void OnTextInput(TextInputEventArgs e)
     {
@@ -163,6 +185,7 @@ internal sealed class CompletionController : IDisposable
             _session is { IsShowing: true } session
             && e.Text is [char typed]
             && session.Items[session.Selected].Item.CommitCharacters.Contains(typed)
+            && CanCommit(session, session.Selected)
         )
         {
             Commit(session, session.Selected);
@@ -179,6 +202,7 @@ internal sealed class CompletionController : IDisposable
             return false;
         _session = null;
         session.Pending?.Cancellation.Cancel();
+        session.Filtering?.Cancellation.Cancel();
         foreach (Resolve resolve in session.Resolves.Values)
             resolve.Cancellation.Cancel();
         session.Details?.Cancel();
@@ -279,54 +303,157 @@ internal sealed class CompletionController : IDisposable
     }
 
     /// <summary>
-    /// Shows the items of <paramref name="answer"/> that match the text typed for each, from where its edit starts up
-    /// to the caret, best first.
+    /// Filters <paramref name="answer"/> for the text up to the caret, off the UI thread, unless that filter runs or
+    /// shows already: the filter under way stops, and the list shows the new one's result once it has run.
     /// </summary>
     private void Filter(Session session, Answer answer, int caret)
     {
         // While the request is not stale, its offsets up to where it was asked are the current text's.
-        Request request = answer.Request;
-        if (request.IsStale || caret < request.Offset)
+        if (answer.Request.IsStale || caret < answer.Request.Offset)
         {
             // The answer no longer fits: the newer request's shows.
             Hide(session);
             return;
         }
-        IReadOnlyList<CompletionItem> items = answer.List.Items;
+        FilterKey key = CurrentKey(answer);
+        if (session.Filtering?.Key == key || (session.Shown == key && session.Filtering is null))
+            return;
+        session.Filtering?.Cancellation.Cancel();
+        if (session.CommitAt != key)
+            session.CommitAt = null;
+        var filtering = new Filtering(key, new CancellationTokenSource());
+        session.Filtering = filtering;
+        // Each item's typed text is the part of the line from where its edit starts: the line is read here, the rest
+        // off the UI thread.
+        DocumentLine line = _buffer.GetLineByOffset(caret);
+        FilterAsync(session, filtering, line.Offset, _buffer.GetText(line.Offset, caret - line.Offset));
+    }
+
+    /// <summary>Shows a filter's result, unless completion ended, or a newer filter replaced it.</summary>
+    private async void FilterAsync(Session session, Filtering filtering, int lineStart, string lineBefore)
+    {
+        try
+        {
+            CancellationToken cancellationToken = filtering.Cancellation.Token;
+            Task<Filtered?> ranking = _matching.ContinueWith(
+                _ => Rank(filtering.Key.Answer.List.Items, lineStart, lineBefore, cancellationToken),
+                CancellationToken.None,
+                TaskContinuationOptions.DenyChildAttach,
+                TaskScheduler.Default
+            );
+            _matching = ranking;
+            Filtered? filtered = await ranking;
+            if (filtered is null || _session != session || session.Filtering != filtering)
+                return;
+            session.Filtering = null;
+            Show(session, filtering.Key, filtered);
+        }
+        catch (Exception e)
+        {
+            Logger.TryGet(LogEventLevel.Error, AssetFiles.LogArea)?.Log(this, "Filtering failed: {Exception}", e);
+        }
+    }
+
+    /// <summary>
+    /// Off the UI thread, after the filter before: the items that match the text typed for each, from where its edit
+    /// starts, best first, and the one to select; null once cancelled.
+    /// </summary>
+    private Filtered? Rank(
+        IReadOnlyList<CompletionItem> items,
+        int lineStart,
+        string lineBefore,
+        CancellationToken cancellationToken
+    )
+    {
+        if (cancellationToken.IsCancellationRequested)
+            return null;
         var typed = new Dictionary<int, string>();
         var candidates = new CompletionCandidate[items.Count];
         for (int i = 0; i < items.Count; i++)
         {
             CompletionItem item = items[i];
-            int start = item.Edit.Range.Start;
+            int start = item.Edit.Range.Start - lineStart;
             if (!typed.TryGetValue(start, out string? text))
-                typed[start] = text = _buffer.GetText(start, caret - start);
+                typed[start] = text = lineBefore[start..];
             candidates[i] = new CompletionCandidate(text, item.Label, item.FilterText);
         }
-        List<RankedCompletion> ranked = _matcher.Rank(candidates);
-        if (ranked.Count == 0)
+        List<RankedCompletion> ranked;
+        try
+        {
+            ranked = (_filterMatcher ??= new CompletionMatcher()).Rank(candidates, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+        // As VS Code: the first item, or the first that the server preselects among those that match best.
+        int preselected = ranked.FindIndex(r => r.Score == ranked[0].Score && items[r.Index].IsPreselected);
+        return new Filtered(
+            [.. ranked.Select(r => new ShownItem(items[r.Index], r.Highlights))],
+            Math.Max(0, preselected)
+        );
+    }
+
+    /// <summary>Shows a filter's items, or ends completion when none match a complete list.</summary>
+    private void Show(Session session, FilterKey key, Filtered filtered)
+    {
+        if (filtered.Items.Count == 0)
         {
             // An incomplete list may have more for what is typed: its next answer shows.
-            if (answer.List.IsIncomplete)
+            if (key.Answer.List.IsIncomplete)
                 Hide(session);
             else
                 Close();
             return;
         }
-        session.Items = [.. ranked.Select(r => new ShownItem(items[r.Index], r.Highlights))];
-        // As VS Code: the first item, or the first that the server preselects among those that match best.
-        int preselected = ranked.FindIndex(r => r.Score == ranked[0].Score && items[r.Index].IsPreselected);
-        session.Selected = preselected > 0 ? preselected : 0;
-        int wordStart = request.Word.Start;
+        session.Items = filtered.Items;
+        session.Selected = filtered.Selected;
+        session.Shown = key;
+        if (session.CommitAt == key)
+        {
+            Commit(session, session.Selected);
+            return;
+        }
+        int wordStart = key.Answer.Request.Word.Start;
         Func<Rect> place = () => TextViewBoxes.CharacterAt(_textView, Math.Min(wordStart, _buffer.TextLength));
         session.Place = place;
         _view.Room = () => RoomFrom(place);
-        session.IsShowing = true;
         _view.Show(session.Items, session.Selected, Look(), _icons, Math.Ceiling(_textView.DefaultLineHeight) + 4);
         _popup.Show(_textView, session.Place);
         // Placing it may have ended completion, as its line is out of view.
         if (_session == session)
             ResolveSelected(session);
+    }
+
+    /// <summary>
+    /// Whether the item at <paramref name="index"/> may be committed now: the list shows the filter of the current
+    /// text, or the item matches it, which is checked for that item alone.
+    /// </summary>
+    private bool CanCommit(Session session, int index)
+    {
+        if (session.Shown is not { } shown)
+            return false;
+        if (session.Answer is { } answer && shown == CurrentKey(answer))
+            return true;
+        CompletionItem item = session.Items[index].Item;
+        int caret = _textArea.Caret.Offset;
+        int start = item.Edit.Range.Start;
+        if (shown.Answer.Request.IsStale || caret < shown.Answer.Request.Offset)
+            return false;
+        string typed = _buffer.GetText(start, caret - start);
+        return (_itemMatcher ??= new CompletionMatcher()).Match(typed, item.Label, item.FilterText) is not null;
+    }
+
+    /// <summary>
+    /// Commits what the filter of the current text selects once it has run, for Enter or Tab, unless the text or the
+    /// caret changes before; starts that filter if none runs.
+    /// </summary>
+    private void CommitWhenFiltered(Session session)
+    {
+        if (session.Answer is not { } answer)
+            return;
+        session.CommitAt = CurrentKey(answer);
+        Filter(session, answer, _textArea.Caret.Offset);
     }
 
     /// <summary>
@@ -338,6 +465,10 @@ internal sealed class CompletionController : IDisposable
             ? layer.Bounds.Width - Math.Max(0, at.X)
             : double.PositiveInfinity;
 
+    /// <summary>What filtering <paramref name="answer"/> now would filter for.</summary>
+    private FilterKey CurrentKey(Answer answer) =>
+        new(answer, _document.CurrentSnapshot.Version, _textArea.Caret.Offset);
+
     private void Select(Session session, int index)
     {
         session.Selected = index;
@@ -345,10 +476,13 @@ internal sealed class CompletionController : IDisposable
         ResolveSelected(session);
     }
 
-    /// <summary>Hides the list while completion waits for an answer.</summary>
+    /// <summary>Hides the list while completion waits for an answer; a filter of the old one under way stops.</summary>
     private void Hide(Session session)
     {
-        session.IsShowing = false;
+        session.Filtering?.Cancellation.Cancel();
+        session.Filtering = null;
+        session.CommitAt = null;
+        session.Shown = null;
         session.Items = [];
         session.DetailsOf = null;
         session.Details?.Cancel();
@@ -375,7 +509,7 @@ internal sealed class CompletionController : IDisposable
             session.Resolves.Remove(other);
         }
         ShowDetails(session, session.ResolvedOf(item) ?? item);
-        if (session.Answer is not { List.Resolves: true } answer || session.Resolves.ContainsKey(item))
+        if (session.Shown?.Answer is not { List.Resolves: true } answer || session.Resolves.ContainsKey(item))
             return;
         var cancellation = new CancellationTokenSource();
         Task<CompletionItem?> resolving = answer.List.ResolveAsync(item, cancellation.Token);
@@ -464,7 +598,7 @@ internal sealed class CompletionController : IDisposable
     /// </summary>
     private void Commit(Session session, int index)
     {
-        if (session.Answer is not { } answer)
+        if (session.Shown?.Answer is not { } answer)
             return;
         if (!_textArea.ReadOnlySectionProvider.CanInsert(_textArea.Caret.Offset))
         {
@@ -585,8 +719,15 @@ internal sealed class CompletionController : IDisposable
 
     private void OnClicked(int index)
     {
-        if (_session is { IsShowing: true } session && index >= 0 && index < session.Items.Count)
+        if (
+            _session is { IsShowing: true } session
+            && index >= 0
+            && index < session.Items.Count
+            && CanCommit(session, index)
+        )
+        {
             Commit(session, index);
+        }
     }
 
     /// <summary>Opens completion on the server's trigger characters, and when typing starts a word.</summary>
@@ -688,6 +829,15 @@ internal sealed class CompletionController : IDisposable
     /// <summary>An item's resolve, under way or done.</summary>
     private sealed record Resolve(Task<CompletionItem?> Task, CancellationTokenSource Cancellation);
 
+    /// <summary>What a list is filtered for: an answer, at a version of the text and a caret.</summary>
+    private readonly record struct FilterKey(Answer Answer, int Version, int Caret);
+
+    /// <summary>A filter under way.</summary>
+    private sealed record Filtering(FilterKey Key, CancellationTokenSource Cancellation);
+
+    /// <summary>A filter's result: the items that match, in order, and the one to select.</summary>
+    private sealed record Filtered(List<ShownItem> Items, int Selected);
+
     /// <summary>Completion from its first request until it ends.</summary>
     private sealed class Session
     {
@@ -702,7 +852,19 @@ internal sealed class CompletionController : IDisposable
             Pending ?? Answer?.Request ?? throw new InvalidOperationException("Completion was not asked for.");
 
         /// <summary>Whether the list shows.</summary>
-        public bool IsShowing { get; set; }
+        public bool IsShowing => Shown is not null;
+
+        /// <summary>What the items that show were filtered for; null while none show.</summary>
+        public FilterKey? Shown { get; set; }
+
+        /// <summary>The filter under way; null for none.</summary>
+        public Filtering? Filtering { get; set; }
+
+        /// <summary>
+        /// The filter whose selection Enter or Tab commits once it has run; null for none. A filter for anything else
+        /// drops it.
+        /// </summary>
+        public FilterKey? CommitAt { get; set; }
 
         /// <summary>The items that show, in order.</summary>
         public List<ShownItem> Items { get; set; } = [];

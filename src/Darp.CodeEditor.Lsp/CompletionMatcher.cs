@@ -18,7 +18,9 @@ namespace Darp.CodeEditor.Lsp;
 /// license), with its default options: the first character must match strongly, and a full match is boosted. It has
 /// no typo-tolerant variant, and emoji are no separators. Texts are matched up to their first 128 characters.
 /// </para>
-/// <para>An instance keeps the tables of the matching for reuse: use it on one thread at a time.</para>
+/// <para>
+/// An instance keeps the tables of the matching for reuse: use it on one thread at a time. They take about 150 KB.
+/// </para>
 /// </remarks>
 internal sealed class CompletionMatcher
 {
@@ -46,13 +48,22 @@ internal sealed class CompletionMatcher
     private readonly byte[] _arrows = new byte[Stride * Stride];
 
     /// <summary>
-    /// The items that match, best first; equal scores keep the order of <paramref name="items"/>.
+    /// The items that match, best first; equal scores keep the order of <paramref name="items"/>. Matching a long list
+    /// against a long typed text takes long, so it belongs off the UI thread; it stops soon once
+    /// <paramref name="cancellationToken"/> is cancelled.
     /// </summary>
-    public List<RankedCompletion> Rank(IReadOnlyList<CompletionCandidate> items)
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    public List<RankedCompletion> Rank(
+        IReadOnlyList<CompletionCandidate> items,
+        CancellationToken cancellationToken = default
+    )
     {
         var ranked = new List<RankedCompletion>();
         for (int i = 0; i < items.Count; i++)
         {
+            // An item takes up to some 50 µs: a check every 64 items keeps the wait short and its cost small.
+            if (i % 64 == 0)
+                cancellationToken.ThrowIfCancellationRequested();
             CompletionCandidate item = items[i];
             if (Match(item.Typed, item.Label, item.FilterText) is { } match)
                 ranked.Add(new RankedCompletion(i, match.Score, match.Highlights));
