@@ -255,25 +255,23 @@ internal sealed class SignatureHelpController : IDisposable
             }.OfType<HoverText>(),
         ];
         TextMateGrammar? grammar = _highlighter.Grammar;
+        // As much as a hover shows, the signature first: a server's long signature or documentation costs the UI thread
+        // no more than the largest hover.
+        var budget = new HoverBudget();
+        string label = budget.Take(signature.Label) ?? "";
         try
         {
             IReadOnlyList<HoverBlock> blocks =
                 documentation.Length == 0
                     ? []
                     : await Task.Run(
-                        () =>
-                            HoverBlocks.Of(
-                                new HoverInfo(documentation, null),
-                                grammar,
-                                new HoverBudget(),
-                                reading.Token
-                            ),
+                        () => HoverBlocks.Of(new HoverInfo(documentation, null), grammar, budget, reading.Token),
                         reading.Token
                     );
             if (_reading != reading)
                 return;
             var look = new CodeLook(_editor.FontFamily, _editor.FontSize, _colors?.Background, _colors?.Foreground);
-            _content.Content = View(help, signature, blocks, look);
+            _content.Content = View(help, signature, label, blocks, look);
             _popup.Show(
                 _textView,
                 () =>
@@ -296,20 +294,31 @@ internal sealed class SignatureHelpController : IDisposable
     /// The signature as code, in the editor's font, colors and background, with the active parameter in bold; before
     /// it which signature of how many, when there are more; below it the documentation.
     /// </summary>
+    /// <param name="help">The signature help.</param>
+    /// <param name="signature">The signature that shows.</param>
+    /// <param name="label">Its label, as much of it as the budget left, with "…" where it was cut.</param>
+    /// <param name="documentation">The documentation.</param>
+    /// <param name="look">How code looks.</param>
     private static Control View(
         SignatureHelpInfo help,
         SignatureInfo signature,
+        string label,
         IReadOnlyList<HoverBlock> documentation,
         CodeLook look
     )
     {
         var inlines = new InlineCollection();
-        string label = signature.Label;
-        if (signature.ActiveParameter >= 0 && signature.Parameters[signature.ActiveParameter] is { Length: > 0 } active)
+        // The active parameter, in what is left of the label.
+        int kept = label.Length == signature.Label.Length ? label.Length : label.Length - 1;
+        (int start, int end) =
+            signature.ActiveParameter >= 0 && signature.Parameters[signature.ActiveParameter] is var active
+                ? (Math.Min(active.Start, kept), Math.Min(active.Start + active.Length, kept))
+                : (0, 0);
+        if (end > start)
         {
-            inlines.Add(new Run(label[..active.Start]));
-            inlines.Add(new Run(label.Substring(active.Start, active.Length)) { FontWeight = FontWeight.Bold });
-            inlines.Add(new Run(label[(active.Start + active.Length)..]));
+            inlines.Add(new Run(label[..start]));
+            inlines.Add(new Run(label[start..end]) { FontWeight = FontWeight.Bold });
+            inlines.Add(new Run(label[end..]));
         }
         else
         {

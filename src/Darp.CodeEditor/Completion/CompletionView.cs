@@ -29,6 +29,12 @@ internal sealed class CompletionView
     private const double ListWidth = 300;
     private const double DetailsWidth = 360;
 
+    /// <summary>
+    /// The most of a label that a row shows: more than any list is wide, so that the row still trims it with "…", while
+    /// a server's long label costs the UI thread no more.
+    /// </summary>
+    private const int MaxLabelLength = 256;
+
     /// <summary>The narrowest the details get beside the list; with less room, they go below it.</summary>
     private const double MinDetailsWidth = 200;
 
@@ -126,6 +132,18 @@ internal sealed class CompletionView
     {
         _detailsContent.Content = details;
         _details.IsVisible = details is not null;
+    }
+
+    /// <summary>
+    /// <paramref name="label"/>, or its start with "…" when it is longer than a row shows; a cut never splits a surrogate
+    /// pair. Matched characters are all within the start: matching reads 128 characters.
+    /// </summary>
+    private static string Shortened(string label)
+    {
+        if (label.Length <= MaxLabelLength)
+            return label;
+        int end = char.IsHighSurrogate(label[MaxLabelLength - 1]) ? MaxLabelLength - 1 : MaxLabelLength;
+        return string.Concat(label.AsSpan(0, end), "…");
     }
 
     /// <summary>The label, with the characters at <paramref name="highlights"/> in bold.</summary>
@@ -246,7 +264,7 @@ internal sealed class CompletionView
             Height = _view._rowHeight;
             _label.FontFamily = _view._look?.FontFamily ?? FontFamily.Default;
             _label.FontSize = _view._look?.FontSize ?? 12;
-            _label.Inlines = Label(item.Label, shown.Highlights);
+            _label.Inlines = Label(Shortened(item.Label), shown.Highlights);
             _label.TextDecorations = item.IsDeprecated ? TextDecorations.Strikethrough : null;
             _icon.IsVisible = _view._icons is not null;
             if (_view._icons is { } icons)

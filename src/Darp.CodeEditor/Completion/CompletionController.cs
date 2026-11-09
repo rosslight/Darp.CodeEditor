@@ -576,21 +576,27 @@ internal sealed class CompletionController : IDisposable
         }
     }
 
+    /// <summary>
+    /// The detail, as code, and the documentation, as much of both as a hover shows: one budget for both, cut before
+    /// anything reads them, so that a server's long detail or documentation costs the UI thread no more than the
+    /// largest hover.
+    /// </summary>
     private static IReadOnlyList<HoverBlock> DetailBlocks(
         CompletionItem item,
         TextMateGrammar? grammar,
         CancellationToken cancellationToken
     )
     {
+        var budget = new HoverBudget();
         var blocks = new List<HoverBlock>();
-        if (item.Detail is { } detail)
-            blocks.Add(HoverBlocks.Highlight(detail.Split('\n'), grammar, cancellationToken));
-        if (item.Documentation is { } documentation)
+        if (item.Detail is { } detail && budget.Take(detail) is { } kept)
         {
-            blocks.AddRange(
-                HoverBlocks.Of(new HoverInfo([documentation], null), grammar, new HoverBudget(), cancellationToken)
-            );
+            // Lines end at \r\n, \n or \r, as everywhere in the library.
+            string[] lines = kept.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            blocks.AddRange(budget.Fit([HoverBlocks.Highlight(lines, grammar, cancellationToken)]));
         }
+        if (item.Documentation is { } documentation)
+            blocks.AddRange(HoverBlocks.Of(new HoverInfo([documentation], null), grammar, budget, cancellationToken));
         return blocks;
     }
 
