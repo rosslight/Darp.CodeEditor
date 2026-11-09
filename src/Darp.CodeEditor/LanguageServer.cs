@@ -15,7 +15,9 @@ namespace Darp.CodeEditor;
 /// <para>
 /// The process starts with the first document it creates, or with <see cref="StartAsync"/>. It is restarted after
 /// a crash or when it stops answering, and stopped by <see cref="DisposeAsync"/>, or at once by <see cref="Dispose"/>.
-/// It is a child of the app: it ends when the app ends, even when the app is killed.
+/// It is a child of the app: disposing the server ends it. When the app is killed instead, Windows ends it with the app;
+/// on Linux and macOS it ends once it notices that its input closed or that the app's process, whose id it gets in
+/// <c>initialize</c>, is gone, as the protocol asks servers to do.
 /// </para>
 /// <para>
 /// The server is safe to use from any thread. It raises <see cref="PropertyChanged"/> for <see cref="State"/> on the

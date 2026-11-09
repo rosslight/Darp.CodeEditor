@@ -263,6 +263,9 @@ How the client talks to a server, where the protocol leaves a choice:
 - **Not reading:** when more than 10,000 messages wait to be written to a server, counting its requests that still
   run, the server does not read what it is sent, and its process ends as a crash. A document closed before its
   `didOpen` was written sends nothing, and a closed document keeps no text while its messages wait.
+- **Ending with the app:** disposing the server ends its process. When the app is killed, Windows ends the process
+  with it, through a Job Object. On Linux and macOS the process ends once the server notices that its standard input
+  closed or that the app's process, whose id it gets in `initialize`, is gone, as the protocol asks servers to do.
 - **Capabilities** of the server that have another JSON type than the protocol says count as not given.
 - **Messages** from a server that are not valid JSON get an error response. A message over 64 MiB, or broken framing,
   ends the process as a crash: skipping it would lose a request or a response without notice.
@@ -662,18 +665,17 @@ own, and with a clock that tests advance:
 - a server and its document before Avalonia is set up, in the test process of documents: events where the change
   happens, and nothing touching the dispatcher; after setup, the server's `State` and the diagnostics arrive on the UI
   thread;
-- the package carries the internal assembly in its `lib` folder and depends on no package of it.
+- the package carries the internal assembly in its `lib` folder and depends on no package of it;
+- on win-x64, on CI: a server ends when the app that started it is killed, through the Job Object.
 
 Still open:
 
 - runner-side dependencies on arm64 and macOS, the real bridge and contracts loaded once for both sides, two versions
   of one package in the app and the runner side, and the build step that deploys them;
-- processes ending with a killed app on Linux and macOS, and for third-party language servers, which may not watch
-  their standard input;
+- the library's own processes ending with a killed app on Linux and macOS; third-party language servers end there
+  only as the protocol asks them to (section 6);
 - nothing touching Avalonia's dispatcher before Avalonia is set up, for compiling: the test of documents extended
   with a compilation;
-- language servers ending with a killed app on Windows: a test kills a host process and checks that its server
-  ends; it runs on CI's Windows job only;
 - the exit reason rule and `Exited` completing before failures, when causes race: tests that kill the runner at every
   step of disposing, and call `DisposeAsync` and `KillAsync` together;
 - calls that must stay quick, such as prompts, callback replies and stopping a run, while the bridge carries bulk data
