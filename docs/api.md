@@ -286,9 +286,12 @@ How the client talks to a server, where the protocol leaves a choice:
 - **Hover** is asked when the pointer rests on a character for 400 ms, as long as Avalonia's tooltips wait (it is
   AvaloniaEdit's hover time), at that character's position, or at a line's end within a space's width after it, where
   an empty diagnostic's squiggle is. A `MarkedString` with a language becomes a Markdown code
-  block. The popup stays while the pointer is over the word, the range that the answer names, or the popup itself;
-  resting on another word, typing, scrolling, Escape and the editor losing the keyboard focus close it, and cancel the
-  request still under way with `$/cancelRequest`.
+  block. The popup stays while the pointer is over the word, the range that the answer names, or the popup itself.
+  The hover ends when the pointer rests on another word, on typing, scrolling and Escape, when the editor loses the
+  keyboard focus, when a server starts or stops serving the document, and with new colors; also while it still
+  waits for its answer. Ending it cancels the request still under way with `$/cancelRequest`, stops reading the
+  answer and highlighting its code between lines, and drops what they would show. The popup is placed again when
+  the window or the text it is next to moves, as when the window narrows.
 - **Semantic tokens** are asked for the lines in view with `semanticTokens/range` when the server offers it, otherwise
   for the whole text with `semanticTokens/full`; never as deltas. An editor asks once it shows its first lines, 300 ms
   after the last edit, 100 ms after scrolling stops on lines without current tokens (VS Code's shortest pauses for a
@@ -717,8 +720,10 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   layer, inside a window narrower than the tooltip. An editor in a dark `ThemeVariantScope` of a light window shows a
   dark popup, in its pixels. The popup stays while the pointer is over its word or over the popup, and closes when the
   pointer leaves both, rests on another word under the same diagnostic, and on typing, Escape, scrolling and focus
-  loss. Resting on another word cancels the request still under way with `$/cancelRequest`. An empty diagnostic at a
-  line's end shows when the pointer rests where its squiggle is;
+  loss. Resting on another word cancels the request still under way with `$/cancelRequest`, and so does Escape
+  before any popup showed. A server that stops serving the document and new colors end the hover, and highlighting
+  a code block stops between lines once it ended. A popup stays inside a window that narrows. An empty diagnostic at
+  a line's end shows when the pointer rests where its squiggle is;
 - the Markdown subset: emphasis, also nested, paired as CommonMark pairs it, also in text with thousands of
   delimiters that never close, inline code, escapes, links that open only http and https pages, nested
   lists, hard line breaks, headings, rules and fenced code blocks; and hover answers as `MarkupContent`, `MarkedString`
