@@ -288,7 +288,8 @@ How the client talks to a server, where the protocol leaves a choice:
   an empty diagnostic's squiggle is. A `MarkedString` with a language becomes a Markdown code
   block. The popup stays while the pointer is over the word, the range that the answer names, or the popup itself.
   The word reaches at most 1,000 characters to either side of the pointer, as in VS Code, so a line of millions of
-  word characters costs the pointer no more.
+  word characters costs the pointer no more; the popup still stays while the pointer moves on along such a word,
+  which the view shows only up to its 3,000th character.
   The hover ends when the pointer rests on another word, on typing, scrolling and Escape, when the editor loses the
   keyboard focus, when a server starts or stops serving the document, and with new colors; also while it still
   waits for its answer. Ending it cancels the request still under way with `$/cancelRequest`, stops reading the
@@ -298,13 +299,19 @@ How the client talks to a server, where the protocol leaves a choice:
   highlighted with the document's grammar; inline code as a small span in the editor's font family, foreground and
   background, at the size of the text around it, so that it fits its line.
 - **The hover's size:** a hover shows at most 2,000 characters on 50 lines, in 250 runs of one style or color, the
-  diagnostics' messages first; "…" marks where it was cut. The UI thread builds and lays out every run one by one, at
+  diagnostics' messages first, the most severe first and at most 50 of them; "…" marks where it was cut. The UI thread builds and lays out every run one by one, at
   about 10 µs a run and 1 µs a character, so the largest hover takes it about 2 ms, with the frame about 7 ms
   (BenchmarkDotNet, i7-13700), and a tooltip that scrolls gains nothing from more. Every piece of a hover's text, a
   diagnostic's message and code as much as the server's answer, is cut in one place before anything else reads it,
   so the work, in the background too, is bounded by these limits and not by what the server sends. Lines are counted
   at `\r\n`, `\n` and `\r`, and also where the layout of text breaks them, such as the Unicode line separator; a cut
-  never splits a surrogate pair.
+  never splits a surrogate pair. Finding the diagnostics under the pointer puts in order only those it keeps: 1.4 ms
+  for 100,000 on one character in the server's order, and 8.9 ms in the worst order, where each one found beats those
+  before (BenchmarkDotNet, i7-13700).
+- **Squiggles** of one severity that overlap are drawn as one, so a frame's waves and dots grow with the text in view,
+  not with the diagnostics, of which a server may put thousands on one line. Finding those in view and reading their
+  offsets still grows with their number: a frame with 100,000 on one word takes about 12 ms, 5 ms of it the frame
+  itself, where drawing them one by one took 1.1 s (BenchmarkDotNet, i7-13700).
 - **Semantic tokens** are asked for the lines in view with `semanticTokens/range` when the server offers it, otherwise
   for the whole text with `semanticTokens/full`; never as deltas. An editor asks once it shows its first lines, 300 ms
   after the last edit, 100 ms after scrolling stops on lines without current tokens (VS Code's shortest pauses for a
@@ -727,7 +734,9 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
 
 - squiggles in the color theme's error, warning and information colors, and in VS Code's where a theme sets none, in
   the rendered pixels under each character of their text and nowhere else; a hint as three dots under its first two
-  characters. They follow typing, with text typed at their edges outside them, and go when the diagnostics clear;
+  characters. They follow typing, with text typed at their edges outside them, and go when the diagnostics clear.
+  Squiggles of one severity that overlap all show, also an even number of them on one text, and a frame with 10,000
+  on one word allocates about what a frame with one does;
 - hover: the diagnostics' messages, with their codes, above the server's Markdown, whose code block is highlighted with
   the document's grammar in the editor's font, colors and background; in the app's tooltip, in the window's overlay
   layer, inside a window narrower than the tooltip. An editor in a dark `ThemeVariantScope` of a light window shows a
@@ -753,6 +762,8 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   ranges, in full from one that does not; asked for again after an edit, whose next edit cancels the request, and when
   scrolling shows lines without them; a token that an edit touches loses its color at once, and one that it moves
   keeps it, also onto a new line;
+- a hover takes the 50 most severe of 10,000 diagnostics on one word, in the server's order of each severity, and
+  stays while the pointer moves past where the hovered word was cut, in the same word;
 - the client advertises exactly what it implements, and only editors that show a document ask for its hover and
   tokens, not an editor out of the visual tree;
 - on linux-x64 (BenchmarkDotNet, i7-13700): taking a server's tokens for all 5,000 lines of JSON with a warning under
