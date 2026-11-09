@@ -31,14 +31,15 @@ namespace Darp.CodeEditor.Completion;
 /// commit it: its edit, or its text over the word, and its additional edits, such as an import, in one step that the
 /// user undoes. The server resolves the selected item, so that its detail and documentation show beside the list. An
 /// item whose additional edits are still to come when it is committed gets them when they come, in its step, if that
-/// step is still the last one: otherwise they are dropped, as the user moved on.
+/// step is still the last one: otherwise they are dropped, as the user moved on. A read-only editor neither completes
+/// nor commits.
 /// </para>
 /// <para>
-/// <see cref="Close"/> ends completion, for every reason it ends: Escape, the caret leaving the line or moving back past
-/// the word, a selection, the list scrolling out of view, the editor losing the keyboard focus, a server that starts or
-/// stops serving the document, new colors, the list running out of matches, and the editor no longer showing the
-/// document. Ending it cancels the request still under way with <c>$/cancelRequest</c>, and so does a newer request; a
-/// late answer is dropped.
+/// <see cref="Close"/> ends completion, for every reason it ends: Escape, the caret leaving the line or moving back
+/// past the word, a selection, the editor becoming read-only, the list scrolling out of view, the editor losing the
+/// keyboard focus, a server that starts or stops serving the document, new colors, the list running out of matches, and
+/// the editor no longer showing the document. Ending it cancels the request still under way with
+/// <c>$/cancelRequest</c>, and so does a newer request; a late answer is dropped.
 /// </para>
 /// </remarks>
 internal sealed class CompletionController : IDisposable
@@ -449,6 +450,11 @@ internal sealed class CompletionController : IDisposable
     {
         if (session.Answer is not { } answer)
             return;
+        if (!_textArea.ReadOnlySectionProvider.CanInsert(_textArea.Caret.Offset))
+        {
+            Close();
+            return;
+        }
         CompletionItem selected = session.Items[index].Item;
         CompletionItem item = session.ResolvedOf(selected) ?? selected;
         Request request = answer.Request;
@@ -501,6 +507,7 @@ internal sealed class CompletionController : IDisposable
                 late.Cancellation.IsCancellationRequested
                 || item?.AdditionalEdits is not { Count: > 0 } additional
                 || _buffer.UndoStack.LastGroupDescriptor != step
+                || !_textArea.ReadOnlySectionProvider.CanInsert(_textArea.Caret.Offset)
             )
             {
                 return;

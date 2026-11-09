@@ -513,6 +513,12 @@ public class CodeEditor : TemplatedControl
         {
             _part?.IsReadOnly = IsReadOnly || _shown is null;
             _searchBar?.UpdateReplaceRow();
+            // Nothing completes or asks for signatures where the user cannot type.
+            if (IsReadOnly)
+            {
+                _completion?.Close();
+                _signatureHelp?.Close();
+            }
         }
         else if (
             change.Property == ColorThemeProperty

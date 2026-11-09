@@ -211,6 +211,23 @@ public sealed class SignatureHelpTests(UiFixture ui)
             await Wait.UntilAsync(() => Popup(window) is null);
         });
 
+    [Fact]
+    public Task A_read_only_editor_ends_signature_help() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "call");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            await server.StartAsync();
+            await OpenAsync(window, document);
+
+            editor.IsReadOnly = true;
+
+            Popup(window).ShouldBeNull();
+        });
+
     /// <summary>Opens signature help on "call" anew: types "(" after it.</summary>
     private static async Task OpenAsync(EditorWindow window, CodeDocument document)
     {

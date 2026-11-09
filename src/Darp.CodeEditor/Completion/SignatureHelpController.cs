@@ -31,8 +31,8 @@ namespace Darp.CodeEditor.Completion;
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends it, for every reason it ends: Escape, leaving the call, when the server answers with none,
-/// the editor losing the keyboard focus, a server that starts or stops serving the document, new colors, the caret's
-/// line scrolling out of view, and the editor no longer showing the document.
+/// the editor becoming read-only, the editor losing the keyboard focus, a server that starts or stops serving the
+/// document, new colors, the caret's line scrolling out of view, and the editor no longer showing the document.
 /// </para>
 /// </remarks>
 internal sealed class SignatureHelpController : IDisposable
@@ -188,6 +188,12 @@ internal sealed class SignatureHelpController : IDisposable
     private void Ask(int kind, char? character)
     {
         StopWaiting();
+        // Nothing to help with where the user cannot type.
+        if (!_textArea.ReadOnlySectionProvider.CanInsert(_textArea.Caret.Offset))
+        {
+            Close();
+            return;
+        }
         var cancellation = new CancellationTokenSource();
         _request = cancellation;
         AskAsync(

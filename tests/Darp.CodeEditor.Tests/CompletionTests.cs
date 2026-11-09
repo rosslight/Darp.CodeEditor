@@ -136,6 +136,30 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_read_only_editor_neither_completes_nor_commits() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("alpha"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "a");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            await OpenAsync(window, 1);
+
+            editor.IsReadOnly = true;
+
+            List(window).ShouldBeNull();
+            window.Press(Key.Tab);
+            window.Press(Key.Space, KeyModifiers.Control);
+            await BarrierAsync(server, fake);
+            window.Render();
+            List(window).ShouldBeNull();
+            document.Text.ShouldBe("a");
+            fake.LinesStartingWith("completion ").Count.ShouldBe(1);
+        });
+
+    [Fact]
     public Task Enter_Tab_a_click_and_commit_characters_commit_as_one_step_that_the_user_undoes() =>
         _ui.Run(async () =>
         {
