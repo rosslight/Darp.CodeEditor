@@ -94,6 +94,28 @@ public sealed class SignatureHelpTests(UiFixture ui)
         });
 
     [Fact]
+    public Task An_edit_that_leaves_the_caret_where_it_was_asks_again_after_the_pause() =>
+        _ui.Run(async () =>
+        {
+            var time = new ManualTime();
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "call");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await server.StartAsync();
+            window.Editor.Selection = new TextSelection(4);
+            window.Type("(");
+            await WaitForSignatureAsync(window, "first", "Calls with two.");
+
+            // As another editor of the document renames the call: same length, so the caret stays.
+            document.Replace(new TextRange(0, 4), "ring");
+            window.Editor.Selection.Caret.ShouldBe(5);
+            time.Advance(TimeSpan.FromMilliseconds(120));
+
+            (await fake.WaitForAsync("signatureHelp ", 2)).ShouldEndWith(" 3 - True 0 5");
+        });
+
+    [Fact]
     public Task Up_and_Down_show_the_other_signatures_the_server_keeps_the_choice_and_an_open_list_takes_them() =>
         _ui.Run(async () =>
         {

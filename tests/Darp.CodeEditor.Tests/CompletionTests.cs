@@ -254,6 +254,26 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task An_edit_before_where_completion_was_asked_asks_again_so_that_the_commit_replaces_the_word() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("Console"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, " Co");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await OpenAsync(window, 3);
+
+            // As another editor of the document types at the line's start: the caret moves with the text.
+            document.Replace(new TextRange(0, 0), "x");
+
+            (await fake.WaitForAsync("completion ", 2)).ShouldEndWith(" 1 - 4");
+            (await WaitForLabelsAsync(window)).ShouldBe(["Console"]);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("x Console");
+        });
+
+    [Fact]
     public Task The_selected_items_detail_and_documentation_show_beside_the_list_once_resolved() =>
         _ui.Run(async () =>
         {
