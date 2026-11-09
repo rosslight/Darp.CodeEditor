@@ -60,6 +60,9 @@ public class CompletionBenchmarks
         RunJobsUntil(() => start.IsCompleted, "The language server did not start.");
         start.GetAwaiter().GetResult();
         _document = _server.CreateDocument(CodeLanguage.Json, HeadlessEditor.Json(5000));
+        // Editors ask only once the document is open in the server, after the start's settings went out.
+        CodeDocument document = _document;
+        RunJobsUntil(() => document.Features is not null, "The document did not open in the server.");
         _editor = new CodeEditor { Document = _document };
         _window = HeadlessEditor.Show(_editor);
         HeadlessEditor.RenderUntilColored(_window, _editor, HeadlessEditor.JsonKey);
@@ -186,6 +189,12 @@ public class CompletionWorstCaseBenchmarks
         CompletionBenchmarks.RunJobsUntil(() => start.IsCompleted, "The language server did not start.");
         start.GetAwaiter().GetResult();
         _document = _server.CreateDocument(CodeLanguage.PlainText, s_typed);
+        // Editors ask only once the document is open in the server, after the start's settings went out.
+        CodeDocument document = _document;
+        CompletionBenchmarks.RunJobsUntil(
+            () => document.Features is not null,
+            "The document did not open in the server."
+        );
         var editor = new CodeEditor { Document = _document };
         _window = HeadlessEditor.Show(editor);
         HeadlessEditor.Render(_window);
