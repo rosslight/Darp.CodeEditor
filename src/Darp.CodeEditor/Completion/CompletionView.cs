@@ -47,7 +47,8 @@ internal sealed class CompletionView
         {
             Focusable = false,
             Width = ListWidth,
-            ItemTemplate = new FuncDataTemplate<ShownItem>((item, _) => Row(item)),
+            // Rows that the list recycles have no item for a moment.
+            ItemTemplate = new FuncDataTemplate<ShownItem?>((item, _) => item is null ? null : Row(item)),
         };
         // Rows as dense as the editor's lines, as in VS Code, in the app's look of list items otherwise.
         _list.Styles.Add(
