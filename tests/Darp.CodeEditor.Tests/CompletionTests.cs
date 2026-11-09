@@ -9,6 +9,7 @@ using Avalonia.Styling;
 using Avalonia.VisualTree;
 using AvaloniaEdit.Editing;
 using Darp.CodeEditor.Completion;
+using Darp.CodeEditor.Popups;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -544,6 +545,52 @@ public sealed class CompletionTests(UiFixture ui)
                 details.Left.ShouldBeGreaterThanOrEqualTo(list.Right);
                 details.Top.ShouldBe(list.Top, tolerance: 1);
             }
+        });
+
+    [Fact]
+    public Task A_long_detail_documentation_and_label_show_only_as_much_as_a_hover() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            string label = "Long" + new string('x', 5_000);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                new JsonObject
+                {
+                    ["items"] = new JsonArray(
+                        new JsonObject
+                        {
+                            ["label"] = label,
+                            ["data"] = new JsonObject
+                            {
+                                ["detail"] = string.Join("\n", Enumerable.Range(0, 2_000).Select(i => $"line {i}")),
+                                ["documentation"] = new JsonObject
+                                {
+                                    ["kind"] = "markdown",
+                                    ["value"] = string.Concat(Enumerable.Repeat("**word** ", 2_000)),
+                                },
+                            },
+                        }
+                    ),
+                }
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            await OpenAsync(window, 0);
+            await Wait.UntilAsync(() => DetailTexts(window).Count > 0);
+
+            // The detail and the documentation share a hover's budget: the detail alone uses up its lines.
+            IReadOnlyList<string> details = DetailTexts(window);
+            details.Sum(text => text.Length).ShouldBeLessThanOrEqualTo(HoverBudget.MaxCharacters + 1);
+            details[0].Split('\n').Length.ShouldBe(HoverBudget.MaxLines);
+            details[^1].ShouldEndWith("…");
+            // A row shows the start of a long label.
+            string shown = LabelOf(window, label).Inlines.ShouldNotBeNull().Text ?? "";
+            shown.Length.ShouldBe(257);
+            shown.ShouldEndWith("…");
         });
 
     [Fact]

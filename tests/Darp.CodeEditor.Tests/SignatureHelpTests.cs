@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
@@ -5,6 +6,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.VisualTree;
+using Darp.CodeEditor.Popups;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -226,6 +228,50 @@ public sealed class SignatureHelpTests(UiFixture ui)
             editor.IsReadOnly = true;
 
             Popup(window).ShouldBeNull();
+        });
+
+    [Fact]
+    public Task A_long_signature_and_documentation_show_only_as_much_as_a_hover() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            var signatures = new JsonArray(
+                new JsonObject
+                {
+                    ["label"] = "call(first, " + new string('x', 5_000) + ")",
+                    ["documentation"] = new JsonObject
+                    {
+                        ["kind"] = "markdown",
+                        ["value"] = string.Concat(Enumerable.Repeat("**word** ", 2_000)),
+                    },
+                    ["parameters"] = new JsonArray(new JsonObject { ["label"] = "first" }),
+                }
+            );
+            using CodeDocument command = server.CreateDocument(
+                FakeServer.Commands,
+                $"signatures {signatures.ToJsonString()}"
+            );
+            await fake.WaitForAsync("set signatures");
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "call");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Editor.Selection = new TextSelection(4);
+
+            window.Type("(");
+
+            ToolTip? popup = null;
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                popup = Popup(window);
+                return popup is not null
+                    && Runs(popup).Any(run => run.Text == "first" && run.FontWeight == FontWeight.Bold);
+            });
+            // The signature uses up the budget: the documentation does not show.
+            string label = Signature(popup!).Inlines?.Text ?? "";
+            label.Length.ShouldBe(HoverBudget.MaxCharacters + 1);
+            label.ShouldEndWith("…");
+            Texts(popup!).Sum(text => text.Length).ShouldBe(label.Length);
         });
 
     /// <summary>Opens signature help on "call" anew: types "(" after it.</summary>
