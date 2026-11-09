@@ -292,7 +292,8 @@ How the client talks to a server, where the protocol leaves a choice:
   block. The popup stays while the pointer is over the word, the range that the answer names, or the popup itself.
   The word reaches at most 1,000 characters to either side of the pointer, as in VS Code, so a line of millions of
   word characters costs the pointer no more; the popup still stays while the pointer moves on along such a word,
-  which the view shows only up to its 3,000th character.
+  which the view shows only up to its 3,000th character. How far the word goes on its line is found once, when the
+  hover starts, so moving the pointer reads no text.
   The hover ends when the pointer rests on another word, on typing, scrolling and Escape, when the editor loses the
   keyboard focus, when a server starts or stops serving the document, and with new colors; also while it still
   waits for its answer. Ending it cancels the request still under way with `$/cancelRequest`, stops reading the
@@ -314,16 +315,18 @@ How the client talks to a server, where the protocol leaves a choice:
 - **The shown part of a line.** The editor's views work only on the part of each line that the view shows, its first
   3,000 characters: AvaloniaEdit collapses the rest of a longer line into "...", which shows none of it (design.md
   #106). Squiggles are drawn only in the shown part, the hover finds no text over "..." and its word stops where the
-  tail starts, and semantic tokens that start in a tail are dropped as they are read. So their work per line is
-  bounded by 3,000 characters, whatever the line's length or what a server puts in its tail.
+  tail starts, semantic tokens that start in a tail are dropped as they are read, and those that an edit moves past
+  the shown part, as when lines join, go. So their work per line is bounded by 3,000 characters, whatever the line's
+  length or what a server puts in its tail; an edit that removes a hidden tail reads none of it either.
 - **Diagnostics shown.** Editors show at most 10,000 of a document's diagnostics, the most severe first, then in the
   server's order, which is also their order in a hover (design.md #109); `Diagnostics` keeps them all. As a batch
   arrives, those shown are chosen and put in the latest text on the server's thread: 0.9 ms for 10,000, and 4.0 ms
   when they are about text 100 edits old. The UI thread then follows only the edits made since, usually none: taking
   the batch in costs it 13 µs, and 79 µs after 100 edits. From then on they move with the text as the user types,
   once for all of the document's editors, also while none shows it.
-- **Squiggles** are drawn only for what is on screen: between the view's edges, in the shown part of each line. Those
-  of one severity that overlap are drawn as one, and where they go is measured once per row of text, not once for each
+- **Squiggles** are drawn only for what is on screen: in the rows of each line between the view's top and bottom
+  edges, in the shown part of the line, whole rows, as right-to-left text puts their characters in another order across
+  the screen than along the text. Those of one severity that overlap are drawn as one, and where they go is measured once per row of text, not once for each
   of them, as a text line's own hit tests would walk the row from its start for each. With all 10,000 apart on the
   screen of a 4K window, drawing them takes the UI thread 2.9 ms, where measuring each on its own took 15 to 19 ms.
   The headless frame, which also rasterizes them, takes 15 ms more than without them; an app rasterizes on its render
@@ -340,12 +343,17 @@ How the client talks to a server, where the protocol leaves a choice:
   ignored, and a process's tokens go when it ends, as its diagnostics do. A line keeps at most one token per character
   of its shown part: tokens that overlap the one kept before them, or start in a long line's hidden tail, are dropped
   as they are read. An answer is read, and its lines built, off the UI thread; showing it compares and draws only the
-  lines in view, also when it is for the whole text.
+  lines in view, also when it is for the whole text. A line draws at most 250 of its tokens in their colors, and the
+  rest of it keeps its TextMate colors (design.md #109): each colored token is a run of text that the layout costs
+  about 6 µs, as each TextMate token is. The 32 lines of an 800 by 600 window with a token on each of their 3,000
+  characters take 57 ms to take and draw, where all of the tokens took 984 ms; with 300 tokens a line, 45 ms; TextMate
+  colors alone take 55 ms for 300 tokens a line (BenchmarkDotNet, i7-13700).
 - **Token colors** come from the color theme as in VS Code: its `semanticTokenColors`, matched by type, modifiers and
   language with VS Code's scores; otherwise its TextMate color of the scopes that VS Code's standard mapping gives the
   type and modifiers, such as `entity.name.type` for a class or `variable.other.constant` for a read-only variable.
   Tokens without either keep their TextMate color. Only the color is drawn, not bold, italic or underline: the TextMate
-  colors draw no font styles either.
+  colors draw no font styles either. Only the first 1,000 types of a legend are colored, and modifiers that no selector
+  names count as none, so the UI thread finds a color once per type and named modifiers, whatever a server sends.
 - **Messages** from a server that are not valid JSON get an error response. A message over 64 MiB, or broken framing,
   ends the process as a crash: skipping it would lose a request or a response without notice.
 
@@ -760,7 +768,8 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   them all; a batch that arrives from another thread costs the UI thread under 100 KB to take in, where putting the
   10,000 in the text there took 0.9 MB; and squiggles stay on their text through edits made while a batch arrives and
   while no editor shows the document. Where squiggles go matches where the text layout draws each character, with
-  tabs, wide and right-to-left text, surrogate pairs, accents, control characters, wrapped rows and a collapsed tail;
+  tabs, wide and right-to-left text, surrogate pairs, accents, control characters, wrapped rows and a collapsed tail,
+  and squiggles show in the pixels under each character of right-to-left words and of a line that mixes directions;
 - hover: the diagnostics' messages, with their codes, above the server's Markdown, whose code block is highlighted with
   the document's grammar in the editor's font, colors and background; in the app's tooltip, in the window's overlay
   layer, inside a window narrower than the tooltip. An editor in a dark `ThemeVariantScope` of a light window shows a
@@ -788,9 +797,13 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   keeps it, also onto a new line;
 - a hover takes the 50 most severe of 10,000 diagnostics on one word, in the server's order of each severity, and
   stays while the pointer moves past where the hovered word was cut, in the same word; the hovered word stops where a
-  long line's hidden tail starts, and the pointer over its "..." is over no text, so the hover ends there;
+  long line's hidden tail starts, and the pointer over its "..." is over no text, so the hover ends there, as it does
+  when the pointer goes on to the next line; the pointer may move along the word only in the shown part of its line;
 - a line keeps at most one semantic token per character of its shown part: one of 100,000 tokens that overlap, and
-  3,000 of 10,000 tokens of one character;
+  3,000 of 10,000 tokens of one character, also when 30 such lines join into one; an edit that removes a line break
+  and a hidden tail of ten million characters reads 3,000 of them; a line of 3,000 tokens is drawn in 250 colored
+  runs and one more; and finding the colors of 100,000 combinations of modifiers that no selector names, and of
+  100,000 types past the first 1,000, allocates nothing;
 - the client advertises exactly what it implements, and only editors that show a document ask for its hover and
   tokens, not an editor out of the visual tree; while the start's settings block, a running server gets no hover or
   token request for a document not yet open in it, editors get nothing, and they learn that the server serves the
@@ -801,7 +814,9 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   the screen of a 4K window: preparing it takes the server's thread 0.9 ms, 4.0 ms when it is about text 100 edits
   old; taking it in takes the UI thread 13 µs, 79 µs after 100 edits since; drawing the squiggles 2.9 ms; and the
   headless frame, which also rasterizes, 107 ms against 92 ms without diagnostics. Finding what a hover shows among
-  10,000 on one character, each one found beating those before, takes 0.75 ms. Showing the
+  10,000 on one character, each one found beating those before, takes 0.75 ms. Taking a server's tokens on every
+  character of the 32 lines on screen of an 800 by 600 window, 3,000 a line, and drawing the frame after it takes
+  57 ms, and 300 a line 45 ms. Showing the
   largest hover in its worst shape, a code block of 50 lines, 249 runs that alternate colors and 2,000 characters,
   takes 6.8 ms with its frame; the frame alone about 5 ms. Without the limit on runs, 2,000 runs of one character took
   24 ms.
