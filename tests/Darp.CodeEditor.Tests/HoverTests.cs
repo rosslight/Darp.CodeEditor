@@ -439,6 +439,12 @@ public sealed class HoverTests(UiFixture ui)
             window.MoveMouse(window.PointAt(VisibleText.LineLimit));
 
             Popup(window).ShouldBeNull();
+
+            // Straight on to the next line, past the hidden tail.
+            await HoverAsync(window, 5, "long");
+            window.MoveMouse(window.PointAt(text.Length - 2));
+
+            Popup(window).ShouldBeNull();
         });
 
     [Fact]
@@ -453,6 +459,14 @@ public sealed class HoverTests(UiFixture ui)
             HoverController.WordAt(buffer, 3).ShouldBe(new TextRange(3, reach));
             // Nor past the shown part of a long line.
             HoverController.WordAt(buffer, 2_500).ShouldBe(TextRange.FromBounds(2_500 - reach, VisibleText.LineLimit));
+
+            // The pointer may move on along a cut word, in the shown part of its line only: neither into its hidden
+            // tail nor past it, onto the next line.
+            var tail = new AvaloniaEdit.Document.TextDocument(new string('x', 10_000_000) + "\nend");
+            TextRange word = HoverController.WordAt(tail, 5);
+            HoverController.AlongWord(tail, word).ShouldBe(new TextRange(0, VisibleText.LineLimit));
+            HoverController.AlongWord(buffer, new TextRange(0, 2)).ShouldBe(new TextRange(0, 2));
+            HoverController.AlongWord(buffer, new TextRange(2, 1)).ShouldBe(new TextRange(2, 1));
         });
 
     /// <summary>

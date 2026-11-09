@@ -126,9 +126,11 @@ internal sealed class HoverController : IDisposable
             return;
         Close();
         var budget = new HoverBudget();
+        TextRange word = WordAt(_buffer, offset);
         var hovered = new Hovered(
             offset,
-            WordAt(_buffer, offset),
+            word,
+            AlongWord(_buffer, word),
             _document.CurrentSnapshot,
             // Each diagnostic takes a line at least, so a hover never shows more of them than it has lines.
             HoverBlocks.Of(_squiggles.At(offset, HoverBudget.MaxLines), budget),
@@ -229,29 +231,29 @@ internal sealed class HoverController : IDisposable
 
     /// <summary>
     /// Whether <paramref name="offset"/> is in the hovered text: in its range, or further along a word that
-    /// <see cref="WordAt"/> cut, while only word characters lie between. The pointer reaches only the part of a line
-    /// that the view shows, its first 3,000 characters, so this reads at most that many.
+    /// <see cref="WordAt"/> cut. Reads no text: how far the word goes was found when the hover started.
     /// </summary>
-    private bool IsHovered(Hovered hovered, int offset)
+    private static bool IsHovered(Hovered hovered, int offset) =>
+        hovered.Contains(offset) || (offset >= hovered.Along.Start && offset < hovered.Along.End);
+
+    /// <summary>
+    /// The word characters around <paramref name="word"/>, beyond where <see cref="WordAt"/> cut it, in the shown part
+    /// of its line, its first 3,000 characters: the pointer may move along them without ending the hover. Just the word
+    /// when it is not one, as a space or a line's end. Reads at most the shown part of one line.
+    /// </summary>
+    internal static TextRange AlongWord(TextDocument buffer, TextRange word)
     {
-        if (hovered.Contains(offset))
-            return true;
-        TextRange word = hovered.Word;
-        if (
-            word.Length == 0
-            || offset >= _buffer.TextLength
-            || !WordCharacters.IsWordCharacter(_buffer.GetCharAt(word.Start))
-        )
-        {
-            return false;
-        }
-        (int from, int to) = offset >= word.End ? (word.End, offset + 1) : (offset, word.Start);
-        for (int i = from; i < to; i++)
-        {
-            if (!WordCharacters.IsWordCharacter(_buffer.GetCharAt(i)))
-                return false;
-        }
-        return true;
+        if (word.Length == 0 || !WordCharacters.IsWordCharacter(buffer.GetCharAt(word.Start)))
+            return word;
+        DocumentLine line = buffer.GetLineByOffset(word.Start);
+        int start = word.Start;
+        while (start > line.Offset && WordCharacters.IsWordCharacter(buffer.GetCharAt(start - 1)))
+            start--;
+        int last = VisibleText.End(line);
+        int end = word.End;
+        while (end < last && WordCharacters.IsWordCharacter(buffer.GetCharAt(end)))
+            end++;
+        return TextRange.FromBounds(start, end);
     }
 
     /// <summary>
@@ -289,12 +291,14 @@ internal sealed class HoverController : IDisposable
     /// <summary>The text hovered, in the current text.</summary>
     /// <param name="offset">The character the pointer rested on.</param>
     /// <param name="word">The word there, which the popup is next to.</param>
+    /// <param name="along">The word characters around it, which the pointer may move along.</param>
     /// <param name="snapshot">The text when the pointer rested: the popup closes when it changes.</param>
     /// <param name="messages">The diagnostics' messages.</param>
     /// <param name="budget">What is left of the text the hover shows, for the server's hover after the messages.</param>
     private sealed class Hovered(
         int offset,
         TextRange word,
+        TextRange along,
         TextSnapshot snapshot,
         IReadOnlyList<HoverBlock> messages,
         HoverBudget budget
@@ -303,6 +307,8 @@ internal sealed class HoverController : IDisposable
         public int Offset { get; } = offset;
 
         public TextRange Word { get; } = word;
+
+        public TextRange Along { get; } = along;
 
         /// <summary>The text that the popup stays open over: the word, and the server's range.</summary>
         public TextRange Range { get; set; } = word;
