@@ -290,8 +290,16 @@ How the client talks to a server, where the protocol leaves a choice:
   The hover ends when the pointer rests on another word, on typing, scrolling and Escape, when the editor loses the
   keyboard focus, when a server starts or stops serving the document, and with new colors; also while it still
   waits for its answer. Ending it cancels the request still under way with `$/cancelRequest`, stops reading the
-  answer and highlighting its code between lines, and drops what they would show. The popup is placed again when
-  the window or the text it is next to moves, as when the window narrows.
+  answer between lines and paragraphs and highlighting its code between lines, and drops what they would show. The
+  popup is placed again when the window or the text it is next to moves, as when the window narrows.
+- **The hover's look:** text in the app's tooltip; code blocks in the editor's font, colors and background,
+  highlighted with the document's grammar; inline code as a small span in the editor's font family, foreground and
+  background, at the size of the text around it, so that it fits its line.
+- **The hover's size:** a hover shows at most 2,000 characters on 50 lines, in 250 runs of one style or color, the
+  diagnostics' messages first; "…" marks where it was cut. The UI thread builds and lays out every run one by one, at
+  about 10 µs a run and 1 µs a character, so the largest hover takes it about 2 ms, with the frame about 7 ms
+  (BenchmarkDotNet, i7-13700), and a tooltip that scrolls gains nothing from more. The text is cut before it is read,
+  so the work in the background is bounded too.
 - **Semantic tokens** are asked for the lines in view with `semanticTokens/range` when the server offers it, otherwise
   for the whole text with `semanticTokens/full`; never as deltas. An editor asks once it shows its first lines, 300 ms
   after the last edit, 100 ms after scrolling stops on lines without current tokens (VS Code's shortest pauses for a
@@ -718,12 +726,16 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
 - hover: the diagnostics' messages, with their codes, above the server's Markdown, whose code block is highlighted with
   the document's grammar in the editor's font, colors and background; in the app's tooltip, in the window's overlay
   layer, inside a window narrower than the tooltip. An editor in a dark `ThemeVariantScope` of a light window shows a
-  dark popup, in its pixels. The popup stays while the pointer is over its word or over the popup, and closes when the
+  dark popup, in its pixels. Inline code shows in the editor's font, foreground and background, and code without a color
+  of its own in the editor's foreground, in the pixels. The popup stays while the pointer is over its word or over the
+  popup, and closes when the
   pointer leaves both, rests on another word under the same diagnostic, and on typing, Escape, scrolling and focus
   loss. Resting on another word cancels the request still under way with `$/cancelRequest`, and so does Escape
-  before any popup showed. A server that stops serving the document and new colors end the hover, and highlighting
-  a code block stops between lines once it ended. A popup stays inside a window that narrows. An empty diagnostic at
-  a line's end shows when the pointer rests where its squiggle is;
+  before any popup showed. A server that stops serving the document and new colors end the hover, and reading its
+  Markdown and highlighting its code stop part-way once it ended. A popup stays inside a window that narrows. An empty
+  diagnostic at a line's end shows when the pointer rests where its squiggle is. A hover shows at most its characters,
+  lines and runs, also for a diagnostic message of 100,000 characters, an answer of 1,000 lines and a paragraph of
+  800 runs, and the messages leave the server's hover only what they do not use;
 - the Markdown subset: emphasis, also nested, paired as CommonMark pairs it, also in text with thousands of
   delimiters that never close, inline code, escapes, links that open only http and https pages, nested
   lists, hard line breaks, headings, rules and fenced code blocks; and hover answers as `MarkupContent`, `MarkedString`
@@ -736,7 +748,10 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
 - the client advertises exactly what it implements, and only editors that show a document ask for its hover and
   tokens, not an editor out of the visual tree;
 - on linux-x64 (BenchmarkDotNet, i7-13700): taking a server's tokens for all 5,000 lines of JSON with a warning under
-  every key, and drawing the frame after it, takes the UI thread 7.1 ms; every line in view draws again.
+  every key, and drawing the frame after it, takes the UI thread 7.1 ms; every line in view draws again. Showing the
+  largest hover in its worst shape, a code block of 50 lines, 249 runs that alternate colors and 2,000 characters,
+  takes 6.8 ms with its frame; the frame alone about 5 ms. Without the limit on runs, 2,000 runs of one character took
+  24 ms.
 
 Still open:
 
