@@ -236,8 +236,9 @@ internal sealed class ServerConnection
 
     /// <summary>
     /// The server's completion at the end of <paramref name="word"/> in an open document, for an editor. Null when the
-    /// server does not run, offers no completion or failed, and when <paramref name="cancellationToken"/> cancelled the
-    /// request. The list resolves its items with this process only.
+    /// server does not run, the document is not open in it, it offers no completion or failed, and when
+    /// <paramref name="cancellationToken"/> cancelled the request. The list resolves its items with this process only,
+    /// while the document stays open in it.
     /// </summary>
     /// <param name="document">The document.</param>
     /// <param name="snapshot">The document's text that the word is in.</param>
@@ -259,16 +260,21 @@ internal sealed class ServerConnection
             Positions.ToLsp(snapshot.GetPosition(word.End)),
             new CompletionContext(trigger.Kind, trigger.Character?.ToString())
         );
-        JsonRpcConnection rpc = target.Rpc;
+        (JsonRpcConnection rpc, string uri, _) = target;
         Func<CompletionItem, CancellationToken, Task<CompletionItem?>>? resolve = provider.Resolves
             ? (item, token) =>
-                RequestForEditorAsync(
-                    rpc,
-                    "completionItem/resolve",
-                    writer => item.Source.WriteTo(writer),
-                    result => CompletionList.Resolved(item, result, snapshot),
-                    token
-                )
+                // Only while the document is open in this process as it was when the item came, as every request.
+                Target(document) is { } now
+                && now.Rpc == rpc
+                && now.Uri == uri
+                    ? RequestForEditorAsync(
+                        rpc,
+                        "completionItem/resolve",
+                        writer => item.Source.WriteTo(writer),
+                        result => CompletionList.Resolved(item, result, snapshot),
+                        token
+                    )
+                    : Task.FromResult<CompletionItem?>(null)
             : null;
         return RequestForEditorAsync(
             rpc,
@@ -281,8 +287,8 @@ internal sealed class ServerConnection
 
     /// <summary>
     /// The server's signature help at <paramref name="offset"/> of an open document, for an editor. Null when the
-    /// server does not run, offers no signature help, failed or has none there, and when
-    /// <paramref name="cancellationToken"/> cancelled the request.
+    /// server does not run, the document is not open in it, it offers no signature help, failed or has none there, and
+    /// when <paramref name="cancellationToken"/> cancelled the request.
     /// </summary>
     /// <param name="document">The document.</param>
     /// <param name="snapshot">The document's text that the offset is in.</param>
