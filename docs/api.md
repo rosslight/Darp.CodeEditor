@@ -326,9 +326,11 @@ How the client talks to a server, where the protocol leaves a choice:
   once for all of the document's editors, also while none shows it.
 - **Squiggles** are drawn only for what is on screen: in the rows of each line between the view's top and bottom
   edges, in the shown part of the line, whole rows, as right-to-left text puts their characters in another order across
-  the screen than along the text. Those of one severity that overlap are drawn as one, and where they go is measured once per row of text, not once for each
+  the screen than along the text. Each diagnostic is read once a frame, also one over many lines, and those of one
+  severity that overlap are drawn as one, and where they go is measured once per row of text, not once for each
   of them, as a text line's own hit tests would walk the row from its start for each. With all 10,000 apart on the
-  screen of a 4K window, drawing them takes the UI thread 2.9 ms, where measuring each on its own took 15 to 19 ms.
+  screen of a 4K window, drawing them takes the UI thread 2.9 ms, where measuring each on its own took 15 to 19 ms;
+  with each of them over all of the text, 3.2 ms, where reading them for each line in view took 30 ms.
   The headless frame, which also rasterizes them, takes 15 ms more than without them; an app rasterizes on its render
   thread (BenchmarkDotNet, i7-13700).
 - **Semantic tokens** are asked for the lines in view with `semanticTokens/range` when the server offers it, otherwise
@@ -770,6 +772,8 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   while no editor shows the document. Where squiggles go matches where the text layout draws each character, with
   tabs, wide and right-to-left text, surrogate pairs, accents, control characters, wrapped rows and a collapsed tail,
   and squiggles show in the pixels under each character of right-to-left words and of a line that mixes directions;
+  a frame with 10,000 errors over all of the text allocates under 1 MB more than one with one such error, where
+  reading them for each line in view took 8.4 MB;
 - hover: the diagnostics' messages, with their codes, above the server's Markdown, whose code block is highlighted with
   the document's grammar in the editor's font, colors and background; in the app's tooltip, in the window's overlay
   layer, inside a window narrower than the tooltip. An editor in a dark `ThemeVariantScope` of a light window shows a
@@ -812,7 +816,8 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   every key, its lines built beforehand off the UI thread, and drawing the frame after it, takes the UI thread 7.0 ms;
   every line in view draws again. The largest batch of diagnostics, 10,000 one-character errors apart, all of them on
   the screen of a 4K window: preparing it takes the server's thread 0.9 ms, 4.0 ms when it is about text 100 edits
-  old; taking it in takes the UI thread 13 µs, 79 µs after 100 edits since; drawing the squiggles 2.9 ms; and the
+  old; taking it in takes the UI thread 13 µs, 79 µs after 100 edits since; drawing the squiggles 2.9 ms, and 3.2 ms
+  with each error over all of the text; and the
   headless frame, which also rasterizes, 107 ms against 92 ms without diagnostics. Finding what a hover shows among
   10,000 on one character, each one found beating those before, takes 0.75 ms. Taking a server's tokens on every
   character of the 32 lines on screen of an 800 by 600 window, 3,000 a line, and drawing the frame after it takes
