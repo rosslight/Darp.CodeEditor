@@ -119,7 +119,10 @@ internal sealed class HoverController : IDisposable
     /// </summary>
     private void OnPointerHover(object? sender, PointerEventArgs e)
     {
-        if (OffsetAt(e.GetPosition(_textView)) is not { } offset || _hovered?.Contains(offset) == true)
+        if (
+            OffsetAt(e.GetPosition(_textView)) is not { } offset
+            || (_hovered is { } current && IsHovered(current, offset))
+        )
             return;
         Close();
         var budget = new HoverBudget();
@@ -127,7 +130,8 @@ internal sealed class HoverController : IDisposable
             offset,
             WordAt(_buffer, offset),
             _document.CurrentSnapshot,
-            HoverBlocks.Of(_squiggles.At(offset), budget),
+            // Each diagnostic takes a line at least, so a hover never shows more of them than it has lines.
+            HoverBlocks.Of(_squiggles.At(offset, HoverBudget.MaxLines), budget),
             budget
         );
         _hovered = hovered;
@@ -187,7 +191,7 @@ internal sealed class HoverController : IDisposable
     {
         if (_hovered is not { } hovered)
             return;
-        if (OffsetAt(e.GetPosition(_textView)) is not { } offset || !hovered.Contains(offset))
+        if (OffsetAt(e.GetPosition(_textView)) is not { } offset || !IsHovered(hovered, offset))
             Close();
     }
 
@@ -218,6 +222,33 @@ internal sealed class HoverController : IDisposable
             return offset;
         Rect end = TextViewBoxes.CharacterAt(_textView, line.EndOffset);
         return point.X < end.Right ? line.EndOffset : null;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="offset"/> is in the hovered text: in its range, or further along a word that
+    /// <see cref="WordAt"/> cut, while only word characters lie between. The pointer reaches only the part of a line
+    /// that the view shows, its first 3,000 characters, so this reads at most that many.
+    /// </summary>
+    private bool IsHovered(Hovered hovered, int offset)
+    {
+        if (hovered.Contains(offset))
+            return true;
+        TextRange word = hovered.Word;
+        if (
+            word.Length == 0
+            || offset >= _buffer.TextLength
+            || !WordCharacters.IsWordCharacter(_buffer.GetCharAt(word.Start))
+        )
+        {
+            return false;
+        }
+        (int from, int to) = offset >= word.End ? (word.End, offset + 1) : (offset, word.Start);
+        for (int i = from; i < to; i++)
+        {
+            if (!WordCharacters.IsWordCharacter(_buffer.GetCharAt(i)))
+                return false;
+        }
+        return true;
     }
 
     /// <summary>

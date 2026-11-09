@@ -6,6 +6,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
+using Darp.CodeEditor.Diagnostics;
 using Darp.CodeEditor.Popups;
 
 namespace Darp.CodeEditor.Tests;
@@ -358,6 +359,66 @@ public sealed class HoverTests(UiFixture ui)
 
             await HoverAsync(window, text.IndexOf("fast", StringComparison.Ordinal), "fast is a word in");
             await fake.WaitForAsync($"cancel {id}");
+        });
+
+    [Fact]
+    public Task A_hover_takes_the_few_most_severe_diagnostics_of_however_many_there_are() =>
+        _ui.Run(() =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "word");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            TextSnapshot snapshot = document.CurrentSnapshot;
+            // 10,000 on one word, their severities taking turns from hints to errors.
+            document.SetDiagnostics([
+                .. Enumerable
+                    .Range(0, 10_000)
+                    .Select(i => new Diagnostic(
+                        snapshot,
+                        new TextRange(0, 4),
+                        (DiagnosticSeverity)(i % 4),
+                        null,
+                        $"{i}"
+                    )),
+            ]);
+            window.Layout();
+            using var squiggles = new SquiggleLayer(EditorWindow.PartOf(editor).TextArea, document);
+
+            IReadOnlyList<Diagnostic> shown = squiggles.At(1, HoverBudget.MaxLines);
+
+            // The errors, which come every fourth, in the server's order; no more than a hover has lines.
+            shown
+                .Select(d => d.Message)
+                .ShouldBe(Enumerable.Range(0, HoverBudget.MaxLines).Select(i => $"{4 * i + 3}"));
+        });
+
+    [Fact]
+    public Task The_popup_stays_over_a_word_longer_than_the_hovered_word_reaches() =>
+        _ui.Run(async () =>
+        {
+            string text = new string('x', 2_500) + " end";
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, text);
+            var editor = new CodeEditor { Document = document, WordWrap = true };
+            using var window = new EditorWindow(editor, height: 800);
+            document.SetDiagnostics([
+                new Diagnostic(
+                    document.CurrentSnapshot,
+                    new TextRange(0, 2_500),
+                    DiagnosticSeverity.Error,
+                    null,
+                    "long"
+                ),
+            ]);
+            ToolTip popup = await HoverAsync(window, 0, "long");
+
+            // Past where the hovered word was cut, in the same word.
+            window.MoveMouse(window.PointAt(HoverController.MaxWordReach + 1));
+            Popup(window).ShouldBeSameAs(popup);
+            window.MoveMouse(window.PointAt(2_499));
+            Popup(window).ShouldBeSameAs(popup);
+
+            window.MoveMouse(window.PointAt(text.IndexOf("end", StringComparison.Ordinal)));
+            Popup(window).ShouldBeNull();
         });
 
     [Fact]
