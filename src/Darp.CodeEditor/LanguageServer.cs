@@ -257,22 +257,29 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
         }
     }
 
-    /// <summary>
-    /// The server answered <c>initialize</c>, and the app's settings are computed: it runs, and gets its settings, then
-    /// the documents.
-    /// </summary>
-    internal void OnInitialized(ServerConnection connection, JsonRpcConnection rpc, bool isFullSync, JsonNode? settings)
+    /// <summary>The server answered <c>initialize</c>: it runs. Its documents open once its settings went out.</summary>
+    internal void OnInitialized(ServerConnection connection, JsonRpcConnection rpc, bool isFullSync)
     {
         bool changed;
         lock (_lock)
         {
             if (_connection != connection)
                 return;
-            connection.OnRunning(rpc, isFullSync, settings, _documents);
+            connection.OnRunning(rpc, isFullSync);
             changed = SetState(LanguageServerState.Running);
         }
         if (changed)
             OnStateChanged();
+    }
+
+    /// <summary>The start's settings are computed: the server gets them, then the documents open in it.</summary>
+    internal void OpenDocuments(ServerConnection connection, JsonNode? settings)
+    {
+        lock (_lock)
+        {
+            if (_connection == connection)
+                connection.OpenDocuments(settings, _documents);
+        }
     }
 
     /// <summary>
@@ -425,8 +432,9 @@ public sealed record LanguageServerOptions
     /// <summary>
     /// The app's settings for the server: gets the section, such as <c>yaml</c>, and the file or folder it is for, and
     /// returns the settings, or null when the app has none. The client sends all settings, the answer for a null
-    /// section, when the server starts and on <see cref="LanguageServer.NotifySettingsChanged"/>; servers that ask for
-    /// settings get the answers per section. Called on any thread.
+    /// section, when the server starts, before its documents open in it, and on
+    /// <see cref="LanguageServer.NotifySettingsChanged"/>; servers that ask for settings get the answers per section.
+    /// Called on any thread.
     /// </summary>
     public Func<LanguageServerSettingsRequest, JsonNode?>? Settings { get; init; }
 

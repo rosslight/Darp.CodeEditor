@@ -57,6 +57,12 @@ internal sealed class ServerConnection
     /// <summary>Guarded: the settings changed while they were computed, so another computation follows.</summary>
     private bool _isSettingsChangedAgain;
 
+    /// <summary>
+    /// Guarded: the start's settings went out, so documents open in the server. Until then, documents don't reach
+    /// it: they open afterwards, with their text and path of that moment.
+    /// </summary>
+    private bool _areDocumentsOpen;
+
     public ServerConnection(LanguageServer server, LanguageServerOptions options, Lock serverLock)
     {
         _server = server;
@@ -80,23 +86,28 @@ internal sealed class ServerConnection
     public void Start() => _run = Task.Run(RunAsync);
 
     /// <summary>
-    /// Guarded: the server answered <c>initialize</c>, and the app's settings are computed. Sends all settings, then
-    /// opens <paramref name="documents"/>, so that the server has its settings before it checks them.
+    /// Guarded: the server answered <c>initialize</c>, and <c>initialized</c> went out. It runs; its documents open once
+    /// the start's settings went out, in <see cref="OpenDocuments"/>.
     /// </summary>
-    /// <param name="rpc">The connection to the server.</param>
-    /// <param name="isFullSync">Whether the server wants the full text with every change.</param>
-    /// <param name="settings">All settings; null when the app's callback threw, which drops this push.</param>
-    /// <param name="documents">The server's open documents.</param>
-    public void OnRunning(
-        JsonRpcConnection rpc,
-        bool isFullSync,
-        JsonNode? settings,
-        IEnumerable<ServerDocument> documents
-    )
+    public void OnRunning(JsonRpcConnection rpc, bool isFullSync)
     {
         _running = new Running(rpc, _options.TimeProvider.GetTimestamp(), isFullSync);
+        _isComputingSettings = true;
+    }
+
+    /// <summary>
+    /// Guarded: the app's settings for the start are computed. Sends them, then opens <paramref name="documents"/>, so
+    /// that the server has its settings before it checks them.
+    /// </summary>
+    /// <param name="settings">All settings; null when the app's callback threw, which drops this push.</param>
+    /// <param name="documents">The server's open documents.</param>
+    public void OpenDocuments(JsonNode? settings, IEnumerable<ServerDocument> documents)
+    {
+        if (_running is not { } running)
+            return;
         if (settings is not null)
-            SendSettings(rpc, settings);
+            SendSettings(running.Rpc, settings);
+        _areDocumentsOpen = true;
         foreach (ServerDocument document in documents)
             Open(document);
         SettingsComputed();
@@ -105,7 +116,7 @@ internal sealed class ServerConnection
     /// <summary>Guarded: opens a document in the running server, with its current text.</summary>
     public void Open(ServerDocument document)
     {
-        if (_running is { } running)
+        if (_running is { } running && _areDocumentsOpen)
             _documents[document] = new OpenDocument(this, running, document);
     }
 
@@ -237,15 +248,14 @@ internal sealed class ServerConnection
                         writer.WriteEndObject();
                     }
                 );
+                _server.OnInitialized(this, rpc, isFullSync);
+                _initialized.TrySetResult(null);
                 // All settings go before the documents. The app's callback may block: the end of the process
                 // abandons the wait, and the answer is dropped.
-                lock (_lock)
-                    _isComputingSettings = true;
                 Task<JsonNode?> settings = Task.Run(AllSettings);
                 if (await Task.WhenAny(settings, ended).ConfigureAwait(false) == settings)
                 {
-                    _server.OnInitialized(this, rpc, isFullSync, await settings.ConfigureAwait(false));
-                    _initialized.TrySetResult(null);
+                    _server.OpenDocuments(this, await settings.ConfigureAwait(false));
                     await ended.ConfigureAwait(false);
                 }
             }

@@ -148,14 +148,58 @@ public sealed class ServerRequestsTests(UiFixture ui)
             );
             try
             {
-                Task start = server.StartAsync();
+                await Wait.ForAsync(server.StartAsync());
                 await Wait.ForAsync(entered.Task);
 
                 await Wait.ForAsync(server.DisposeAsync().AsTask());
 
                 server.State.ShouldBe(LanguageServerState.Stopped);
                 FakeServer.HasEnded(fake.ProcessIds[0]).ShouldBeTrue();
-                await Should.ThrowAsync<ObjectDisposedException>(Wait.ForAsync(start));
+            }
+            finally
+            {
+                release.Set();
+            }
+        });
+
+    [Fact]
+    public Task StartAsync_completes_while_the_starts_settings_block_and_documents_wait_for_them() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            var release = new ManualResetEventSlim();
+            using var server = new LanguageServer(
+                fake.Options with
+                {
+                    Settings = request =>
+                    {
+                        if (request.Section is null)
+                            release.Wait();
+                        return null;
+                    },
+                }
+            );
+            string path = Path.Combine(AppContext.BaseDirectory, "waiting.txt");
+            try
+            {
+                using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "before");
+
+                await Wait.ForAsync(server.StartAsync());
+
+                server.State.ShouldBe(LanguageServerState.Running);
+                await fake.WaitForAsync("initialized");
+                // While the settings are computed, no edit and no new path reaches the server: the didOpen that
+                // follows the settings takes them.
+                document.Replace(new TextRange(6, 0), " and after");
+                document.FilePath = path;
+                fake.LinesStartingWith("open ").ShouldBeEmpty();
+                release.Set();
+                await Wait.UntilAsync(() => document.Diagnostics is [{ Message: "before and after" }]);
+                List<string> lines = [.. fake.Lines];
+                string opened = $"open {new Uri(path).AbsoluteUri} plaintext {document.CurrentSnapshot.Version}";
+                lines.Where(line => line.StartsWith("open ")).ShouldBe([opened]);
+                lines.IndexOf("configuration changed {\"settings\":{}}").ShouldBeLessThan(lines.IndexOf(opened));
+                lines.ShouldNotContain(line => line.StartsWith("change ") || line.StartsWith("close "));
             }
             finally
             {

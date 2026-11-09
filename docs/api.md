@@ -265,10 +265,10 @@ How the client talks to a server, where the protocol leaves a choice:
   client sends `workspace/didChangeConfiguration` with all settings: the answer of `Settings` for a null section, or
   `{}` without one, never `null`. Some servers read their settings only there, such as VS Code's JSON server with its
   `json.schemas`; others ask with `workspace/configuration`, which `Settings` answers per section. `Settings` runs on
-  the thread pool for both. At the start, the server runs and the documents open once the settings are sent, so a
-  callback that blocks holds them back; later, it holds back only the settings. Disposal and restarts never wait for
-  it, and its late answer is dropped. A callback that throws drops its push. One computation runs at a time: changes
-  meanwhile make one more.
+  the thread pool for both. At the start, the server runs once it answered `initialize`, and `StartAsync` completes
+  then; its documents open once the settings went out, so a callback that blocks holds back the documents' opening
+  and the settings, and later only the settings. Disposal and restarts never wait for it, and its late answer is
+  dropped. A callback that throws drops its push. One computation runs at a time: changes meanwhile make one more.
 - **Not reading:** when more than 10,000 messages wait to be written to a server, counting its requests that still
   run, the server does not read what it is sent, and its process ends as a crash. A document closed before its
   `didOpen` was written sends nothing, and a closed document keeps no text while its messages wait.
