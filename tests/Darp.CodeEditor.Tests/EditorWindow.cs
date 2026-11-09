@@ -184,12 +184,39 @@ internal sealed class EditorWindow : IDisposable
             ) ?? throw new InvalidOperationException("The text view is not in the window.");
     }
 
-    /// <summary>Renders a frame, and counts its pixels of <paramref name="color"/> in <paramref name="area"/> of the window.</summary>
-    public int RenderAndCountPixels(Color color, Rect area)
+    /// <summary>
+    /// Renders a frame, and counts its pixels of <paramref name="color"/>, give or take <paramref name="tolerance"/>, in
+    /// <paramref name="area"/> of the window.
+    /// </summary>
+    public int RenderAndCountPixels(Color color, Rect area, int tolerance = 8)
     {
         using WriteableBitmap frame =
             Window.CaptureRenderedFrame() ?? throw new InvalidOperationException("Nothing was rendered.");
-        return CountPixels(frame, color, area: PixelRect.FromRect(area, 1));
+        return CountPixels(frame, color, tolerance, PixelRect.FromRect(area, 1));
+    }
+
+    /// <summary>
+    /// Where the text view draws the character at <paramref name="offset"/>, in the window: as wide as the text layout
+    /// bounds it, also in right-to-left text, and as high as its row.
+    /// </summary>
+    public Rect CharacterArea(int offset)
+    {
+        TextView textView = TextView;
+        textView.EnsureVisualLines();
+        DocumentLine line = textView.Document.GetLineByOffset(offset);
+        VisualLine visualLine =
+            textView.GetVisualLine(line.LineNumber) ?? throw new InvalidOperationException("The line is not in view.");
+        int column = visualLine.GetVisualColumn(offset - line.Offset);
+        TextLine row = visualLine.GetTextLine(column);
+        Rect[] bounds = [.. row.GetTextBounds(column, 1).Select(b => b.Rectangle)];
+        double left = bounds.Min(b => b.Left);
+        double top = visualLine.GetTextLineVisualYPosition(row, VisualYPosition.LineTop);
+        double bottom = visualLine.GetTextLineVisualYPosition(row, VisualYPosition.LineBottom);
+        Point topLeft = new Point(left, top) - textView.ScrollOffset;
+        Point origin =
+            textView.TranslatePoint(topLeft, Window)
+            ?? throw new InvalidOperationException("The text view is not in the window.");
+        return new Rect(origin, new Size(bounds.Max(b => b.Right) - left, bottom - top));
     }
 
     private static int CountPixels(WriteableBitmap frame, Color color, int tolerance = 8, PixelRect? area = null)

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Avalonia;
 using Avalonia.Media;
+using Avalonia.Media.TextFormatting;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
@@ -88,9 +89,9 @@ internal sealed class SquiggleLayer : SelectionOverlay
     }
 
     /// <remarks>
-    /// Each line in view is read only where the view shows it: in the shown part of a long line, and between the view's
-    /// edges, so that what lies in a hidden tail, beyond the right edge or in rows of a wrapped line above or below the
-    /// view costs nothing. Diagnostics that overlap draw one squiggle, so their ranges are merged first, by severity: the
+    /// Each line in view is read only where the view shows it: in the shown part of a long line, and in the rows of a
+    /// wrapped line between the view's top and bottom edges, so that what lies in a hidden tail or in rows above or
+    /// below the view costs nothing. Diagnostics that overlap draw one squiggle, so their ranges are merged first, by severity: the
     /// waves and dots drawn grow with the text on screen, not with the diagnostics. Where they go is measured once per
     /// row of text, not once per squiggle: see <see cref="LineBoxes"/>.
     /// </remarks>
@@ -112,7 +113,8 @@ internal sealed class SquiggleLayer : SelectionOverlay
         foreach (VisualLine visualLine in textView.VisualLines)
         {
             DocumentLine line = visualLine.FirstDocumentLine;
-            (int lineStart, int shownEnd) = OnScreen(textView, visualLine);
+            if (OnScreen(textView, visualLine) is not var (lineStart, shownEnd))
+                continue;
             bool any = false;
             foreach (DiagnosticMarker marker in markers.FindOverlappingSegments(lineStart, shownEnd - lineStart))
             {
@@ -216,21 +218,34 @@ internal sealed class SquiggleLayer : SelectionOverlay
     }
 
     /// <summary>
-    /// The offsets of <paramref name="visualLine"/> that the view shows: from where its top left edge meets the line to
-    /// where its bottom right edge does, a character more on either side, within the shown part of the line.
+    /// The offsets of <paramref name="visualLine"/> that the view shows: those of its rows between the view's top and
+    /// bottom edges, within the shown part of the line; null when none is. Whole rows: right-to-left text puts a row's
+    /// offsets in another order across the screen than along the text, while a row holds a stretch of the text.
     /// </summary>
-    private static (int Start, int End) OnScreen(TextView textView, VisualLine visualLine)
+    private static (int Start, int End)? OnScreen(TextView textView, VisualLine visualLine)
     {
+        // In the view's coordinates of the whole text, as the line places its rows.
+        double top = textView.ScrollOffset.Y;
+        double bottom = top + textView.Bounds.Height;
+        double rowTop = visualLine.VisualTop;
+        int column = 0;
+        (int First, int End)? columns = null;
+        foreach (TextLine row in visualLine.TextLines)
+        {
+            double rowBottom = rowTop + Math.Max(row.Height, textView.DefaultLineHeight);
+            if (rowBottom > top && rowTop < bottom)
+                columns = (columns?.First ?? column, column + row.Length);
+            column += row.Length;
+            rowTop = rowBottom;
+        }
+        if (columns is not var (first, end))
+            return null;
         DocumentLine line = visualLine.FirstDocumentLine;
-        // In the view's coordinates of the whole text, as the line's hit tests take them.
-        Rect view = new Rect(textView.Bounds.Size).Translate(textView.ScrollOffset);
-        double top = Math.Max(view.Top, visualLine.VisualTop);
-        double bottom = Math.Min(view.Bottom, visualLine.VisualTop + visualLine.Height) - 1;
-        int first = visualLine.GetVisualColumnFloor(new Point(view.Left, top));
-        int last = visualLine.GetVisualColumn(new Point(view.Right, Math.Max(top, bottom)));
-        int start = Math.Max(line.Offset, line.Offset + visualLine.GetRelativeOffset(first) - 1);
-        int end = Math.Min(VisibleText.End(line), line.Offset + visualLine.GetRelativeOffset(last) + 1);
-        return (start, Math.Max(start, end));
+        int start = line.Offset + visualLine.GetRelativeOffset(first);
+        return (
+            start,
+            Math.Max(start, Math.Min(VisibleText.End(line), line.Offset + visualLine.GetRelativeOffset(end)))
+        );
     }
 
     public override void Dispose()

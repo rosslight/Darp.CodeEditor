@@ -121,6 +121,34 @@ public sealed class SquiggleTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Squiggles_show_under_right_to_left_and_mixed_text() =>
+        _ui.Run(async () =>
+        {
+            // Right to left across the screen, and both ways on one line.
+            const string text = "שלום עולם\nabc שלום def";
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document, ColorTheme = Marks() });
+            TextRange[] words =
+            [
+                Range(text, "שלום"),
+                Range(text, "עולם"),
+                Range(text, "abc"),
+                new(text.LastIndexOf("שלום", StringComparison.Ordinal), 4),
+                Range(text, "def"),
+            ];
+
+            document.SetDiagnostics([.. words.Select(word => Diagnostic(document, word, DiagnosticSeverity.Error))]);
+
+            await Wait.UntilAsync(() =>
+                words.All(word =>
+                    Enumerable
+                        .Range(word.Start, word.Length)
+                        .All(offset => window.RenderAndCountPixels(s_error, window.CharacterArea(offset), Smoothed) > 0)
+                )
+            );
+        });
+
+    [Fact]
     public Task Squiggles_of_one_severity_that_overlap_all_show() =>
         _ui.Run(async () =>
         {
