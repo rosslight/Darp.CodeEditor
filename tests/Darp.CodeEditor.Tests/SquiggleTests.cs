@@ -1,4 +1,6 @@
 using Avalonia.Media;
+using Avalonia.Threading;
+using Darp.CodeEditor.Diagnostics;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -101,6 +103,24 @@ public sealed class SquiggleTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Squiggles_stay_on_their_text_through_edits_while_they_arrive_and_while_no_editor_shows_them() =>
+        _ui.Run(async () =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "let value = 1");
+            document.SetDiagnostics([Diagnostic(document, new TextRange(4, 5), DiagnosticSeverity.Error)]);
+            // Before the UI thread takes the diagnostics in, and after.
+            document.Replace(new TextRange(0, 0), "xx");
+            Dispatcher.UIThread.RunJobs();
+            document.Replace(new TextRange(0, 0), "y");
+
+            using var window = new EditorWindow(new CodeEditor { Document = document, ColorTheme = Marks() });
+
+            // "yxxlet value = 1"
+            await Wait.UntilAsync(() => IsUnderEach(window, s_error, new TextRange(7, 5)));
+            window.RenderAndCountPixels(s_error, new TextRange(0, 7), Smoothed).ShouldBe(0);
+        });
+
+    [Fact]
     public Task Squiggles_of_one_severity_that_overlap_all_show() =>
         _ui.Run(async () =>
         {
@@ -126,8 +146,8 @@ public sealed class SquiggleTests(UiFixture ui)
             CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "a word here");
             using var window = new EditorWindow(new CodeEditor { Document = document, ColorTheme = Marks() });
 
-            long one = FrameAllocations(window, document, 1);
-            long many = FrameAllocations(window, document, 10_000);
+            long one = FrameAllocations(window, document, Errors(document, 1));
+            long many = FrameAllocations(window, document, Errors(document, 10_000));
 
             // Their ranges merge before any shape is made; AvaloniaEdit's search still lists each, a few bytes each.
             // Drawn one by one, they took 9.7 MB more.
@@ -135,18 +155,74 @@ public sealed class SquiggleTests(UiFixture ui)
             IsUnderEach(window, s_error, new TextRange(2, 4)).ShouldBeTrue();
         });
 
-    /// <summary>
-    /// What a frame allocates on the UI thread with <paramref name="count"/> errors on one word, the squiggles drawing
-    /// again in it.
-    /// </summary>
-    private static long FrameAllocations(EditorWindow window, CodeDocument document, int count)
-    {
-        TextSnapshot snapshot = document.CurrentSnapshot;
-        document.SetDiagnostics([
+    [Fact]
+    public Task Editors_take_the_10000_most_severe_of_a_documents_diagnostics() =>
+        _ui.Run(() =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "a word here");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            TextSnapshot snapshot = document.CurrentSnapshot;
+            // 100,000 on one word, their severities taking turns from hints to errors: 25,000 errors.
+            document.SetDiagnostics([
+                .. Enumerable
+                    .Range(0, 100_000)
+                    .Select(i => new Diagnostic(
+                        snapshot,
+                        new TextRange(2, 4),
+                        (DiagnosticSeverity)(i % 4),
+                        null,
+                        $"{i}"
+                    )),
+            ]);
+            window.Layout();
+            using var squiggles = new SquiggleLayer(EditorWindow.PartOf(editor).TextArea, document);
+
+            IReadOnlyList<Diagnostic> taken = squiggles.At(3, 20_000);
+
+            // The document keeps them all; its editors the first 10,000 errors.
+            document.Diagnostics.Count.ShouldBe(100_000);
+            taken.Count.ShouldBe(DiagnosticsBatch.MaxShown);
+            taken.ShouldAllBe(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+            taken[^1].Message.ShouldBe($"{4 * (DiagnosticsBatch.MaxShown - 1) + 3}");
+        });
+
+    [Fact]
+    public Task Diagnostics_from_a_servers_thread_cost_the_UI_thread_nothing_each() =>
+        _ui.Run(() =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "a word here");
+            IReadOnlyList<Diagnostic> many = Errors(document, 100_000);
+            // As a server's arrive: chosen, and put in the text, on its thread.
+            Task.Run(() => document.SetDiagnostics(many)).Wait();
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            Dispatcher.UIThread.RunJobs();
+            long taken = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            document.Diagnostics.Count.ShouldBe(100_000);
+            document.ShownDiagnostics.Count.ShouldBe(DiagnosticsBatch.MaxShown);
+            // Put in the text on this thread, the 10,000 shown took 0.9 MB.
+            taken.ShouldBeLessThan(100_000);
+        });
+
+    private static IReadOnlyList<Diagnostic> Errors(CodeDocument document, int count) =>
+        [
             .. Enumerable
                 .Range(0, count)
-                .Select(_ => Diagnostic(document, new TextRange(2, 4), DiagnosticSeverity.Error, snapshot)),
-        ]);
+                .Select(_ => Diagnostic(document, new TextRange(2, 4), DiagnosticSeverity.Error)),
+        ];
+
+    /// <summary>
+    /// What a frame allocates on the UI thread with <paramref name="diagnostics"/>, the squiggles drawing again in it.
+    /// </summary>
+    private static long FrameAllocations(
+        EditorWindow window,
+        CodeDocument document,
+        IReadOnlyList<Diagnostic> diagnostics
+    )
+    {
+        document.SetDiagnostics(diagnostics);
         window.Render();
         // Lines built again draw the layers again; the first frame of them also builds what later ones reuse.
         window.TextView.Redraw();

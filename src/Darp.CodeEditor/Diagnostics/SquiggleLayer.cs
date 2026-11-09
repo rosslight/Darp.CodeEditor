@@ -17,10 +17,9 @@ namespace Darp.CodeEditor.Diagnostics;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A diagnostic's range is about its snapshot. The layer maps it to the current text once, when the diagnostics arrive,
-/// and from then on it moves with the text as the user types, until the next diagnostics replace it. Text typed at
-/// either edge stays outside it, as <see cref="CodeDocument.MapToCurrent"/> keeps it. An empty range is drawn one
-/// character wide.
+/// A diagnostic's range is about its snapshot. The document maps it to the current text once, when the diagnostics
+/// arrive, for all of its editors, and from then on it moves with the text as the user types, until the next
+/// diagnostics replace it: see <see cref="CodeDocument.ShownDiagnostics"/>. An empty range is drawn one character wide.
 /// </para>
 /// <para>
 /// Drawing reads only the diagnostics in view, so its cost grows with what the view shows, not with the document.
@@ -32,10 +31,6 @@ internal sealed class SquiggleLayer : SelectionOverlay
     private const double HalfWave = 3;
 
     private readonly CodeDocument _document;
-    private readonly TextDocument _buffer;
-
-    /// <summary>The diagnostics in the current text: they follow every change of it.</summary>
-    private readonly TextSegmentCollection<Marker> _markers;
 
     private TextAreaColors? _colors;
 
@@ -43,10 +38,7 @@ internal sealed class SquiggleLayer : SelectionOverlay
         : base(textArea)
     {
         _document = document;
-        _buffer = textArea.Document;
-        _markers = new TextSegmentCollection<Marker>(_buffer);
         document.PropertyChanged += OnDocumentPropertyChanged;
-        ReadDiagnostics();
     }
 
     /// <summary>The colors of the color theme, once it is loaded.</summary>
@@ -74,8 +66,8 @@ internal sealed class SquiggleLayer : SelectionOverlay
         if (count <= 0)
             return [];
         // By their rank negated: the worst kept is the first to give way.
-        var kept = new PriorityQueue<Marker, int>(count + 1);
-        foreach (Marker marker in _markers.FindSegmentsContaining(offset))
+        var kept = new PriorityQueue<DiagnosticMarker, int>(count + 1);
+        foreach (DiagnosticMarker marker in _document.ShownDiagnostics.FindSegmentsContaining(offset))
         {
             if (kept.Count == count && kept.TryPeek(out _, out int worst) && -marker.Rank <= worst)
                 continue;
@@ -100,7 +92,8 @@ internal sealed class SquiggleLayer : SelectionOverlay
     public override void Render(DrawingContext context)
     {
         TextView textView = TextArea.TextView;
-        if (_colors is not { } colors || _markers.Count == 0 || !textView.VisualLinesValid)
+        TextSegmentCollection<DiagnosticMarker> markers = _document.ShownDiagnostics;
+        if (_colors is not { } colors || markers.Count == 0 || !textView.VisualLinesValid)
             return;
         if (textView.VisualLines is not [VisualLine first, ..] || textView.VisualLines[^1] is not { } last)
             return;
@@ -111,7 +104,9 @@ internal sealed class SquiggleLayer : SelectionOverlay
         var starts = new List<int>[4];
         for (int severity = 0; severity < 4; severity++)
             (ranges[severity], starts[severity]) = ([], []);
-        foreach (Marker marker in _markers.FindOverlappingSegments(start, last.LastDocumentLine.EndOffset - start))
+        foreach (
+            DiagnosticMarker marker in markers.FindOverlappingSegments(start, last.LastDocumentLine.EndOffset - start)
+        )
         {
             int severity = (int)marker.Diagnostic.Severity;
             // Reading the offset walks the segments' tree: once each.
@@ -169,41 +164,13 @@ internal sealed class SquiggleLayer : SelectionOverlay
     {
         base.Dispose();
         _document.PropertyChanged -= OnDocumentPropertyChanged;
-        _markers.Disconnect(_buffer);
     }
 
     /// <summary>The diagnostics changed: raised on the UI thread.</summary>
     private void OnDocumentPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(CodeDocument.Diagnostics))
-            ReadDiagnostics();
-    }
-
-    /// <summary>Replaces the markers with the document's diagnostics, mapped to the current text.</summary>
-    private void ReadDiagnostics()
-    {
-        _markers.Clear();
-        IReadOnlyList<Diagnostic> diagnostics = _document.Diagnostics;
-        // Each one's place in the hover, counted by severity: the errors from 0 on in the server's order, then the
-        // warnings, and so on.
-        var nextRank = new int[4];
-        foreach (Diagnostic diagnostic in diagnostics)
-        {
-            for (int lower = 0; lower < (int)diagnostic.Severity; lower++)
-                nextRank[lower]++;
-        }
-        foreach (Diagnostic diagnostic in diagnostics)
-        {
-            TextRange range = _document.MapToCurrent(diagnostic.Snapshot, diagnostic.Range);
-            _markers.Add(
-                new Marker(diagnostic, nextRank[(int)diagnostic.Severity]++)
-                {
-                    StartOffset = range.Start,
-                    Length = range.Length,
-                }
-            );
-        }
-        InvalidateVisual();
+            InvalidateVisual();
     }
 
     /// <summary>
@@ -242,14 +209,5 @@ internal sealed class SquiggleLayer : SelectionOverlay
             figure.ArcTo(new Point(x - 1, y), new Size(1, 1), 0, false, SweepDirection.Clockwise);
             figure.EndFigure(isClosed: true);
         }
-    }
-
-    /// <summary>A diagnostic in the current text.</summary>
-    private sealed class Marker(Diagnostic diagnostic, int rank) : TextSegment
-    {
-        public Diagnostic Diagnostic { get; } = diagnostic;
-
-        /// <summary>Its place in a hover: the most severe first, then in the server's order.</summary>
-        public int Rank { get; } = rank;
     }
 }
