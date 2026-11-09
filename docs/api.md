@@ -121,8 +121,9 @@ template at the caret: `document.Replace(editor.Selection.Range, snippet)`. Sett
 
 **Keys:** the editor handles only its own: editing, navigation, search (Ctrl+F, Ctrl+H, F3), completion (Ctrl+Space),
 comments (Ctrl+/) and indentation (Tab, Shift+Tab). On macOS, Cmd takes Ctrl's place, except for completion, and
-Cmd+Alt+F opens the replace bar, as AvaloniaEdit decides by the operating system. Other keys, such as F5 or Ctrl+S,
-reach the app's key bindings.
+Cmd+Alt+F opens the replace bar, as AvaloniaEdit decides by the operating system. While completion's list shows, Up,
+Down, Page Up, Page Down, Enter, Tab and Escape are its; while signature help shows several signatures, Up and Down
+are its. Other keys, such as F5 or Ctrl+S, reach the app's key bindings.
 
 **Indentation** belongs to the document (`CodeDocument.Indentation`), so all editors of one document agree. It starts
 as in VS Code, 2 spaces for YAML and 4 otherwise, and is not detected from the text.
@@ -170,9 +171,14 @@ high contrast inherits from Light, so it shows Light+ without one. To make one e
   server's information.
 - **Hover:** Markdown, with emphasis, inline code, lists and links. Code blocks are highlighted with the editor's
   grammar and colors.
+- **Completion:** a list of up to 12 items at once below the word, or above it when only that side has room, in the
+  app's flyout, with rows in the app's look of list items as dense as the editor's lines and labels in the editor's
+  font; the selected item's details beside it, in a flyout of their own.
 - **Completion icons:** VS Code's codicons, drawn as vector shapes in the theme's `symbolIcon.*` colors, as in VS
-  Code. Their designs are licensed CC BY 4.0: the package lists them in its third-party notices, and apps that show
-  notices of their own include that entry.
+  Code, and in VS Code's colors where the theme sets none. Their designs are licensed CC BY 4.0: the package lists
+  them in its third-party notices, and apps that show notices of their own include that entry.
+- **Signature help:** in the app's tooltip above the caret's line, so that completion's list shows below it; the
+  signature as code, in the editor's font, colors and background.
 
 **Before v1, additive:** marks beside the scroll bar for errors, warnings and search matches, as Monaco's overview
 ruler shows them. Scripts of 5,000 lines need them to find errors outside the view. They add to the API without
@@ -241,9 +247,14 @@ follows the edits made since, so clicking an error after typing above it still l
 - **Not in v1:** pulled diagnostics, workspace edits, file watching, code actions, formatting, rename. The client does not advertise them.
 
 A server that needs pulled diagnostics would add them to v1. The client advertises only what it implements, so
-servers fall back where they can. So far that is the lifecycle, documents, settings, pushed diagnostics, hover (Markdown
-and plain text) and semantic tokens (range and full, in the relative format, with the protocol's standard token types and
-modifiers); completion and signature help follow.
+servers fall back where they can: the lifecycle, documents, settings, pushed diagnostics, hover (Markdown and plain
+text), semantic tokens (range and full, in the relative format, with the protocol's standard token types and modifiers),
+completion and signature help. Completion items may have documentation in Markdown or plain text, commit characters,
+a deprecated flag or tag, preselection, an edit that inserts or replaces, and any of the protocol's 25 kinds; their
+detail, documentation and additional edits may come when they are resolved, and the request says how completion was
+asked for. Items are inserted as their text is: the client advertises no snippets. Signatures may have documentation
+in Markdown or plain text, parameters labelled by offsets, and an active parameter of their own, and the request says
+how it was asked for.
 
 How the client talks to a server, where the protocol leaves a choice:
 
@@ -278,14 +289,17 @@ How the client talks to a server, where the protocol leaves a choice:
   with it, through a Job Object. On Linux and macOS the process ends once the server notices that its standard input
   closed or that the app's process, whose id it gets in `initialize`, is gone, as the protocol asks servers to do.
 - **Capabilities** of the server that have another JSON type than the protocol says count as not given.
-- **Editors ask, documents don't.** Only an editor that shows a document asks for its hover and semantic tokens; a
-  document that no editor shows costs the server nothing but its text. Editors never wait for an answer. Their
-  requests take the path of every request, with its hang limit, and a server's error or an answer of another shape
-  shows nothing. An answer counts only for the text that was current when the editor asked: the document's changes
-  reach the server before the request, and an answer that comes after an edit is dropped. Editors ask only once the
-  document is open in the server's process, after the start's settings went out: until then they get nothing, and
-  when it opens there, not when the server runs, they learn that the server serves it, so a hover ends and semantic
-  tokens are asked for again.
+- **Editors ask, documents don't.** Only an editor that shows a document asks for its hover, semantic tokens,
+  completion and signature help; a document that no editor shows costs the server nothing but its text, so the
+  documents that editors show go first. Editors never wait for an answer, and keep no queue of their own: each editor
+  asks at once, and an editor that loses the keyboard focus cancels what it asked for completion and signature help.
+  Their requests take the path of every request, with its hang limit, and a server's error or an answer of another
+  shape shows nothing. An answer counts only for the text that was current when the editor asked: the document's
+  changes reach the server before the request, and an answer that comes after an edit is dropped, except
+  completion's, which the typing since filters. Editors ask only once the document is open in the server's process,
+  after the start's settings went out: until then they get nothing, and when it opens there, not when the server
+  runs, they learn that the server serves it, so a hover, completion and signature help end, and semantic tokens are
+  asked for again.
 - **Hover** is asked when the pointer rests on a character for 400 ms, as long as Avalonia's tooltips wait (it is
   AvaloniaEdit's hover time), at that character's position, or at a line's end within a space's width after it, where
   an empty diagnostic's squiggle is. A `MarkedString` with a language becomes a Markdown code
@@ -356,6 +370,50 @@ How the client talks to a server, where the protocol leaves a choice:
   colors alone take 55 ms for 300 tokens a line. Of that, the UI thread's own work, taking the tokens and laying out
   the lines with their colors, takes 35 ms, and 28 ms with 300 tokens a line, about 4.4 µs a colored token: the limit
   keeps it bounded, not within a frame (BenchmarkDotNet, i7-13700).
+- **Completion** behaves as VS Code's by default. It is asked for at the caret on Ctrl+Space, also on macOS, and when
+  typing starts a word outside a comment, as invoked; and on the server's trigger characters, as a trigger character.
+  VS Code also asks in strings for JSON and YAML, and the editor does not tell strings apart. Typing on in a word does
+  not ask again, also after Escape, until the next word or Ctrl+Space. The word before the caret goes by VS Code's word
+  characters, and items without an edit replace it up to the caret with their `insertText`, or their label. An item
+  whose edit is not on the caret's line, spans lines, or does not contain the caret, is left out, as VS Code leaves it
+  out, and one without a kind, or with a kind the protocol does not name, shows as a property.
+  - **Filtering and ranking** are on the client, as the user types, with VS Code's fuzzy matching (a port of its
+    `fuzzyScore`, which the C# server will share): the typed text from where an item's edit starts is matched against
+    its `filterText`, or its label, in order and ignoring case, and its first character must match at a word start, a
+    capital or after a separator. Before anything is typed, items are in the order of their `sortText`, or their
+    label, ignoring case, then of their label and kind; equal scores keep that order. The characters that matched show
+    in bold in the label. The first item is selected, or the first that the server preselects among those that match
+    best. There is no typo tolerance.
+  - **Asking again:** a list marked `isIncomplete` is asked for again on each character that the user types on in a
+    word, for incomplete completions, and shows meanwhile. Moving back before where completion was asked asks again
+    while a word is left, as invoked, as VS Code does. A newer request cancels the one under way with
+    `$/cancelRequest`, and so does ending completion; the answer of a request that is no longer the latest is
+    dropped. An answer that comes after typing is filtered with what was typed since.
+  - **Committing:** Enter, Tab, a click, or one of the item's commit characters, or the server's `allCommitCharacters`
+    for an item that names none, which then goes in. The item's `textEdit` applies: a text edit, or the insert range of
+    an insert and replace edit, as VS Code's default insert mode; its range grows by what was typed since it was
+    asked, as in VS Code. Its `additionalTextEdits`, such as an import, apply with it, as one step that the user undoes;
+    ones that overlap another edit are left out.
+  - **Resolving:** the selected item is resolved when it is selected, and the resolve of an item that is no longer
+    selected is cancelled. Its detail, as code highlighted with the document's grammar, and its documentation show
+    beside the list. Additional edits that the resolve brings only after the item was committed join the commit's
+    undo step while it is the last one; once the user moved on, they are dropped. Items resolve only in the process
+    that sent them.
+  - **Ending:** Escape, the caret leaving the line or moving back past the word, a selection, the list's line
+    scrolling out of view, the editor losing the keyboard focus, a server that starts or stops serving the document,
+    new colors, nothing left that matches a complete list, and the editor no longer showing the document.
+- **Signature help** is asked for on the server's trigger characters, and again at once on its retrigger characters
+  while it is open. While it is open, each edit and caret move restarts a pause of 120 ms, VS Code's, after which it
+  asks again for a change of the content; the pause runs on the options' `TimeProvider`. Asking again says that it is
+  a retrigger and sends the signature help that showed, with the signature the user chose. A newer request, and each
+  edit and caret move, cancels the one under way, and an answer about older text is dropped. An answer without
+  signatures, as outside a call, closes it. It shows the active signature, or the first, with the active parameter in
+  bold: the signature's own, or the answer's, or the first; one outside the parameters is none, as in VS Code. A
+  parameter labelled by a string is found as a whole word in the signature. The parameter's documentation shows
+  below, then the signature's; with several signatures, which one of how many. Up and Down show the others while
+  completion's list is closed. It ends on Escape, after completion's list, with no signature, when the editor loses
+  the keyboard focus, when a server starts or stops serving the document, with new colors, and when its line scrolls
+  out of view.
 - **Token colors** come from the color theme as in VS Code: its `semanticTokenColors`, matched by type, modifiers and
   language with VS Code's scores; otherwise its TextMate color of the scopes that VS Code's standard mapping gives the
   type and modifiers, such as `entity.name.type` for a class or `variable.other.constant` for a read-only variable.
@@ -681,7 +739,7 @@ Documents, languages and themes (sections 1 and 4) are implemented and tested. P
   0.8 ms.
 
 The editor (section 2) shows documents with background TextMate highlighting, search and the editing helpers, and a
-server's diagnostics, hover and semantic tokens (below); completion and signature help come next. Proven on linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered
+server's diagnostics, hover, semantic tokens, completion and signature help (below). Proven on linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered
 with Skia:
 
 - the budgets of the design's section 1.2 without a language server, on a quiet machine. Benchmarks measure them
@@ -836,9 +894,53 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   takes 6.8 ms with its frame; the frame alone about 5 ms. Without the limit on runs, 2,000 runs of one character took
   24 ms.
 
+Completion and signature help (sections 2 and 6) are implemented. Proven on linux-x64, with `dotnet test` and as
+NativeAOT, in headless windows rendered with Skia, against the fake server:
+
+- completion opens on Ctrl+Space, pressed with Control, on a trigger character, which the request names, and when
+  typing starts a word; not on typing on in a word, nor at the start of one that goes on, nor in a comment;
+- the ranking that the C# server will share gives the scores and the matched characters of VS Code's `fuzzyScore`
+  and `anyScore`: compared with VS Code 1.145's own code, without its emoji separators, on 25,000 random texts, also
+  beyond 128 characters, they agreed on all of them. Tests check prefixes before capitals inside words, equal scores in the server's order, a
+  filter text that decides while the label shows what matched, and the order of sort texts; in the editor, typing
+  filters on the client without asking again, the matched characters show in bold, and a preselected item is selected
+  among the best;
+- Enter, Tab, a click, the item's own commit character and the server's commit the selected item, each as one step
+  that the user undoes, and a commit character then goes in; an item's own commit characters replace the server's.
+  A text edit replaces its range, also grown by what was typed since; an insert and replace edit inserts; `insertText`
+  replaces the word;
+- the selected item's resolved detail, as code in the editor's foreground, and its Markdown show beside the list;
+  additional edits apply with the item in one step, and ones that come after the commit join its step, and are
+  dropped once the user typed on;
+- an incomplete list is asked for again on each character typed, for incomplete completions; a newer request and
+  Escape cancel the one under way with `$/cancelRequest`, and selecting another item cancels the resolve under way;
+- documents that no editor shows ask for nothing, and an editor that loses the keyboard focus cancels its request,
+  while the editor that has it gets its list;
+- icons in Light+ and Dark+ in VS Code's light and dark colors, and in a theme's own `symbolIcon.methodForeground`, in
+  the rendered pixels; the list in a dark `ThemeVariantScope` of a light window as a dark flyout, in its pixels,
+  inside a small window, and above its line when there is no room below;
+- completion ends on Escape, on leaving the word, on focus loss, when its line scrolls out of view, and when the
+  server stops serving the document;
+- signature help opens on "(" with the active parameter in bold and its Markdown, moves the parameter at once on ",",
+  asks again only after 120 ms without an edit, with a clock that the test advances, shows the other signatures on
+  Up and Down, tells the server the one that shows, which keeps it, and leaves Up and Down to an open completion
+  list; it shows above the line while completion's list shows below, and ends on Escape, on leaving the call, on
+  focus loss and when the server stops serving the document;
+- the client advertises exactly what it implements, snippets not;
+- on linux-x64 (BenchmarkDotNet, i7-13700, warm), in 5,000 lines of JSON, against the fake server answering at once
+  with 1,000 items: from Ctrl+Space until a rendered frame shows the list takes 17 ms (median 16.9 ms, p95 19.0 ms),
+  within the budget of 50 ms; typing a character that filters the open list to 125 items takes 19 ms with the frame
+  after it, of which the keystroke takes about 10 ms without completion.
+
 Still open:
 
-- hover and semantic tokens against a real server, such as yaml-language-server, and the C# server's once it exists;
+- hover, semantic tokens, completion and signature help against a real server, such as yaml-language-server, and the
+  C# server's once it exists, with the completion budget measured there;
+- a server answers the requests of the documents that editors show in its own order: the client cancels what an
+  editor no longer needs and asks for nothing that no editor shows, but cannot put one document's request ahead of
+  another's in the server. The C# server will take the shown document first;
+- the selected item's details beside the list make the popup wider, and in a narrow window it then moves left of the
+  word it completes; VS Code would show them on the other side or below;
 - opening a link through the app's launcher: headless windows have none, so tests check only which links open;
 - code blocks are highlighted with the document's grammar whatever language their fence names, and the hover is as
   wide as the app's tooltips allow, 320 pixels in Fluent; both wait for a use case that needs more;
