@@ -298,8 +298,11 @@ How the client talks to a server, where the protocol leaves a choice:
 - **The hover's size:** a hover shows at most 2,000 characters on 50 lines, in 250 runs of one style or color, the
   diagnostics' messages first; "…" marks where it was cut. The UI thread builds and lays out every run one by one, at
   about 10 µs a run and 1 µs a character, so the largest hover takes it about 2 ms, with the frame about 7 ms
-  (BenchmarkDotNet, i7-13700), and a tooltip that scrolls gains nothing from more. The text is cut before it is read,
-  so the work in the background is bounded too.
+  (BenchmarkDotNet, i7-13700), and a tooltip that scrolls gains nothing from more. Every piece of a hover's text, a
+  diagnostic's message and code as much as the server's answer, is cut in one place before anything else reads it,
+  so the work, in the background too, is bounded by these limits and not by what the server sends. Lines are counted
+  at `\r\n`, `\n` and `\r`, and also where the layout of text breaks them, such as the Unicode line separator; a cut
+  never splits a surrogate pair.
 - **Semantic tokens** are asked for the lines in view with `semanticTokens/range` when the server offers it, otherwise
   for the whole text with `semanticTokens/full`; never as deltas. An editor asks once it shows its first lines, 300 ms
   after the last edit, 100 ms after scrolling stops on lines without current tokens (VS Code's shortest pauses for a
@@ -735,7 +738,10 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   Markdown and highlighting its code stop part-way once it ended. A popup stays inside a window that narrows. An empty
   diagnostic at a line's end shows when the pointer rests where its squiggle is. A hover shows at most its characters,
   lines and runs, also for a diagnostic message of 100,000 characters, an answer of 1,000 lines and a paragraph of
-  800 runs, and the messages leave the server's hover only what they do not use;
+  800 runs, and the messages leave the server's hover only what they do not use. A diagnostic of 10 million
+  characters with a code allocates under 1 MB to be shown; lines count at `\r\n`, `\n`, `\r` and the line
+  separator; a cut keeps surrogate pairs whole; and a popup whose space is not a whole number of pixels stays inside
+  the window;
 - the Markdown subset: emphasis, also nested, paired as CommonMark pairs it, also in text with thousands of
   delimiters that never close, inline code, escapes, links that open only http and https pages, nested
   lists, hard line breaks, headings, rules and fenced code blocks; and hover answers as `MarkupContent`, `MarkedString`
