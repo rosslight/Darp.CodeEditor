@@ -23,7 +23,8 @@ namespace Darp.CodeEditor.Completion;
 /// is the server's for where it was asked: typing on filters and ranks it on the client, with the matching of
 /// <see cref="CompletionMatcher"/>, and selects the first item, or the one the server preselects among the best. A list
 /// that the server marks incomplete is asked for again as the user types on, and shows meanwhile. Moving back before
-/// where completion was asked asks again while a word is left, as VS Code does.
+/// where completion was asked, and any edit before it, as by another editor of the document, asks again while a word
+/// is left, as VS Code does when the caret moves back: the list's positions no longer fit the text.
 /// </para>
 /// <para>
 /// Up, Down, Page Up and Page Down select, and Enter, Tab, a click or one of the selected item's commit characters
@@ -60,6 +61,9 @@ internal sealed class CompletionController : IDisposable
     /// <summary>Cancels the resolve of the item committed last, whose additional edits are still to come.</summary>
     private CancellationTokenSource? _lateEdits;
 
+    /// <summary>Whether the change of the text under way made a request stale.</summary>
+    private bool _madeStale;
+
     public CompletionController(
         CodeEditor editor,
         TextArea textArea,
@@ -75,6 +79,8 @@ internal sealed class CompletionController : IDisposable
         _highlighter = highlighter;
         _popup = new EditorPopup(editor, _view.Root, below: true);
         _view.Clicked += OnClicked;
+        _buffer.Changing += OnBufferChanging;
+        _buffer.TextChanged += OnBufferTextChanged;
         _textArea.TextEntered += OnTextEntered;
         _textArea.Caret.PositionChanged += OnCaretPositionChanged;
         _document.LanguageFeaturesChanged += OnClosingChange;
@@ -183,6 +189,8 @@ internal sealed class CompletionController : IDisposable
         Close();
         _lateEdits?.Cancel();
         _view.Clicked -= OnClicked;
+        _buffer.Changing -= OnBufferChanging;
+        _buffer.TextChanged -= OnBufferTextChanged;
         _textArea.TextEntered -= OnTextEntered;
         _textArea.Caret.PositionChanged -= OnCaretPositionChanged;
         _document.LanguageFeaturesChanged -= OnClosingChange;
@@ -198,14 +206,7 @@ internal sealed class CompletionController : IDisposable
         int caret = _textArea.Caret.Offset;
         if (!_textArea.ReadOnlySectionProvider.CanInsert(caret))
             return;
-        TextLocation location = _buffer.GetLocation(caret);
-        var request = new Request(
-            _document.CurrentSnapshot,
-            WordBefore(caret),
-            location.Line,
-            location.Column,
-            new CancellationTokenSource()
-        );
+        var request = new Request(_document.CurrentSnapshot, WordBefore(caret));
         Session session = _session ??= new Session();
         session.Pending?.Cancellation.Cancel();
         session.Pending = request;
@@ -246,16 +247,18 @@ internal sealed class CompletionController : IDisposable
         if (_session is not { } session)
             return;
         int caret = _textArea.Caret.Offset;
-        TextLocation at = _buffer.GetLocation(caret);
         Request latest = session.Latest;
-        if (at.Line != latest.Line || !_textArea.Selection.IsEmpty)
+        if (
+            !_textArea.Selection.IsEmpty
+            || (!latest.IsStale && _buffer.GetLineByOffset(caret) != _buffer.GetLineByOffset(latest.Offset))
+        )
         {
             Close();
             return;
         }
-        if (at.Column < latest.Column)
+        if (latest.IsStale || caret < latest.Offset)
         {
-            // Back before where completion was asked: the list is for more text than there is.
+            // Back before where completion was asked, or the text before it changed: the list does not fit.
             if (WordBefore(caret).Length == 0)
             {
                 Close();
@@ -267,7 +270,7 @@ internal sealed class CompletionController : IDisposable
         }
         if (session.Answer is not { } answer)
             return;
-        if (answer.List.IsIncomplete && at.Column > latest.Column && WordBefore(caret).Length > 0)
+        if (answer.List.IsIncomplete && caret > latest.Offset && WordBefore(caret).Length > 0)
             Ask(new CompletionTrigger(CompletionTriggerKind.TriggerForIncompleteCompletions));
         Filter(session, answer, caret);
     }
@@ -278,13 +281,11 @@ internal sealed class CompletionController : IDisposable
     /// </summary>
     private void Filter(Session session, Answer answer, int caret)
     {
+        // While the request is not stale, its offsets up to where it was asked are the current text's.
         Request request = answer.Request;
-        DocumentLine line = _buffer.GetLineByOffset(caret);
-        // Where completion was asked, in the current text: the text before it on its line has not changed.
-        int asked = line.Offset + request.Column - 1;
-        if (caret < asked)
+        if (request.IsStale || caret < request.Offset)
         {
-            // Before the answer that shows was asked for: the newer request's answer shows.
+            // The answer no longer fits: the newer request's shows.
             Hide(session);
             return;
         }
@@ -294,7 +295,7 @@ internal sealed class CompletionController : IDisposable
         for (int i = 0; i < items.Count; i++)
         {
             CompletionItem item = items[i];
-            int start = asked - (request.Offset - item.Edit.Range.Start);
+            int start = item.Edit.Range.Start;
             if (!typed.TryGetValue(start, out string? text))
                 typed[start] = text = _buffer.GetText(start, caret - start);
             candidates[i] = new CompletionCandidate(text, item.Label, item.FilterText);
@@ -313,12 +314,14 @@ internal sealed class CompletionController : IDisposable
         // As VS Code: the first item, or the first that the server preselects among those that match best.
         int preselected = ranked.FindIndex(r => r.Score == ranked[0].Score && items[r.Index].IsPreselected);
         session.Selected = preselected > 0 ? preselected : 0;
-        int wordStart = asked - (request.Offset - request.Word.Start);
+        int wordStart = request.Word.Start;
         session.Place = () => TextViewBoxes.CharacterAt(_textView, Math.Min(wordStart, _buffer.TextLength));
         session.IsShowing = true;
         _view.Show(session.Items, session.Selected, Look(), _icons, Math.Ceiling(_textView.DefaultLineHeight) + 4);
         _popup.Show(_textView, session.Place);
-        ResolveSelected(session);
+        // Placing it may have ended completion, as its line is out of view.
+        if (_session == session)
+            ResolveSelected(session);
     }
 
     private void Select(Session session, int index)
@@ -450,12 +453,10 @@ internal sealed class CompletionController : IDisposable
         CompletionItem item = session.ResolvedOf(selected) ?? selected;
         Request request = answer.Request;
         int caret = _textArea.Caret.Offset;
-        DocumentLine line = _buffer.GetLineByOffset(caret);
-        int asked = line.Offset + request.Column - 1;
         var main = new CompletionEdit(
             TextRange.FromBounds(
-                asked - (request.Offset - item.Edit.Range.Start),
-                Math.Min(line.EndOffset, caret + (item.Edit.Range.End - request.Offset))
+                item.Edit.Range.Start,
+                Math.Min(_buffer.GetLineByOffset(caret).EndOffset, caret + (item.Edit.Range.End - request.Offset))
             ),
             item.Edit.NewText
         );
@@ -596,6 +597,30 @@ internal sealed class CompletionController : IDisposable
 
     private void OnCaretPositionChanged(object? sender, EventArgs e) => Update();
 
+    /// <summary>A part of a change before where completion was asked makes the request stale.</summary>
+    private void OnBufferChanging(object? sender, DocumentChangeEventArgs e)
+    {
+        if (_session is not { } session)
+            return;
+        foreach (Request? request in (Request?[])[session.Answer?.Request, session.Pending])
+        {
+            if (request is { IsStale: false } && e.Offset < request.Offset)
+                (request.IsStale, _madeStale) = (true, true);
+        }
+    }
+
+    /// <summary>
+    /// After a change that made a request stale: follows it, also when it left the caret where it was, as an edit by
+    /// another editor of the document can.
+    /// </summary>
+    private void OnBufferTextChanged(object? sender, EventArgs e)
+    {
+        if (!_madeStale)
+            return;
+        _madeStale = false;
+        Update();
+    }
+
     private void OnClosingChange(object? sender, EventArgs e) => Close();
 
     /// <summary>The word before <paramref name="caret"/>, by VS Code's word characters, which ends at the caret.</summary>
@@ -611,21 +636,27 @@ internal sealed class CompletionController : IDisposable
     private CodeLook Look() => new(_editor.FontFamily, _editor.FontSize, _colors?.Background, _colors?.Foreground);
 
     /// <summary>A request for completion.</summary>
-    /// <param name="Snapshot">The text it was asked for.</param>
-    /// <param name="Word">The word before the caret then: what items without an edit replace.</param>
-    /// <param name="Line">The caret's line then.</param>
-    /// <param name="Column">The caret's column then.</param>
-    /// <param name="Cancellation">Cancels the request.</param>
-    private sealed record Request(
-        TextSnapshot Snapshot,
-        TextRange Word,
-        int Line,
-        int Column,
-        CancellationTokenSource Cancellation
-    )
+    /// <param name="snapshot">The text it was asked for.</param>
+    /// <param name="word">The word before the caret then: what items without an edit replace.</param>
+    private sealed class Request(TextSnapshot snapshot, TextRange word)
     {
-        /// <summary>The caret's offset in <see cref="Snapshot"/>.</summary>
+        public TextSnapshot Snapshot { get; } = snapshot;
+
+        public TextRange Word { get; } = word;
+
+        /// <summary>
+        /// Where the caret was, in <see cref="Snapshot"/>; also in the current text, while the request is not stale.
+        /// </summary>
         public int Offset => Word.End;
+
+        /// <summary>Cancels the request.</summary>
+        public CancellationTokenSource Cancellation { get; } = new();
+
+        /// <summary>
+        /// Whether the text before <see cref="Offset"/> changed since: then the answer's positions no longer fit the
+        /// current text.
+        /// </summary>
+        public bool IsStale { get; set; }
     }
 
     /// <summary>A server's list, with the request it answered.</summary>

@@ -100,16 +100,17 @@ internal sealed class FakeServer
     private readonly List<(JsonNode? Id, JsonNode Item)> _heldResolves = [];
 
     /// <summary>Set by the command <c>signatures</c>: the signatures of signature help.</summary>
-    private JsonNode _signatures = JsonNode.Parse(
-        """
-        [
-          { "label": "call(first, second)", "documentation": "Calls with two.",
-            "parameters": [ { "label": "first", "documentation": { "kind": "markdown", "value": "The **first** one." } }, { "label": "second" } ] },
-          { "label": "call(first, second, third)", "documentation": "Calls with three.",
-            "parameters": [ { "label": [5, 10] }, { "label": [12, 18] }, { "label": [20, 25], "documentation": "The third one." } ] }
-        ]
-        """
-    )!;
+    private JsonNode _signatures =
+        JsonNode.Parse(
+            """
+            [
+              { "label": "call(first, second)", "documentation": "Calls with two.",
+                "parameters": [ { "label": "first", "documentation": { "kind": "markdown", "value": "The **first** one." } }, { "label": "second" } ] },
+              { "label": "call(first, second, third)", "documentation": "Calls with three.",
+                "parameters": [ { "label": [5, 10] }, { "label": [12, 18] }, { "label": [20, 25], "documentation": "The third one." } ] }
+            ]
+            """
+        ) ?? throw new InvalidDataException("No signatures.");
     private readonly List<string> _startLines = [];
     private int _lastId;
 

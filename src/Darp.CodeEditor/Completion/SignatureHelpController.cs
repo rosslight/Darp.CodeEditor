@@ -43,6 +43,7 @@ internal sealed class SignatureHelpController : IDisposable
     private readonly CodeEditor _editor;
     private readonly TextArea _textArea;
     private readonly TextView _textView;
+    private readonly TextDocument _buffer;
     private readonly CodeDocument _document;
     private readonly BackgroundTextMateHighlighter _highlighter;
     private readonly ContentControl _content = new();
@@ -71,11 +72,13 @@ internal sealed class SignatureHelpController : IDisposable
         _editor = editor;
         _textArea = textArea;
         _textView = textArea.TextView;
+        _buffer = textArea.Document;
         _document = document;
         _highlighter = highlighter;
         _popup = new EditorPopup(editor, new AppToolTip { Content = _content });
         _textArea.TextEntered += OnTextEntered;
-        _textArea.Caret.PositionChanged += OnCaretPositionChanged;
+        _textArea.Caret.PositionChanged += OnEditOrCaretMove;
+        _buffer.Changed += OnEditOrCaretMove;
         _document.LanguageFeaturesChanged += OnClosingChange;
         _popup.LeftView += OnClosingChange;
     }
@@ -129,7 +132,8 @@ internal sealed class SignatureHelpController : IDisposable
     {
         Close();
         _textArea.TextEntered -= OnTextEntered;
-        _textArea.Caret.PositionChanged -= OnCaretPositionChanged;
+        _textArea.Caret.PositionChanged -= OnEditOrCaretMove;
+        _buffer.Changed -= OnEditOrCaretMove;
         _document.LanguageFeaturesChanged -= OnClosingChange;
         _popup.LeftView -= OnClosingChange;
     }
@@ -144,8 +148,11 @@ internal sealed class SignatureHelpController : IDisposable
             Ask(SignatureHelpTriggerKind.TriggerCharacter, typed);
     }
 
-    /// <summary>While active, an edit or a caret move outdates what is asked, and restarts the pause.</summary>
-    private void OnCaretPositionChanged(object? sender, EventArgs e)
+    /// <summary>
+    /// While active, an edit, also one that leaves the caret where it was, or a caret move outdates what is asked, and
+    /// restarts the pause.
+    /// </summary>
+    private void OnEditOrCaretMove(object? sender, EventArgs e)
     {
         if (IsActive)
             Wait();
