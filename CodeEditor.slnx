@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Darp.CodeEditor/Darp.CodeEditor.csproj" />
+    <Project Path="src/Darp.CodeEditor.Lsp/Darp.CodeEditor.Lsp.csproj" />
     <Project Path="src/Darp.CodeEditor.CSharpScript/Darp.CodeEditor.CSharpScript.csproj" />
     <Project Path="src/Darp.CodeEditor.CSharpScript.Runner/Darp.CodeEditor.CSharpScript.Runner.csproj" />
   </Folder>
