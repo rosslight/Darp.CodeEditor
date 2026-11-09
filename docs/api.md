@@ -326,11 +326,15 @@ How the client talks to a server, where the protocol leaves a choice:
   once for all of the document's editors, also while none shows it.
 - **Squiggles** are drawn only for what is on screen: in the rows of each line between the view's top and bottom
   edges, in the shown part of the line, whole rows, as right-to-left text puts their characters in another order across
-  the screen than along the text. Each diagnostic is read once a frame, also one over many lines, and those of one
+  the screen than along the text. A range over a change of direction is drawn on each side of it, not over the text of
+  the other direction between, and each wave is cut to the view's width, so a line scrolled sideways costs what the
+  view shows of it. Each diagnostic is read once a frame, also one over many lines, and those of one
   severity that overlap are drawn as one, and where they go is measured once per row of text, not once for each
   of them, as a text line's own hit tests would walk the row from its start for each. With all 10,000 apart on the
   screen of a 4K window, drawing them takes the UI thread 2.9 ms, where measuring each on its own took 15 to 19 ms;
-  with each of them over all of the text, 3.2 ms, where reading them for each line in view took 30 ms.
+  with each of them over all of the text, 3.2 ms, where reading them for each line in view took 30 ms. One error over
+  100 lines of 3,000 characters, unwrapped in an 800 by 2,160 window, takes 3.7 ms, where waves the length of each
+  row took 41 ms.
   The headless frame, which also rasterizes them, takes 15 ms more than without them; an app rasterizes on its render
   thread (BenchmarkDotNet, i7-13700).
 - **Semantic tokens** are asked for the lines in view with `semanticTokens/range` when the server offers it, otherwise
@@ -349,7 +353,9 @@ How the client talks to a server, where the protocol leaves a choice:
   rest of it keeps its TextMate colors (design.md #109): each colored token is a run of text that the layout costs
   about 6 µs, as each TextMate token is. The 32 lines of an 800 by 600 window with a token on each of their 3,000
   characters take 57 ms to take and draw, where all of the tokens took 984 ms; with 300 tokens a line, 45 ms; TextMate
-  colors alone take 55 ms for 300 tokens a line (BenchmarkDotNet, i7-13700).
+  colors alone take 55 ms for 300 tokens a line. Of that, the UI thread's own work, taking the tokens and laying out
+  the lines with their colors, takes 35 ms, and 28 ms with 300 tokens a line, about 4.4 µs a colored token: the limit
+  keeps it bounded, not within a frame (BenchmarkDotNet, i7-13700).
 - **Token colors** come from the color theme as in VS Code: its `semanticTokenColors`, matched by type, modifiers and
   language with VS Code's scores; otherwise its TextMate color of the scopes that VS Code's standard mapping gives the
   type and modifiers, such as `entity.name.type` for a class or `variable.other.constant` for a read-only variable.
@@ -771,7 +777,10 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   10,000 in the text there took 0.9 MB; and squiggles stay on their text through edits made while a batch arrives and
   while no editor shows the document. Where squiggles go matches where the text layout draws each character, with
   tabs, wide and right-to-left text, surrogate pairs, accents, control characters, wrapped rows and a collapsed tail,
-  and squiggles show in the pixels under each character of right-to-left words and of a line that mixes directions;
+  and squiggles show in the pixels under each character of right-to-left words and of a line that mixes directions,
+  and a range across a change of direction leaves the characters of the other direction between without one; the
+  squiggle over a line wider than the view is shaped no wider than the view and a wave on either side, also scrolled
+  sideways;
   a frame with 10,000 errors over all of the text allocates under 1 MB more than one with one such error, where
   reading them for each line in view took 8.4 MB;
 - hover: the diagnostics' messages, with their codes, above the server's Markdown, whose code block is highlighted with
@@ -821,7 +830,8 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   headless frame, which also rasterizes, 107 ms against 92 ms without diagnostics. Finding what a hover shows among
   10,000 on one character, each one found beating those before, takes 0.75 ms. Taking a server's tokens on every
   character of the 32 lines on screen of an 800 by 600 window, 3,000 a line, and drawing the frame after it takes
-  57 ms, and 300 a line 45 ms. Showing the
+  57 ms, and 300 a line 45 ms; taking them and laying out the lines alone, 35 ms and 28 ms. One error over 100
+  unwrapped lines of 3,000 characters in an 800 by 2,160 window takes 3.7 ms to draw. Showing the
   largest hover in its worst shape, a code block of 50 lines, 249 runs that alternate colors and 2,000 characters,
   takes 6.8 ms with its frame; the frame alone about 5 ms. Without the limit on runs, 2,000 runs of one character took
   24 ms.
