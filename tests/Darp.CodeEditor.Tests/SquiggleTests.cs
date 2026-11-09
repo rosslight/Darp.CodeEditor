@@ -156,6 +156,35 @@ public sealed class SquiggleTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Diagnostics_in_a_long_lines_hidden_tail_cost_a_frame_nothing() =>
+        _ui.Run(() =>
+        {
+            // The editor shows the first 3,000 characters of the line, wrapped, and "..." for the rest.
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, new string('x', 20_000));
+            using var window = new EditorWindow(
+                new CodeEditor
+                {
+                    Document = document,
+                    WordWrap = true,
+                    ColorTheme = Marks(),
+                },
+                height: 900
+            );
+            IReadOnlyList<Diagnostic> hidden =
+            [
+                .. Enumerable
+                    .Range(4_000, 10_000)
+                    .Select(offset => Diagnostic(document, new TextRange(offset, 1), DiagnosticSeverity.Hint)),
+            ];
+
+            long none = FrameAllocations(window, document, []);
+            long many = FrameAllocations(window, document, hidden);
+
+            // Drawn one by one, at the "..." they all map to, they took about 4 MB.
+            (many - none).ShouldBeLessThan(1_000_000);
+        });
+
+    [Fact]
     public Task Editors_take_the_10000_most_severe_of_a_documents_diagnostics() =>
         _ui.Run(() =>
         {

@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using Avalonia;
 using Avalonia.Media;
-using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
@@ -31,6 +30,9 @@ internal sealed class SquiggleLayer : SelectionOverlay
     private const double HalfWave = 3;
 
     private readonly CodeDocument _document;
+
+    /// <summary>Where the line being drawn draws its characters.</summary>
+    private readonly LineBoxes _boxes = new();
 
     private TextAreaColors? _colors;
 
@@ -86,8 +88,11 @@ internal sealed class SquiggleLayer : SelectionOverlay
     }
 
     /// <remarks>
-    /// Diagnostics that overlap draw one squiggle, so their ranges are merged first, by severity: the waves and dots
-    /// drawn grow with the text in view, not with the diagnostics, of which a server may put thousands on one line.
+    /// Each line in view is read only where the view shows it: in the shown part of a long line, and between the view's
+    /// edges, so that what lies in a hidden tail, beyond the right edge or in rows of a wrapped line above or below the
+    /// view costs nothing. Diagnostics that overlap draw one squiggle, so their ranges are merged first, by severity: the
+    /// waves and dots drawn grow with the text on screen, not with the diagnostics. Where they go is measured once per
+    /// row of text, not once per squiggle: see <see cref="LineBoxes"/>.
     /// </remarks>
     public override void Render(DrawingContext context)
     {
@@ -95,59 +100,73 @@ internal sealed class SquiggleLayer : SelectionOverlay
         TextSegmentCollection<DiagnosticMarker> markers = _document.ShownDiagnostics;
         if (_colors is not { } colors || markers.Count == 0 || !textView.VisualLinesValid)
             return;
-        if (textView.VisualLines is not [VisualLine first, ..] || textView.VisualLines[^1] is not { } last)
-            return;
-        int start = first.FirstDocumentLine.Offset;
-        // In the order of their starts: by severity, the ranges in view merged, and the empty ones and the hints by
-        // their starts, each start once.
+        // A line's, by severity, in the order of the text: its ranges merged, and its empty ones and hints by their
+        // starts, each start once.
         var ranges = new List<(int Start, int End)>[4];
         var starts = new List<int>[4];
+        // The frame's, by severity: the boxes to draw a wave under, and those of the hints' first characters.
+        var waves = new List<Rect>[4];
+        var dots = new List<Rect>();
         for (int severity = 0; severity < 4; severity++)
-            (ranges[severity], starts[severity]) = ([], []);
-        foreach (
-            DiagnosticMarker marker in markers.FindOverlappingSegments(start, last.LastDocumentLine.EndOffset - start)
-        )
+            (ranges[severity], starts[severity], waves[severity]) = ([], [], []);
+        foreach (VisualLine visualLine in textView.VisualLines)
         {
-            int severity = (int)marker.Diagnostic.Severity;
-            // Reading the offset walks the segments' tree: once each.
-            int markerStart = marker.StartOffset;
-            int markerEnd = markerStart + marker.Length;
-            if (marker.Diagnostic.Severity == DiagnosticSeverity.Hint || marker.Length == 0)
+            DocumentLine line = visualLine.FirstDocumentLine;
+            (int lineStart, int shownEnd) = OnScreen(textView, visualLine);
+            bool any = false;
+            foreach (DiagnosticMarker marker in markers.FindOverlappingSegments(lineStart, shownEnd - lineStart))
             {
-                // An empty range is in view where it starts; dots under the start of a hint that starts above the view
-                // would be out of it too.
-                List<int> points = starts[severity];
-                if (markerStart >= start && (points.Count == 0 || points[^1] != markerStart))
-                    points.Add(markerStart);
+                int severity = (int)marker.Diagnostic.Severity;
+                // Reading the offset walks the segments' tree: once each.
+                int markerStart = marker.StartOffset;
+                int markerEnd = markerStart + marker.Length;
+                if (marker.Diagnostic.Severity == DiagnosticSeverity.Hint || marker.Length == 0)
+                {
+                    // Where it starts, if that is shown on this line: not before it, and not in a hidden tail.
+                    bool hidden = markerStart == VisibleText.End(line) && VisibleText.IsCollapsed(line);
+                    List<int> points = starts[severity];
+                    if (
+                        markerStart >= lineStart
+                        && markerStart <= shownEnd
+                        && !hidden
+                        && (points.Count == 0 || points[^1] != markerStart)
+                    )
+                    {
+                        points.Add(markerStart);
+                        any = true;
+                    }
+                    continue;
+                }
+                int from = Math.Max(markerStart, lineStart);
+                int to = Math.Min(markerEnd, shownEnd);
+                if (to <= from)
+                    continue;
+                if (ranges[severity] is [.., var (lastStart, lastEnd)] && from <= lastEnd)
+                    ranges[severity][^1] = (lastStart, Math.Max(lastEnd, to));
+                else
+                    ranges[severity].Add((from, to));
+                any = true;
             }
-            else if (ranges[severity] is [.., var (lastStart, lastEnd)] && markerStart <= lastEnd)
-                ranges[severity][^1] = (lastStart, Math.Max(lastEnd, markerEnd));
-            else
-                ranges[severity].Add((markerStart, markerEnd));
+            if (any)
+                Measure(textView, visualLine, ranges, starts, waves, dots);
         }
         // Errors last, over the others.
         for (int severity = 0; severity < 4; severity++)
         {
-            if (ranges[severity].Count == 0 && starts[severity].Count == 0)
+            if (waves[severity].Count == 0 && (severity != (int)DiagnosticSeverity.Hint || dots.Count == 0))
                 continue;
             var shape = new StreamGeometry();
             using (StreamGeometryContext figure = shape.Open())
             {
                 // Where shapes of one severity overlap, as an empty range's inside another's, both show.
                 figure.SetFillRule(FillRule.NonZero);
-                foreach (int point in starts[severity])
+                if (severity == (int)DiagnosticSeverity.Hint)
                 {
-                    if (severity == (int)DiagnosticSeverity.Hint)
-                        AddDots(figure, textView, point);
-                    else
-                        AddWave(figure, TextViewBoxes.CharacterAt(textView, point));
+                    foreach (Rect character in dots)
+                        AddDots(figure, character);
                 }
-                foreach ((int rangeStart, int rangeEnd) in ranges[severity])
-                {
-                    var segment = new SimpleSegment(rangeStart, rangeEnd - rangeStart);
-                    foreach (Rect rect in BackgroundGeometryBuilder.GetRectsForSegment(textView, segment))
-                        AddWave(figure, rect);
-                }
+                foreach (Rect box in waves[severity])
+                    AddWave(figure, box);
             }
             IBrush brush = (DiagnosticSeverity)severity switch
             {
@@ -158,6 +177,60 @@ internal sealed class SquiggleLayer : SelectionOverlay
             };
             context.DrawGeometry(brush, null, shape);
         }
+    }
+
+    /// <summary>
+    /// The boxes that a line's ranges and starts are drawn under, by severity; empties the line's lists for the next.
+    /// </summary>
+    private void Measure(
+        TextView textView,
+        VisualLine visualLine,
+        List<(int Start, int End)>[] ranges,
+        List<int>[] starts,
+        List<Rect>[] waves,
+        List<Rect> dots
+    )
+    {
+        int lineOffset = visualLine.FirstDocumentLine.Offset;
+        _boxes.Show(textView, visualLine);
+        for (int severity = 0; severity < 4; severity++)
+        {
+            _boxes.Rewind();
+            foreach (int point in starts[severity])
+            {
+                Rect character = _boxes.CharacterAt(_boxes.ColumnAt(point - lineOffset));
+                if (severity == (int)DiagnosticSeverity.Hint)
+                    dots.Add(character);
+                else
+                    waves[severity].Add(character.WithWidth(textView.WideSpaceWidth));
+            }
+            _boxes.Rewind();
+            foreach ((int start, int end) in ranges[severity])
+            {
+                int startColumn = _boxes.ColumnAt(start - lineOffset);
+                _boxes.AddSpans(startColumn, _boxes.ColumnAt(end - lineOffset), waves[severity]);
+            }
+            starts[severity].Clear();
+            ranges[severity].Clear();
+        }
+    }
+
+    /// <summary>
+    /// The offsets of <paramref name="visualLine"/> that the view shows: from where its top left edge meets the line to
+    /// where its bottom right edge does, a character more on either side, within the shown part of the line.
+    /// </summary>
+    private static (int Start, int End) OnScreen(TextView textView, VisualLine visualLine)
+    {
+        DocumentLine line = visualLine.FirstDocumentLine;
+        // In the view's coordinates of the whole text, as the line's hit tests take them.
+        Rect view = new Rect(textView.Bounds.Size).Translate(textView.ScrollOffset);
+        double top = Math.Max(view.Top, visualLine.VisualTop);
+        double bottom = Math.Min(view.Bottom, visualLine.VisualTop + visualLine.Height) - 1;
+        int first = visualLine.GetVisualColumnFloor(new Point(view.Left, top));
+        int last = visualLine.GetVisualColumn(new Point(view.Right, Math.Max(top, bottom)));
+        int start = Math.Max(line.Offset, line.Offset + visualLine.GetRelativeOffset(first) - 1);
+        int end = Math.Min(VisibleText.End(line), line.Offset + visualLine.GetRelativeOffset(last) + 1);
+        return (start, Math.Max(start, end));
     }
 
     public override void Dispose()
@@ -196,10 +269,9 @@ internal sealed class SquiggleLayer : SelectionOverlay
             );
     }
 
-    /// <summary>Three dots under the first characters at <paramref name="offset"/>, as VS Code marks a hint.</summary>
-    private static void AddDots(StreamGeometryContext figure, TextView textView, int offset)
+    /// <summary>Three dots under the first characters from <paramref name="character"/> on, as VS Code marks a hint.</summary>
+    private static void AddDots(StreamGeometryContext figure, Rect character)
     {
-        Rect character = TextViewBoxes.CharacterAt(textView, offset);
         for (int i = 0; i < 3; i++)
         {
             double x = character.Left + 1 + 4 * i;
