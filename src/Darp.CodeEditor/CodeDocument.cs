@@ -56,9 +56,16 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     /// <summary>Set by <see cref="Dispose"/> on any thread, read by editors on the UI thread.</summary>
     private volatile bool _isDisposed;
 
-    private protected CodeDocument(CodeLanguage language, string text)
+    /// <summary>Set on the UI thread, or where the server's diagnostics arrive before Avalonia is set up; read anywhere.</summary>
+    private IReadOnlyList<Diagnostic> _diagnostics = [];
+
+    /// <summary>Diagnostics on their way to the UI thread. Only the latest is applied; null when none is on its way.</summary>
+    private IReadOnlyList<Diagnostic>? _pendingDiagnostics;
+
+    private protected CodeDocument(CodeLanguage language, string text, string? filePath = null)
     {
         Language = language;
+        _filePath = filePath;
         _indentation = language.Id == "yaml" ? Indentation.Spaces(2) : Indentation.Spaces(4);
         _document = new TextDocument(text);
         _currentSnapshot = new TextSnapshot(_document.CreateSnapshot(), 0);
@@ -66,6 +73,7 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
         _owner = Application.Current?.Dispatcher;
         // AvaloniaEdit's document belongs to the thread that created it. Unbound, it belongs to none between changes.
         _document.SetOwnerThread(_owner?.Thread);
+        _document.Changing += (_, e) => OnChanging(_document, e);
         _document.TextChanged += OnTextChanged;
         _document.UndoStack.PropertyChanged += OnUndoStackPropertyChanged;
     }
@@ -100,6 +108,9 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
         set
         {
             VerifyAccess();
+            if (value == _filePath)
+                return;
+            OnFilePathChanging(value);
             _filePath = value;
         }
     }
@@ -157,7 +168,7 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     /// one in the current text, map it: <c>MapToCurrent(diagnostic.Snapshot, diagnostic.Range)</c>. Empty without a
     /// server.
     /// </summary>
-    public IReadOnlyList<Diagnostic> Diagnostics => [];
+    public IReadOnlyList<Diagnostic> Diagnostics => _diagnostics;
 
     /// <summary>
     /// Replaces <paramref name="range"/> with <paramref name="text"/>, in one step that the user can undo; an empty
@@ -216,6 +227,7 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     public void Dispose()
     {
         _isDisposed = true;
+        OnDisposed();
         Disposed?.Invoke(this, EventArgs.Empty);
     }
 
@@ -237,6 +249,46 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
 
     /// <summary>Raised by <see cref="Dispose"/>, on the thread that disposes, for the editors that show the document.</summary>
     internal event EventHandler? Disposed;
+
+    /// <summary>
+    /// Replaces <see cref="Diagnostics"/>, from any thread: on the app's main UI thread, or where it is called before
+    /// Avalonia is set up. Of the diagnostics that arrive before the UI thread gets to them, only the latest is applied.
+    /// </summary>
+    internal void SetDiagnostics(IReadOnlyList<Diagnostic> diagnostics)
+    {
+        // Application.Current is null before setup, so reading it ties no dispatcher to this thread.
+        if (Application.Current?.Dispatcher is not { } dispatcher)
+        {
+            ApplyDiagnostics(diagnostics);
+            return;
+        }
+        if (Interlocked.Exchange(ref _pendingDiagnostics, diagnostics) is null)
+        {
+            dispatcher.Post(() =>
+            {
+                if (Interlocked.Exchange(ref _pendingDiagnostics, null) is { } latest)
+                    ApplyDiagnostics(latest);
+            });
+        }
+    }
+
+    /// <summary>
+    /// Called for each part of a change, before it applies, on the thread that changes the text:
+    /// <paramref name="buffer"/> still holds the text before the change.
+    /// </summary>
+    private protected virtual void OnChanging(TextDocument buffer, DocumentChangeEventArgs change) { }
+
+    /// <summary>
+    /// Called after a change of the text, on the thread that changed it, once <paramref name="snapshot"/> is current and
+    /// before <see cref="TextChanged"/>.
+    /// </summary>
+    private protected virtual void OnChanged(TextSnapshot snapshot) { }
+
+    /// <summary>Called on the UI thread before <see cref="FilePath"/> changes to <paramref name="path"/>; throws to refuse.</summary>
+    private protected virtual void OnFilePathChanging(string? path) { }
+
+    /// <summary>Called by <see cref="Dispose"/>, on the thread that disposes, maybe more than once.</summary>
+    private protected virtual void OnDisposed() { }
 
     /// <summary>
     /// The versions in AvaloniaEdit of <paramref name="snapshot"/> and of the current text, after checking that the
@@ -287,7 +339,16 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     private void OnTextChanged(object? sender, EventArgs e)
     {
         _currentSnapshot = new TextSnapshot(_document.CreateSnapshot(), _currentSnapshot.Version + 1);
+        OnChanged(_currentSnapshot);
         TextChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void ApplyDiagnostics(IReadOnlyList<Diagnostic> diagnostics)
+    {
+        if (diagnostics.Count == 0 && _diagnostics.Count == 0)
+            return;
+        _diagnostics = diagnostics;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Diagnostics)));
     }
 
     private void OnUndoStackPropertyChanged(object? sender, PropertyChangedEventArgs e)

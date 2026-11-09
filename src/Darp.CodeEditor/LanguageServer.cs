@@ -1,5 +1,9 @@
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Nodes;
+using Avalonia;
+using Darp.CodeEditor.LanguageClient;
+using Darp.CodeEditor.Lsp;
 
 namespace Darp.CodeEditor;
 
@@ -26,14 +30,72 @@ namespace Darp.CodeEditor;
 /// </remarks>
 public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, IDisposable
 {
+    /// <summary>
+    /// How many failures in a row make the server <see cref="LanguageServerState.Failed"/>. A server that fails at once
+    /// gets about 8 seconds of restarts, with delays from 0.5 to 4 seconds.
+    /// </summary>
+    private const int MaxFailures = 5;
+
+    private static readonly TimeSpan s_firstRestartDelay = TimeSpan.FromSeconds(0.5);
+    private static readonly TimeSpan s_maxRestartDelay = TimeSpan.FromSeconds(30);
+
+    /// <summary>A server that has been running this long counts as stable: the failures and hangs before it are forgiven.</summary>
+    private static readonly TimeSpan s_stableAfter = TimeSpan.FromSeconds(30);
+
+    /// <summary>How long a request may go unanswered; a server that has not answered yet gets twice that.</summary>
+    private static readonly TimeSpan s_firstHangLimit = TimeSpan.FromSeconds(30);
+
+    /// <summary>Each hang doubles the limit, up to this.</summary>
+    private static readonly TimeSpan s_maxHangLimit = TimeSpan.FromMinutes(2);
+
+    /// <summary>How long <see cref="DisposeAsync"/> waits for <c>shutdown</c> and <c>exit</c> before it kills, as VS Code.</summary>
+    private static readonly TimeSpan s_shutdownLimit = TimeSpan.FromSeconds(2);
+
+    private static readonly PropertyChangedEventArgs s_stateChanged = new(nameof(State));
+
+    private static int s_lastUntitled;
+
+    private readonly LanguageServerOptions _options;
+
+    /// <summary>Guards the server's state, its documents and its connections' state.</summary>
+    private readonly Lock _lock = new();
+
+    /// <summary>Guarded: the open documents.</summary>
+    private readonly List<ServerDocument> _documents = [];
+
+    /// <summary>Guarded.</summary>
+    private LanguageServerState _state;
+
+    /// <summary>
+    /// Guarded: the process while <see cref="LanguageServerState.Starting"/> or <see cref="LanguageServerState.Running"/>,
+    /// the next one while <see cref="LanguageServerState.Restarting"/>, otherwise null.
+    /// </summary>
+    private ServerConnection? _connection;
+
+    /// <summary>Guarded: starts the next process after its delay.</summary>
+    private ITimer? _restartTimer;
+
+    /// <summary>Guarded: processes that failed in a row.</summary>
+    private int _failures;
+
+    /// <summary>Guarded: processes that hung in a row.</summary>
+    private int _hangs;
+
     /// <summary>Describes a language server. The process does not start yet.</summary>
-    public LanguageServer(LanguageServerOptions options) => throw new NotImplementedException();
+    public LanguageServer(LanguageServerOptions options) => _options = options;
 
     /// <summary>Raised on the UI thread after <see cref="State"/> changed; see the remarks for before the UI runs.</summary>
     public event PropertyChangedEventHandler? PropertyChanged;
 
     /// <summary>Where the process is in its life, for a status indicator.</summary>
-    public LanguageServerState State => throw new NotImplementedException();
+    public LanguageServerState State
+    {
+        get
+        {
+            lock (_lock)
+                return _state;
+        }
+    }
 
     /// <summary>
     /// Starts the process now rather than with the first document, so that language features are ready sooner.
@@ -43,7 +105,28 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
     /// <exception cref="InvalidOperationException">
     /// The process did not start or did not answer in time. The message says why, with the end of its standard error.
     /// </exception>
-    public Task StartAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public async Task StartAsync(CancellationToken cancellationToken = default)
+    {
+        ServerConnection connection;
+        bool changed = false;
+        lock (_lock)
+        {
+            ObjectDisposedException.ThrowIf(_state == LanguageServerState.Stopped, this);
+            if (_connection is null)
+            {
+                // Not started yet, or failed: a new start, with nothing to forgive.
+                _failures = 0;
+                _hangs = 0;
+                changed = StartConnection();
+            }
+            connection = _connection;
+        }
+        if (changed)
+            OnStateChanged();
+        // The process keeps starting for the documents when the caller stops waiting.
+        if (await connection.Initialized.WaitAsync(cancellationToken).ConfigureAwait(false) is { } failure)
+            throw failure;
+    }
 
     /// <summary>
     /// Creates a document that the server serves, open in it until the document's <see cref="CodeDocument.Dispose"/>.
@@ -55,23 +138,269 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
     /// never reads or writes it.
     /// </param>
     /// <exception cref="InvalidOperationException">Another open document of this server has <paramref name="filePath"/>.</exception>
-    public CodeDocument CreateDocument(CodeLanguage language, string text = "", string? filePath = null) =>
-        throw new NotImplementedException();
+    public CodeDocument CreateDocument(CodeLanguage language, string text = "", string? filePath = null)
+    {
+        var document = new ServerDocument(this, language, text, filePath, DocumentUri(filePath));
+        bool changed = false;
+        lock (_lock)
+        {
+            ObjectDisposedException.ThrowIf(_state == LanguageServerState.Stopped, this);
+            ThrowIfOpen(document.Uri, filePath, document);
+            _documents.Add(document);
+            if (_state == LanguageServerState.NotStarted)
+                changed = StartConnection();
+            else if (_state == LanguageServerState.Running)
+                _connection?.Open(document);
+        }
+        if (changed)
+            OnStateChanged();
+        return document;
+    }
 
     /// <summary>
     /// Tells the server that the answers of <see cref="LanguageServerOptions.Settings"/> may have changed, so that it
     /// asks again.
     /// </summary>
-    public void NotifySettingsChanged() => throw new NotImplementedException();
+    public void NotifySettingsChanged()
+    {
+        // A server that starts asks for its settings anyway.
+        lock (_lock)
+            _connection?.NotifySettingsChanged();
+    }
 
     /// <summary>Stops the process. Its documents keep their text and lose their language features.</summary>
-    public ValueTask DisposeAsync() => throw new NotImplementedException();
+    public async ValueTask DisposeAsync()
+    {
+        ServerConnection? connection;
+        lock (_lock)
+        {
+            if (_state == LanguageServerState.Stopped)
+                return;
+            connection = Stop();
+        }
+        OnStateChanged();
+        if (connection is not null)
+            await connection.StopAsync(s_shutdownLimit).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// Kills the process at once, without the protocol's shutdown, for app exits where only synchronous disposal
     /// runs. Its documents keep their text and lose their language features.
     /// </summary>
-    public void Dispose() => throw new NotImplementedException();
+    public void Dispose()
+    {
+        ServerConnection? connection;
+        lock (_lock)
+        {
+            if (_state == LanguageServerState.Stopped)
+                return;
+            connection = Stop();
+        }
+        OnStateChanged();
+        connection?.Abandon();
+    }
+
+    /// <summary>The <c>file:</c> URI of a path.</summary>
+    internal static string FileUri(string path) => new Uri(Path.GetFullPath(path)).AbsoluteUri;
+
+    /// <summary>
+    /// A document's text changed, on the thread that changed it: sends the change to the running server.
+    /// </summary>
+    internal void Changed(
+        ServerDocument document,
+        TextSnapshot snapshot,
+        IReadOnlyList<TextDocumentContentChangeEvent> changes
+    )
+    {
+        lock (_lock)
+            _connection?.Change(document, snapshot, changes);
+    }
+
+    /// <summary>Moves a document to a new path, before it takes it, on the UI thread.</summary>
+    /// <exception cref="InvalidOperationException">Another open document of this server has <paramref name="path"/>.</exception>
+    internal void Move(ServerDocument document, string? path)
+    {
+        string uri = DocumentUri(path);
+        lock (_lock)
+        {
+            // A closed document, or one whose server stopped, is no longer the server's.
+            if (!_documents.Contains(document))
+                return;
+            ThrowIfOpen(uri, path, document);
+            document.Uri = uri;
+            _connection?.Move(document);
+        }
+    }
+
+    /// <summary>Closes a document in the server, on the thread that disposes it.</summary>
+    internal void Close(ServerDocument document)
+    {
+        lock (_lock)
+        {
+            if (_documents.Remove(document))
+                _connection?.Close(document);
+        }
+    }
+
+    /// <summary>
+    /// How long <paramref name="connection"/> may take to answer a request it is about to send. A server that has run
+    /// long enough is stable, and its earlier hangs no longer count.
+    /// </summary>
+    internal TimeSpan HangLimit(ServerConnection connection)
+    {
+        lock (_lock)
+        {
+            if (connection.RunningFor >= s_stableAfter)
+                (_failures, _hangs) = (0, 0);
+            TimeSpan limit = s_firstHangLimit;
+            for (int i = 0; i < _hangs; i++)
+                limit = Min(limit * 2, s_maxHangLimit);
+            return connection.IsRunning ? limit : limit * 2;
+        }
+    }
+
+    /// <summary>The server answered <c>initialize</c>: it runs, and the documents open in it.</summary>
+    internal void OnInitialized(ServerConnection connection, JsonRpcConnection rpc, bool isFullSync)
+    {
+        bool changed;
+        lock (_lock)
+        {
+            if (_connection != connection)
+                return;
+            connection.OnRunning(rpc, isFullSync, _documents);
+            changed = SetState(LanguageServerState.Running);
+        }
+        if (changed)
+            OnStateChanged();
+    }
+
+    /// <summary>
+    /// The process ended, and nothing more arrives from it: unless the server stopped, a new one starts after a delay,
+    /// or the server failed too often in a row.
+    /// </summary>
+    /// <param name="connection">The process.</param>
+    /// <param name="hung">Whether it was killed because it did not answer.</param>
+    /// <param name="ranFor">How long it ran after it answered <c>initialize</c>; null when it never answered.</param>
+    internal void OnEnded(ServerConnection connection, bool hung, TimeSpan? ranFor)
+    {
+        bool changed;
+        lock (_lock)
+        {
+            if (_connection != connection)
+                return;
+            if (!hung && ranFor >= s_stableAfter)
+                (_failures, _hangs) = (0, 0);
+            _failures++;
+            if (hung)
+                _hangs++;
+            if (_failures >= MaxFailures)
+            {
+                _connection = null;
+                changed = SetState(LanguageServerState.Failed);
+            }
+            else
+            {
+                var next = new ServerConnection(this, _options, _lock);
+                _connection = next;
+                _restartTimer = _options.TimeProvider.CreateTimer(
+                    _ => Restart(next),
+                    null,
+                    RestartDelay(),
+                    Timeout.InfiniteTimeSpan
+                );
+                changed = SetState(LanguageServerState.Restarting);
+            }
+        }
+        if (changed)
+            OnStateChanged();
+    }
+
+    /// <summary>The delay before a restart: it doubles with each failure in a row.</summary>
+    private TimeSpan RestartDelay()
+    {
+        TimeSpan delay = s_firstRestartDelay;
+        for (int i = 1; i < _failures; i++)
+            delay = Min(delay * 2, s_maxRestartDelay);
+        return delay;
+    }
+
+    /// <summary>Starts the next process, once its delay has passed.</summary>
+    private void Restart(ServerConnection next)
+    {
+        bool changed;
+        lock (_lock)
+        {
+            if (_connection != next || _state != LanguageServerState.Restarting)
+                return;
+            _restartTimer?.Dispose();
+            _restartTimer = null;
+            next.Start();
+            changed = SetState(LanguageServerState.Starting);
+        }
+        if (changed)
+            OnStateChanged();
+    }
+
+    /// <summary>Guarded: starts a new process.</summary>
+    /// <returns>Whether the state changed.</returns>
+    [MemberNotNull(nameof(_connection))]
+    private bool StartConnection()
+    {
+        _connection = new ServerConnection(this, _options, _lock);
+        _connection.Start();
+        return SetState(LanguageServerState.Starting);
+    }
+
+    /// <summary>Guarded: stops the server for good.</summary>
+    /// <returns>The process to end, if there is one.</returns>
+    private ServerConnection? Stop()
+    {
+        SetState(LanguageServerState.Stopped);
+        _restartTimer?.Dispose();
+        _restartTimer = null;
+        _documents.Clear();
+        ServerConnection? connection = _connection;
+        _connection = null;
+        return connection;
+    }
+
+    /// <summary>Guarded.</summary>
+    /// <returns>Whether the state changed.</returns>
+    private bool SetState(LanguageServerState state)
+    {
+        if (_state == state)
+            return false;
+        _state = state;
+        return true;
+    }
+
+    /// <summary>
+    /// Raises <see cref="PropertyChanged"/> for <see cref="State"/> on the app's main UI thread, or here before Avalonia
+    /// is set up. Called outside the lock; handlers read the state that is current when they run.
+    /// </summary>
+    private void OnStateChanged()
+    {
+        // Application.Current is null before setup, so reading it ties no dispatcher to this thread.
+        if (Application.Current?.Dispatcher is { } dispatcher)
+            dispatcher.Post(() => PropertyChanged?.Invoke(this, s_stateChanged));
+        else
+            PropertyChanged?.Invoke(this, s_stateChanged);
+    }
+
+    /// <summary>Guarded.</summary>
+    private void ThrowIfOpen(string uri, string? path, ServerDocument document)
+    {
+        if (_documents.Any(open => open != document && open.Uri == uri))
+            throw new InvalidOperationException(
+                $"Another open document of this language server has the path '{path}'."
+            );
+    }
+
+    /// <summary>The URI of a document with <paramref name="path"/>: its file, or a new untitled one.</summary>
+    private static string DocumentUri(string? path) =>
+        path is null ? $"untitled:Untitled-{Interlocked.Increment(ref s_lastUntitled)}" : FileUri(path);
+
+    private static TimeSpan Min(TimeSpan a, TimeSpan b) => a < b ? a : b;
 }
 
 /// <summary>How to start a language server and what to tell it.</summary>

@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -58,8 +59,13 @@ internal sealed record PublishDiagnosticsParams(
 /// <param name="Range">The range it is about.</param>
 /// <param name="Message">The text for users.</param>
 /// <param name="Severity">1 for errors, 2 warnings, 3 information, 4 hints; null leaves it to the client.</param>
-/// <param name="Code">A number or a string.</param>
-internal sealed record LspDiagnostic(LspRange Range, string Message, int? Severity = null, JsonElement? Code = null);
+/// <param name="Code">A number or a string, read as text.</param>
+internal sealed record LspDiagnostic(
+    LspRange Range,
+    string Message,
+    int? Severity = null,
+    [property: JsonConverter(typeof(DiagnosticCodeConverter))] string? Code = null
+);
 
 internal sealed record ConfigurationParams(IReadOnlyList<ConfigurationItem> Items);
 
@@ -69,6 +75,16 @@ internal sealed record DidChangeConfigurationParams(
     // Required by the protocol; servers that pull their settings ignore it.
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] JsonNode? Settings
 );
+
+/// <summary>Reads a diagnostic's code, a number or a string, as text.</summary>
+internal sealed class DiagnosticCodeConverter : JsonConverter<string>
+{
+    public override string? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        reader.TokenType == JsonTokenType.Number ? Encoding.UTF8.GetString(reader.ValueSpan) : reader.GetString();
+
+    public override void Write(Utf8JsonWriter writer, string value, JsonSerializerOptions options) =>
+        writer.WriteStringValue(value);
+}
 
 /// <summary>The kinds of <c>TextDocumentSyncKind</c>.</summary>
 internal static class TextDocumentSyncKind
