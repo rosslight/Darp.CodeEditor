@@ -39,12 +39,12 @@ public sealed class HoverTests(UiFixture ui)
 
             window.MoveMouse(window.PointAt(text.IndexOf("key", StringComparison.Ordinal)));
 
-            ToolTip popup = await WaitForPopupAsync(window, "is a word.");
+            ToolTip popup = await WaitForPopupAsync(window, "is a word in");
             Control[] parts = [.. ((Panel)Content(popup)).Children];
             // The diagnostic's message and code, a line, the server's paragraph, and its code block.
             TextOf(parts[0]).ShouldBe($"{text} (echo)");
             parts[1].ShouldBeOfType<Separator>();
-            TextOf(parts[2]).ShouldBe("key is a word.");
+            TextOf(parts[2]).ShouldBe("key is a word in json.");
             ((TextBlock)parts[2]).Inlines.ShouldNotBeNull().OfType<Run>().First().FontWeight.ShouldBe(FontWeight.Bold);
             var code = (TextBlock)parts[3].GetVisualDescendants().Prepend(parts[3]).OfType<Border>().First().Child!;
             TextOf(code).ShouldBe("  \"key\": 1");
@@ -58,6 +58,59 @@ public sealed class HoverTests(UiFixture ui)
             runs.ShouldContain(run => run.Text == "1" && (run.Foreground as ISolidColorBrush)!.Color == s_number);
             Rect bounds = BoundsInWindow(popup);
             new Rect(window.Window.ClientSize).Contains(bounds).ShouldBeTrue(bounds.ToString());
+        });
+
+    [Fact]
+    public Task Inline_code_shows_in_the_editors_font_colors_and_background() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.Json, "{\n  \"key\": 1\n}");
+            // A dark text area in a light app: code in the light tooltip keeps the text area's look.
+            var editor = new CodeEditor { Document = document, ColorTheme = CodeEditorColorTheme.DarkPlus };
+            using var window = new EditorWindow(editor);
+            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+
+            ToolTip popup = await HoverAsync(window, 5, "key is a word in");
+
+            var paragraph = popup
+                .GetVisualDescendants()
+                .OfType<TextBlock>()
+                .First(t => TextOf(t) == "key is a word in json.");
+            Run code = paragraph.Inlines.ShouldNotBeNull().OfType<Run>().Single(run => run.Text == "json");
+            code.FontFamily.ShouldBe(editor.FontFamily);
+            code.Foreground.ShouldBeAssignableTo<ISolidColorBrush>()
+                .ShouldNotBeNull()
+                .Color.ShouldBe(Color.Parse("#D4D4D4"));
+            code.Background.ShouldBeAssignableTo<ISolidColorBrush>()
+                .ShouldNotBeNull()
+                .Color.ShouldBe(Color.Parse("#1E1E1E"));
+            // At the paragraph's size, so that it fits its line.
+            code.IsSet(TextElement.FontSizeProperty).ShouldBeFalse();
+            window.RenderAndCountPixels(Color.Parse("#1E1E1E"), BoundsInWindow(paragraph)).ShouldBeGreaterThan(20);
+        });
+
+    [Fact]
+    public Task Code_without_a_color_of_its_own_shows_in_the_editors_foreground() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            // Plain text has no grammar: no token of its code block has a color of its own.
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "some plain words");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+
+            ToolTip popup = await HoverAsync(window, 1, "some is a word in");
+
+            // In Light+'s black text, on its white background.
+            TextBlock code = popup
+                .GetVisualDescendants()
+                .OfType<TextBlock>()
+                .First(text => text.GetVisualParent() is Border);
+            code.Inlines.ShouldNotBeNull().OfType<Run>().Single().IsSet(TextElement.ForegroundProperty).ShouldBeFalse();
+            window.RenderAndCountPixels(Colors.Black, BoundsInWindow(code)).ShouldBeGreaterThan(0);
         });
 
     [Fact]
@@ -99,7 +152,7 @@ public sealed class HoverTests(UiFixture ui)
 
             window.MoveMouse(window.PointAt(5));
 
-            ToolTip popup = await WaitForPopupAsync(window, "is a word.");
+            ToolTip popup = await WaitForPopupAsync(window, "is a word in");
             window.Window.ActualThemeVariant.ShouldBe(ThemeVariant.Light);
             popup.ActualThemeVariant.ShouldBe(ThemeVariant.Dark);
             // The app's dark tooltip, and the code in Dark+'s background, in the frame's pixels.
@@ -128,7 +181,7 @@ public sealed class HoverTests(UiFixture ui)
             ToolTip popup = await HoverAsync(
                 window,
                 text.IndexOf("three", StringComparison.Ordinal),
-                "three is a word."
+                "three is a word in"
             );
             window.MoveMouse(window.PointAt(text.IndexOf("three", StringComparison.Ordinal) + 3));
             Popup(window).ShouldBeSameAs(popup);
@@ -140,7 +193,7 @@ public sealed class HoverTests(UiFixture ui)
             Popup(window).ShouldBeNull();
 
             // Over another word, though under the same diagnostic.
-            await HoverAsync(window, 0, "one is a word.");
+            await HoverAsync(window, 0, "one is a word in");
             window.MoveMouse(window.PointAt(text.IndexOf("two", StringComparison.Ordinal)));
             Popup(window).ShouldBeNull();
         });
@@ -160,21 +213,21 @@ public sealed class HoverTests(UiFixture ui)
             using var window = new EditorWindow(editor, new DockPanel { Children = { button, editor } });
             await server.StartAsync();
 
-            await HoverAsync(window, 1, "word0 is a word.");
+            await HoverAsync(window, 1, "word0 is a word in");
             window.Type("x");
             Popup(window).ShouldBeNull();
 
-            await HoverAsync(window, 1, "xword0 is a word.");
+            await HoverAsync(window, 1, "xword0 is a word in");
             window.Press(Key.Escape);
             Popup(window).ShouldBeNull();
 
-            await HoverAsync(window, 1, "xword0 is a word.");
+            await HoverAsync(window, 1, "xword0 is a word in");
             editor.ScrollTo(new TextRange(text.Length, 0));
             window.Layout();
             Popup(window).ShouldBeNull();
 
             editor.ScrollTo(new TextRange(0, 0));
-            await HoverAsync(window, 1, "xword0 is a word.");
+            await HoverAsync(window, 1, "xword0 is a word in");
             button.Focus();
             window.Layout();
             Popup(window).ShouldBeNull();
@@ -211,7 +264,7 @@ public sealed class HoverTests(UiFixture ui)
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "word");
             using var window = new EditorWindow(new CodeEditor { Document = document });
             await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
-            await HoverAsync(window, 1, "word is a word.");
+            await HoverAsync(window, 1, "word is a word in");
 
             // The process crashes: its information and its diagnostics' messages are outdated.
             using CodeDocument crash = server.CreateDocument(FakeServer.Commands, "exit 3");
@@ -230,7 +283,7 @@ public sealed class HoverTests(UiFixture ui)
             var scope = new ThemeVariantScope { RequestedThemeVariant = ThemeVariant.Light, Child = editor };
             using var window = new EditorWindow(editor, scope);
             await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
-            await HoverAsync(window, 5, "is a word.");
+            await HoverAsync(window, 5, "is a word in");
 
             scope.RequestedThemeVariant = ThemeVariant.Dark;
 
@@ -254,7 +307,11 @@ public sealed class HoverTests(UiFixture ui)
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
             using var window = new EditorWindow(new CodeEditor { Document = document }, width: 700);
             await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
-            ToolTip popup = await HoverAsync(window, text.IndexOf("word", StringComparison.Ordinal), "word is a word.");
+            ToolTip popup = await HoverAsync(
+                window,
+                text.IndexOf("word", StringComparison.Ordinal),
+                "word is a word in"
+            );
             double right = BoundsInWindow(popup).Right;
 
             // Narrower than the popup's right edge, while the hovered word stays in view.
@@ -282,7 +339,7 @@ public sealed class HoverTests(UiFixture ui)
             string id = (await fake.WaitForAsync("hover "))["hover ".Length..].Split(' ')[0];
             (await fake.WaitForAsync("hover ")).ShouldEndWith(" slow");
 
-            await HoverAsync(window, text.IndexOf("fast", StringComparison.Ordinal), "fast is a word.");
+            await HoverAsync(window, text.IndexOf("fast", StringComparison.Ordinal), "fast is a word in");
             await fake.WaitForAsync($"cancel {id}");
         });
 

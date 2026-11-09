@@ -51,8 +51,14 @@ internal static class HoverView
                 run.FontWeight = FontWeight.Bold;
             if (span.Style.HasFlag(SpanStyle.Italic))
                 run.FontStyle = FontStyle.Italic;
+            // A small code span, in the editor's look at the paragraph's size, so that it fits its line.
             if (span.Style.HasFlag(SpanStyle.Code))
+            {
                 run.FontFamily = code.FontFamily;
+                run.Background = code.Background;
+                if (code.Foreground is { } foreground)
+                    run.Foreground = foreground;
+            }
             if (span.Link is { } uri)
             {
                 run.TextDecorations = TextDecorations.Underline;
@@ -81,7 +87,13 @@ internal static class HoverView
     {
         var inlines = new InlineCollection();
         foreach (CodeRun run in block.Runs)
-            inlines.Add(new Run(run.Text) { Foreground = run.Foreground });
+        {
+            // A run without a color of its own takes the block's, the editor's foreground.
+            var text = new Run(run.Text);
+            if (run.Foreground is { } foreground)
+                text.Foreground = foreground;
+            inlines.Add(text);
+        }
         return new Border
         {
             Background = look.Background,

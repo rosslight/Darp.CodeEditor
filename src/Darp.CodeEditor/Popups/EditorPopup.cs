@@ -131,7 +131,8 @@ internal sealed class EditorPopup
         double above = top.Y;
         double below = space.Height - bottom.Y;
         bool placeAbove = size.Height <= above || (size.Height > below && above >= below);
-        _root.MaxHeight = Math.Max(0, placeAbove ? above : below);
+        // In whole pixels, so that rounding the layout cannot take it past the window's edge.
+        _root.MaxHeight = Math.Max(0, Math.Floor(placeAbove ? above : below));
         Canvas.SetLeft(_root, Math.Clamp(top.X, 0, Math.Max(0, space.Width - size.Width)));
         if (placeAbove)
         {

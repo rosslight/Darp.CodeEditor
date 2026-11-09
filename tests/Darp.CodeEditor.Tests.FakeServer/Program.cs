@@ -6,7 +6,8 @@
 // Every other document is echoed: the server publishes one diagnostic over its whole text, whose message is the text
 // as the server has it.
 //
-// Hover over a word answers with Markdown: the word in bold, and its line as a code block in the document's language.
+// Hover over a word answers with Markdown: the word in bold, the document's language as inline code, and the word's
+// line as a code block in that language.
 // Hover over the word "slow" is never answered. Semantic tokens come from words, runs of letters, digits and
 // underscores: a word "class_static" is a token of the type "class" with the modifier "static", if the legend names
 // them; other words are not tokens.
@@ -378,7 +379,7 @@ internal sealed class FakeServer
                 {
                     ["kind"] = "markdown",
                     ["value"] =
-                        $"**{word}** is a word.\n\n```{document.LanguageId}\n{document.Text[lineStart..lineEnd]}\n```",
+                        $"**{word}** is a word in `{document.LanguageId}`.\n\n```{document.LanguageId}\n{document.Text[lineStart..lineEnd]}\n```",
                 },
                 ["range"] = new JsonObject
                 {
