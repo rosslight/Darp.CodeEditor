@@ -61,7 +61,12 @@ internal static class HoverBlocks
     /// plain text as it is. Off the UI thread: tokenizing a code block takes the grammar from the background highlighter
     /// for a line at a time.
     /// </summary>
-    public static IReadOnlyList<HoverBlock> Of(HoverInfo hover, TextMateGrammar? grammar)
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    public static IReadOnlyList<HoverBlock> Of(
+        HoverInfo hover,
+        TextMateGrammar? grammar,
+        CancellationToken cancellationToken
+    )
     {
         var blocks = new List<HoverBlock>();
         foreach (HoverText part in hover.Contents)
@@ -69,7 +74,7 @@ internal static class HoverBlocks
             if (blocks.Count > 0)
                 blocks.Add(new HoverRule());
             if (part.IsMarkdown)
-                blocks.AddRange(Markdown.Parse(part.Text, code => Highlight(code, grammar)));
+                blocks.AddRange(Markdown.Parse(part.Text, code => Highlight(code, grammar, cancellationToken)));
             else
                 blocks.Add(new HoverParagraph([new HoverSpan(part.Text.Trim())]));
         }
@@ -78,15 +83,18 @@ internal static class HoverBlocks
 
     /// <summary>
     /// A code block in the colors of <paramref name="grammar"/>'s tokens, line by line; a line that runs out of time
-    /// keeps the editor's foreground, and the next starts from the start of the grammar.
+    /// keeps the editor's foreground, and the next starts from the start of the grammar. Tokenizing stops between lines
+    /// once <paramref name="cancellationToken"/> is cancelled, as the hover's highlighting is no longer needed.
     /// </summary>
-    public static HoverCode Highlight(string code, TextMateGrammar? grammar)
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    public static HoverCode Highlight(string code, TextMateGrammar? grammar, CancellationToken cancellationToken)
     {
         var runs = new List<CodeRun>();
         IStateStack? state = null;
         string[] lines = code.Split('\n');
         for (int i = 0; i < lines.Length; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (i > 0)
                 runs.Add(new CodeRun("\n", null));
             string line = lines[i];

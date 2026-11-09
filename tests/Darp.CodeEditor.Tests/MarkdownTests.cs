@@ -1,6 +1,9 @@
 using System.Text.Json;
+using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.LanguageClient;
+using Darp.CodeEditor.Loading;
 using Darp.CodeEditor.Popups;
+using TextMateSharp.Internal.Types;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -44,6 +47,23 @@ public sealed class MarkdownTests
         IReadOnlyList<HoverSpan> spans = await Wait.ForAsync(Task.Run(() => Spans(text)));
 
         spans.ShouldBe([new(text)]);
+    }
+
+    [Fact]
+    public async Task Highlighting_a_code_block_stops_between_lines_once_the_hover_ends()
+    {
+        IRawGrammar source = (await CodeLanguage.Json.Loaded).Grammar.ShouldNotBeNull();
+        ColorThemeFile theme = (await CodeEditorColorTheme.LightPlus.Loaded).ShouldNotBeNull();
+        TextMateGrammar grammar = TextMateGrammar.Load(theme, source);
+        var hover = new HoverInfo([new HoverText("text\n\n```json\n{\n  \"a\": 1\n}\n```", true)], null);
+        using var ended = new CancellationTokenSource();
+        ended.Cancel();
+
+        Should.Throw<OperationCanceledException>(() => HoverBlocks.Of(hover, grammar, ended.Token));
+        HoverBlocks
+            .Of(hover, grammar, TestContext.Current.CancellationToken)
+            .OfType<HoverCode>()
+            .ShouldHaveSingleItem();
     }
 
     [Fact]

@@ -32,8 +32,8 @@ namespace Darp.CodeEditor.Popups;
 /// <see cref="Close"/> ends the hover, for every reason it ends: the pointer leaves both, also for another word under
 /// the same diagnostic; typing, scrolling and Escape; the editor losing the keyboard focus; a server that starts or
 /// stops serving the document, whose information the hover showed; new colors, which its code was drawn in; and the
-/// editor no longer showing the document. Ending it cancels the server's request if it is still under way, and drops what
-/// it would show, also before any popup opened.
+/// editor no longer showing the document. Ending it cancels the server's request and the reading of its answer if they
+/// are still under way, and drops what they would show, also before any popup opened.
 /// </para>
 /// </remarks>
 internal sealed class HoverController : IDisposable
@@ -88,8 +88,8 @@ internal sealed class HoverController : IDisposable
     }
 
     /// <summary>
-    /// Ends the current hover: closes the popup, cancels the server's request if it is still under way, and drops what
-    /// it would show.
+    /// Ends the current hover: closes the popup, cancels the server's request and the reading of its answer if they are
+    /// still under way, and drops what they would show.
     /// </summary>
     /// <returns>Whether a popup was open.</returns>
     public bool Close()
@@ -140,24 +140,30 @@ internal sealed class HoverController : IDisposable
     /// </summary>
     private async void ShowServerHover(Hovered hovered)
     {
+        CancellationToken cancellation = hovered.Cancellation.Token;
         try
         {
             TextLocation location = _buffer.GetLocation(hovered.Offset);
             HoverInfo? hover = await _document.HoverAsync(
                 hovered.Snapshot,
                 new TextPosition(location.Line, location.Column),
-                hovered.Cancellation.Token
+                cancellation
             );
             if (hover is null || _hovered != hovered)
                 return;
             TextMateGrammar? grammar = _highlighter.Grammar;
-            IReadOnlyList<HoverBlock> blocks = await Task.Run(() => HoverBlocks.Of(hover, grammar));
+            IReadOnlyList<HoverBlock> blocks = await Task.Run(
+                () => HoverBlocks.Of(hover, grammar, cancellation),
+                cancellation
+            );
             if (_hovered != hovered)
                 return;
             if (hover.Range is { } range)
                 hovered.Range = Union(hovered.Range, range);
             Show(hovered, hovered.Messages.Count > 0 ? [.. hovered.Messages, new HoverRule(), .. blocks] : blocks);
         }
+        // The hover ended while its answer was read.
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception e)
         {
             Logger
@@ -253,7 +259,7 @@ internal sealed class HoverController : IDisposable
 
         public IReadOnlyList<HoverBlock> Messages { get; } = messages;
 
-        /// <summary>Cancels the server's request.</summary>
+        /// <summary>Cancels the server's request and the reading of its answer.</summary>
         public CancellationTokenSource Cancellation { get; } = new();
 
         public bool Contains(int offset) => offset >= Range.Start && offset < Math.Max(Range.End, Range.Start + 1);
