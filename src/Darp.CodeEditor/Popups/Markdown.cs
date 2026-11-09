@@ -9,8 +9,8 @@ namespace Darp.CodeEditor.Popups;
 /// as its text, as do links to anything but web pages.
 /// </summary>
 /// <remarks>
-/// It follows CommonMark where hovers need it, and keeps it simple elsewhere: emphasis matches its closest closing
-/// delimiters, and a line of dashes is always a line between parts, never a heading's underline.
+/// It follows CommonMark where hovers need it, emphasis included, and keeps it simple elsewhere: a line of dashes is
+/// always a line between parts, never a heading's underline, and lists number their items as they are written.
 /// </remarks>
 internal static class Markdown
 {
@@ -51,7 +51,7 @@ internal static class Markdown
     public static IReadOnlyList<HoverSpan> Inline(string text)
     {
         var spans = new List<HoverSpan>();
-        AppendInline(text, SpanStyle.None, null, spans);
+        AppendInline(text, null, spans);
         return spans;
     }
 
@@ -127,9 +127,15 @@ internal static class Markdown
         return end - start;
     }
 
-    /// <summary>Appends the spans of <paramref name="text"/>, with <paramref name="style"/> and <paramref name="link"/> around them.</summary>
-    private static void AppendInline(string text, SpanStyle style, Uri? link, List<HoverSpan> spans)
+    /// <summary>
+    /// Appends the spans of <paramref name="text"/>, all with <paramref name="link"/>. Code spans, escapes, links and
+    /// autolinks are read first, and runs of <c>*</c> and <c>_</c> kept as delimiters; then emphasis pairs them, as
+    /// CommonMark does, in time that grows with the square of the delimiters at most. Only a link's text is read again, by
+    /// itself, and it holds no links.
+    /// </summary>
+    private static void AppendInline(string text, Uri? link, List<HoverSpan> spans)
     {
+        var parts = new List<Part>();
         var plain = new StringBuilder();
         int i = 0;
         while (i < text.Length)
@@ -151,43 +157,131 @@ internal static class Markdown
                     continue;
                 }
                 Flush();
-                spans.Add(new HoverSpan(CodeSpan(text[(i + run)..close]), style | SpanStyle.Code, link));
+                parts.Add(new Part(CodeSpan(text[(i + run)..close]), SpanStyle.Code, link));
                 i = close + run;
             }
-            else if (c is '*' or '_' && Emphasis(text, i) is { } emphasis)
+            else if (c is '*' or '_')
             {
                 Flush();
-                AppendInline(text[emphasis.InnerStart..emphasis.InnerEnd], style | emphasis.Style, link, spans);
-                i = emphasis.End;
+                int run = Run(text, i, c);
+                parts.Add(Delimiter(text, i, run));
+                i += run;
             }
             else if (c == '[' && link is null && Link(text, i) is { } found)
             {
                 Flush();
-                AppendInline(found.Label, style, WebPage(found.Target), spans);
+                var label = new List<HoverSpan>();
+                AppendInline(found.Label, WebPage(found.Target), label);
+                parts.AddRange(label.Select(span => new Part(span.Text, span.Style, span.Link)));
                 i = found.End;
             }
             else if (c == '<' && link is null && Autolink(text, i) is { } autolink)
             {
                 Flush();
-                spans.Add(new HoverSpan(autolink.Uri.OriginalString, style, autolink.Uri));
+                parts.Add(new Part(autolink.Uri.OriginalString, SpanStyle.None, autolink.Uri));
                 i = autolink.End;
             }
             else
             {
-                int run = c is '*' or '_' ? Run(text, i, c) : 1;
-                plain.Append(text, i, run);
-                i += run;
+                plain.Append(c);
+                i++;
             }
         }
         Flush();
+        Emphasize(parts);
+        foreach (Part part in parts)
+        {
+            string partText = part.Delimiter is { } delimiter ? new string(delimiter, part.Count) : part.Text;
+            if (partText.Length == 0)
+                continue;
+            // Text of one style and link is one span.
+            if (spans.Count > 0 && spans[^1] is var last && last.Style == part.Style && last.Link == part.Link)
+                spans[^1] = last with { Text = last.Text + partText };
+            else
+                spans.Add(new HoverSpan(partText, part.Style, part.Link));
+        }
 
         void Flush()
         {
             if (plain.Length > 0)
-                spans.Add(new HoverSpan(plain.ToString(), style, link));
+                parts.Add(new Part(plain.ToString(), SpanStyle.None, link));
             plain.Clear();
         }
+
+        Part Delimiter(string text, int start, int run)
+        {
+            char before = start > 0 ? text[start - 1] : ' ';
+            char after = start + run < text.Length ? text[start + run] : ' ';
+            // As CommonMark: a run that text follows can open, one that text precedes can close; punctuation counts as
+            // text only next to space or punctuation.
+            bool leftFlanking =
+                !char.IsWhiteSpace(after)
+                && (!IsPunctuation(after) || char.IsWhiteSpace(before) || IsPunctuation(before));
+            bool rightFlanking =
+                !char.IsWhiteSpace(before)
+                && (!IsPunctuation(before) || char.IsWhiteSpace(after) || IsPunctuation(after));
+            // An underscore inside a word, as in snake_case, is text.
+            bool underscore = text[start] == '_';
+            return new Part("", SpanStyle.None, link)
+            {
+                Delimiter = text[start],
+                Count = run,
+                Length = run,
+                CanOpen = leftFlanking && (!underscore || !rightFlanking || IsPunctuation(before)),
+                CanClose = rightFlanking && (!underscore || !leftFlanking || IsPunctuation(after)),
+            };
+        }
     }
+
+    /// <summary>
+    /// Pairs delimiter runs into emphasis, as CommonMark does: each run that can close takes the nearest run of the same
+    /// character before it that can open, two delimiters of each for bold when both have them, one for italic, and
+    /// styles what lies between. What a run does not use stays as its text.
+    /// </summary>
+    private static void Emphasize(List<Part> parts)
+    {
+        for (int close = 0; close < parts.Count; close++)
+        {
+            Part closer = parts[close];
+            if (closer.Delimiter is not { } c || !closer.CanClose)
+                continue;
+            while (closer.Count > 0 && Opener(parts, close, closer) is { } open)
+            {
+                Part opener = parts[open];
+                int used = opener.Count >= 2 && closer.Count >= 2 ? 2 : 1;
+                SpanStyle style = used == 2 ? SpanStyle.Bold : SpanStyle.Italic;
+                for (int i = open + 1; i < close; i++)
+                {
+                    parts[i].Style |= style;
+                    // Runs between the two can no longer pair.
+                    parts[i].CanOpen = parts[i].CanClose = false;
+                }
+                opener.Count -= used;
+                closer.Count -= used;
+            }
+        }
+    }
+
+    /// <summary>The nearest run before <paramref name="close"/> that can open emphasis that it closes; null for none.</summary>
+    private static int? Opener(List<Part> parts, int close, Part closer)
+    {
+        for (int open = close - 1; open >= 0; open--)
+        {
+            Part opener = parts[open];
+            if (opener.Delimiter != closer.Delimiter || !opener.CanOpen || opener.Count == 0)
+                continue;
+            // CommonMark's rule of three, for runs that can both open and close.
+            bool both = (opener.CanOpen && opener.CanClose) || (closer.CanOpen && closer.CanClose);
+            if (both && (opener.Length + closer.Length) % 3 == 0 && (opener.Length % 3 != 0 || closer.Length % 3 != 0))
+            {
+                continue;
+            }
+            return open;
+        }
+        return null;
+    }
+
+    private static bool IsPunctuation(char c) => char.IsPunctuation(c) || char.IsSymbol(c);
 
     private static bool IsAsciiPunctuation(char c) =>
         c is (>= '!' and <= '/') or (>= ':' and <= '@') or (>= '[' and <= '`') or (>= '{' and <= '~');
@@ -211,71 +305,6 @@ internal static class Markdown
         text = text.Replace('\n', ' ');
         return text.Length >= 2 && text[0] == ' ' && text[^1] == ' ' && text.Trim().Length > 0 ? text[1..^1] : text;
     }
-
-    /// <summary>
-    /// Emphasis that opens at <paramref name="start"/>: two delimiters for bold, one for italic, closed by the nearest
-    /// run of the same character that can close it. Emphasis inside it is skipped whole, so that <c>*a **b** c*</c>
-    /// nests. Underscores inside words are text, as in <c>snake_case</c>.
-    /// </summary>
-    private static (int InnerStart, int InnerEnd, int End, SpanStyle Style)? Emphasis(string text, int start)
-    {
-        char c = text[start];
-        int run = Run(text, start, c);
-        if (!CanOpen(text, start, run))
-            return null;
-        // The closing run is found after the whole opening run; delimiters of it beyond the emphasis are its text.
-        foreach (int length in run >= 2 ? (int[])[2, 1] : [1])
-        {
-            if (Closer(text, start + run, c, length) is { } close)
-                return (start + length, close, close + length, length == 2 ? SpanStyle.Bold : SpanStyle.Italic);
-        }
-        return null;
-    }
-
-    /// <summary>Where the delimiters that close emphasis of <paramref name="length"/> start; null for none.</summary>
-    private static int? Closer(string text, int from, char c, int length)
-    {
-        for (int i = from; i < text.Length; )
-        {
-            if (text[i] == '\\')
-            {
-                i += 2;
-                continue;
-            }
-            if (
-                text[i] == '`'
-                && ClosingBackticks(text, i + Run(text, i, '`'), Run(text, i, '`')) is var close and >= 0
-            )
-            {
-                i = close + Run(text, i, '`');
-                continue;
-            }
-            if (text[i] != c)
-            {
-                i++;
-                continue;
-            }
-            int run = Run(text, i, c);
-            if (run >= length && CanClose(text, i, run))
-                return i + run - length;
-            // Emphasis that opens here closes before this one does.
-            if (CanOpen(text, i, run) && Emphasis(text, i) is { } inner)
-                i = inner.End;
-            else
-                i += run;
-        }
-        return null;
-    }
-
-    private static bool CanOpen(string text, int start, int run) =>
-        start + run < text.Length
-        && !char.IsWhiteSpace(text[start + run])
-        && (text[start] != '_' || start == 0 || !char.IsLetterOrDigit(text[start - 1]));
-
-    private static bool CanClose(string text, int start, int run) =>
-        start > 0
-        && !char.IsWhiteSpace(text[start - 1])
-        && (text[start] != '_' || start + run >= text.Length || !char.IsLetterOrDigit(text[start + run]));
 
     /// <summary>A link, <c>[label](target "title")</c>, that starts at <paramref name="start"/>; null for none.</summary>
     private static (string Label, string Target, int End)? Link(string text, int start)
@@ -327,6 +356,29 @@ internal static class Markdown
         && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
             ? uri
             : null;
+
+    /// <summary>A part of a paragraph's text: text with its style and link, or a run of emphasis delimiters.</summary>
+    private sealed class Part(string text, SpanStyle style, Uri? link)
+    {
+        public string Text { get; } = text;
+
+        public SpanStyle Style { get; set; } = style;
+
+        public Uri? Link { get; } = link;
+
+        /// <summary>The run's character, <c>*</c> or <c>_</c>; null for text.</summary>
+        public char? Delimiter { get; init; }
+
+        /// <summary>How many of the run's delimiters are not used by emphasis yet.</summary>
+        public int Count { get; set; }
+
+        /// <summary>How many delimiters the run had.</summary>
+        public int Length { get; init; }
+
+        public bool CanOpen { get; set; }
+
+        public bool CanClose { get; set; }
+    }
 
     /// <summary>
     /// Collects blocks: the paragraph being read, and the list items it is in. A line that follows a paragraph's line

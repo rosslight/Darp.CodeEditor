@@ -36,6 +36,17 @@ public sealed class MarkdownTests
     }
 
     [Fact]
+    public async Task Emphasis_that_never_closes_stays_text_however_much_there_is()
+    {
+        // Each delimiter could open, and none can close: pairing them must not try every combination.
+        string text = string.Concat(Enumerable.Repeat("*a _b **c ", 5_000));
+
+        IReadOnlyList<HoverSpan> spans = await Wait.ForAsync(Task.Run(() => Spans(text)));
+
+        spans.ShouldBe([new(text)]);
+    }
+
+    [Fact]
     public void Links_open_web_pages_only()
     {
         var page = new Uri("https://example.com/a_(b)");
@@ -43,9 +54,7 @@ public sealed class MarkdownTests
             .ShouldBe([
                 new("the ", Link: page),
                 new("page", SpanStyle.Bold, page),
-                new(" "),
-                new("a file"),
-                new(" "),
+                new(" a file "),
                 new("http://example.org", Link: new Uri("http://example.org")),
             ]);
     }
