@@ -88,19 +88,24 @@ internal sealed class CompletionMatcher
             start++;
         if (start == typed.Length)
             return (DefaultScore, []);
-        string typedLow = typed.ToLowerInvariant();
-        if (
-            Score(typed, typedLow, start, filterText, filterText.ToLowerInvariant(), firstMatchCanBeWeak: false)
-            is not { } match
-        )
-        {
+        string typedLow = Lower(typed);
+        if (Score(typed, typedLow, start, filterText, Lower(filterText), firstMatchCanBeWeak: false) is not { } match)
             return null;
-        }
-        if (string.Equals(filterText, label, StringComparison.OrdinalIgnoreCase))
+        // Matched positions lie in the first MaxLength characters, so they hold for a label that starts alike.
+        if (Head(filterText).Equals(Head(label), StringComparison.OrdinalIgnoreCase))
             return match;
         // The label shows: its characters that match, by the most lenient score, with the filter text's score.
         return (match.Score, AnyScore(typed, typedLow, start, label));
     }
+
+    /// <summary>The first <see cref="MaxLength"/> characters of <paramref name="text"/>, all that matching reads.</summary>
+    private static ReadOnlySpan<char> Head(string text) => text.AsSpan(0, Math.Min(text.Length, MaxLength));
+
+    /// <summary>
+    /// <see cref="Head"/> in lower case: a server's label of millions of characters costs no more than its head.
+    /// </summary>
+    private static string Lower(string text) =>
+        text.Length <= MaxLength ? text.ToLowerInvariant() : text[..MaxLength].ToLowerInvariant();
 
     /// <summary>
     /// VS Code's <c>anyScore</c>: the characters of <paramref name="word"/> that match, also weakly and from a later
@@ -108,7 +113,7 @@ internal sealed class CompletionMatcher
     /// </summary>
     private int[] AnyScore(string pattern, string patternLow, int patternStart, string word)
     {
-        string wordLow = word.ToLowerInvariant();
+        string wordLow = Lower(word);
         int max = Math.Min(13, pattern.Length);
         for (int start = patternStart; start < max; start++)
         {

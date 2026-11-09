@@ -55,6 +55,26 @@ public sealed class CompletionMatcherTests
     }
 
     [Fact]
+    public void Matching_a_label_of_millions_of_characters_reads_only_its_first_128()
+    {
+        // A server may send labels of any length; committing matches one on the UI thread.
+        string label = "Console" + new string('x', 10_000_000);
+        string filterText = "Console" + new string('y', 10_000_000);
+        _matcher.Match("co", label, label);
+        _matcher.Match("co", label, filterText);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        (_, int[] highlights) = _matcher.Match("co", label, label).ShouldNotBeNull();
+        (_, int[] filtered) = _matcher.Match("co", label, filterText).ShouldNotBeNull();
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        highlights.ShouldBe([0, 1]);
+        filtered.ShouldBe([0, 1]);
+        // The labels alone take 20 MB each; matching them takes a few hundred bytes.
+        allocated.ShouldBeLessThan(10_000);
+    }
+
+    [Fact]
     public void Nothing_typed_matches_every_item_in_their_order()
     {
         CompletionCandidate[] items = [new("", "b", "b"), new("", "a", "a"), new(" \t", "c", "c")];
