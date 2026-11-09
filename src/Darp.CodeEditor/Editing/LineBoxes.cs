@@ -18,7 +18,13 @@ internal sealed class LineBoxes
     /// <summary>The top of each row, and after the last one, where the line ends, in the coordinates of the whole text.</summary>
     private readonly List<double> _rowTops = [];
 
+    /// <summary>How close boxes are that touch: a part of a pixel, as the layout adds up the widths of glyphs.</summary>
+    private const double Touch = 0.5;
+
     private readonly List<bool> _measured = [];
+
+    /// <summary>The stretches of the screen that a span covers on a row, kept for the next.</summary>
+    private readonly List<(double Left, double Right)> _stretches = [];
     private double[] _left = [];
     private double[] _right = [];
     private TextView? _textView;
@@ -90,7 +96,10 @@ internal sealed class LineBoxes
         return Box(row, _left[column], _right[column]);
     }
 
-    /// <summary>A box over the characters from <paramref name="start"/> to <paramref name="end"/>, each row's own.</summary>
+    /// <summary>
+    /// Boxes over the characters from <paramref name="start"/> to <paramref name="end"/>: on each row, one for each stretch
+    /// of the screen that they cover, as text of the other direction within them puts them apart.
+    /// </summary>
     public void AddSpans(int start, int end, List<Rect> boxes)
     {
         for (int row = RowOf(start); row < _rowStarts.Count - 1 && _rowStarts[row] < end; row++)
@@ -100,11 +109,35 @@ internal sealed class LineBoxes
             int to = Math.Min(end, _rowStarts[row + 1]);
             if (from >= to)
                 continue;
-            // Right to left text runs the other way: the box spans all of them.
-            (double left, double right) = (double.MaxValue, double.MinValue);
+            // In the order of the text, a character next to the one before, on either side, as text runs on in either
+            // direction, adds to its stretch.
+            _stretches.Clear();
             for (int column = from; column < to; column++)
-                (left, right) = (Math.Min(left, _left[column]), Math.Max(right, _right[column]));
-            boxes.Add(Box(row, left, right));
+            {
+                (double left, double right) = (_left[column], _right[column]);
+                if (
+                    _stretches is [.., var (lastLeft, lastRight)]
+                    && left <= lastRight + Touch
+                    && right >= lastLeft - Touch
+                )
+                    _stretches[^1] = (Math.Min(lastLeft, left), Math.Max(lastRight, right));
+                else
+                    _stretches.Add((left, right));
+            }
+            // Stretches apart in the text may meet on the screen.
+            _stretches.Sort();
+            (double Left, double Right) stretch = _stretches[0];
+            for (int i = 1; i < _stretches.Count; i++)
+            {
+                if (_stretches[i].Left <= stretch.Right + Touch)
+                    stretch.Right = Math.Max(stretch.Right, _stretches[i].Right);
+                else
+                {
+                    boxes.Add(Box(row, stretch.Left, stretch.Right));
+                    stretch = _stretches[i];
+                }
+            }
+            boxes.Add(Box(row, stretch.Left, stretch.Right));
         }
     }
 

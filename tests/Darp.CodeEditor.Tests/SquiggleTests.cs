@@ -1,6 +1,8 @@
+using Avalonia;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Darp.CodeEditor.Diagnostics;
+using Darp.CodeEditor.Editing;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -146,6 +148,30 @@ public sealed class SquiggleTests(UiFixture ui)
                         .All(offset => window.RenderAndCountPixels(s_error, window.CharacterArea(offset), Smoothed) > 0)
                 )
             );
+        });
+
+    [Fact]
+    public Task Squiggles_across_directions_leave_out_the_text_between() =>
+        _ui.Run(async () =>
+        {
+            // "abc " then the first half of the right-to-left word: its second half lies between on the screen.
+            const string text = "abc שלום def";
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document, ColorTheme = Marks() });
+
+            document.SetDiagnostics([Diagnostic(document, new TextRange(0, 6), DiagnosticSeverity.Error)]);
+
+            await Wait.UntilAsync(() =>
+                Enumerable
+                    .Range(0, 6)
+                    .All(offset => window.RenderAndCountPixels(s_error, window.CharacterArea(offset), Smoothed) > 0)
+            );
+            foreach (int offset in (int[])[6, 7])
+            {
+                // Inside its edges, which a smoothed wave next to it may touch.
+                Rect between = window.CharacterArea(offset).Deflate(new Thickness(1, 0));
+                window.RenderAndCountPixels(s_error, between, Smoothed).ShouldBe(0, $"offset {offset}");
+            }
         });
 
     [Fact]
