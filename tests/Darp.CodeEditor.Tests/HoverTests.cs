@@ -61,6 +61,28 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task An_empty_diagnostic_at_a_lines_end_shows_where_its_squiggle_is() =>
+        _ui.Run(async () =>
+        {
+            // As a missing semicolon: no server, only the diagnostic.
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "let a = 1\nlet b = 2");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            document.SetDiagnostics([
+                new Diagnostic(
+                    document.CurrentSnapshot,
+                    new TextRange(9, 0),
+                    DiagnosticSeverity.Error,
+                    null,
+                    "';' expected"
+                ),
+            ]);
+
+            window.MoveMouse(window.PointAt(9));
+
+            await WaitForPopupAsync(window, "';' expected");
+        });
+
+    [Fact]
     public Task The_popup_takes_the_editors_theme_variant() =>
         _ui.Run(async () =>
         {

@@ -284,19 +284,21 @@ How the client talks to a server, where the protocol leaves a choice:
   shows nothing. An answer counts only for the text that was current when the editor asked: the document's changes
   reach the server before the request, and an answer that comes after an edit is dropped.
 - **Hover** is asked when the pointer rests on a character for 400 ms, as long as Avalonia's tooltips wait (it is
-  AvaloniaEdit's hover time), at that character's position. A `MarkedString` with a language becomes a Markdown code
+  AvaloniaEdit's hover time), at that character's position, or at a line's end within a space's width after it, where
+  an empty diagnostic's squiggle is. A `MarkedString` with a language becomes a Markdown code
   block. The popup stays while the pointer is over the word, the range that the answer names, or the popup itself;
   resting on another word, typing, scrolling, Escape and the editor losing the keyboard focus close it, and cancel the
   request still under way with `$/cancelRequest`.
 - **Semantic tokens** are asked for the lines in view with `semanticTokens/range` when the server offers it, otherwise
   for the whole text with `semanticTokens/full`; never as deltas. An editor asks once it shows its first lines, 300 ms
-  after the last edit, 100 ms after scrolling shows lines without current tokens (VS Code's shortest pauses for a
+  after the last edit, 100 ms after scrolling stops on lines without current tokens (VS Code's shortest pauses for a
   document and for the view), and when a server starts or stops serving the document. An edit, or a newer request,
-  cancels the request under way. Tokens stay with their unchanged text until new ones arrive: an edit inside a line
-  moves the tokens after it and drops those it touches, and an edit across lines drops the rest of the lines it
-  changed; after an edit every line's tokens count as outdated and are asked for again when in view, as an edit can
-  change the meaning of text elsewhere. Tokens of a type that the server's legend does not name, outside the lines
-  asked for, or empty are ignored, and a process's tokens go when it ends, as its diagnostics do.
+  cancels the request under way. Tokens stay with their unchanged text until new ones arrive: an edit keeps the tokens
+  before it, moves those after it with their text, also onto another line, and drops those it touches. After an edit
+  every line's tokens count as outdated and are asked for again when in view, as an edit can change the meaning of
+  text elsewhere. An answer that fails leaves the lines in view as they are until the next edit, or until scrolling
+  shows others. Tokens of a type that the server's legend does not name, outside the lines asked for, or empty are
+  ignored, and a process's tokens go when it ends, as its diagnostics do.
 - **Token colors** come from the color theme as in VS Code: its `semanticTokenColors`, matched by type, modifiers and
   language with VS Code's scores; otherwise its TextMate color of the scopes that VS Code's standard mapping gives the
   type and modifiers, such as `entity.name.type` for a class or `variable.other.constant` for a read-only variable.
@@ -715,14 +717,17 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   layer, inside a window narrower than the tooltip. An editor in a dark `ThemeVariantScope` of a light window shows a
   dark popup, in its pixels. The popup stays while the pointer is over its word or over the popup, and closes when the
   pointer leaves both, rests on another word under the same diagnostic, and on typing, Escape, scrolling and focus
-  loss. Resting on another word cancels the request still under way with `$/cancelRequest`;
-- the Markdown subset: emphasis, also nested, inline code, escapes, links that open only http and https pages, nested
+  loss. Resting on another word cancels the request still under way with `$/cancelRequest`. An empty diagnostic at a
+  line's end shows when the pointer rests where its squiggle is;
+- the Markdown subset: emphasis, also nested, paired as CommonMark pairs it, also in text with thousands of
+  delimiters that never close, inline code, escapes, links that open only http and https pages, nested
   lists, hard line breaks, headings, rules and fenced code blocks; and hover answers as `MarkupContent`, `MarkedString`
   and arrays of them;
 - semantic tokens in the rendered pixels, with the server's own legend: a type that Light+'s `semanticTokenColors`
   names, and types and modifiers that it colors through VS Code's scopes; asked by range from a server that offers
-  ranges, in full from one that does not; asked for again after an edit, whose next edit cancels the request; a token
-  that an edit touches loses its color at once, and one that it moves keeps it;
+  ranges, in full from one that does not; asked for again after an edit, whose next edit cancels the request, and when
+  scrolling shows lines without them; a token that an edit touches loses its color at once, and one that it moves
+  keeps it, also onto a new line;
 - the client advertises exactly what it implements, and only editors that show a document ask for its hover and
   tokens, not an editor out of the visual tree;
 - on linux-x64 (BenchmarkDotNet, i7-13700): taking a server's tokens for all 5,000 lines of JSON with a warning under

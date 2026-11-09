@@ -1,3 +1,4 @@
+using Avalonia.Input;
 using Avalonia.Media;
 
 namespace Darp.CodeEditor.Tests;
@@ -84,19 +85,21 @@ public sealed class SemanticTokensTests(UiFixture ui)
             using CodeDocument hold = server.CreateDocument(FakeServer.Commands, "hold-semantic-tokens");
             await fake.WaitForAsync("holding semantic tokens");
 
-            // Inside the token on the first line, and before the token on the second.
+            // Inside the token on the first line; before the token on the second, a line break and a space.
             window.Editor.Selection = new TextSelection(2);
             window.Type("x");
             window.Editor.Selection = new TextSelection(11);
+            window.Press(Key.Enter);
             window.Type(" ");
             window.Render();
 
-            // "clxass one\n class two": the changed token goes, the moved one keeps its color.
+            // "clxass one\n\n class two": the changed token goes, the moved one keeps its color.
+            document.Text.ShouldBe("clxass one\n\n class two");
             window.ColorAt(0).ShouldBe(s_text);
             window.ColorAt(2).ShouldBe(s_text);
-            window.ColorAt(11).ShouldBe(s_text);
-            window.ColorAt(12).ShouldBe(s_class);
-            window.ColorAt(16).ShouldBe(s_class);
+            window.ColorAt(12).ShouldBe(s_text);
+            window.ColorAt(13).ShouldBe(s_class);
+            window.ColorAt(17).ShouldBe(s_class);
             await fake.WaitForAsync("semanticTokens/", requests + 1);
 
             // An edit outdates the request under way.

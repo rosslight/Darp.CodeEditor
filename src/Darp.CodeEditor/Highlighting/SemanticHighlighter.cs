@@ -54,11 +54,8 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
     /// <summary>Whether the last answer covered every line, as answers of a server without ranges do.</summary>
     private bool _lastAnsweredAll;
 
-    /// <summary>
-    /// Whether the document had no tokens to give at this generation, as a document without a server: no more
-    /// requests until it changes.
-    /// </summary>
-    private bool _unavailable;
+    /// <summary>The first line in view at the last layout, from 0: when it changes, the view scrolled.</summary>
+    private int _firstShown = -1;
 
     private ColorThemeFile? _theme;
     private SemanticTokensLegend? _legend;
@@ -106,14 +103,23 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
             _styles = null;
             ClearLines();
         }
+        (int firstShown, int lastShown) = Shown();
         for (int i = 0; i < tokens.Lines.Length && tokens.FirstLine + i < _lines.Count; i++)
         {
             int index = tokens.FirstLine + i;
             int[] lineTokens = tokens.Lines[i];
-            bool changed = !(_lines[index]?.Tokens.AsSpan().SequenceEqual(lineTokens) ?? lineTokens.Length == 0);
+            LineTokens? old = _lines[index];
             _lines[index] = new LineTokens(lineTokens, _generation);
-            if (changed && _textView.GetVisualLine(index + 1) is { } visualLine)
+            // Only lines in view are drawn: the others take their tokens when they are built.
+            if (
+                index >= firstShown
+                && index <= lastShown
+                && !(old?.Tokens.AsSpan().SequenceEqual(lineTokens) ?? lineTokens.Length == 0)
+                && _textView.GetVisualLine(index + 1) is { } visualLine
+            )
+            {
                 _textView.Redraw(visualLine);
+            }
         }
         _lastAnsweredAll = tokens.FirstLine == 0 && tokens.Lines.Length >= _lines.Count;
     }
@@ -162,39 +168,55 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
                 : null;
 
     /// <summary>
-    /// Keeps the tokens on their text: one entry per line, the tokens after an edit inside a line moved, and none on
-    /// changed text. Then asks again once the user pauses.
+    /// Keeps the tokens on their text: one entry per line, the tokens before the edit where they were, those after it
+    /// moved with their text, also to another line, and none on changed text. Then asks again once the user pauses.
     /// </summary>
     private void OnBufferChanged(object? sender, DocumentChangeEventArgs e)
     {
         DocumentLine firstLine = _buffer.GetLineByOffset(e.Offset);
+        DocumentLine lastLine = _buffer.GetLineByOffset(e.Offset + e.InsertionLength);
         int first = firstLine.LineNumber - 1;
+        int last = lastLine.LineNumber - 1;
         int column = e.Offset - firstLine.Offset;
-        int lastInserted = _buffer.GetLineByOffset(e.Offset + e.InsertionLength).LineNumber - 1;
         int delta = _buffer.LineCount - _lines.Count;
+        // Where the text after the edit starts: in the old text on the line where the removed text ended, now on the
+        // line where the inserted text ends.
+        int removedBreaks = last - first - delta;
+        LineTokens? head = _lines[first];
+        LineTokens? end = _lines[first + removedBreaks];
+        int oldEnd = removedBreaks == 0 ? column + e.RemovalLength : LastLineLength(e.RemovedText);
+        int newEnd = e.Offset + e.InsertionLength - lastLine.Offset;
         // The entries right after the changed line come and go, so the entries of the lines after keep their tokens.
         if (delta > 0)
             _lines.InsertRange(first + 1, new LineTokens?[delta]);
         else if (delta < 0)
             _lines.RemoveRange(first + 1, -delta);
-        if (_lines[first] is { } changed)
-        {
-            _lines[first] =
-                lastInserted == first && !ContainsLineBreak(e.RemovedText)
-                    ? changed.Moved(column, e.RemovalLength, e.InsertionLength)
-                    : changed.Before(column);
-        }
-        for (int i = first + 1; i <= lastInserted; i++)
+        for (int i = first; i <= last; i++)
             _lines[i] = null;
+        int[] before = head?.Before(column) ?? [];
+        int[] after = end?.After(oldEnd, newEnd) ?? [];
+        if (first == last)
+            _lines[first] = head is null && end is null ? null : new LineTokens([.. before, .. after], _generation);
+        else
+        {
+            _lines[first] = head is null ? null : new LineTokens(before, _generation);
+            _lines[last] = end is null ? null : new LineTokens(after, _generation);
+        }
         // A handler of the change that ran before this one may have built the changed lines from the old tokens.
         _textView.Redraw(e.Offset, e.InsertionLength);
         Outdate(s_afterEdit);
     }
 
-    /// <summary>The view shows other lines: asks for their tokens once scrolling pauses, if they need them.</summary>
+    /// <summary>
+    /// The view shows other lines: asks for their tokens once scrolling pauses, if they need them. While the view
+    /// moves, the pause starts again; an edit's longer pause stays.
+    /// </summary>
     private void OnVisualLinesChanged(object? sender, EventArgs e)
     {
-        if (!_timer.IsEnabled && NeedsTokens())
+        int firstShown = Shown().First;
+        bool scrolled = firstShown != _firstShown;
+        _firstShown = firstShown;
+        if (NeedsTokens() && (!_timer.IsEnabled || (scrolled && _timer.Interval == s_afterScroll)))
             Schedule(s_afterScroll);
     }
 
@@ -209,7 +231,6 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
     private void Outdate(TimeSpan pause)
     {
         _generation++;
-        _unavailable = false;
         _request?.Cancellation.Cancel();
         _request = null;
         Schedule(pause);
@@ -232,10 +253,7 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
     /// <summary>Whether a line in view lacks current tokens, and no request under way asks for it.</summary>
     private bool NeedsTokens()
     {
-        if (_unavailable || !_textView.VisualLinesValid || _textView.VisualLines.Count == 0)
-            return false;
-        int first = _textView.VisualLines[0].FirstDocumentLine.LineNumber - 1;
-        int last = _textView.VisualLines[^1].LastDocumentLine.LineNumber - 1;
+        (int first, int last) = Shown();
         for (int i = first; i <= last; i++)
         {
             if (_lines[i]?.Generation != _generation && _request?.Covers(i) != true)
@@ -243,6 +261,15 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
         }
         return false;
     }
+
+    /// <summary>The first and the last line in view, from 0; none while the view has no lines.</summary>
+    private (int First, int Last) Shown() =>
+        _textView.VisualLinesValid && _textView.VisualLines.Count > 0
+            ? (
+                _textView.VisualLines[0].FirstDocumentLine.LineNumber - 1,
+                _textView.VisualLines[^1].LastDocumentLine.LineNumber - 1
+            )
+            : (0, -1);
 
     /// <summary>Asks for the tokens of the lines in view, or of all lines from a server without ranges.</summary>
     private void RequestTokens()
@@ -258,7 +285,6 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
             cancellation.Token
         );
         var request = new Request(
-            _generation,
             _lastAnsweredAll ? 0 : first.LineNumber - 1,
             _lastAnsweredAll ? int.MaxValue : last.LineNumber - 1,
             cancellation,
@@ -274,7 +300,9 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
     }
 
     /// <summary>
-    /// Shows an answer, unless a newer request replaced it, or the text or the server changed since it was asked for.
+    /// Shows an answer, unless a newer request replaced it, or the text or the server changed since it was asked for:
+    /// either cancelled it. Without tokens, from a document without a server or a server that failed, the lines in view
+    /// keep what they have until the next edit.
     /// </summary>
     private void OnAnswered(Request request)
     {
@@ -289,11 +317,11 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
                 ?.Log(this, "Reading semantic tokens failed: {Exception}", exception);
             return;
         }
-        if (request.Generation != _generation)
-            return;
         if (request.Answer.Result is not { } tokens)
         {
-            _unavailable = true;
+            (int first, int last) = Shown();
+            for (int i = first; i <= last; i++)
+                _lines[i] = new LineTokens(_lines[i]?.Tokens ?? [], _generation);
             return;
         }
         Show(tokens);
@@ -309,16 +337,24 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
         _textView.Redraw();
     }
 
-    private static bool ContainsLineBreak(ITextSource text) => text.IndexOfAny(['\r', '\n'], 0, text.TextLength) >= 0;
+    /// <summary>The length of the last line of <paramref name="text"/>, after its last line break.</summary>
+    private static int LastLineLength(ITextSource text)
+    {
+        int length = 0;
+        while (length < text.TextLength && text.GetCharAt(text.TextLength - 1 - length) is not ('\r' or '\n'))
+            length++;
+        return length;
+    }
 
-    /// <summary>A request for tokens, of the lines from <paramref name="First"/> to <paramref name="Last"/> or more.</summary>
-    /// <param name="Generation">The count of edits and server changes when it was made.</param>
+    /// <summary>
+    /// A request for tokens, of the lines from <paramref name="First"/> to <paramref name="Last"/> or more. An edit or a
+    /// change of the server cancels it, so that an answer it gets is about the current text.
+    /// </summary>
     /// <param name="First">The first line it asks for, from 0.</param>
     /// <param name="Last">The last line it asks for.</param>
     /// <param name="Cancellation">Cancels it.</param>
     /// <param name="Answer">The tokens, once the server answered; null for none.</param>
     private sealed record Request(
-        int Generation,
         int First,
         int Last,
         CancellationTokenSource Cancellation,
@@ -333,27 +369,8 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
     /// <param name="Generation">The count of edits and server changes that they are current for.</param>
     private sealed record LineTokens(int[] Tokens, int Generation)
     {
-        /// <summary>
-        /// The tokens after an edit inside the line, which replaced <paramref name="removed"/> characters at
-        /// <paramref name="column"/> with <paramref name="inserted"/> ones: those before it stay, those after it move,
-        /// and those it touches go.
-        /// </summary>
-        public LineTokens Moved(int column, int removed, int inserted)
-        {
-            var moved = new List<int>(Tokens.Length);
-            for (int i = 0; i < Tokens.Length; i += SemanticTokenLines.Stride)
-            {
-                int start = Tokens[i];
-                if ((long)start + Tokens[i + 1] <= column)
-                    moved.AddRange(Tokens.AsSpan(i, SemanticTokenLines.Stride));
-                else if (start >= column + removed)
-                    moved.AddRange([start - removed + inserted, Tokens[i + 1], Tokens[i + 2], Tokens[i + 3]]);
-            }
-            return this with { Tokens = [.. moved] };
-        }
-
-        /// <summary>The tokens that end before <paramref name="column"/>, where an edit across lines starts.</summary>
-        public LineTokens Before(int column)
+        /// <summary>The tokens that end at or before <paramref name="column"/>, where an edit starts.</summary>
+        public int[] Before(int column)
         {
             var before = new List<int>(Tokens.Length);
             for (int i = 0; i < Tokens.Length; i += SemanticTokenLines.Stride)
@@ -361,7 +378,22 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
                 if ((long)Tokens[i] + Tokens[i + 1] <= column)
                     before.AddRange(Tokens.AsSpan(i, SemanticTokenLines.Stride));
             }
-            return this with { Tokens = [.. before] };
+            return [.. before];
+        }
+
+        /// <summary>
+        /// The tokens that start at or after <paramref name="column"/>, where an edit ends, moved to start from
+        /// <paramref name="newColumn"/> as their text does.
+        /// </summary>
+        public int[] After(int column, int newColumn)
+        {
+            var after = new List<int>(Tokens.Length);
+            for (int i = 0; i < Tokens.Length; i += SemanticTokenLines.Stride)
+            {
+                if (Tokens[i] >= column)
+                    after.AddRange([Tokens[i] - column + newColumn, Tokens[i + 1], Tokens[i + 2], Tokens[i + 3]]);
+            }
+            return [.. after];
         }
     }
 }

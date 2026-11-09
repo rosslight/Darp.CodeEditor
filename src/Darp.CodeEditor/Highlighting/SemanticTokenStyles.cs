@@ -136,10 +136,6 @@ internal sealed class SemanticTokenStyles
         ];
     }
 
-    public ColorThemeFile Theme => _theme;
-
-    public SemanticTokensLegend Legend => _legend;
-
     /// <summary>
     /// The foreground of a token with <paramref name="type"/> and <paramref name="modifiers"/>, an index and bits of the
     /// legend; null where the TextMate colors stay.

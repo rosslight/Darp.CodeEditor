@@ -97,7 +97,11 @@ internal sealed class SquiggleLayer : SelectionOverlay
                 figure = figures[severity] = shape.Open();
             }
             if (marker.Diagnostic.Severity == DiagnosticSeverity.Hint)
-                AddDots(figure, textView, marker.StartOffset);
+            {
+                // Dots under the start of a hint that starts above the view would be out of it too.
+                if (marker.StartOffset >= start)
+                    AddDots(figure, textView, marker.StartOffset);
+            }
             else if (marker.Length == 0)
                 AddWave(figure, TextViewBoxes.CharacterAt(textView, marker.StartOffset));
             else

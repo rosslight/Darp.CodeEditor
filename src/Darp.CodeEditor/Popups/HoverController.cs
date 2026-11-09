@@ -179,22 +179,33 @@ internal sealed class HoverController : IDisposable
 
     private void OnClosingChange(object? sender, EventArgs e) => Close();
 
-    /// <summary>The offset of the character under <paramref name="point"/>; null where there is none, as past a line's end.</summary>
+    /// <summary>
+    /// The offset of the character under <paramref name="point"/>, or of a line's end within a space's width after it,
+    /// where an empty diagnostic there is drawn; null elsewhere.
+    /// </summary>
     private int? OffsetAt(Point point)
     {
         if (_textView.GetPositionFloor(point + _textView.ScrollOffset) is not { } position)
             return null;
         DocumentLine line = _buffer.GetLineByNumber(position.Line);
         int offset = _buffer.GetOffset(position.Location);
-        return offset < line.EndOffset ? offset : null;
+        if (offset < line.EndOffset)
+            return offset;
+        Rect end = TextViewBoxes.CharacterAt(_textView, line.EndOffset);
+        return point.X < end.Right ? line.EndOffset : null;
     }
 
-    /// <summary>The word at <paramref name="offset"/>, by VS Code's word characters; the character alone if it is none.</summary>
+    /// <summary>
+    /// The word at <paramref name="offset"/>, by VS Code's word characters; the character alone if it is none, and
+    /// nothing at a line's end.
+    /// </summary>
     private TextRange WordAt(int offset)
     {
+        DocumentLine line = _buffer.GetLineByOffset(offset);
+        if (offset == line.EndOffset)
+            return new TextRange(offset, 0);
         if (!WordCharacters.IsWordCharacter(_buffer.GetCharAt(offset)))
             return new TextRange(offset, 1);
-        DocumentLine line = _buffer.GetLineByOffset(offset);
         int start = offset;
         while (start > line.Offset && WordCharacters.IsWordCharacter(_buffer.GetCharAt(start - 1)))
             start--;
