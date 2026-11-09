@@ -386,7 +386,8 @@ How the client talks to a server, where the protocol leaves a choice:
     best. There is no typo tolerance.
   - **Asking again:** a list marked `isIncomplete` is asked for again on each character that the user types on in a
     word, for incomplete completions, and shows meanwhile. Moving back before where completion was asked asks again
-    while a word is left, as invoked, as VS Code does. A newer request cancels the one under way with
+    while a word is left, as invoked, as VS Code does, and so does an edit before it, as by another editor of the
+    document: the list's positions no longer fit the text. A newer request cancels the one under way with
     `$/cancelRequest`, and so does ending completion; the answer of a request that is no longer the latest is
     dropped. An answer that comes after typing is filtered with what was typed since.
   - **Committing:** Enter, Tab, a click, or one of the item's commit characters, or the server's `allCommitCharacters`
@@ -914,6 +915,8 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   dropped once the user typed on;
 - an incomplete list is asked for again on each character typed, for incomplete completions; a newer request and
   Escape cancel the one under way with `$/cancelRequest`, and selecting another item cancels the resolve under way;
+- an edit before where completion was asked, as by another editor of the document, asks again, and the item then
+  replaces the word where it is now;
 - documents that no editor shows ask for nothing, and an editor that loses the keyboard focus cancels its request,
   while the editor that has it gets its list;
 - icons in Light+ and Dark+ in VS Code's light and dark colors, and in a theme's own `symbolIcon.methodForeground`, in
@@ -922,7 +925,8 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
 - completion ends on Escape, on leaving the word, on focus loss, when its line scrolls out of view, and when the
   server stops serving the document;
 - signature help opens on "(" with the active parameter in bold and its Markdown, moves the parameter at once on ",",
-  asks again only after 120 ms without an edit, with a clock that the test advances, shows the other signatures on
+  asks again only after 120 ms without an edit, with a clock that the test advances, also after an edit that leaves
+  the caret where it was, shows the other signatures on
   Up and Down, tells the server the one that shows, which keeps it, and leaves Up and Down to an open completion
   list; it shows above the line while completion's list shows below, and ends on Escape, on leaving the call, on
   focus loss and when the server stops serving the document;
