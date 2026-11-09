@@ -638,18 +638,25 @@ public class CodeEditor : TemplatedControl
         }
         else if (e.Key == Key.F3 && (e.KeyModifiers == KeyModifiers.None || shift))
             e.Handled = FindNext(previous: shift);
-        else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && _hover is { IsOpen: true } hover)
-        {
-            hover.Close();
+        else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && Dismiss())
             e.Handled = true;
-        }
-        else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && _searchBar is { IsOpen: true } bar)
-        {
-            bar.Close();
-            e.Handled = true;
-        }
         else if (_helpers is { } helpers && _part is { } part && part.TextArea.IsFocused)
             helpers.OnKeyDown(e);
+    }
+
+    /// <summary>
+    /// What Escape closes: it ends the hover, also one still waiting for its server, and when no hover was open, it
+    /// closes the search bar.
+    /// </summary>
+    /// <returns>Whether it closed something the user saw.</returns>
+    private bool Dismiss()
+    {
+        if (_hover?.Close() == true)
+            return true;
+        if (_searchBar is not { IsOpen: true } bar)
+            return false;
+        bar.Close();
+        return true;
     }
 
     /// <summary>

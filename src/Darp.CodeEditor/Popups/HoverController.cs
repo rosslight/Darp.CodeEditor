@@ -26,9 +26,14 @@ namespace Darp.CodeEditor.Popups;
 /// </para>
 /// <para>
 /// The hovered text is the word under the pointer, and the range that the server's hover names. The popup stays while
-/// the pointer is over it or over the popup, so that its links can be clicked and it can be scrolled. It closes when
-/// the pointer leaves both, also for another word under the same diagnostic, on typing, scrolling and Escape, and when
-/// the editor loses the keyboard focus. Closing cancels the server's request if it is still under way.
+/// the pointer is over it or over the popup, so that its links can be clicked and it can be scrolled.
+/// </para>
+/// <para>
+/// <see cref="Close"/> ends the hover, for every reason it ends: the pointer leaves both, also for another word under
+/// the same diagnostic; typing, scrolling and Escape; the editor losing the keyboard focus; a server that starts or
+/// stops serving the document, whose information the hover showed; new colors, which its code was drawn in; and the
+/// editor no longer showing the document. Ending it cancels the server's request if it is still under way, and drops what
+/// it would show, also before any popup opened.
 /// </para>
 /// </remarks>
 internal sealed class HoverController : IDisposable
@@ -66,23 +71,34 @@ internal sealed class HoverController : IDisposable
         _textView.PointerExited += OnPointerExited;
         _textView.ScrollOffsetChanged += OnClosingChange;
         _buffer.Changed += OnClosingChange;
+        _document.LanguageFeaturesChanged += OnClosingChange;
         _popup.Root.PointerExited += OnPointerExited;
     }
 
-    /// <summary>The colors of the color theme, for code in the popup, once it is loaded.</summary>
+    /// <summary>The colors of the color theme, for code in the popup, once it is loaded. New colors end the hover.</summary>
     public TextAreaColors? Colors
     {
-        set => _colors = value;
+        set
+        {
+            if (value == _colors)
+                return;
+            _colors = value;
+            Close();
+        }
     }
 
-    public bool IsOpen => _popup.IsOpen;
-
-    /// <summary>Closes the popup, and cancels the server's request if it is still under way.</summary>
-    public void Close()
+    /// <summary>
+    /// Ends the current hover: closes the popup, cancels the server's request if it is still under way, and drops what
+    /// it would show.
+    /// </summary>
+    /// <returns>Whether a popup was open.</returns>
+    public bool Close()
     {
+        bool wasOpen = _popup.IsOpen;
         _hovered?.Cancellation.Cancel();
         _hovered = null;
         _popup.Hide();
+        return wasOpen;
     }
 
     public void Dispose()
@@ -93,6 +109,7 @@ internal sealed class HoverController : IDisposable
         _textView.PointerExited -= OnPointerExited;
         _textView.ScrollOffsetChanged -= OnClosingChange;
         _buffer.Changed -= OnClosingChange;
+        _document.LanguageFeaturesChanged -= OnClosingChange;
         _popup.Root.PointerExited -= OnPointerExited;
     }
 
@@ -118,8 +135,8 @@ internal sealed class HoverController : IDisposable
     }
 
     /// <summary>
-    /// Shows the server's hover below the messages, once it answered and its Markdown is read, unless the popup closed
-    /// or other text is hovered meanwhile. Failures of reading it go to the log.
+    /// Shows the server's hover below the messages, once it answered and its Markdown is read, unless the hover ended
+    /// meanwhile. Failures of reading it go to the log.
     /// </summary>
     private async void ShowServerHover(Hovered hovered)
     {

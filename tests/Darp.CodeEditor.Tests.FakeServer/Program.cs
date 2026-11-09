@@ -16,6 +16,7 @@
 //   --stderr <text>         write a line to standard error at start
 //   --exit-at-start <code>  exit at start, before reading anything
 //   --unversioned           publish diagnostics without a version
+//   --no-diagnostics        publish no diagnostics for echoed documents
 //   --full-sync             ask for the full text with every change
 //   --text-document-sync <json>  answer initialize with this textDocumentSync capability
 //   --vscode-uris           publish diagnostics with file URIs written as VS Code's URI library writes them
@@ -53,6 +54,7 @@ internal sealed class FakeServer
     private readonly Dictionary<string, Document> _documents = [];
     private readonly bool _neverInitialize;
     private readonly bool _unversioned;
+    private readonly bool _noDiagnostics;
     private readonly bool _fullSync;
     private readonly bool _ignoreShutdown;
     private readonly JsonNode? _textDocumentSync;
@@ -98,6 +100,9 @@ internal sealed class FakeServer
                     break;
                 case "--unversioned":
                     _unversioned = true;
+                    break;
+                case "--no-diagnostics":
+                    _noDiagnostics = true;
                     break;
                 case "--full-sync":
                     _fullSync = true;
@@ -253,6 +258,8 @@ internal sealed class FakeServer
     {
         if (document.LanguageId != "fake-command")
         {
+            if (_noDiagnostics)
+                return;
             (int line, int character) = End(document.Text);
             Publish(document, !_unversioned, Diagnostic(0, 0, line, character, document.Text));
             return;

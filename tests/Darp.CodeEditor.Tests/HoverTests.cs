@@ -180,6 +180,70 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Escape_ends_a_hover_that_still_waits_for_its_server() =>
+        _ui.Run(async () =>
+        {
+            // Without diagnostics, nothing shows until the server answers, and it never answers for "slow". The clock
+            // stands still, so that no hang limit cancels the request instead.
+            var fake = new FakeServer("--no-diagnostics");
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = new ManualTime() });
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "slow");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await server.StartAsync();
+            window.MoveMouse(window.PointAt(1));
+            string id = (await fake.WaitForAsync("hover "))["hover ".Length..].Split(' ')[0];
+            Popup(window).ShouldBeNull();
+
+            window.Press(Key.Escape);
+
+            // Its request is cancelled, so that a late answer opens nothing.
+            await fake.WaitForAsync($"cancel {id}");
+            Popup(window).ShouldBeNull();
+        });
+
+    [Fact]
+    public Task A_server_that_stops_serving_the_document_ends_its_hover() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = new ManualTime() });
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "word");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+            await HoverAsync(window, 1, "word is a word.");
+
+            // The process crashes: its information and its diagnostics' messages are outdated.
+            using CodeDocument crash = server.CreateDocument(FakeServer.Commands, "exit 3");
+
+            await Wait.UntilAsync(() => Popup(window) is null);
+        });
+
+    [Fact]
+    public Task New_colors_end_the_hover_whose_code_shows_the_old_ones() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.Json, "{\n  \"key\": 1\n}");
+            var editor = new CodeEditor { Document = document };
+            var scope = new ThemeVariantScope { RequestedThemeVariant = ThemeVariant.Light, Child = editor };
+            using var window = new EditorWindow(editor, scope);
+            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+            await HoverAsync(window, 5, "is a word.");
+
+            scope.RequestedThemeVariant = ThemeVariant.Dark;
+
+            // Once the text area shows Dark+, no code in Light+'s colors shows beside it.
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return EditorWindow.PartOf(editor).Background is ISolidColorBrush { Color: var color }
+                    && color == Color.Parse("#1E1E1E");
+            });
+            Popup(window).ShouldBeNull();
+        });
+
+    [Fact]
     public Task The_popup_stays_inside_a_window_that_narrows() =>
         _ui.Run(async () =>
         {
