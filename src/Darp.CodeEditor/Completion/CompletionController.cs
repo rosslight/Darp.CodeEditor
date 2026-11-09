@@ -351,16 +351,19 @@ internal sealed class CompletionController : IDisposable
     private async void ResolveSelected(Session session)
     {
         CompletionItem item = session.Items[session.Selected].Item;
-        ShowDetails(session, session.ResolvedOf(item) ?? item);
-        if (session.Answer is not { List.Resolves: true } answer || session.Resolves.ContainsKey(item))
-            return;
+        // Whether or not this item still needs its own, the resolve of another one is no longer needed.
         foreach (
-            (CompletionItem other, Resolve running) in session.Resolves.Where(r => !r.Value.Task.IsCompleted).ToList()
+            (CompletionItem other, Resolve running) in session
+                .Resolves.Where(r => !ReferenceEquals(r.Key, item) && !r.Value.Task.IsCompleted)
+                .ToList()
         )
         {
             running.Cancellation.Cancel();
             session.Resolves.Remove(other);
         }
+        ShowDetails(session, session.ResolvedOf(item) ?? item);
+        if (session.Answer is not { List.Resolves: true } answer || session.Resolves.ContainsKey(item))
+            return;
         var cancellation = new CancellationTokenSource();
         Task<CompletionItem?> resolving = answer.List.ResolveAsync(item, cancellation.Token);
         session.Resolves[item] = new Resolve(resolving, cancellation);

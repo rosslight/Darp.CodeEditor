@@ -342,6 +342,38 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Selecting_an_item_whose_resolve_is_done_cancels_the_resolve_of_the_one_left() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [ { "label": "alpha", "data": { "detail": "the alpha" } },
+                                 { "label": "beta", "data": { "detail": "the beta" } } ] }
+                    """
+                )
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await OpenAsync(window, 0);
+            await Wait.UntilAsync(() => DetailTexts(window).Contains("the alpha"));
+            using CodeDocument hold = await CommandAsync(server, fake, "hold-resolve", "holding resolve");
+            window.Press(Key.Down);
+            string beta = Id(await fake.WaitForAsync("resolve ", 2));
+
+            // Back to "alpha", resolved already.
+            window.Press(Key.Up);
+
+            await BarrierAsync(server, fake);
+            fake.Lines.ShouldContain($"cancel {beta}");
+            DetailTexts(window).ShouldContain("the alpha");
+        });
+
+    [Fact]
     public Task Additional_edits_commit_with_the_item_in_one_step() =>
         _ui.Run(async () =>
         {
