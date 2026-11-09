@@ -48,59 +48,81 @@ internal static class HoverBlocks
     /// <summary>How long a line of a code block may take to tokenize, as the background highlighter allows.</summary>
     private static readonly TimeSpan s_lineTimeLimit = TimeSpan.FromMilliseconds(50);
 
-    /// <summary>The messages of <paramref name="diagnostics"/>, each with its code, as plain text.</summary>
-    public static IReadOnlyList<HoverBlock> Of(IEnumerable<Diagnostic> diagnostics) =>
-        [
-            .. diagnostics.Select(diagnostic => new HoverParagraph([
-                new HoverSpan(diagnostic.Code is { } code ? $"{diagnostic.Message} ({code})" : diagnostic.Message),
-            ])),
-        ];
+    /// <summary>
+    /// The messages of <paramref name="diagnostics"/>, each with its code, as plain text, as much of them as
+    /// <paramref name="budget"/> leaves.
+    /// </summary>
+    public static IReadOnlyList<HoverBlock> Of(IEnumerable<Diagnostic> diagnostics, HoverBudget budget)
+    {
+        var blocks = new List<HoverBlock>();
+        foreach (Diagnostic diagnostic in diagnostics)
+        {
+            string message = diagnostic.Code is { } code ? $"{diagnostic.Message} ({code})" : diagnostic.Message;
+            if (budget.Take(message) is not { } text)
+                break;
+            blocks.Add(new HoverParagraph([new HoverSpan(text)]));
+        }
+        return budget.Fit(blocks);
+    }
 
     /// <summary>
-    /// The server's hover, its parts apart: Markdown with its code blocks highlighted by <paramref name="grammar"/>, and
-    /// plain text as it is. Off the UI thread: tokenizing a code block takes the grammar from the background highlighter
-    /// for a line at a time.
+    /// The server's hover, its parts apart, as much of it as <paramref name="budget"/> leaves: Markdown with its code
+    /// blocks highlighted by <paramref name="grammar"/>, and plain text as it is. Off the UI thread: tokenizing a code
+    /// block takes the grammar from the background highlighter for a line at a time. Reading stops between lines and
+    /// paragraphs once <paramref name="cancellationToken"/> is cancelled, as the hover is no longer needed.
     /// </summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public static IReadOnlyList<HoverBlock> Of(
         HoverInfo hover,
         TextMateGrammar? grammar,
+        HoverBudget budget,
         CancellationToken cancellationToken
     )
     {
         var blocks = new List<HoverBlock>();
         foreach (HoverText part in hover.Contents)
         {
+            if (budget.Take(part.Text) is not { } text)
+                break;
             if (blocks.Count > 0)
                 blocks.Add(new HoverRule());
             if (part.IsMarkdown)
-                blocks.AddRange(Markdown.Parse(part.Text, code => Highlight(code, grammar, cancellationToken)));
+            {
+                blocks.AddRange(
+                    Markdown.Parse(text, code => Highlight(code, grammar, cancellationToken), cancellationToken)
+                );
+            }
             else
-                blocks.Add(new HoverParagraph([new HoverSpan(part.Text.Trim())]));
+                blocks.Add(new HoverParagraph([new HoverSpan(text.Trim())]));
         }
-        return blocks;
+        return budget.Fit(blocks);
     }
 
     /// <summary>
-    /// A code block in the colors of <paramref name="grammar"/>'s tokens, line by line; a line that runs out of time
-    /// keeps the editor's foreground, and the next starts from the start of the grammar. Tokenizing stops between lines
-    /// once <paramref name="cancellationToken"/> is cancelled, as the hover's highlighting is no longer needed.
+    /// A code block in the colors of <paramref name="grammar"/>'s tokens, line by line, with neighbors of one color in
+    /// one run; a line that runs out of time keeps the editor's foreground, and the next starts from the start of the
+    /// grammar. Tokenizing stops between lines once <paramref name="cancellationToken"/> is cancelled, as the hover's
+    /// highlighting is no longer needed.
     /// </summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
-    public static HoverCode Highlight(string code, TextMateGrammar? grammar, CancellationToken cancellationToken)
+    public static HoverCode Highlight(
+        IEnumerable<string> lines,
+        TextMateGrammar? grammar,
+        CancellationToken cancellationToken
+    )
     {
         var runs = new List<CodeRun>();
         IStateStack? state = null;
-        string[] lines = code.Split('\n');
-        for (int i = 0; i < lines.Length; i++)
+        bool first = true;
+        foreach (string line in lines)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (i > 0)
-                runs.Add(new CodeRun("\n", null));
-            string line = lines[i];
+            if (!first)
+                Add("\n", null);
+            first = false;
             if (grammar?.TokenizeInBackground(line, state, s_lineTimeLimit) is not { } result)
             {
-                runs.Add(new CodeRun(line, null));
+                Add(line, null);
                 state = null;
                 continue;
             }
@@ -111,9 +133,112 @@ internal static class HoverBlocks
                 int start = Math.Min(tokens[t], line.Length);
                 int end = Math.Min(t + 2 < tokens.Length ? tokens[t + 2] : line.Length, line.Length);
                 if (end > start)
-                    runs.Add(new CodeRun(line[start..end], grammar.Foreground(tokens[t + 1])));
+                    Add(line[start..end], grammar.Foreground(tokens[t + 1]));
             }
         }
         return new HoverCode(runs);
+
+        // Each run costs the UI thread a text run to build and lay out.
+        void Add(string text, IBrush? foreground)
+        {
+            if (runs.Count > 0 && runs[^1].Foreground == foreground)
+                runs[^1] = runs[^1] with { Text = runs[^1].Text + text };
+            else
+                runs.Add(new CodeRun(text, foreground));
+        }
     }
+}
+
+/// <summary>
+/// How much a hover shows, so that the UI thread builds and lays it out well within a frame: at most
+/// <see cref="MaxCharacters"/> characters on <see cref="MaxLines"/> lines, in <see cref="MaxRuns"/> runs, its parts in
+/// order. The text is cut where any of them runs out, and "…" marks the cut. A hover is a tooltip that scrolls, so more
+/// would not help the user.
+/// </summary>
+/// <remarks>
+/// The UI thread's cost follows the runs, the pieces of text of one style or one color that it builds and shapes one by
+/// one, more than the characters: about 10 µs a run and 1 µs a character (the hover benchmark). The text is cut before
+/// it is read, which bounds the work in the background too, and what is read is cut by its runs.
+/// </remarks>
+internal sealed class HoverBudget
+{
+    public const int MaxCharacters = 2_000;
+
+    public const int MaxLines = 50;
+
+    public const int MaxRuns = 250;
+
+    private int _characters = MaxCharacters;
+    private int _lines = MaxLines;
+    private int _runs = MaxRuns;
+
+    /// <summary>
+    /// The start of <paramref name="text"/> that the characters and lines left allow, a part of a hover on lines of its
+    /// own, with "…" at its end when it was cut; null when nothing is left.
+    /// </summary>
+    public string? Take(string text)
+    {
+        if (_characters <= 0 || _lines <= 0)
+            return null;
+        int lines = 1;
+        int end = 0;
+        for (; end < text.Length && end < _characters; end++)
+        {
+            if (text[end] == '\n' && ++lines > _lines)
+                break;
+        }
+        if (end == text.Length)
+        {
+            _characters -= end;
+            _lines -= lines;
+            return text;
+        }
+        // Nothing follows a cut.
+        _characters = 0;
+        _lines = 0;
+        return text[..end] + "…";
+    }
+
+    /// <summary>
+    /// The blocks that the runs left allow: those that fit, and as much of the next as fits, ending with "…". Nothing
+    /// follows a cut.
+    /// </summary>
+    public IReadOnlyList<HoverBlock> Fit(IReadOnlyList<HoverBlock> blocks)
+    {
+        var fitted = new List<HoverBlock>(blocks.Count);
+        foreach (HoverBlock block in blocks)
+        {
+            int runs = Runs(block);
+            if (runs <= _runs)
+            {
+                fitted.Add(block);
+                _runs -= runs;
+                continue;
+            }
+            int kept = Math.Max(0, _runs - 1);
+            fitted.Add(
+                block switch
+                {
+                    HoverParagraph paragraph => paragraph with
+                    {
+                        Spans = [.. paragraph.Spans.Take(kept), new HoverSpan("…")],
+                    },
+                    HoverCode code => new HoverCode([.. code.Runs.Take(kept), new CodeRun("…", null)]),
+                    _ => new HoverParagraph([new HoverSpan("…")]),
+                }
+            );
+            (_characters, _lines, _runs) = (0, 0, 0);
+            break;
+        }
+        return fitted;
+    }
+
+    /// <summary>The runs a block takes: its spans or tokens, and a list item's marker.</summary>
+    private static int Runs(HoverBlock block) =>
+        block switch
+        {
+            HoverParagraph paragraph => paragraph.Spans.Count + (paragraph.Marker is null ? 0 : 1),
+            HoverCode code => code.Runs.Count,
+            _ => 1,
+        };
 }

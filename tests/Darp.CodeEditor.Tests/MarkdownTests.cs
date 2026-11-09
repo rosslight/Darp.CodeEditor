@@ -50,20 +50,93 @@ public sealed class MarkdownTests
     }
 
     [Fact]
-    public async Task Highlighting_a_code_block_stops_between_lines_once_the_hover_ends()
+    public void Reading_a_hovers_Markdown_stops_part_way_once_the_hover_ends()
     {
-        IRawGrammar source = (await CodeLanguage.Json.Loaded).Grammar.ShouldNotBeNull();
-        ColorThemeFile theme = (await CodeEditorColorTheme.LightPlus.Loaded).ShouldNotBeNull();
-        TextMateGrammar grammar = TextMateGrammar.Load(theme, source);
-        var hover = new HoverInfo([new HoverText("text\n\n```json\n{\n  \"a\": 1\n}\n```", true)], null);
         using var ended = new CancellationTokenSource();
-        ended.Cancel();
+        int codeBlocks = 0;
 
-        Should.Throw<OperationCanceledException>(() => HoverBlocks.Of(hover, grammar, ended.Token));
-        HoverBlocks
-            .Of(hover, grammar, TestContext.Current.CancellationToken)
-            .OfType<HoverCode>()
-            .ShouldHaveSingleItem();
+        // The hover ends while its first code block is read.
+        Should.Throw<OperationCanceledException>(() =>
+            Markdown.Parse(
+                "first\n\n```\na\n```\n\nsecond\n\n```\nb\n```",
+                lines =>
+                {
+                    codeBlocks++;
+                    ended.Cancel();
+                    return Code(lines);
+                },
+                ended.Token
+            )
+        );
+
+        codeBlocks.ShouldBe(1);
+        // A hover's prose stops too.
+        Should.Throw<OperationCanceledException>(() =>
+            HoverBlocks.Of(Hover("first\n\nsecond", markdown: true), null, new HoverBudget(), ended.Token)
+        );
+    }
+
+    [Fact]
+    public async Task Highlighting_a_code_block_stops_part_way_once_the_hover_ends()
+    {
+        TextMateGrammar grammar = await JsonGrammarAsync();
+        using var ended = new CancellationTokenSource();
+        int read = 0;
+
+        // The hover ends once the first line is highlighted.
+        Should.Throw<OperationCanceledException>(() => HoverBlocks.Highlight(Lines(), grammar, ended.Token));
+
+        read.ShouldBe(2);
+
+        IEnumerable<string> Lines()
+        {
+            read++;
+            yield return "{";
+            ended.Cancel();
+            read++;
+            yield return "  \"a\": 1";
+            read++;
+            yield return "}";
+        }
+    }
+
+    [Fact]
+    public void A_hover_shows_at_most_its_characters_lines_and_runs_cut_with_an_ellipsis()
+    {
+        CancellationToken going = TestContext.Current.CancellationToken;
+        var diagnostic = new Diagnostic(
+            TextSnapshot.FromString(""),
+            default,
+            DiagnosticSeverity.Error,
+            null,
+            new string('m', 100_000)
+        );
+        // Emphasis that alternates: two runs every four characters, 800 runs on one line.
+        string emphasis = string.Concat(Enumerable.Repeat("*x* ", 400));
+
+        string characters = TextOf(HoverBlocks.Of([diagnostic], new HoverBudget()));
+        string lines = TextOf(
+            HoverBlocks.Of(
+                Hover(string.Join('\n', Enumerable.Repeat("x", 1_000)), false),
+                null,
+                new HoverBudget(),
+                going
+            )
+        );
+        IReadOnlyList<HoverBlock> runs = HoverBlocks.Of(Hover(emphasis, true), null, new HoverBudget(), going);
+        // The diagnostics' messages come first, and leave nothing to the server's hover.
+        var shared = new HoverBudget();
+        HoverBlocks.Of([diagnostic], shared);
+        IReadOnlyList<HoverBlock> after = HoverBlocks.Of(Hover("more", true), null, shared, going);
+
+        characters.Length.ShouldBe(HoverBudget.MaxCharacters + 1);
+        characters.ShouldEndWith("…");
+        lines.Count(c => c == '\n').ShouldBe(HoverBudget.MaxLines - 1);
+        lines.ShouldEndWith("…");
+        HoverParagraph paragraph = runs.ShouldHaveSingleItem().ShouldBeOfType<HoverParagraph>();
+        paragraph.Spans.Count.ShouldBe(HoverBudget.MaxRuns);
+        paragraph.Spans[^1].Text.ShouldBe("…");
+        after.ShouldBeEmpty();
     }
 
     [Fact]
@@ -141,9 +214,35 @@ public sealed class MarkdownTests
 
     private static IReadOnlyList<HoverSpan> Spans(string text) => Markdown.Inline(text);
 
-    private static IReadOnlyList<HoverBlock> Parse(string markdown) => Markdown.Parse(markdown, code => Code(code));
+    private static IReadOnlyList<HoverBlock> Parse(string markdown) =>
+        Markdown.Parse(markdown, Code, TestContext.Current.CancellationToken);
 
     private static HoverCode Code(string code) => new([new CodeRun(code, null)]);
+
+    private static HoverCode Code(IReadOnlyList<string> lines) => Code(string.Join('\n', lines));
+
+    private static HoverInfo Hover(string text, bool markdown) => new([new HoverText(text, markdown)], null);
+
+    /// <summary>The text that blocks show, paragraphs on lines of their own.</summary>
+    private static string TextOf(IEnumerable<HoverBlock> blocks) =>
+        string.Join(
+            '\n',
+            blocks.Select(block =>
+                block switch
+                {
+                    HoverParagraph paragraph => string.Concat(paragraph.Spans.Select(span => span.Text)),
+                    HoverCode code => string.Concat(code.Runs.Select(run => run.Text)),
+                    _ => "",
+                }
+            )
+        );
+
+    private static async Task<TextMateGrammar> JsonGrammarAsync()
+    {
+        IRawGrammar source = (await CodeLanguage.Json.Loaded).Grammar.ShouldNotBeNull();
+        ColorThemeFile theme = (await CodeEditorColorTheme.LightPlus.Loaded).ShouldNotBeNull();
+        return TextMateGrammar.Load(theme, source);
+    }
 
     private static HoverInfo? Read(string json, TextSnapshot snapshot) =>
         HoverInfo.Read(JsonElement.Parse(json), snapshot);

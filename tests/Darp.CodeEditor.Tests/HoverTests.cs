@@ -149,7 +149,8 @@ public sealed class HoverTests(UiFixture ui)
     public Task The_popup_closes_on_typing_Escape_scrolling_and_focus_loss() =>
         _ui.Run(async () =>
         {
-            var fake = new FakeServer();
+            // Without diagnostics: the echoed whole text would take all that a hover shows.
+            var fake = new FakeServer("--no-diagnostics");
             await using var server = new LanguageServer(fake.Options);
             string text = string.Concat(Enumerable.Range(0, 200).Select(i => $"word{i}\n"));
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
@@ -157,7 +158,7 @@ public sealed class HoverTests(UiFixture ui)
             DockPanel.SetDock(button, Dock.Top);
             var editor = new CodeEditor { Document = document };
             using var window = new EditorWindow(editor, new DockPanel { Children = { button, editor } });
-            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+            await server.StartAsync();
 
             await HoverAsync(window, 1, "word0 is a word.");
             window.Type("x");

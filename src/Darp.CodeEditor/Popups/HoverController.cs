@@ -122,11 +122,13 @@ internal sealed class HoverController : IDisposable
         if (OffsetAt(e.GetPosition(_textView)) is not { } offset || _hovered?.Contains(offset) == true)
             return;
         Close();
+        var budget = new HoverBudget();
         var hovered = new Hovered(
             offset,
             WordAt(offset),
             _document.CurrentSnapshot,
-            HoverBlocks.Of(_squiggles.At(offset))
+            HoverBlocks.Of(_squiggles.At(offset), budget),
+            budget
         );
         _hovered = hovered;
         if (hovered.Messages.Count > 0)
@@ -153,7 +155,7 @@ internal sealed class HoverController : IDisposable
                 return;
             TextMateGrammar? grammar = _highlighter.Grammar;
             IReadOnlyList<HoverBlock> blocks = await Task.Run(
-                () => HoverBlocks.Of(hover, grammar, cancellation),
+                () => HoverBlocks.Of(hover, grammar, hovered.Budget, cancellation),
                 cancellation
             );
             if (_hovered != hovered)
@@ -246,7 +248,14 @@ internal sealed class HoverController : IDisposable
     /// <param name="word">The word there, which the popup is next to.</param>
     /// <param name="snapshot">The text when the pointer rested: the popup closes when it changes.</param>
     /// <param name="messages">The diagnostics' messages.</param>
-    private sealed class Hovered(int offset, TextRange word, TextSnapshot snapshot, IReadOnlyList<HoverBlock> messages)
+    /// <param name="budget">What is left of the text the hover shows, for the server's hover after the messages.</param>
+    private sealed class Hovered(
+        int offset,
+        TextRange word,
+        TextSnapshot snapshot,
+        IReadOnlyList<HoverBlock> messages,
+        HoverBudget budget
+    )
     {
         public int Offset { get; } = offset;
 
@@ -258,6 +267,8 @@ internal sealed class HoverController : IDisposable
         public TextSnapshot Snapshot { get; } = snapshot;
 
         public IReadOnlyList<HoverBlock> Messages { get; } = messages;
+
+        public HoverBudget Budget { get; } = budget;
 
         /// <summary>Cancels the server's request and the reading of its answer.</summary>
         public CancellationTokenSource Cancellation { get; } = new();

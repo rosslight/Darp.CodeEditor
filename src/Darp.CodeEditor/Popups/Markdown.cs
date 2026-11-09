@@ -16,13 +16,22 @@ internal static class Markdown
 {
     private const string Bullets = "-*+";
 
-    /// <summary>Reads <paramref name="markdown"/> into blocks, with <paramref name="code"/> making its code blocks.</summary>
-    public static IReadOnlyList<HoverBlock> Parse(string markdown, Func<string, HoverCode> code)
+    /// <summary>
+    /// Reads <paramref name="markdown"/> into blocks, with <paramref name="code"/> making its code blocks from their
+    /// lines. Reading stops between lines and paragraphs once <paramref name="cancellationToken"/> is cancelled.
+    /// </summary>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    public static IReadOnlyList<HoverBlock> Parse(
+        string markdown,
+        Func<IReadOnlyList<string>, HoverCode> code,
+        CancellationToken cancellationToken
+    )
     {
-        var reader = new BlockReader(code);
+        var reader = new BlockReader(code, cancellationToken);
         string[] lines = markdown.ReplaceLineEndings("\n").Split('\n');
         for (int i = 0; i < lines.Length; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             string line = lines[i].Replace('\t', ' ');
             string trimmed = line.TrimStart(' ');
             int indent = line.Length - trimmed.Length;
@@ -31,7 +40,7 @@ internal static class Markdown
                 var codeLines = new List<string>();
                 for (i++; i < lines.Length && !IsClosingFence(lines[i], fence.Character, fence.Length); i++)
                     codeLines.Add(Unindent(lines[i], indent));
-                reader.Code(string.Join('\n', codeLines));
+                reader.Code(codeLines);
             }
             else if (trimmed.Length == 0)
                 reader.Blank();
@@ -385,9 +394,10 @@ internal static class Markdown
     /// continues it; a blank line ends it, and a line after it that is indented as an item's text is a paragraph of
     /// that item.
     /// </summary>
-    private sealed class BlockReader(Func<string, HoverCode> code)
+    private sealed class BlockReader(Func<IReadOnlyList<string>, HoverCode> code, CancellationToken cancellationToken)
     {
-        private readonly Func<string, HoverCode> _code = code;
+        private readonly Func<IReadOnlyList<string>, HoverCode> _code = code;
+        private readonly CancellationToken _cancellationToken = cancellationToken;
         private readonly List<HoverBlock> _blocks = [];
 
         /// <summary>The column where the text of each open list item starts, the outermost first.</summary>
@@ -407,10 +417,10 @@ internal static class Markdown
             _blocks.Add(block);
         }
 
-        public void Code(string text)
+        public void Code(IReadOnlyList<string> lines)
         {
             EndParagraph();
-            _blocks.Add(_code(text));
+            _blocks.Add(_code(lines));
         }
 
         public void Blank() => EndParagraph();
@@ -468,6 +478,7 @@ internal static class Markdown
 
         private void EndParagraph()
         {
+            _cancellationToken.ThrowIfCancellationRequested();
             if (_paragraph.Length > 0)
                 _blocks.Add(new HoverParagraph(Inline(_paragraph.ToString()), _level, _marker));
             _paragraph.Clear();
