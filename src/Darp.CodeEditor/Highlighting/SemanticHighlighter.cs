@@ -43,8 +43,11 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
     private readonly Dispatcher _dispatcher;
     private readonly DispatcherTimer _timer;
 
-    /// <summary>One entry per line: its tokens and the text they came for; null while none came.</summary>
-    private readonly List<LineTokens?> _lines = [];
+    /// <summary>
+    /// One entry per line: its tokens and the text they came for; null while none came. An answer for the whole text
+    /// replaces it, built off the UI thread.
+    /// </summary>
+    private List<LineTokens?> _lines = [];
 
     /// <summary>Counts the edits and the changes of the server: tokens of an older count are outdated.</summary>
     private int _generation;
@@ -92,37 +95,51 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
     }
 
     /// <summary>
-    /// Shows <paramref name="tokens"/>, which are about the current text: the lines they cover take them, and lines
-    /// whose tokens changed draw again.
+    /// Off the UI thread: the line entries of an answer that is about the text of <paramref name="generation"/>.
     /// </summary>
-    public void Show(SemanticTokenLines tokens)
+    public static Answer Prepare(SemanticTokenLines tokens, int generation) =>
+        new(tokens.Legend, tokens.FirstLine, [.. tokens.Lines.Select(line => new LineTokens(line, generation))]);
+
+    /// <summary>
+    /// Shows an answer about the current text: the lines it covers take its tokens, and those in view whose tokens
+    /// changed draw again. An answer for the whole text takes the place of all entries at once, so the UI thread's work
+    /// grows with the lines in view, not with the text.
+    /// </summary>
+    public void Show(Answer answer)
     {
-        if (tokens.Legend != _legend)
+        if (answer.Legend != _legend)
         {
             // Another server's numbers name other types: the tokens of the old one go.
-            _legend = tokens.Legend;
+            _legend = answer.Legend;
             _styles = null;
             ClearLines();
         }
         (int firstShown, int lastShown) = Shown();
-        for (int i = 0; i < tokens.Lines.Length && tokens.FirstLine + i < _lines.Count; i++)
+        var changed = new List<VisualLine>();
+        for (int index = Math.Max(firstShown, answer.FirstLine); index <= lastShown; index++)
         {
-            int index = tokens.FirstLine + i;
-            int[] lineTokens = tokens.Lines[i];
-            LineTokens? old = _lines[index];
-            _lines[index] = new LineTokens(lineTokens, _generation);
-            // Only lines in view are drawn: the others take their tokens when they are built.
+            if (index - answer.FirstLine >= answer.Lines.Count || index >= _lines.Count)
+                break;
+            int[] tokens = answer.Lines[index - answer.FirstLine]?.Tokens ?? [];
             if (
-                index >= firstShown
-                && index <= lastShown
-                && !(old?.Tokens.AsSpan().SequenceEqual(lineTokens) ?? lineTokens.Length == 0)
+                !(_lines[index]?.Tokens.AsSpan().SequenceEqual(tokens) ?? tokens.Length == 0)
                 && _textView.GetVisualLine(index + 1) is { } visualLine
             )
             {
-                _textView.Redraw(visualLine);
+                changed.Add(visualLine);
             }
         }
-        _lastAnsweredAll = tokens.FirstLine == 0 && tokens.Lines.Length >= _lines.Count;
+        _lastAnsweredAll = answer.FirstLine == 0 && answer.Lines.Count == _lines.Count;
+        if (_lastAnsweredAll)
+            _lines = answer.Lines;
+        else
+        {
+            // An answer for a range covers the lines in view.
+            for (int i = 0; i < answer.Lines.Count && answer.FirstLine + i < _lines.Count; i++)
+                _lines[answer.FirstLine + i] = answer.Lines[i];
+        }
+        foreach (VisualLine visualLine in changed)
+            _textView.Redraw(visualLine);
     }
 
     public void Dispose()
@@ -280,12 +297,21 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
         DocumentLine last = _textView.VisualLines[^1].LastDocumentLine;
         _request?.Cancellation.Cancel();
         var cancellation = new CancellationTokenSource();
-        Task<SemanticTokenLines?> answer = _document.SemanticTokensAsync(
-            new TextPosition(first.LineNumber, 1),
-            new TextPosition(last.LineNumber, last.Length + 1),
-            _buffer.LineCount,
-            cancellation.Token
-        );
+        int generation = _generation;
+        // The answer's line entries are built off the UI thread, also for the whole text.
+        Task<Answer?> answer = _document
+            .SemanticTokensAsync(
+                new TextPosition(first.LineNumber, 1),
+                new TextPosition(last.LineNumber, last.Length + 1),
+                _buffer.LineCount,
+                cancellation.Token
+            )
+            .ContinueWith(
+                tokens => tokens.Result is { } read ? Prepare(read, generation) : null,
+                CancellationToken.None,
+                TaskContinuationOptions.None,
+                TaskScheduler.Default
+            );
         var request = new Request(
             _lastAnsweredAll ? 0 : first.LineNumber - 1,
             _lastAnsweredAll ? int.MaxValue : last.LineNumber - 1,
@@ -319,14 +345,14 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
                 ?.Log(this, "Reading semantic tokens failed: {Exception}", exception);
             return;
         }
-        if (request.Answer.Result is not { } tokens)
+        if (request.Answer.Result is not { } answer)
         {
             (int first, int last) = Shown();
             for (int i = first; i <= last; i++)
                 _lines[i] = new LineTokens(_lines[i]?.Tokens ?? [], _generation);
             return;
         }
-        Show(tokens);
+        Show(answer);
         // The view may have moved on meanwhile.
         if (!_timer.IsEnabled && NeedsTokens())
             Schedule(s_afterScroll);
@@ -356,20 +382,21 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
     /// <param name="Last">The last line it asks for.</param>
     /// <param name="Cancellation">Cancels it.</param>
     /// <param name="Answer">The tokens, once the server answered; null for none.</param>
-    private sealed record Request(
-        int First,
-        int Last,
-        CancellationTokenSource Cancellation,
-        Task<SemanticTokenLines?> Answer
-    )
+    private sealed record Request(int First, int Last, CancellationTokenSource Cancellation, Task<Answer?> Answer)
     {
         public bool Covers(int line) => line >= First && line <= Last;
     }
 
+    /// <summary>An answer's line entries, from <paramref name="FirstLine"/> on.</summary>
+    /// <param name="Legend">What the tokens' numbers name.</param>
+    /// <param name="FirstLine">The first line it covers, from 0.</param>
+    /// <param name="Lines">The entries of the lines it covers.</param>
+    internal sealed record Answer(SemanticTokensLegend Legend, int FirstLine, List<LineTokens?> Lines);
+
     /// <summary>A line's tokens, as <see cref="SemanticTokenLines"/> has them.</summary>
     /// <param name="Tokens">Its tokens.</param>
     /// <param name="Generation">The count of edits and server changes that they are current for.</param>
-    private sealed record LineTokens(int[] Tokens, int Generation)
+    internal sealed record LineTokens(int[] Tokens, int Generation)
     {
         /// <summary>The tokens that end at or before <paramref name="column"/>, where an edit starts.</summary>
         public int[] Before(int column)

@@ -10,8 +10,9 @@ namespace Darp.CodeEditor.Benchmarks;
 
 /// <summary>
 /// The UI thread's cost of a server's semantic tokens in 5,000 lines of JSON with a warning under every key: taking
-/// the tokens of the whole text, as a server without ranges sends them, and the frame after it, with its squiggles.
-/// Each call takes other tokens than the last, so that every line in view draws again.
+/// the tokens of the whole text, as a server without ranges sends them, and the frame after it, with its squiggles. The
+/// answer's line entries are built beforehand, as the editor builds them off the UI thread. Each call takes other tokens
+/// than the last, so that every line in view draws again.
 /// </summary>
 [NotInBaseline]
 [WarmupCount(2)]
@@ -22,7 +23,7 @@ public class SemanticTokenBenchmarks
 
     private Window? _window;
     private SemanticHighlighter? _highlighter;
-    private SemanticTokenLines[] _tokens = [];
+    private SemanticHighlighter.Answer[] _answers = [];
     private int _next;
 
     [GlobalSetup]
@@ -48,14 +49,14 @@ public class SemanticTokenBenchmarks
         ]);
         Dispatcher.UIThread.RunJobs();
         _highlighter = editor.SemanticHighlighter;
-        _tokens = [Tokens(type: 0), Tokens(type: 1)];
+        _answers = [SemanticHighlighter.Prepare(Tokens(type: 0), 0), SemanticHighlighter.Prepare(Tokens(type: 1), 0)];
     }
 
     [Benchmark]
     public void TakeTokensOfTheWholeTextAndDraw()
     {
         SemanticHighlighter highlighter = _highlighter ?? throw new InvalidOperationException("Not set up.");
-        highlighter.Show(_tokens[_next]);
+        highlighter.Show(_answers[_next]);
         _next ^= 1;
         HeadlessEditor.Render(_window ?? throw new InvalidOperationException("Not set up."));
     }
