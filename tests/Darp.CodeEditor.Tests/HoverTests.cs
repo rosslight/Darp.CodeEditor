@@ -180,6 +180,29 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task The_popup_stays_inside_a_window_that_narrows() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            string text = new string('a', 36) + " word";
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document }, width: 700);
+            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+            ToolTip popup = await HoverAsync(window, text.IndexOf("word", StringComparison.Ordinal), "word is a word.");
+            double right = BoundsInWindow(popup).Right;
+
+            // Narrower than the popup's right edge, while the hovered word stays in view.
+            window.Window.Width = right - 40;
+            window.Layout();
+            window.Render();
+
+            Popup(window).ShouldBeSameAs(popup);
+            Rect bounds = BoundsInWindow(popup);
+            new Rect(window.Window.ClientSize).Contains(bounds).ShouldBeTrue($"{bounds} in {window.Window.ClientSize}");
+        });
+
+    [Fact]
     public Task An_outdated_hover_request_is_cancelled() =>
         _ui.Run(async () =>
         {

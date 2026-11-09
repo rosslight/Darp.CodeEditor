@@ -154,7 +154,7 @@ internal sealed class HoverController : IDisposable
         var code = new CodeLook(_editor.FontFamily, _editor.FontSize, _colors?.Background, _colors?.Foreground);
         _content.Content = HoverView.Create(blocks, code);
         // Above the hovered word, where the pointer comes from.
-        _popup.Show(_textView, TextViewBoxes.CharacterAt(_textView, hovered.Word.Start));
+        _popup.Show(_textView, () => TextViewBoxes.CharacterAt(_textView, hovered.Word.Start));
     }
 
     /// <summary>Closes the popup once the pointer moves over other text.</summary>
