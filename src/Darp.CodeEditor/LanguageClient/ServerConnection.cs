@@ -33,8 +33,6 @@ internal sealed class ServerConnection
     /// <summary>Guarded: the documents open in the server, from <see cref="OnRunning"/> on.</summary>
     private readonly Dictionary<ServerDocument, OpenDocument> _documents = [];
 
-    private readonly SettingsChange _settingsChange;
-
     /// <summary>Guarded: the connection's life, from <see cref="Start"/> on.</summary>
     private Task? _run;
 
@@ -53,12 +51,17 @@ internal sealed class ServerConnection
     /// <summary>Guarded: why the server did not answer <c>initialize</c>, when it answered something else.</summary>
     private string? _failure;
 
+    /// <summary>Guarded: the app's answer for all settings is being computed, on the thread pool.</summary>
+    private bool _isComputingSettings;
+
+    /// <summary>Guarded: the settings changed while they were computed, so another computation follows.</summary>
+    private bool _isSettingsChangedAgain;
+
     public ServerConnection(LanguageServer server, LanguageServerOptions options, Lock serverLock)
     {
         _server = server;
         _options = options;
         _lock = serverLock;
-        _settingsChange = new SettingsChange(this);
     }
 
     /// <summary>
@@ -77,23 +80,26 @@ internal sealed class ServerConnection
     public void Start() => _run = Task.Run(RunAsync);
 
     /// <summary>
-    /// Guarded: the server answered <c>initialize</c>. Sends <c>initialized</c> and all settings, then opens
-    /// <paramref name="documents"/>, so that the server has its settings before it checks them.
+    /// Guarded: the server answered <c>initialize</c>, and the app's settings are computed. Sends all settings, then
+    /// opens <paramref name="documents"/>, so that the server has its settings before it checks them.
     /// </summary>
-    public void OnRunning(JsonRpcConnection rpc, bool isFullSync, IEnumerable<ServerDocument> documents)
+    /// <param name="rpc">The connection to the server.</param>
+    /// <param name="isFullSync">Whether the server wants the full text with every change.</param>
+    /// <param name="settings">All settings; null when the app's callback threw, which drops this push.</param>
+    /// <param name="documents">The server's open documents.</param>
+    public void OnRunning(
+        JsonRpcConnection rpc,
+        bool isFullSync,
+        JsonNode? settings,
+        IEnumerable<ServerDocument> documents
+    )
     {
         _running = new Running(rpc, _options.TimeProvider.GetTimestamp(), isFullSync);
-        rpc.Notify(
-            "initialized",
-            writer =>
-            {
-                writer.WriteStartObject();
-                writer.WriteEndObject();
-            }
-        );
-        _settingsChange.Queue(rpc);
+        if (settings is not null)
+            SendSettings(rpc, settings);
         foreach (ServerDocument document in documents)
             Open(document);
+        SettingsComputed();
     }
 
     /// <summary>Guarded: opens a document in the running server, with its current text.</summary>
@@ -128,11 +134,22 @@ internal sealed class ServerConnection
         Open(document);
     }
 
-    /// <summary>Guarded: sends all settings again to the running server.</summary>
+    /// <summary>
+    /// Guarded: sends all settings again to the running server, once the app's callback has answered on the thread
+    /// pool. One computation runs at a time, and changes meanwhile make one more.
+    /// </summary>
     public void NotifySettingsChanged()
     {
-        if (_running is { } running)
-            _settingsChange.Queue(running.Rpc);
+        if (_isComputingSettings)
+        {
+            _isSettingsChangedAgain = true;
+            return;
+        }
+        // A server that starts gets all settings anyway.
+        if (_running is null)
+            return;
+        _isComputingSettings = true;
+        _ = Task.Run(PushSettings);
     }
 
     /// <summary>
@@ -207,10 +224,31 @@ internal sealed class ServerConnection
 
         var rpc = new JsonRpcConnection(process.Output, process.Input, HandleRequestAsync, HandleNotification);
         rpc.Start();
+        Task ended = Task.WhenAny(rpc.Ended, process.WaitForExitAsync());
         try
         {
-            if (await InitializeAsync(rpc).ConfigureAwait(false))
-                await Task.WhenAny(rpc.Ended, process.WaitForExitAsync()).ConfigureAwait(false);
+            if (await InitializeAsync(rpc).ConfigureAwait(false) is { } isFullSync)
+            {
+                rpc.Notify(
+                    "initialized",
+                    writer =>
+                    {
+                        writer.WriteStartObject();
+                        writer.WriteEndObject();
+                    }
+                );
+                // All settings go before the documents. The app's callback may block: the end of the process
+                // abandons the wait, and the answer is dropped.
+                lock (_lock)
+                    _isComputingSettings = true;
+                Task<JsonNode?> settings = Task.Run(AllSettings);
+                if (await Task.WhenAny(settings, ended).ConfigureAwait(false) == settings)
+                {
+                    _server.OnInitialized(this, rpc, isFullSync, await settings.ConfigureAwait(false));
+                    _initialized.TrySetResult(null);
+                    await ended.ConfigureAwait(false);
+                }
+            }
         }
         // The connection's end: whatever went wrong ends it as a failure, so that the server moves on.
         catch (Exception e)
@@ -259,9 +297,9 @@ internal sealed class ServerConnection
         _server.OnEnded(this, hung, ranFor);
     }
 
-    /// <summary>Sends <c>initialize</c>, and tells the server when it answered.</summary>
-    /// <returns>Whether the server answered.</returns>
-    private async Task<bool> InitializeAsync(JsonRpcConnection rpc)
+    /// <summary>Sends <c>initialize</c>.</summary>
+    /// <returns>Whether the server wants the full text with every change; null when it did not answer.</returns>
+    private async Task<bool?> InitializeAsync(JsonRpcConnection rpc)
     {
         string? rootUri = null;
         WorkspaceFolder[]? workspaceFolders = null;
@@ -299,9 +337,7 @@ internal sealed class ServerConnection
             InitializeResult initialized =
                 result.Deserialize(LspJsonContext.Default.InitializeResult)
                 ?? throw new JsonException("The result is null.");
-            _server.OnInitialized(this, rpc, IsFullSync(initialized.Capabilities.TextDocumentSync));
-            _initialized.TrySetResult(null);
-            return true;
+            return IsFullSync(initialized.Capabilities.TextDocumentSync);
         }
         catch (TimeoutException e)
         {
@@ -318,14 +354,14 @@ internal sealed class ServerConnection
         // The connection ended: the end tells why.
         catch (IOException)
         {
-            return false;
+            return null;
         }
 
-        bool Failed(string failure)
+        bool? Failed(string failure)
         {
             lock (_lock)
                 _failure = failure;
-            return false;
+            return null;
         }
     }
 
@@ -446,6 +482,67 @@ internal sealed class ServerConnection
             diagnostic.Message
         );
     }
+
+    /// <summary>
+    /// The app's answer for all settings, that is for a null section, copied; an empty object without one, never
+    /// null, which some servers fail on. Runs on the thread pool, as the app's callback may take its time.
+    /// </summary>
+    /// <returns>Null when the app's callback threw, which drops this push.</returns>
+    private JsonNode? AllSettings()
+    {
+        try
+        {
+            return _options.Settings?.Invoke(new LanguageServerSettingsRequest(null, null))?.DeepClone()
+                ?? new JsonObject();
+        }
+        // The app's callback failed: this push is dropped, and the next change sends the settings again.
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Computes all settings on the thread pool and sends them, unless the server ended meanwhile. Not awaited: the
+    /// app's callback may block, and nothing waits for it.
+    /// </summary>
+    private void PushSettings()
+    {
+        JsonNode? settings = AllSettings();
+        lock (_lock)
+        {
+            if (settings is not null && _running is { } running)
+                SendSettings(running.Rpc, settings);
+            SettingsComputed();
+        }
+    }
+
+    /// <summary>Guarded: a computation of all settings ended; another starts when the settings changed meanwhile.</summary>
+    private void SettingsComputed()
+    {
+        if (_isSettingsChangedAgain && _running is not null)
+        {
+            _isSettingsChangedAgain = false;
+            _ = Task.Run(PushSettings);
+            return;
+        }
+        _isComputingSettings = false;
+    }
+
+    /// <summary>
+    /// <c>workspace/didChangeConfiguration</c> with all settings. Some servers read their settings only here, such as
+    /// VS Code's JSON server; others pull them after it.
+    /// </summary>
+    private static void SendSettings(JsonRpcConnection rpc, JsonNode settings) =>
+        rpc.Notify(
+            "workspace/didChangeConfiguration",
+            writer =>
+                JsonSerializer.Serialize(
+                    writer,
+                    new DidChangeConfigurationParams(settings),
+                    LspJsonContext.Default.DidChangeConfigurationParams
+                )
+        );
 
     private ProcessStartInfo StartInfo()
     {
@@ -710,53 +807,5 @@ internal sealed class ServerConnection
                 ),
                 LspJsonContext.Default.DidChangeTextDocumentParams
             );
-    }
-
-    /// <summary>
-    /// <c>workspace/didChangeConfiguration</c> with all settings: the app's answer for a null section, or an empty object
-    /// without one, never null, which some servers fail on. Some servers read their settings only here, such as VS Code's
-    /// JSON server. At most one waits in the write queue, and it asks the app when it is built: on the write loop, off
-    /// the UI thread and outside the server's lock, with the settings of that moment.
-    /// </summary>
-    private sealed class SettingsChange : OutgoingMessage
-    {
-        private readonly ServerConnection _connection;
-
-        /// <summary>Guarded by the server's lock.</summary>
-        private bool _isQueued;
-
-        public SettingsChange(ServerConnection connection) => _connection = connection;
-
-        /// <summary>Guarded by the server's lock.</summary>
-        public void Queue(JsonRpcConnection rpc)
-        {
-            if (_isQueued)
-                return;
-            _isQueued = true;
-            rpc.Send(this);
-        }
-
-        public override bool Write(Utf8JsonWriter writer)
-        {
-            lock (_connection._lock)
-                _isQueued = false;
-            JsonNode settings =
-                _connection._options.Settings?.Invoke(new LanguageServerSettingsRequest(null, null))
-                ?? new JsonObject();
-            WriteNotification(
-                writer,
-                "workspace/didChangeConfiguration",
-                w =>
-                    JsonSerializer.Serialize(
-                        w,
-                        new DidChangeConfigurationParams(settings),
-                        LspJsonContext.Default.DidChangeConfigurationParams
-                    )
-            );
-            return true;
-        }
-
-        /// <summary>The settings did not serialize, or the app's answer threw: this push is dropped.</summary>
-        public override void Fail(Exception exception) { }
     }
 }

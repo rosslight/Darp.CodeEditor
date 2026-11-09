@@ -257,15 +257,18 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
         }
     }
 
-    /// <summary>The server answered <c>initialize</c>: it runs, and the documents open in it.</summary>
-    internal void OnInitialized(ServerConnection connection, JsonRpcConnection rpc, bool isFullSync)
+    /// <summary>
+    /// The server answered <c>initialize</c>, and the app's settings are computed: it runs, and gets its settings, then
+    /// the documents.
+    /// </summary>
+    internal void OnInitialized(ServerConnection connection, JsonRpcConnection rpc, bool isFullSync, JsonNode? settings)
     {
         bool changed;
         lock (_lock)
         {
             if (_connection != connection)
                 return;
-            connection.OnRunning(rpc, isFullSync, _documents);
+            connection.OnRunning(rpc, isFullSync, settings, _documents);
             changed = SetState(LanguageServerState.Running);
         }
         if (changed)

@@ -126,6 +126,161 @@ public sealed class ServerRequestsTests(UiFixture ui)
         });
 
     [Fact]
+    public Task DisposeAsync_completes_while_the_apps_settings_block_the_start() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            var entered = new TaskCompletionSource();
+            var release = new ManualResetEventSlim();
+            var server = new LanguageServer(
+                fake.Options with
+                {
+                    Settings = request =>
+                    {
+                        if (request.Section is null)
+                        {
+                            entered.TrySetResult();
+                            release.Wait();
+                        }
+                        return null;
+                    },
+                }
+            );
+            try
+            {
+                Task start = server.StartAsync();
+                await Wait.ForAsync(entered.Task);
+
+                await Wait.ForAsync(server.DisposeAsync().AsTask());
+
+                server.State.ShouldBe(LanguageServerState.Stopped);
+                FakeServer.HasEnded(fake.ProcessIds[0]).ShouldBeTrue();
+                await Should.ThrowAsync<ObjectDisposedException>(Wait.ForAsync(start));
+            }
+            finally
+            {
+                release.Set();
+            }
+        });
+
+    [Fact]
+    public Task Settings_that_block_hold_back_no_text_changes() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            var entered = new TaskCompletionSource();
+            var release = new ManualResetEventSlim();
+            bool block = false;
+            using var server = new LanguageServer(
+                fake.Options with
+                {
+                    Settings = request =>
+                    {
+                        if (request.Section is null && Volatile.Read(ref block))
+                        {
+                            entered.TrySetResult();
+                            release.Wait();
+                        }
+                        return null;
+                    },
+                }
+            );
+            try
+            {
+                using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "before");
+                await Wait.UntilAsync(() => document.Diagnostics is [{ Message: "before" }]);
+                Volatile.Write(ref block, true);
+                server.NotifySettingsChanged();
+                await Wait.ForAsync(entered.Task);
+
+                document.Replace(new TextRange(6, 0), " and after");
+
+                await Wait.UntilAsync(() => document.Diagnostics is [{ Message: "before and after" }]);
+            }
+            finally
+            {
+                release.Set();
+            }
+        });
+
+    [Fact]
+    public Task Changes_while_the_settings_are_computed_make_one_more_computation() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            var release = new ManualResetEventSlim();
+            int calls = 0;
+            using var server = new LanguageServer(
+                fake.Options with
+                {
+                    Settings = request =>
+                    {
+                        if (request.Section is not null)
+                            return null;
+                        int call = Interlocked.Increment(ref calls);
+                        // The start's answer comes at once; later ones wait for the test.
+                        if (call > 1)
+                            release.Wait();
+                        return new JsonObject { ["call"] = call };
+                    },
+                }
+            );
+            try
+            {
+                await Wait.ForAsync(server.StartAsync());
+                await fake.WaitForAsync("configuration changed");
+                server.NotifySettingsChanged();
+                await Wait.UntilAsync(() => Volatile.Read(ref calls) == 2);
+
+                for (int i = 0; i < 10; i++)
+                    server.NotifySettingsChanged();
+                release.Set();
+
+                (await fake.WaitForAsync("configuration changed", 3)).ShouldBe(
+                    """configuration changed {"settings":{"call":3}}"""
+                );
+                Volatile.Read(ref calls).ShouldBe(3);
+            }
+            finally
+            {
+                release.Set();
+            }
+        });
+
+    [Fact]
+    public Task Settings_that_throw_drop_only_their_own_push() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            int calls = 0;
+            using var server = new LanguageServer(
+                fake.Options with
+                {
+                    Settings = request =>
+                    {
+                        if (request.Section is not null)
+                            return null;
+                        int call = Interlocked.Increment(ref calls);
+                        return call == 2
+                            ? throw new InvalidOperationException("The app's settings failed.")
+                            : new JsonObject { ["call"] = call };
+                    },
+                }
+            );
+            await Wait.ForAsync(server.StartAsync());
+            await fake.WaitForAsync("configuration changed");
+
+            server.NotifySettingsChanged();
+            await Wait.UntilAsync(() => Volatile.Read(ref calls) == 2);
+            server.NotifySettingsChanged();
+
+            (await fake.WaitForAsync("configuration changed", 2)).ShouldBe(
+                """configuration changed {"settings":{"call":3}}"""
+            );
+            server.State.ShouldBe(LanguageServerState.Running);
+        });
+
+    [Fact]
     public Task Registrations_are_acknowledged_and_unknown_requests_refused() =>
         _ui.Run(async () =>
         {
