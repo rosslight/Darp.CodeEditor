@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json.Nodes;
 using Avalonia.Threading;
+using Darp.CodeEditor.LanguageClient;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -205,6 +206,68 @@ public sealed class ServerRequestsTests(UiFixture ui)
             {
                 release.Set();
             }
+        });
+
+    [Fact]
+    public Task Editors_ask_a_server_only_once_the_document_is_open_in_it() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            var release = new ManualResetEventSlim();
+            using var server = new LanguageServer(
+                fake.Options with
+                {
+                    Settings = request =>
+                    {
+                        if (request.Section is null)
+                            release.Wait();
+                        return null;
+                    },
+                }
+            );
+            try
+            {
+                using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "some words");
+                int changes = 0;
+                document.LanguageFeaturesChanged += (_, _) => changes++;
+                await Wait.ForAsync(server.StartAsync());
+                await fake.WaitForAsync("initialized");
+
+                // Running, but the document is not open in the process until the start's settings went out: editors
+                // get nothing, the server hears nothing of it, and nothing tells editors that it serves the document.
+                (await Hover(document)).ShouldBeNull();
+                (await Tokens(document)).ShouldBeNull();
+                Dispatcher.UIThread.RunJobs();
+                changes.ShouldBe(0);
+                fake.Lines.ShouldNotContain(line => line.StartsWith("hover ") || line.StartsWith("semanticTokens"));
+
+                release.Set();
+
+                await Wait.UntilAsync(() => changes == 1);
+                (await Hover(document)).ShouldNotBeNull();
+                (await Tokens(document)).ShouldNotBeNull();
+                List<string> lines = [.. fake.Lines];
+                lines
+                    .FindIndex(line => line.StartsWith("hover "))
+                    .ShouldBeGreaterThan(lines.FindIndex(line => line.StartsWith("open ")));
+                changes.ShouldBe(1);
+                fake.ProcessIds.ShouldHaveSingleItem();
+            }
+            finally
+            {
+                release.Set();
+            }
+
+            static Task<HoverInfo?> Hover(CodeDocument document) =>
+                document.HoverAsync(document.CurrentSnapshot, new TextPosition(1, 1), CancellationToken.None);
+
+            static Task<SemanticTokenLines?> Tokens(CodeDocument document) =>
+                document.SemanticTokensAsync(
+                    new TextPosition(1, 1),
+                    new TextPosition(1, 11),
+                    1,
+                    CancellationToken.None
+                );
         });
 
     [Fact]

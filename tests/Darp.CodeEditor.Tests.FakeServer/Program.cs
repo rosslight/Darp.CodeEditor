@@ -10,7 +10,7 @@
 // line as a code block in that language.
 // Hover over the word "slow" is never answered. Semantic tokens come from words, runs of letters, digits and
 // underscores: a word "class_static" is a token of the type "class" with the modifier "static", if the legend names
-// them; other words are not tokens.
+// them; other words are not tokens. Either request about a document that is not open is answered with an error.
 //
 // Arguments:
 //   --initialize never      never answer initialize
@@ -363,7 +363,8 @@ internal sealed class FakeServer
     /// <summary>Answers with the word at the position, and its line as code; or never, for the word "slow".</summary>
     private void Hover(JsonNode? id, JsonNode parameters)
     {
-        Document document = _documents[Text(parameters["textDocument"]?["uri"], "uri")];
+        if (Known(id, "hover", parameters) is not { } document)
+            return;
         int offset = Offset(document.Text, Required(parameters["position"], "position"));
         (int start, int end) = WordAt(document.Text, offset);
         string word = document.Text[start..end];
@@ -390,11 +391,26 @@ internal sealed class FakeServer
         );
     }
 
+    /// <summary>
+    /// The open document that a request names; for one that is not open, says so and answers the request with an error,
+    /// as a server that never heard of it would.
+    /// </summary>
+    private Document? Known(JsonNode? id, string request, JsonNode parameters)
+    {
+        string uri = Text(parameters["textDocument"]?["uri"], "uri");
+        if (_documents.TryGetValue(uri, out Document? document))
+            return document;
+        Log($"{request} of a document that is not open: {uri}");
+        ReplyError(id, -32602, $"{uri} is not open.");
+        return null;
+    }
+
     /// <summary>Answers with the tokens of the words in the range, or in the whole text; or never, once held.</summary>
     private void SemanticTokens(JsonNode? id, string method, JsonNode parameters)
     {
         string uri = Text(parameters["textDocument"]?["uri"], "uri");
-        Document document = _documents[uri];
+        if (Known(id, method["textDocument/".Length..], parameters) is not { } document)
+            return;
         (int first, int last) = (0, int.MaxValue);
         if (parameters["range"] is { } range)
             (first, last) = (Number(range["start"]?["line"], "line"), Number(range["end"]?["line"], "line"));
