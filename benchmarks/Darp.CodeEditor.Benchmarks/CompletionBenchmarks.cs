@@ -1,0 +1,142 @@
+// Left out of the baseline's build while the target branch has no completion: see NotInBaselineAttribute.
+#if !BENCHMARK_BASELINE
+using System.Diagnostics;
+using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Headless;
+using Avalonia.Input;
+using Avalonia.Threading;
+using Avalonia.VisualTree;
+using BenchmarkDotNet.Attributes;
+using Darp.CodeEditor.Completion;
+
+namespace Darp.CodeEditor.Benchmarks;
+
+/// <summary>
+/// Completion in 5,000 lines of JSON, warm, against the fake language server, which answers at once with 1,000 items,
+/// as a C# server's list can be long: from Ctrl+Space until a rendered frame shows the list's items, which the budget
+/// of 50 ms is about (design, section 1.2); and typing a character that filters the open list, with the frame after
+/// it. The server's time to build its answer counts, its time to think is nil. Each iteration is one call, so warming
+/// up takes many: the budget is for code that the JIT compiler has optimized.
+/// </summary>
+[NotInBaseline]
+[InvocationCount(1)]
+[WarmupCount(40)]
+[IterationCount(20)]
+public class CompletionBenchmarks
+{
+    private const int Items = 1000;
+
+    private LanguageServer? _server;
+    private Window? _window;
+    private CodeEditor? _editor;
+    private CodeDocument? _document;
+
+    /// <summary>The text's length before an iteration.</summary>
+    private int _length;
+
+    [GlobalSetup]
+    public void SetUp()
+    {
+        HeadlessEditor.SetUpApp();
+        string fakeServer = Path.Combine(AppContext.BaseDirectory, "Darp.CodeEditor.Tests.FakeServer.dll");
+        _server = new LanguageServer(
+            new LanguageServerOptions
+            {
+                FileName = Environment.ProcessPath ?? "dotnet",
+                Arguments =
+                [
+                    fakeServer,
+                    "--completion-items",
+                    $"{Items}",
+                    "--no-diagnostics",
+                    "--semantic-tokens",
+                    "none",
+                ],
+            }
+        );
+        Task start = _server.StartAsync();
+        RunJobsUntil(() => start.IsCompleted, "The language server did not start.");
+        start.GetAwaiter().GetResult();
+        _document = _server.CreateDocument(CodeLanguage.Json, HeadlessEditor.Json(5000));
+        _editor = new CodeEditor { Document = _document };
+        _window = HeadlessEditor.Show(_editor);
+        HeadlessEditor.RenderUntilColored(_window, _editor, HeadlessEditor.JsonKey);
+        // In the middle of the text, in view, before a key: nothing typed yet, so all items show.
+        int caret = _document.CurrentSnapshot.GetOffset(new TextPosition(2500, 3));
+        _editor.Selection = new TextSelection(caret);
+        _editor.ScrollTo(new TextRange(caret, 0));
+        HeadlessEditor.RenderUntilColored(_window, _editor, HeadlessEditor.JsonKey);
+        _editor.Focus();
+        _length = _document.CurrentSnapshot.Length;
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("CI")]
+    public void CtrlSpaceUntilAFrameShowsTheList()
+    {
+        Window window = _window ?? throw new InvalidOperationException("Not set up.");
+        window.KeyPress(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
+        window.KeyRelease(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
+        RunJobsUntil(() => List(window) is { ItemCount: Items }, "The list did not show.");
+        HeadlessEditor.Render(window);
+        // A list that showed nothing would look fast.
+        if (List(window)?.ContainerFromIndex(0) is not ListBoxItem { Content: ShownItem { Item.Label: "alpha0" } })
+            throw new InvalidOperationException("The frame does not show the list's items.");
+    }
+
+    [IterationSetup(Target = nameof(TypeACharacterThatFiltersTheOpenList))]
+    public void OpenTheList() => CtrlSpaceUntilAFrameShowsTheList();
+
+    [Benchmark]
+    [BenchmarkCategory("CI")]
+    public void TypeACharacterThatFiltersTheOpenList()
+    {
+        Window window = _window ?? throw new InvalidOperationException("Not set up.");
+        window.KeyTextInput("a");
+        HeadlessEditor.Render(window);
+        // The items that start with "a": one in eight.
+        if (
+            List(window) is not { ItemCount: Items / 8 } list
+            || list.ContainerFromIndex(0) is not ListBoxItem { Content: ShownItem }
+        )
+            throw new InvalidOperationException("The frame does not show the filtered list.");
+    }
+
+    /// <summary>Closes the list, and deletes what was typed, so that each iteration starts alike.</summary>
+    [IterationCleanup]
+    public void CloseTheList()
+    {
+        Window window = _window ?? throw new InvalidOperationException("Not set up.");
+        CodeDocument document = _document ?? throw new InvalidOperationException("Not set up.");
+        window.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
+        window.KeyRelease(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
+        if (document.CurrentSnapshot.Length != _length)
+            document.Undo();
+        HeadlessEditor.Render(window);
+    }
+
+    [GlobalCleanup]
+    public void Close()
+    {
+        _window?.Close();
+        _document?.Dispose();
+        _server?.Dispose();
+    }
+
+    private static ListBox? List(Window window) =>
+        OverlayLayer.GetOverlayLayer(window)?.GetVisualDescendants().OfType<ListBox>().FirstOrDefault();
+
+    /// <summary>Runs the UI thread's jobs until <paramref name="condition"/> holds; fails after 10 seconds.</summary>
+    private static void RunJobsUntil(Func<bool> condition, string failure)
+    {
+        long start = Stopwatch.GetTimestamp();
+        while (!condition())
+        {
+            Dispatcher.UIThread.RunJobs();
+            if (Stopwatch.GetElapsedTime(start) > TimeSpan.FromSeconds(10))
+                throw new InvalidOperationException(failure);
+        }
+    }
+}
+#endif
