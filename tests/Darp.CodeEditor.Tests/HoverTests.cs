@@ -360,6 +360,19 @@ public sealed class HoverTests(UiFixture ui)
             await fake.WaitForAsync($"cancel {id}");
         });
 
+    [Fact]
+    public Task The_hovered_word_reaches_a_bounded_distance_from_the_pointer() =>
+        _ui.Run(() =>
+        {
+            // One word of a million characters on a line, after a short one.
+            var buffer = new AvaloniaEdit.Document.TextDocument("ab " + new string('x', 1_000_000) + " cd");
+            const int reach = HoverController.MaxWordReach;
+
+            HoverController.WordAt(buffer, 1).ShouldBe(new TextRange(0, 2));
+            HoverController.WordAt(buffer, 3).ShouldBe(new TextRange(3, reach));
+            HoverController.WordAt(buffer, 500_000).ShouldBe(TextRange.FromBounds(500_000 - reach, 500_000 + reach));
+        });
+
     /// <summary>
     /// Moves the pointer away, then rests it on the character at <paramref name="offset"/>, and waits for the popup
     /// with <paramref name="text"/>.

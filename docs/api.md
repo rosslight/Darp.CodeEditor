@@ -287,6 +287,8 @@ How the client talks to a server, where the protocol leaves a choice:
   AvaloniaEdit's hover time), at that character's position, or at a line's end within a space's width after it, where
   an empty diagnostic's squiggle is. A `MarkedString` with a language becomes a Markdown code
   block. The popup stays while the pointer is over the word, the range that the answer names, or the popup itself.
+  The word reaches at most 1,000 characters to either side of the pointer, as in VS Code, so a line of millions of
+  word characters costs the pointer no more.
   The hover ends when the pointer rests on another word, on typing, scrolling and Escape, when the editor loses the
   keyboard focus, when a server starts or stops serving the document, and with new colors; also while it still
   waits for its answer. Ending it cancels the request still under way with `$/cancelRequest`, stops reading the

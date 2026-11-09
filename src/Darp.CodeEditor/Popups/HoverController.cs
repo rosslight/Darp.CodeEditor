@@ -125,7 +125,7 @@ internal sealed class HoverController : IDisposable
         var budget = new HoverBudget();
         var hovered = new Hovered(
             offset,
-            WordAt(offset),
+            WordAt(_buffer, offset),
             _document.CurrentSnapshot,
             HoverBlocks.Of(_squiggles.At(offset), budget),
             budget
@@ -221,21 +221,30 @@ internal sealed class HoverController : IDisposable
     }
 
     /// <summary>
-    /// The word at <paramref name="offset"/>, by VS Code's word characters; the character alone if it is none, and
-    /// nothing at a line's end.
+    /// How far the hovered word reaches on either side of the pointer, at most, as in VS Code: a longer word is cut
+    /// there, so that a line of millions of word characters costs the pointer no more than this.
     /// </summary>
-    private TextRange WordAt(int offset)
+    internal const int MaxWordReach = 1_000;
+
+    /// <summary>
+    /// The word at <paramref name="offset"/>, by VS Code's word characters, reaching at most
+    /// <see cref="MaxWordReach"/> characters to either side; the character alone if it is none, and nothing at a line's
+    /// end.
+    /// </summary>
+    internal static TextRange WordAt(TextDocument buffer, int offset)
     {
-        DocumentLine line = _buffer.GetLineByOffset(offset);
+        DocumentLine line = buffer.GetLineByOffset(offset);
         if (offset == line.EndOffset)
             return new TextRange(offset, 0);
-        if (!WordCharacters.IsWordCharacter(_buffer.GetCharAt(offset)))
+        if (!WordCharacters.IsWordCharacter(buffer.GetCharAt(offset)))
             return new TextRange(offset, 1);
+        int first = Math.Max(line.Offset, offset - MaxWordReach);
         int start = offset;
-        while (start > line.Offset && WordCharacters.IsWordCharacter(_buffer.GetCharAt(start - 1)))
+        while (start > first && WordCharacters.IsWordCharacter(buffer.GetCharAt(start - 1)))
             start--;
+        int last = Math.Min(line.EndOffset, offset + MaxWordReach);
         int end = offset;
-        while (end < line.EndOffset && WordCharacters.IsWordCharacter(_buffer.GetCharAt(end)))
+        while (end < last && WordCharacters.IsWordCharacter(buffer.GetCharAt(end)))
             end++;
         return TextRange.FromBounds(start, end);
     }
