@@ -106,6 +106,34 @@ public sealed class SemanticTokensTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Scrolling_to_lines_without_tokens_asks_for_them() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            string text = string.Concat(Enumerable.Range(0, 300).Select(i => $"class{i} class_static\n"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return window.ColorAt(text.IndexOf("class_static", StringComparison.Ordinal)) == s_class;
+            });
+            int last = text.LastIndexOf("class_static", StringComparison.Ordinal);
+            window.ColorAt(last).ShouldBeNull();
+
+            window.Editor.ScrollTo(new TextRange(last, 0));
+
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return window.ColorAt(last) == s_class;
+            });
+            // The lines in view, which end with the last line of text and the empty one after it.
+            fake.LinesStartingWith("semanticTokens/range").ShouldContain(line => line.EndsWith("-300"));
+        });
+
+    [Fact]
     public Task Only_editors_that_show_a_document_ask_for_its_tokens_and_hover() =>
         _ui.Run(async () =>
         {
