@@ -250,12 +250,16 @@ How the client talks to a server, where the protocol leaves a choice:
   change gets it. While a server does not read, a document's changes wait as one message; past 1,000 changes or a
   million characters, its full text replaces them.
 - **Diagnostics** with a version are about the text sent with that version; the client keeps the last 64 versions it
-  sent, and drops diagnostics of an older one as outdated. Diagnostics without a version are about the text last sent
-  when they arrive. A diagnostic without a severity is an error, as in VS Code. Diagnostics belong to the process that
+  sent, and drops diagnostics of an older one as outdated. Diagnostics without a version are about the text last
+  written to the server when they arrive. A diagnostic without a severity is an error, as in VS Code. Diagnostics belong to the process that
   sent them: when it ends, by a crash, a hang or disposal, the documents' diagnostics are cleared.
-- **Server requests** run on the thread pool, at most 16 at once: `workspace/configuration` calls `Settings` once per
-  item, with the scope's path for a `file:` URI. Registrations are acknowledged; other requests get `MethodNotFound`.
-  Notifications other than `publishDiagnostics`, such as `window/logMessage`, are ignored.
+- **Server requests** run on the thread pool, and reading never waits for them, so responses and cancellations always
+  get through: `workspace/configuration` calls `Settings` once per item, with the scope's path for a `file:` URI.
+  Registrations are acknowledged; other requests get `MethodNotFound`. Notifications other than `publishDiagnostics`,
+  such as `window/logMessage`, are ignored. A server with more than 1,000 requests and invalid messages whose answers
+  are not written yet, because they run or because it does not read, sends faster than it reads: its process ends as a
+  crash.
+- **Capabilities** of the server that have another JSON type than the protocol says count as not given.
 - **Messages** from a server that are not valid JSON get an error response. A message over 64 MiB, or broken framing,
   ends the process as a crash: skipping it would lose a request or a response without notice.
 
@@ -498,7 +502,8 @@ StreamJsonRpc's error hook, and maps a refused call to `ConnectionLostException`
 - **Popups and policies.** Completion, hover and signature help have no settings yet, and their parts have no style
   classes for apps to restyle. They take the app's look instead. Restart and hang timeouts keep the prototype's
   defaults: a restart waits 0.5 s, doubling up to 30 s; a request unanswered for 30 s counts as a hang, a new server
-  gets twice that before its first answer, and each hang doubles the limit up to 2 minutes; 30 s of running forgives
+  gets twice that before its first answer, and each hang doubles the limit; no start or request waits longer than 2
+  minutes. 30 s of running forgives
   the failures and hangs before. After 5 failures in a row, which take about 8 s for a server that fails at once, the
   server is `Failed`. `DisposeAsync` waits 2 s for `shutdown` and `exit`, as VS Code does, then kills. Their clock,
   like a session's time limits, is the options' `TimeProvider`, so tests can pass their own.
@@ -632,16 +637,21 @@ own, and with a clock that tests advance:
 - `State` from start through a crash, the restart after its delay and disposal, raised once per change on the UI
   thread; `StartAsync`'s failure with the end of standard error, also for an executable that does not start; delays of
   0.5, 1, 2 and 4 s, then `Failed` after 5 failures, and `StartAsync` after `Failed` starting anew; an unanswered
-  `initialize` restarted after 60 s, and the next one after 120 s;
+  `initialize` restarted after 60 s, the next one after 120 s, and the third after 120 s too, the longest wait; a
+  capability of another JSON type read as not given, and an unexpected failure during a start counted as a failed
+  start;
 - documents open at creation, with `file:` or untitled URIs; edits reproduced on the server in order, as incremental
   changes, with `\r\n`, `\r` alone, line breaks split by an edit, surrogate pairs, undo and redo, and 200 edits at once;
   documents opened again with their current text after a restart, closed when disposed, moved by `FilePath`, one per
   file path;
-- diagnostics about the snapshot the server analyzed, by version or the text last sent, mapped with `MapToCurrent`,
+- diagnostics about the snapshot the server analyzed, by version or the text last written, not one still being
+  written, mapped with `MapToCurrent`,
   set on the UI thread with `PropertyChanged`, and positions outside the text clamped, `int.MaxValue` included;
 - `workspace/configuration` answered by `Settings` off the UI thread, `NotifySettingsChanged`, registrations, unknown
   requests, malformed JSON and an oversized message; framing split across reads and merged into one, cancellation
-  both ways, a message that cannot be built failing alone, and a failed write ending the connection;
+  both ways, responses and cancellations getting through while 20 of the server's requests run, a server that sends
+  without reading the answers ending the connection, a message that cannot be built failing alone, and a failed write
+  ending the connection;
 - `DisposeAsync` with `shutdown` and `exit`, its kill after 2 s, and `Dispose` killing at once;
 - a server and its document before Avalonia is set up, in the test process of documents: events where the change
   happens, and nothing touching the dispatcher; after setup, the server's `State` and the diagnostics arrive on the UI

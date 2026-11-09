@@ -125,6 +125,62 @@ public sealed class JsonRpcConnectionTests
     }
 
     [Fact]
+    public async Task Responses_and_cancellations_get_through_while_the_peers_requests_run()
+    {
+        await using var peer = new Peer(
+            requests: async (_, _, cancellationToken) =>
+            {
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+                return null;
+            }
+        );
+        Task<JsonElement> call = peer.Connection.SendRequestAsync("mine", null, TestContext.Current.CancellationToken);
+        JsonNode request = await peer.ReadAsync();
+
+        // More requests than reading once let run before it waited for one of them.
+        for (int i = 0; i < 20; i++)
+            await peer.WriteAsync(Peer.Frame($$"""{"jsonrpc":"2.0","id":{{i}},"method":"slow"}"""));
+        await peer.WriteAsync(Peer.Frame($$$"""{"jsonrpc":"2.0","id":{{{request["id"]}}},"result":"answered"}"""));
+        for (int i = 0; i < 20; i++)
+        {
+            await peer.WriteAsync(
+                Peer.Frame($$$"""{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":{{{i}}}}}""")
+            );
+        }
+
+        (await call).GetString().ShouldBe("answered");
+        var cancelled = new List<int?>();
+        for (int i = 0; i < 20; i++)
+        {
+            JsonNode response = await peer.ReadAsync();
+            ((int?)response["error"]?["code"]).ShouldBe(JsonRpcErrorCodes.RequestCancelled);
+            cancelled.Add((int?)response["id"]);
+        }
+        cancelled.ShouldBe(Enumerable.Range(0, 20).Select(i => (int?)i), ignoreOrder: true);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_peer_that_sends_without_reading_the_answers_is_disconnected(bool requests)
+    {
+        // The peer reads nothing, so the answers to its requests, or to its invalid messages, wait to be written.
+        await using var peer = new Peer(
+            requests: (_, _, _) => Task.FromResult<JsonNode?>(null),
+            pauseWriterThreshold: 64,
+            maxUnansweredRequests: 10
+        );
+
+        for (int i = 0; i < 100 && !peer.Connection.Ended.IsCompleted; i++)
+        {
+            string message = requests ? $$"""{"jsonrpc":"2.0","id":{{i}},"method":"quick"}""" : "{oops";
+            await peer.WriteAsync(Peer.Frame(message));
+        }
+
+        (await peer.Connection.Ended).ShouldBeOfType<IOException>().Message.ShouldContain("without reading");
+    }
+
+    [Fact]
     public async Task A_peers_error_response_fails_the_call_with_its_code()
     {
         await using var peer = new Peer();
@@ -197,7 +253,8 @@ public sealed class JsonRpcConnectionTests
             RequestHandler? requests = null,
             NotificationHandler? notifications = null,
             int maxMessageLength = JsonRpcConnection.DefaultMaxMessageLength,
-            long pauseWriterThreshold = 65536
+            long pauseWriterThreshold = 65536,
+            int maxUnansweredRequests = JsonRpcConnection.DefaultMaxUnansweredRequests
         )
         {
             _fromConnection = new Pipe(
@@ -211,7 +268,8 @@ public sealed class JsonRpcConnectionTests
                 _fromConnection.Writer.AsStream(),
                 requests ?? ((method, _, _) => throw new JsonRpcException(JsonRpcErrorCodes.MethodNotFound, method)),
                 notifications ?? ((_, _) => { }),
-                maxMessageLength
+                maxMessageLength,
+                maxUnansweredRequests
             );
             Connection.Start();
         }

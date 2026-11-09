@@ -12,6 +12,7 @@
 //   --exit-at-start <code>  exit at start, before reading anything
 //   --unversioned           publish diagnostics without a version
 //   --full-sync             ask for the full text with every change
+//   --text-document-sync <json>  answer initialize with this textDocumentSync capability
 //   --ignore-shutdown       never answer shutdown
 //   host                    start a child in "sleep" as the library starts servers, print its process id, and wait
 //   sleep                   sleep, and never read standard input
@@ -46,9 +47,13 @@ internal sealed class FakeServer
     private readonly bool _unversioned;
     private readonly bool _fullSync;
     private readonly bool _ignoreShutdown;
+    private readonly JsonNode? _textDocumentSync;
     private readonly int? _exitAtStart;
     private readonly List<string> _startLines = [];
     private int _lastId;
+
+    /// <summary>Set by the command <c>peek</c>: the file whose existence lets the server read on.</summary>
+    private string? _peekSignal;
 
     public FakeServer(string[] arguments)
     {
@@ -73,6 +78,9 @@ internal sealed class FakeServer
                     break;
                 case "--ignore-shutdown":
                     _ignoreShutdown = true;
+                    break;
+                case "--text-document-sync":
+                    _textDocumentSync = JsonNode.Parse(arguments[++i]);
                     break;
                 default:
                     throw new ArgumentException($"Unknown argument {arguments[i]}");
@@ -115,11 +123,9 @@ internal sealed class FakeServer
                         {
                             ["capabilities"] = new JsonObject
                             {
-                                ["textDocumentSync"] = new JsonObject
-                                {
-                                    ["openClose"] = true,
-                                    ["change"] = _fullSync ? 1 : 2,
-                                },
+                                ["textDocumentSync"] =
+                                    _textDocumentSync?.DeepClone()
+                                    ?? new JsonObject { ["openClose"] = true, ["change"] = _fullSync ? 1 : 2 },
                             },
                         }
                     );
@@ -207,7 +213,7 @@ internal sealed class FakeServer
         if (document.LanguageId != "fake-command")
         {
             (int line, int character) = End(document.Text);
-            Publish(document, Diagnostic(0, 0, line, character, document.Text));
+            Publish(document, !_unversioned, Diagnostic(0, 0, line, character, document.Text));
             return;
         }
         foreach (string command in document.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries))
@@ -259,12 +265,17 @@ internal sealed class FakeServer
                 {
                     Publish(
                         document,
+                        !_unversioned,
                         Diagnostic(-1, -1, 0, 0, "before the start"),
                         Diagnostic(0, 1_000_000, 1, 0, "past the end of the first line"),
                         Diagnostic(1_000_000, 0, int.MaxValue, int.MaxValue, "past the last line"),
                         Diagnostic(0, 2, 0, 1, "end before start")
                     );
                 }
+                break;
+            case ["peek", var signal]:
+                _peekSignal = signal;
+                Log("peeking");
                 break;
             case ["malformed"]:
                 WriteFrame("{\"jsonrpc\": \"2.0\", \"method\": "u8.ToArray());
@@ -278,10 +289,10 @@ internal sealed class FakeServer
         }
     }
 
-    private void Publish(Document document, params JsonNode[] diagnostics)
+    private void Publish(Document document, bool versioned, params JsonNode[] diagnostics)
     {
         var parameters = new JsonObject { ["uri"] = document.Uri, ["diagnostics"] = new JsonArray(diagnostics) };
-        if (!_unversioned)
+        if (versioned)
             parameters["version"] = document.Version;
         Write(
             new JsonObject
@@ -409,6 +420,19 @@ internal sealed class FakeServer
         }
         if (length < 0)
             return null;
+        if (_peekSignal is { } signal)
+        {
+            // Between a message's header and its body: the client is still writing the body.
+            _peekSignal = null;
+            foreach (Document document in _documents.Values.Where(d => d.LanguageId != "fake-command"))
+            {
+                (int line, int character) = End(document.Text);
+                Publish(document, versioned: false, Diagnostic(0, 0, line, character, document.Text));
+            }
+            Log($"peeked into a message of {length} bytes");
+            while (!File.Exists(signal))
+                Thread.Sleep(10);
+        }
         byte[] body = new byte[length];
         _input.ReadExactly(body);
         return JsonNode.Parse(body)?.AsObject();

@@ -45,7 +45,7 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
     /// <summary>How long a request may go unanswered; a server that has not answered yet gets twice that.</summary>
     private static readonly TimeSpan s_firstHangLimit = TimeSpan.FromSeconds(30);
 
-    /// <summary>Each hang doubles the limit, up to this.</summary>
+    /// <summary>Each hang doubles the limit, up to this, which also caps what a new server gets.</summary>
     private static readonly TimeSpan s_maxHangLimit = TimeSpan.FromMinutes(2);
 
     /// <summary>How long <see cref="DisposeAsync"/> waits for <c>shutdown</c> and <c>exit</c> before it kills, as VS Code.</summary>
@@ -255,7 +255,8 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
             TimeSpan limit = s_firstHangLimit;
             for (int i = 0; i < _hangs; i++)
                 limit = Min(limit * 2, s_maxHangLimit);
-            return connection.IsRunning ? limit : limit * 2;
+            // No start or request waits longer than the longest limit.
+            return connection.IsRunning ? limit : Min(limit * 2, s_maxHangLimit);
         }
     }
 

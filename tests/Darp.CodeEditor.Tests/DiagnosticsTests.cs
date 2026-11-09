@@ -33,7 +33,7 @@ public sealed class DiagnosticsTests(UiFixture ui)
         });
 
     [Fact]
-    public Task Diagnostics_without_a_version_are_about_the_text_last_sent() =>
+    public Task Diagnostics_without_a_version_are_about_the_text_last_written() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer("--unversioned");
@@ -45,6 +45,44 @@ public sealed class DiagnosticsTests(UiFixture ui)
 
             await Wait.UntilAsync(() => document.Diagnostics[0].Snapshot == document.CurrentSnapshot);
             document.Diagnostics[0].Message.ShouldBe("one two");
+        });
+
+    [Fact]
+    public Task Diagnostics_without_a_version_are_not_about_a_text_still_being_written() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "written");
+            TextSnapshot written = document.CurrentSnapshot;
+            var analyzed = new List<TextSnapshot>();
+            document.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(CodeDocument.Diagnostics) && document.Diagnostics is [var diagnostic])
+                    analyzed.Add(diagnostic.Snapshot);
+            };
+            await Wait.UntilAsync(() => analyzed.Count == 1);
+            // The server publishes without a version once it read the next message's header, and reads its body only
+            // once the signal file exists.
+            string signal = Path.Combine(Path.GetTempPath(), $"peek-{Guid.NewGuid():N}");
+            using CodeDocument command = server.CreateDocument(FakeServer.Commands, $"peek {signal}");
+            await fake.WaitForAsync("peeking");
+
+            try
+            {
+                // More than a pipe holds: the client is still writing it when the diagnostics arrive.
+                document.Text = new string('x', 4_000_000);
+
+                await fake.WaitForAsync("peeked into a message");
+                await Wait.UntilAsync(() => analyzed.Count == 2);
+                analyzed[1].ShouldBeSameAs(written);
+            }
+            finally
+            {
+                await File.WriteAllTextAsync(signal, "", TestContext.Current.CancellationToken);
+            }
+            await Wait.UntilAsync(() => analyzed[^1] == document.CurrentSnapshot);
+            File.Delete(signal);
         });
 
     [Fact]

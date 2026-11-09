@@ -32,11 +32,11 @@ internal delegate void NotificationHandler(string method, JsonElement parameters
 /// </summary>
 /// <remarks>
 /// <para>
-/// A read loop reads the peer's messages one at a time. It completes the responses to requests, cancels the peer's
-/// requests on <c>$/cancelRequest</c>, passes notifications to their handler, and starts each request's handler on the
-/// thread pool. At most <see cref="MaxRequestsInFlight"/> of the peer's requests run at once; reading waits for a free
-/// one. An invalid message is answered with an error and the connection goes on. A message over the size limit, or
-/// broken framing, ends the connection: skipping it would lose a request or a response without notice.
+/// A read loop reads the peer's messages one at a time and never waits for a handler, so responses and cancellations
+/// always get through. It completes the responses to requests, cancels the peer's requests on <c>$/cancelRequest</c>,
+/// passes notifications to their handler, and starts each request's handler on the thread pool. An invalid message is
+/// answered with an error and the connection goes on. A message over the size limit, or broken framing, ends the
+/// connection: skipping it would lose a request or a response without notice.
 /// </para>
 /// <para>
 /// A write loop writes the queued messages in order, each built when its turn comes, off the sender's thread. A message
@@ -44,9 +44,10 @@ internal delegate void NotificationHandler(string method, JsonElement parameters
 /// </para>
 /// <para>
 /// The write queue has no capacity of its own: what waits in it is bounded by who puts it there. Each request has its
-/// caller, each response a request of the peer (of which at most <see cref="MaxRequestsInFlight"/> run), each
-/// <c>$/cancelRequest</c> a written request. Senders whose messages could pile up behind a peer that stops reading,
-/// such as a document's changes, queue one <see cref="OutgoingMessage"/> that takes what is new when it is built.
+/// caller, and each <c>$/cancelRequest</c> a written request. The peer's requests, and its messages that get an error
+/// answer, count as unanswered until their answer is written; a peer with more unanswered than the limit sends faster
+/// than it reads, and the connection ends. Senders whose messages could pile up behind a peer that stops reading, such
+/// as a document's changes, queue one <see cref="OutgoingMessage"/> that takes what is new when it is built.
 /// </para>
 /// <para>The connection does not own the streams: their owner closes them, for example by ending the process.</para>
 /// </remarks>
@@ -55,8 +56,11 @@ internal sealed class JsonRpcConnection : IAsyncDisposable
     /// <summary>The largest message the peer may send, in bytes; a larger one ends the connection.</summary>
     public const int DefaultMaxMessageLength = 64 * 1024 * 1024;
 
-    /// <summary>How many of the peer's requests may run at once before reading waits.</summary>
-    public const int MaxRequestsInFlight = 16;
+    /// <summary>
+    /// How many of the peer's messages may wait for their answer to be written, running or queued, before the connection
+    /// ends.
+    /// </summary>
+    public const int DefaultMaxUnansweredRequests = 1_000;
 
     /// <summary>A header is a line or two, such as <c>Content-Length: 1234</c>.</summary>
     private const int MaxHeaderLength = 1024;
@@ -72,13 +76,11 @@ internal sealed class JsonRpcConnection : IAsyncDisposable
     private readonly RequestHandler _handleRequest;
     private readonly NotificationHandler _handleNotification;
     private readonly int _maxMessageLength;
+    private readonly int _maxUnansweredRequests;
 
     private readonly Channel<OutgoingMessage> _queue = Channel.CreateUnbounded<OutgoingMessage>(
         new UnboundedChannelOptions { SingleReader = true }
     );
-
-    /// <summary>Free places for the peer's requests; reading waits when there is none.</summary>
-    private readonly SemaphoreSlim _requestSlots = new(MaxRequestsInFlight);
 
     /// <summary>Cancelled when the connection ends, to stop both loops.</summary>
     private readonly CancellationTokenSource _stop = new();
@@ -99,6 +101,9 @@ internal sealed class JsonRpcConnection : IAsyncDisposable
     /// <summary>Guarded by <see cref="_lock"/>.</summary>
     private int _lastId;
 
+    /// <summary>Guarded by <see cref="_lock"/>: the peer's messages whose answers are not written yet.</summary>
+    private int _unansweredRequests;
+
     /// <summary>Guarded by <see cref="_lock"/>.</summary>
     private bool _isEnded;
 
@@ -110,12 +115,14 @@ internal sealed class JsonRpcConnection : IAsyncDisposable
     /// <param name="handleRequest">Answers the peer's requests.</param>
     /// <param name="handleNotification">Handles the peer's notifications.</param>
     /// <param name="maxMessageLength">The largest message the peer may send, in bytes.</param>
+    /// <param name="maxUnansweredRequests">How many of the peer's messages may wait for their answer.</param>
     public JsonRpcConnection(
         Stream input,
         Stream output,
         RequestHandler handleRequest,
         NotificationHandler handleNotification,
-        int maxMessageLength = DefaultMaxMessageLength
+        int maxMessageLength = DefaultMaxMessageLength,
+        int maxUnansweredRequests = DefaultMaxUnansweredRequests
     )
     {
         _input = input;
@@ -123,6 +130,7 @@ internal sealed class JsonRpcConnection : IAsyncDisposable
         _handleRequest = handleRequest;
         _handleNotification = handleNotification;
         _maxMessageLength = maxMessageLength;
+        _maxUnansweredRequests = maxUnansweredRequests;
     }
 
     /// <summary>
@@ -251,7 +259,7 @@ internal sealed class JsonRpcConnection : IAsyncDisposable
         try
         {
             while (await ReadMessageAsync(reader, _stop.Token).ConfigureAwait(false) is { } message)
-                await DispatchAsync(message).ConfigureAwait(false);
+                Dispatch(message);
         }
         catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
         // The loop's end: whatever stopped it ends the connection, and the owner learns why.
@@ -339,7 +347,7 @@ internal sealed class JsonRpcConnection : IAsyncDisposable
     }
 
     /// <summary>Routes a message: responses and cancellations at once, notifications to their handler, requests to theirs.</summary>
-    private async ValueTask DispatchAsync(byte[] body)
+    private void Dispatch(byte[] body)
     {
         JsonElement message;
         try
@@ -348,12 +356,12 @@ internal sealed class JsonRpcConnection : IAsyncDisposable
         }
         catch (JsonException e)
         {
-            Send(new Response(null, JsonRpcErrorCodes.ParseError, $"The message is not valid JSON: {e.Message}"));
+            Answer(new Response(null, JsonRpcErrorCodes.ParseError, $"The message is not valid JSON: {e.Message}"));
             return;
         }
         if (message.ValueKind != JsonValueKind.Object)
         {
-            Send(new Response(null, JsonRpcErrorCodes.InvalidRequest, "A message must be a JSON object."));
+            Answer(new Response(null, JsonRpcErrorCodes.InvalidRequest, "A message must be a JSON object."));
             return;
         }
 
@@ -368,7 +376,7 @@ internal sealed class JsonRpcConnection : IAsyncDisposable
             if (id is { } responseId)
                 Complete(responseId, message);
             else if (!message.TryGetProperty("error", out _))
-                Send(new Response(null, JsonRpcErrorCodes.InvalidRequest, "A message needs a method or an id."));
+                Answer(new Response(null, JsonRpcErrorCodes.InvalidRequest, "A message needs a method or an id."));
             return;
         }
 
@@ -381,12 +389,12 @@ internal sealed class JsonRpcConnection : IAsyncDisposable
         catch (InvalidOperationException) { }
         if (method is null)
         {
-            Send(new Response(id, JsonRpcErrorCodes.InvalidRequest, "A method must be a string."));
+            Answer(new Response(id, JsonRpcErrorCodes.InvalidRequest, "A method must be a string."));
             return;
         }
         JsonElement parameters = message.TryGetProperty("params", out JsonElement p) ? p : default;
         if (id is { } requestId)
-            await StartRequestAsync(requestId, method, parameters).ConfigureAwait(false);
+            StartRequest(requestId, method, parameters);
         else
             HandleNotification(method, parameters);
     }
@@ -443,22 +451,45 @@ internal sealed class JsonRpcConnection : IAsyncDisposable
         catch (JsonException) { }
     }
 
-    private async ValueTask StartRequestAsync(JsonElement id, string method, JsonElement parameters)
+    private void StartRequest(JsonElement id, string method, JsonElement parameters)
     {
-        await _requestSlots.WaitAsync(_stop.Token).ConfigureAwait(false);
+        if (!CountUnanswered())
+            return;
         string key = id.GetRawText();
         var cancellation = new CancellationTokenSource();
         lock (_lock)
-        {
-            if (_isEnded)
-            {
-                _requestSlots.Release();
-                return;
-            }
             _peerRequests[key] = cancellation;
-        }
         // On the thread pool: a handler that blocks, such as the app's settings, does not stop reading.
         _ = Task.Run(() => RunRequestAsync(id, key, method, parameters, cancellation));
+    }
+
+    /// <summary>Queues the answer to a message that cannot be handled.</summary>
+    private void Answer(Response response)
+    {
+        if (CountUnanswered())
+            Send(response);
+    }
+
+    /// <summary>
+    /// Counts a message of the peer as unanswered until its answer is written. A peer with too many sends faster than
+    /// it reads: the connection ends.
+    /// </summary>
+    /// <returns>False when the connection ended.</returns>
+    private bool CountUnanswered()
+    {
+        lock (_lock)
+        {
+            if (_isEnded)
+                return false;
+            if (++_unansweredRequests <= _maxUnansweredRequests)
+                return true;
+        }
+        End(
+            new IOException(
+                $"The peer sent more than {_maxUnansweredRequests} messages that wait for an answer without reading the answers."
+            )
+        );
+        return false;
     }
 
     /// <summary>Runs a handler of the peer's request and queues its response. Never fails.</summary>
@@ -497,7 +528,6 @@ internal sealed class JsonRpcConnection : IAsyncDisposable
         }
         lock (_lock)
             _peerRequests.Remove(key);
-        _requestSlots.Release();
         Send(response);
     }
 
@@ -511,7 +541,15 @@ internal sealed class JsonRpcConnection : IAsyncDisposable
             {
                 buffer.ResetWrittenCount();
                 if (TryBuild(message, buffer))
+                {
                     await WriteFrameAsync(buffer.WrittenMemory, _stop.Token).ConfigureAwait(false);
+                    message.Written();
+                }
+                if (message is Response)
+                {
+                    lock (_lock)
+                        _unansweredRequests--;
+                }
             }
         }
         catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
@@ -684,6 +722,9 @@ internal abstract class OutgoingMessage
 
     /// <summary>The message was not written: <see cref="Write"/> threw, or the connection ended first.</summary>
     public abstract void Fail(Exception exception);
+
+    /// <summary>The message is on the stream, after <see cref="Write"/> wrote it. Called on the write loop.</summary>
+    public virtual void Written() { }
 
     /// <summary>Writes a notification: its method and, when there are any, its params.</summary>
     protected static void WriteNotification(Utf8JsonWriter writer, string method, Action<Utf8JsonWriter>? writeParams)

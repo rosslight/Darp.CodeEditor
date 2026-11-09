@@ -205,8 +205,17 @@ internal sealed class ServerConnection
 
         var rpc = new JsonRpcConnection(process.Output, process.Input, HandleRequestAsync, HandleNotification);
         rpc.Start();
-        if (await InitializeAsync(rpc).ConfigureAwait(false))
-            await Task.WhenAny(rpc.Ended, process.WaitForExitAsync()).ConfigureAwait(false);
+        try
+        {
+            if (await InitializeAsync(rpc).ConfigureAwait(false))
+                await Task.WhenAny(rpc.Ended, process.WaitForExitAsync()).ConfigureAwait(false);
+        }
+        // The connection's end: whatever went wrong ends it as a failure, so that the server moves on.
+        catch (Exception e)
+        {
+            lock (_lock)
+                _failure ??= $"failed: {e.Message}";
+        }
 
         // The end: nothing arrives from the process after this.
         process.Kill();
@@ -235,6 +244,7 @@ internal sealed class ServerConnection
             document.SetDiagnostics([]);
         string tail = process.StandardErrorTail;
         process.Dispose();
+        failure = failure.TrimEnd('.');
         End(tail.Length > 0 ? $"{failure}. Its standard error ended with:\n{tail}" : $"{failure}.", hung, ranFor);
     }
 
@@ -465,16 +475,21 @@ internal sealed class ServerConnection
             },
         };
 
-    /// <summary>Whether the server wants the full text with every change, rather than the changed ranges.</summary>
-    private static bool IsFullSync(JsonElement? sync) =>
-        sync switch
-        {
-            { ValueKind: JsonValueKind.Number } kind => kind.TryGetInt32(out int k) && k == TextDocumentSyncKind.Full,
-            { ValueKind: JsonValueKind.Object } options => options.TryGetProperty("change", out JsonElement change)
-                && change.TryGetInt32(out int k)
-                && k == TextDocumentSyncKind.Full,
-            _ => false,
-        };
+    /// <summary>
+    /// Whether the server wants the full text with every change, rather than the changed ranges: a kind, or an object
+    /// with a <c>change</c> kind. A value of another JSON kind means the default.
+    /// </summary>
+    private static bool IsFullSync(JsonElement? sync)
+    {
+        JsonElement? kind =
+            sync is { ValueKind: JsonValueKind.Object } options
+            && options.TryGetProperty("change", out JsonElement change)
+                ? change
+                : sync;
+        return kind is { ValueKind: JsonValueKind.Number } number
+            && number.TryGetInt32(out int value)
+            && value == TextDocumentSyncKind.Full;
+    }
 
     /// <summary>A server that answered <c>initialize</c>.</summary>
     /// <param name="Rpc">Its connection.</param>
@@ -503,8 +518,11 @@ internal sealed class ServerConnection
         private readonly ServerConnection _connection;
         private readonly Running _running;
 
-        /// <summary>The snapshots sent, oldest first: the texts that the server's diagnostics can refer to.</summary>
+        /// <summary>The snapshots written, oldest first: the texts that the server's diagnostics can refer to.</summary>
         private readonly List<TextSnapshot> _sent = [];
+
+        /// <summary>The snapshot of the message that the write loop is writing, until it is on the stream.</summary>
+        private TextSnapshot? _writing;
 
         /// <summary>The text that the server has once the queued message is written.</summary>
         private TextSnapshot _latest;
@@ -564,7 +582,7 @@ internal sealed class ServerConnection
         }
 
         /// <summary>
-        /// The text that diagnostics of <paramref name="version"/> refer to, or the latest one sent for diagnostics
+        /// The text that diagnostics of <paramref name="version"/> refer to, or the latest one written for diagnostics
         /// without a version; null for a version not sent, or no longer kept. Versions before it are dropped: the
         /// server is past them.
         /// </summary>
@@ -572,6 +590,12 @@ internal sealed class ServerConnection
         {
             if (version is null)
                 return _sent.Count > 0 ? _sent[^1] : null;
+            // A server that answers quickly may name the version whose message is still being finished here.
+            if (_writing?.Version == version)
+            {
+                _sent.Clear();
+                return _writing;
+            }
             int index = _sent.FindIndex(snapshot => snapshot.Version == version);
             if (index < 0)
                 return null;
@@ -612,14 +636,26 @@ internal sealed class ServerConnection
                 {
                     _changes = [];
                     _changedLength = 0;
-                    _sent.Add(snapshot);
-                    if (_sent.Count > MaxSentVersions)
-                        _sent.RemoveAt(0);
+                    _writing = snapshot;
                 }
             }
             // Outside the lock: the text can be long.
             WriteNotification(writer, method, writeParams);
             return true;
+        }
+
+        /// <summary>The server can have the text now: diagnostics without a version refer to it from here on.</summary>
+        public override void Written()
+        {
+            lock (_connection._lock)
+            {
+                if (_writing is null)
+                    return;
+                _sent.Add(_writing);
+                _writing = null;
+                if (_sent.Count > MaxSentVersions)
+                    _sent.RemoveAt(0);
+            }
         }
 
         /// <summary>

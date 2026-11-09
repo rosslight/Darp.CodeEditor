@@ -131,7 +131,7 @@ public sealed class LanguageServerTests(UiFixture ui)
         });
 
     [Fact]
-    public Task A_server_that_does_not_answer_initialize_restarts_with_a_longer_limit() =>
+    public Task A_server_that_does_not_answer_initialize_restarts_with_longer_limits_up_to_two_minutes() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer("--initialize", "never");
@@ -157,6 +157,52 @@ public sealed class LanguageServerTests(UiFixture ui)
             server.State.ShouldBe(LanguageServerState.Starting);
             time.Advance(TimeSpan.FromSeconds(1));
             await Wait.UntilAsync(() => server.State == LanguageServerState.Restarting);
+
+            // Doubled again it would be 240 s, but no start waits longer than 2 minutes.
+            time.Advance(TimeSpan.FromSeconds(1));
+            await fake.WaitForAsync("initialize ", 3);
+            time.Advance(TimeSpan.FromSeconds(119));
+            server.State.ShouldBe(LanguageServerState.Starting);
+            time.Advance(TimeSpan.FromSeconds(1));
+            await Wait.UntilAsync(() => server.State == LanguageServerState.Restarting);
+        });
+
+    [Fact]
+    public Task A_capability_of_another_JSON_kind_than_the_protocol_says_means_its_default() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer("--text-document-sync", """{ "change": "full" }""");
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one");
+
+            await server.StartAsync();
+            document.Replace(new TextRange(3, 0), " two");
+
+            (await fake.WaitForAsync("change ")).ShouldEndWith(" ranged 1 full 0");
+        });
+
+    [Fact]
+    public Task An_unexpected_failure_while_starting_counts_as_a_failed_start() =>
+        _ui.Run(async () =>
+        {
+            // No URI holds a path with a null character: the start fails after the process started.
+            var fake = new FakeServer();
+            var server = new LanguageServer(
+                fake.Options with
+                {
+                    RootPath = "invalid\0path",
+                    TimeProvider = new ManualTime(),
+                }
+            );
+
+            // A cap, not a latency: a start that never ends would leave the state machine stuck.
+            await Should.ThrowAsync<InvalidOperationException>(
+                server.StartAsync().WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken)
+            );
+
+            await Wait.UntilAsync(() => server.State == LanguageServerState.Restarting);
+            await server.DisposeAsync();
+            server.State.ShouldBe(LanguageServerState.Stopped);
         });
 
     [Fact]
