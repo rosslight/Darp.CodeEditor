@@ -32,6 +32,7 @@
 //   --semantic-tokens <range|full|none>  offer semantic tokens for ranges and the whole text, the whole text only, or
 //                           none; ranges and the whole text by default
 //   --completion-items <n>  answer completion with n generated items, as a large server does
+//   --completion-label-length <n>  make the generated items' labels n characters long, ending in "abab…"
 //   host                    start a child in "sleep" as the library starts servers, print its process id, and wait
 //   sleep                   sleep, and never read standard input
 using System.Diagnostics;
@@ -71,6 +72,7 @@ internal sealed class FakeServer
     private readonly int? _exitAtStart;
     private readonly string _semanticTokens = "range";
     private readonly int _completionItems;
+    private readonly int _completionLabelLength;
 
     /// <summary>The legend of semantic tokens, in another order than the client's, and with a type of its own.</summary>
     private static readonly string[] s_tokenTypes =
@@ -155,6 +157,9 @@ internal sealed class FakeServer
                     break;
                 case "--completion-items":
                     _completionItems = int.Parse(arguments[++i]);
+                    break;
+                case "--completion-label-length":
+                    _completionLabelLength = int.Parse(arguments[++i]);
                     break;
                 default:
                     throw new ArgumentException($"Unknown argument {arguments[i]}");
@@ -561,6 +566,8 @@ internal sealed class FakeServer
         for (int i = 0; i < _completionItems; i++)
         {
             string label = $"{words[i % words.Length]}{i}";
+            for (int c = 0; label.Length < _completionLabelLength; c++)
+                label += c % 2 == 0 ? 'a' : 'b';
             items.Add(
                 (JsonNode)
                     new JsonObject
