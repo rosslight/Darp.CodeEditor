@@ -13,10 +13,11 @@
 // them; other words are not tokens. Either request about a document that is not open is answered with an error.
 //
 // Completion answers with what the command "completion" set, or with generated items (--completion-items); "." asks
-// for it as it is typed, and ";" commits items. Requests are logged with the caret's offset, as is signature help. Resolving an item answers the item with the properties of its "data"
+// for it as it is typed, and ";" commits items. Requests are logged with the caret's offset at the end, and so is
+// signature help. Resolving an item answers the item with the properties of its "data"
 // added. Signature help answers inside parentheses, "(" asks for it and "," asks again: the signatures that the command
 // "signatures" set, or two of "call", with the parameter at the position active, and the signature that the client
-// says it shows, or the first.
+// says it shows, or the first. Completion in a document with the word "slow" is never answered.
 //
 // Arguments:
 //   --initialize never      never answer initialize
@@ -103,7 +104,7 @@ internal sealed class FakeServer
         """
         [
           { "label": "call(first, second)", "documentation": "Calls with two.",
-            "parameters": [ { "label": "first", "documentation": "The **first** one." }, { "label": "second" } ] },
+            "parameters": [ { "label": "first", "documentation": { "kind": "markdown", "value": "The **first** one." } }, { "label": "second" } ] },
           { "label": "call(first, second, third)", "documentation": "Calls with three.",
             "parameters": [ { "label": [5, 10] }, { "label": [12, 18] }, { "label": [20, 25], "documentation": "The third one." } ] }
         ]
@@ -540,13 +541,14 @@ internal sealed class FakeServer
     /// <summary>Answers with the generated items, or the result set by the command; or never, once held.</summary>
     private void Completion(JsonNode? id, JsonNode parameters)
     {
-        Document document = _documents[Text(parameters["textDocument"]?["uri"], "uri")];
+        string uri = Text(parameters["textDocument"]?["uri"], "uri");
+        Document document = _documents[uri];
         JsonNode? context = parameters["context"];
         int offset = Offset(document.Text, Required(parameters["position"], "position"));
         Log(
-            $"completion {id?.ToJsonString()} {(int?)context?["triggerKind"]} {(string?)context?["triggerCharacter"] ?? "-"} {offset}"
+            $"completion {id?.ToJsonString()} {uri} {(int?)context?["triggerKind"]} {(string?)context?["triggerCharacter"] ?? "-"} {offset}"
         );
-        if (_holdCompletion)
+        if (_holdCompletion || document.Text.Contains("slow", StringComparison.Ordinal))
             return;
         if (_completionItems == 0)
         {
@@ -606,7 +608,7 @@ internal sealed class FakeServer
         int offset = Offset(document.Text, Required(parameters["position"], "position"));
         Log(
             $"signatureHelp {id?.ToJsonString()} {(int?)context?["triggerKind"]} {(string?)context?["triggerCharacter"] ?? "-"} "
-                + $"{(bool?)context?["isRetrigger"]} {offset} {showing?["activeSignature"]?.ToJsonString() ?? "-"}"
+                + $"{(bool?)context?["isRetrigger"]} {showing?["activeSignature"]?.ToJsonString() ?? "-"} {offset}"
         );
         // The innermost parenthesis still open before the position, and the commas in it.
         int depth = 0;
