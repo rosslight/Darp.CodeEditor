@@ -405,7 +405,8 @@ How the client talks to a server, where the protocol leaves a choice:
     ones that overlap another edit are left out.
   - **Resolving:** the selected item is resolved when it is selected, and the resolve of an item that is no longer
     selected is cancelled. Its detail, as code highlighted with the document's grammar, and its documentation show
-    beside the list. Additional edits that the resolve brings only after the item was committed join the commit's
+    beside the list, as much of both as a hover shows: they share one budget of the hover's size, cut before anything
+    reads them. A row shows at most 256 characters of a label, with "…". Additional edits that the resolve brings only after the item was committed join the commit's
     undo step while it is the last one; once the user moved on, they are dropped. Items resolve only in the process
     that sent them.
   - **Ending:** Escape, the caret leaving the line or moving back past the word, a selection, the editor becoming
@@ -419,7 +420,7 @@ How the client talks to a server, where the protocol leaves a choice:
   signatures, as outside a call, closes it. It shows the active signature, or the first, with the active parameter in
   bold: the signature's own, or the answer's, or the first; one outside the parameters is none, as in VS Code. A
   parameter labelled by a string is found as a whole word in the signature. The parameter's documentation shows
-  below, then the signature's; with several signatures, which one of how many. Up and Down show the others while
+  below, then the signature's, all of it as much as a hover shows, the signature first; with several signatures, which one of how many. Up and Down show the others while
   completion's list is closed. It ends on Escape, after completion's list, with no signature, when the editor becomes
   read-only, when the editor loses the keyboard focus, when a server starts or stops serving the document, with new colors, and when its line scrolls
   out of view.
@@ -923,6 +924,9 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   commit, also one that leaves the caret where it was, by code or by another editor of the document;
 - an editor that becomes read-only closes completion and signature help, and Tab and Ctrl+Space then change
   nothing;
+- a detail of 2,000 lines with long documentation shows 50 lines, its budget's, and no documentation; a label of
+  5,000 characters shows 256 with "…"; a signature of 5,000 characters shows 2,000 with "…", and its documentation
+  not;
 - the selected item's resolved detail, as code in the editor's foreground, and its Markdown show beside the list, or
   below it in a window of 420 pixels, narrower beside it in one of 640, wrapped inside the window, with the list at
   the word it completes;
