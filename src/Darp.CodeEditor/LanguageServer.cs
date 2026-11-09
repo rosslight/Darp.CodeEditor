@@ -53,8 +53,6 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
 
     private static readonly PropertyChangedEventArgs s_stateChanged = new(nameof(State));
 
-    private static int s_lastUntitled;
-
     private readonly LanguageServerOptions _options;
 
     /// <summary>Guards the server's state, its documents and its connections' state.</summary>
@@ -140,7 +138,7 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
     /// <exception cref="InvalidOperationException">Another open document of this server has <paramref name="filePath"/>.</exception>
     public CodeDocument CreateDocument(CodeLanguage language, string text = "", string? filePath = null)
     {
-        var document = new ServerDocument(this, language, text, filePath, DocumentUri(filePath));
+        var document = new ServerDocument(this, language, text, filePath, DocumentUris.Of(filePath));
         bool changed = false;
         lock (_lock)
         {
@@ -200,9 +198,6 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
         connection?.Abandon();
     }
 
-    /// <summary>The <c>file:</c> URI of a path.</summary>
-    internal static string FileUri(string path) => new Uri(Path.GetFullPath(path)).AbsoluteUri;
-
     /// <summary>
     /// A document's text changed, on the thread that changed it: sends the change to the running server.
     /// </summary>
@@ -220,7 +215,7 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
     /// <exception cref="InvalidOperationException">Another open document of this server has <paramref name="path"/>.</exception>
     internal void Move(ServerDocument document, string? path)
     {
-        string uri = DocumentUri(path);
+        string uri = DocumentUris.Of(path);
         lock (_lock)
         {
             // A closed document, or one whose server stopped, is no longer the server's.
@@ -391,15 +386,12 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
     /// <summary>Guarded.</summary>
     private void ThrowIfOpen(string uri, string? path, ServerDocument document)
     {
-        if (_documents.Any(open => open != document && open.Uri == uri))
+        string identity = DocumentUris.Identity(uri);
+        if (_documents.Any(open => open != document && DocumentUris.Identity(open.Uri) == identity))
             throw new InvalidOperationException(
                 $"Another open document of this language server has the path '{path}'."
             );
     }
-
-    /// <summary>The URI of a document with <paramref name="path"/>: its file, or a new untitled one.</summary>
-    private static string DocumentUri(string? path) =>
-        path is null ? $"untitled:Untitled-{Interlocked.Increment(ref s_lastUntitled)}" : FileUri(path);
 
     private static TimeSpan Min(TimeSpan a, TimeSpan b) => a < b ? a : b;
 }

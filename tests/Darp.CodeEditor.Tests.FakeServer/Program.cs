@@ -13,6 +13,7 @@
 //   --unversioned           publish diagnostics without a version
 //   --full-sync             ask for the full text with every change
 //   --text-document-sync <json>  answer initialize with this textDocumentSync capability
+//   --vscode-uris           publish diagnostics with file URIs written as VS Code's URI library writes them
 //   --ignore-shutdown       never answer shutdown
 //   host                    start a child in "sleep" as the library starts servers, print its process id, and wait
 //   sleep                   sleep, and never read standard input
@@ -48,6 +49,7 @@ internal sealed class FakeServer
     private readonly bool _fullSync;
     private readonly bool _ignoreShutdown;
     private readonly JsonNode? _textDocumentSync;
+    private readonly bool _vscodeUris;
     private readonly int? _exitAtStart;
     private readonly List<string> _startLines = [];
     private int _lastId;
@@ -78,6 +80,9 @@ internal sealed class FakeServer
                     break;
                 case "--ignore-shutdown":
                     _ignoreShutdown = true;
+                    break;
+                case "--vscode-uris":
+                    _vscodeUris = true;
                     break;
                 case "--text-document-sync":
                     _textDocumentSync = JsonNode.Parse(arguments[++i]);
@@ -273,6 +278,10 @@ internal sealed class FakeServer
                     );
                 }
                 break;
+            case ["stop-reading"]:
+                Log("not reading");
+                Thread.Sleep(Timeout.Infinite);
+                break;
             case ["peek", var signal]:
                 _peekSignal = signal;
                 Log("peeking");
@@ -291,7 +300,8 @@ internal sealed class FakeServer
 
     private void Publish(Document document, bool versioned, params JsonNode[] diagnostics)
     {
-        var parameters = new JsonObject { ["uri"] = document.Uri, ["diagnostics"] = new JsonArray(diagnostics) };
+        string uri = _vscodeUris ? VscodeUri(document.Uri) : document.Uri;
+        var parameters = new JsonObject { ["uri"] = uri, ["diagnostics"] = new JsonArray(diagnostics) };
         if (versioned)
             parameters["version"] = document.Version;
         Write(
@@ -302,6 +312,31 @@ internal sealed class FakeServer
                 ["params"] = parameters,
             }
         );
+    }
+
+    /// <summary>
+    /// A file URI as VS Code's URI library writes it: a drive letter in lower case, and every byte of the path but
+    /// letters, digits, <c>-._~</c> and <c>/</c> percent-encoded, so <c>file:///C:/a+b.txt</c> becomes
+    /// <c>file:///c%3A/a%2Bb.txt</c>.
+    /// </summary>
+    private static string VscodeUri(string uri)
+    {
+        if (!uri.StartsWith("file://", StringComparison.Ordinal))
+            return uri;
+        string path = Uri.UnescapeDataString(uri["file://".Length..]);
+        if (path.Length > 2 && path[0] == '/' && char.IsAsciiLetter(path[1]) && path[2] == ':')
+            path = $"/{char.ToLowerInvariant(path[1])}{path[2..]}";
+        var encoded = new StringBuilder("file://");
+        foreach (byte b in Encoding.UTF8.GetBytes(path))
+        {
+            if (
+                char.IsAsciiLetterOrDigit((char)b) || b is (byte)'-' or (byte)'.' or (byte)'_' or (byte)'~' or (byte)'/'
+            )
+                encoded.Append((char)b);
+            else
+                encoded.Append($"%{b:X2}");
+        }
+        return encoded.ToString();
     }
 
     private static JsonObject Diagnostic(

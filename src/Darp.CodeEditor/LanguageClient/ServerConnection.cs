@@ -265,7 +265,7 @@ internal sealed class ServerConnection
         WorkspaceFolder[]? workspaceFolders = null;
         if (_options.RootPath is { } root)
         {
-            rootUri = LanguageServer.FileUri(root);
+            rootUri = DocumentUris.File(root);
             workspaceFolders =
             [
                 new WorkspaceFolder(rootUri, Path.GetFileName(Path.TrimEndingDirectorySeparator(root))),
@@ -404,15 +404,16 @@ internal sealed class ServerConnection
         PublishDiagnosticsParams published =
             parameters.Deserialize(LspJsonContext.Default.PublishDiagnosticsParams)
             ?? throw new JsonException("The params are missing.");
+        string identity = DocumentUris.Identity(published.Uri);
         ServerDocument? document = null;
         TextSnapshot? snapshot = null;
         lock (_lock)
         {
-            foreach (OpenDocument open in _documents.Values)
+            foreach ((ServerDocument candidate, OpenDocument open) in _documents)
             {
-                if (open.Uri == published.Uri)
+                if (open.Identity == identity)
                 {
-                    document = open.Document;
+                    document = candidate;
                     snapshot = open.Analyzed(published.Version);
                     break;
                 }
@@ -500,7 +501,7 @@ internal sealed class ServerConnection
     /// <summary>
     /// A document open in the server: what the server has of it, and what is still to send. At most one of its messages
     /// waits in the write queue; changes made meanwhile join it. Its members are guarded by the server's lock, except
-    /// <see cref="Write"/>, which takes it.
+    /// <see cref="Write"/> and <see cref="Written"/>, which take it.
     /// </summary>
     private sealed class OpenDocument : OutgoingMessage
     {
@@ -524,15 +525,15 @@ internal sealed class ServerConnection
         /// <summary>The snapshot of the message that the write loop is writing, until it is on the stream.</summary>
         private TextSnapshot? _writing;
 
-        /// <summary>The text that the server has once the queued message is written.</summary>
-        private TextSnapshot _latest;
+        /// <summary>The text that the server has once the queued message is written; null once it is closed.</summary>
+        private TextSnapshot? _latest;
 
         /// <summary>The changes not sent yet; null when the full text is to be sent instead.</summary>
         private List<TextDocumentContentChangeEvent>? _changes = [];
 
+        private readonly string _languageId;
         private int _changedLength;
         private bool _isOpened;
-        private bool _isClosed;
         private bool _isQueued;
 
         /// <summary>Queues the document's <c>didOpen</c>, with its current text.</summary>
@@ -540,21 +541,23 @@ internal sealed class ServerConnection
         {
             _connection = connection;
             _running = running;
-            Document = document;
+            _languageId = document.Language.Id;
             Uri = document.Uri;
+            Identity = DocumentUris.Identity(Uri);
             _latest = document.CurrentSnapshot;
             Queue();
         }
 
-        public ServerDocument Document { get; }
-
         /// <summary>The URI that the server knows the document by.</summary>
         public string Uri { get; }
+
+        /// <summary>What names the document in the server's URIs, whatever form they take.</summary>
+        public string Identity { get; }
 
         public void Change(TextSnapshot snapshot, IReadOnlyList<TextDocumentContentChangeEvent> changes)
         {
             // Versions only grow: a didOpen already has the text of this version or a later one.
-            if (_isClosed || snapshot.Version <= _latest.Version)
+            if (_latest is null || snapshot.Version <= _latest.Version)
                 return;
             _latest = snapshot;
             // A didOpen not written yet takes the latest text.
@@ -575,10 +578,29 @@ internal sealed class ServerConnection
             Queue();
         }
 
+        /// <summary>
+        /// Closes the document in the server: a <c>didClose</c> of its own once the write loop took its <c>didOpen</c>,
+        /// and nothing before. A message of it that still waits writes nothing, and it keeps no text.
+        /// </summary>
         public void Close()
         {
-            _isClosed = true;
-            Queue();
+            if (_isOpened)
+            {
+                string uri = Uri;
+                _running.Rpc.Notify(
+                    "textDocument/didClose",
+                    writer =>
+                        JsonSerializer.Serialize(
+                            writer,
+                            new DidCloseTextDocumentParams(new TextDocumentIdentifier(uri)),
+                            LspJsonContext.Default.DidCloseTextDocumentParams
+                        )
+                );
+            }
+            _latest = null;
+            _changes = null;
+            _writing = null;
+            _sent.Clear();
         }
 
         /// <summary>
@@ -610,16 +632,11 @@ internal sealed class ServerConnection
             lock (_connection._lock)
             {
                 _isQueued = false;
-                TextSnapshot snapshot = _latest;
+                // Closed: its didClose went on its own.
+                if (_latest is not { } snapshot)
+                    return false;
                 List<TextDocumentContentChangeEvent>? changes = _changes;
-                if (_isClosed)
-                {
-                    if (!_isOpened)
-                        return false;
-                    _isOpened = false;
-                    (method, writeParams) = ("textDocument/didClose", WriteClose);
-                }
-                else if (!_isOpened)
+                if (!_isOpened)
                 {
                     _isOpened = true;
                     (method, writeParams) = ("textDocument/didOpen", w => WriteOpen(w, snapshot));
@@ -632,12 +649,9 @@ internal sealed class ServerConnection
                 {
                     (method, writeParams) = ("textDocument/didChange", w => WriteChange(w, snapshot, changes));
                 }
-                if (!_isClosed)
-                {
-                    _changes = [];
-                    _changedLength = 0;
-                    _writing = snapshot;
-                }
+                _changes = [];
+                _changedLength = 0;
+                _writing = snapshot;
             }
             // Outside the lock: the text can be long.
             WriteNotification(writer, method, writeParams);
@@ -676,7 +690,7 @@ internal sealed class ServerConnection
             JsonSerializer.Serialize(
                 writer,
                 new DidOpenTextDocumentParams(
-                    new TextDocumentItem(Uri, Document.Language.Id, snapshot.Version, snapshot.GetText())
+                    new TextDocumentItem(Uri, _languageId, snapshot.Version, snapshot.GetText())
                 ),
                 LspJsonContext.Default.DidOpenTextDocumentParams
             );
@@ -693,13 +707,6 @@ internal sealed class ServerConnection
                     changes ?? [new TextDocumentContentChangeEvent(null, snapshot.GetText())]
                 ),
                 LspJsonContext.Default.DidChangeTextDocumentParams
-            );
-
-        private void WriteClose(Utf8JsonWriter writer) =>
-            JsonSerializer.Serialize(
-                writer,
-                new DidCloseTextDocumentParams(new TextDocumentIdentifier(Uri)),
-                LspJsonContext.Default.DidCloseTextDocumentParams
             );
     }
 

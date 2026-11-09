@@ -251,14 +251,18 @@ How the client talks to a server, where the protocol leaves a choice:
   million characters, its full text replaces them.
 - **Diagnostics** with a version are about the text sent with that version; the client keeps the last 64 versions it
   sent, and drops diagnostics of an older one as outdated. Diagnostics without a version are about the text last
-  written to the server when they arrive. A diagnostic without a severity is an error, as in VS Code. Diagnostics belong to the process that
+  written to the server when they arrive. Diagnostics find their document by its file URI in whatever form the
+  server writes it: decoded, with the drive letter and the host in any case. Servers built on VS Code's URI library
+  write `file:///C:/a.txt` as `file:///c%3A/a.txt`; the same rule finds two documents with one file path. A
+  diagnostic without a severity is an error, as in VS Code. Diagnostics belong to the process that
   sent them: when it ends, by a crash, a hang or disposal, the documents' diagnostics are cleared.
 - **Server requests** run on the thread pool, and reading never waits for them, so responses and cancellations always
   get through: `workspace/configuration` calls `Settings` once per item, with the scope's path for a `file:` URI.
   Registrations are acknowledged; other requests get `MethodNotFound`. Notifications other than `publishDiagnostics`,
-  such as `window/logMessage`, are ignored. A server with more than 1,000 requests and invalid messages whose answers
-  are not written yet, because they run or because it does not read, sends faster than it reads: its process ends as a
-  crash.
+  such as `window/logMessage`, are ignored.
+- **Not reading:** when more than 10,000 messages wait to be written to a server, counting its requests that still
+  run, the server does not read what it is sent, and its process ends as a crash. A document closed before its
+  `didOpen` was written sends nothing, and a closed document keeps no text while its messages wait.
 - **Capabilities** of the server that have another JSON type than the protocol says count as not given.
 - **Messages** from a server that are not valid JSON get an error response. A message over 64 MiB, or broken framing,
   ends the process as a crash: skipping it would lose a request or a response without notice.
@@ -650,7 +654,9 @@ own, and with a clock that tests advance:
 - `workspace/configuration` answered by `Settings` off the UI thread, `NotifySettingsChanged`, registrations, unknown
   requests, malformed JSON and an oversized message; framing split across reads and merged into one, cancellation
   both ways, responses and cancellations getting through while 20 of the server's requests run, a server that sends
-  without reading the answers ending the connection, a message that cannot be built failing alone, and a failed write
+  without reading the answers ending the connection, and one that stops reading while documents come and go or move,
+  answers with parts of another JSON type, an id this end never used, the server's requests cancelled at the end,
+  diagnostics for a file URI in VS Code's form, a message that cannot be built failing alone, and a failed write
   ending the connection;
 - `DisposeAsync` with `shutdown` and `exit`, its kill after 2 s, and `Dispose` killing at once;
 - a server and its document before Avalonia is set up, in the test process of documents: events where the change

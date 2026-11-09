@@ -86,6 +86,20 @@ public sealed class DiagnosticsTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Diagnostics_reach_their_document_whatever_form_of_its_file_URI_the_server_writes() =>
+        _ui.Run(async () =>
+        {
+            // The server writes the URI as VS Code's URI library does: file:///…/a%2Bb%20%281%29.txt.
+            var fake = new FakeServer("--vscode-uris");
+            await using var server = new LanguageServer(fake.Options);
+            string path = Path.Combine(AppContext.BaseDirectory, "a+b (1).txt");
+
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "text", path);
+
+            await Wait.UntilAsync(() => document.Diagnostics is [{ Message: "text" }]);
+        });
+
+    [Fact]
     public Task Diagnostics_arrive_on_the_UI_thread_with_PropertyChanged() =>
         _ui.Run(async () =>
         {

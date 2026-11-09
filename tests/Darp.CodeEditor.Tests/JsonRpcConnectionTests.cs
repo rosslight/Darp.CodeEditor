@@ -148,7 +148,7 @@ public sealed class JsonRpcConnectionTests
             );
         }
 
-        (await call).GetString().ShouldBe("answered");
+        (await Wait.ForAsync(call)).GetString().ShouldBe("answered");
         var cancelled = new List<int?>();
         for (int i = 0; i < 20; i++)
         {
@@ -168,7 +168,7 @@ public sealed class JsonRpcConnectionTests
         await using var peer = new Peer(
             requests: (_, _, _) => Task.FromResult<JsonNode?>(null),
             pauseWriterThreshold: 64,
-            maxUnansweredRequests: 10
+            maxWaitingMessages: 10
         );
 
         for (int i = 0; i < 100 && !peer.Connection.Ended.IsCompleted; i++)
@@ -177,7 +177,66 @@ public sealed class JsonRpcConnectionTests
             await peer.WriteAsync(Peer.Frame(message));
         }
 
-        (await peer.Connection.Ended).ShouldBeOfType<IOException>().Message.ShouldContain("without reading");
+        (await Wait.ForAsync(peer.Connection.Ended))
+            .ShouldBeOfType<IOException>()
+            .Message.ShouldContain("does not read");
+    }
+
+    [Theory]
+    [InlineData("""{"code":"bad","message":"failure"}""", JsonRpcErrorCodes.InternalError, "failure")]
+    [InlineData("""{"code":-32601,"message":7}""", JsonRpcErrorCodes.MethodNotFound, "The request failed.")]
+    [InlineData("\"failure\"", JsonRpcErrorCodes.InternalError, "The request failed.")]
+    public async Task An_error_answer_with_parts_of_another_JSON_kind_still_fails_its_call(
+        string error,
+        int code,
+        string message
+    )
+    {
+        await using var peer = new Peer();
+        Task<JsonElement> call = peer.Connection.SendRequestAsync("asked", null, TestContext.Current.CancellationToken);
+        JsonNode request = await peer.ReadAsync();
+
+        await peer.WriteAsync(Peer.Frame($$$"""{"jsonrpc":"2.0","id":{{{request["id"]}}},"error":{{{error}}}}"""));
+
+        JsonRpcException exception = await Should.ThrowAsync<JsonRpcException>(Wait.ForAsync(call));
+        exception.Code.ShouldBe(code);
+        exception.Message.ShouldBe(message);
+        peer.Connection.Ended.IsCompleted.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task An_answer_to_an_id_this_end_never_used_is_ignored()
+    {
+        await using var peer = new Peer();
+        Task<JsonElement> call = peer.Connection.SendRequestAsync("asked", null, TestContext.Current.CancellationToken);
+        JsonNode request = await peer.ReadAsync();
+
+        await peer.WriteAsync(Peer.Frame("""{"jsonrpc":"2.0","id":"not ours","result":1}"""));
+        await peer.WriteAsync(Peer.Frame($$"""{"jsonrpc":"2.0","id":{{request["id"]}},"result":2}"""));
+
+        (await Wait.ForAsync(call)).GetInt32().ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task The_peers_requests_are_cancelled_when_the_connection_ends()
+    {
+        var started = new TaskCompletionSource();
+        var cancelled = new TaskCompletionSource();
+        await using var peer = new Peer(
+            requests: async (_, _, cancellationToken) =>
+            {
+                started.TrySetResult();
+                using (cancellationToken.Register(() => cancelled.TrySetResult()))
+                    await Task.Delay(Timeout.Infinite, cancellationToken);
+                return null;
+            }
+        );
+        await peer.WriteAsync(Peer.Frame("""{"jsonrpc":"2.0","id":1,"method":"slow"}"""));
+        await Wait.ForAsync(started.Task);
+
+        await peer.Connection.DisposeAsync();
+
+        await Wait.ForAsync(cancelled.Task);
     }
 
     [Fact]
@@ -254,7 +313,7 @@ public sealed class JsonRpcConnectionTests
             NotificationHandler? notifications = null,
             int maxMessageLength = JsonRpcConnection.DefaultMaxMessageLength,
             long pauseWriterThreshold = 65536,
-            int maxUnansweredRequests = JsonRpcConnection.DefaultMaxUnansweredRequests
+            int maxWaitingMessages = JsonRpcConnection.DefaultMaxWaitingMessages
         )
         {
             _fromConnection = new Pipe(
@@ -269,7 +328,7 @@ public sealed class JsonRpcConnectionTests
                 requests ?? ((method, _, _) => throw new JsonRpcException(JsonRpcErrorCodes.MethodNotFound, method)),
                 notifications ?? ((_, _) => { }),
                 maxMessageLength,
-                maxUnansweredRequests
+                maxWaitingMessages
             );
             Connection.Start();
         }

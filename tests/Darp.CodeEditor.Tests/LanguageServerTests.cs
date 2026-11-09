@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Avalonia.Threading;
+using Darp.CodeEditor.Lsp;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -179,6 +180,37 @@ public sealed class LanguageServerTests(UiFixture ui)
             document.Replace(new TextRange(3, 0), " two");
 
             (await fake.WaitForAsync("change ")).ShouldEndWith(" ranged 1 full 0");
+        });
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task A_server_that_stops_reading_while_documents_come_and_go_ends_as_a_crash(bool move) =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            using var server = new LanguageServer(fake.Options with { TimeProvider = new ManualTime() });
+            await Wait.ForAsync(server.StartAsync());
+            using CodeDocument command = server.CreateDocument(FakeServer.Commands, "stop-reading");
+            await fake.WaitForAsync("not reading");
+            // More than a pipe holds: writing its didOpen blocks, and what comes after waits.
+            using CodeDocument large = server.CreateDocument(CodeLanguage.PlainText, new string('x', 4_000_000));
+            using CodeDocument moving = server.CreateDocument(CodeLanguage.PlainText, "text");
+
+            // Each round queues a message or two that the server never reads, while no more documents stay open.
+            for (
+                int i = 0;
+                i < 2 * JsonRpcConnection.DefaultMaxWaitingMessages && server.State == LanguageServerState.Running;
+                i++
+            )
+            {
+                if (move)
+                    moving.FilePath = Path.Combine(AppContext.BaseDirectory, $"moving-{i % 2}.txt");
+                else
+                    server.CreateDocument(CodeLanguage.PlainText, "text").Dispose();
+            }
+
+            await Wait.UntilAsync(() => server.State == LanguageServerState.Restarting);
         });
 
     [Fact]
