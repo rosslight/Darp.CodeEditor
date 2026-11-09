@@ -13,13 +13,13 @@ public sealed class CompletionMatcherTests
     [Fact]
     public void Typed_characters_match_in_order_ignoring_case_and_the_first_at_a_word_start()
     {
-        _matcher.Match("fb", "FooBar", "FooBar").ShouldNotBeNull().Highlights.ShouldBe([0, 3]);
-        _matcher.Match("FOOB", "fooBar", "fooBar").ShouldNotBeNull().Highlights.ShouldBe([0, 1, 2, 3]);
-        _matcher.Match("lin", "write_line", "write_line").ShouldNotBeNull().Highlights.ShouldBe([6, 7, 8]);
+        _matcher.Match("fb", "FooBar", "FooBar", true).ShouldNotBeNull().Highlights.ShouldBe([0, 3]);
+        _matcher.Match("FOOB", "fooBar", "fooBar", true).ShouldNotBeNull().Highlights.ShouldBe([0, 1, 2, 3]);
+        _matcher.Match("lin", "write_line", "write_line", true).ShouldNotBeNull().Highlights.ShouldBe([6, 7, 8]);
         // Out of order, missing, or starting inside a word.
-        _matcher.Match("bf", "FooBar", "FooBar").ShouldBeNull();
-        _matcher.Match("fx", "FooBar", "FooBar").ShouldBeNull();
-        _matcher.Match("oo", "FooBar", "FooBar").ShouldBeNull();
+        _matcher.Match("bf", "FooBar", "FooBar", true).ShouldBeNull();
+        _matcher.Match("fx", "FooBar", "FooBar", true).ShouldBeNull();
+        _matcher.Match("oo", "FooBar", "FooBar", true).ShouldBeNull();
     }
 
     [Fact]
@@ -28,7 +28,7 @@ public sealed class CompletionMatcherTests
         string[] labels = ["readConsole", "Console", "console", "consoleKey", "ToConsoleString", "cos"];
 
         List<RankedCompletion> ranked = _matcher.Rank(
-            [.. labels.Select(l => new CompletionCandidate("Cons", l, l))],
+            [.. labels.Select(l => new CompletionCandidate("Cons", l, l, true))],
             TestContext.Current.CancellationToken
         );
 
@@ -38,7 +38,7 @@ public sealed class CompletionMatcherTests
             .Select(r => labels[r.Index])
             .ShouldBe(["Console", "console", "consoleKey", "ToConsoleString", "readConsole"]);
         _matcher
-            .Rank([new("x", "x1", "x1"), new("x", "x2", "x2")], TestContext.Current.CancellationToken)
+            .Rank([new("x", "x1", "x1", true), new("x", "x2", "x2", true)], TestContext.Current.CancellationToken)
             .Select(r => r.Index)
             .ShouldBe([0, 1]);
     }
@@ -47,11 +47,27 @@ public sealed class CompletionMatcherTests
     public void A_filter_text_decides_the_match_and_the_label_shows_what_matched_in_it()
     {
         // As a server offers "Console.WriteLine" for "wl", filtering by the method's name.
-        (int score, int[] highlights) = _matcher.Match("wl", "Console.WriteLine", "WriteLine").ShouldNotBeNull();
+        (int score, int[] highlights) = _matcher.Match("wl", "Console.WriteLine", "WriteLine", false).ShouldNotBeNull();
 
         highlights.ShouldBe([8, 13]);
-        score.ShouldBe(_matcher.Match("wl", "WriteLine", "WriteLine").ShouldNotBeNull().Score);
-        _matcher.Match("co", "Console.WriteLine", "WriteLine").ShouldBeNull();
+        score.ShouldBe(_matcher.Match("wl", "WriteLine", "WriteLine", true).ShouldNotBeNull().Score);
+        _matcher.Match("co", "Console.WriteLine", "WriteLine", false).ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_label_shows_the_filter_texts_matches_only_when_the_whole_filter_text_is_the_label()
+    {
+        // Alike in their first 128 characters, not in their last: VS Code's highlights come from the label itself.
+        string label = "BacaA" + new string('x', 123) + "2";
+        string filterText = "BACAA" + new string('x', 123) + "1";
+
+        (_, int[] highlights) = _matcher.Match("BAa", label, filterText, filterTextIsLabel: false).ShouldNotBeNull();
+
+        highlights.ShouldBe([0, 1, 4]);
+        _matcher
+            .Match("BAa", label, label.ToUpperInvariant(), filterTextIsLabel: true)
+            .ShouldNotBeNull()
+            .Highlights.ShouldBe([0, 1, 3]);
     }
 
     [Fact]
@@ -60,12 +76,12 @@ public sealed class CompletionMatcherTests
         // A server may send labels of any length; committing matches one on the UI thread.
         string label = "Console" + new string('x', 10_000_000);
         string filterText = "Console" + new string('y', 10_000_000);
-        _matcher.Match("co", label, label);
-        _matcher.Match("co", label, filterText);
+        _matcher.Match("co", label, label, true);
+        _matcher.Match("co", label, filterText, false);
 
         long before = GC.GetAllocatedBytesForCurrentThread();
-        (_, int[] highlights) = _matcher.Match("co", label, label).ShouldNotBeNull();
-        (_, int[] filtered) = _matcher.Match("co", label, filterText).ShouldNotBeNull();
+        (_, int[] highlights) = _matcher.Match("co", label, label, true).ShouldNotBeNull();
+        (_, int[] filtered) = _matcher.Match("co", label, filterText, false).ShouldNotBeNull();
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         highlights.ShouldBe([0, 1]);
@@ -77,7 +93,7 @@ public sealed class CompletionMatcherTests
     [Fact]
     public void Nothing_typed_matches_every_item_in_their_order()
     {
-        CompletionCandidate[] items = [new("", "b", "b"), new("", "a", "a"), new(" \t", "c", "c")];
+        CompletionCandidate[] items = [new("", "b", "b", true), new("", "a", "a", true), new(" \t", "c", "c", true)];
 
         List<RankedCompletion> ranked = _matcher.Rank(items, TestContext.Current.CancellationToken);
 
@@ -90,7 +106,7 @@ public sealed class CompletionMatcherTests
     {
         CompletionCandidate[] items =
         [
-            .. Enumerable.Range(0, 1000).Select(i => new CompletionCandidate("a", $"a{i}", $"a{i}")),
+            .. Enumerable.Range(0, 1000).Select(i => new CompletionCandidate("a", $"a{i}", $"a{i}", true)),
         ];
 
         Should.Throw<OperationCanceledException>(() => _matcher.Rank(items, new CancellationToken(canceled: true)));

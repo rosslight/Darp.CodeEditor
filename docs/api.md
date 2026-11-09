@@ -383,10 +383,11 @@ How the client talks to a server, where the protocol leaves a choice:
     its `filterText`, or its label, in order and ignoring case, and its first character must match at a word start, a
     capital or after a separator. Before anything is typed, items are in the order of their `sortText`, or their
     label, ignoring case, then of their label and kind; equal scores keep that order. The characters that matched show
-    in bold in the label. The first item is selected, or the first that the server preselects among those that match
-    best. There is no typo tolerance. Matching runs off the UI thread, whatever the list's length and the typed
-    text's: each change cancels the filter under way, and the list shows the newest result, the previous one
-    meanwhile.
+    in bold in the label, as in VS Code: the filter text's, when the whole filter text is the label, ignoring case,
+    and otherwise the label's own, by VS Code's more lenient `anyScore`. The first item is selected, or the first that
+    the server preselects among those that match best. There is no typo tolerance. Matching runs off the UI thread,
+    whatever the list's length and the typed text's: each change cancels the filter under way, and the list shows the
+    newest result, the previous one meanwhile.
   - **Asking again:** a list marked `isIncomplete` is asked for again on each character that the user types on in a
     word, for incomplete completions, and shows meanwhile. Moving back before where completion was asked asks again
     while a word is left, as invoked, as VS Code does, and so does an edit before it, as by another editor of the
@@ -911,10 +912,11 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   typing starts a word; not on typing on in a word, nor at the start of one that goes on, nor in a comment;
 - the ranking that the C# server will share gives the scores and the matched characters of VS Code's `fuzzyScore`
   and `anyScore`: compared with VS Code 1.145's own code, without its emoji separators, on 25,000 random texts, also
-  beyond 128 characters, they agreed on all of them. Tests check prefixes before capitals inside words, equal scores in the server's order, a
-  filter text that decides while the label shows what matched, the order of sort texts, and that ranking stops once
-  cancelled; in the editor, typing filters on the client without asking again, off the UI thread: right after
-  keystrokes that the UI thread did nothing else in between, the list still shows what it showed, and then the
+  beyond 128 characters, they agreed on all of them. Tests check prefixes before capitals inside words, equal scores
+  in the server's order, a filter text that decides while the label shows what matched, also one that differs from
+  the label only after its 128th character, the order of sort texts, and that ranking stops once cancelled; in the
+  editor, typing filters on the client without asking again, off the UI thread: right after keystrokes that the UI
+  thread did nothing else in between, the list still shows what it showed, and then the
   newest result. The matched characters show in bold, and a preselected item is selected among the best;
 - Enter, Tab, a click, the item's own commit character and the server's commit the selected item, each as one step
   that the user undoes, and a commit character then goes in; an item's own commit characters replace the server's.

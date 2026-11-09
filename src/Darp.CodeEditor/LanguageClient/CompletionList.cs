@@ -126,6 +126,7 @@ internal sealed class CompletionList
         {
             (range, newText) = (word, ServerJson.String(item, "insertText") ?? label);
         }
+        string filterText = ServerJson.String(item, "filterText") ?? label;
         // As VS Code, an item without a kind, or with one the protocol does not name, is a property.
         int kind = ServerJson.Number(item, "kind") is int k and >= 1 and <= 25 ? k : CompletionItemKinds.Property;
         return new CompletionItem(
@@ -135,7 +136,9 @@ internal sealed class CompletionList
             ServerJson.Documentation(item),
             IsDeprecated: ServerJson.IsTrue(item, "deprecated") || HasDeprecatedTag(item),
             IsPreselected: ServerJson.IsTrue(item, "preselect"),
-            ServerJson.String(item, "filterText") ?? label,
+            filterText,
+            // Read here, off the UI thread, once: comparing whole texts costs as much as they are long.
+            string.Equals(filterText, label, StringComparison.OrdinalIgnoreCase),
             new CompletionSortKey(ServerJson.String(item, "sortText") ?? label, label, kind),
             new CompletionEdit(range, newText),
             AdditionalEdits(item, snapshot),
@@ -235,6 +238,7 @@ internal sealed class CompletionList
 /// <param name="IsDeprecated">Whether it is deprecated: it shows struck through.</param>
 /// <param name="IsPreselected">Whether the server wants it selected, among the items that match best.</param>
 /// <param name="FilterText">The text it is matched by.</param>
+/// <param name="FilterTextIsLabel">Whether the whole filter text equals the label, ignoring case.</param>
 /// <param name="SortKey">Where it is in the list before anything is typed.</param>
 /// <param name="Edit">What committing it does to the text.</param>
 /// <param name="AdditionalEdits">What else committing it changes, such as an import; null when it names none.</param>
@@ -248,6 +252,7 @@ internal sealed record CompletionItem(
     bool IsDeprecated,
     bool IsPreselected,
     string FilterText,
+    bool FilterTextIsLabel,
     CompletionSortKey SortKey,
     CompletionEdit Edit,
     IReadOnlyList<CompletionEdit>? AdditionalEdits,

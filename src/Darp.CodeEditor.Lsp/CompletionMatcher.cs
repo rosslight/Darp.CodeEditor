@@ -65,7 +65,7 @@ internal sealed class CompletionMatcher
             if (i % 64 == 0)
                 cancellationToken.ThrowIfCancellationRequested();
             CompletionCandidate item = items[i];
-            if (Match(item.Typed, item.Label, item.FilterText) is { } match)
+            if (Match(item.Typed, item.Label, item.FilterText, item.FilterTextIsLabel) is { } match)
                 ranked.Add(new RankedCompletion(i, match.Score, match.Highlights));
         }
         // A stable order: List.Sort is not stable, so the index decides between equal scores.
@@ -80,7 +80,12 @@ internal sealed class CompletionMatcher
     /// <param name="typed">The text typed from where the item's edit starts up to the caret.</param>
     /// <param name="label">The item's label, which shows.</param>
     /// <param name="filterText">The text the item is matched by: its label, unless the server gave another.</param>
-    public (int Score, int[] Highlights)? Match(string typed, string label, string filterText)
+    /// <param name="filterTextIsLabel">
+    /// Whether the whole filter text equals the label, ignoring case: then the label shows the filter text's matched
+    /// characters, as VS Code shows them; otherwise its own, by the most lenient score. The caller knows it from
+    /// reading the item once, as comparing whole texts costs as much as they are long.
+    /// </param>
+    public (int Score, int[] Highlights)? Match(string typed, string label, string filterText, bool filterTextIsLabel)
     {
         // Whitespace that the item's edit starts with is not typed text.
         int start = 0;
@@ -91,18 +96,15 @@ internal sealed class CompletionMatcher
         string typedLow = Lower(typed);
         if (Score(typed, typedLow, start, filterText, Lower(filterText), firstMatchCanBeWeak: false) is not { } match)
             return null;
-        // Matched positions lie in the first MaxLength characters, so they hold for a label that starts alike.
-        if (Head(filterText).Equals(Head(label), StringComparison.OrdinalIgnoreCase))
+        if (filterTextIsLabel)
             return match;
         // The label shows: its characters that match, by the most lenient score, with the filter text's score.
         return (match.Score, AnyScore(typed, typedLow, start, label));
     }
 
-    /// <summary>The first <see cref="MaxLength"/> characters of <paramref name="text"/>, all that matching reads.</summary>
-    private static ReadOnlySpan<char> Head(string text) => text.AsSpan(0, Math.Min(text.Length, MaxLength));
-
     /// <summary>
-    /// <see cref="Head"/> in lower case: a server's label of millions of characters costs no more than its head.
+    /// The first <see cref="MaxLength"/> characters of <paramref name="text"/>, all that matching reads, in lower case:
+    /// a server's label of millions of characters costs no more than its start.
     /// </summary>
     private static string Lower(string text) =>
         text.Length <= MaxLength ? text.ToLowerInvariant() : text[..MaxLength].ToLowerInvariant();
@@ -414,7 +416,13 @@ internal sealed class CompletionMatcher
 /// <param name="Typed">The text typed from where the item's edit starts up to the caret.</param>
 /// <param name="Label">The label, whose matched characters show.</param>
 /// <param name="FilterText">The text it is matched by: its label, unless the server gave another.</param>
-internal readonly record struct CompletionCandidate(string Typed, string Label, string FilterText);
+/// <param name="FilterTextIsLabel">Whether the whole filter text equals the label, ignoring case.</param>
+internal readonly record struct CompletionCandidate(
+    string Typed,
+    string Label,
+    string FilterText,
+    bool FilterTextIsLabel
+);
 
 /// <summary>An item that matches.</summary>
 /// <param name="Index">Its index in the ranked items.</param>

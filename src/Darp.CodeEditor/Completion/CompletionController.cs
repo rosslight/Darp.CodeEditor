@@ -379,7 +379,7 @@ internal sealed class CompletionController : IDisposable
             int start = item.Edit.Range.Start - lineStart;
             if (!typed.TryGetValue(start, out string? text))
                 typed[start] = text = lineBefore[start..];
-            candidates[i] = new CompletionCandidate(text, item.Label, item.FilterText);
+            candidates[i] = new CompletionCandidate(text, item.Label, item.FilterText, item.FilterTextIsLabel);
         }
         List<RankedCompletion> ranked;
         try
@@ -445,7 +445,13 @@ internal sealed class CompletionController : IDisposable
         if (shown.Answer.Request.IsStale || caret < shown.Answer.Request.Offset)
             return false;
         string typed = _buffer.GetText(start, caret - start);
-        return (_itemMatcher ??= new CompletionMatcher()).Match(typed, item.Label, item.FilterText) is not null;
+        return (_itemMatcher ??= new CompletionMatcher()).Match(
+            typed,
+            item.Label,
+            item.FilterText,
+            item.FilterTextIsLabel
+        )
+            is not null;
     }
 
     /// <summary>
