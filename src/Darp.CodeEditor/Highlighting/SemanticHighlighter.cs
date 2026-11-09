@@ -32,6 +32,12 @@ namespace Darp.CodeEditor.Highlighting;
 internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisposable
 {
     /// <summary>The pause after the last edit before the tokens are asked for again: VS Code's shortest.</summary>
+    /// <summary>
+    /// How many of a line's tokens are drawn in their colors, at most; the others keep their TextMate colors. Each one
+    /// costs the line a run of text to lay out, about 6 µs, and a server may send one for every character.
+    /// </summary>
+    public const int MaxColoredTokens = 250;
+
     private static readonly TimeSpan s_afterEdit = TimeSpan.FromMilliseconds(300);
 
     /// <summary>The pause after scrolling shows lines without current tokens: VS Code's shortest for the view.</summary>
@@ -168,18 +174,17 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
             return;
         // The shown part of the line: tokens in a long line's hidden tail are not drawn.
         int length = Math.Min(line.Length, VisibleText.LineLimit);
-        for (int i = 0; i < tokens.Length; i += SemanticTokenLines.Stride)
+        int colored = 0;
+        for (int i = 0; i < tokens.Length && colored < MaxColoredTokens; i += SemanticTokenLines.Stride)
         {
             int start = tokens[i];
             if (start >= length)
                 break;
             int end = (int)Math.Min((long)start + tokens[i + 1], length);
-            if (styles.Foreground(tokens[i + 2], tokens[i + 3]) is { } brush)
-                ChangeLinePart(
-                    line.Offset + start,
-                    line.Offset + end,
-                    e => e.TextRunProperties.SetForegroundBrush(brush)
-                );
+            if (styles.Foreground(tokens[i + 2], tokens[i + 3]) is not { } brush)
+                continue;
+            ChangeLinePart(line.Offset + start, line.Offset + end, e => e.TextRunProperties.SetForegroundBrush(brush));
+            colored++;
         }
     }
 

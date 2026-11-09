@@ -5,6 +5,7 @@ using AvaloniaEdit.Document;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.LanguageClient;
+using Darp.CodeEditor.Loading;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -187,6 +188,56 @@ public sealed class SemanticTokensTests(UiFixture ui)
             kept.Count.ShouldBe(line.Length);
             kept.Where((_, i) => i % SemanticTokenLines.Stride == 0).Max().ShouldBe(width - 1);
         });
+
+    [Fact]
+    public Task A_line_draws_at_most_250_tokens_in_their_colors() =>
+        _ui.Run(() =>
+        {
+            // A token on each character, of two types in two colors that take turns: a run of text each.
+            const int width = VisibleText.LineLimit;
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, new string('x', width));
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            SemanticHighlighter highlighter =
+                editor.SemanticHighlighter ?? throw new InvalidOperationException("The editor shows no document.");
+            int[] line = [.. Enumerable.Range(0, width).SelectMany(column => (int[])[column, 1, column % 2, 0])];
+            var legend = new SemanticTokensLegend(["class", "variable"], []);
+
+            highlighter.Show(SemanticHighlighter.Prepare(new SemanticTokenLines(legend, 0, [line]), 0));
+            window.Render();
+
+            // The colored tokens, and the rest of the line in its TextMate color: each run costs the layout.
+            int runs = window.TextView.VisualLines[0].TextLines.Sum(row => row.TextRuns.Count);
+            runs.ShouldBeGreaterThanOrEqualTo(SemanticHighlighter.MaxColoredTokens);
+            runs.ShouldBeLessThanOrEqualTo(SemanticHighlighter.MaxColoredTokens + 3);
+        });
+
+    [Fact]
+    public async Task Token_colors_cost_nothing_for_modifiers_no_selector_names_or_types_past_the_first_1000()
+    {
+        ColorThemeFile theme = (await CodeEditorColorTheme.LightPlus.Loaded).ShouldNotBeNull();
+        // Modifiers that no selector names, and more types than are colored, as a server may choose them.
+        string[] types = [.. Enumerable.Range(0, 100_000).Select(i => i == 0 ? "variable" : $"type{i}")];
+        string[] modifiers = ["readonly", .. Enumerable.Range(1, 31).Select(i => $"modifier{i}")];
+        var styles = new SemanticTokenStyles(theme, "plaintext", new SemanticTokensLegend(types, modifiers));
+        IBrush? readOnly = styles.Foreground(0, 1);
+
+        int others = 0;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 1; i < 100_000; i++)
+        {
+            if (styles.Foreground(0, 1 | (i << 1)) != readOnly)
+                others++;
+            if (styles.Foreground(SemanticTokenStyles.MaxTypes + i, 0) is not null)
+                others++;
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // A color looked up for each combination took about 100 bytes each.
+        allocated.ShouldBeLessThan(100_000);
+        others.ShouldBe(0);
+        readOnly.ShouldNotBeNull();
+    }
 
     [Fact]
     public void Removed_text_is_read_back_to_its_last_line_break_within_the_shown_part()

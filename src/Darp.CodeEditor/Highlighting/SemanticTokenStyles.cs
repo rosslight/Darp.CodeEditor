@@ -12,10 +12,18 @@ namespace Darp.CodeEditor.Highlighting;
 /// </summary>
 /// <remarks>
 /// One set of colors serves one theme, one language and one server's legend. It finds each combination of type and
-/// modifiers once, on the UI thread, when a token of it is first drawn.
+/// modifiers once, on the UI thread, when a token of it is first drawn. A server chooses the types and modifiers, so
+/// that work is bounded: only the modifiers that a selector names count, and only the first
+/// <see cref="MaxTypes"/> types of a legend are colored.
 /// </remarks>
 internal sealed class SemanticTokenStyles
 {
+    /// <summary>
+    /// How many of a legend's types are colored, at most: a server names dozens, while each one colored costs the UI
+    /// thread a search of the theme's rules.
+    /// </summary>
+    public const int MaxTypes = 1_000;
+
     /// <summary>The protocol's standard token types, which the client advertises and themes color.</summary>
     public static readonly string[] TokenTypes =
     [
@@ -115,17 +123,21 @@ internal sealed class SemanticTokenStyles
         }.Select(rule => (Selector.Parse(rule.Item1), rule.Item2)),
     ];
 
-    private readonly ColorThemeFile _theme;
     private readonly string _language;
     private readonly SemanticTokensLegend _legend;
     private readonly (Selector Selector, Color Foreground)[] _themeRules;
+
+    /// <summary>The standard mapping's selectors with the color the theme gives their scopes, where it gives one.</summary>
+    private readonly (Selector Selector, Color Foreground)[] _scopeRules;
+
+    /// <summary>The bits of the legend's modifiers that a selector names: the others change no color.</summary>
+    private readonly int _namedModifiers;
 
     /// <summary>The foreground of each combination of type and modifiers found so far; null for none.</summary>
     private readonly Dictionary<(int Type, int Modifiers), IBrush?> _foregrounds = [];
 
     public SemanticTokenStyles(ColorThemeFile theme, string language, SemanticTokensLegend legend)
     {
-        _theme = theme;
         _language = language;
         _legend = legend;
         _themeRules =
@@ -134,6 +146,19 @@ internal sealed class SemanticTokenStyles
                 .SemanticTokenColors.Where(rule => rule.Value.Foreground is not null)
                 .Select(rule => (Selector.Parse(rule.Key), rule.Value.Foreground.GetValueOrDefault())),
         ];
+        _scopeRules =
+        [
+            .. s_scopeRules
+                .Select(rule => (rule.Selector, Foreground: ScopeColor(theme, rule.Scopes)))
+                .Where(rule => rule.Foreground is not null)
+                .Select(rule => (rule.Selector, rule.Foreground.GetValueOrDefault())),
+        ];
+        HashSet<string> named = [.. _themeRules.Concat(_scopeRules).SelectMany(rule => rule.Selector.Modifiers)];
+        for (int i = 0; i < legend.TokenModifiers.Length && i < 32; i++)
+        {
+            if (named.Contains(legend.TokenModifiers[i]))
+                _namedModifiers |= 1 << i;
+        }
     }
 
     /// <summary>
@@ -142,6 +167,9 @@ internal sealed class SemanticTokenStyles
     /// </summary>
     public IBrush? Foreground(int type, int modifiers)
     {
+        if (type >= MaxTypes)
+            return null;
+        modifiers &= _namedModifiers;
         if (!_foregrounds.TryGetValue((type, modifiers), out IBrush? brush))
         {
             Color? color = FindForeground(_legend.TokenTypes[type], ModifierNames(modifiers));
@@ -166,22 +194,16 @@ internal sealed class SemanticTokenStyles
         }
         if (foreground is not null)
             return foreground;
-        foreach ((Selector selector, string[] scopes) in s_scopeRules)
+        foreach ((Selector selector, Color color) in _scopeRules)
         {
-            if (
-                selector.Match(type, modifiers, _language) is var score and >= 0
-                && score >= best
-                && ScopeColor(scopes) is { } color
-            )
-            {
+            if (selector.Match(type, modifiers, _language) is var score and >= 0 && score >= best)
                 (foreground, best) = (color, score);
-            }
         }
         return foreground;
     }
 
-    /// <summary>The color of the first of <paramref name="scopes"/> that a rule of the theme colors.</summary>
-    private Color? ScopeColor(string[] scopes)
+    /// <summary>The color of the first of <paramref name="scopes"/> that a rule of <paramref name="theme"/> colors.</summary>
+    private static Color? ScopeColor(ColorThemeFile theme, string[] scopes)
     {
         foreach (string scope in scopes)
         {
@@ -189,7 +211,7 @@ internal sealed class SemanticTokenStyles
             int longest = -1;
             // The longest selector that is the scope or one of its parents wins, a later rule on a tie. Selectors with
             // ancestors, such as "source.cs keyword", need more than one scope.
-            foreach (TokenColorRule rule in _theme.TokenColors)
+            foreach (TokenColorRule rule in theme.TokenColors)
             {
                 foreach (string selector in rule.Scopes)
                 {
