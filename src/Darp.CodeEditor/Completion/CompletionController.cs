@@ -35,11 +35,11 @@ namespace Darp.CodeEditor.Completion;
 /// commit it: its edit, or its text over the word, and its additional edits, such as an import, in one step that the
 /// user undoes. While the filter of the current text still runs, they commit the item that shows if it matches the
 /// current text, checked on the UI thread for that item alone; otherwise Enter and Tab commit what that filter selects
-/// once it has run, unless the text changes before, and a commit character goes in as text, as it does when nothing
-/// matches: deciding later would hold back or reorder what the user types. A read-only editor neither completes nor
-/// commits. The server resolves the selected item, so that its detail and documentation show beside the list. An
-/// item whose additional edits are still to come when it is committed gets them when they come, in its step, if that
-/// step is still the last one: otherwise they are dropped, as the user moved on.
+/// once it has run, unless the text, by any editor or code, or the caret changes before, and a commit character goes in
+/// as text, as it does when nothing matches: deciding later would hold back or reorder what the user types. A read-only
+/// editor neither completes nor commits. The server resolves the selected item, so that its detail and documentation
+/// show beside the list. An item whose additional edits are still to come when it is committed gets them when they
+/// come, in its step, if that step is still the last one: otherwise they are dropped, as the user moved on.
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends completion, for every reason it ends: Escape, the caret leaving the line or moving back
@@ -67,9 +67,6 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>Cancels the resolve of the item committed last, whose additional edits are still to come.</summary>
     private CancellationTokenSource? _lateEdits;
-
-    /// <summary>Whether the change of the text under way made a request stale.</summary>
-    private bool _madeStale;
 
     /// <summary>
     /// Ranks lists off the UI thread, for one filter at a time; made the first time a list is filtered, as it takes
@@ -346,6 +343,13 @@ internal sealed class CompletionController : IDisposable
             if (filtered is null || _session != session || session.Filtering != filtering)
                 return;
             session.Filtering = null;
+            // It counts only for the text and the caret it was filtered for: a change since outdates it, also one
+            // that left the caret where it was.
+            if (filtering.Key != CurrentKey(filtering.Key.Answer))
+            {
+                Update();
+                return;
+            }
             Show(session, filtering.Key, filtered);
         }
         catch (Exception e)
@@ -769,21 +773,15 @@ internal sealed class CompletionController : IDisposable
         foreach (Request? request in (Request?[])[session.Answer?.Request, session.Pending])
         {
             if (request is { IsStale: false } && e.Offset < request.Offset)
-                (request.IsStale, _madeStale) = (true, true);
+                request.IsStale = true;
         }
     }
 
     /// <summary>
-    /// After a change that made a request stale: follows it, also when it left the caret where it was, as an edit by
-    /// another editor of the document can.
+    /// After any change of the text, by this editor, another editor of the document or code: follows it, also when it
+    /// left the caret where it was. The filter under way, and a commit that waits for it, are for older text.
     /// </summary>
-    private void OnBufferTextChanged(object? sender, EventArgs e)
-    {
-        if (!_madeStale)
-            return;
-        _madeStale = false;
-        Update();
-    }
+    private void OnBufferTextChanged(object? sender, EventArgs e) => Update();
 
     private void OnClosingChange(object? sender, EventArgs e) => Close();
 
