@@ -33,35 +33,96 @@ public sealed class ServerRequestsTests(UiFixture ui)
                 $"configuration yaml {new Uri(path).AbsoluteUri}\nconfiguration other"
             );
 
-            (await fake.WaitForAsync("response 1 ")).ShouldBe("""response 1 result [{"validate":true}]""");
-            (await fake.WaitForAsync("response 2 ")).ShouldBe("response 2 result [null]");
+            // The fake server's request 1 asks for its own section when it gets all settings at the start.
+            (await fake.WaitForAsync("response 2 ")).ShouldBe("""response 2 result [{"validate":true}]""");
+            (await fake.WaitForAsync("response 3 ")).ShouldBe("response 3 result [null]");
             // Requests run side by side, in any order.
-            requests.ShouldBe(
-                [
-                    (new LanguageServerSettingsRequest("yaml", path), false),
-                    (new LanguageServerSettingsRequest("other", null), false),
-                ],
-                ignoreOrder: true
-            );
+            requests.ShouldContain((new LanguageServerSettingsRequest("yaml", path), false));
+            requests.ShouldContain((new LanguageServerSettingsRequest("other", null), false));
         });
 
     [Fact]
-    public Task NotifySettingsChanged_makes_the_server_ask_again() =>
+    public Task All_settings_reach_the_server_when_it_starts_and_after_a_restart() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            var time = new ManualTime();
+            var requests = new ConcurrentQueue<(LanguageServerSettingsRequest Request, bool OnUiThread)>();
+            using var server = new LanguageServer(
+                fake.Options with
+                {
+                    TimeProvider = time,
+                    Settings = request =>
+                    {
+                        requests.Enqueue((request, Dispatcher.UIThread.CheckAccess()));
+                        return request.Section is null
+                            ? new JsonObject { ["json"] = new JsonObject { ["validate"] = true } }
+                            : null;
+                    },
+                }
+            );
+            const string pushed = """configuration changed {"settings":{"json":{"validate":true}}}""";
+
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "text");
+
+            (await fake.WaitForAsync("configuration changed")).ShouldBe(pushed);
+            string opened = await fake.WaitForAsync("open ");
+            // After initialized, and before the documents, which the server may check against its settings.
+            List<string> lines = [.. fake.Lines];
+            lines.IndexOf("initialized").ShouldBeLessThan(lines.IndexOf(pushed));
+            lines.IndexOf(pushed).ShouldBeLessThan(lines.IndexOf(opened));
+
+            CodeDocument crash = server.CreateDocument(FakeServer.Commands, "exit 1");
+            await Wait.UntilAsync(() => server.State == LanguageServerState.Restarting);
+            crash.Dispose();
+            time.Advance(TimeSpan.FromSeconds(0.5));
+
+            (await fake.WaitForAsync("configuration changed", 2)).ShouldBe(pushed);
+            requests.Count(r => r.Request == new LanguageServerSettingsRequest(null, null)).ShouldBe(2);
+            requests.ShouldAllBe(r => !r.OnUiThread);
+        });
+
+    [Fact]
+    public Task NotifySettingsChanged_sends_all_settings_again_and_the_server_asks_again() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            int version = 0;
+            await using var server = new LanguageServer(
+                fake.Options with
+                {
+                    Settings = request => new JsonObject { ["section"] = request.Section, ["version"] = version },
+                }
+            );
+            await Wait.ForAsync(server.StartAsync());
+            (await fake.WaitForAsync("configuration changed")).ShouldBe(
+                """configuration changed {"settings":{"section":null,"version":0}}"""
+            );
+            await fake.WaitForAsync("response 1 ");
+
+            version = 1;
+            server.NotifySettingsChanged();
+
+            (await fake.WaitForAsync("configuration changed", 2)).ShouldBe(
+                """configuration changed {"settings":{"section":null,"version":1}}"""
+            );
+            (await fake.WaitForAsync("response 2 ")).ShouldBe("""response 2 result [{"section":"fake","version":1}]""");
+        });
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task Without_settings_the_server_gets_an_empty_object_not_null(bool settingsAnswerNull) =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
             await using var server = new LanguageServer(
-                fake.Options with
-                {
-                    Settings = request => new JsonObject { ["section"] = request.Section },
-                }
+                settingsAnswerNull ? fake.Options with { Settings = _ => null } : fake.Options
             );
-            await server.StartAsync();
 
-            server.NotifySettingsChanged();
+            await Wait.ForAsync(server.StartAsync());
 
-            (await fake.WaitForAsync("configuration changed")).ShouldBe("""configuration changed {"settings":null}""");
-            (await fake.WaitForAsync("response 1 ")).ShouldBe("""response 1 result [{"section":"fake"}]""");
+            (await fake.WaitForAsync("configuration changed")).ShouldBe("""configuration changed {"settings":{}}""");
         });
 
     [Fact]
@@ -76,9 +137,10 @@ public sealed class ServerRequestsTests(UiFixture ui)
                 "register\nunregister\nunknown-request"
             );
 
-            (await fake.WaitForAsync("response 1 ")).ShouldBe("response 1 result null");
+            // The fake server's request 1 asks for its own section when it gets all settings at the start.
             (await fake.WaitForAsync("response 2 ")).ShouldBe("response 2 result null");
-            (await fake.WaitForAsync("response 3 ")).ShouldBe("response 3 error -32601");
+            (await fake.WaitForAsync("response 3 ")).ShouldBe("response 3 result null");
+            (await fake.WaitForAsync("response 4 ")).ShouldBe("response 4 error -32601");
         });
 
     [Fact]

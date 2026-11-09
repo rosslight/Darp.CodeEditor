@@ -236,6 +236,7 @@ follows the edits made since, so clicking an error after typing above it still l
 - **Lifecycle:** `initialize` (with the root folder and initialization options), shutdown and exit, and `$/cancelRequest`.
 - **Documents:** incremental `didOpen`, `didChange` and `didClose`.
 - **Features:** completion with resolve, hover, signature help, semantic tokens (range, or full), and pushed diagnostics (`publishDiagnostics`).
+- **Settings:** `workspace/didChangeConfiguration` with all settings, when the server starts and on `NotifySettingsChanged`.
 - **Server requests the client answers:** `workspace/configuration` (through `Settings`) and `client/registerCapability`. Registrations are acknowledged, and only the features above take effect.
 - **Not in v1:** pulled diagnostics, workspace edits, file watching, code actions, formatting, rename. The client does not advertise them.
 
@@ -260,6 +261,11 @@ How the client talks to a server, where the protocol leaves a choice:
   get through: `workspace/configuration` calls `Settings` once per item, with the scope's path for a `file:` URI.
   Registrations are acknowledged; other requests get `MethodNotFound`. Notifications other than `publishDiagnostics`,
   such as `window/logMessage`, are ignored.
+- **Settings** go both ways. After `initialized`, on every start and restart, and on `NotifySettingsChanged`, the
+  client sends `workspace/didChangeConfiguration` with all settings: the answer of `Settings` for a null section, or
+  `{}` without one, never `null`. Some servers read their settings only there, such as VS Code's JSON server with its
+  `json.schemas`; others ask with `workspace/configuration`, which `Settings` answers per section. `Settings` runs off
+  the UI thread for both.
 - **Not reading:** when more than 10,000 messages wait to be written to a server, counting its requests that still
   run, the server does not read what it is sent, and its process ends as a crash. A document closed before its
   `didOpen` was written sends nothing, and a closed document keeps no text while its messages wait.
@@ -654,7 +660,8 @@ own, and with a clock that tests advance:
 - diagnostics about the snapshot the server analyzed, by version or the text last written, not one still being
   written, mapped with `MapToCurrent`,
   set on the UI thread with `PropertyChanged`, and positions outside the text clamped, `int.MaxValue` included;
-- `workspace/configuration` answered by `Settings` off the UI thread, `NotifySettingsChanged`, registrations, unknown
+- `workspace/configuration` answered by `Settings` off the UI thread; all settings sent at the start, after a restart
+  and on `NotifySettingsChanged`, also off the UI thread, and `{}` without settings; registrations, unknown
   requests, malformed JSON and an oversized message; framing split across reads and merged into one, cancellation
   both ways, responses and cancellations getting through while 20 of the server's requests run, a server that sends
   without reading the answers ending the connection, and one that stops reading while documents come and go or move,

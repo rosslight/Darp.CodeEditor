@@ -71,10 +71,8 @@ internal sealed record ConfigurationParams(IReadOnlyList<ConfigurationItem> Item
 
 internal sealed record ConfigurationItem(string? ScopeUri = null, string? Section = null);
 
-internal sealed record DidChangeConfigurationParams(
-    // Required by the protocol; servers that pull their settings ignore it.
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] JsonNode? Settings
-);
+/// <param name="Settings">All settings; some servers fail on null.</param>
+internal sealed record DidChangeConfigurationParams(JsonNode Settings);
 
 /// <summary>Reads a diagnostic's code, a number or a string, as text.</summary>
 internal sealed class DiagnosticCodeConverter : JsonConverter<string>

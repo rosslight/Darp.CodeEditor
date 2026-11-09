@@ -77,7 +77,8 @@ internal sealed class ServerConnection
     public void Start() => _run = Task.Run(RunAsync);
 
     /// <summary>
-    /// Guarded: the server answered <c>initialize</c>. Sends <c>initialized</c>, then opens <paramref name="documents"/>.
+    /// Guarded: the server answered <c>initialize</c>. Sends <c>initialized</c> and all settings, then opens
+    /// <paramref name="documents"/>, so that the server has its settings before it checks them.
     /// </summary>
     public void OnRunning(JsonRpcConnection rpc, bool isFullSync, IEnumerable<ServerDocument> documents)
     {
@@ -90,6 +91,7 @@ internal sealed class ServerConnection
                 writer.WriteEndObject();
             }
         );
+        _settingsChange.Queue(rpc);
         foreach (ServerDocument document in documents)
             Open(document);
     }
@@ -126,7 +128,7 @@ internal sealed class ServerConnection
         Open(document);
     }
 
-    /// <summary>Guarded: tells the running server that the settings may have changed.</summary>
+    /// <summary>Guarded: sends all settings again to the running server.</summary>
     public void NotifySettingsChanged()
     {
         if (_running is { } running)
@@ -710,7 +712,12 @@ internal sealed class ServerConnection
             );
     }
 
-    /// <summary><c>workspace/didChangeConfiguration</c>: at most one waits in the write queue.</summary>
+    /// <summary>
+    /// <c>workspace/didChangeConfiguration</c> with all settings: the app's answer for a null section, or an empty object
+    /// without one, never null, which some servers fail on. Some servers read their settings only here, such as VS Code's
+    /// JSON server. At most one waits in the write queue, and it asks the app when it is built: on the write loop, off
+    /// the UI thread and outside the server's lock, with the settings of that moment.
+    /// </summary>
     private sealed class SettingsChange : OutgoingMessage
     {
         private readonly ServerConnection _connection;
@@ -733,19 +740,23 @@ internal sealed class ServerConnection
         {
             lock (_connection._lock)
                 _isQueued = false;
+            JsonNode settings =
+                _connection._options.Settings?.Invoke(new LanguageServerSettingsRequest(null, null))
+                ?? new JsonObject();
             WriteNotification(
                 writer,
                 "workspace/didChangeConfiguration",
                 w =>
                     JsonSerializer.Serialize(
                         w,
-                        new DidChangeConfigurationParams(null),
+                        new DidChangeConfigurationParams(settings),
                         LspJsonContext.Default.DidChangeConfigurationParams
                     )
             );
             return true;
         }
 
+        /// <summary>The settings did not serialize, or the app's answer threw: this push is dropped.</summary>
         public override void Fail(Exception exception) { }
     }
 }

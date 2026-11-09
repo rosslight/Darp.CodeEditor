@@ -158,8 +158,8 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
     }
 
     /// <summary>
-    /// Tells the server that the answers of <see cref="LanguageServerOptions.Settings"/> may have changed, so that it
-    /// asks again.
+    /// Tells the server that the answers of <see cref="LanguageServerOptions.Settings"/> may have changed: the client
+    /// sends all settings again, the answer for a null section, and servers that ask for their settings ask again.
     /// </summary>
     public void NotifySettingsChanged()
     {
@@ -420,8 +420,10 @@ public sealed record LanguageServerOptions
     public JsonNode? InitializationOptions { get; init; }
 
     /// <summary>
-    /// Answers the server's <c>workspace/configuration</c> requests: gets the section, such as <c>yaml</c>, and the file
-    /// or folder it is for, and returns the settings, or null when the app has none. Called on any thread.
+    /// The app's settings for the server: gets the section, such as <c>yaml</c>, and the file or folder it is for, and
+    /// returns the settings, or null when the app has none. The client sends all settings, the answer for a null
+    /// section, when the server starts and on <see cref="LanguageServer.NotifySettingsChanged"/>; servers that ask for
+    /// settings get the answers per section. Called on any thread.
     /// </summary>
     public Func<LanguageServerSettingsRequest, JsonNode?>? Settings { get; init; }
 
