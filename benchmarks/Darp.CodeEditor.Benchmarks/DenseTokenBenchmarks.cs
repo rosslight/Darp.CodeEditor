@@ -28,6 +28,7 @@ public class DenseTokenBenchmarks
 
     private Window? _window;
     private SemanticHighlighter? _highlighter;
+    private TextView? _textView;
     private SemanticHighlighter.Answer[] _answers = [];
     private int _next;
 
@@ -51,6 +52,7 @@ public class DenseTokenBenchmarks
         highlighter.Show(_answers[0]);
         // Drawn in the theme's colors, once they are loaded: a run for each colored token.
         TextView textView = editor.GetVisualDescendants().OfType<AvaloniaEdit.TextEditor>().Single().TextArea.TextView;
+        _textView = textView;
         long start = Stopwatch.GetTimestamp();
         while (
             !textView.VisualLinesValid
@@ -69,6 +71,18 @@ public class DenseTokenBenchmarks
         _next ^= 1;
         (_highlighter ?? throw new InvalidOperationException("Not set up.")).Show(_answers[_next]);
         HeadlessEditor.Render(_window ?? throw new InvalidOperationException("Not set up."));
+    }
+
+    /// <summary>
+    /// The UI thread's own part of it: taking the tokens, and laying out the lines in view with their colors, without
+    /// the frame, whose drawing an app rasterizes on its render thread.
+    /// </summary>
+    [Benchmark]
+    public void TakeTokensOnEveryCharacterAndLayOut()
+    {
+        _next ^= 1;
+        (_highlighter ?? throw new InvalidOperationException("Not set up.")).Show(_answers[_next]);
+        (_textView ?? throw new InvalidOperationException("Not set up.")).EnsureVisualLines();
     }
 
     [GlobalCleanup]
