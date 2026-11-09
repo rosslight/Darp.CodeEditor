@@ -3,6 +3,7 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Rendering;
+using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.LanguageClient;
 using Darp.CodeEditor.Loading;
 
@@ -145,7 +146,8 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
             || Styles() is not { } styles
         )
             return;
-        int length = line.Length;
+        // The shown part of the line: tokens in a long line's hidden tail are not drawn.
+        int length = Math.Min(line.Length, VisibleText.LineLimit);
         for (int i = 0; i < tokens.Length; i += SemanticTokenLines.Stride)
         {
             int start = tokens[i];

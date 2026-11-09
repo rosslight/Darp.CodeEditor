@@ -434,7 +434,7 @@ public class CodeEditor : TemplatedControl
             part.IsReadOnly = true;
             TextEditorOptions options = part.Options;
             // AvaloniaEdit's default, until Avalonia's wrapping and font fallback get fast on longer wrapped lines.
-            options.LongLineLimit = 3_000;
+            options.LongLineLimit = VisibleText.LineLimit;
             options.HighlightCurrentLine = true;
             options.AllowScrollBelowDocument = true;
             // Links would be drawn in AvaloniaEdit's blue, not in the theme's colors.

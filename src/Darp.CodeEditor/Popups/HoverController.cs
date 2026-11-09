@@ -209,8 +209,9 @@ internal sealed class HoverController : IDisposable
     private void OnClosingChange(object? sender, EventArgs e) => Close();
 
     /// <summary>
-    /// The offset of the character under <paramref name="point"/>, or of a line's end within a space's width after it,
-    /// where an empty diagnostic there is drawn; null elsewhere.
+    /// The offset of the character under <paramref name="point"/>, in the shown part of its line, or of a line's end
+    /// within a space's width after it, where an empty diagnostic there is drawn; null elsewhere, as over the "..." of a
+    /// long line's hidden tail, which shows no text.
     /// </summary>
     private int? OffsetAt(Point point)
     {
@@ -218,8 +219,10 @@ internal sealed class HoverController : IDisposable
             return null;
         DocumentLine line = _buffer.GetLineByNumber(position.Line);
         int offset = _buffer.GetOffset(position.Location);
-        if (offset < line.EndOffset)
+        if (offset < VisibleText.End(line))
             return offset;
+        if (VisibleText.IsCollapsed(line))
+            return null;
         Rect end = TextViewBoxes.CharacterAt(_textView, line.EndOffset);
         return point.X < end.Right ? line.EndOffset : null;
     }
@@ -259,8 +262,8 @@ internal sealed class HoverController : IDisposable
 
     /// <summary>
     /// The word at <paramref name="offset"/>, by VS Code's word characters, reaching at most
-    /// <see cref="MaxWordReach"/> characters to either side; the character alone if it is none, and nothing at a line's
-    /// end.
+    /// <see cref="MaxWordReach"/> characters to either side, and not into a long line's hidden tail; the character alone
+    /// if it is none, and nothing at a line's end.
     /// </summary>
     internal static TextRange WordAt(TextDocument buffer, int offset)
     {
@@ -273,7 +276,7 @@ internal sealed class HoverController : IDisposable
         int start = offset;
         while (start > first && WordCharacters.IsWordCharacter(buffer.GetCharAt(start - 1)))
             start--;
-        int last = Math.Min(line.EndOffset, offset + MaxWordReach);
+        int last = Math.Min(VisibleText.End(line), offset + MaxWordReach);
         int end = offset;
         while (end < last && WordCharacters.IsWordCharacter(buffer.GetCharAt(end)))
             end++;

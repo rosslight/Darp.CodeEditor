@@ -7,6 +7,7 @@ using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
 using Darp.CodeEditor.Diagnostics;
+using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Popups;
 
 namespace Darp.CodeEditor.Tests;
@@ -422,6 +423,25 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task The_pointer_over_a_long_lines_hidden_tail_is_over_no_text() =>
+        _ui.Run(async () =>
+        {
+            // The editor shows the first 3,000 characters of the word, wrapped, and "..." for its other ten million.
+            string text = new string('x', 10_000_000) + "\nend";
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document, WordWrap = true }, height: 900);
+            document.SetDiagnostics([
+                new Diagnostic(document.CurrentSnapshot, new TextRange(0, 10), DiagnosticSeverity.Error, null, "long"),
+            ]);
+            await HoverAsync(window, 5, "long");
+
+            // Over the "...", where the hidden tail starts.
+            window.MoveMouse(window.PointAt(VisibleText.LineLimit));
+
+            Popup(window).ShouldBeNull();
+        });
+
+    [Fact]
     public Task The_hovered_word_reaches_a_bounded_distance_from_the_pointer() =>
         _ui.Run(() =>
         {
@@ -431,7 +451,8 @@ public sealed class HoverTests(UiFixture ui)
 
             HoverController.WordAt(buffer, 1).ShouldBe(new TextRange(0, 2));
             HoverController.WordAt(buffer, 3).ShouldBe(new TextRange(3, reach));
-            HoverController.WordAt(buffer, 500_000).ShouldBe(TextRange.FromBounds(500_000 - reach, 500_000 + reach));
+            // Nor past the shown part of a long line.
+            HoverController.WordAt(buffer, 2_500).ShouldBe(TextRange.FromBounds(2_500 - reach, VisibleText.LineLimit));
         });
 
     /// <summary>

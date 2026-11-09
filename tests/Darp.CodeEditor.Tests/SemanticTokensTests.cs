@@ -1,5 +1,8 @@
+using System.Text.Json;
 using Avalonia.Input;
 using Avalonia.Media;
+using Darp.CodeEditor.Editing;
+using Darp.CodeEditor.LanguageClient;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -135,6 +138,24 @@ public sealed class SemanticTokensTests(UiFixture ui)
             // The lines in view, which end with the last line of text and the empty one after it.
             fake.LinesStartingWith("semanticTokens/range").ShouldContain(line => line.EndsWith("-300"));
         });
+
+    [Fact]
+    public void A_line_keeps_at_most_one_token_per_character_of_its_shown_part()
+    {
+        var legend = new SemanticTokensLegend(["variable"], []);
+        // Line 0: 100,000 tokens on its first character. Line 1: a token on each of its first 10,000 characters, most of
+        // them in the hidden tail of a long line.
+        IEnumerable<int> overlapping = Enumerable.Range(0, 100_000).SelectMany(_ => (int[])[0, 0, 1, 0, 0]);
+        IEnumerable<int> wide = Enumerable
+            .Range(0, 10_000)
+            .SelectMany(i => (int[])[i == 0 ? 1 : 0, i == 0 ? 0 : 1, 1, 0, 0]);
+        string json = $"{{ \"data\": [{string.Join(",", overlapping.Concat(wide))}] }}";
+
+        SemanticTokenLines tokens = SemanticTokenLines.Read(JsonElement.Parse(json), legend, 0, 1);
+
+        (tokens.Lines[0].Length / SemanticTokenLines.Stride).ShouldBe(1);
+        (tokens.Lines[1].Length / SemanticTokenLines.Stride).ShouldBe(VisibleText.LineLimit);
+    }
 
     [Fact]
     public Task Only_editors_that_show_a_document_ask_for_its_tokens_and_hover() =>

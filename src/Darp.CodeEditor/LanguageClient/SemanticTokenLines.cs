@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Darp.CodeEditor.Editing;
 
 namespace Darp.CodeEditor.LanguageClient;
 
@@ -19,8 +20,10 @@ internal sealed record SemanticTokenLines(SemanticTokensLegend Legend, int First
 
     /// <summary>
     /// Reads a <c>SemanticTokens</c> result for the lines from <paramref name="firstLine"/> to
-    /// <paramref name="lastLine"/>, both from 0. Tokens outside them, of a type the legend does not name, or empty, are
-    /// left out. A null result counts as no tokens.
+    /// <paramref name="lastLine"/>, both from 0. Tokens outside them, of a type the legend does not name, empty, or that
+    /// overlap the token before them are left out, and so are those that start in a long line's hidden tail: a line keeps
+    /// at most one token per character of its shown part, whatever the server sends. A null result counts as no
+    /// tokens.
     /// </summary>
     /// <exception cref="JsonException">The result is not semantic tokens.</exception>
     public static SemanticTokenLines Read(JsonElement result, SemanticTokensLegend legend, int firstLine, int lastLine)
@@ -34,6 +37,8 @@ internal sealed record SemanticTokenLines(SemanticTokensLegend Legend, int First
                 throw new JsonException("Semantic tokens' data come in groups of five.");
             long line = 0;
             long column = 0;
+            // Where the last token kept on the line ends.
+            long keptEnd = 0;
             JsonElement.ArrayEnumerator numbers = data.EnumerateArray();
             while (numbers.MoveNext())
             {
@@ -48,8 +53,19 @@ internal sealed record SemanticTokenLines(SemanticTokensLegend Legend, int First
                 // Tokens come in the order of the text.
                 if (line > lastLine)
                     break;
-                if (line < firstLine || type >= legend.TokenTypes.Length || length == 0 || column > int.MaxValue)
+                if (deltaLine != 0)
+                    keptEnd = 0;
+                if (
+                    line < firstLine
+                    || type >= legend.TokenTypes.Length
+                    || length == 0
+                    || column >= VisibleText.LineLimit
+                    || column < keptEnd
+                )
+                {
                     continue;
+                }
+                keptEnd = column + length;
                 List<int> tokens = lines[line - firstLine] ??= [];
                 tokens.AddRange([(int)column, (int)Math.Min(length, int.MaxValue), (int)type, (int)modifiers]);
             }
