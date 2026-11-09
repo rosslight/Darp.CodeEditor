@@ -47,8 +47,8 @@ internal sealed class CompletionView
         {
             Focusable = false,
             Width = ListWidth,
-            // Rows that the list recycles have no item for a moment.
-            ItemTemplate = new FuncDataTemplate<ShownItem?>((item, _) => item is null ? null : Row(item)),
+            // Each row is reused for the items it shows as the list changes: only its icon and text change.
+            ItemTemplate = new FuncDataTemplate<ShownItem>((_, _) => new Row(this), supportsRecycling: true),
         };
         // Rows as dense as the editor's lines, as in VS Code, in the app's look of list items otherwise.
         _list.Styles.Add(
@@ -121,34 +121,6 @@ internal sealed class CompletionView
         _details.IsVisible = details is not null;
     }
 
-    private Control Row(ShownItem shown)
-    {
-        CompletionItem item = shown.Item;
-        var label = new TextBlock
-        {
-            Inlines = Label(item.Label, shown.Highlights),
-            FontFamily = _look?.FontFamily ?? FontFamily.Default,
-            FontSize = _look?.FontSize ?? 12,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        if (item.IsDeprecated)
-            label.TextDecorations = TextDecorations.Strikethrough;
-        var row = new DockPanel { Height = _rowHeight };
-        if (_icons is { } icons)
-        {
-            var icon = new CompletionIcon(item.Kind, icons.Of(item.Kind))
-            {
-                Margin = new Thickness(0, 0, 4, 0),
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            DockPanel.SetDock(icon, Dock.Left);
-            row.Children.Add(icon);
-        }
-        row.Children.Add(label);
-        return row;
-    }
-
     /// <summary>The label, with the characters at <paramref name="highlights"/> in bold.</summary>
     private static InlineCollection Label(string label, int[] highlights)
     {
@@ -171,6 +143,51 @@ internal sealed class CompletionView
             start = end;
         }
         return inlines;
+    }
+
+    /// <summary>
+    /// A row of the list: the item's icon, and its label in the editor's font with the characters that matched in bold,
+    /// struck through when it is deprecated. The list reuses it for other items.
+    /// </summary>
+    private sealed class Row : DockPanel
+    {
+        private readonly CompletionView _view;
+
+        private readonly CompletionIcon _icon = new()
+        {
+            Margin = new Thickness(0, 0, 4, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        private readonly TextBlock _label = new()
+        {
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        public Row(CompletionView view)
+        {
+            _view = view;
+            SetDock(_icon, Dock.Left);
+            Children.Add(_icon);
+            Children.Add(_label);
+        }
+
+        /// <summary>The list gives the row another item.</summary>
+        protected override void OnDataContextChanged(EventArgs e)
+        {
+            base.OnDataContextChanged(e);
+            if (DataContext is not ShownItem { Item: var item } shown)
+                return;
+            Height = _view._rowHeight;
+            _label.FontFamily = _view._look?.FontFamily ?? FontFamily.Default;
+            _label.FontSize = _view._look?.FontSize ?? 12;
+            _label.Inlines = Label(item.Label, shown.Highlights);
+            _label.TextDecorations = item.IsDeprecated ? TextDecorations.Strikethrough : null;
+            _icon.IsVisible = _view._icons is not null;
+            if (_view._icons is { } icons)
+                _icon.Show(item.Kind, icons.Of(item.Kind));
+        }
     }
 
     /// <summary>

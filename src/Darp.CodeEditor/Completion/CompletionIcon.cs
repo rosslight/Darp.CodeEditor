@@ -10,17 +10,21 @@ namespace Darp.CodeEditor.Completion;
 /// <summary>A completion item's icon: the codicon of its kind, 16 by 16 pixels, in its color.</summary>
 internal sealed class CompletionIcon : Control
 {
-    private readonly Geometry[] _shapes;
-    private readonly IBrush _brush;
+    private Geometry[] _shapes = [];
+    private IBrush? _brush;
 
-    /// <param name="kind">The item's kind, from 1 to 25.</param>
-    /// <param name="brush">The icon's color.</param>
-    public CompletionIcon(int kind, IBrush brush)
+    public CompletionIcon()
+    {
+        Width = 16;
+        Height = 16;
+    }
+
+    /// <summary>Shows the icon of <paramref name="kind"/>, from 1 to 25, in <paramref name="brush"/>.</summary>
+    public void Show(int kind, IBrush brush)
     {
         _shapes = Codicons.Shapes(kind);
         _brush = brush;
-        Width = 16;
-        Height = 16;
+        InvalidateVisual();
     }
 
     public override void Render(DrawingContext context)
