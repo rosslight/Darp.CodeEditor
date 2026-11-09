@@ -6,6 +6,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
+using Darp.CodeEditor.Popups;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -322,6 +323,22 @@ public sealed class HoverTests(UiFixture ui)
             Popup(window).ShouldBeSameAs(popup);
             Rect bounds = BoundsInWindow(popup);
             new Rect(window.Window.ClientSize).Contains(bounds).ShouldBeTrue($"{bounds} in {window.Window.ClientSize}");
+        });
+
+    [Fact]
+    public Task A_popup_whose_space_is_not_whole_pixels_stays_inside_the_window() =>
+        _ui.Run(() =>
+        {
+            var editor = new CodeEditor();
+            using var window = new EditorWindow(editor, width: 400, height: 300);
+            // Taller than either side, so that its height is limited to the space below its place, 183.4 pixels.
+            var popup = new EditorPopup(editor, new Border { Height = 1_000, Background = Brushes.Gray });
+
+            popup.Show(editor, () => new Rect(10, 100.6, 8, 16));
+            window.Layout();
+
+            BoundsInWindow(popup.Root).Bottom.ShouldBeLessThanOrEqualTo(window.Window.ClientSize.Height);
+            popup.Hide();
         });
 
     [Fact]
