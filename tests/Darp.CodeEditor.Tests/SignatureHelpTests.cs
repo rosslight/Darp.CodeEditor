@@ -29,7 +29,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "call");
             var editor = new CodeEditor { Document = document };
             using var window = new EditorWindow(editor);
-            await server.StartAsync();
+            await CompletionTests.StartServingAsync(server, document);
             window.Editor.Selection = new TextSelection(4);
 
             window.Type("(");
@@ -58,7 +58,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
             await using var server = new LanguageServer(fake.Options);
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "call");
             using var window = new EditorWindow(new CodeEditor { Document = document });
-            await server.StartAsync();
+            await CompletionTests.StartServingAsync(server, document);
             window.Editor.Selection = new TextSelection(4);
             window.Type("(");
             await WaitForSignatureAsync(window, "first", "Calls with two.");
@@ -78,7 +78,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
             await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "call");
             using var window = new EditorWindow(new CodeEditor { Document = document });
-            await server.StartAsync();
+            await CompletionTests.StartServingAsync(server, document);
             window.Editor.Selection = new TextSelection(4);
             window.Type("(");
             await WaitForSignatureAsync(window, "first", "Calls with two.");
@@ -104,7 +104,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
             await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "call");
             using var window = new EditorWindow(new CodeEditor { Document = document });
-            await server.StartAsync();
+            await CompletionTests.StartServingAsync(server, document);
             window.Editor.Selection = new TextSelection(4);
             window.Type("(");
             await WaitForSignatureAsync(window, "first", "Calls with two.");
@@ -191,7 +191,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
             DockPanel.SetDock(button, Dock.Top);
             var editor = new CodeEditor { Document = document };
             using var window = new EditorWindow(editor, new DockPanel { Children = { button, editor } });
-            await server.StartAsync();
+            await CompletionTests.StartServingAsync(server, document);
 
             await OpenAsync(window, document);
             window.Press(Key.Escape);
@@ -222,7 +222,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "call");
             var editor = new CodeEditor { Document = document };
             using var window = new EditorWindow(editor);
-            await server.StartAsync();
+            await CompletionTests.StartServingAsync(server, document);
             await OpenAsync(window, document);
 
             editor.IsReadOnly = true;

@@ -10,14 +10,15 @@
 // line as a code block in that language.
 // Hover over the word "slow" is never answered. Semantic tokens come from words, runs of letters, digits and
 // underscores: a word "class_static" is a token of the type "class" with the modifier "static", if the legend names
-// them; other words are not tokens. Either request about a document that is not open is answered with an error.
+// them; other words are not tokens.
 //
 // Completion answers with what the command "completion" set, or with generated items (--completion-items); "." asks
 // for it as it is typed, and ";" commits items. Requests are logged with the caret's offset at the end, and so is
 // signature help. Resolving an item answers the item with the properties of its "data"
 // added. Signature help answers inside parentheses, "(" asks for it and "," asks again: the signatures that the command
 // "signatures" set, or two of "call", with the parameter at the position active, and the signature that the client
-// says it shows, or the first. Completion in a document with the word "slow" is never answered.
+// says it shows, or the first. Completion in a document with the word "slow" is never answered. A request about a
+// document that is not open is answered with an error.
 //
 // Arguments:
 //   --initialize never      never answer initialize
@@ -548,7 +549,8 @@ internal sealed class FakeServer
     private void Completion(JsonNode? id, JsonNode parameters)
     {
         string uri = Text(parameters["textDocument"]?["uri"], "uri");
-        Document document = _documents[uri];
+        if (Known(id, "completion", parameters) is not { } document)
+            return;
         JsonNode? context = parameters["context"];
         int offset = Offset(document.Text, Required(parameters["position"], "position"));
         Log(
@@ -610,7 +612,8 @@ internal sealed class FakeServer
     /// </summary>
     private void SignatureHelp(JsonNode? id, JsonNode parameters)
     {
-        Document document = _documents[Text(parameters["textDocument"]?["uri"], "uri")];
+        if (Known(id, "signatureHelp", parameters) is not { } document)
+            return;
         JsonNode? context = parameters["context"];
         JsonNode? showing = context?["activeSignatureHelp"];
         int offset = Offset(document.Text, Required(parameters["position"], "position"));

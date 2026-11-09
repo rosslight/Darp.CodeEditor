@@ -756,7 +756,7 @@ public sealed class CompletionTests(UiFixture ui)
             await using var server = new LanguageServer(fake.Options);
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "slow x");
             using var window = new EditorWindow(new CodeEditor { Document = document });
-            await server.StartAsync();
+            await StartServingAsync(server, document);
 
             // The server never answers completion in this document.
             window.Editor.Selection = new TextSelection(6);
@@ -945,6 +945,16 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     /// <summary>Makes the fake server answer completion with <paramref name="result"/>, until the document is disposed.</summary>
+    /// <summary>
+    /// Starts the server, and waits until <paramref name="document"/> is open in it: editors ask only then, once the
+    /// start's settings went out.
+    /// </summary>
+    internal static async Task StartServingAsync(LanguageServer server, CodeDocument document)
+    {
+        await server.StartAsync();
+        await Wait.UntilAsync(() => document.Features is not null);
+    }
+
     internal static async Task<CodeDocument> SetCompletionAsync(LanguageServer server, FakeServer fake, JsonNode result)
     {
         int set = fake.LinesStartingWith("set completion").Count;
