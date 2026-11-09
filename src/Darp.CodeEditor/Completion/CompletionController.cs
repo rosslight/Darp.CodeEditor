@@ -320,20 +320,18 @@ internal sealed class CompletionController : IDisposable
             session.CommitAt = null;
         var filtering = new Filtering(key, new CancellationTokenSource());
         session.Filtering = filtering;
-        // Each item's typed text is the part of the line from where its edit starts: the line is read here, the rest
-        // off the UI thread.
-        DocumentLine line = _buffer.GetLineByOffset(caret);
-        FilterAsync(session, filtering, line.Offset, _buffer.GetText(line.Offset, caret - line.Offset));
+        // The UI thread reads no text: each item's typed text is read off it, from the snapshot of the key's version.
+        FilterAsync(session, filtering, _document.CurrentSnapshot);
     }
 
     /// <summary>Shows a filter's result, unless completion ended, or a newer filter replaced it.</summary>
-    private async void FilterAsync(Session session, Filtering filtering, int lineStart, string lineBefore)
+    private async void FilterAsync(Session session, Filtering filtering, TextSnapshot snapshot)
     {
         try
         {
             CancellationToken cancellationToken = filtering.Cancellation.Token;
             Task<Filtered?> ranking = _matching.ContinueWith(
-                _ => Rank(filtering.Key.Answer.List.Items, lineStart, lineBefore, cancellationToken),
+                _ => Rank(filtering.Key.Answer.List.Items, snapshot, filtering.Key.Caret, cancellationToken),
                 CancellationToken.None,
                 TaskContinuationOptions.DenyChildAttach,
                 TaskScheduler.Default
@@ -360,12 +358,13 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>
     /// Off the UI thread, after the filter before: the items that match the text typed for each, from where its edit
-    /// starts, best first, and the one to select; null once cancelled.
+    /// starts up to <paramref name="caret"/>, best first, and the one to select; null once cancelled. Of each typed
+    /// text only what the matcher reads is read, however far before the caret the edit starts.
     /// </summary>
     private Filtered? Rank(
         IReadOnlyList<CompletionItem> items,
-        int lineStart,
-        string lineBefore,
+        TextSnapshot snapshot,
+        int caret,
         CancellationToken cancellationToken
     )
     {
@@ -376,9 +375,9 @@ internal sealed class CompletionController : IDisposable
         for (int i = 0; i < items.Count; i++)
         {
             CompletionItem item = items[i];
-            int start = item.Edit.Range.Start - lineStart;
+            int start = item.Edit.Range.Start;
             if (!typed.TryGetValue(start, out string? text))
-                typed[start] = text = lineBefore[start..];
+                typed[start] = text = Typed(snapshot, start, caret);
             candidates[i] = new CompletionCandidate(text, item.Label, item.FilterText, item.FilterTextIsLabel);
         }
         List<RankedCompletion> ranked;
@@ -441,12 +440,10 @@ internal sealed class CompletionController : IDisposable
             return true;
         CompletionItem item = session.Items[index].Item;
         int caret = _textArea.Caret.Offset;
-        int start = item.Edit.Range.Start;
         if (shown.Answer.Request.IsStale || caret < shown.Answer.Request.Offset)
             return false;
-        string typed = _buffer.GetText(start, caret - start);
         return (_itemMatcher ??= new CompletionMatcher()).Match(
-            typed,
+            Typed(_document.CurrentSnapshot, item.Edit.Range.Start, caret),
             item.Label,
             item.FilterText,
             item.FilterTextIsLabel
@@ -474,6 +471,15 @@ internal sealed class CompletionController : IDisposable
         OverlayLayer.GetOverlayLayer(_editor) is { } layer && _textView.TranslatePoint(place().TopLeft, layer) is { } at
             ? layer.Bounds.Width - Math.Max(0, at.X)
             : double.PositiveInfinity;
+
+    /// <summary>
+    /// The text typed from <paramref name="start"/> up to <paramref name="caret"/>, as far as the matcher reads it: an
+    /// edit that starts far before the caret, also in a line's collapsed tail, costs no more than one near it, and
+    /// matches by its first characters, as in VS Code. When they are all spaces and tabs, nothing counts as typed;
+    /// VS Code reads on, and leaves the item out if anything else follows.
+    /// </summary>
+    private static string Typed(TextSnapshot snapshot, int start, int caret) =>
+        snapshot.GetText(TextRange.FromBounds(start, Math.Min(caret, start + CompletionMatcher.MaxLength)));
 
     /// <summary>What filtering <paramref name="answer"/> now would filter for.</summary>
     private FilterKey CurrentKey(Answer answer) =>
@@ -797,12 +803,17 @@ internal sealed class CompletionController : IDisposable
 
     private void OnClosingChange(object? sender, EventArgs e) => Close();
 
-    /// <summary>The word before <paramref name="caret"/>, by VS Code's word characters, which ends at the caret.</summary>
+    /// <summary>
+    /// The word before <paramref name="caret"/>, by VS Code's word characters, which ends at the caret. It reaches
+    /// back at most <see cref="HoverController.MaxWordReach"/> characters, as a hovered word does: a line of millions
+    /// of word characters costs no more.
+    /// </summary>
     private TextRange WordBefore(int caret)
     {
         DocumentLine line = _buffer.GetLineByOffset(caret);
+        int first = Math.Max(line.Offset, caret - HoverController.MaxWordReach);
         int start = caret;
-        while (start > line.Offset && WordCharacters.IsWordCharacter(_buffer.GetCharAt(start - 1)))
+        while (start > first && WordCharacters.IsWordCharacter(_buffer.GetCharAt(start - 1)))
             start--;
         return TextRange.FromBounds(start, caret);
     }

@@ -24,8 +24,11 @@ namespace Darp.CodeEditor.Lsp;
 /// </remarks>
 internal sealed class CompletionMatcher
 {
-    /// <summary>The longest typed text and filter text that are matched; the rest is ignored.</summary>
-    private const int MaxLength = 128;
+    /// <summary>
+    /// The longest typed text and filter text that are matched; the rest is ignored. A caller that copies the typed
+    /// text needs no more of it than this.
+    /// </summary>
+    public const int MaxLength = 128;
 
     /// <summary>The score of an item when nothing is typed: below any score of a match.</summary>
     private const int DefaultScore = -100;
@@ -77,7 +80,10 @@ internal sealed class CompletionMatcher
     /// How <paramref name="typed"/> matches an item: the score of its filter text, and the characters of its label
     /// that matched, ascending. Null when it does not match.
     /// </summary>
-    /// <param name="typed">The text typed from where the item's edit starts up to the caret.</param>
+    /// <param name="typed">
+    /// The text typed from where the item's edit starts up to the caret; only its first <see cref="MaxLength"/>
+    /// characters are read.
+    /// </param>
     /// <param name="label">The item's label, which shows.</param>
     /// <param name="filterText">The text the item is matched by: its label, unless the server gave another.</param>
     /// <param name="filterTextIsLabel">
@@ -413,7 +419,10 @@ internal sealed class CompletionMatcher
 }
 
 /// <summary>An item to rank: the text typed for it, and its texts.</summary>
-/// <param name="Typed">The text typed from where the item's edit starts up to the caret.</param>
+/// <param name="Typed">
+/// The text typed from where the item's edit starts up to the caret; only its first
+/// <see cref="CompletionMatcher.MaxLength"/> characters are read.
+/// </param>
 /// <param name="Label">The label, whose matched characters show.</param>
 /// <param name="FilterText">The text it is matched by: its label, unless the server gave another.</param>
 /// <param name="FilterTextIsLabel">Whether the whole filter text equals the label, ignoring case.</param>

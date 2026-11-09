@@ -375,9 +375,10 @@ How the client talks to a server, where the protocol leaves a choice:
   typing starts a word outside a comment, as invoked; and on the server's trigger characters, as a trigger character.
   VS Code also asks in strings for JSON and YAML, and the editor does not tell strings apart. Typing on in a word does
   not ask again, also after Escape, until the next word or Ctrl+Space. The word before the caret goes by VS Code's word
-  characters, and items without an edit replace it up to the caret with their `insertText`, or their label. An item
-  whose edit is not on the caret's line, spans lines, or does not contain the caret, is left out, as VS Code leaves it
-  out, and one without a kind, or with a kind the protocol does not name, shows as a property.
+  characters and reaches back at most 1,000 of them, as a hovered word does, and items without an edit replace it up
+  to the caret with their `insertText`, or their label. An item whose edit is not on the caret's line, spans lines, or
+  does not contain the caret, is left out, as VS Code leaves it out, and one without a kind, or with a kind the
+  protocol does not name, shows as a property.
   - **Filtering and ranking** are on the client, as the user types, with VS Code's fuzzy matching (a port of its
     `fuzzyScore`, which the C# server will share): the typed text from where an item's edit starts is matched against
     its `filterText`, or its label, in order and ignoring case, and its first character must match at a word start, a
@@ -387,7 +388,9 @@ How the client talks to a server, where the protocol leaves a choice:
     and otherwise the label's own, by VS Code's more lenient `anyScore`. The first item is selected, or the first that
     the server preselects among those that match best. There is no typo tolerance. Matching runs off the UI thread,
     whatever the list's length and the typed text's: each change cancels the filter under way, and the list shows the
-    newest result, the previous one meanwhile.
+    newest result, the previous one meanwhile. The UI thread reads no text for it, and matching reads the first 128
+    characters of an item's typed text, as VS Code's does: an edit that starts further before the caret, also when
+    the caret is in a line's collapsed tail, where only code puts it, matches by those, and costs no more.
   - **Asking again:** a list marked `isIncomplete` is asked for again on each character that the user types on in a
     word, for incomplete completions, and shows meanwhile. Moving back before where completion was asked asks again
     while a word is left, as invoked, as VS Code does, and so does an edit before it, as by another editor of the
@@ -396,14 +399,14 @@ How the client talks to a server, where the protocol leaves a choice:
     dropped. An answer that comes after typing is filtered with what was typed since.
   - **Committing:** Enter, Tab, a click, or one of the item's commit characters, or the server's `allCommitCharacters`
     for an item that names none, which then goes in. While the filter of the current text still runs, they commit the
-    item that shows if it matches the current text, which is checked for that item alone; otherwise Enter and Tab
-    commit what that filter selects once it has run, unless the text, by any editor of the document or by code, or the
-    caret changes before, and a commit
-    character goes in as text, as when nothing matches: deciding later would hold back or reorder what the user
-    types. A read-only editor neither completes nor commits. The item's `textEdit` applies: a text edit, or the insert range of
-    an insert and replace edit, as VS Code's default insert mode; its range grows by what was typed since it was
-    asked, as in VS Code. Its `additionalTextEdits`, such as an import, apply with it, as one step that the user undoes;
-    ones that overlap another edit are left out.
+    item that shows if it matches the current text, which is checked for that item alone, on the first 128 characters
+    of its typed text; otherwise Enter and Tab commit what that filter selects once it has run, unless the text, by
+    any editor of the document or by code, or the caret changes before, and a commit character goes in as text, as
+    when nothing matches: deciding later would hold back or reorder what the user types. A read-only editor neither
+    completes nor commits. The item's `textEdit` applies: a text edit, or the insert range of an insert and replace
+    edit, as VS Code's default insert mode; its range grows by what was typed since it was asked, as in VS Code. Its
+    `additionalTextEdits`, such as an import, apply with it, as one step that the user undoes; ones that overlap
+    another edit are left out.
   - **Resolving:** the selected item is resolved when it is selected, and the resolve of an item that is no longer
     selected is cancelled. Its detail, as code highlighted with the document's grammar, and its documentation show
     beside the list, as much of both as a hover shows: they share one budget of the hover's size, cut before anything
@@ -923,7 +926,11 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   A text edit replaces its range, also grown by what was typed since; an insert and replace edit inserts; `insertText`
   replaces the word. While a filter runs, Enter commits the item that shows at once when it still matches, otherwise
   what the filter selects; a commit character then goes in as text. An edit before that filter has run drops the
-  commit, also one that leaves the caret where it was, by code or by another editor of the document;
+  commit, also one that leaves the caret where it was, by code or by another editor of the document. With an item
+  whose edit starts at the start of a line of two million characters, moving the caret on in the line's collapsed
+  tail and filtering again takes the UI thread 2 KB, and Enter, which checks the item while that filter runs, about
+  0.8 MB with the commit's edit of the line, where a copy of the line takes 4 MB; an item without an edit replaces
+  the last 1,000 characters of a word of two million;
 - an editor that becomes read-only closes completion and signature help, and Tab and Ctrl+Space then change
   nothing;
 - a detail of 2,000 lines with long documentation shows 50 lines, its budget's, and no documentation; a label of

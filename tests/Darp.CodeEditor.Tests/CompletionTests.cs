@@ -250,6 +250,76 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task An_edit_that_starts_far_before_the_caret_costs_the_UI_thread_only_what_matching_reads() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer("--no-diagnostics");
+            await using var server = new LanguageServer(fake.Options);
+            // A line of two million characters, and an item whose edit starts at its start: its typed text is the line.
+            const int length = 2_000_000;
+            string label = "w" + new string('a', 300);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                new JsonObject
+                {
+                    ["items"] = new JsonArray(
+                        new JsonObject
+                        {
+                            ["label"] = label,
+                            ["textEdit"] = new JsonObject
+                            {
+                                ["range"] = new JsonObject
+                                {
+                                    ["start"] = new JsonObject { ["line"] = 0, ["character"] = 0 },
+                                    ["end"] = new JsonObject { ["line"] = 0, ["character"] = length },
+                                },
+                                ["newText"] = "word",
+                            },
+                        }
+                    ),
+                }
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "w" + new string('a', length));
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await OpenAsync(window, length);
+
+            // The caret moves on in the line's collapsed tail, where only code puts it, and the list filters again;
+            // Enter, while that filter runs, checks the item against the text typed.
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            window.Editor.Selection = new TextSelection(length + 1);
+            long moving = GC.GetAllocatedBytesForCurrentThread() - before;
+            before = GC.GetAllocatedBytesForCurrentThread();
+            PressAlone(window, Key.Enter);
+            long committing = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            document.Text.ShouldBe("word");
+            // A copy of the line takes two bytes a character, 4 MB; what matching reads, a few hundred bytes. The
+            // commit's edit of the line takes the editor about a third of a byte a character.
+            moving.ShouldBeLessThan(1_000_000);
+            committing.ShouldBeLessThan(length);
+        });
+
+    [Fact]
+    public Task The_word_an_item_without_an_edit_replaces_reaches_back_1000_characters() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer("--no-diagnostics");
+            await using var server = new LanguageServer(fake.Options);
+            string label = new string('a', 200) + "bc";
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items(label));
+            // A word of two million characters: as a hovered word, it reaches back from the caret 1,000 of them.
+            const int length = 2_000_000;
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, new string('a', length));
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await OpenAsync(window, length);
+
+            window.Press(Key.Enter);
+
+            document.Text.ShouldBe(new string('a', length - 1_000) + label);
+        });
+
+    [Fact]
     public Task A_read_only_editor_neither_completes_nor_commits() =>
         _ui.Run(async () =>
         {
