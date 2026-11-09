@@ -385,7 +385,9 @@ How the client talks to a server, where the protocol leaves a choice:
     capital or after a separator. Before anything is typed, items are in the order of their `sortText`, or their
     label, ignoring case, then of their label and kind; equal scores keep that order. The characters that matched show
     in bold in the label, as in VS Code: the filter text's, when the whole filter text is the label, ignoring case,
-    and otherwise the label's own, by VS Code's more lenient `anyScore`. The first item is selected, or the first that
+    and otherwise the label's own, by VS Code's more lenient `anyScore`. Case is ignored by .NET's invariant lower
+    case, so the few letters whose case depends on their context, such as the Greek final sigma, match differently
+    than in VS Code. The first item is selected, or the first that
     the server preselects among those that match best. There is no typo tolerance. Matching runs off the UI thread,
     whatever the list's length and the typed text's: each change cancels the filter under way, and the list shows the
     newest result, the previous one meanwhile. The UI thread reads no text for it, and matching reads the first 128

@@ -16,7 +16,9 @@ namespace Darp.CodeEditor.Lsp;
 /// <para>
 /// This is a port of VS Code's <c>fuzzyScore</c> and <c>anyScore</c> (<c>src/vs/base/common/filters.ts</c>, 1.145.0, MIT
 /// license), with its default options: the first character must match strongly, and a full match is boosted. It has
-/// no typo-tolerant variant, and emoji are no separators. Texts are matched up to their first 128 characters.
+/// no typo-tolerant variant, and emoji are no separators. Texts are matched up to their first 128 characters. Case is
+/// ignored by .NET's invariant lower case, which differs from JavaScript's for the few letters whose case depends on
+/// their context, such as the Greek final sigma.
 /// </para>
 /// <para>
 /// An instance keeps the tables of the matching for reuse: use it on one thread at a time. They take about 150 KB.
