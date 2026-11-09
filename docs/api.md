@@ -173,7 +173,8 @@ high contrast inherits from Light, so it shows Light+ without one. To make one e
   grammar and colors.
 - **Completion:** a list of up to 12 items at once below the word, or above it when only that side has room, in the
   app's flyout, with rows in the app's look of list items as dense as the editor's lines and labels in the editor's
-  font; the selected item's details beside it, in a flyout of their own.
+  font; the selected item's details in a flyout of their own, beside the list where the window has room for them
+  right of the word, narrower if need be, and below the list otherwise, so that the list stays at the word.
 - **Completion icons:** VS Code's codicons, drawn as vector shapes in the theme's `symbolIcon.*` colors, as in VS
   Code, and in VS Code's colors where the theme sets none. Their designs are licensed CC BY 4.0: the package lists
   them in its third-party notices, and apps that show notices of their own include that entry.
@@ -383,7 +384,9 @@ How the client talks to a server, where the protocol leaves a choice:
     capital or after a separator. Before anything is typed, items are in the order of their `sortText`, or their
     label, ignoring case, then of their label and kind; equal scores keep that order. The characters that matched show
     in bold in the label. The first item is selected, or the first that the server preselects among those that match
-    best. There is no typo tolerance.
+    best. There is no typo tolerance. Matching runs off the UI thread, whatever the list's length and the typed
+    text's: each change cancels the filter under way, and the list shows the newest result, the previous one
+    meanwhile.
   - **Asking again:** a list marked `isIncomplete` is asked for again on each character that the user types on in a
     word, for incomplete completions, and shows meanwhile. Moving back before where completion was asked asks again
     while a word is left, as invoked, as VS Code does, and so does an edit before it, as by another editor of the
@@ -391,7 +394,11 @@ How the client talks to a server, where the protocol leaves a choice:
     `$/cancelRequest`, and so does ending completion; the answer of a request that is no longer the latest is
     dropped. An answer that comes after typing is filtered with what was typed since.
   - **Committing:** Enter, Tab, a click, or one of the item's commit characters, or the server's `allCommitCharacters`
-    for an item that names none, which then goes in. The item's `textEdit` applies: a text edit, or the insert range of
+    for an item that names none, which then goes in. While the filter of the current text still runs, they commit the
+    item that shows if it matches the current text, which is checked for that item alone; otherwise Enter and Tab
+    commit what that filter selects once it has run, unless the text or the caret changes before, and a commit
+    character goes in as text, as when nothing matches: deciding later would hold back or reorder what the user
+    types. A read-only editor neither completes nor commits. The item's `textEdit` applies: a text edit, or the insert range of
     an insert and replace edit, as VS Code's default insert mode; its range grows by what was typed since it was
     asked, as in VS Code. Its `additionalTextEdits`, such as an import, apply with it, as one step that the user undoes;
     ones that overlap another edit are left out.
@@ -400,8 +407,8 @@ How the client talks to a server, where the protocol leaves a choice:
     beside the list. Additional edits that the resolve brings only after the item was committed join the commit's
     undo step while it is the last one; once the user moved on, they are dropped. Items resolve only in the process
     that sent them.
-  - **Ending:** Escape, the caret leaving the line or moving back past the word, a selection, the list's line
-    scrolling out of view, the editor losing the keyboard focus, a server that starts or stops serving the document,
+  - **Ending:** Escape, the caret leaving the line or moving back past the word, a selection, the editor becoming
+    read-only, the list's line scrolling out of view, the editor losing the keyboard focus, a server that starts or stops serving the document,
     new colors, nothing left that matches a complete list, and the editor no longer showing the document.
 - **Signature help** is asked for on the server's trigger characters, and again at once on its retrigger characters
   while it is open. While it is open, each edit and caret move restarts a pause of 120 ms, VS Code's, after which it
@@ -412,8 +419,8 @@ How the client talks to a server, where the protocol leaves a choice:
   bold: the signature's own, or the answer's, or the first; one outside the parameters is none, as in VS Code. A
   parameter labelled by a string is found as a whole word in the signature. The parameter's documentation shows
   below, then the signature's; with several signatures, which one of how many. Up and Down show the others while
-  completion's list is closed. It ends on Escape, after completion's list, with no signature, when the editor loses
-  the keyboard focus, when a server starts or stops serving the document, with new colors, and when its line scrolls
+  completion's list is closed. It ends on Escape, after completion's list, with no signature, when the editor becomes
+  read-only, when the editor loses the keyboard focus, when a server starts or stops serving the document, with new colors, and when its line scrolls
   out of view.
 - **Token colors** come from the color theme as in VS Code: its `semanticTokenColors`, matched by type, modifiers and
   language with VS Code's scores; otherwise its TextMate color of the scopes that VS Code's standard mapping gives the
@@ -903,18 +910,25 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
 - the ranking that the C# server will share gives the scores and the matched characters of VS Code's `fuzzyScore`
   and `anyScore`: compared with VS Code 1.145's own code, without its emoji separators, on 25,000 random texts, also
   beyond 128 characters, they agreed on all of them. Tests check prefixes before capitals inside words, equal scores in the server's order, a
-  filter text that decides while the label shows what matched, and the order of sort texts; in the editor, typing
-  filters on the client without asking again, the matched characters show in bold, and a preselected item is selected
-  among the best;
+  filter text that decides while the label shows what matched, the order of sort texts, and that ranking stops once
+  cancelled; in the editor, typing filters on the client without asking again, off the UI thread: right after
+  keystrokes that the UI thread did nothing else in between, the list still shows what it showed, and then the
+  newest result. The matched characters show in bold, and a preselected item is selected among the best;
 - Enter, Tab, a click, the item's own commit character and the server's commit the selected item, each as one step
   that the user undoes, and a commit character then goes in; an item's own commit characters replace the server's.
   A text edit replaces its range, also grown by what was typed since; an insert and replace edit inserts; `insertText`
-  replaces the word;
-- the selected item's resolved detail, as code in the editor's foreground, and its Markdown show beside the list;
+  replaces the word. While a filter runs, Enter commits the item that shows at once when it still matches, otherwise
+  what the filter selects; a commit character then goes in as text;
+- an editor that becomes read-only closes completion and signature help, and Tab and Ctrl+Space then change
+  nothing;
+- the selected item's resolved detail, as code in the editor's foreground, and its Markdown show beside the list, or
+  below it in a window of 420 pixels, narrower beside it in one of 640, wrapped inside the window, with the list at
+  the word it completes;
   additional edits apply with the item in one step, and ones that come after the commit join its step, and are
   dropped once the user typed on;
 - an incomplete list is asked for again on each character typed, for incomplete completions; a newer request and
-  Escape cancel the one under way with `$/cancelRequest`, and selecting another item cancels the resolve under way;
+  Escape cancel the one under way with `$/cancelRequest`, and selecting another item cancels the resolve under way,
+  also when it is an item resolved already;
 - an edit before where completion was asked, as by another editor of the document, asks again, and the item then
   replaces the word where it is now;
 - documents that no editor shows ask for nothing, and an editor that loses the keyboard focus cancels its request,
@@ -932,9 +946,12 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   focus loss and when the server stops serving the document;
 - the client advertises exactly what it implements, snippets not;
 - on linux-x64 (BenchmarkDotNet, i7-13700, warm), in 5,000 lines of JSON, against the fake server answering at once
-  with 1,000 items: from Ctrl+Space until a rendered frame shows the list takes 15 ms (median 15.1 ms, p95 20.1 ms),
-  within the budget of 50 ms; typing a character that filters the open list to 125 items takes 17 ms with the frame
-  after it, of which the keystroke takes about 10 ms without completion.
+  with 1,000 items: from Ctrl+Space until a rendered frame shows the list takes 18 ms (median 17.5 ms, p95 21.1 ms),
+  within the budget of 50 ms; from typing a character until a rendered frame shows the list filtered to 125 items
+  takes 21 ms (median 20.8 ms, p95 33.7 ms), of which the keystroke takes about 10 ms without completion. In the
+  worst case, 10,000 items of 128 characters and a typed word of 64 characters that each holds in order, matching
+  takes 235 ms off the UI thread (the matcher alone, warm), while a keystroke with its frame takes the UI thread
+  10 ms (p95 10.3 ms), no more than with the list closed (12 ms in that run).
 
 Still open:
 
@@ -943,8 +960,8 @@ Still open:
 - a server answers the requests of the documents that editors show in its own order: the client cancels what an
   editor no longer needs and asks for nothing that no editor shows, but cannot put one document's request ahead of
   another's in the server. The C# server will take the shown document first;
-- the selected item's details beside the list make the popup wider, and in a narrow window it then moves left of the
-  word it completes; VS Code would show them on the other side or below;
+- the list itself moves left of the word it completes when the word is within the list's width of the window's right
+  edge; VS Code would show its details on the list's other side too;
 - opening a link through the app's launcher: headless windows have none, so tests check only which links open;
 - code blocks are highlighted with the document's grammar whatever language their fence names, and the hover is as
   wide as the app's tooltips allow, 320 pixels in Fluent; both wait for a use case that needs more;
