@@ -932,8 +932,8 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   focus loss and when the server stops serving the document;
 - the client advertises exactly what it implements, snippets not;
 - on linux-x64 (BenchmarkDotNet, i7-13700, warm), in 5,000 lines of JSON, against the fake server answering at once
-  with 1,000 items: from Ctrl+Space until a rendered frame shows the list takes 17 ms (median 16.9 ms, p95 19.0 ms),
-  within the budget of 50 ms; typing a character that filters the open list to 125 items takes 19 ms with the frame
+  with 1,000 items: from Ctrl+Space until a rendered frame shows the list takes 15 ms (median 15.1 ms, p95 20.1 ms),
+  within the budget of 50 ms; typing a character that filters the open list to 125 items takes 17 ms with the frame
   after it, of which the keystroke takes about 10 ms without completion.
 
 Still open:
