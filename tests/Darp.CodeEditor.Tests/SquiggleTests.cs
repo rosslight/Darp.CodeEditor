@@ -213,6 +213,32 @@ public sealed class SquiggleTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Diagnostics_over_many_lines_cost_a_frame_once_each() =>
+        _ui.Run(() =>
+        {
+            string text = string.Join("\n", Enumerable.Repeat("some words on a line", 40));
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document, ColorTheme = Marks() });
+
+            long one = FrameAllocations(window, document, OverAll(1));
+            long many = FrameAllocations(window, document, OverAll(10_000));
+
+            // Looked up for each line in view, they took 8.4 MB.
+            (many - one).ShouldBeLessThan(1_000_000);
+            IsUnderEach(window, s_error, new TextRange(7, 5)).ShouldBeTrue();
+
+            // Errors over all of the text, from one of its first characters on.
+            IReadOnlyList<Diagnostic> OverAll(int count) =>
+                [
+                    .. Enumerable
+                        .Range(0, count)
+                        .Select(i =>
+                            Diagnostic(document, TextRange.FromBounds(i % 7, text.Length), DiagnosticSeverity.Error)
+                        ),
+                ];
+        });
+
+    [Fact]
     public Task Editors_take_the_10000_most_severe_of_a_documents_diagnostics() =>
         _ui.Run(() =>
         {

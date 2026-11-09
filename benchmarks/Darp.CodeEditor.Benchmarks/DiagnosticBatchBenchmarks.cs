@@ -57,19 +57,7 @@ public class DiagnosticBatchBenchmarks
         _batches = [Apart(snapshot, 0), Apart(snapshot, 1)];
         Edit();
         _document?.SetDiagnostics(_batches[0]);
-        Dispatcher.UIThread.RunJobs();
-        Window window = _window ?? throw new InvalidOperationException("Not set up.");
-        TextView textView = _textView ?? throw new InvalidOperationException("Not set up.");
-        // Drawn in the theme's colors, once they are loaded.
-        _drawn = textView.Layers.OfType<SquiggleLayer>().Single();
-        long start = Stopwatch.GetTimestamp();
-        while (Draw(_drawn) == 0)
-        {
-            if (Stopwatch.GetElapsedTime(start) > TimeSpan.FromSeconds(10))
-                throw new InvalidOperationException("The editor draws no squiggles.");
-            HeadlessEditor.Render(window);
-        }
-        HeadlessEditor.Render(window);
+        _drawn = DrawnLayer();
     }
 
     /// <summary>The document alone: it takes a batch in for its editors whether one shows it or not.</summary>
@@ -80,6 +68,30 @@ public class DiagnosticBatchBenchmarks
         _document = CodeDocument.Create(CodeLanguage.PlainText, Text());
         _batches = [Apart(_document.CurrentSnapshot, 0), Apart(_document.CurrentSnapshot, 1)];
     }
+
+    /// <summary>The largest batch with each error over all of the text: every line in view holds all of them.</summary>
+    [GlobalSetup(Target = nameof(DrawRangesOverEveryLine))]
+    public void SetUpOverEveryLine()
+    {
+        TextSnapshot snapshot = Show();
+        CodeDocument document = _document ?? throw new InvalidOperationException("Not set up.");
+        document.SetDiagnostics([
+            .. Enumerable
+                .Range(0, DiagnosticsBatch.MaxShown)
+                .Select(i => new Diagnostic(
+                    snapshot,
+                    new TextRange(i % 7, snapshot.Length),
+                    DiagnosticSeverity.Error,
+                    null,
+                    "e"
+                )),
+        ]);
+        _drawn = DrawnLayer();
+    }
+
+    /// <summary>What the squiggles cost the UI thread in a frame when every line in view holds all of the batch.</summary>
+    [Benchmark]
+    public int DrawRangesOverEveryLine() => Draw(_drawn ?? throw new InvalidOperationException("Not set up."));
 
     [GlobalSetup(Target = nameof(DrawAFrameWithoutDiagnostics))]
     public void SetUpWithout() => Show();
@@ -165,6 +177,24 @@ public class DiagnosticBatchBenchmarks
     {
         (_textView ?? throw new InvalidOperationException("Not set up.")).Redraw();
         HeadlessEditor.Render(_window ?? throw new InvalidOperationException("Not set up."));
+    }
+
+    /// <summary>The editor's squiggles, once they draw the diagnostics in the theme's colors, after it loaded.</summary>
+    private SquiggleLayer DrawnLayer()
+    {
+        Dispatcher.UIThread.RunJobs();
+        Window window = _window ?? throw new InvalidOperationException("Not set up.");
+        TextView textView = _textView ?? throw new InvalidOperationException("Not set up.");
+        SquiggleLayer layer = textView.Layers.OfType<SquiggleLayer>().Single();
+        long start = Stopwatch.GetTimestamp();
+        while (Draw(layer) == 0)
+        {
+            if (Stopwatch.GetElapsedTime(start) > TimeSpan.FromSeconds(10))
+                throw new InvalidOperationException("The editor draws no squiggles.");
+            HeadlessEditor.Render(window);
+        }
+        HeadlessEditor.Render(window);
+        return layer;
     }
 
     /// <summary>Draws <paramref name="layer"/> on its own; the shapes that it drew.</summary>

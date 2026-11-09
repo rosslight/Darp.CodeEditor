@@ -101,53 +101,79 @@ internal sealed class SquiggleLayer : SelectionOverlay
         TextSegmentCollection<DiagnosticMarker> markers = _document.ShownDiagnostics;
         if (_colors is not { } colors || markers.Count == 0 || !textView.VisualLinesValid)
             return;
-        // A line's, by severity, in the order of the text: its ranges merged, and its empty ones and hints by their
-        // starts, each start once.
+        // The lines on screen, each with the stretch of its text that the view shows, in the order of the text.
+        var lines = new List<(VisualLine Line, int Start, int End)>(textView.VisualLines.Count);
+        foreach (VisualLine visualLine in textView.VisualLines)
+        {
+            if (OnScreen(textView, visualLine) is var (start, end))
+                lines.Add((visualLine, start, end));
+        }
+        if (lines.Count == 0)
+            return;
+        // The frame's, by severity, in the order of the text: the ranges merged, and the empty ones and the hints by
+        // their starts, each start once. Read once each, also those over many lines.
+        var allRanges = new List<(int Start, int End)>[4];
+        var allStarts = new List<int>[4];
+        for (int severity = 0; severity < 4; severity++)
+            (allRanges[severity], allStarts[severity]) = ([], []);
+        int first = lines[0].Start;
+        foreach (DiagnosticMarker marker in markers.FindOverlappingSegments(first, lines[^1].End - first))
+        {
+            int severity = (int)marker.Diagnostic.Severity;
+            // Reading the offset walks the segments' tree: once each.
+            int markerStart = marker.StartOffset;
+            int markerEnd = markerStart + marker.Length;
+            if (marker.Diagnostic.Severity == DiagnosticSeverity.Hint || marker.Length == 0)
+            {
+                if (allStarts[severity] is not [.., var last] || last != markerStart)
+                    allStarts[severity].Add(markerStart);
+            }
+            else if (allRanges[severity] is [.., var (lastStart, lastEnd)] && markerStart <= lastEnd)
+                allRanges[severity][^1] = (lastStart, Math.Max(lastEnd, markerEnd));
+            else
+                allRanges[severity].Add((markerStart, markerEnd));
+        }
+        // A line's, by severity: its part of them, and where in them the next line's part starts.
         var ranges = new List<(int Start, int End)>[4];
         var starts = new List<int>[4];
+        var nextRange = new int[4];
+        var nextStart = new int[4];
         // The frame's, by severity: the boxes to draw a wave under, and those of the hints' first characters.
         var waves = new List<Rect>[4];
         var dots = new List<Rect>();
         for (int severity = 0; severity < 4; severity++)
             (ranges[severity], starts[severity], waves[severity]) = ([], [], []);
-        foreach (VisualLine visualLine in textView.VisualLines)
+        foreach ((VisualLine visualLine, int lineStart, int shownEnd) in lines)
         {
             DocumentLine line = visualLine.FirstDocumentLine;
-            if (OnScreen(textView, visualLine) is not var (lineStart, shownEnd))
-                continue;
+            // Where a start is in a hidden tail: the "..." shows none of the text.
+            int hidden = VisibleText.IsCollapsed(line) ? VisibleText.End(line) : -1;
             bool any = false;
-            foreach (DiagnosticMarker marker in markers.FindOverlappingSegments(lineStart, shownEnd - lineStart))
+            for (int severity = 0; severity < 4; severity++)
             {
-                int severity = (int)marker.Diagnostic.Severity;
-                // Reading the offset walks the segments' tree: once each.
-                int markerStart = marker.StartOffset;
-                int markerEnd = markerStart + marker.Length;
-                if (marker.Diagnostic.Severity == DiagnosticSeverity.Hint || marker.Length == 0)
+                List<(int Start, int End)> merged = allRanges[severity];
+                while (nextRange[severity] < merged.Count && merged[nextRange[severity]].End <= lineStart)
+                    nextRange[severity]++;
+                // A range over lines stays for the next line too.
+                for (int k = nextRange[severity]; k < merged.Count && merged[k].Start < shownEnd; k++)
                 {
-                    // Where it starts, if that is shown on this line: not before it, and not in a hidden tail.
-                    bool hidden = markerStart == VisibleText.End(line) && VisibleText.IsCollapsed(line);
-                    List<int> points = starts[severity];
-                    if (
-                        markerStart >= lineStart
-                        && markerStart <= shownEnd
-                        && !hidden
-                        && (points.Count == 0 || points[^1] != markerStart)
-                    )
-                    {
-                        points.Add(markerStart);
-                        any = true;
-                    }
-                    continue;
+                    (int from, int to) = (Math.Max(merged[k].Start, lineStart), Math.Min(merged[k].End, shownEnd));
+                    if (to > from)
+                        ranges[severity].Add((from, to));
                 }
-                int from = Math.Max(markerStart, lineStart);
-                int to = Math.Min(markerEnd, shownEnd);
-                if (to <= from)
-                    continue;
-                if (ranges[severity] is [.., var (lastStart, lastEnd)] && from <= lastEnd)
-                    ranges[severity][^1] = (lastStart, Math.Max(lastEnd, to));
-                else
-                    ranges[severity].Add((from, to));
-                any = true;
+                List<int> points = allStarts[severity];
+                while (nextStart[severity] < points.Count && points[nextStart[severity]] < lineStart)
+                    nextStart[severity]++;
+                for (
+                    ;
+                    nextStart[severity] < points.Count && points[nextStart[severity]] <= shownEnd;
+                    nextStart[severity]++
+                )
+                {
+                    if (points[nextStart[severity]] != hidden)
+                        starts[severity].Add(points[nextStart[severity]]);
+                }
+                any |= ranges[severity].Count > 0 || starts[severity].Count > 0;
             }
             if (any)
                 Measure(textView, visualLine, ranges, starts, waves, dots);
