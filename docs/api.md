@@ -241,8 +241,8 @@ follows the edits made since, so clicking an error after typing above it still l
 - **Not in v1:** pulled diagnostics, workspace edits, file watching, code actions, formatting, rename. The client does not advertise them.
 
 A server that needs pulled diagnostics would add them to v1. The client advertises only what it implements, so
-servers fall back where they can. So far that is the lifecycle, documents, pushed diagnostics, hover (Markdown and plain
-text) and semantic tokens (range and full, in the relative format, with the protocol's standard token types and
+servers fall back where they can. So far that is the lifecycle, documents, settings, pushed diagnostics, hover (Markdown
+and plain text) and semantic tokens (range and full, in the relative format, with the protocol's standard token types and
 modifiers); completion and signature help follow.
 
 How the client talks to a server, where the protocol leaves a choice:
@@ -282,7 +282,10 @@ How the client talks to a server, where the protocol leaves a choice:
   document that no editor shows costs the server nothing but its text. Editors never wait for an answer. Their
   requests take the path of every request, with its hang limit, and a server's error or an answer of another shape
   shows nothing. An answer counts only for the text that was current when the editor asked: the document's changes
-  reach the server before the request, and an answer that comes after an edit is dropped.
+  reach the server before the request, and an answer that comes after an edit is dropped. Editors ask only once the
+  document is open in the server's process, after the start's settings went out: until then they get nothing, and
+  when it opens there, not when the server runs, they learn that the server serves it, so a hover ends and semantic
+  tokens are asked for again.
 - **Hover** is asked when the pointer rests on a character for 400 ms, as long as Avalonia's tooltips wait (it is
   AvaloniaEdit's hover time), at that character's position, or at a line's end within a space's width after it, where
   an empty diagnostic's squiggle is. A `MarkedString` with a language becomes a Markdown code
@@ -789,7 +792,9 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
 - a line keeps at most one semantic token per character of its shown part: one of 100,000 tokens that overlap, and
   3,000 of 10,000 tokens of one character;
 - the client advertises exactly what it implements, and only editors that show a document ask for its hover and
-  tokens, not an editor out of the visual tree;
+  tokens, not an editor out of the visual tree; while the start's settings block, a running server gets no hover or
+  token request for a document not yet open in it, editors get nothing, and they learn that the server serves the
+  document once it opens there, not when the server runs;
 - on linux-x64 (BenchmarkDotNet, i7-13700): taking a server's tokens for all 5,000 lines of JSON with a warning under
   every key, its lines built beforehand off the UI thread, and drawing the frame after it, takes the UI thread 7.0 ms;
   every line in view draws again. The largest batch of diagnostics, 10,000 one-character errors apart, all of them on
