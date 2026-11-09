@@ -16,6 +16,7 @@ using Darp.CodeEditor.Diagnostics;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.Loading;
+using Darp.CodeEditor.Popups;
 using Darp.CodeEditor.Search;
 using TextMateSharp.Internal.Types;
 using EditorSelection = AvaloniaEdit.Editing.Selection;
@@ -157,6 +158,9 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>Colors the server's semantic tokens of the shown document.</summary>
     private SemanticHighlighter? _semantic;
+
+    /// <summary>Shows the diagnostics and the server's hover where the pointer rests.</summary>
+    private HoverController? _hover;
 
     /// <summary>The template's panel, which the search bar goes into, over the text.</summary>
     private Panel? _root;
@@ -474,6 +478,18 @@ public class CodeEditor : TemplatedControl
     }
 
     /// <inheritdoc />
+    protected override void OnLostFocus(FocusChangedEventArgs e)
+    {
+        base.OnLostFocus(e);
+        // Raised as the focus leaves an element inside the editor; it may stay inside, as when it goes to the search bar.
+        Dispatcher.Post(() =>
+        {
+            if (!IsKeyboardFocusWithin)
+                _hover?.Close();
+        });
+    }
+
+    /// <inheritdoc />
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
@@ -562,6 +578,7 @@ public class CodeEditor : TemplatedControl
         _whitespace = new WhitespaceLayer(part.TextArea) { Colors = _colors };
         _squiggles = new SquiggleLayer(part.TextArea, document) { Colors = _colors };
         _semantic = new SemanticHighlighter(textView, document, Dispatcher) { Theme = _theme };
+        _hover = new HoverController(this, part.TextArea, document, _squiggles, _highlighter) { Colors = _colors };
         _searchBar?.Attach(this, part.TextArea, document);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
         _waitingForLayout = true;
@@ -581,6 +598,8 @@ public class CodeEditor : TemplatedControl
         _brackets = null;
         _whitespace?.Dispose();
         _whitespace = null;
+        _hover?.Dispose();
+        _hover = null;
         _squiggles?.Dispose();
         _squiggles = null;
         _semantic?.Dispose();
@@ -619,6 +638,11 @@ public class CodeEditor : TemplatedControl
         }
         else if (e.Key == Key.F3 && (e.KeyModifiers == KeyModifiers.None || shift))
             e.Handled = FindNext(previous: shift);
+        else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && _hover is { IsOpen: true } hover)
+        {
+            hover.Close();
+            e.Handled = true;
+        }
         else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && _searchBar is { IsOpen: true } bar)
         {
             bar.Close();
@@ -934,6 +958,7 @@ public class CodeEditor : TemplatedControl
             _brackets?.Colors = colors;
             _whitespace?.Colors = colors;
             _squiggles?.Colors = colors;
+            _hover?.Colors = colors;
             _semantic?.Theme = theme;
             _searchBar?.Colors = colors;
             TextArea textArea = part.TextArea;

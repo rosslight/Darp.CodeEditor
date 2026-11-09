@@ -86,6 +86,25 @@ internal sealed class EditorWindow : IDisposable
         Dispatcher.UIThread.RunJobs();
     }
 
+    /// <summary>Where the window shows the middle of the character at <paramref name="offset"/>.</summary>
+    public Point PointAt(int offset)
+    {
+        TextView textView = TextView;
+        textView.EnsureVisualLines();
+        var position = new TextViewPosition(textView.Document.GetLocation(offset));
+        Point start = textView.GetVisualPosition(position, VisualYPosition.TextMiddle) - textView.ScrollOffset;
+        Point middle = start + new Point(textView.WideSpaceWidth / 2, 0);
+        return textView.TranslatePoint(middle, Window)
+            ?? throw new InvalidOperationException("The text view is not in the window.");
+    }
+
+    /// <summary>Moves the mouse to <paramref name="point"/> of the window.</summary>
+    public void MoveMouse(Point point)
+    {
+        Window.MouseMove(point);
+        Dispatcher.UIThread.RunJobs();
+    }
+
     /// <summary>Clicks <paramref name="button"/> at <paramref name="point"/> of the window.</summary>
     public void Click(Point point, MouseButton button)
     {
@@ -163,6 +182,14 @@ internal sealed class EditorWindow : IDisposable
                 ) - textView.ScrollOffset,
                 Window
             ) ?? throw new InvalidOperationException("The text view is not in the window.");
+    }
+
+    /// <summary>Renders a frame, and counts its pixels of <paramref name="color"/> in <paramref name="area"/> of the window.</summary>
+    public int RenderAndCountPixels(Color color, Rect area)
+    {
+        using WriteableBitmap frame =
+            Window.CaptureRenderedFrame() ?? throw new InvalidOperationException("Nothing was rendered.");
+        return CountPixels(frame, color, area: PixelRect.FromRect(area, 1));
     }
 
     private static int CountPixels(WriteableBitmap frame, Color color, int tolerance = 8, PixelRect? area = null)

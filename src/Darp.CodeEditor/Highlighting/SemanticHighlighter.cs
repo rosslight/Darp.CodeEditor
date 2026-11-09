@@ -285,7 +285,7 @@ internal sealed class SemanticHighlighter : DocumentColorizingTransformer, IDisp
         if (request.Answer.Exception is { } exception)
         {
             Logger
-                .TryGet(LogEventLevel.Error, "CodeEditor")
+                .TryGet(LogEventLevel.Error, AssetFiles.LogArea)
                 ?.Log(this, "Reading semantic tokens failed: {Exception}", exception);
             return;
         }

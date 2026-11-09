@@ -61,15 +61,15 @@ internal sealed class SquiggleLayer : SelectionOverlay
 
     /// <summary>
     /// The diagnostics whose range in the current text holds the character at <paramref name="offset"/>, or starts there
-    /// when it is empty, in the server's order, each with that range.
+    /// when it is empty, in the server's order.
     /// </summary>
-    public IReadOnlyList<(Diagnostic Diagnostic, TextRange Range)> At(int offset) =>
+    public IReadOnlyList<Diagnostic> At(int offset) =>
         [
             .. _markers
                 .FindSegmentsContaining(offset)
                 .Where(marker => marker.Length == 0 ? marker.StartOffset == offset : offset < marker.EndOffset)
                 .OrderBy(marker => marker.Index)
-                .Select(marker => (marker.Diagnostic, new TextRange(marker.StartOffset, marker.Length))),
+                .Select(marker => marker.Diagnostic),
         ];
 
     public override void Render(DrawingContext context)
