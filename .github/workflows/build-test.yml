@@ -34,7 +34,8 @@ jobs:
         run: |
           dotnet test --no-build --no-progress --results-directory ./coverage-results \
             --coverlet --coverlet-output-format cobertura \
-            --coverlet-include "[Darp.CodeEditor]*" --coverlet-exclude "[*.Tests*]*"
+            --coverlet-include "[Darp.CodeEditor]*" --coverlet-include "[Darp.CodeEditor.Lsp]*" \
+            --coverlet-exclude "[*.Tests*]*"
 
       # Pull requests from forks get a read-only token, and the action fails without write access. On main it writes
       # the coverage to the step summary.
@@ -47,9 +48,11 @@ jobs:
           update-comment: true
           show-changed-lines-only: true
 
-      # The tests start the fixture from their own folder
-      - name: Publish the fixture with Native AOT
-        run: dotnet publish tests/Darp.CodeEditor.Tests.BeforeSetup -c Release -r linux-x64 -o ./artifacts/aot-tests /warnaserror
+      # The tests start the fixtures from their own folder
+      - name: Publish the fixtures with Native AOT
+        run: |
+          dotnet publish tests/Darp.CodeEditor.Tests.BeforeSetup -c Release -r linux-x64 -o ./artifacts/aot-tests /warnaserror
+          dotnet publish tests/Darp.CodeEditor.Tests.FakeServer -c Release -r linux-x64 -o ./artifacts/aot-tests /warnaserror
       - name: Publish the tests with Native AOT
         run: dotnet publish tests/Darp.CodeEditor.Tests -c Release -r linux-x64 -o ./artifacts/aot-tests /warnaserror
       - name: Test Native AOT
@@ -108,8 +111,10 @@ jobs:
         run: dotnet build --no-restore
       - name: Test
         run: dotnet test --no-build --no-progress
-      - name: Publish the fixture with Native AOT
-        run: dotnet publish tests/Darp.CodeEditor.Tests.BeforeSetup -c Release -r ${{ matrix.rid }} -o ./artifacts/aot-tests /warnaserror
+      - name: Publish the fixtures with Native AOT
+        run: |
+          dotnet publish tests/Darp.CodeEditor.Tests.BeforeSetup -c Release -r ${{ matrix.rid }} -o ./artifacts/aot-tests /warnaserror
+          dotnet publish tests/Darp.CodeEditor.Tests.FakeServer -c Release -r ${{ matrix.rid }} -o ./artifacts/aot-tests /warnaserror
       - name: Publish the tests with Native AOT
         run: dotnet publish tests/Darp.CodeEditor.Tests -c Release -r ${{ matrix.rid }} -o ./artifacts/aot-tests /warnaserror
       - name: Test Native AOT
