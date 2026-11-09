@@ -177,6 +177,8 @@ public sealed class LanguageServerTests(UiFixture ui)
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one");
 
             await server.StartAsync();
+            // An edit made before the didOpen is written joins it, and no change goes out.
+            await fake.WaitForAsync("open ");
             document.Replace(new TextRange(3, 0), " two");
 
             (await fake.WaitForAsync("change ")).ShouldEndWith(" ranged 1 full 0");
