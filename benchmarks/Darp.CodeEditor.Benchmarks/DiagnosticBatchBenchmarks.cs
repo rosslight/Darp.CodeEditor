@@ -8,6 +8,7 @@ using Avalonia.VisualTree;
 using AvaloniaEdit.Rendering;
 using BenchmarkDotNet.Attributes;
 using Darp.CodeEditor.Diagnostics;
+using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Popups;
 
 namespace Darp.CodeEditor.Benchmarks;
@@ -92,6 +93,44 @@ public class DiagnosticBatchBenchmarks
     /// <summary>What the squiggles cost the UI thread in a frame when every line in view holds all of the batch.</summary>
     [Benchmark]
     public int DrawRangesOverEveryLine() => Draw(_drawn ?? throw new InvalidOperationException("Not set up."));
+
+    /// <summary>
+    /// One error over 100 lines as long as the shown part, unwrapped, in a window as high as a 4K screen: each line runs
+    /// far past the view's right edge.
+    /// </summary>
+    [GlobalSetup(Target = nameof(DrawARangeOverLinesWiderThanTheView))]
+    public void SetUpWide()
+    {
+        HeadlessEditor.SetUpApp();
+        string text = string.Join("\n", Enumerable.Repeat(new string('x', VisibleText.LineLimit), 100));
+        var document = CodeDocument.Create(CodeLanguage.PlainText, text);
+        var editor = new CodeEditor { Document = document };
+        _document = document;
+        _window = new Window
+        {
+            Width = 800,
+            Height = 2160,
+            Content = editor,
+        };
+        _window.Show();
+        HeadlessEditor.Render(_window);
+        _textView = editor.GetVisualDescendants().OfType<AvaloniaEdit.TextEditor>().Single().TextArea.TextView;
+        document.SetDiagnostics([
+            new Diagnostic(
+                document.CurrentSnapshot,
+                new TextRange(0, text.Length),
+                DiagnosticSeverity.Error,
+                null,
+                "An error."
+            ),
+        ]);
+        _drawn = DrawnLayer();
+    }
+
+    /// <summary>What the squiggles cost the UI thread in a frame when lines run far past the view's edge.</summary>
+    [Benchmark]
+    public int DrawARangeOverLinesWiderThanTheView() =>
+        Draw(_drawn ?? throw new InvalidOperationException("Not set up."));
 
     [GlobalSetup(Target = nameof(DrawAFrameWithoutDiagnostics))]
     public void SetUpWithout() => Show();

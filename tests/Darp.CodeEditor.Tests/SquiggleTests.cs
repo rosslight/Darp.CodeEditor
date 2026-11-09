@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Media;
 using Avalonia.Threading;
+using AvaloniaEdit.Rendering;
 using Darp.CodeEditor.Diagnostics;
 using Darp.CodeEditor.Editing;
 
@@ -171,6 +172,37 @@ public sealed class SquiggleTests(UiFixture ui)
                 // Inside its edges, which a smoothed wave next to it may touch.
                 Rect between = window.CharacterArea(offset).Deflate(new Thickness(1, 0));
                 window.RenderAndCountPixels(s_error, between, Smoothed).ShouldBe(0, $"offset {offset}");
+            }
+        });
+
+    [Fact]
+    public Task A_squiggle_over_a_line_wider_than_the_view_is_shaped_for_the_view_only() =>
+        _ui.Run(async () =>
+        {
+            // Unwrapped, the shown part of a long line runs far past the view's right edge.
+            string text = new string('x', VisibleText.LineLimit);
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, text);
+            var editor = new CodeEditor { Document = document, ColorTheme = Marks() };
+            using var window = new EditorWindow(editor);
+            document.SetDiagnostics([Diagnostic(document, new TextRange(0, text.Length), DiagnosticSeverity.Error)]);
+            TextView textView = window.TextView;
+            SquiggleLayer layer = textView.Layers.OfType<SquiggleLayer>().Single();
+            await Wait.UntilAsync(() => IsUnderEach(window, s_error, new TextRange(0, 3)));
+
+            // At the line's start, and scrolled sideways to its middle.
+            foreach (int column in (int[])[0, text.Length / 2])
+            {
+                EditorWindow.PartOf(editor).ScrollToHorizontalOffset(column * textView.WideSpaceWidth);
+                window.Render();
+                var drawing = new DrawingGroup();
+                using (DrawingContext context = drawing.Open())
+                    layer.Render(context);
+                Rect shapes = drawing.GetBounds();
+
+                // A wave more on either side at most, where it starts and ends on whole waves.
+                shapes.Left.ShouldBeGreaterThanOrEqualTo(-6, $"column {column}");
+                shapes.Right.ShouldBeLessThanOrEqualTo(textView.Bounds.Width + 6, $"column {column}");
+                shapes.Width.ShouldBeGreaterThan(textView.Bounds.Width / 2, $"column {column}");
             }
         });
 

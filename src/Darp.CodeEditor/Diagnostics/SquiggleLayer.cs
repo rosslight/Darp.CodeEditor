@@ -194,7 +194,10 @@ internal sealed class SquiggleLayer : SelectionOverlay
                         AddDots(figure, character);
                 }
                 foreach (Rect box in waves[severity])
-                    AddWave(figure, box);
+                {
+                    if (InView(box, textView.Bounds.Width) is { } shown)
+                        AddWave(figure, shown);
+                }
             }
             IBrush brush = (DiagnosticSeverity)severity switch
             {
@@ -285,6 +288,21 @@ internal sealed class SquiggleLayer : SelectionOverlay
     {
         if (e.PropertyName == nameof(CodeDocument.Diagnostics))
             InvalidateVisual();
+    }
+
+    /// <summary>
+    /// The part of a wave's <paramref name="box"/> that the view shows, as wide as <paramref name="width"/>: from the last
+    /// whole wave before its left edge, so that the wave keeps its place as the view scrolls; null where none shows. A
+    /// line scrolled sideways shows a part of its waves, so they cost what the view's width does.
+    /// </summary>
+    private static Rect? InView(Rect box, double width)
+    {
+        const double wave = 2 * HalfWave;
+        if (box.Right <= 0 || box.Left >= width)
+            return null;
+        double left = box.Left < 0 ? box.Left + Math.Floor(-box.Left / wave) * wave : box.Left;
+        double right = Math.Min(box.Right, width + wave);
+        return new Rect(left, box.Top, right - left, box.Height);
     }
 
     /// <summary>
