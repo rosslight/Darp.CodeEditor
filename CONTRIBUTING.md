@@ -11,6 +11,11 @@ dotnet publish tests/Darp.CodeEditor.Tests -c Release -r linux-x64 -o artifacts/
 artifacts/aot-tests/Darp.CodeEditor.Tests
 ```
 
+## Sample app
+
+[`samples/Darp.CodeEditor.Sample`](samples/Darp.CodeEditor.Sample) shows how an app uses the API.
+`dotnet run --project samples/Darp.CodeEditor.Sample` runs it; its README says how to publish it as NativeAOT.
+
 ## Benchmarks
 
 `dotnet run -c Release --project benchmarks/Darp.CodeEditor.Benchmarks -- --filter '*'` runs all benchmarks. Each pull
