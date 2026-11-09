@@ -396,7 +396,8 @@ How the client talks to a server, where the protocol leaves a choice:
   - **Committing:** Enter, Tab, a click, or one of the item's commit characters, or the server's `allCommitCharacters`
     for an item that names none, which then goes in. While the filter of the current text still runs, they commit the
     item that shows if it matches the current text, which is checked for that item alone; otherwise Enter and Tab
-    commit what that filter selects once it has run, unless the text or the caret changes before, and a commit
+    commit what that filter selects once it has run, unless the text, by any editor of the document or by code, or the
+    caret changes before, and a commit
     character goes in as text, as when nothing matches: deciding later would hold back or reorder what the user
     types. A read-only editor neither completes nor commits. The item's `textEdit` applies: a text edit, or the insert range of
     an insert and replace edit, as VS Code's default insert mode; its range grows by what was typed since it was
@@ -918,7 +919,8 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   that the user undoes, and a commit character then goes in; an item's own commit characters replace the server's.
   A text edit replaces its range, also grown by what was typed since; an insert and replace edit inserts; `insertText`
   replaces the word. While a filter runs, Enter commits the item that shows at once when it still matches, otherwise
-  what the filter selects; a commit character then goes in as text;
+  what the filter selects; a commit character then goes in as text. An edit before that filter has run drops the
+  commit, also one that leaves the caret where it was, by code or by another editor of the document;
 - an editor that becomes read-only closes completion and signature help, and Tab and Ctrl+Space then change
   nothing;
 - the selected item's resolved detail, as code in the editor's foreground, and its Markdown show beside the list, or
