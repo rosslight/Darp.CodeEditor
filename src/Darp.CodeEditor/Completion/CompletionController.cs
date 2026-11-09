@@ -333,6 +333,7 @@ internal sealed class CompletionController : IDisposable
     {
         session.IsShowing = false;
         session.Items = [];
+        session.DetailsOf = null;
         session.Details?.Cancel();
         _popup.Hide();
         _view.ShowDetails(null);
@@ -379,10 +380,13 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>
     /// Shows <paramref name="item"/>'s detail, as code, and its documentation beside the list, read off the UI thread
-    /// as the hover reads its Markdown; nothing when it has neither.
+    /// as the hover reads its Markdown; nothing when it has neither. Typing that keeps the item selected keeps them.
     /// </summary>
     private async void ShowDetails(Session session, CompletionItem item)
     {
+        if (ReferenceEquals(session.DetailsOf, item))
+            return;
+        session.DetailsOf = item;
         session.Details?.Cancel();
         session.Details = null;
         if (item.Detail is null && item.Documentation is null)
@@ -657,6 +661,9 @@ internal sealed class CompletionController : IDisposable
 
         /// <summary>The resolves of the items, under way or done.</summary>
         public Dictionary<CompletionItem, Resolve> Resolves { get; } = new(ReferenceEqualityComparer.Instance);
+
+        /// <summary>The item whose details show, or are about to; null for none.</summary>
+        public CompletionItem? DetailsOf { get; set; }
 
         /// <summary>Cancels the reading of the details that are about to show.</summary>
         public CancellationTokenSource? Details { get; set; }
