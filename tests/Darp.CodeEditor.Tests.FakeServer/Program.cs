@@ -386,7 +386,7 @@ internal sealed class FakeServer
                 break;
             case ["completion", var json]:
                 _completion = JsonNode.Parse(json);
-                Log("completion set");
+                Log("set completion");
                 break;
             case ["hold-completion"]:
                 _holdCompletion = true;
@@ -405,7 +405,7 @@ internal sealed class FakeServer
                 break;
             case ["signatures", var json]:
                 _signatures = JsonNode.Parse(json) ?? throw new InvalidDataException("No signatures.");
-                Log("signatures set");
+                Log("set signatures");
                 break;
             case ["peek", var signal]:
                 _peekSignal = signal;
