@@ -12,6 +12,7 @@ using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
 using AvaloniaEdit.Search;
+using Darp.CodeEditor.Diagnostics;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.Loading;
@@ -150,6 +151,9 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>Shows the spaces and tabs inside the selection.</summary>
     private WhitespaceLayer? _whitespace;
+
+    /// <summary>Draws the squiggles under the shown document's diagnostics.</summary>
+    private SquiggleLayer? _squiggles;
 
     /// <summary>The template's panel, which the search bar goes into, over the text.</summary>
     private Panel? _root;
@@ -550,6 +554,7 @@ public class CodeEditor : TemplatedControl
         _helpers = new EditingHelpers(part.TextArea, document, _highlighter);
         _brackets = new BracketHighlighter(part.TextArea, document, _highlighter) { Colors = _colors };
         _whitespace = new WhitespaceLayer(part.TextArea) { Colors = _colors };
+        _squiggles = new SquiggleLayer(part.TextArea, document) { Colors = _colors };
         _searchBar?.Attach(this, part.TextArea, document);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
         _waitingForLayout = true;
@@ -569,6 +574,8 @@ public class CodeEditor : TemplatedControl
         _brackets = null;
         _whitespace?.Dispose();
         _whitespace = null;
+        _squiggles?.Dispose();
+        _squiggles = null;
         _searchBar?.Detach();
         _highlighter?.Dispose();
         _highlighter = null;
@@ -917,6 +924,7 @@ public class CodeEditor : TemplatedControl
             _colors = colors;
             _brackets?.Colors = colors;
             _whitespace?.Colors = colors;
+            _squiggles?.Colors = colors;
             _searchBar?.Colors = colors;
             TextArea textArea = part.TextArea;
             part.Background = colors.Background;

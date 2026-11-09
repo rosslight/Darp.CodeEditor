@@ -9,6 +9,10 @@
 		"editorBracketMatch.border": "#FF00FF",
 		"editorWhitespace.foreground": "#FF0000",
 		"editor.findMatchBackground": "#00C000",
-		"editor.findMatchHighlightBackground": "#0000FF"
+		"editor.findMatchHighlightBackground": "#0000FF",
+		"editorError.foreground": "#FF8000",
+		"editorWarning.foreground": "#00C0C0",
+		"editorInfo.foreground": "#8000FF",
+		"editorHint.foreground": "#008080"
 	}
 }

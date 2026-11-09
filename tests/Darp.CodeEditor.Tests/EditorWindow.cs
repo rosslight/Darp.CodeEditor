@@ -137,10 +137,10 @@ internal sealed class EditorWindow : IDisposable
             : new HashSet<Color>();
 
     /// <summary>
-    /// Renders a frame, and counts its pixels of <paramref name="color"/> where the text view draws the characters of
-    /// <paramref name="range"/>, on one line.
+    /// Renders a frame, and counts its pixels of <paramref name="color"/>, give or take <paramref name="tolerance"/>, where
+    /// the text view draws the characters of <paramref name="range"/>, on one line.
     /// </summary>
-    public int RenderAndCountPixels(Color color, TextRange range)
+    public int RenderAndCountPixels(Color color, TextRange range, int tolerance = 8)
     {
         TextView textView = TextView;
         textView.EnsureVisualLines();
@@ -151,7 +151,8 @@ internal sealed class EditorWindow : IDisposable
         return CountPixels(
             frame,
             color,
-            area: new PixelRect(PixelPoint.FromPoint(start, 1), PixelPoint.FromPoint(end, 1))
+            tolerance,
+            new PixelRect(PixelPoint.FromPoint(start, 1), PixelPoint.FromPoint(end, 1))
         );
 
         Point Position(int offset) =>
