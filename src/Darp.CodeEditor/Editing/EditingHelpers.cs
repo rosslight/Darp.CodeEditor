@@ -636,7 +636,7 @@ internal sealed class EditingHelpers : IDisposable
             return;
         // The smallest indentation by its width, so that tabs and spaces line up.
         var indenting = new Indenting(_document.Indentation);
-        int column = changed.Min(l => indenting.Width(l.Text[..l.Indent]));
+        int column = changed.Min(l => indenting.Width(l.Text.AsSpan(0, l.Indent)));
         var edits = new List<(int Offset, int Length, string Text)>(changed.Count);
         foreach ((DocumentLine line, string text, int indent) in changed)
         {

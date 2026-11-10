@@ -150,19 +150,20 @@ public sealed class SnippetTests
     }
 
     [Fact]
-    public void A_snippet_beyond_the_limits_goes_in_as_written()
+    public void A_snippet_beyond_the_parsing_limits_goes_in_as_written()
     {
-        // As many stops as tracked: 999 and the final one.
+        // As many stops as tracked, the final one included.
         string most = string.Concat(Enumerable.Repeat("$1", Snippet.MaxStops - 1));
         Render(most).Stops.Count.ShouldBe(Snippet.MaxStops);
         AsWritten(most + "$1");
 
-        // As deep as placeholders nest.
+        // As deep as placeholders and variables nest.
         string nested =
-            string.Concat(Enumerable.Range(1, Snippet.MaxNesting).Select(i => $"${{{i}:"))
-            + new string('}', Snippet.MaxNesting);
-        Render(nested).Stops.Count.ShouldBe(Snippet.MaxNesting + 1);
-        AsWritten("${0:" + nested + "}");
+            string.Concat(Enumerable.Repeat("${TM_SELECTED_TEXT:", Snippet.MaxNesting - 1))
+            + "${1:x}"
+            + new string('}', Snippet.MaxNesting - 1);
+        Stops(Render(nested)).ShouldBe("1:x|0:");
+        AsWritten("${TM_SELECTED_TEXT:" + nested + "}");
 
         // Mirrors that would double the text twenty times over.
         AsWritten("${1:x}" + string.Concat(Enumerable.Range(2, 20).Select(i => $"${{{i}:${i - 1}${i - 1}}}")));
@@ -171,39 +172,44 @@ public sealed class SnippetTests
         // The stop at the end would parse, if parsing went on.
         AsWritten(string.Concat(Enumerable.Repeat("${1/a/b/", 20_000)) + "${1:x}");
         AsWritten(string.Concat(Enumerable.Repeat("${1/" + new string('a', 1_000), 200)) + "${1:x}");
-
-        static void AsWritten(string snippet)
-        {
-            RenderedSnippet rendered = Render(snippet);
-            rendered.Text.ShouldBe(snippet);
-            rendered.Stops.ShouldBeEmpty();
-        }
     }
 
     [Fact]
-    public void Variables_add_at_most_10000_characters_and_later_ones_take_their_default_without_asking()
+    public void A_snippet_whose_text_would_pass_5000_characters_goes_in_as_written()
     {
-        string line = new('a', 3_000);
+        // Lines that the line's indentation of 3,000 columns would make 30 million characters long.
+        string lines = "${1:a}" + new string('\n', 10_000);
+        AsWritten(lines, lineIndentation: new string(' ', 3_000));
+        // Wide tabs, which would make one line's indentation long, are counted before it is made.
+        AsWritten("a\n\t$1", lineIndentation: new string('\t', 20), indentation: Indentation.Spaces(1_000));
+        Render("a\n\t$1", lineIndentation: "\t", indentation: Indentation.Spaces(100)).Text.Length.ShouldBe(202);
 
-        RenderedSnippet rendered = Render(
-            "$TM_CURRENT_LINE$TM_CURRENT_LINE$TM_CURRENT_LINE${TM_CURRENT_LINE:default}",
-            name => name == "TM_CURRENT_LINE" ? line : null
-        );
+        // Variables' values.
+        string line = new('a', 1_000);
+        AsWritten(string.Concat(Enumerable.Repeat("$TM_CURRENT_LINE", 6)) + "$1", _ => line);
+        Render(string.Concat(Enumerable.Repeat("$TM_CURRENT_LINE", 4)) + "$1", _ => line).Text.Length.ShouldBe(4_000);
 
-        rendered.Text.ShouldBe(line + line + line + "default");
-
-        // Each variable asked for counts, also one without a value: the rest are not asked for.
+        // Parts count too: variables without a value are asked for at most that often.
         int asked = 0;
-        Render(
-            string.Concat(Enumerable.Repeat("$CLIPBOARD", 2 * Snippet.MaxAddedText)),
+        AsWritten(
+            "$1" + string.Concat(Enumerable.Repeat("$CLIPBOARD", 2 * Snippet.MaxText)),
             _ =>
             {
                 asked++;
                 return null;
             }
-        )
-            .Text.ShouldBeEmpty();
-        asked.ShouldBe(Snippet.MaxAddedText);
+        );
+        asked.ShouldBeLessThanOrEqualTo(Snippet.MaxText);
+    }
+
+    [Fact]
+    public void A_mirror_has_the_values_of_the_variables_it_copies()
+    {
+        int drawn = 0;
+
+        RenderedSnippet rendered = Render("${1:$UUID} $1 $UUID", _ => $"v{++drawn}");
+
+        rendered.Text.ShouldBe("v1 v1 v2");
     }
 
     [Fact]
@@ -280,6 +286,19 @@ public sealed class SnippetTests
         SnippetVariables.Random("RANDOM_HEX").ShouldNotBeNull().ShouldMatch("^[0-9a-f]{6}$");
         Guid.TryParse(SnippetVariables.Random("UUID"), out _).ShouldBeTrue();
         SnippetVariables.Random("TM_FILENAME").ShouldBeNull();
+    }
+
+    /// <summary>Checks that <paramref name="snippet"/> goes in as written, without stops.</summary>
+    private static void AsWritten(
+        string snippet,
+        Func<string, string?>? variable = null,
+        string lineIndentation = "",
+        Indentation? indentation = null
+    )
+    {
+        RenderedSnippet rendered = Render(snippet, variable, lineIndentation, indentation);
+        rendered.Text.ShouldBe(snippet);
+        rendered.Stops.ShouldBeEmpty();
     }
 
     /// <summary>A snippet as it goes in, by default without variables at the start of an unindented line.</summary>

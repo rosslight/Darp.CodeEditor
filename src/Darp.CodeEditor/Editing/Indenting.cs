@@ -40,17 +40,25 @@ internal readonly struct Indenting(Indentation indentation)
         return offset;
     }
 
-    /// <summary>The width of <paramref name="whitespace"/> in columns, tabs to the next stop.</summary>
-    public int Width(string whitespace)
+    /// <summary>
+    /// The column after <paramref name="whitespace"/> when it starts at <paramref name="column"/>, tabs to the next
+    /// stop: its width in columns, from the start of a line.
+    /// </summary>
+    public int Width(ReadOnlySpan<char> whitespace, int column = 0)
     {
-        int columns = 0;
+        int columns = column;
         foreach (char c in whitespace)
             columns = c == '\t' ? (columns / _indentation.Size + 1) * _indentation.Size : columns + 1;
         return columns;
     }
 
-    private string Whitespace(int columns) =>
+    /// <summary>Whitespace <paramref name="columns"/> wide, in tabs and spaces or in spaces, as the document indents.</summary>
+    public string Whitespace(int columns) =>
         _indentation.UseTabs
             ? new string('\t', columns / _indentation.Size) + new string(' ', columns % _indentation.Size)
             : new string(' ', columns);
+
+    /// <summary>The length of <see cref="Whitespace"/> for <paramref name="columns"/>, without making it.</summary>
+    public int Length(int columns) =>
+        _indentation.UseTabs ? columns / _indentation.Size + columns % _indentation.Size : columns;
 }

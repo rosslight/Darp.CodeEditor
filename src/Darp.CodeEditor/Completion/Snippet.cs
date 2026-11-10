@@ -11,36 +11,37 @@ namespace Darp.CodeEditor.Completion;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Stops of one number are mirrors: the first one with text gives every other one its text, as in VS Code. A variable
-/// that VS Code does not know, without a default, becomes a placeholder with its name, as the protocol says and as VS
-/// Code does for its own snippets. Transformations, such as <c>${1/(.*)/${1:/upcase}/}</c>, are read and not applied:
-/// a variable goes in as its value, and a stop with one is a mirror of its number. A snippet with stops gets a final
-/// stop at its end, unless it has one.
+/// Stops of one number are mirrors: the first one with text gives every other one its text, as in VS Code, and a
+/// mirror's variables have that text's values. A variable that VS Code does not know, without a default, becomes a
+/// placeholder with its name, as the protocol says. Transformations, such as <c>${1/(.*)/${1:/upcase}/}</c>, are read
+/// and not applied: a variable goes in as its value, and a stop with one is a mirror of its number. A snippet with stops
+/// gets a final stop at its end, unless it has one.
 /// </para>
 /// <para>
-/// Parsing runs where the server's answer is read, off the UI thread, and is bounded by the snippet's length: a snippet
-/// whose parsing reads its characters more than four times over, nested deeper than <see cref="MaxNesting"/> levels, with
-/// more than <see cref="MaxStops"/> stops, mirrors included, or whose mirrors add more than
-/// <see cref="MaxAddedText"/> characters, goes in as written, without stops. So the UI thread renders it at a cost
-/// proportional to what the server sent.
+/// The limits are sized for real snippets, which have a few lines and fewer than about 20 stops, so that the UI thread's
+/// work with a snippet is bounded by small constants, whatever the server sends. Parsing runs where the server's answer
+/// is read, off the UI thread, and reads the characters at most four times over. A snippet that parsing would read more
+/// often, nested deeper than <see cref="MaxNesting"/> levels, with more than <see cref="MaxStops"/> stops, mirrors
+/// included, or whose text would be longer than <see cref="MaxText"/> characters with its mirrors, its variables'
+/// values and its indentation goes in as written, without stops, as a plain item goes in.
 /// </para>
 /// </remarks>
 internal sealed class Snippet
 {
     /// <summary>
-    /// The most stops that a snippet tracks, mirrors included: far beyond any real snippet, and few enough that
-    /// following an edit and drawing the stops cost the UI thread microseconds.
+    /// The most stops that a snippet tracks, mirrors included: more than twice a real snippet's, and few enough that each
+    /// edit and caret move can look at all of them.
     /// </summary>
-    public const int MaxStops = 1_000;
+    public const int MaxStops = 50;
 
     /// <summary>How deep placeholders and variables may nest.</summary>
     public const int MaxNesting = 100;
 
     /// <summary>
-    /// How many characters mirrors may add to the snippet's text, counting one for each part they copy, and variables'
-    /// values, counting one for each variable.
+    /// The most characters that a snippet's text may have once it is rendered, each part of it counting one too: many
+    /// times a real snippet's few lines.
     /// </summary>
-    public const int MaxAddedText = 10_000;
+    public const int MaxText = 5_000;
 
     /// <summary>The variables that VS Code knows; others without a default become placeholders.</summary>
     private static readonly HashSet<string> s_knownVariables =
@@ -86,9 +87,17 @@ internal sealed class Snippet
         "UUID",
     ];
 
-    private readonly List<Node> _nodes;
+    /// <summary>The snippet as the server wrote it.</summary>
+    private readonly string _source;
 
-    private Snippet(List<Node> nodes) => _nodes = nodes;
+    /// <summary>Its parts; null for a snippet that goes in as written.</summary>
+    private readonly List<Node>? _nodes;
+
+    private Snippet(string source, List<Node>? nodes)
+    {
+        _source = source;
+        _nodes = nodes;
+    }
 
     /// <summary>Parses <paramref name="text"/>, in the snippet syntax.</summary>
     public static Snippet Parse(string text)
@@ -108,25 +117,27 @@ internal sealed class Snippet
         if (placeholders.Count > MaxStops || !FillMirrors(placeholders))
             return AsWritten(text);
         JoinTexts(nodes);
-        return new Snippet(nodes);
+        return new Snippet(text, nodes);
     }
 
     /// <summary>
     /// The text that goes in, and its stops, as VS Code adjusts and resolves them: lines after the first are indented
     /// by the line it goes in, the indentation is that of the document, line breaks are the line's, and variables have
-    /// their values. Variables add at most <see cref="MaxAddedText"/> characters, counting one for each variable asked
-    /// for; once they are spent, later variables are unset without asking. So rendering costs one pass over the
-    /// snippet's parts.
+    /// their values. A text that would be longer than <see cref="MaxText"/> goes in as written, without stops: rendering
+    /// stops there, so it costs the UI thread at most that many characters and parts, and a variable is asked for once.
     /// </summary>
     public RenderedSnippet Render(SnippetContext context)
     {
+        if (_nodes is null)
+            return new RenderedSnippet(_source, []);
         var renderer = new Renderer(context);
-        renderer.Write(_nodes, parent: -1);
-        return new RenderedSnippet(renderer.Text.ToString(), renderer.Stops);
+        return renderer.Write(_nodes, parent: -1)
+            ? new RenderedSnippet(renderer.Text.ToString(), renderer.Stops)
+            : new RenderedSnippet(_source, []);
     }
 
-    /// <summary>A snippet that goes in as written: one text, without stops.</summary>
-    private static Snippet AsWritten(string text) => new([new TextNode(text)]);
+    /// <summary>A snippet that goes in as written, without stops.</summary>
+    private static Snippet AsWritten(string text) => new(text, null);
 
     /// <summary>
     /// Turns each variable without a default that VS Code does not know into a placeholder with its name, numbered
@@ -183,8 +194,8 @@ internal sealed class Snippet
     /// <summary>
     /// Gives each mirror the text of its number's first placeholder with text, as VS Code does: every other
     /// placeholder of that number, except the final stop's. A mirror's text is plain, without stops of its own: it
-    /// follows its stop as a whole. False when the mirrors would add more than <see cref="MaxAddedText"/> characters
-    /// and parts, or nest deeper than <see cref="MaxNesting"/>.
+    /// follows its stop as a whole, and its variables are those of the text it copies. False when the mirrors would add
+    /// more than <see cref="MaxText"/> characters and parts, or nest deeper than <see cref="MaxNesting"/>.
     /// </summary>
     private static bool FillMirrors(List<PlaceholderNode> placeholders)
     {
@@ -198,7 +209,7 @@ internal sealed class Snippet
                 continue;
             mirrors.Add(placeholder);
         }
-        int budget = MaxAddedText;
+        int budget = MaxText;
         var filled = new List<(PlaceholderNode Mirror, List<Node> Text)>();
         foreach (PlaceholderNode mirror in mirrors)
         {
@@ -241,7 +252,7 @@ internal sealed class Snippet
                         into.Add(node);
                         break;
                     case VariableNode variable:
-                        var copy = new VariableNode(variable.Name);
+                        var copy = new VariableNode(variable.Name) { Source = variable.Source ?? variable };
                         if (!Flatten(variable.Children, copy.Children, filling, depth + 1))
                             return false;
                         into.Add(copy);
@@ -321,6 +332,9 @@ internal sealed class Snippet
     private sealed class VariableNode(string name) : Node
     {
         public string Name { get; } = name;
+
+        /// <summary>For a mirror's copy, the variable it copies, whose value it has; null otherwise.</summary>
+        public VariableNode? Source { get; init; }
 
         public override List<Node> Children { get; } = [];
     }
@@ -752,86 +766,118 @@ internal sealed class Snippet
     }
 
     /// <summary>Writes the nodes' text and records the stops, as <see cref="Render"/> describes.</summary>
-    private sealed class Renderer(SnippetContext context)
+    private sealed class Renderer
     {
-        private readonly SnippetContext _context = context;
-        private readonly Indenting _indenting = new(context.Indentation);
-        private int _variableBudget = MaxAddedText;
+        private readonly SnippetContext _context;
+        private readonly Indenting _indenting;
+
+        /// <summary>The width of the line's indentation in columns, which each line after a line break starts with.</summary>
+        private readonly int _lineColumns;
+
+        /// <summary>The variables' values: each is asked for once, and a mirror's copy has its source's.</summary>
+        private readonly Dictionary<VariableNode, string?> _values = [];
+
+        /// <summary>The characters and parts that the text may still take.</summary>
+        private int _budget = MaxText;
+
+        public Renderer(SnippetContext context)
+        {
+            _context = context;
+            _indenting = new Indenting(context.Indentation);
+            _lineColumns = _indenting.Width(context.LineIndentation);
+        }
 
         public StringBuilder Text { get; } = new();
 
         public List<SnippetStop> Stops { get; } = [];
 
-        public void Write(List<Node> nodes, int parent)
+        /// <summary>Writes the nodes; false once the text would be longer than <see cref="MaxText"/>.</summary>
+        public bool Write(List<Node> nodes, int parent)
         {
             foreach (Node node in nodes)
             {
+                if (--_budget < 0)
+                    return false;
                 switch (node)
                 {
                     case TextNode text:
-                        WriteText(text.Value);
+                        if (!WriteText(text.Value))
+                            return false;
                         break;
                     case ChoiceNode choice:
-                        Text.Append(choice.Value);
+                        if (!Append(choice.Value))
+                            return false;
                         break;
                     case VariableNode variable:
-                        string? value = _variableBudget > 0 ? _context.Variable(variable.Name) : null;
-                        _variableBudget--;
-                        if (value is not null && value.Length <= _variableBudget)
-                        {
-                            _variableBudget -= value.Length;
-                            Text.Append(value);
-                        }
-                        else
-                        {
-                            Write(variable.Children, parent);
-                        }
+                        VariableNode source = variable.Source ?? variable;
+                        if (!_values.TryGetValue(source, out string? value))
+                            _values[source] = value = _context.Variable(variable.Name);
+                        if (value is null ? !Write(variable.Children, parent) : !Append(value))
+                            return false;
                         break;
                     case PlaceholderNode placeholder:
                         int index = Stops.Count;
                         int start = Text.Length;
                         Stops.Add(new SnippetStop(placeholder.Index, start, start, parent));
-                        Write(placeholder.Children, index);
+                        if (!Write(placeholder.Children, index))
+                            return false;
                         Stops[index] = Stops[index] with { End = Text.Length };
                         break;
                 }
             }
+            return true;
         }
 
         /// <summary>
         /// Text, as VS Code adjusts it: each line after a line break starts with the indentation of the line the
         /// snippet goes in, and its own; the indentation at the start of the snippet or of a line is the document's;
-        /// line breaks are the line's.
+        /// line breaks are the line's. A text longer than what is left is not read.
         /// </summary>
-        private void WriteText(string value)
+        private bool WriteText(string value)
         {
+            if (value.Length > _budget)
+                return false;
             int start = 0;
             while (true)
             {
                 int length = value.AsSpan(start).IndexOfAny('\r', '\n');
-                string line = length < 0 ? value[start..] : value.Substring(start, length);
-                if (Text.Length == 0)
-                    WriteIndented(line, "");
-                else if (Text[^1] is '\r' or '\n')
-                    WriteIndented(line, _context.LineIndentation);
-                else
-                    Text.Append(line);
+                ReadOnlySpan<char> line = length < 0 ? value.AsSpan(start) : value.AsSpan(start, length);
+                bool written =
+                    Text.Length == 0 ? WriteIndented(line, column: 0)
+                    : Text[^1] is '\r' or '\n' ? WriteIndented(line, _lineColumns)
+                    : Append(line);
+                if (!written)
+                    return false;
                 if (length < 0)
-                    return;
+                    return true;
                 int lineBreak = start + length;
                 bool crlf = value[lineBreak] == '\r' && lineBreak + 1 < value.Length && value[lineBreak + 1] == '\n';
                 start = lineBreak + (crlf ? 2 : 1);
-                Text.Append(_context.LineBreak);
+                if (!Append(_context.LineBreak))
+                    return false;
             }
         }
 
-        private void WriteIndented(string line, string lineIndentation)
+        /// <summary>A line whose indentation starts at <paramref name="column"/>, in the document's indentation.</summary>
+        private bool WriteIndented(ReadOnlySpan<char> line, int column)
         {
             int whitespace = 0;
             while (whitespace < line.Length && line[whitespace] is ' ' or '\t')
                 whitespace++;
-            Text.Append(_indenting.Normalize(lineIndentation + line[..whitespace]))
-                .Append(line, whitespace, line.Length - whitespace);
+            int columns = _indenting.Width(line[..whitespace], column);
+            // Counted before it is made: a deep indentation by wide tabs is long.
+            if (_indenting.Length(columns) > _budget)
+                return false;
+            return Append(_indenting.Whitespace(columns)) && Append(line[whitespace..]);
+        }
+
+        private bool Append(ReadOnlySpan<char> text)
+        {
+            _budget -= text.Length;
+            if (_budget < 0)
+                return false;
+            Text.Append(text);
+            return true;
         }
     }
 }
