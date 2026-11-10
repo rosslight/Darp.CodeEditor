@@ -133,6 +133,10 @@ internal sealed class CompletionList
         string filterText = ServerJson.String(item, "filterText") ?? label;
         // As VS Code, an item without a kind, or with one the protocol does not name, is a property.
         int kind = ServerJson.Number(item, "kind") is int k and >= 1 and <= 25 ? k : CompletionItemKinds.Property;
+        JsonElement? labelDetails =
+            item.TryGetProperty("labelDetails", out JsonElement details) && details.ValueKind == JsonValueKind.Object
+                ? details
+                : null;
         return new CompletionItem(
             label,
             kind,
@@ -151,7 +155,11 @@ internal sealed class CompletionList
                 ? ServerFeatures.Characters(item, "commitCharacters")
                 : commitCharacters,
             item
-        );
+        )
+        {
+            LabelDetail = labelDetails is { } d ? OneLine(ServerJson.String(d, "detail")) : null,
+            LabelDescription = labelDetails is { } e ? OneLine(ServerJson.String(e, "description")) : null,
+        };
     }
 
     /// <summary>
@@ -228,6 +236,19 @@ internal sealed class CompletionList
         return read;
     }
 
+    /// <summary>
+    /// A label's detail or description on one line, as VS Code shows it, and at most as long as a row shows: read here,
+    /// off the UI thread.
+    /// </summary>
+    private static string? OneLine(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return null;
+        const int MaxLength = 256;
+        string line = text.Length > MaxLength ? string.Concat(text.AsSpan(0, MaxLength), "…") : text;
+        return line.ReplaceLineEndings(" ");
+    }
+
     private static bool HasDeprecatedTag(JsonElement item) =>
         item.TryGetProperty("tags", out JsonElement tags)
         && tags.ValueKind == JsonValueKind.Array
@@ -265,7 +286,14 @@ internal sealed record CompletionItem(
     IReadOnlyList<CompletionEdit>? AdditionalEdits,
     string CommitCharacters,
     JsonElement Source
-);
+)
+{
+    /// <summary>The <c>labelDetails.detail</c>, such as a signature, right after the label, dimmed; null for none.</summary>
+    public string? LabelDetail { get; init; }
+
+    /// <summary>The <c>labelDetails.description</c>, such as a module, right-aligned in the row; null for none.</summary>
+    public string? LabelDescription { get; init; }
+}
 
 /// <summary>A change of the text: <paramref name="Range"/> becomes <paramref name="NewText"/>.</summary>
 internal readonly record struct CompletionEdit(TextRange Range, string NewText);

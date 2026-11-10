@@ -106,6 +106,8 @@ internal sealed class PopupScroller : Control
     public override void Render(DrawingContext context)
     {
         base.Render(context);
+        // Transparent: the wheel and the slider's gutter take the pointer everywhere.
+        context.FillRectangle(Brushes.Transparent, new Rect(Bounds.Size));
         if (!CanScroll || SliderBrushes is not var (normal, hover, active))
             return;
         Rect slider = SliderRect();

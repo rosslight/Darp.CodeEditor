@@ -1,109 +1,88 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Documents;
-using Avalonia.Controls.Primitives;
-using Avalonia.Controls.Templates;
-using Avalonia.Input;
-using Avalonia.Interactivity;
 using Avalonia.Layout;
-using Avalonia.Media;
-using Avalonia.Styling;
-using Avalonia.VisualTree;
 using Darp.CodeEditor.LanguageClient;
 using Darp.CodeEditor.Popups;
 
 namespace Darp.CodeEditor.Completion;
 
 /// <summary>
-/// What the completion popup shows: the items in a list in the app's flyout look, each with its icon and its label in
-/// the editor's font, the characters that matched in bold and deprecated items struck through; and in a flyout of its
-/// own the selected item's details, beside the list where the window has room for them, narrower if need be, and below
-/// it otherwise, as VS Code places them. Neither takes the keyboard focus, so the editor keeps it; clicking an item
-/// commits it.
+/// What the completion popup shows, as VS Code's suggest widget: the list below the word, or above it with its bottom at
+/// the line, with the labels lined up with the word; and the selected item's details in a popup of their own, beside
+/// the list, as <see cref="EditorPopup.ShowBeside"/> places them. Both are the editor's own controls, in its color
+/// theme's suggest colors. Neither takes the keyboard focus while the user types, so the editor keeps it; clicking an
+/// item commits it, and the details' text can be selected and copied.
 /// </summary>
 internal sealed class CompletionView
 {
-    /// <summary>How many items show at once, as in VS Code.</summary>
-    public const int VisibleItems = 12;
+    /// <summary>How many items show at once by default, as in VS Code.</summary>
+    public const int DefaultRows = 12;
 
-    private const double ListWidth = 300;
-    private const double DetailsWidth = 360;
+    /// <summary>The list's width by default, its border included, as in VS Code.</summary>
+    public const double DefaultWidth = 430;
 
-    /// <summary>
-    /// The most of a label that a row shows: more than any list is wide, so that the row still trims it with "…", while
-    /// a server's long label costs the UI thread no more.
-    /// </summary>
-    private const int MaxLabelLength = 256;
+    /// <summary>The narrowest the list gets, as in VS Code.</summary>
+    public const double MinWidth = 220;
 
-    /// <summary>The narrowest the details get beside the list; with less room, they go below it.</summary>
-    private const double MinDetailsWidth = 200;
+    /// <summary>The details' width by default, as in VS Code.</summary>
+    public const double DefaultDetailsWidth = 330;
 
-    private const double Gap = 2;
+    /// <summary>The frame's border, on each side.</summary>
+    private const double Border = 1;
 
-    private readonly ListBox _list;
+    private readonly CompletionListBox _list = new();
     private readonly PopupFrame _listFrame;
-    private readonly PopupFrame _details;
-    private readonly Layout _layout;
+    private readonly PopupFrame _detailsFrame;
+    private readonly PopupScroller _detailsContent = new();
+    private readonly EditorPopup _listPopup;
+    private readonly EditorPopup _detailsPopup;
 
-    private readonly PopupScroller _detailsContent = new() { MaxWidth = DetailsWidth };
-
-    private PopupLook? _look;
-    private SymbolIconColors? _icons;
-    private double _rowHeight;
-
-    public CompletionView()
+    public CompletionView(CodeEditor editor)
     {
-        _list = new ListBox
+        _listFrame = new PopupFrame
         {
-            Focusable = false,
-            Width = ListWidth,
-            // Each row is reused for the items it shows as the list changes: only its icon and text change.
-            ItemTemplate = new FuncDataTemplate<ShownItem>((_, _) => new Row(this), supportsRecycling: true),
+            Name = "CompletionList",
+            Child = _list,
+            HorizontalAlignment = HorizontalAlignment.Left,
         };
-        // Rows as dense as the editor's lines, as in VS Code, in the app's look of list items otherwise.
-        _list.Styles.Add(
-            new Style(x => x.OfType<ListBoxItem>())
-            {
-                Setters =
-                {
-                    new Setter(TemplatedControl.PaddingProperty, new Thickness(4, 0)),
-                    new Setter(Layoutable.MinHeightProperty, 0.0),
-                },
-            }
-        );
-        _list.AddHandler(InputElement.PointerPressedEvent, OnPointerPressed, RoutingStrategies.Tunnel);
-        _details = new PopupFrame
+        _detailsFrame = new PopupFrame
         {
             Name = "CompletionDetails",
             Child = _detailsContent,
-            Padding = new Thickness(5, 4, 1, 4),
-            IsVisible = false,
+            Padding = new Thickness(6, 4, 2, 4),
         };
-        _listFrame = new PopupFrame { Name = "CompletionList", Child = _list };
-        _layout = new Layout(_listFrame, _details);
-    }
-
-    /// <summary>The view's outermost control.</summary>
-    public Control Root => _layout;
-
-    /// <summary>
-    /// The width from where the popup starts to the window's right edge, as it is placed now: the room for the list and
-    /// the details beside it. By default, the width the popup is measured with.
-    /// </summary>
-    public Func<double> Room
-    {
-        set => _layout.Room = value;
+        // Below the word, with the labels lined up with it.
+        _listPopup = new EditorPopup(editor, _listFrame, below: true)
+        {
+            OffsetX = -(Border + CompletionListBox.LabelInset),
+        };
+        _detailsPopup = new EditorPopup(editor, _detailsFrame);
+        _list.Clicked += index => Clicked?.Invoke(index);
+        _listPopup.LeftView += (_, _) =>
+        {
+            _detailsPopup.Hide();
+            LeftView?.Invoke(this, EventArgs.Empty);
+        };
     }
 
     /// <summary>Raised when an item is clicked, with its index.</summary>
     public event Action<int>? Clicked;
 
+    /// <summary>Raised when the list closed because its line left the view.</summary>
+    public event EventHandler? LeftView;
+
+    /// <summary>The list, for tests.</summary>
+    public CompletionListBox List => _list;
+
+    /// <summary>Whether the details show beside the list.</summary>
+    public bool ShowsDetails => _detailsPopup.IsOpen;
+
     /// <summary>Shows <paramref name="items"/>, with <paramref name="selected"/> selected and in view.</summary>
     /// <param name="items">The items.</param>
     /// <param name="selected">The selected item's index.</param>
-    /// <param name="look">The editor's font, for the labels.</param>
+    /// <param name="look">The editor's font, for the labels, and the popups' colors.</param>
     /// <param name="icons">The icons' colors; none while the color theme loads.</param>
-    /// <param name="rowHeight">The height of an item.</param>
+    /// <param name="rowHeight">The height of an item: the editor's line height.</param>
     public void Show(
         IReadOnlyList<ShownItem> items,
         int selected,
@@ -112,182 +91,51 @@ internal sealed class CompletionView
         double rowHeight
     )
     {
-        (_look, _icons, _rowHeight) = (look, icons, rowHeight);
-        PopupColors colors = look.Colors;
-        _listFrame.Paint(colors.SuggestBackground, colors.SuggestBorder, colors.SuggestForeground, colors.Shadow);
-        _details.Paint(colors.SuggestBackground, colors.SuggestBorder, colors.WidgetForeground, colors.Shadow);
-        _detailsContent.SliderBrushes = (colors.Slider, colors.SliderHover, colors.SliderActive);
-        _list.MaxHeight = rowHeight * VisibleItems;
-        _detailsContent.MaxHeight = rowHeight * VisibleItems;
-        _list.ItemsSource = items;
-        Select(selected);
+        Paint(look.Colors);
+        _list.Show(items, selected, look, icons, rowHeight);
+    }
+
+    /// <summary>Shows <paramref name="message"/> in the list, such as "No suggestions.", without items or details.</summary>
+    public void ShowMessage(string message, PopupLook look, double rowHeight)
+    {
+        Paint(look.Colors);
+        _list.ShowMessage(message, look, rowHeight);
+        ShowDetails(null);
+    }
+
+    /// <summary>Opens the list at <paramref name="place"/>, the box of the word's first character, or moves it there.</summary>
+    public void Open(Visual relativeTo, Func<Rect> place) => _listPopup.Show(relativeTo, place);
+
+    public void Hide()
+    {
+        _detailsPopup.Hide();
+        _listPopup.Hide();
     }
 
     /// <summary>Selects the item at <paramref name="index"/>, and scrolls it into view.</summary>
-    public void Select(int index)
-    {
-        _list.SelectedIndex = index;
-        _list.ScrollIntoView(index);
-    }
+    public void Select(int index) => _list.Select(index);
 
     /// <summary>Shows the selected item's details beside the list; null hides them.</summary>
     public void ShowDetails(Control? details)
     {
         _detailsContent.Child = details;
-        _details.IsVisible = details is not null;
-    }
-
-    /// <summary>
-    /// <paramref name="label"/>, or its start with "…" when it is longer than a row shows; a cut never splits a surrogate
-    /// pair. Matched characters are all within the start: matching reads 128 characters.
-    /// </summary>
-    private static string Shortened(string label)
-    {
-        if (label.Length <= MaxLabelLength)
-            return label;
-        int end = char.IsHighSurrogate(label[MaxLabelLength - 1]) ? MaxLabelLength - 1 : MaxLabelLength;
-        return string.Concat(label.AsSpan(0, end), "…");
-    }
-
-    /// <summary>The label, with the characters at <paramref name="highlights"/> in bold.</summary>
-    private static InlineCollection Label(string label, int[] highlights)
-    {
-        var inlines = new InlineCollection();
-        int next = 0;
-        for (int start = 0; start < label.Length; )
+        _list.DetailsOpen = details is not null;
+        if (details is null)
         {
-            int end = start;
-            bool bold = next < highlights.Length && highlights[next] == start;
-            if (bold)
-            {
-                while (next < highlights.Length && highlights[next] == end)
-                    (next, end) = (next + 1, end + 1);
-            }
-            else
-            {
-                end = next < highlights.Length ? Math.Min(highlights[next], label.Length) : label.Length;
-            }
-            inlines.Add(new Run(label[start..end]) { FontWeight = bold ? FontWeight.Bold : FontWeight.Normal });
-            start = end;
-        }
-        return inlines;
-    }
-
-    /// <summary>
-    /// Places the details beside the list when the room right of where the popup starts takes them at least
-    /// <see cref="MinDetailsWidth"/> wide, narrowed to that room; otherwise below the list, at least as wide as it.
-    /// </summary>
-    private sealed class Layout : Panel
-    {
-        private readonly Control _list;
-        private readonly Control _details;
-        private bool _beside;
-
-        public Layout(Control list, Control details)
-        {
-            _list = list;
-            _details = details;
-            Children.Add(list);
-            Children.Add(details);
-        }
-
-        public Func<double>? Room { get; set; }
-
-        protected override Size MeasureOverride(Size availableSize)
-        {
-            _list.Measure(availableSize);
-            Size list = _list.DesiredSize;
-            if (!_details.IsVisible)
-                return list;
-            double room = Math.Min(availableSize.Width, Room?.Invoke() ?? double.PositiveInfinity);
-            double beside = room - list.Width - Gap;
-            _beside = beside >= MinDetailsWidth;
-            if (_beside)
-            {
-                _details.Measure(availableSize.WithWidth(beside));
-                Size details = _details.DesiredSize;
-                return new Size(list.Width + Gap + details.Width, Math.Max(list.Height, details.Height));
-            }
-            double below = Math.Max(0, availableSize.Height - list.Height - Gap);
-            _details.Measure(new Size(Math.Max(list.Width, Math.Min(room, DetailsWidth)), below));
-            Size under = _details.DesiredSize;
-            return new Size(Math.Max(list.Width, under.Width), list.Height + Gap + under.Height);
-        }
-
-        protected override Size ArrangeOverride(Size finalSize)
-        {
-            Size list = _list.DesiredSize;
-            _list.Arrange(new Rect(list));
-            if (!_details.IsVisible)
-                return finalSize;
-            Size details = _details.DesiredSize;
-            _details.Arrange(
-                _beside
-                    ? new Rect(list.Width + Gap, 0, details.Width, details.Height)
-                    : new Rect(0, list.Height + Gap, details.Width, details.Height)
-            );
-            return finalSize;
-        }
-    }
-
-    /// <summary>
-    /// A row of the list: the item's icon, and its label in the editor's font with the characters that matched in bold,
-    /// struck through when it is deprecated. The list reuses it for other items.
-    /// </summary>
-    private sealed class Row : DockPanel
-    {
-        private readonly CompletionView _view;
-
-        private readonly CompletionIcon _icon = new()
-        {
-            Margin = new Thickness(0, 0, 4, 0),
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-
-        private readonly TextBlock _label = new()
-        {
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-
-        public Row(CompletionView view)
-        {
-            _view = view;
-            SetDock(_icon, Dock.Left);
-            Children.Add(_icon);
-            Children.Add(_label);
-        }
-
-        /// <summary>The list gives the row another item.</summary>
-        protected override void OnDataContextChanged(EventArgs e)
-        {
-            base.OnDataContextChanged(e);
-            if (DataContext is not ShownItem { Item: var item } shown)
-                return;
-            Height = _view._rowHeight;
-            _label.FontFamily = _view._look?.CodeFont ?? FontFamily.Default;
-            _label.FontSize = _view._look?.CodeSize ?? 12;
-            _label.Inlines = Label(Shortened(item.Label), shown.Highlights);
-            _label.TextDecorations = item.IsDeprecated ? TextDecorations.Strikethrough : null;
-            _icon.IsVisible = _view._icons is not null;
-            if (_view._icons is { } icons)
-                _icon.Show(item.Kind, icons.Of(item.Kind));
-        }
-    }
-
-    /// <summary>
-    /// A click on an item commits it. The list does not handle it, so that it takes no focus: the editor keeps the
-    /// keyboard.
-    /// </summary>
-    private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        if (!e.GetCurrentPoint(_list).Properties.IsLeftButtonPressed)
+            _detailsPopup.Hide();
             return;
-        if ((e.Source as Visual)?.FindAncestorOfType<ListBoxItem>(includeSelf: true) is { } container)
-        {
-            e.Handled = true;
-            Clicked?.Invoke(_list.IndexFromContainer(container));
         }
+        // At most as tall as the list's most rows, so that it stays next to the list.
+        _detailsFrame.MaxHeight = Math.Max(_list.RowHeight * _list.MaxRows, _list.RowHeight * DefaultRows) + 2 * Border;
+        if (_listPopup.IsOpen)
+            _detailsPopup.ShowBeside(_listPopup, DefaultDetailsWidth);
+    }
+
+    private void Paint(PopupColors colors)
+    {
+        _listFrame.Paint(colors.SuggestBackground, colors.SuggestBorder, colors.SuggestForeground, colors.Shadow);
+        _detailsFrame.Paint(colors.SuggestBackground, colors.SuggestBorder, colors.WidgetForeground, colors.Shadow);
+        _detailsContent.SliderBrushes = (colors.Slider, colors.SliderHover, colors.SliderActive);
     }
 }
 

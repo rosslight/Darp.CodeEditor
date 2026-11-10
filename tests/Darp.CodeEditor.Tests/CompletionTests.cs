@@ -214,14 +214,7 @@ public sealed class CompletionTests(UiFixture ui)
 
             // Then the filter of what was typed last.
             await WaitForLabelsAsync(window, ["Console", "Convert"]);
-            Row(window, "Console")
-                .GetVisualDescendants()
-                .OfType<TextBlock>()
-                .Single()
-                .Inlines.ShouldNotBeNull()
-                .OfType<Run>()
-                .First()
-                .Text.ShouldBe("Con");
+            Row(window, "Console").Label.Inlines.ShouldNotBeNull().OfType<Run>().First().Text.ShouldBe("Con");
         });
 
     [Fact]
@@ -619,7 +612,7 @@ public sealed class CompletionTests(UiFixture ui)
 
     [Theory]
     [InlineData(420, "below")]
-    [InlineData(640, "beside, narrower")]
+    [InlineData(720, "beside, narrower")]
     [InlineData(900, "beside")]
     public Task The_details_fit_beside_the_list_where_there_is_room_and_below_it_otherwise(int width, string where) =>
         _ui.Run(async () =>
@@ -660,12 +653,16 @@ public sealed class CompletionTests(UiFixture ui)
             var client = new Rect(window.Window.ClientSize);
             client.Contains(list).ShouldBeTrue($"{list} in {client}");
             client.Contains(details).ShouldBeTrue($"{details} in {client}");
-            // The documentation wraps to the width the details have.
+            // The documentation wraps to the width the details have, and scrolls where it is taller.
             foreach (TextBlock text in Details(window)!.GetVisualDescendants().OfType<TextBlock>())
-                details.Contains(BoundsInWindow(text)).ShouldBeTrue($"{BoundsInWindow(text)} in {details}");
-            // The list stays at the word it completes, where the window has room for it.
+            {
+                Rect bounds = BoundsInWindow(text);
+                (bounds.Left >= details.Left && bounds.Right <= details.Right).ShouldBeTrue($"{bounds} in {details}");
+            }
+            // The list stays at the word it completes, where the window has room for it: its labels line up with it.
             Point word = window.PointAt(4);
-            list.Left.ShouldBeInRange(word.X - 10, word.X);
+            if (width > CompletionView.DefaultWidth + word.X)
+                (list.Left + 1 + CompletionListBox.LabelInset).ShouldBeInRange(word.X - 10, word.X);
             if (where == "below")
             {
                 details.Top.ShouldBeGreaterThanOrEqualTo(list.Bottom);
@@ -929,7 +926,7 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
-    public Task The_list_looks_like_the_apps_flyouts_in_the_editors_theme_variant_and_stays_inside_the_window() =>
+    public Task The_list_takes_the_color_theme_of_the_editors_theme_variant_and_stays_inside_the_window() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
@@ -1087,11 +1084,15 @@ public sealed class CompletionTests(UiFixture ui)
 
     /// <summary>The labels of the items that the list shows, in order; none while it is closed.</summary>
     internal static IReadOnlyList<string> Labels(EditorWindow window) =>
-        List(window) is { ItemsSource: IEnumerable<ShownItem> items } ? [.. items.Select(i => i.Item.Label)] : [];
+        List(window) is { Items: var items } ? [.. items.Select(i => i.Item.Label)] : [];
 
     /// <summary>The completion list in the window's overlay layer; null while it is closed.</summary>
-    internal static ListBox? List(EditorWindow window) =>
-        OverlayLayer.GetOverlayLayer(window.Window)?.GetVisualDescendants().OfType<ListBox>().FirstOrDefault();
+    internal static CompletionListBox? List(EditorWindow window) =>
+        OverlayLayer
+            .GetOverlayLayer(window.Window)
+            ?.GetVisualDescendants()
+            .OfType<CompletionListBox>()
+            .FirstOrDefault(list => list.IsEffectivelyVisible);
 
     /// <summary>The frame around the list; null while it is closed.</summary>
     internal static PopupFrame? Flyout(EditorWindow window) => PopupFrames.Find(window, "CompletionList");
@@ -1162,21 +1163,21 @@ public sealed class CompletionTests(UiFixture ui)
                 .Select(run => (run.Text ?? "", run.FontWeight == FontWeight.Bold)),
         ];
 
-    private static TextBlock LabelOf(EditorWindow window, string label) =>
-        Row(window, label).GetVisualDescendants().OfType<TextBlock>().Single();
+    private static TextBlock LabelOf(EditorWindow window, string label) => Row(window, label).Label;
 
-    private static ListBoxItem Row(EditorWindow window, string label) =>
+    private static CompletionListBox.Row Row(EditorWindow window, string label) =>
         List(window)
             .ShouldNotBeNull()
             .GetVisualDescendants()
-            .OfType<ListBoxItem>()
-            .Single(item => item.Content is ShownItem shown && shown.Item.Label == label);
+            .OfType<CompletionListBox.Row>()
+            .Single(row => row.IsVisible && row.Item?.Item.Label == label);
 
     private static Point RowCenter(EditorWindow window, int index)
     {
         window.Render();
-        ListBox list = List(window).ShouldNotBeNull();
-        return BoundsInWindow(list.ContainerFromIndex(index).ShouldNotBeNull()).Center;
+        CompletionListBox list = List(window).ShouldNotBeNull();
+        Rect row = list.RowBounds(index).ShouldNotBeNull();
+        return list.TranslatePoint(row.Center, window.Window).ShouldNotBeNull();
     }
 
     /// <summary>The pixels of <paramref name="color"/> in the icon column of the row at <paramref name="index"/>.</summary>
@@ -1185,7 +1186,7 @@ public sealed class CompletionTests(UiFixture ui)
         window.Render();
         CompletionIcon icon = List(window)
             .ShouldNotBeNull()
-            .ContainerFromIndex(index)
+            .RowOf(index)
             .ShouldNotBeNull()
             .GetVisualDescendants()
             .OfType<CompletionIcon>()

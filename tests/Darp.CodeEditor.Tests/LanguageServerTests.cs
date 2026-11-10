@@ -367,6 +367,7 @@ public sealed class LanguageServerTests(UiFixture ui)
                                 "preselectSupport": true,
                                 "tagSupport": { "valueSet": [1] },
                                 "insertReplaceSupport": true,
+                                "labelDetailsSupport": true,
                                 "resolveSupport": { "properties": ["detail", "documentation", "additionalTextEdits"] }
                               },
                               "completionItemKind": {

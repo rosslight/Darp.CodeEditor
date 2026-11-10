@@ -828,6 +828,7 @@ internal sealed class ServerConnection
                         ["preselectSupport"] = true,
                         ["tagSupport"] = new JsonObject { ["valueSet"] = new JsonArray(1) },
                         ["insertReplaceSupport"] = true,
+                        ["labelDetailsSupport"] = true,
                         ["resolveSupport"] = new JsonObject
                         {
                             ["properties"] = new JsonArray("detail", "documentation", "additionalTextEdits"),

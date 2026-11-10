@@ -59,8 +59,7 @@ internal sealed class CompletionController : IDisposable
     private readonly CodeDocument _document;
     private readonly BackgroundTextMateHighlighter _highlighter;
     private readonly SnippetController _snippets;
-    private readonly CompletionView _view = new();
-    private readonly EditorPopup _popup;
+    private readonly CompletionView _view;
     private TextAreaColors? _colors;
     private SymbolIconColors? _icons;
 
@@ -103,14 +102,14 @@ internal sealed class CompletionController : IDisposable
         _document = document;
         _highlighter = highlighter;
         _snippets = snippets;
-        _popup = new EditorPopup(editor, _view.Root, below: true);
+        _view = new CompletionView(editor);
         _view.Clicked += OnClicked;
         _buffer.Changing += OnBufferChanging;
         _buffer.TextChanged += OnBufferTextChanged;
         _textArea.TextEntered += OnTextEntered;
         _textArea.Caret.PositionChanged += OnCaretPositionChanged;
         _document.LanguageFeaturesChanged += OnClosingChange;
-        _popup.LeftView += OnClosingChange;
+        _view.LeftView += OnClosingChange;
     }
 
     /// <summary>The colors of the color theme, for code in the details, once it is loaded. New colors end completion.</summary>
@@ -147,7 +146,7 @@ internal sealed class CompletionController : IDisposable
         if (_session is not { IsShowing: true } session || e.KeyModifiers != KeyModifiers.None)
             return false;
         int count = session.Items.Count;
-        int page = CompletionView.VisibleItems - 1;
+        int page = _view.List.VisibleRows - 1;
         switch (e.Key)
         {
             case Key.Down:
@@ -222,7 +221,7 @@ internal sealed class CompletionController : IDisposable
         foreach (Resolve resolve in session.Resolves.Values)
             resolve.Cancellation.Cancel();
         session.Details?.Cancel();
-        _popup.Hide();
+        _view.Hide();
         _view.ShowDetails(null);
         return session.IsShowing;
     }
@@ -237,7 +236,7 @@ internal sealed class CompletionController : IDisposable
         _textArea.TextEntered -= OnTextEntered;
         _textArea.Caret.PositionChanged -= OnCaretPositionChanged;
         _document.LanguageFeaturesChanged -= OnClosingChange;
-        _popup.LeftView -= OnClosingChange;
+        _view.LeftView -= OnClosingChange;
     }
 
     /// <summary>
@@ -441,9 +440,8 @@ internal sealed class CompletionController : IDisposable
         int wordStart = key.Answer.Request.Word.Start;
         Func<Rect> place = () => TextViewBoxes.CharacterAt(_textView, Math.Min(wordStart, _buffer.TextLength));
         session.Place = place;
-        _view.Room = () => RoomFrom(place);
-        _view.Show(session.Items, session.Selected, Look(), _icons, Math.Ceiling(_textView.DefaultLineHeight) + 4);
-        _popup.Show(_textView, session.Place);
+        _view.Show(session.Items, session.Selected, Look(), _icons, _textView.DefaultLineHeight);
+        _view.Open(_textView, place);
         // Placing it may have ended completion, as its line is out of view.
         if (_session == session)
             ResolveSelected(session);
@@ -485,15 +483,6 @@ internal sealed class CompletionController : IDisposable
     }
 
     /// <summary>
-    /// The width from <paramref name="place"/>, where the popup starts, to the window's right edge; the popup moves left
-    /// of it only when even the list does not fit there.
-    /// </summary>
-    private double RoomFrom(Func<Rect> place) =>
-        OverlayLayer.GetOverlayLayer(_editor) is { } layer && _textView.TranslatePoint(place().TopLeft, layer) is { } at
-            ? layer.Bounds.Width - Math.Max(0, at.X)
-            : double.PositiveInfinity;
-
-    /// <summary>
     /// The text typed from <paramref name="start"/> up to <paramref name="caret"/>, as far as the matcher reads it: an
     /// edit that starts far before the caret, also in a line's collapsed tail, costs no more than one near it, and
     /// matches by its first characters, as in VS Code. When they are all spaces and tabs, nothing counts as typed;
@@ -523,7 +512,7 @@ internal sealed class CompletionController : IDisposable
         session.Items = [];
         session.DetailsOf = null;
         session.Details?.Cancel();
-        _popup.Hide();
+        _view.Hide();
         _view.ShowDetails(null);
     }
 
@@ -583,9 +572,6 @@ internal sealed class CompletionController : IDisposable
         if (!s_showsDetails || (item.Detail is null && item.Documentation is null))
         {
             _view.ShowDetails(null);
-            // Narrower now: placed again, as it may move right.
-            if (session.Place is { } shown)
-                _popup.Show(_textView, shown);
             return;
         }
         var cancellation = new CancellationTokenSource();
@@ -598,11 +584,9 @@ internal sealed class CompletionController : IDisposable
                 () => DetailBlocks(item, grammar, dimmed, cancellation.Token),
                 cancellation.Token
             );
-            if (_session != session || cancellation.IsCancellationRequested || session.Place is not { } place)
+            if (_session != session || cancellation.IsCancellationRequested || !session.IsShowing)
                 return;
             _view.ShowDetails(HoverView.Create(blocks, Look()));
-            // The popup is wider now: placed again, so that it stays inside the window.
-            _popup.Show(_textView, place);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception e)
