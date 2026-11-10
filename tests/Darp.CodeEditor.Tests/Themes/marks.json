@@ -5,6 +5,8 @@
 	"include": "avares://Darp.CodeEditor/Themes/light_plus.json",
 	"colors": {
 		"editor.selectionBackground": "#FFFF00",
+		"editorLineNumber.foreground": "#00FFFF",
+		"editor.lineHighlightBackground": "#FF8000",
 		"editorBracketMatch.background": "#FF00FF",
 		"editorBracketMatch.border": "#FF00FF",
 		"editorWhitespace.foreground": "#FF0000",

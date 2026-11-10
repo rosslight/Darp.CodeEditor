@@ -139,6 +139,13 @@ public class CodeEditor : TemplatedControl
     /// </summary>
     private CodeDocument? _shown;
 
+    /// <summary>
+    /// The part's document while it shows nothing, empty and never edited: the part is read-only meanwhile.
+    /// AvaloniaEdit's own editor always has a document: without one, its template logs a binding warning, and a click
+    /// throws.
+    /// </summary>
+    private readonly TextDocument _emptyBuffer = new();
+
     /// <summary>Highlights the shown document.</summary>
     private BackgroundTextMateHighlighter? _highlighter;
 
@@ -416,8 +423,7 @@ public class CodeEditor : TemplatedControl
         _theme = null;
         if (_part is { } part)
         {
-            part.Document = null;
-            part.IsReadOnly = true;
+            ShowNothing(part);
             TextEditorOptions options = part.Options;
             // AvaloniaEdit's default, until Avalonia's wrapping and font fallback get fast on longer wrapped lines.
             options.LongLineLimit = 3_000;
@@ -541,6 +547,7 @@ public class CodeEditor : TemplatedControl
         TextDocument buffer = document.Buffer;
         part.Document = buffer;
         part.IsReadOnly = IsReadOnly;
+        part.TextArea.Opacity = 1;
         CodeEditorViewState? place = _place?.ToCurrent();
         _place = place;
         _shown = document;
@@ -578,8 +585,20 @@ public class CodeEditor : TemplatedControl
         _waitingForLayout = false;
         _laidOut = null;
         _shown = null;
-        part.Document = null;
+        ShowNothing(part);
+    }
+
+    /// <summary>
+    /// Gives the part <see cref="_emptyBuffer"/>, read-only, and draws its text area transparent, so that the editor
+    /// shows only its background and border: no line number, current line or caret. Transparent rather than hidden: a
+    /// hidden text area can't keep the keyboard focus, and the line numbers show the lines that AvaloniaEdit lays out
+    /// even in a hidden text view.
+    /// </summary>
+    private void ShowNothing(TextEditor part)
+    {
+        part.Document = _emptyBuffer;
         part.IsReadOnly = true;
+        part.TextArea.Opacity = 0;
     }
 
     /// <summary>

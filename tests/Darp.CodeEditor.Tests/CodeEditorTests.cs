@@ -5,6 +5,7 @@ using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Threading;
 using AvaloniaEdit;
 using AvaloniaEdit.Rendering;
@@ -15,6 +16,12 @@ namespace Darp.CodeEditor.Tests;
 [Collection(UiFixture.Collection)]
 public sealed class CodeEditorTests(UiFixture ui)
 {
+    /// <summary>The line numbers in the marks theme.</summary>
+    private static readonly Color s_lineNumbers = Color.Parse("#00FFFF");
+
+    /// <summary>The background of the caret's line in the marks theme.</summary>
+    private static readonly Color s_currentLine = Color.Parse("#FF8000");
+
     private readonly UiFixture _ui = ui;
 
     [Fact]
@@ -116,9 +123,53 @@ public sealed class CodeEditorTests(UiFixture ui)
 
             window.Type("text");
 
-            window.TextView.Document.ShouldBeNull();
+            window.TextView.Document.Text.ShouldBeEmpty();
             window.Editor.Selection.ShouldBe(new TextSelection(0));
             Should.Throw<InvalidOperationException>(() => window.Editor.SaveViewState());
+        });
+
+    [Fact]
+    public Task Without_a_document_the_editor_draws_no_line_number_and_no_current_line() =>
+        _ui.Run(async () =>
+        {
+            var theme = new CodeEditorColorTheme
+            {
+                Source = new Uri("avares://Darp.CodeEditor.Tests/Themes/marks.json"),
+            };
+            await theme.Loaded;
+            using var window = new EditorWindow(new CodeEditor { ColorTheme = theme });
+            CodeEditor editor = window.Editor;
+
+            window.RenderAndCountPixels(s_lineNumbers).ShouldBe(0);
+            window.RenderAndCountPixels(s_currentLine).ShouldBe(0);
+
+            editor.Document = CodeDocument.Create(CodeLanguage.PlainText, "text");
+            window.RenderAndCountPixels(s_lineNumbers).ShouldBeGreaterThan(0);
+            window.RenderAndCountPixels(s_currentLine).ShouldBeGreaterThan(0);
+
+            editor.Document = null;
+            // A click, which makes AvaloniaEdit lay out lines, draws none either.
+            window.Click(new Point(100, 10), MouseButton.Left);
+
+            window.RenderAndCountPixels(s_lineNumbers).ShouldBe(0);
+            window.RenderAndCountPixels(s_currentLine).ShouldBe(0);
+        });
+
+    [Fact]
+    public Task Switching_to_another_document_and_to_none_logs_no_binding_errors() =>
+        _ui.Run(() =>
+        {
+            IReadOnlyList<string> errors = TestLog.BindingErrorsOf(() =>
+            {
+                using var window = new EditorWindow(Editor("{}"));
+
+                window.Editor.Document = CodeDocument.Create(CodeLanguage.Json, "[]");
+                window.Layout();
+                window.Editor.Document = null;
+                window.Layout();
+            });
+
+            errors.ShouldBeEmpty();
         });
 
     [Fact]
@@ -455,10 +506,11 @@ public sealed class CodeEditorTests(UiFixture ui)
             window.Layout();
 
             await Task.Run(document.Dispose);
-            await Wait.UntilAsync(() => EditorWindow.TextViewOf(first).Document is null);
+            await Wait.UntilAsync(() => EditorWindow.TextViewOf(first).Document.TextLength == 0);
             window.Type("x");
 
-            EditorWindow.TextViewOf(second).Document.ShouldBeNull();
+            EditorWindow.TextViewOf(first).Document.Text.ShouldBeEmpty();
+            EditorWindow.TextViewOf(second).Document.Text.ShouldBeEmpty();
             first.Document.ShouldBeSameAs(document);
             document.Text.ShouldBe("{}");
         });
@@ -477,7 +529,7 @@ public sealed class CodeEditorTests(UiFixture ui)
             window.Layout();
             window.Type("x");
 
-            part.Document.ShouldBeNull();
+            part.Document.Text.ShouldBeEmpty();
             part.IsReadOnly.ShouldBeTrue();
             document.Text.ShouldBe("{}");
         });
@@ -592,7 +644,7 @@ public sealed class CodeEditorTests(UiFixture ui)
 
             TextEditor after = EditorWindow.PartOf(editor);
             after.ShouldNotBeSameAs(before);
-            before.Document.ShouldBeNull();
+            before.Document.Text.ShouldBeEmpty();
             after.Document.ShouldBeSameAs(document.Buffer);
             document.Text.ShouldBe("one 2 three");
             editor.Selection.ShouldBe(new TextSelection(5));
