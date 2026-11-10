@@ -73,6 +73,16 @@ internal sealed class PopupScroller : Control
 
     private bool CanScroll => _extent > Bounds.Height + 0.5;
 
+    /// <summary>The control that the next arrange scrolls into view; null for none.</summary>
+    private Control? _intoView;
+
+    /// <summary>Scrolls <paramref name="descendant"/> of the content into view, once it is laid out.</summary>
+    public void ScrollIntoView(Control descendant)
+    {
+        _intoView = descendant;
+        InvalidateArrange();
+    }
+
     /// <summary>Scrolls by <paramref name="delta"/> pixels, down when positive, within the content.</summary>
     public void ScrollBy(double delta) => ScrollTo(_offset + delta);
 
@@ -100,6 +110,21 @@ internal sealed class PopupScroller : Control
         _extent = child.DesiredSize.Height;
         _offset = Math.Clamp(_offset, 0, Math.Max(0, _extent - finalSize.Height));
         child.Arrange(new Rect(0, -_offset, Math.Max(0, width), _extent));
+        if (_intoView is { } target && target.TranslatePoint(default, child) is { } at)
+        {
+            _intoView = null;
+            double top = at.Y;
+            double bottom = top + target.Bounds.Height;
+            double offset =
+                top < _offset ? top
+                : bottom > _offset + finalSize.Height ? Math.Min(top, bottom - finalSize.Height)
+                : _offset;
+            if (offset != _offset)
+            {
+                _offset = Math.Clamp(offset, 0, Math.Max(0, _extent - finalSize.Height));
+                child.Arrange(new Rect(0, -_offset, Math.Max(0, width), _extent));
+            }
+        }
         return finalSize;
     }
 

@@ -36,7 +36,9 @@ public sealed class SignatureHelpTests(UiFixture ui)
 
             PopupFrame popup = await WaitForSignatureAsync(window, "first", "Calls with two.");
             (await fake.WaitForAsync("signatureHelp ")).ShouldEndWith(" 2 ( False - 5");
-            Texts(popup).ShouldContain("1/2");
+            // Every signature shows, the active one marked.
+            Texts(popup).ShouldContain("call(first, second, third)");
+            ActiveSignature(popup).ShouldBe("call(first, second)");
             // The parameter's Markdown.
             popup
                 .GetVisualDescendants()
@@ -67,6 +69,16 @@ public sealed class SignatureHelpTests(UiFixture ui)
             await WaitForSignatureAsync(window, "first", "Calls with two.");
             (await fake.WaitForAsync("signatureHelp ")).ShouldContain(" 1 ");
         });
+
+    [Theory]
+    [InlineData("""{ "label": "f(a)", "parameters": [ { "label": "a" } ], "activeParameter": 1 }""", true)]
+    [InlineData("""{ "label": "f(a)", "parameters": [ { "label": "a" } ], "activeParameter": 0 }""", false)]
+    [InlineData("""{ "label": "f()", "parameters": [], "activeParameter": 0 }""", false)]
+    [InlineData("""{ "label": "f()", "parameters": [], "activeParameter": 1 }""", true)]
+    public void A_signature_whose_active_parameter_it_lacks_cannot_match(string json, bool cannotMatch) =>
+        LanguageClient
+            .SignatureInfo.Read(System.Text.Json.JsonDocument.Parse(json).RootElement, null)
+            .CannotMatch.ShouldBe(cannotMatch);
 
     [Fact]
     public Task A_retrigger_character_moves_the_active_parameter_at_once() =>
@@ -154,7 +166,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
 
             window.Press(Key.Down);
             PopupFrame popup = await WaitForSignatureAsync(window, "first", "Calls with three.");
-            Texts(popup).ShouldContain("2/2");
+            ActiveSignature(popup).ShouldBe("call(first, second, third)");
             document.Text.ShouldBe("call(");
 
             // Asking again tells the server the signature that shows, and it keeps it.
@@ -166,7 +178,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
             await CompletionTests.WaitForLabelsAsync(window);
             window.Press(Key.Down);
             CompletionTests.List(window).ShouldNotBeNull().SelectedIndex.ShouldBe(1);
-            Texts(Popup(window).ShouldNotBeNull()).ShouldContain("2/2");
+            ActiveSignature(Popup(window).ShouldNotBeNull()).ShouldBe("call(first, second, third)");
         });
 
     [Fact]
@@ -286,9 +298,11 @@ public sealed class SignatureHelpTests(UiFixture ui)
                 return popup is not null
                     && Runs(popup).Any(run => run.Text == "first" && run.FontWeight == FontWeight.Bold);
             });
-            // The signature uses up the budget: the documentation does not show.
+            // The signature uses up the budget: the documentation does not show. Too long for a line, it breaks after
+            // its comma.
             string label = Signature(popup!).Inlines?.Text ?? "";
-            label.Length.ShouldBe(HoverBudget.MaxCharacters + 1);
+            label.ShouldStartWith("call(first,\n    xxx");
+            label.Replace("\n    ", " ").Length.ShouldBe(HoverBudget.MaxCharacters + 1);
             label.ShouldEndWith("…");
             Texts(popup!).Sum(text => text.Length).ShouldBe(label.Length);
         });
@@ -325,6 +339,15 @@ public sealed class SignatureHelpTests(UiFixture ui)
 
     /// <summary>The signature help's popup in the window's overlay layer; null while it is closed.</summary>
     private static PopupFrame? Popup(EditorWindow window) => PopupFrames.Find(window, "SignatureHelp");
+
+    /// <summary>The label of the signature marked active.</summary>
+    private static string? ActiveSignature(PopupFrame popup) =>
+        popup
+            .GetVisualDescendants()
+            .OfType<Border>()
+            .Where(border => border.Background is not null && border.Child is TextBlock)
+            .Select(border => ((TextBlock)border.Child!).Inlines?.Text)
+            .SingleOrDefault();
 
     private static TextBlock Signature(PopupFrame popup) =>
         popup.GetVisualDescendants().OfType<TextBlock>().First(t => t.Inlines?.Text?.StartsWith("call(") == true);

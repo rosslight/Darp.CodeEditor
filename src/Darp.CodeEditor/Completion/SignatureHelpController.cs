@@ -37,6 +37,12 @@ namespace Darp.CodeEditor.Completion;
 /// </remarks>
 internal sealed class SignatureHelpController : IDisposable
 {
+    /// <summary>The narrowest the popup's most width gets: VS Code's.</summary>
+    private const double MinMaxWidth = 440;
+
+    /// <summary>The lowest the popup's most height gets: VS Code's.</summary>
+    private const double MinMaxHeight = 250;
+
     /// <summary>The pause after an edit or a caret move before signature help is asked again: VS Code's.</summary>
     private static readonly TimeSpan s_pause = TimeSpan.FromMilliseconds(120);
 
@@ -80,9 +86,7 @@ internal sealed class SignatureHelpController : IDisposable
         {
             Name = "SignatureHelp",
             Child = _content,
-            Padding = new Avalonia.Thickness(8, 4, 4, 4),
-            MaxWidth = 440,
-            MaxHeight = 250,
+            Padding = new Avalonia.Thickness(4, 4, 2, 4),
         };
         _popup = new EditorPopup(editor, _frame);
         _textArea.TextEntered += OnTextEntered;
@@ -252,8 +256,8 @@ internal sealed class SignatureHelpController : IDisposable
     }
 
     /// <summary>
-    /// Shows <paramref name="help"/>'s active signature above the caret, once its documentation is read off the UI
-    /// thread, as the hover reads its Markdown.
+    /// Shows <paramref name="help"/>'s signatures above the caret, once the documentation of the active one is read off
+    /// the UI thread, as the hover reads its Markdown.
     /// </summary>
     private async void Show(SignatureHelpInfo help)
     {
@@ -271,10 +275,16 @@ internal sealed class SignatureHelpController : IDisposable
             }.OfType<HoverText>(),
         ];
         TextMateGrammar? grammar = _highlighter.Grammar;
-        // As much as a hover shows, the signature first: a server's long signature or documentation costs the UI thread
+        // As much as a hover shows, the signatures first: a server's long signatures or documentation cost the UI thread
         // no more than the largest hover.
         var budget = new HoverBudget();
-        string label = budget.Take(signature.Label) ?? "";
+        var labels = new List<string>();
+        foreach (SignatureInfo each in help.Signatures)
+        {
+            if (budget.Take(each.Label) is not { } label)
+                break;
+            labels.Add(label);
+        }
         try
         {
             IReadOnlyList<HoverBlock> blocks =
@@ -289,13 +299,22 @@ internal sealed class SignatureHelpController : IDisposable
             PopupColors colors = _colors?.Popups ?? PopupColors.Default;
             _frame.Paint(colors.HoverBackground, colors.HoverBorder, colors.HoverForeground, colors.Shadow);
             _content.SliderBrushes = (colors.Slider, colors.SliderHover, colors.SliderActive);
-            _content.Child = View(
+            // As VS Code: at least 440 pixels wide, wider in wide editors, and scrolling beyond a quarter of the
+            // editor's height, at least 250 pixels.
+            Avalonia.Size editor = _editor.Bounds.Size;
+            _frame.MaxWidth = Math.Max(MinMaxWidth, Math.Floor(editor.Width / 2));
+            _frame.MaxHeight = Math.Max(MinMaxHeight, Math.Floor(editor.Height / 4));
+            double room = _frame.MaxWidth - _frame.Padding.Left - _frame.Padding.Right - PopupScroller.SliderWidth - 10;
+            int columns = Math.Max(20, (int)(room / Math.Max(1, _textView.WideSpaceWidth)));
+            _content.Child = SignatureView.Create(
                 help,
-                signature,
-                label,
+                labels,
                 blocks,
-                new PopupLook(_editor.FontFamily, _editor.FontSize, colors)
+                new PopupLook(_editor.FontFamily, _editor.FontSize, colors),
+                columns,
+                out Control active
             );
+            _content.ScrollIntoView(active);
             _popup.Show(
                 _textView,
                 () =>
@@ -312,67 +331,6 @@ internal sealed class SignatureHelpController : IDisposable
                 .TryGet(LogEventLevel.Error, AssetFiles.LogArea)
                 ?.Log(this, "Showing signature help failed: {Exception}", e);
         }
-    }
-
-    /// <summary>
-    /// The signature as code, in the editor's font, with the active parameter in bold in the hover's highlight color;
-    /// before it which signature of how many, when there are more; below it the documentation.
-    /// </summary>
-    /// <param name="help">The signature help.</param>
-    /// <param name="signature">The signature that shows.</param>
-    /// <param name="label">Its label, as much of it as the budget left, with "…" where it was cut.</param>
-    /// <param name="documentation">The documentation.</param>
-    /// <param name="look">How the popup looks.</param>
-    private static Control View(
-        SignatureHelpInfo help,
-        SignatureInfo signature,
-        string label,
-        IReadOnlyList<HoverBlock> documentation,
-        PopupLook look
-    )
-    {
-        var inlines = new InlineCollection();
-        // The active parameter, in what is left of the label.
-        int kept = label.Length == signature.Label.Length ? label.Length : label.Length - 1;
-        (int start, int end) =
-            signature.ActiveParameter >= 0 && signature.Parameters[signature.ActiveParameter] is var active
-                ? (Math.Min(active.Start, kept), Math.Min(active.Start + active.Length, kept))
-                : (0, 0);
-        if (end > start)
-        {
-            inlines.Add(new Run(label[..start]));
-            inlines.Add(
-                new Run(label[start..end]) { FontWeight = FontWeight.Bold, Foreground = look.Colors.HoverHighlight }
-            );
-            inlines.Add(new Run(label[end..]));
-        }
-        else
-        {
-            inlines.Add(new Run(label));
-        }
-        SelectableTextBlock code = HoverView.Text(look);
-        code.Inlines = inlines;
-        code.FontFamily = look.CodeFont;
-        code.FontSize = look.CodeSize;
-        code.Foreground = look.Colors.CodeForeground;
-        var line = new DockPanel();
-        if (help.Signatures.Count > 1)
-        {
-            var counter = new TextBlock
-            {
-                Text = $"{help.ActiveSignature + 1}/{help.Signatures.Count}",
-                VerticalAlignment = VerticalAlignment.Center,
-                Foreground = look.Colors.Description,
-                Margin = new Avalonia.Thickness(0, 0, 6, 0),
-            };
-            DockPanel.SetDock(counter, Dock.Left);
-            line.Children.Add(counter);
-        }
-        line.Children.Add(code);
-        var panel = new StackPanel { Spacing = 6, Children = { line } };
-        if (documentation.Count > 0)
-            panel.Children.Add(HoverView.Create(documentation, look));
-        return panel;
     }
 
     private void OnClosingChange(object? sender, EventArgs e) => Close();
