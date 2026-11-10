@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Threading;
 using AvaloniaEdit.Document;
 using Darp.CodeEditor.Diagnostics;
+using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.LanguageClient;
 
 namespace Darp.CodeEditor;
@@ -73,7 +74,10 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     {
         Language = language;
         _filePath = filePath;
-        _indentation = language.Id == "yaml" ? Indentation.Spaces(2) : Indentation.Spaces(4);
+        _indentation = IndentationGuesser.Guess(
+            text,
+            language.Id == "yaml" ? Indentation.Spaces(2) : Indentation.Spaces(4)
+        );
         _document = new TextDocument(text);
         _currentSnapshot = new TextSnapshot(_document.CreateSnapshot(), 0);
         _diagnostics = new DiagnosticsBatch([], _currentSnapshot);
@@ -139,8 +143,10 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
 
     /// <summary>
     /// How Tab and new lines indent, in every editor that shows the document, and how wide tabs are drawn. It starts
-    /// as in VS Code: 2 spaces for YAML, 4 spaces otherwise. The document does not detect it from the text. Changing it
-    /// leaves the existing text as it is, and editors apply it at once.
+    /// as VS Code detects it from the initial text: tabs or spaces by how many lines start with each, and the size of a
+    /// level by how much lines indent more than the line above, from the first 10,000 lines. Where the text gives no
+    /// answer, as when it is empty or has no indented lines, it is VS Code's default: 2 spaces for YAML, 4 spaces
+    /// otherwise. Changing it leaves the existing text as it is, and editors apply it at once.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The size is not from 1 to 1,000 columns.</exception>
     public Indentation Indentation
