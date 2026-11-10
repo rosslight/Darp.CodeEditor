@@ -10,7 +10,15 @@
 // line as a code block in that language.
 // Hover over the word "slow" is never answered. Semantic tokens come from words, runs of letters, digits and
 // underscores: a word "class_static" is a token of the type "class" with the modifier "static", if the legend names
-// them; other words are not tokens. Either request about a document that is not open is answered with an error.
+// them; other words are not tokens.
+//
+// Completion answers with what the command "completion" set, or with generated items (--completion-items); "." asks
+// for it as it is typed, and ";" commits items. Requests are logged with the caret's offset at the end, and so is
+// signature help. Resolving an item answers the item with the properties of its "data"
+// added. Signature help answers inside parentheses, "(" asks for it and "," asks again: the signatures that the command
+// "signatures" set, or two of "call", with the parameter at the position active, and the signature that the client
+// says it shows, or the first. Completion in a document with the word "slow" is never answered. A request about a
+// document that is not open is answered with an error.
 //
 // Arguments:
 //   --initialize never      never answer initialize
@@ -24,6 +32,8 @@
 //   --ignore-shutdown       never answer shutdown
 //   --semantic-tokens <range|full|none>  offer semantic tokens for ranges and the whole text, the whole text only, or
 //                           none; ranges and the whole text by default
+//   --completion-items <n>  answer completion with n generated items, as a large server does
+//   --completion-label-length <n>  make the generated items' labels n characters long, ending in "abab…"
 //   host                    start a child in "sleep" as the library starts servers, print its process id, and wait
 //   sleep                   sleep, and never read standard input
 using System.Diagnostics;
@@ -62,6 +72,8 @@ internal sealed class FakeServer
     private readonly bool _vscodeUris;
     private readonly int? _exitAtStart;
     private readonly string _semanticTokens = "range";
+    private readonly int _completionItems;
+    private readonly int _completionLabelLength;
 
     /// <summary>The legend of semantic tokens, in another order than the client's, and with a type of its own.</summary>
     private static readonly string[] s_tokenTypes =
@@ -78,6 +90,35 @@ internal sealed class FakeServer
 
     /// <summary>Set by the command <c>hold-semantic-tokens</c>: semantic tokens are no longer answered.</summary>
     private bool _holdSemanticTokens;
+
+    /// <summary>Set by the command <c>completion</c>: the result that completion answers with.</summary>
+    private JsonNode? _completion;
+
+    /// <summary>
+    /// Set by the command <c>hold-completion</c>: completion requests wait for the command <c>release-completion</c>,
+    /// which answers them with what the command <c>completion</c> set by then.
+    /// </summary>
+    private bool _holdCompletion;
+
+    private readonly List<JsonNode?> _heldCompletions = [];
+
+    /// <summary>Set by the command <c>hold-resolve</c>: resolve requests wait for the command <c>release-resolve</c>.</summary>
+    private bool _holdResolve;
+
+    private readonly List<(JsonNode? Id, JsonNode Item)> _heldResolves = [];
+
+    /// <summary>Set by the command <c>signatures</c>: the signatures of signature help.</summary>
+    private JsonNode _signatures =
+        JsonNode.Parse(
+            """
+            [
+              { "label": "call(first, second)", "documentation": "Calls with two.",
+                "parameters": [ { "label": "first", "documentation": { "kind": "markdown", "value": "The **first** one." } }, { "label": "second" } ] },
+              { "label": "call(first, second, third)", "documentation": "Calls with three.",
+                "parameters": [ { "label": [5, 10] }, { "label": [12, 18] }, { "label": [20, 25], "documentation": "The third one." } ] }
+            ]
+            """
+        ) ?? throw new InvalidDataException("No signatures.");
     private readonly List<string> _startLines = [];
     private int _lastId;
 
@@ -119,6 +160,12 @@ internal sealed class FakeServer
                     break;
                 case "--semantic-tokens":
                     _semanticTokens = arguments[++i];
+                    break;
+                case "--completion-items":
+                    _completionItems = int.Parse(arguments[++i]);
+                    break;
+                case "--completion-label-length":
+                    _completionLabelLength = int.Parse(arguments[++i]);
                     break;
                 default:
                     throw new ArgumentException($"Unknown argument {arguments[i]}");
@@ -166,6 +213,17 @@ internal sealed class FakeServer
                                     ?? new JsonObject { ["openClose"] = true, ["change"] = _fullSync ? 1 : 2 },
                                 ["hoverProvider"] = true,
                                 ["semanticTokensProvider"] = SemanticTokensProvider(),
+                                ["completionProvider"] = new JsonObject
+                                {
+                                    ["triggerCharacters"] = new JsonArray("."),
+                                    ["allCommitCharacters"] = new JsonArray(";"),
+                                    ["resolveProvider"] = true,
+                                },
+                                ["signatureHelpProvider"] = new JsonObject
+                                {
+                                    ["triggerCharacters"] = new JsonArray("("),
+                                    ["retriggerCharacters"] = new JsonArray(","),
+                                },
                             },
                         }
                     );
@@ -203,6 +261,15 @@ internal sealed class FakeServer
             case "textDocument/semanticTokens/full":
             case "textDocument/semanticTokens/range":
                 SemanticTokens(id, method, Required(parameters, "params"));
+                break;
+            case "textDocument/completion":
+                Completion(id, Required(parameters, "params"));
+                break;
+            case "completionItem/resolve":
+                Resolve(id, Required(parameters, "params"));
+                break;
+            case "textDocument/signatureHelp":
+                SignatureHelp(id, Required(parameters, "params"));
                 break;
             case "workspace/didChangeConfiguration":
                 Log($"configuration changed {parameters?.ToJsonString()}");
@@ -329,6 +396,36 @@ internal sealed class FakeServer
             case ["hold-semantic-tokens"]:
                 _holdSemanticTokens = true;
                 Log("holding semantic tokens");
+                break;
+            case ["completion", var json]:
+                _completion = JsonNode.Parse(json);
+                Log("set completion");
+                break;
+            case ["hold-completion"]:
+                _holdCompletion = true;
+                Log("holding completion");
+                break;
+            case ["release-completion"]:
+                _holdCompletion = false;
+                foreach (JsonNode? id in _heldCompletions)
+                    Reply(id, _completion?.DeepClone());
+                _heldCompletions.Clear();
+                Log("released completion");
+                break;
+            case ["hold-resolve"]:
+                _holdResolve = true;
+                Log("holding resolve");
+                break;
+            case ["release-resolve"]:
+                _holdResolve = false;
+                foreach ((JsonNode? id, JsonNode item) in _heldResolves)
+                    Reply(id, Resolved(item));
+                _heldResolves.Clear();
+                Log("released resolve");
+                break;
+            case ["signatures", var json]:
+                _signatures = JsonNode.Parse(json) ?? throw new InvalidDataException("No signatures.");
+                Log("set signatures");
                 break;
             case ["peek", var signal]:
                 _peekSignal = signal;
@@ -458,6 +555,116 @@ internal sealed class FakeServer
             }
         }
         Reply(id, new JsonObject { ["data"] = data });
+    }
+
+    /// <summary>Answers with the generated items, or the result set by the command; or never, once held.</summary>
+    private void Completion(JsonNode? id, JsonNode parameters)
+    {
+        string uri = Text(parameters["textDocument"]?["uri"], "uri");
+        if (Known(id, "completion", parameters) is not { } document)
+            return;
+        JsonNode? context = parameters["context"];
+        int offset = Offset(document.Text, Required(parameters["position"], "position"));
+        Log(
+            $"completion {id?.ToJsonString()} {uri} {(int?)context?["triggerKind"]} {(string?)context?["triggerCharacter"] ?? "-"} {offset}"
+        );
+        if (document.Text.Contains("slow", StringComparison.Ordinal))
+            return;
+        if (_holdCompletion)
+        {
+            _heldCompletions.Add(id?.DeepClone());
+            return;
+        }
+        if (_completionItems == 0)
+        {
+            Reply(id, _completion?.DeepClone());
+            return;
+        }
+        string[] words = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"];
+        var items = new JsonArray();
+        for (int i = 0; i < _completionItems; i++)
+        {
+            string label = $"{words[i % words.Length]}{i}";
+            for (int c = 0; label.Length < _completionLabelLength; c++)
+                label += c % 2 == 0 ? 'a' : 'b';
+            items.Add(
+                (JsonNode)
+                    new JsonObject
+                    {
+                        ["label"] = label,
+                        ["kind"] = i % 25 + 1,
+                        ["sortText"] = $"{i:D5}",
+                        ["filterText"] = label,
+                        ["data"] = new JsonObject { ["index"] = i },
+                    }
+            );
+        }
+        Reply(id, new JsonObject { ["isIncomplete"] = false, ["items"] = items });
+    }
+
+    /// <summary>Answers with the item and the properties of its data; once held, when the hold is released.</summary>
+    private void Resolve(JsonNode? id, JsonNode item)
+    {
+        Log($"resolve {id?.ToJsonString()} {(string?)item["label"]}");
+        if (_holdResolve)
+            _heldResolves.Add((id?.DeepClone(), item.DeepClone()));
+        else
+            Reply(id, Resolved(item));
+    }
+
+    private static JsonNode Resolved(JsonNode item)
+    {
+        JsonObject resolved = item.DeepClone().AsObject();
+        if (item["data"] is JsonObject data)
+        {
+            foreach ((string name, JsonNode? value) in data)
+                resolved[name] = value?.DeepClone();
+        }
+        return resolved;
+    }
+
+    /// <summary>
+    /// Answers inside parentheses with the signatures, the parameter at the position active and the signature that the
+    /// client shows, or the first; outside them with null.
+    /// </summary>
+    private void SignatureHelp(JsonNode? id, JsonNode parameters)
+    {
+        if (Known(id, "signatureHelp", parameters) is not { } document)
+            return;
+        JsonNode? context = parameters["context"];
+        JsonNode? showing = context?["activeSignatureHelp"];
+        int offset = Offset(document.Text, Required(parameters["position"], "position"));
+        Log(
+            $"signatureHelp {id?.ToJsonString()} {(int?)context?["triggerKind"]} {(string?)context?["triggerCharacter"] ?? "-"} "
+                + $"{(bool?)context?["isRetrigger"]} {showing?["activeSignature"]?.ToJsonString() ?? "-"} {offset}"
+        );
+        // The innermost parenthesis still open before the position, and the commas in it.
+        int depth = 0;
+        int commas = 0;
+        for (int i = offset - 1; i >= 0; i--)
+        {
+            char c = document.Text[i];
+            if (c == ')')
+                depth++;
+            else if (c == '(' && depth > 0)
+                depth--;
+            else if (c == '(')
+            {
+                Reply(
+                    id,
+                    new JsonObject
+                    {
+                        ["signatures"] = _signatures.DeepClone(),
+                        ["activeSignature"] = (int?)showing?["activeSignature"] ?? 0,
+                        ["activeParameter"] = commas,
+                    }
+                );
+                return;
+            }
+            else if (c == ',' && depth == 0)
+                commas++;
+        }
+        Reply(id, null);
     }
 
     /// <summary>The word of letters, digits and underscores at an offset; empty where there is none.</summary>

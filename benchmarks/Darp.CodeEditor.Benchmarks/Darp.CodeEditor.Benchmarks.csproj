@@ -13,6 +13,8 @@
   <!-- Default: benchmark the library in this working tree. -->
   <ItemGroup Condition="'$(DarpCodeEditorBaselineVersion)' == ''">
     <ProjectReference Include="..\..\src\Darp.CodeEditor\Darp.CodeEditor.csproj" />
+    <!-- The language server that the completion benchmarks ask; the baseline has no completion to ask for. -->
+    <ProjectReference Include="..\..\tests\Darp.CodeEditor.Tests.FakeServer\Darp.CodeEditor.Tests.FakeServer.csproj" />
   </ItemGroup>
   <!-- Baseline job: benchmark a packed version of the library, without the benchmarks of code it lacks ([NotInBaseline]). -->
   <PropertyGroup Condition="'$(DarpCodeEditorBaselineVersion)' != ''">

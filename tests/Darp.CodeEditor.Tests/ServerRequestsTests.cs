@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json.Nodes;
 using Avalonia.Threading;
 using Darp.CodeEditor.LanguageClient;
+using Darp.CodeEditor.Lsp;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -266,6 +267,80 @@ public sealed class ServerRequestsTests(UiFixture ui)
                     new TextPosition(1, 1),
                     new TextPosition(1, 11),
                     1,
+                    CancellationToken.None
+                );
+        });
+
+    [Fact]
+    public Task Completion_resolve_and_signature_help_ask_a_server_only_once_the_document_is_open_in_it() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer("--completion-items", "3");
+            var release = new ManualResetEventSlim();
+            using var server = new LanguageServer(
+                fake.Options with
+                {
+                    Settings = request =>
+                    {
+                        if (request.Section is null)
+                            release.Wait();
+                        return null;
+                    },
+                }
+            );
+            try
+            {
+                using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "call(");
+                int changes = 0;
+                document.LanguageFeaturesChanged += (_, _) => changes++;
+                await Wait.ForAsync(server.StartAsync());
+                await fake.WaitForAsync("initialized");
+
+                // Running, but the document is not open in the process until the start's settings went out: editors
+                // see no features and get nothing, and the server hears nothing of it.
+                document.Features.ShouldBeNull();
+                (await Completion(document)).ShouldBeNull();
+                (await SignatureHelp(document)).ShouldBeNull();
+                fake.Lines.ShouldNotContain(line =>
+                    line.StartsWith("completion ") || line.StartsWith("signatureHelp ")
+                );
+
+                release.Set();
+
+                // Right after it opens there, they work.
+                await Wait.UntilAsync(() => changes == 1);
+                document.Features.ShouldNotBeNull();
+                CompletionList list = (await Completion(document)).ShouldNotBeNull();
+                (await SignatureHelp(document)).ShouldNotBeNull();
+                (await list.ResolveAsync(list.Items[0], CancellationToken.None)).ShouldNotBeNull();
+                List<string> lines = [.. fake.Lines];
+                int open = lines.FindIndex(line => line.StartsWith("open "));
+                lines.FindIndex(line => line.StartsWith("completion ")).ShouldBeGreaterThan(open);
+                lines.FindIndex(line => line.StartsWith("signatureHelp ")).ShouldBeGreaterThan(open);
+
+                // Once the document is no longer open there as it was, its items no longer resolve.
+                document.FilePath = Path.Combine(AppContext.BaseDirectory, "moved.txt");
+                (await list.ResolveAsync(list.Items[1], CancellationToken.None)).ShouldBeNull();
+                fake.LinesStartingWith("resolve ").ShouldHaveSingleItem();
+            }
+            finally
+            {
+                release.Set();
+            }
+
+            static Task<CompletionList?> Completion(CodeDocument document) =>
+                document.CompletionAsync(
+                    document.CurrentSnapshot,
+                    TextRange.FromBounds(5, 5),
+                    new CompletionTrigger(CompletionTriggerKind.Invoked),
+                    CancellationToken.None
+                );
+
+            static Task<SignatureHelpInfo?> SignatureHelp(CodeDocument document) =>
+                document.SignatureHelpAsync(
+                    document.CurrentSnapshot,
+                    5,
+                    new SignatureHelpTrigger(SignatureHelpTriggerKind.Invoked, null, null),
                     CancellationToken.None
                 );
         });

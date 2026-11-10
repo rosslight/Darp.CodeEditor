@@ -14,19 +14,22 @@ namespace Darp.CodeEditor.Popups;
 /// </summary>
 /// <remarks>
 /// <para>
-/// It opens above the place's line, or below it when only that side has room; when neither has, it takes the larger
+/// It opens above the place's line, or below it when only that side has room; a popup made for below, such as a list
+/// of choices, opens below, or above when only that side has room. When neither side has room, it takes the larger
 /// side and is limited to its height. Above the line it keeps its bottom edge there, so it stays next to the line when
 /// its content grows. It moves left at the window's right edge.
 /// </para>
 /// <para>
 /// While open, it is placed again after each layout pass in which the window or its place moved, as when the window is
-/// resized or the text reflows, and it closes when its place's line leaves the view it is in.
+/// resized or the text reflows, and it closes when its place's line leaves the view it is in, which
+/// <see cref="LeftView"/> reports.
 /// </para>
 /// </remarks>
 internal sealed class EditorPopup
 {
     private readonly CodeEditor _editor;
     private readonly ThemeVariantScope _root;
+    private readonly bool _below;
     private OverlayLayer? _layer;
 
     /// <summary>The bindings to the editor's theme variant and to the font around it, while open.</summary>
@@ -38,11 +41,18 @@ internal sealed class EditorPopup
     /// <summary>The window's size and the place's line in it at the last placing; null to place again.</summary>
     private (Size Space, Point Top, Point Bottom)? _placed;
 
-    public EditorPopup(CodeEditor editor, Control content)
+    /// <param name="editor">The editor whose text the popup is next to.</param>
+    /// <param name="content">What the popup shows.</param>
+    /// <param name="below">Whether it opens below its place's line when both sides have room.</param>
+    public EditorPopup(CodeEditor editor, Control content, bool below = false)
     {
         _editor = editor;
         _root = new ThemeVariantScope { Child = content };
+        _below = below;
     }
+
+    /// <summary>Raised when the popup closed because its place's line left the view.</summary>
+    public event EventHandler? LeftView;
 
     /// <summary>The popup's outermost control, for the pointer over it.</summary>
     public Control Root => _root;
@@ -118,6 +128,7 @@ internal sealed class EditorPopup
         )
         {
             Hide();
+            LeftView?.Invoke(this, EventArgs.Empty);
             return;
         }
         Size space = layer.Bounds.Size;
@@ -130,7 +141,9 @@ internal sealed class EditorPopup
         Size size = _root.DesiredSize;
         double above = top.Y;
         double below = space.Height - bottom.Y;
-        bool placeAbove = size.Height <= above || (size.Height > below && above >= below);
+        bool placeAbove = _below
+            ? size.Height > below && above > below
+            : size.Height <= above || (size.Height > below && above >= below);
         // In whole pixels, so that rounding the layout cannot take it past the window's edge.
         _root.MaxHeight = Math.Max(0, Math.Floor(placeAbove ? above : below));
         Canvas.SetLeft(_root, Math.Clamp(top.X, 0, Math.Max(0, space.Width - size.Width)));

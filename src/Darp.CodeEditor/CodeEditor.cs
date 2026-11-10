@@ -12,6 +12,7 @@ using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
 using AvaloniaEdit.Search;
+using Darp.CodeEditor.Completion;
 using Darp.CodeEditor.Diagnostics;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
@@ -162,6 +163,12 @@ public class CodeEditor : TemplatedControl
     /// <summary>Shows the diagnostics and the server's hover where the pointer rests.</summary>
     private HoverController? _hover;
 
+    /// <summary>The server's completion of the shown document.</summary>
+    private CompletionController? _completion;
+
+    /// <summary>The server's signature help of the shown document.</summary>
+    private SignatureHelpController? _signatureHelp;
+
     /// <summary>The template's panel, which the search bar goes into, over the text.</summary>
     private Panel? _root;
 
@@ -205,6 +212,9 @@ public class CodeEditor : TemplatedControl
     /// <summary>The colors of <see cref="_theme"/> besides the tokens.</summary>
     private TextAreaColors? _colors;
 
+    /// <summary>The colors of <see cref="_theme"/>'s completion icons.</summary>
+    private SymbolIconColors? _iconColors;
+
     /// <summary>The grammar loaded last, with the theme it was loaded with.</summary>
     private TextMateGrammar? _grammar;
 
@@ -232,8 +242,9 @@ public class CodeEditor : TemplatedControl
             new(SearchCommands.FindNext, (_, _) => FindNext(previous: false)),
             new(SearchCommands.FindPrevious, (_, _) => FindNext(previous: true)),
         ];
-        // Ahead of AvaloniaEdit's own keys, which its text area handles as they bubble.
+        // Ahead of AvaloniaEdit's own keys, which its text area handles as they bubble, and of its typed text.
         AddHandler(KeyDownEvent, OnKeyDownTunnel, RoutingStrategies.Tunnel);
+        AddHandler(TextInputEvent, OnTextInputTunnel, RoutingStrategies.Tunnel);
     }
 
     /// <summary>
@@ -484,8 +495,11 @@ public class CodeEditor : TemplatedControl
         // Raised as the focus leaves an element inside the editor; it may stay inside, as when it goes to the search bar.
         Dispatcher.Post(() =>
         {
-            if (!IsKeyboardFocusWithin)
-                _hover?.Close();
+            if (IsKeyboardFocusWithin)
+                return;
+            _hover?.Close();
+            _completion?.Close();
+            _signatureHelp?.Close();
         });
     }
 
@@ -499,6 +513,12 @@ public class CodeEditor : TemplatedControl
         {
             _part?.IsReadOnly = IsReadOnly || _shown is null;
             _searchBar?.UpdateReplaceRow();
+            // Nothing completes or asks for signatures where the user cannot type.
+            if (IsReadOnly)
+            {
+                _completion?.Close();
+                _signatureHelp?.Close();
+            }
         }
         else if (
             change.Property == ColorThemeProperty
@@ -579,6 +599,13 @@ public class CodeEditor : TemplatedControl
         _squiggles = new SquiggleLayer(part.TextArea, document) { Colors = _colors };
         _semantic = new SemanticHighlighter(textView, document, Dispatcher) { Theme = _theme };
         _hover = new HoverController(this, part.TextArea, document, _squiggles, _highlighter) { Colors = _colors };
+        // After the editing helpers: they see typed text first, so that a typed "(" has its ")" when it asks.
+        _completion = new CompletionController(this, part.TextArea, document, _highlighter)
+        {
+            Colors = _colors,
+            Icons = _iconColors,
+        };
+        _signatureHelp = new SignatureHelpController(this, part.TextArea, document, _highlighter) { Colors = _colors };
         _searchBar?.Attach(this, part.TextArea, document);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
         _waitingForLayout = true;
@@ -600,6 +627,10 @@ public class CodeEditor : TemplatedControl
         _whitespace = null;
         _hover?.Dispose();
         _hover = null;
+        _completion?.Dispose();
+        _completion = null;
+        _signatureHelp?.Dispose();
+        _signatureHelp = null;
         _squiggles?.Dispose();
         _squiggles = null;
         _semantic?.Dispose();
@@ -625,8 +656,9 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>
     /// The editor's own keys, before AvaloniaEdit's: search, also in the search bar, as AvaloniaEdit decides them by
-    /// the operating system, and the editing helpers' keys in the text area. Ctrl+F and Ctrl+H are the editor's even
-    /// without a document, so that AvaloniaEdit's own search panel never opens.
+    /// the operating system, and in the text area the keys of completion, of signature help and of the editing
+    /// helpers. Ctrl+F and Ctrl+H are the editor's even without a document, so that AvaloniaEdit's own search panel
+    /// never opens.
     /// </summary>
     private void OnKeyDownTunnel(object? sender, KeyEventArgs e)
     {
@@ -640,18 +672,29 @@ public class CodeEditor : TemplatedControl
             e.Handled = FindNext(previous: shift);
         else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && Dismiss())
             e.Handled = true;
-        else if (_helpers is { } helpers && _part is { } part && part.TextArea.IsFocused)
-            helpers.OnKeyDown(e);
+        else if (_part is not { TextArea.IsFocused: true })
+            return;
+        else if (_completion?.OnKeyDown(e) == true || _signatureHelp?.OnKeyDown(e) == true)
+            e.Handled = true;
+        else
+            _helpers?.OnKeyDown(e);
+    }
+
+    /// <summary>Typed text, before AvaloniaEdit's text area takes it: a commit character commits completion's item.</summary>
+    private void OnTextInputTunnel(object? sender, TextInputEventArgs e)
+    {
+        if (_part is { TextArea.IsFocused: true })
+            _completion?.OnTextInput(e);
     }
 
     /// <summary>
-    /// What Escape closes: it ends the hover, also one still waiting for its server, and when no hover was open, it
-    /// closes the search bar.
+    /// What Escape closes, one at a time: completion, signature help, the hover, the search bar. Each also ends what
+    /// still waits for its server.
     /// </summary>
     /// <returns>Whether it closed something the user saw.</returns>
     private bool Dismiss()
     {
-        if (_hover?.Close() == true)
+        if (_completion?.Close() == true || _signatureHelp?.Close() == true || _hover?.Close() == true)
             return true;
         if (_searchBar is not { IsOpen: true } bar)
             return false;
@@ -962,6 +1005,10 @@ public class CodeEditor : TemplatedControl
             _theme = theme;
             TextAreaColors colors = TextAreaColors.From(theme);
             _colors = colors;
+            _iconColors = SymbolIconColors.From(theme);
+            _completion?.Colors = colors;
+            _completion?.Icons = _iconColors;
+            _signatureHelp?.Colors = colors;
             _brackets?.Colors = colors;
             _whitespace?.Colors = colors;
             _squiggles?.Colors = colors;

@@ -31,10 +31,14 @@ internal sealed record InitializeResult(ServerCapabilities Capabilities);
 /// <param name="TextDocumentSync">A <c>TextDocumentSyncKind</c> number, or an object with a <c>change</c> kind.</param>
 /// <param name="HoverProvider">True, or an object of options.</param>
 /// <param name="SemanticTokensProvider">An object with a <c>legend</c>, and <c>range</c> and <c>full</c> when offered.</param>
+/// <param name="CompletionProvider">An object with trigger and commit characters, and whether items resolve.</param>
+/// <param name="SignatureHelpProvider">An object with trigger and retrigger characters.</param>
 internal sealed record ServerCapabilities(
     JsonElement? TextDocumentSync = null,
     JsonElement? HoverProvider = null,
-    JsonElement? SemanticTokensProvider = null
+    JsonElement? SemanticTokensProvider = null,
+    JsonElement? CompletionProvider = null,
+    JsonElement? SignatureHelpProvider = null
 );
 
 internal sealed record TextDocumentItem(string Uri, string LanguageId, int Version, string Text);
@@ -82,6 +86,37 @@ internal sealed record SemanticTokensParams(TextDocumentIdentifier TextDocument)
 /// <summary>The params of <c>textDocument/semanticTokens/range</c>.</summary>
 internal sealed record SemanticTokensRangeParams(TextDocumentIdentifier TextDocument, LspRange Range);
 
+/// <summary>The params of <c>textDocument/completion</c>.</summary>
+internal sealed record CompletionParams(
+    TextDocumentIdentifier TextDocument,
+    LspPosition Position,
+    CompletionContext Context
+);
+
+/// <summary>How completion was asked for.</summary>
+/// <param name="TriggerKind">One of <see cref="CompletionTriggerKind"/>.</param>
+/// <param name="TriggerCharacter">The character typed, for a trigger character.</param>
+internal sealed record CompletionContext(int TriggerKind, string? TriggerCharacter = null);
+
+/// <summary>The params of <c>textDocument/signatureHelp</c>.</summary>
+internal sealed record SignatureHelpParams(
+    TextDocumentIdentifier TextDocument,
+    LspPosition Position,
+    SignatureHelpContext Context
+);
+
+/// <summary>How signature help was asked for.</summary>
+/// <param name="TriggerKind">One of <see cref="SignatureHelpTriggerKind"/>.</param>
+/// <param name="IsRetrigger">Whether signature help showed when it was asked for.</param>
+/// <param name="TriggerCharacter">The character typed, for a trigger character.</param>
+/// <param name="ActiveSignatureHelp">The signature help that showed, with the signature the user chose.</param>
+internal sealed record SignatureHelpContext(
+    int TriggerKind,
+    bool IsRetrigger,
+    string? TriggerCharacter = null,
+    JsonNode? ActiveSignatureHelp = null
+);
+
 internal sealed record ConfigurationParams(IReadOnlyList<ConfigurationItem> Items);
 
 internal sealed record ConfigurationItem(string? ScopeUri = null, string? Section = null);
@@ -107,6 +142,22 @@ internal static class TextDocumentSyncKind
     public const int Incremental = 2;
 }
 
+/// <summary>The kinds of <c>CompletionTriggerKind</c>.</summary>
+internal static class CompletionTriggerKind
+{
+    public const int Invoked = 1;
+    public const int TriggerCharacter = 2;
+    public const int TriggerForIncompleteCompletions = 3;
+}
+
+/// <summary>The kinds of <c>SignatureHelpTriggerKind</c>.</summary>
+internal static class SignatureHelpTriggerKind
+{
+    public const int Invoked = 1;
+    public const int TriggerCharacter = 2;
+    public const int ContentChange = 3;
+}
+
 /// <summary>The source-generated serialization of the protocol's types, for NativeAOT.</summary>
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
@@ -123,6 +174,8 @@ internal static class TextDocumentSyncKind
 [JsonSerializable(typeof(TextDocumentPositionParams))]
 [JsonSerializable(typeof(SemanticTokensParams))]
 [JsonSerializable(typeof(SemanticTokensRangeParams))]
+[JsonSerializable(typeof(CompletionParams))]
+[JsonSerializable(typeof(SignatureHelpParams))]
 [JsonSerializable(typeof(ConfigurationParams))]
 [JsonSerializable(typeof(DidChangeConfigurationParams))]
 internal sealed partial class LspJsonContext : JsonSerializerContext;

@@ -51,8 +51,7 @@ internal sealed record TextAreaColors(
     public static TextAreaColors From(ColorThemeFile theme)
     {
         IReadOnlyDictionary<string, Color> colors = theme.Colors;
-        // VS Code knows a theme's kind from its extension; the file has only its background to tell.
-        bool dark = !colors.TryGetValue("editor.background", out Color background) || Luminance(background) < 0.5;
+        bool dark = IsDark(theme);
         ImmutableSolidColorBrush? currentLine = Brush("editor.lineHighlightBackground");
         return new TextAreaColors(
             Brush("editor.background") ?? Solid(dark ? 0xFF1E1E1E : 0xFFFFFFFF),
@@ -85,6 +84,13 @@ internal sealed record TextAreaColors(
 
         ImmutablePen? Pen(string key) => Brush(key) is { } brush ? new ImmutablePen(brush) : null;
     }
+
+    /// <summary>
+    /// Whether <paramref name="theme"/> is dark, for VS Code's defaults of the colors it leaves out. VS Code knows a
+    /// theme's kind from its extension; the file has only its background to tell.
+    /// </summary>
+    public static bool IsDark(ColorThemeFile theme) =>
+        !theme.Colors.TryGetValue("editor.background", out Color background) || Luminance(background) < 0.5;
 
     private static ImmutableSolidColorBrush Solid(uint argb) => new(Color.FromUInt32(argb));
 

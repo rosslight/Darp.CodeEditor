@@ -65,7 +65,7 @@ internal sealed class HoverController : IDisposable
         _document = document;
         _squiggles = squiggles;
         _highlighter = highlighter;
-        _popup = new EditorPopup(editor, new HoverToolTip { Content = _content });
+        _popup = new EditorPopup(editor, new AppToolTip { Content = _content });
         _textView.PointerHover += OnPointerHover;
         _textView.PointerMoved += OnPointerMoved;
         _textView.PointerExited += OnPointerExited;
@@ -323,13 +323,5 @@ internal sealed class HoverController : IDisposable
         public CancellationTokenSource Cancellation { get; } = new();
 
         public bool Contains(int offset) => offset >= Range.Start && offset < Math.Max(Range.End, Range.Start + 1);
-    }
-
-    /// <summary>The app's tooltip, shown open, as the hover's look: its font, padding, corners and colors.</summary>
-    private sealed class HoverToolTip : ToolTip
-    {
-        public HoverToolTip() => PseudoClasses.Set(":open", true);
-
-        protected override Type StyleKeyOverride => typeof(ToolTip);
     }
 }

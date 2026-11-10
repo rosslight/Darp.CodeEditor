@@ -283,6 +283,46 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     ) => Task.FromResult<SemanticTokenLines?>(null);
 
     /// <summary>
+    /// The server's completion at the end of <paramref name="word"/> in <paramref name="snapshot"/>, the current text,
+    /// for an editor; null when there is none, and when <paramref name="cancellationToken"/> cancelled it. Never waits
+    /// on the calling thread.
+    /// </summary>
+    /// <param name="snapshot">The current text.</param>
+    /// <param name="word">The word before the caret, which ends at the caret: what items without an edit replace.</param>
+    /// <param name="trigger">How completion was asked for.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    internal virtual Task<CompletionList?> CompletionAsync(
+        TextSnapshot snapshot,
+        TextRange word,
+        CompletionTrigger trigger,
+        CancellationToken cancellationToken
+    ) => Task.FromResult<CompletionList?>(null);
+
+    /// <summary>
+    /// The server's signature help at <paramref name="offset"/> of <paramref name="snapshot"/>, the current text, for an
+    /// editor; null when there is none, and when <paramref name="cancellationToken"/> cancelled it. Never waits on the
+    /// calling thread.
+    /// </summary>
+    internal virtual Task<SignatureHelpInfo?> SignatureHelpAsync(
+        TextSnapshot snapshot,
+        int offset,
+        SignatureHelpTrigger trigger,
+        CancellationToken cancellationToken
+    ) => Task.FromResult<SignatureHelpInfo?>(null);
+
+    /// <summary>
+    /// What the server that serves the document offers its editors now, such as the characters that ask for
+    /// completion; null without a running server.
+    /// </summary>
+    internal virtual ServerFeatures? Features => null;
+
+    /// <summary>
+    /// The clock of the editors' pauses before they ask the server: its options' <c>TimeProvider</c>, so that tests can
+    /// pass their own.
+    /// </summary>
+    internal virtual TimeProvider TimeProvider => TimeProvider.System;
+
+    /// <summary>
     /// Raises <see cref="LanguageFeaturesChanged"/> on the UI thread, from any thread. Before Avalonia is set up there
     /// are no editors to tell.
     /// </summary>

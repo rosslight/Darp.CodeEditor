@@ -13,6 +13,7 @@
 		"editorError.foreground": "#FF8000",
 		"editorWarning.foreground": "#00C0C0",
 		"editorInfo.foreground": "#8000FF",
-		"editorHint.foreground": "#008080"
+		"editorHint.foreground": "#008080",
+		"symbolIcon.methodForeground": "#FF0080"
 	}
 }
