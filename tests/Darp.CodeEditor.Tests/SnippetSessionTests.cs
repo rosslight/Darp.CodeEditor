@@ -4,6 +4,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.VisualTree;
+using Darp.CodeEditor.Completion;
 using Darp.CodeEditor.Search;
 using static Darp.CodeEditor.Tests.CompletionTests;
 
@@ -168,6 +169,80 @@ public sealed class SnippetSessionTests(UiFixture ui)
             document.Text.ShouldBe("ay = ay; y");
             document.Undo();
             document.Text.ShouldBe("ax = ax; x");
+        });
+
+    [Theory]
+    // The stop inside the placeholder follows first, so that the placeholder's mirror has its new text.
+    [InlineData("${1:a${2:b} $2} = $1", 1, "x", "ax x = ax x")]
+    // A mirror right after its placeholder does not take what is typed at the placeholder's end.
+    [InlineData("${1:a}$1", 0, "xyz", "xyzxyz")]
+    public Task Mirrors_follow_nested_and_neighbouring_stops_as_in_VS_Code(
+        string snippet,
+        int tabs,
+        string typed,
+        string text
+    ) =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Item(snippet));
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            for (int i = 0; i < tabs; i++)
+                window.Press(Key.Tab);
+
+            window.Type(typed);
+
+            document.Text.ShouldBe(text);
+        });
+
+    [Fact]
+    public Task Typing_over_a_placeholder_drops_the_stops_inside_it() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Item("${1:a${2}b} + ${3:c}"));
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            window.Editor.Selection.ShouldBe(new TextSelection(0, 2));
+
+            window.Type("x");
+            window.Press(Key.Tab);
+
+            document.Text.ShouldBe("x + c");
+            window.Editor.Selection.ShouldBe(new TextSelection(4, 5));
+        });
+
+    [Fact]
+    public Task A_change_that_would_copy_more_than_2000_characters_into_mirrors_ends_the_session() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            string mirrors = string.Concat(Enumerable.Repeat("$1", Snippet.MaxStops - 2));
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Item("${1:a}" + mirrors));
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            string text = new('a', Snippet.MaxStops - 1);
+            document.Text.ShouldBe(text);
+
+            // 41 characters in each of the 49 stops would pass 2,000: the mirrors keep their text.
+            string pasted = new('b', SnippetController.MaxMirrorText / (Snippet.MaxStops - 1) + 1);
+            document.Replace(new TextRange(0, 1), pasted);
+
+            document.Text.ShouldBe(pasted + text[1..]);
+            editor.Selection = new TextSelection(0);
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("    " + pasted + text[1..]);
         });
 
     [Fact]
