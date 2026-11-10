@@ -499,19 +499,21 @@ public sealed class SnippetSessionTests(UiFixture ui)
                 },
             };
             using var window = new EditorWindow(editor);
-            using CodeDocument answer = await SetCompletionAsync(server, fake, Item("${1:aaaa} ${2:bbbb} $0"));
+            // The final stop between spaces: text drawn with colored edges, as on Windows, cannot reach its border's color.
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Item("${1:aaaa} ${2:bbbb}  $0  "));
             Color stop = Color.Parse("#00FF80");
             Color final = Color.Parse("#804000");
+            var aroundFinal = new TextRange(10, 3);
 
             await OpenAsync(window, 0);
             window.Press(Key.Enter);
 
             // The second stop, as the first is selected, in the theme's colors once it is loaded; the final stop's border.
             await Wait.UntilAsync(() => window.RenderAndCountPixels(stop, new TextRange(5, 4)) > 0);
-            window.RenderAndCountPixels(final).ShouldBeGreaterThan(0);
+            window.RenderAndCountPixels(final, aroundFinal).ShouldBeGreaterThan(0);
             window.Press(Key.Escape);
             window.RenderAndCountPixels(stop).ShouldBe(0);
-            window.RenderAndCountPixels(final).ShouldBe(0);
+            window.RenderAndCountPixels(final, aroundFinal).ShouldBe(0);
         });
 
     /// <summary>A complete list of one item, whose text is <paramref name="snippet"/> in the snippet syntax.</summary>
