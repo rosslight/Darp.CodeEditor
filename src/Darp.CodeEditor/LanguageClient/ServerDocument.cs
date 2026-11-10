@@ -61,6 +61,19 @@ internal sealed class ServerDocument : CodeDocument
 
     private protected override void OnFilePathChanging(string? path) => _server.Move(this, path);
 
+    internal override Task<HoverInfo?> HoverAsync(
+        TextSnapshot snapshot,
+        TextPosition position,
+        CancellationToken cancellationToken
+    ) => _server.HoverAsync(this, snapshot, position, cancellationToken);
+
+    internal override Task<SemanticTokenLines?> SemanticTokensAsync(
+        TextPosition start,
+        TextPosition end,
+        int lineCount,
+        CancellationToken cancellationToken
+    ) => _server.SemanticTokensAsync(this, start, end, lineCount, cancellationToken);
+
     private protected override void OnDisposed() => _server.Close(this);
 
     private static bool IsInsideLineBreak(TextDocument buffer, int offset) =>

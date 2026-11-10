@@ -2,6 +2,8 @@ using System.ComponentModel;
 using Avalonia;
 using Avalonia.Threading;
 using AvaloniaEdit.Document;
+using Darp.CodeEditor.Diagnostics;
+using Darp.CodeEditor.LanguageClient;
 
 namespace Darp.CodeEditor;
 
@@ -57,10 +59,15 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     private volatile bool _isDisposed;
 
     /// <summary>Set on the UI thread, or where the server's diagnostics arrive before Avalonia is set up; read anywhere.</summary>
-    private IReadOnlyList<Diagnostic> _diagnostics = [];
+    private DiagnosticsBatch _diagnostics;
+
+    /// <summary>
+    /// The batch whose markers follow the text, from when the UI thread took it; null until it takes one.
+    /// </summary>
+    private DiagnosticsBatch? _followed;
 
     /// <summary>Diagnostics on their way to the UI thread. Only the latest is applied; null when none is on its way.</summary>
-    private IReadOnlyList<Diagnostic>? _pendingDiagnostics;
+    private DiagnosticsBatch? _pendingDiagnostics;
 
     private protected CodeDocument(CodeLanguage language, string text, string? filePath = null)
     {
@@ -69,12 +76,14 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
         _indentation = language.Id == "yaml" ? Indentation.Spaces(2) : Indentation.Spaces(4);
         _document = new TextDocument(text);
         _currentSnapshot = new TextSnapshot(_document.CreateSnapshot(), 0);
+        _diagnostics = new DiagnosticsBatch([], _currentSnapshot);
         // Application.Current is null before setup, so reading it ties no dispatcher to this thread.
         _owner = Application.Current?.Dispatcher;
         // AvaloniaEdit's document belongs to the thread that created it. Unbound, it belongs to none between changes.
         _document.SetOwnerThread(_owner?.Thread);
         _document.Changing += (_, e) => OnChanging(_document, e);
         _document.TextChanged += OnTextChanged;
+        _document.Changed += OnBufferChanged;
         _document.UndoStack.PropertyChanged += OnUndoStackPropertyChanged;
     }
 
@@ -168,7 +177,7 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     /// one in the current text, map it: <c>MapToCurrent(diagnostic.Snapshot, diagnostic.Range)</c>. Empty without a
     /// server.
     /// </summary>
-    public IReadOnlyList<Diagnostic> Diagnostics => _diagnostics;
+    public IReadOnlyList<Diagnostic> Diagnostics => _diagnostics.All;
 
     /// <summary>
     /// Replaces <paramref name="range"/> with <paramref name="text"/>, in one step that the user can undo; an empty
@@ -187,15 +196,8 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     /// range whose text was deleted shrinks to where it was.
     /// </summary>
     /// <exception cref="ArgumentException">The snapshot is of another document.</exception>
-    public TextRange MapToCurrent(TextSnapshot snapshot, TextRange range)
-    {
-        (ITextSourceVersion from, ITextSourceVersion to) = Versions(snapshot);
-        (int start, int length) = snapshot.Clamp(range);
-        // Text typed at either edge of the range stays outside it.
-        int newStart = from.MoveOffsetTo(to, start, AnchorMovementType.AfterInsertion);
-        int newEnd = from.MoveOffsetTo(to, start + length, AnchorMovementType.BeforeInsertion);
-        return TextRange.FromBounds(newStart, Math.Max(newStart, newEnd));
-    }
+    public TextRange MapToCurrent(TextSnapshot snapshot, TextRange range) =>
+        new SnapshotEdits(snapshot, _currentSnapshot).Map(range);
 
     /// <summary>
     /// Makes <paramref name="snapshot"/> the unmodified point, for example after saving its text.
@@ -251,23 +253,85 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     internal event EventHandler? Disposed;
 
     /// <summary>
+    /// Raised on the UI thread when a server started or stopped serving the document, for the editors that show it:
+    /// what they asked the server before is outdated, and they ask again.
+    /// </summary>
+    internal event EventHandler? LanguageFeaturesChanged;
+
+    /// <summary>
+    /// The server's hover at <paramref name="position"/> of <paramref name="snapshot"/>, the current text, for an
+    /// editor; null when there is none, and when <paramref name="cancellationToken"/> cancelled it. Never waits on the
+    /// calling thread.
+    /// </summary>
+    internal virtual Task<HoverInfo?> HoverAsync(
+        TextSnapshot snapshot,
+        TextPosition position,
+        CancellationToken cancellationToken
+    ) => Task.FromResult<HoverInfo?>(null);
+
+    /// <summary>
+    /// The server's semantic tokens of the current text, for an editor that shows the lines from
+    /// <paramref name="start"/> to <paramref name="end"/>: of those lines, or of all <paramref name="lineCount"/> lines
+    /// for a server that answers only for the whole text. Null when there are none, and when
+    /// <paramref name="cancellationToken"/> cancelled them. Never waits on the calling thread.
+    /// </summary>
+    internal virtual Task<SemanticTokenLines?> SemanticTokensAsync(
+        TextPosition start,
+        TextPosition end,
+        int lineCount,
+        CancellationToken cancellationToken
+    ) => Task.FromResult<SemanticTokenLines?>(null);
+
+    /// <summary>
+    /// Raises <see cref="LanguageFeaturesChanged"/> on the UI thread, from any thread. Before Avalonia is set up there
+    /// are no editors to tell.
+    /// </summary>
+    internal void OnLanguageFeaturesChanged()
+    {
+        // Application.Current is null before setup, so reading it ties no dispatcher to this thread.
+        if (Application.Current?.Dispatcher is { } dispatcher)
+            dispatcher.Post(() => LanguageFeaturesChanged?.Invoke(this, EventArgs.Empty));
+    }
+
+    /// <summary>
+    /// The diagnostics that editors show, <see cref="DiagnosticsBatch.Markers"/> of <see cref="Diagnostics"/>, in the
+    /// current text, for all of them: each moves with every change of the text until the next diagnostics replace
+    /// them, and text typed at either edge stays outside it. On the UI thread.
+    /// </summary>
+    internal TextSegmentCollection<DiagnosticMarker> ShownDiagnostics
+    {
+        get
+        {
+            DiagnosticsBatch batch = _diagnostics;
+            // Taken before Avalonia was set up: followed from the first time an editor needs it.
+            if (_followed != batch)
+                Follow(batch);
+            return batch.Markers;
+        }
+    }
+
+    /// <summary>
     /// Replaces <see cref="Diagnostics"/>, from any thread: on the app's main UI thread, or where it is called before
     /// Avalonia is set up. Of the diagnostics that arrive before the UI thread gets to them, only the latest is applied.
+    /// Those that editors show are chosen, and mapped to the latest text, here on the calling thread, which is the
+    /// server's: the UI thread follows only the edits made since.
     /// </summary>
     internal void SetDiagnostics(IReadOnlyList<Diagnostic> diagnostics)
     {
+        // Read after the UI thread made it current, with every edit before it.
+        var batch = new DiagnosticsBatch(diagnostics, Volatile.Read(ref _currentSnapshot));
         // Application.Current is null before setup, so reading it ties no dispatcher to this thread.
         if (Application.Current?.Dispatcher is not { } dispatcher)
         {
-            ApplyDiagnostics(diagnostics);
+            ApplyDiagnostics(batch, follow: false);
             return;
         }
-        if (Interlocked.Exchange(ref _pendingDiagnostics, diagnostics) is null)
+        if (Interlocked.Exchange(ref _pendingDiagnostics, batch) is null)
         {
             dispatcher.Post(() =>
             {
                 if (Interlocked.Exchange(ref _pendingDiagnostics, null) is { } latest)
-                    ApplyDiagnostics(latest);
+                    ApplyDiagnostics(latest, follow: true);
             });
         }
     }
@@ -338,18 +402,47 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
 
     private void OnTextChanged(object? sender, EventArgs e)
     {
-        _currentSnapshot = new TextSnapshot(_document.CreateSnapshot(), _currentSnapshot.Version + 1);
+        // With every edit before it, for threads that follow the edits up to it.
+        Volatile.Write(
+            ref _currentSnapshot,
+            new TextSnapshot(_document.CreateSnapshot(), _currentSnapshot.Version + 1)
+        );
         OnChanged(_currentSnapshot);
         TextChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private void ApplyDiagnostics(IReadOnlyList<Diagnostic> diagnostics)
+    /// <summary>
+    /// Takes <paramref name="batch"/>; on the UI thread, also <paramref name="follow"/>s the text with it from now on,
+    /// whether an editor shows the document or not.
+    /// </summary>
+    private void ApplyDiagnostics(DiagnosticsBatch batch, bool follow)
     {
-        if (diagnostics.Count == 0 && _diagnostics.Count == 0)
+        if (batch.All.Count == 0 && _diagnostics.All.Count == 0)
             return;
-        _diagnostics = diagnostics;
+        _diagnostics = batch;
+        if (follow)
+            Follow(batch);
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Diagnostics)));
     }
+
+    /// <summary>
+    /// Moves the markers of <paramref name="batch"/> over the edits made since the server's thread made them, usually
+    /// none, and with each edit from now on; the batch before stays where it is. On the UI thread.
+    /// </summary>
+    private void Follow(DiagnosticsBatch batch)
+    {
+        TextDocument buffer = Buffer;
+        if (batch.Snapshot.SourceVersion is { } version)
+        {
+            // AvaloniaEdit's document records each of its changes as it raises it.
+            foreach (TextChangeEventArgs edit in version.GetChangesTo(buffer.Version))
+                batch.Markers.UpdateOffsets((DocumentChangeEventArgs)edit);
+        }
+        _followed = batch;
+    }
+
+    /// <summary>A part of a change, as it applies: the markers in the current text follow it.</summary>
+    private void OnBufferChanged(object? sender, DocumentChangeEventArgs e) => _followed?.Markers.UpdateOffsets(e);
 
     private void OnUndoStackPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -363,6 +456,58 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
         if (property is not null)
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));
     }
+}
+
+/// <summary>A batch of a document's diagnostics, and those of them that editors show.</summary>
+internal sealed class DiagnosticsBatch
+{
+    /// <summary>
+    /// How many of a document's diagnostics editors show at most: a server may send far more, and each one shown costs
+    /// the UI thread work when it is drawn and when the pointer rests on it.
+    /// </summary>
+    public const int MaxShown = 10_000;
+
+    /// <summary>
+    /// Takes the batch, chooses those shown and puts them in the text of <paramref name="snapshot"/>, on the calling
+    /// thread.
+    /// </summary>
+    /// <exception cref="ArgumentException">A diagnostic is about the text of another document.</exception>
+    public DiagnosticsBatch(IReadOnlyList<Diagnostic> all, TextSnapshot snapshot)
+    {
+        All = all;
+        Snapshot = snapshot;
+        // Following the edits once for each snapshot that the diagnostics are about: usually, one for all.
+        SnapshotEdits? edits = null;
+        int rank = 0;
+        for (var severity = DiagnosticSeverity.Error; severity >= DiagnosticSeverity.Hint; severity--)
+        {
+            foreach (Diagnostic diagnostic in all)
+            {
+                if (rank == MaxShown)
+                    break;
+                if (diagnostic.Severity != severity)
+                    continue;
+                if (edits is null || edits.Snapshot != diagnostic.Snapshot)
+                    edits = new SnapshotEdits(diagnostic.Snapshot, snapshot);
+                TextRange range = edits.Map(diagnostic.Range);
+                Markers.Add(
+                    new DiagnosticMarker(diagnostic, rank++) { StartOffset = range.Start, Length = range.Length }
+                );
+            }
+        }
+    }
+
+    /// <summary>All of the document's diagnostics, in the server's order.</summary>
+    public IReadOnlyList<Diagnostic> All { get; }
+
+    /// <summary>The text that <see cref="Markers"/> are in until the document follows the text with them.</summary>
+    public TextSnapshot Snapshot { get; }
+
+    /// <summary>
+    /// The diagnostics that editors show: at most <see cref="MaxShown"/>, the most severe first, then in the server's
+    /// order, which is their rank in a hover. No document moves them with its text until one takes the batch.
+    /// </summary>
+    public TextSegmentCollection<DiagnosticMarker> Markers { get; } = new();
 }
 
 /// <summary>A document without a language server, from <see cref="CodeDocument.Create"/>.</summary>

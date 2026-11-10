@@ -22,6 +22,10 @@ namespace Darp.CodeEditor.Highlighting;
 /// <param name="FindMatchBorder">Its border, if the theme has one.</param>
 /// <param name="FindMatchHighlight">The background of the other search matches.</param>
 /// <param name="FindMatchHighlightBorder">Their border, if the theme has one.</param>
+/// <param name="Error">The squiggles under errors.</param>
+/// <param name="Warning">The squiggles under warnings.</param>
+/// <param name="Information">The squiggles under information.</param>
+/// <param name="Hint">The dots under hints.</param>
 internal sealed record TextAreaColors(
     IBrush Background,
     IBrush Foreground,
@@ -36,7 +40,11 @@ internal sealed record TextAreaColors(
     IBrush FindMatch,
     IPen? FindMatchBorder,
     IBrush FindMatchHighlight,
-    IPen? FindMatchHighlightBorder
+    IPen? FindMatchHighlightBorder,
+    IBrush Error,
+    IBrush Warning,
+    IBrush Information,
+    IBrush Hint
 )
 {
     /// <summary>Reads the colors of <paramref name="theme"/>.</summary>
@@ -65,7 +73,11 @@ internal sealed record TextAreaColors(
             Brush("editor.findMatchBackground") ?? Solid(dark ? 0xFF515C6A : 0xFFA8AC94),
             Pen("editor.findMatchBorder"),
             Brush("editor.findMatchHighlightBackground") ?? Solid(0x55EA5C00u),
-            Pen("editor.findMatchHighlightBorder")
+            Pen("editor.findMatchHighlightBorder"),
+            Brush("editorError.foreground") ?? Solid(dark ? 0xFFF14C4C : 0xFFE51400),
+            Brush("editorWarning.foreground") ?? Solid(dark ? 0xFFCCA700 : 0xFFBF8803),
+            Brush("editorInfo.foreground") ?? Solid(dark ? 0xFF3794FF : 0xFF1A85FF),
+            Brush("editorHint.foreground") ?? Solid(dark ? 0xB3EEEEEEu : 0xFF6C6C6C)
         );
 
         ImmutableSolidColorBrush? Brush(string key) =>

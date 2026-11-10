@@ -22,7 +22,7 @@ internal abstract class SelectionOverlay : Control, IDisposable
 
     protected TextArea TextArea { get; }
 
-    public void Dispose()
+    public virtual void Dispose()
     {
         TextArea.SelectionChanged -= OnChanged;
         TextArea.TextView.VisualLinesChanged -= OnChanged;

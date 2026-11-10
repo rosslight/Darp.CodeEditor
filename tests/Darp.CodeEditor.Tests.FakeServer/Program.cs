@@ -6,15 +6,24 @@
 // Every other document is echoed: the server publishes one diagnostic over its whole text, whose message is the text
 // as the server has it.
 //
+// Hover over a word answers with Markdown: the word in bold, the document's language as inline code, and the word's
+// line as a code block in that language.
+// Hover over the word "slow" is never answered. Semantic tokens come from words, runs of letters, digits and
+// underscores: a word "class_static" is a token of the type "class" with the modifier "static", if the legend names
+// them; other words are not tokens. Either request about a document that is not open is answered with an error.
+//
 // Arguments:
 //   --initialize never      never answer initialize
 //   --stderr <text>         write a line to standard error at start
 //   --exit-at-start <code>  exit at start, before reading anything
 //   --unversioned           publish diagnostics without a version
+//   --no-diagnostics        publish no diagnostics for echoed documents
 //   --full-sync             ask for the full text with every change
 //   --text-document-sync <json>  answer initialize with this textDocumentSync capability
 //   --vscode-uris           publish diagnostics with file URIs written as VS Code's URI library writes them
 //   --ignore-shutdown       never answer shutdown
+//   --semantic-tokens <range|full|none>  offer semantic tokens for ranges and the whole text, the whole text only, or
+//                           none; ranges and the whole text by default
 //   host                    start a child in "sleep" as the library starts servers, print its process id, and wait
 //   sleep                   sleep, and never read standard input
 using System.Diagnostics;
@@ -46,11 +55,29 @@ internal sealed class FakeServer
     private readonly Dictionary<string, Document> _documents = [];
     private readonly bool _neverInitialize;
     private readonly bool _unversioned;
+    private readonly bool _noDiagnostics;
     private readonly bool _fullSync;
     private readonly bool _ignoreShutdown;
     private readonly JsonNode? _textDocumentSync;
     private readonly bool _vscodeUris;
     private readonly int? _exitAtStart;
+    private readonly string _semanticTokens = "range";
+
+    /// <summary>The legend of semantic tokens, in another order than the client's, and with a type of its own.</summary>
+    private static readonly string[] s_tokenTypes =
+    [
+        "stringLiteral",
+        "variable",
+        "class",
+        "function",
+        "keyword",
+        "type",
+    ];
+
+    private static readonly string[] s_tokenModifiers = ["static", "readonly", "defaultLibrary", "deprecated"];
+
+    /// <summary>Set by the command <c>hold-semantic-tokens</c>: semantic tokens are no longer answered.</summary>
+    private bool _holdSemanticTokens;
     private readonly List<string> _startLines = [];
     private int _lastId;
 
@@ -75,6 +102,9 @@ internal sealed class FakeServer
                 case "--unversioned":
                     _unversioned = true;
                     break;
+                case "--no-diagnostics":
+                    _noDiagnostics = true;
+                    break;
                 case "--full-sync":
                     _fullSync = true;
                     break;
@@ -86,6 +116,9 @@ internal sealed class FakeServer
                     break;
                 case "--text-document-sync":
                     _textDocumentSync = JsonNode.Parse(arguments[++i]);
+                    break;
+                case "--semantic-tokens":
+                    _semanticTokens = arguments[++i];
                     break;
                 default:
                     throw new ArgumentException($"Unknown argument {arguments[i]}");
@@ -131,6 +164,8 @@ internal sealed class FakeServer
                                 ["textDocumentSync"] =
                                     _textDocumentSync?.DeepClone()
                                     ?? new JsonObject { ["openClose"] = true, ["change"] = _fullSync ? 1 : 2 },
+                                ["hoverProvider"] = true,
+                                ["semanticTokensProvider"] = SemanticTokensProvider(),
                             },
                         }
                     );
@@ -161,6 +196,13 @@ internal sealed class FakeServer
                 string closed = Text(parameters?["textDocument"]?["uri"], "uri");
                 _documents.Remove(closed);
                 Log($"close {closed}");
+                break;
+            case "textDocument/hover":
+                Hover(id, Required(parameters, "params"));
+                break;
+            case "textDocument/semanticTokens/full":
+            case "textDocument/semanticTokens/range":
+                SemanticTokens(id, method, Required(parameters, "params"));
                 break;
             case "workspace/didChangeConfiguration":
                 Log($"configuration changed {parameters?.ToJsonString()}");
@@ -217,6 +259,8 @@ internal sealed class FakeServer
     {
         if (document.LanguageId != "fake-command")
         {
+            if (_noDiagnostics)
+                return;
             (int line, int character) = End(document.Text);
             Publish(document, !_unversioned, Diagnostic(0, 0, line, character, document.Text));
             return;
@@ -282,6 +326,10 @@ internal sealed class FakeServer
                 Log("not reading");
                 Thread.Sleep(Timeout.Infinite);
                 break;
+            case ["hold-semantic-tokens"]:
+                _holdSemanticTokens = true;
+                Log("holding semantic tokens");
+                break;
             case ["peek", var signal]:
                 _peekSignal = signal;
                 Log("peeking");
@@ -296,6 +344,141 @@ internal sealed class FakeServer
                 Log($"unknown command {string.Join(' ', command)}");
                 break;
         }
+    }
+
+    private JsonNode? SemanticTokensProvider() =>
+        _semanticTokens == "none"
+            ? null
+            : new JsonObject
+            {
+                ["legend"] = new JsonObject
+                {
+                    ["tokenTypes"] = new JsonArray([.. s_tokenTypes.Select(t => JsonValue.Create(t))]),
+                    ["tokenModifiers"] = new JsonArray([.. s_tokenModifiers.Select(m => JsonValue.Create(m))]),
+                },
+                ["range"] = _semanticTokens == "range",
+                ["full"] = true,
+            };
+
+    /// <summary>Answers with the word at the position, and its line as code; or never, for the word "slow".</summary>
+    private void Hover(JsonNode? id, JsonNode parameters)
+    {
+        if (Known(id, "hover", parameters) is not { } document)
+            return;
+        int offset = Offset(document.Text, Required(parameters["position"], "position"));
+        (int start, int end) = WordAt(document.Text, offset);
+        string word = document.Text[start..end];
+        Log($"hover {id?.ToJsonString()} {word}");
+        if (word == "slow")
+            return;
+        (int lineStart, int lineEnd) = Lines(document.Text).Last(line => line.Start <= offset);
+        Reply(
+            id,
+            new JsonObject
+            {
+                ["contents"] = new JsonObject
+                {
+                    ["kind"] = "markdown",
+                    ["value"] =
+                        $"**{word}** is a word in `{document.LanguageId}`.\n\n```{document.LanguageId}\n{document.Text[lineStart..lineEnd]}\n```",
+                },
+                ["range"] = new JsonObject
+                {
+                    ["start"] = Position(document.Text, start),
+                    ["end"] = Position(document.Text, end),
+                },
+            }
+        );
+    }
+
+    /// <summary>
+    /// The open document that a request names; for one that is not open, says so and answers the request with an error,
+    /// as a server that never heard of it would.
+    /// </summary>
+    private Document? Known(JsonNode? id, string request, JsonNode parameters)
+    {
+        string uri = Text(parameters["textDocument"]?["uri"], "uri");
+        if (_documents.TryGetValue(uri, out Document? document))
+            return document;
+        Log($"{request} of a document that is not open: {uri}");
+        ReplyError(id, -32602, $"{uri} is not open.");
+        return null;
+    }
+
+    /// <summary>Answers with the tokens of the words in the range, or in the whole text; or never, once held.</summary>
+    private void SemanticTokens(JsonNode? id, string method, JsonNode parameters)
+    {
+        string uri = Text(parameters["textDocument"]?["uri"], "uri");
+        if (Known(id, method["textDocument/".Length..], parameters) is not { } document)
+            return;
+        (int first, int last) = (0, int.MaxValue);
+        if (parameters["range"] is { } range)
+            (first, last) = (Number(range["start"]?["line"], "line"), Number(range["end"]?["line"], "line"));
+        Log($"{method["textDocument/".Length..]} {uri} {(parameters["range"] is null ? "all" : $"{first}-{last}")}");
+        if (_holdSemanticTokens)
+            return;
+        var data = new JsonArray();
+        (int line, int character) previous = (0, 0);
+        List<(int Start, int End)> lines = Lines(document.Text);
+        for (int i = first; i < lines.Count && i <= last; i++)
+        {
+            (int lineStart, int lineEnd) = lines[i];
+            for (int start = lineStart; start < lineEnd; )
+            {
+                (int wordStart, int wordEnd) = WordAt(document.Text, start);
+                if (wordEnd == start)
+                {
+                    start++;
+                    continue;
+                }
+                string[] parts = document.Text[wordStart..wordEnd].Split('_');
+                int type = Array.IndexOf(s_tokenTypes, parts[0]);
+                if (type >= 0)
+                {
+                    int modifiers = 0;
+                    foreach (string part in parts[1..])
+                        modifiers |= Array.IndexOf(s_tokenModifiers, part) is var bit and >= 0 ? 1 << bit : 0;
+                    int character = wordStart - lineStart;
+                    foreach (
+                        int number in (int[])
+                            [
+                                i - previous.line,
+                                i == previous.line ? character - previous.character : character,
+                                wordEnd - wordStart,
+                                type,
+                                modifiers,
+                            ]
+                    )
+                    {
+                        data.Add((JsonNode)JsonValue.Create(number));
+                    }
+                    previous = (i, character);
+                }
+                start = wordEnd;
+            }
+        }
+        Reply(id, new JsonObject { ["data"] = data });
+    }
+
+    /// <summary>The word of letters, digits and underscores at an offset; empty where there is none.</summary>
+    private static (int Start, int End) WordAt(string text, int offset)
+    {
+        int start = offset;
+        while (start > 0 && IsWordCharacter(text[start - 1]))
+            start--;
+        int end = offset;
+        while (end < text.Length && IsWordCharacter(text[end]))
+            end++;
+        return (start, end);
+
+        static bool IsWordCharacter(char c) => char.IsAsciiLetterOrDigit(c) || c == '_';
+    }
+
+    private static JsonObject Position(string text, int offset)
+    {
+        List<(int Start, int End)> lines = Lines(text);
+        int line = lines.FindLastIndex(l => l.Start <= offset);
+        return new JsonObject { ["line"] = line, ["character"] = offset - lines[line].Start };
     }
 
     private void Publish(Document document, bool versioned, params JsonNode[] diagnostics)

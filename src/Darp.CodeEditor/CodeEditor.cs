@@ -12,9 +12,11 @@ using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
 using AvaloniaEdit.Search;
+using Darp.CodeEditor.Diagnostics;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.Loading;
+using Darp.CodeEditor.Popups;
 using Darp.CodeEditor.Search;
 using TextMateSharp.Internal.Types;
 using EditorSelection = AvaloniaEdit.Editing.Selection;
@@ -150,6 +152,15 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>Shows the spaces and tabs inside the selection.</summary>
     private WhitespaceLayer? _whitespace;
+
+    /// <summary>Draws the squiggles under the shown document's diagnostics.</summary>
+    private SquiggleLayer? _squiggles;
+
+    /// <summary>Colors the server's semantic tokens of the shown document.</summary>
+    private SemanticHighlighter? _semantic;
+
+    /// <summary>Shows the diagnostics and the server's hover where the pointer rests.</summary>
+    private HoverController? _hover;
 
     /// <summary>The template's panel, which the search bar goes into, over the text.</summary>
     private Panel? _root;
@@ -299,6 +310,9 @@ public class CodeEditor : TemplatedControl
     /// <summary>The caret's line and column, for a status bar.</summary>
     public TextPosition CaretPosition => _caretPosition;
 
+    /// <summary>The semantic colors of the shown document, for benchmarks; null while it shows none.</summary>
+    internal SemanticHighlighter? SemanticHighlighter => _semantic;
+
     /// <summary>
     /// Scrolls <paramref name="range"/> into view: not at all when it is visible, centered when it is not. A range
     /// taller or wider than the view shows from its start.
@@ -420,7 +434,7 @@ public class CodeEditor : TemplatedControl
             part.IsReadOnly = true;
             TextEditorOptions options = part.Options;
             // AvaloniaEdit's default, until Avalonia's wrapping and font fallback get fast on longer wrapped lines.
-            options.LongLineLimit = 3_000;
+            options.LongLineLimit = VisibleText.LineLimit;
             options.HighlightCurrentLine = true;
             options.AllowScrollBelowDocument = true;
             // Links would be drawn in AvaloniaEdit's blue, not in the theme's colors.
@@ -461,6 +475,18 @@ public class CodeEditor : TemplatedControl
         // here: AvaloniaEdit's commands act on the element that got the focus last.
         part.TextArea.Focus(e.NavigationMethod, e.KeyModifiers);
         e.Handled = true;
+    }
+
+    /// <inheritdoc />
+    protected override void OnLostFocus(FocusChangedEventArgs e)
+    {
+        base.OnLostFocus(e);
+        // Raised as the focus leaves an element inside the editor; it may stay inside, as when it goes to the search bar.
+        Dispatcher.Post(() =>
+        {
+            if (!IsKeyboardFocusWithin)
+                _hover?.Close();
+        });
     }
 
     /// <inheritdoc />
@@ -550,6 +576,9 @@ public class CodeEditor : TemplatedControl
         _helpers = new EditingHelpers(part.TextArea, document, _highlighter);
         _brackets = new BracketHighlighter(part.TextArea, document, _highlighter) { Colors = _colors };
         _whitespace = new WhitespaceLayer(part.TextArea) { Colors = _colors };
+        _squiggles = new SquiggleLayer(part.TextArea, document) { Colors = _colors };
+        _semantic = new SemanticHighlighter(textView, document, Dispatcher) { Theme = _theme };
+        _hover = new HoverController(this, part.TextArea, document, _squiggles, _highlighter) { Colors = _colors };
         _searchBar?.Attach(this, part.TextArea, document);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
         _waitingForLayout = true;
@@ -569,6 +598,12 @@ public class CodeEditor : TemplatedControl
         _brackets = null;
         _whitespace?.Dispose();
         _whitespace = null;
+        _hover?.Dispose();
+        _hover = null;
+        _squiggles?.Dispose();
+        _squiggles = null;
+        _semantic?.Dispose();
+        _semantic = null;
         _searchBar?.Detach();
         _highlighter?.Dispose();
         _highlighter = null;
@@ -603,13 +638,25 @@ public class CodeEditor : TemplatedControl
         }
         else if (e.Key == Key.F3 && (e.KeyModifiers == KeyModifiers.None || shift))
             e.Handled = FindNext(previous: shift);
-        else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && _searchBar is { IsOpen: true } bar)
-        {
-            bar.Close();
+        else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && Dismiss())
             e.Handled = true;
-        }
         else if (_helpers is { } helpers && _part is { } part && part.TextArea.IsFocused)
             helpers.OnKeyDown(e);
+    }
+
+    /// <summary>
+    /// What Escape closes: it ends the hover, also one still waiting for its server, and when no hover was open, it
+    /// closes the search bar.
+    /// </summary>
+    /// <returns>Whether it closed something the user saw.</returns>
+    private bool Dismiss()
+    {
+        if (_hover?.Close() == true)
+            return true;
+        if (_searchBar is not { IsOpen: true } bar)
+            return false;
+        bar.Close();
+        return true;
     }
 
     /// <summary>
@@ -917,6 +964,9 @@ public class CodeEditor : TemplatedControl
             _colors = colors;
             _brackets?.Colors = colors;
             _whitespace?.Colors = colors;
+            _squiggles?.Colors = colors;
+            _hover?.Colors = colors;
+            _semantic?.Theme = theme;
             _searchBar?.Colors = colors;
             TextArea textArea = part.TextArea;
             part.Background = colors.Background;
