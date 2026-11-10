@@ -26,6 +26,10 @@ namespace Darp.CodeEditor.Highlighting;
 /// <param name="Warning">The squiggles under warnings.</param>
 /// <param name="Information">The squiggles under information.</param>
 /// <param name="Hint">The dots under hints.</param>
+/// <param name="SnippetTabStop">The background of a snippet's stops.</param>
+/// <param name="SnippetTabStopBorder">Their border, if the theme has one.</param>
+/// <param name="SnippetFinalTabStop">The background of a snippet's final stop, if the theme has one.</param>
+/// <param name="SnippetFinalTabStopBorder">Its border.</param>
 internal sealed record TextAreaColors(
     IBrush Background,
     IBrush Foreground,
@@ -44,7 +48,11 @@ internal sealed record TextAreaColors(
     IBrush Error,
     IBrush Warning,
     IBrush Information,
-    IBrush Hint
+    IBrush Hint,
+    IBrush SnippetTabStop,
+    IPen? SnippetTabStopBorder,
+    IBrush? SnippetFinalTabStop,
+    IPen SnippetFinalTabStopBorder
 )
 {
     /// <summary>Reads the colors of <paramref name="theme"/>.</summary>
@@ -76,7 +84,13 @@ internal sealed record TextAreaColors(
             Brush("editorError.foreground") ?? Solid(dark ? 0xFFF14C4C : 0xFFE51400),
             Brush("editorWarning.foreground") ?? Solid(dark ? 0xFFCCA700 : 0xFFBF8803),
             Brush("editorInfo.foreground") ?? Solid(dark ? 0xFF3794FF : 0xFF1A85FF),
-            Brush("editorHint.foreground") ?? Solid(dark ? 0xB3EEEEEEu : 0xFF6C6C6C)
+            Brush("editorHint.foreground") ?? Solid(dark ? 0xB3EEEEEEu : 0xFF6C6C6C),
+            Brush("editor.snippetTabstopHighlightBackground") ?? Solid(dark ? 0x4D7C7C7Cu : 0x330A3264u),
+            Pen("editor.snippetTabstopHighlightBorder"),
+            Brush("editor.snippetFinalTabstopHighlightBackground"),
+            new ImmutablePen(
+                Brush("editor.snippetFinalTabstopHighlightBorder") ?? Solid(dark ? 0xFF525252 : 0x800A3264u)
+            )
         );
 
         ImmutableSolidColorBrush? Brush(string key) =>

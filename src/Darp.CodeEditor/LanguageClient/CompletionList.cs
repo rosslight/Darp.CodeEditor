@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Darp.CodeEditor.Completion;
 using Darp.CodeEditor.Lsp;
 
 namespace Darp.CodeEditor.LanguageClient;
@@ -126,6 +127,9 @@ internal sealed class CompletionList
         {
             (range, newText) = (word, ServerJson.String(item, "insertText") ?? label);
         }
+        // Parsed here, off the UI thread: a server's snippet can be of any length.
+        Snippet? snippet =
+            ServerJson.Number(item, "insertTextFormat") == InsertTextFormat.Snippet ? Snippet.Parse(newText) : null;
         string filterText = ServerJson.String(item, "filterText") ?? label;
         // As VS Code, an item without a kind, or with one the protocol does not name, is a property.
         int kind = ServerJson.Number(item, "kind") is int k and >= 1 and <= 25 ? k : CompletionItemKinds.Property;
@@ -141,6 +145,7 @@ internal sealed class CompletionList
             string.Equals(filterText, label, StringComparison.OrdinalIgnoreCase),
             new CompletionSortKey(ServerJson.String(item, "sortText") ?? label, label, kind),
             new CompletionEdit(range, newText),
+            snippet,
             AdditionalEdits(item, snapshot),
             item.TryGetProperty("commitCharacters", out JsonElement _)
                 ? ServerFeatures.Characters(item, "commitCharacters")
@@ -240,7 +245,8 @@ internal sealed class CompletionList
 /// <param name="FilterText">The text it is matched by.</param>
 /// <param name="FilterTextIsLabel">Whether the whole filter text equals the label, ignoring case.</param>
 /// <param name="SortKey">Where it is in the list before anything is typed.</param>
-/// <param name="Edit">What committing it does to the text.</param>
+/// <param name="Edit">What committing it does to the text: its text as the server wrote it.</param>
+/// <param name="Snippet">Its text as a snippet, for an item whose text is in the snippet syntax; null otherwise.</param>
 /// <param name="AdditionalEdits">What else committing it changes, such as an import; null when it names none.</param>
 /// <param name="CommitCharacters">The characters that commit it as they are typed.</param>
 /// <param name="Source">The item as the server sent it, for <c>completionItem/resolve</c>.</param>
@@ -255,6 +261,7 @@ internal sealed record CompletionItem(
     bool FilterTextIsLabel,
     CompletionSortKey SortKey,
     CompletionEdit Edit,
+    Snippet? Snippet,
     IReadOnlyList<CompletionEdit>? AdditionalEdits,
     string CommitCharacters,
     JsonElement Source
@@ -267,6 +274,13 @@ internal readonly record struct CompletionEdit(TextRange Range, string NewText);
 /// <param name="Kind">One of <see cref="CompletionTriggerKind"/>.</param>
 /// <param name="Character">The character typed, for a trigger character.</param>
 internal readonly record struct CompletionTrigger(int Kind, char? Character = null);
+
+/// <summary>The formats of an item's text.</summary>
+internal static class InsertTextFormat
+{
+    /// <summary>The LSP snippet syntax; plain text otherwise.</summary>
+    public const int Snippet = 2;
+}
 
 /// <summary>The kinds of completion items that the client treats apart.</summary>
 internal static class CompletionItemKinds
