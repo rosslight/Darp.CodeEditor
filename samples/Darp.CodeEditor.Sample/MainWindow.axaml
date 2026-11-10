@@ -66,6 +66,13 @@
             <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
         </Style>
 
+        <!-- The pane's headers, such as Schemas, as small as its own, Documents. -->
+        <Style Selector="fa|FANavigationViewItemHeader /template/ TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="Normal" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        </Style>
+
         <!--
           A document's state is a badge on its icon, in every mode of the pane. The pseudo-class gives the style
           precedence over the values that FluentAvalonia's template sets.
@@ -294,6 +301,26 @@
                 </local:NavigationItemSelector>
             </fa:FANavigationView.MenuItemTemplateSelector>
             <fa:FANavigationView.FooterMenuItems>
+                <!--
+                  The examples' schemas, files next to the app: a tap opens one as a document, or shows it. The servers
+                  validate the examples with them as the user edits and saves them. The window opens them, by the path
+                  in their tags.
+                -->
+                <fa:FANavigationViewItemHeader Content="{Binding Strings.Schemas}" />
+                <fa:FANavigationViewItem
+                    Content="config.schema.json"
+                    IconSource="Code"
+                    SelectsOnInvoked="False"
+                    Tag="{x:Static documents:ServerSettings.ConfigSchema}"
+                    ToolTip.Tip="{x:Static documents:ServerSettings.ConfigSchema}"
+                />
+                <fa:FANavigationViewItem
+                    Content="pipeline.schema.json"
+                    IconSource="Code"
+                    SelectsOnInvoked="False"
+                    Tag="{x:Static documents:ServerSettings.PipelineSchema}"
+                    ToolTip.Tip="{x:Static documents:ServerSettings.PipelineSchema}"
+                />
                 <fa:FANavigationViewItem
                     Name="SettingsItem"
                     Content="{Binding Strings.Settings}"

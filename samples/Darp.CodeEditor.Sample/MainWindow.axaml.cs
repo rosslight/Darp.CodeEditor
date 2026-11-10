@@ -41,30 +41,34 @@ public sealed partial class MainWindow : FAAppWindow
     private bool _isWorkingWithFiles;
 
     /// <summary>
-    /// Keeps the pane's selected item from being invoked: by a tap, or by Enter or Space. FluentAvalonia 3.1.0 keeps
-    /// such an invoke for the next selection, which then looks for that item's control, and a document just opened or
-    /// created has none yet: it throws. The selected item has nothing to invoke, so it only closes the pane, as
-    /// FluentAvalonia would. Class handlers run before FluentAvalonia's own, for every item: documents and settings.
+    /// Keeps FluentAvalonia from invoking the pane's selected item and the schemas' items: by a tap, or by Enter or
+    /// Space. FluentAvalonia 3.1.0 keeps an invoke that selects nothing for the next selection, which then looks for
+    /// that item's control, and a document just opened or created has none yet: it throws. The selected item has
+    /// nothing to invoke, and a schema's item opens the schema here instead; either closes the pane, as FluentAvalonia
+    /// would. Class handlers run before FluentAvalonia's own, for every item: documents, schemas and settings.
     /// </summary>
     static MainWindow()
     {
-        TappedEvent.AddClassHandler<FANavigationViewItem>(KeepSelectedFromInvoking);
+        TappedEvent.AddClassHandler<FANavigationViewItem>(InvokeItem);
         KeyDownEvent.AddClassHandler<FANavigationViewItem>(
             (item, e) =>
             {
                 if (e.Key is Key.Enter or Key.Space)
-                    KeepSelectedFromInvoking(item, e);
+                    InvokeItem(item, e);
             }
         );
     }
 
-    private static void KeepSelectedFromInvoking(FANavigationViewItem item, RoutedEventArgs e)
+    private static void InvokeItem(FANavigationViewItem item, RoutedEventArgs e)
     {
-        if (!item.IsSelected || item.FindAncestorOfType<FANavigationView>() is not { } navigation)
+        bool isSchema = item.Tag is string;
+        if (!item.IsSelected && !isSchema || item.FindAncestorOfType<FANavigationView>() is not { } navigation)
             return;
         e.Handled = true;
         if (navigation.DisplayMode != FANavigationViewDisplayMode.Expanded)
             navigation.IsPaneOpen = false;
+        if (item.Tag is string schema && TopLevel.GetTopLevel(item) is MainWindow window)
+            window.OpenSchema(schema);
     }
 
     public MainWindow()
@@ -158,6 +162,22 @@ public sealed partial class MainWindow : FAAppWindow
         if (e.SelectedItem is OpenDocument document)
             viewModel.Workspace.Current = document;
     }
+
+    /// <summary>A schema's item in the pane: opens the schema, or shows it. The item itself is never selected.</summary>
+    private async void OpenSchema(string schema) =>
+        await OneAtATimeAsync(async () =>
+        {
+            if (Workspace is not { } workspace)
+                return;
+            try
+            {
+                await workspace.OpenSchemaAsync(schema, StorageProvider);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                await ShowErrorAsync(Strings.Default.FormatOpenFailed(Path.GetFileName(schema)), exception.Message);
+            }
+        });
 
     private void OnDisplayModeChanged(object? sender, FANavigationViewDisplayModeChangedEventArgs e) =>
         PaneButton.IsVisible = e.DisplayMode != FANavigationViewDisplayMode.Expanded;
