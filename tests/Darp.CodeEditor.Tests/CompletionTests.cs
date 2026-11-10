@@ -58,6 +58,64 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_trigger_character_typed_while_a_list_shows_asks_again_and_its_list_shows() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument words = await SetCompletionAsync(server, fake, Items("date", "datetime"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Type("da");
+            (await WaitForLabelsAsync(window)).ShouldBe(["date", "datetime"]);
+            // The server answers the next request only once released: the word's list, filtered for the dot, has
+            // nothing left by then.
+            using CodeDocument hold = await CommandAsync(server, fake, "hold-completion", "holding completion");
+
+            window.Type(".");
+
+            string request = await fake.WaitForAsync("completion ", 2);
+            request.ShouldEndWith(" 2 . 3");
+            using CodeDocument members = await SetCompletionAsync(server, fake, Items("today", "year"));
+            using CodeDocument release = await CommandAsync(server, fake, "release-completion", "released completion");
+            // Ending completion would cancel the request, and its answer would never show.
+            string cancel = $"cancel {Id(request)}";
+            await Wait.UntilAsync(() => Labels(window).SequenceEqual(["today", "year"]) || fake.Lines.Contains(cancel));
+            fake.Lines.ShouldNotContain(cancel);
+            Labels(window).ShouldBe(["today", "year"]);
+        });
+
+    [Fact]
+    public Task A_commit_character_that_is_also_a_trigger_character_commits_and_then_asks_again() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument words = await SetCompletionAsync(
+                server,
+                fake,
+                new JsonObject
+                {
+                    ["items"] = new JsonArray(
+                        new JsonObject { ["label"] = "date", ["commitCharacters"] = new JsonArray(".") }
+                    ),
+                }
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Type("da");
+            (await WaitForLabelsAsync(window)).ShouldBe(["date"]);
+            using CodeDocument members = await SetCompletionAsync(server, fake, Items("today", "year"));
+
+            window.Type(".");
+
+            // As in VS Code: the dot commits the item, goes in, and asks again as a trigger character.
+            document.Text.ShouldBe("date.");
+            (await fake.WaitForAsync("completion ", 2)).ShouldEndWith(" 2 . 5");
+            (await WaitForLabelsAsync(window)).ShouldBe(["today", "year"]);
+        });
+
+    [Fact]
     public Task Typing_that_starts_a_word_opens_the_list_but_not_inside_a_word_or_a_comment() =>
         _ui.Run(async () =>
         {

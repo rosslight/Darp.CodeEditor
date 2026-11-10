@@ -402,8 +402,9 @@ internal sealed class CompletionController : IDisposable
     {
         if (filtered.Items.Count == 0)
         {
-            // An incomplete list may have more for what is typed: its next answer shows.
-            if (key.Answer.List.IsIncomplete)
+            // An incomplete list may have more for what is typed, and a newer request, as for a trigger character typed
+            // while the list showed, brings a list of its own: its answer shows, or ends completion when it has nothing.
+            if (key.Answer.List.IsIncomplete || session.Pending is not null)
                 Hide(session);
             else
                 Close();

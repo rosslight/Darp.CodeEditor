@@ -94,8 +94,13 @@ internal sealed class FakeServer
     /// <summary>Set by the command <c>completion</c>: the result that completion answers with.</summary>
     private JsonNode? _completion;
 
-    /// <summary>Set by the command <c>hold-completion</c>: completion is no longer answered.</summary>
+    /// <summary>
+    /// Set by the command <c>hold-completion</c>: completion requests wait for the command <c>release-completion</c>,
+    /// which answers them with what the command <c>completion</c> set by then.
+    /// </summary>
     private bool _holdCompletion;
+
+    private readonly List<JsonNode?> _heldCompletions = [];
 
     /// <summary>Set by the command <c>hold-resolve</c>: resolve requests wait for the command <c>release-resolve</c>.</summary>
     private bool _holdResolve;
@@ -400,6 +405,13 @@ internal sealed class FakeServer
                 _holdCompletion = true;
                 Log("holding completion");
                 break;
+            case ["release-completion"]:
+                _holdCompletion = false;
+                foreach (JsonNode? id in _heldCompletions)
+                    Reply(id, _completion?.DeepClone());
+                _heldCompletions.Clear();
+                Log("released completion");
+                break;
             case ["hold-resolve"]:
                 _holdResolve = true;
                 Log("holding resolve");
@@ -556,8 +568,13 @@ internal sealed class FakeServer
         Log(
             $"completion {id?.ToJsonString()} {uri} {(int?)context?["triggerKind"]} {(string?)context?["triggerCharacter"] ?? "-"} {offset}"
         );
-        if (_holdCompletion || document.Text.Contains("slow", StringComparison.Ordinal))
+        if (document.Text.Contains("slow", StringComparison.Ordinal))
             return;
+        if (_holdCompletion)
+        {
+            _heldCompletions.Add(id?.DeepClone());
+            return;
+        }
         if (_completionItems == 0)
         {
             Reply(id, _completion?.DeepClone());

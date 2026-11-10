@@ -398,17 +398,19 @@ How the client talks to a server, where the protocol leaves a choice:
     while a word is left, as invoked, as VS Code does, and so does an edit before it, as by another editor of the
     document: the list's positions no longer fit the text. A newer request cancels the one under way with
     `$/cancelRequest`, and so does ending completion; the answer of a request that is no longer the latest is
-    dropped. An answer that comes after typing is filtered with what was typed since.
+    dropped. An answer that comes after typing is filtered with what was typed since. A trigger character asks again
+    also while a list shows, as in VS Code, and the new answer's list replaces it; meanwhile the list shows what still
+    matches, and nothing left to show ends completion only once the new answer has nothing either.
   - **Committing:** Enter, Tab, a click, or one of the item's commit characters, or the server's `allCommitCharacters`
-    for an item that names none, which then goes in. While the filter of the current text still runs, they commit the
-    item that shows if it matches the current text, which is checked for that item alone, on the first 128 characters
-    of its typed text; otherwise Enter and Tab commit what that filter selects once it has run, unless the text, by
-    any editor of the document or by code, or the caret changes before, and a commit character goes in as text, as
-    when nothing matches: deciding later would hold back or reorder what the user types. A read-only editor neither
-    completes nor commits. The item's `textEdit` applies: a text edit, or the insert range of an insert and replace
-    edit, as VS Code's default insert mode; its range grows by what was typed since it was asked, as in VS Code. Its
-    `additionalTextEdits`, such as an import, apply with it, as one step that the user undoes; ones that overlap
-    another edit are left out.
+    for an item that names none, which then goes in, and asks again if it is a trigger character, as in VS Code. While
+    the filter of the current text still runs, they commit the item that shows if it matches the current text, which
+    is checked for that item alone, on the first 128 characters of its typed text; otherwise Enter and Tab commit what
+    that filter selects once it has run, unless the text, by any editor of the document or by code, or the caret
+    changes before, and a commit character goes in as text, as when nothing matches: deciding later would hold back or
+    reorder what the user types. A read-only editor neither completes nor commits. The item's `textEdit` applies: a
+    text edit, or the insert range of an insert and replace edit, as VS Code's default insert mode; its range grows by
+    what was typed since it was asked, as in VS Code. Its `additionalTextEdits`, such as an import, apply with it, as
+    one step that the user undoes; ones that overlap another edit are left out.
   - **Resolving:** the selected item is resolved when it is selected, and the resolve of an item that is no longer
     selected is cancelled. Its detail, as code highlighted with the document's grammar, and its documentation show
     beside the list, as much of both as a hover shows: they share one budget of the hover's size, cut before anything
@@ -416,8 +418,9 @@ How the client talks to a server, where the protocol leaves a choice:
     after the item was committed join the commit's undo step while it is the last one; once the user moved on, they
     are dropped. Items resolve only in the process that sent them, while the document stays open there as it was.
   - **Ending:** Escape, the caret leaving the line or moving back past the word, a selection, the editor becoming
-    read-only, the list's line scrolling out of view, the editor losing the keyboard focus, a server that starts or stops serving the document,
-    new colors, nothing left that matches a complete list, and the editor no longer showing the document.
+    read-only, the list's line scrolling out of view, the editor losing the keyboard focus, a server that starts or
+    stops serving the document, new colors, nothing left that matches a complete list while no newer request is under
+    way, and the editor no longer showing the document.
 - **Signature help** is asked for on the server's trigger characters, and again at once on its retrigger characters
   while it is open. While it is open, each edit and caret move restarts a pause of 120 ms, VS Code's, after which it
   asks again for a change of the content; the pause runs on the options' `TimeProvider`. Asking again says that it is
@@ -914,7 +917,10 @@ Completion and signature help (sections 2 and 6) are implemented. Proven on linu
 NativeAOT, in headless windows rendered with Skia, against the fake server:
 
 - completion opens on Ctrl+Space, pressed with Control, on a trigger character, which the request names, and when
-  typing starts a word; not on typing on in a word, nor at the start of one that goes on, nor in a comment;
+  typing starts a word; not on typing on in a word, nor at the start of one that goes on, nor in a comment. A trigger
+  character typed while a word's list shows asks again, and the new list shows, also when the server answers only
+  after the word's list, filtered for the trigger character, has nothing left; one that is also the selected item's
+  commit character commits it, goes in, and then asks again;
 - the ranking that the C# server will share gives the scores and the matched characters of VS Code's `fuzzyScore`
   and `anyScore`: compared with VS Code 1.145's own code, without its emoji separators, on 25,000 random texts, also
   beyond 128 characters, they agreed on all of them. Tests check prefixes before capitals inside words, equal scores
