@@ -28,7 +28,11 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Darp.CodeEditor\Darp.CodeEditor.csproj" />
+    <!-- The editor references it privately; tests of the connection use it directly. -->
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.Lsp\Darp.CodeEditor.Lsp.csproj" />
     <!-- Runs in its own process: it checks what the library does before Avalonia is set up. -->
     <ProjectReference Include="..\Darp.CodeEditor.Tests.BeforeSetup\Darp.CodeEditor.Tests.BeforeSetup.csproj" />
+    <!-- The language server that the tests start. -->
+    <ProjectReference Include="..\Darp.CodeEditor.Tests.FakeServer\Darp.CodeEditor.Tests.FakeServer.csproj" />
   </ItemGroup>
 </Project>

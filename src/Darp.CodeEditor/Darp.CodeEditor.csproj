@@ -1,11 +1,21 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <Description>Avalonia code editor: TextMate highlighting, search, and completion, hover and diagnostics from any language server. NativeAOT compatible.</Description>
+    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);IncludeLspAssembly</TargetsForTfmSpecificBuildOutput>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" />
     <PackageReference Include="Avalonia.AvaloniaEdit" />
     <PackageReference Include="TextMateSharp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Darp.CodeEditor.Lsp\Darp.CodeEditor.Lsp.csproj">
+      <!--
+        Internal: its DLL ships in this package's lib folder, and the package depends on no package of its own. Private
+        only when packing, so that projects of this repository that reference the editor get the DLL as usual.
+      -->
+      <PrivateAssets Condition="'$(_IsPacking)' == 'true'">all</PrivateAssets>
+    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <!-- The built-in languages and themes, from VS Code. -->
@@ -21,4 +31,13 @@
     <InternalsVisibleTo Include="Darp.CodeEditor.Tests.BeforeSetup" />
     <InternalsVisibleTo Include="Darp.CodeEditor.Benchmarks" />
   </ItemGroup>
+  <!-- Packs the internal LSP assembly next to the editor's. -->
+  <Target Name="IncludeLspAssembly" DependsOnTargets="ResolveReferences">
+    <ItemGroup>
+      <BuildOutputInPackage
+        Include="@(ReferenceCopyLocalPaths)"
+        Condition="'%(ReferenceCopyLocalPaths.ReferenceSourceTarget)' == 'ProjectReference' and '%(Filename)%(Extension)' == 'Darp.CodeEditor.Lsp.dll'"
+      />
+    </ItemGroup>
+  </Target>
 </Project>

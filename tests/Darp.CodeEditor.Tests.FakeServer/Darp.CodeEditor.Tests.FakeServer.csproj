@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <PublishAot>true</PublishAot>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Only for its host mode, which starts a child as the library does. The protocol is its own. -->
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.Lsp\Darp.CodeEditor.Lsp.csproj" />
+  </ItemGroup>
+</Project>

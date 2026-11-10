@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Runtime.CompilerServices;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -71,19 +70,9 @@ public sealed class DocumentThreadTests(UiFixture ui)
     [Fact]
     public async Task Nothing_touches_Avalonias_dispatcher_before_Avalonia_is_set_up()
     {
-        // A process of its own: this one sets Avalonia up for the headless tests. Published as NativeAOT, the fixture
-        // is the native executable beside the tests; otherwise its DLL runs on dotnet.
-        string fixture = Path.Combine(AppContext.BaseDirectory, "Darp.CodeEditor.Tests.BeforeSetup");
-        ProcessStartInfo start = RuntimeFeature.IsDynamicCodeSupported
-            ? new(
-                Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") is { Length: > 0 } dotnet ? dotnet : "dotnet",
-                [$"{fixture}.dll"]
-            )
-            : new(fixture);
-        start.RedirectStandardOutput = true;
-        start.RedirectStandardError = true;
-        using Process process =
-            Process.Start(start) ?? throw new InvalidOperationException("The fixture did not start.");
+        // A process of its own: this one sets Avalonia up for the headless tests. It starts the fake language server.
+        (string server, IReadOnlyList<string> arguments) = Fixtures.CommandLine("Darp.CodeEditor.Tests.FakeServer");
+        using Process process = Fixtures.Start("Darp.CodeEditor.Tests.BeforeSetup", [server, .. arguments]);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(60));
 

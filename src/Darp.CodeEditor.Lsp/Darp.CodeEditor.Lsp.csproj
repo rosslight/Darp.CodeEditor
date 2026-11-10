@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Ships inside the Darp.CodeEditor package: all its types are internal. -->
+    <IsPackable>false</IsPackable>
+    <!-- LibraryImport generates unsafe code for the Windows Job Object. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Darp.CodeEditor" />
+    <InternalsVisibleTo Include="Darp.CodeEditor.Tests" />
+    <!-- The fake language server starts a child through ServerProcess, for the test of processes ending with the app. -->
+    <InternalsVisibleTo Include="Darp.CodeEditor.Tests.FakeServer" />
+    <InternalsVisibleTo Include="Darp.CodeEditor.Benchmarks" />
+  </ItemGroup>
+</Project>
