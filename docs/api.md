@@ -1030,8 +1030,8 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   mirrors in the same undo step, also a pair that closes at its end, and undoing a character keeps the session.
   Completion inside a stop keeps the session, and a snippet committed there joins it. The session ends when the
   selection leaves the stops, the insertion is undone, the text is replaced, the editor becomes read-only, and it
-  stops showing the document; Escape ends it after completion and signature help, and closes the search bar first
-  when the bar has the keyboard. The variables of the caret, the document's file, the language and the server's
+  stops showing the document; Escape ends it after completion and signature help and before the hover and the search
+  bar, and closes the search bar first when the bar has the keyboard. The variables of the caret, the document's file, the language and the server's
   clock go in, and the stops show in a theme's colors, in the rendered pixels. A snippet beyond each limit goes in as
   written, also one crafted so that parsing would take quadratic time;
 - by hand, not in the tests, against VS Code's JSON server from `vscode-langservers-extracted` 4.10.0: with a schema
