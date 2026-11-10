@@ -136,7 +136,7 @@
                 <Button
                     Classes="command wide"
                     ToolTip.Tip="{Binding Strings.Undo}"
-                    IsEnabled="{Binding ShownDocument.Document.CanUndo, FallbackValue=False}"
+                    IsEnabled="{Binding ShownDocument?.Document.CanUndo, TargetNullValue=False}"
                     Click="OnUndo"
                 >
                     <fa:FASymbolIcon Symbol="Undo" />
@@ -144,7 +144,7 @@
                 <Button
                     Classes="command wide"
                     ToolTip.Tip="{Binding Strings.Redo}"
-                    IsEnabled="{Binding ShownDocument.Document.CanRedo, FallbackValue=False}"
+                    IsEnabled="{Binding ShownDocument?.Document.CanRedo, TargetNullValue=False}"
                     Click="OnRedo"
                 >
                     <fa:FASymbolIcon Symbol="Redo" />
@@ -189,11 +189,11 @@
                     TextTrimming="CharacterEllipsis"
                     IsVisible="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
                 >
-                    <Run Text="{Binding ShownDocument.Name}" />
+                    <Run Text="{Binding ShownDocument?.Name}" />
                     <Run Foreground="{DynamicResource TextFillColorSecondaryBrush}">
                         <Run.Text>
                             <MultiBinding Converter="{x:Static local:MainWindow.StateText}">
-                                <Binding Path="ShownDocument.State" />
+                                <Binding Path="ShownDocument?.State" />
                                 <Binding Path="Strings.StateNoFile" />
                                 <Binding Path="Strings.StateUnsaved" />
                             </MultiBinding>
@@ -310,7 +310,7 @@
           The status bar, under the pane and the page, for the document the page shows. It stays while the settings
           show, empty, so that the pane keeps its height.
         -->
-        <Grid Grid.Row="2" Classes="status" Height="28" Margin="12,0" ColumnDefinitions="Auto,*,Auto,Auto">
+        <Grid Grid.Row="2" Classes="status" Height="28" Margin="12,0" ColumnDefinitions="Auto,*,Auto,Auto,Auto">
             <Button
                 Name="CaretButton"
                 IsVisible="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
@@ -346,13 +346,13 @@
                 <TextBlock
                     Classes="plain"
                     Text="{Binding Strings.NoFile}"
-                    IsVisible="{Binding ShownDocument.File, Converter={x:Static ObjectConverters.IsNull}}"
+                    IsVisible="{Binding ShownDocument?.File, Converter={x:Static ObjectConverters.IsNull}}"
                 />
                 <TextBlock
                     Classes="plain"
-                    Text="{Binding ShownDocument.File.Path.LocalPath}"
+                    Text="{Binding ShownDocument?.File?.Path.LocalPath}"
                     TextTrimming="PrefixCharacterEllipsis"
-                    IsVisible="{Binding ShownDocument.File, Converter={x:Static ObjectConverters.IsNotNull}}"
+                    IsVisible="{Binding ShownDocument?.File, Converter={x:Static ObjectConverters.IsNotNull}}"
                 />
             </Panel>
 
@@ -369,13 +369,29 @@
                         <MultiBinding Converter="{x:Static local:MainWindow.IndentationText}">
                             <Binding Path="Strings.IndentSpaces" />
                             <Binding Path="Strings.IndentTabs" />
-                            <Binding Path="ShownDocument.Document.Indentation" />
+                            <Binding Path="ShownDocument?.Document.Indentation" />
                         </MultiBinding>
                     </TextBlock.Text>
                 </TextBlock>
             </DropDownButton>
 
-            <TextBlock Grid.Column="3" Classes="plain" Text="{Binding ShownDocument.Type.Name}" />
+            <TextBlock Grid.Column="3" Classes="plain" Text="{Binding ShownDocument?.Type.Name}" />
+
+            <!-- The document's language server and its state, which the server raises on the UI thread. -->
+            <TextBlock
+                Grid.Column="4"
+                Classes="plain"
+                IsVisible="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
+            >
+                <TextBlock.Text>
+                    <MultiBinding Converter="{x:Static local:MainWindow.ServerText}">
+                        <Binding Path="Strings.NoServer" />
+                        <Binding Path="Strings.ServerNotInstalled" />
+                        <Binding Path="ShownDocument?.Type.ServerName" />
+                        <Binding Path="ShownDocument?.Server?.State" />
+                    </MultiBinding>
+                </TextBlock.Text>
+            </TextBlock>
         </Grid>
     </Grid>
 </windowing:FAAppWindow>

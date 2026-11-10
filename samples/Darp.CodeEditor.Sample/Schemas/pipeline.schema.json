@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Pipeline",
+  "description": "Steps that run one after another when the pipeline is triggered.",
+  "type": "object",
+  "required": ["name", "steps"],
+  "properties": {
+    "name": {
+      "description": "The pipeline's name: lower-case letters, digits and dashes.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "trigger": {
+      "description": "When the pipeline runs, besides when the user starts it.",
+      "type": "object",
+      "properties": {
+        "schedule": {
+          "description": "A cron expression: minute, hour, day of the month, month and day of the week.",
+          "type": "string",
+          "default": "0 6 * * 1-5"
+        },
+        "onChange": {
+          "description": "Whether the pipeline also runs when one of its files changes.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "steps": {
+      "description": "The steps, in the order they run.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "run"],
+        "properties": {
+          "name": {
+            "description": "The step's name, which the pipeline's log shows.",
+            "type": "string"
+          },
+          "run": {
+            "description": "The command the step runs.",
+            "type": "string"
+          },
+          "when": {
+            "description": "Which outcome of the steps before lets this one run.",
+            "enum": ["success", "failure", "always"],
+            "default": "success"
+          },
+          "retries": {
+            "description": "How often the step runs again after it fails.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5,
+            "default": 0
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

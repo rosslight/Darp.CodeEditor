@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Resources;
 using System.Runtime.CompilerServices;
+using Darp.CodeEditor;
 
 namespace Sample.Localization;
 
@@ -64,11 +65,15 @@ public sealed class Strings : INotifyPropertyChanged
     public string NoFile => Get();
     public string StateNoFile => Get();
     public string StateUnsaved => Get();
+    public string NoServer => Get();
+    public string ServerNotInstalled => Get();
     public string CopyPath => Get();
     public string ShowInFolder => Get();
     public string AllFiles => Get();
     public string OpenFailed => Get();
+    public string ExampleHasPath => Get();
     public string SaveFailed => Get();
+    public string OpenInAnother => Get();
     public string Ok => Get();
     public string SaveChanges => Get();
     public string SaveChangesMessage => Get();
@@ -92,6 +97,9 @@ public sealed class Strings : INotifyPropertyChanged
     public string About => Get();
     public string AboutDescription => Get();
     public string SourceCode => Get();
+
+    /// <summary>Where a language server is in its life, in words: the texts <c>ServerRunning</c> and so on.</summary>
+    public string Describe(LanguageServerState state) => Get($"Server{state}");
 
     /// <summary>Fills in a text with placeholders, such as <see cref="Untitled"/>.</summary>
     public string Format(string text, params object?[] args) => string.Format(Culture, text, args);
