@@ -50,8 +50,14 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     /// <summary>The stops with mirrors that the change under way is inside: their mirrors follow once it is done.</summary>
     private readonly List<Stop> _edited = [];
 
-    /// <summary>Whether the controller changes the text or the selection: it does not follow its own changes.</summary>
-    private bool _changing;
+    /// <summary>
+    /// The groups whose mirrors follow one change, while they do: each group follows once, so that stops that are
+    /// mirrors of each other end.
+    /// </summary>
+    private HashSet<List<Stop>>? _following;
+
+    /// <summary>Whether the controller selects a stop: it does not follow its own selection.</summary>
+    private bool _selecting;
 
     public SnippetController(TextArea textArea, CodeDocument document)
     {
@@ -272,7 +278,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     private void Select(Stop stop)
     {
         (int start, int end) = (stop.StartOffset, stop.EndOffset);
-        _changing = true;
+        _selecting = true;
         try
         {
             if (start == end)
@@ -283,7 +289,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         }
         finally
         {
-            _changing = false;
+            _selecting = false;
         }
         _textArea.Caret.BringCaretToView();
     }
@@ -363,15 +369,16 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
 
     /// <summary>
     /// Before a change of the text, but not of an undo or a redo, which bring the mirrors back themselves: notes the
-    /// stops with mirrors that it is inside, and ends the session when it removes all of the snippet's text, unless it
-    /// is inside the selected stop.
+    /// stops with mirrors that it is inside, also a mirror's change inside a stop of another group, and ends the
+    /// session when it removes all of the snippet's text, unless it is inside the selected stop.
     /// </summary>
     private void OnBufferChanging(object? sender, DocumentChangeEventArgs e)
     {
-        if (_changing || _session is not { } session || !_buffer.UndoStack.AcceptChanges)
+        if (_session is not { } session || !_buffer.UndoStack.AcceptChanges)
             return;
         if (
-            e.RemovalLength > 0
+            _following is null
+            && e.RemovalLength > 0
             && e.Offset <= session.Stops.Min(stop => stop.StartOffset)
             && e.Offset + e.RemovalLength >= session.Stops.Max(stop => stop.EndOffset)
             && !session.Stops.Exists(stop => stop.IsSelected && stop.Contains(e))
@@ -382,14 +389,16 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         }
         foreach (Stop stop in session.Stops)
         {
-            if (stop.Group.Count > 1 && stop.Contains(e))
+            if (stop.Group.Count > 1 && _following?.Contains(stop.Group) != true && stop.Contains(e))
                 _edited.Add(stop);
         }
     }
 
     /// <summary>
     /// After a change of the text, within its undo step: ends the session when the step that inserted the snippet was
-    /// undone, and gives the mirrors of the stops that the change was inside their new text.
+    /// undone, and gives the mirrors of the stops that the change was inside their new text. A mirror that changes
+    /// inside a stop of another group changes that group's mirrors in turn, as VS Code's cursors in nested mirrors do;
+    /// each group once. A mirror around or inside its own stop keeps its text, as copying would grow it forever.
     /// </summary>
     private void OnBufferTextChanged(object? sender, EventArgs e)
     {
@@ -401,33 +410,42 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
             return;
         }
         _textArea.TextView.InvalidateLayer(Layer);
-        if (_changing || _edited.Count == 0)
+        if (_following is not null || _edited.Count == 0)
             return;
-        Stop[] edited = [.. _edited.Distinct()];
-        _edited.Clear();
-        _changing = true;
+        _following = [];
         try
         {
-            foreach (Stop stop in edited)
+            // The changes of the mirrors note the stops around them, which follow in turn.
+            for (int i = 0; i < _edited.Count; i++)
             {
+                Stop stop = _edited[i];
+                if (!_following.Add(stop.Group))
+                    continue;
                 string text = _buffer.GetText(Segment(stop.StartOffset, stop.EndOffset));
                 foreach (Stop mirror in stop.Group)
                 {
-                    if (mirror != stop && _buffer.GetText(Segment(mirror.StartOffset, mirror.EndOffset)) != text)
+                    if (
+                        mirror != stop
+                        && !mirror.Overlaps(stop)
+                        && _buffer.GetText(Segment(mirror.StartOffset, mirror.EndOffset)) != text
+                    )
+                    {
                         mirror.Replace(_buffer, text);
+                    }
                 }
             }
         }
         finally
         {
-            _changing = false;
+            _following = null;
+            _edited.Clear();
         }
     }
 
     /// <summary>Ends the session once the selection is outside its stops, or the step that inserted it was undone.</summary>
     private void OnSelectionChanged(object? sender, EventArgs e)
     {
-        if (_changing || _session is not { } session)
+        if (_selecting || _session is not { } session)
             return;
         ISegment selected = _textArea.Selection.IsEmpty
             ? Segment(_textArea.Caret.Offset, _textArea.Caret.Offset)
@@ -535,6 +553,9 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
                 ? _start.MovementType == AnchorMovementType.BeforeInsertion
                 : _end.MovementType == AnchorMovementType.AfterInsertion;
         }
+
+        /// <summary>Whether the stops share text, or one is inside the other; not when they only touch.</summary>
+        public bool Overlaps(Stop other) => StartOffset < other.EndOffset && other.StartOffset < EndOffset;
 
         /// <summary>Replaces the stop's text, which it keeps as a whole, also when it was empty.</summary>
         public void Replace(TextDocument buffer, string text)

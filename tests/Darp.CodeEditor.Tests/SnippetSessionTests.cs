@@ -143,6 +143,34 @@ public sealed class SnippetSessionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_mirror_that_changes_inside_another_stop_changes_that_stops_mirrors_too() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Item("${1:a${2:b}} = $1; $2"));
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("ab = ab; b");
+
+            // In the stop inside the first placeholder: both of their mirrors follow.
+            window.Press(Key.Tab);
+            window.Editor.Selection.ShouldBe(new TextSelection(1, 2));
+            window.Type("x");
+            document.Text.ShouldBe("ax = ax; x");
+
+            // In the second stop's mirror, which VS Code would leave with a cursor of its own: its stop changes, and so
+            // does the first placeholder's mirror.
+            window.Editor.Selection = new TextSelection(9, 10);
+            window.Type("y");
+            document.Text.ShouldBe("ay = ay; y");
+            document.Undo();
+            document.Text.ShouldBe("ax = ax; x");
+        });
+
+    [Fact]
     public Task Completion_inside_a_stop_keeps_the_session_and_a_snippet_joins_it_after_that_stop() =>
         _ui.Run(async () =>
         {

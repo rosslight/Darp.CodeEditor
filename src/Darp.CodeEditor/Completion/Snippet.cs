@@ -19,7 +19,7 @@ namespace Darp.CodeEditor.Completion;
 /// </para>
 /// <para>
 /// Parsing runs where the server's answer is read, off the UI thread, and is bounded by the snippet's length: a snippet
-/// whose parsing reads its tokens more than four times over, nested deeper than <see cref="MaxNesting"/> levels, with
+/// whose parsing reads its characters more than four times over, nested deeper than <see cref="MaxNesting"/> levels, with
 /// more than <see cref="MaxStops"/> stops, mirrors included, or whose mirrors add more than
 /// <see cref="MaxAddedText"/> characters, goes in as written, without stops. So the UI thread renders it at a cost
 /// proportional to what the server sent.
@@ -36,7 +36,10 @@ internal sealed class Snippet
     /// <summary>How deep placeholders and variables may nest.</summary>
     public const int MaxNesting = 100;
 
-    /// <summary>How many characters mirrors, and also variables' values, may add to the snippet's text.</summary>
+    /// <summary>
+    /// How many characters mirrors may add to the snippet's text, counting one for each part they copy, and variables'
+    /// values, counting one for each variable.
+    /// </summary>
     public const int MaxAddedText = 10_000;
 
     /// <summary>The variables that VS Code knows; others without a default become placeholders.</summary>
@@ -111,7 +114,9 @@ internal sealed class Snippet
     /// <summary>
     /// The text that goes in, and its stops, as VS Code adjusts and resolves them: lines after the first are indented
     /// by the line it goes in, the indentation is that of the document, line breaks are the line's, and variables have
-    /// their values. Variables' values add at most <see cref="MaxAddedText"/> characters; later ones count as unset.
+    /// their values. Variables add at most <see cref="MaxAddedText"/> characters, counting one for each variable asked
+    /// for; once they are spent, later variables are unset without asking. So rendering costs one pass over the
+    /// snippet's parts.
     /// </summary>
     public RenderedSnippet Render(SnippetContext context)
     {
@@ -125,7 +130,8 @@ internal sealed class Snippet
 
     /// <summary>
     /// Turns each variable without a default that VS Code does not know into a placeholder with its name, numbered
-    /// after the highest stop, the same name with the same number, in the order VS Code finds them: level by level.
+    /// after the highest stop, the same name with the same number, in the order VS Code finds them: level by level. As
+    /// the protocol says, also in a variable's default, where VS Code's own snippets leave them.
     /// </summary>
     private static void PlaceholdersForUnknownVariables(List<Node> nodes)
     {
@@ -147,9 +153,9 @@ internal sealed class Snippet
                     placeholder.Children.Add(new TextNode(variable.Name));
                     level[i] = placeholder;
                 }
-                else if (level[i] is PlaceholderNode placeholder)
+                else if (level[i].Children is { } children)
                 {
-                    queue.Enqueue(placeholder.Children);
+                    queue.Enqueue(children);
                 }
             }
         }
@@ -329,23 +335,26 @@ internal sealed class Snippet
 
     /// <summary>
     /// VS Code's snippet parser, token by token with the same grammar and the same fallbacks. It stops once it has
-    /// read four times as many tokens as the text has characters, or nests deeper than <see cref="MaxNesting"/>, as
-    /// a text crafted to backtrack could otherwise take time quadratic in its length.
+    /// read the text's characters four times over, going back included, or nests deeper than
+    /// <see cref="MaxNesting"/>, as a text crafted to go back could otherwise take time quadratic in its length.
     /// </summary>
     private sealed class Parser
     {
         private const string SingleCharacterTokens = "$:,{}\\/|+-?";
 
         private readonly string _text;
-        private readonly int _budget;
-        private int _read;
+
+        /// <summary>How many characters parsing may read, each time it reads them.</summary>
+        private readonly long _budget;
+
+        private long _read;
         private int _position;
         private Token _token;
 
         public Parser(string text)
         {
             _text = text;
-            _budget = 4 * text.Length + 16;
+            _budget = 4L * text.Length + 16;
             _token = Next();
         }
 
@@ -671,11 +680,6 @@ internal sealed class Snippet
         {
             if (_position >= _text.Length || IsAborted)
                 return new Token(TokenType.End, _position, 0);
-            if (++_read > _budget)
-            {
-                Abort();
-                return _token;
-            }
             int start = _position;
             char c = _text[start];
             int single = SingleCharacterTokens.IndexOf(c);
@@ -712,6 +716,12 @@ internal sealed class Snippet
                     && !IsNameCharacter(_text[_position])
                 );
                 type = TokenType.Format;
+            }
+            _read += _position - start;
+            if (_read > _budget)
+            {
+                Abort();
+                return _token;
             }
             return new Token(type, start, _position - start);
         }
@@ -765,7 +775,9 @@ internal sealed class Snippet
                         Text.Append(choice.Value);
                         break;
                     case VariableNode variable:
-                        if (_context.Variable(variable.Name) is { } value && value.Length <= _variableBudget)
+                        string? value = _variableBudget > 0 ? _context.Variable(variable.Name) : null;
+                        _variableBudget--;
+                        if (value is not null && value.Length <= _variableBudget)
                         {
                             _variableBudget -= value.Length;
                             Text.Append(value);

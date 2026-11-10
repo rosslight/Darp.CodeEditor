@@ -444,15 +444,17 @@ How the client talks to a server, where the protocol leaves a choice:
     no value, so their default or nothing goes in: `TM_SELECTED_TEXT` and `SELECTION`, as completion never commits
     over a selection; `CLIPBOARD`, as reading the app's clipboard would make the commit wait; `WORKSPACE_NAME` and
     `WORKSPACE_FOLDER`; and the file's variables without a `FilePath`. A variable that VS Code does not know, without a
-    default, becomes a placeholder with its name, as the protocol says and as VS Code does for its own snippets;
-    VS Code's completion inserts nothing for it.
+    default, becomes a placeholder with its name, as the protocol says and as VS Code does for its own snippets, also
+    in another variable's default; VS Code's completion inserts nothing for it.
   - **Transformations**, such as `${1/(.*)/${1:/upcase}/}`, are read and not applied: a variable goes in as its value,
     and a stop with one is a mirror of its number.
   - **The session.** After the commit, the first stop is selected, or the caret goes to the final stop, or after the
     text of a snippet without stops. Tab selects the next stop and Shift+Tab the previous one; on the first stop,
     Shift+Tab outdents, as in VS Code. Tab skips a stop whose text was deleted, such as one inside a placeholder that
     was typed over. Typing in a stop replaces its text, and its mirrors follow in the same undo step; an undo takes
-    them back with it. The selected stop, and the placeholders around it, grow as the user types at their edges; the
+    them back with it. A mirror that changes inside another stop changes that stop's mirrors too, each stop's mirrors
+    once, as VS Code's cursors in nested mirrors do; the editor has one caret, so typing in a mirror changes its stop
+    as well. The selected stop, and the placeholders around it, grow as the user types at their edges; the
     others don't. Completion and signature help work in a stop: a committed item keeps the session, and a snippet
     committed inside a stop joins it, with its stops, its final one too, right after that stop, as in VS Code.
   - **The session ends** at the final stop; on Escape, after completion's list and signature help, while the text area
@@ -464,11 +466,13 @@ How the client talks to a server, where the protocol leaves a choice:
   - **The stops' look:** boxes in the theme's `editor.snippetTabstopHighlightBackground`, and the final stop as a border
     in `editor.snippetFinalTabstopHighlightBorder`, in VS Code's colors where the theme sets none, as long as the
     session runs.
-  - **Limits.** Parsing reads a snippet's tokens at most four times over: text crafted to make VS Code's parser go back
-    could otherwise cost time quadratic in its length. A snippet whose placeholders nest deeper than 100 levels, with
-    more than 1,000 stops, mirrors included, or whose mirrors would add more than 10,000 characters goes in as
-    written, without stops. Variables add at most 10,000 characters; later ones take their default. So the UI thread
-    renders a snippet at the cost of its text, as for any item, and reads at most the shown part of the caret's line.
+  - **Limits.** Parsing reads a snippet's characters at most four times over, going back included: text crafted to
+    make VS Code's parser go back could otherwise cost time quadratic in its length. A snippet whose parsing would read
+    more, whose placeholders nest deeper than 100 levels, with more than 1,000 stops, mirrors included, or whose
+    mirrors would add more than 10,000 characters goes in as written, without stops. Variables add at most 10,000
+    characters, counting one for each variable; once they are spent, later variables take their default without being
+    asked for. So the UI thread renders a snippet in one pass over its parts, at the cost of its text, as for any item,
+    and reads at most the shown part of the caret's line.
     Each edit and caret move checks every stop of the session once, and each frame draws those in view: 1,000 stops are
     far more than any real snippet has, and few enough for that.
 - **Signature help** is asked for on the server's trigger characters, and again at once on its retrigger characters
@@ -1022,18 +1026,20 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   focus loss and when the server stops serving the document;
 - the client advertises exactly what it implements, snippets included;
 - snippets: VS Code's own test cases of its parser give its text, for stops, placeholders, choices, escapes and text
-  that does not parse; mirrors take their text, also nested, and mirrors of each other end; variables take their
-  values or their default, and unknown ones become placeholders; transformations are read and not applied. In the
-  editor, a snippet goes in by its `insertText`, and by a text edit grown by what was typed, indented by its line, in
-  one undo step with its additional edits as plain text, and its first stop selected. Tab and Shift+Tab move through
-  the stops, Shift+Tab on the first one outdents, and the final stop ends the session; typing in a stop changes its
-  mirrors in the same undo step, also a pair that closes at its end, and undoing a character keeps the session.
-  Completion inside a stop keeps the session, and a snippet committed there joins it. The session ends when the
-  selection leaves the stops, the insertion is undone, the text is replaced, the editor becomes read-only, and it
-  stops showing the document; Escape ends it after completion and signature help and before the hover and the search
-  bar, and closes the search bar first when the bar has the keyboard. The variables of the caret, the document's file, the language and the server's
-  clock go in, and the stops show in a theme's colors, in the rendered pixels. A snippet beyond each limit goes in as
-  written, also one crafted so that parsing would take quadratic time;
+  that does not parse; mirrors take their text, also nested, and mirrors of each other end; variables take their values
+  or their default, and unknown ones become placeholders, also in a default; transformations are read and not applied.
+  In the editor, a snippet goes in by its `insertText`, and by a text edit grown by what was typed, indented by its
+  line, in one undo step with its additional edits as plain text, and its first stop selected. Tab and Shift+Tab move
+  through the stops, Shift+Tab on the first one outdents, and the final stop ends the session; typing in a stop changes
+  its mirrors in the same undo step, also a pair that closes at its end, and undoing a character keeps the session; a
+  stop inside a placeholder changes the mirrors of both, and so does typing in a mirror of it. Completion inside a stop
+  keeps the session, and a snippet committed there joins it. The session ends when the selection leaves the stops, the
+  insertion is undone, the text is replaced, the editor becomes read-only, and it stops showing the document; Escape
+  ends it after completion and signature help and before the hover and the search bar, and closes the search bar first
+  when the bar has the keyboard. The variables of the caret, the document's file, the language and the server's clock go
+  in, and the stops show in a theme's colors, in the rendered pixels. A snippet beyond each limit goes in as written,
+  also ones crafted so that parsing would take quadratic time, in many short tokens or few long ones, and variables
+  beyond their budget are not asked for;
 - by hand, not in the tests, against VS Code's JSON server from `vscode-langservers-extracted` 4.10.0: with a schema
   in `json.schemas`, it completes only now that the client advertises snippets. Its property snippets, such as
   `"name": "$1"`, go in with the caret in the quotes, Tab goes after them, a value's snippet inside an object's

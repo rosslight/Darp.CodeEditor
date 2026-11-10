@@ -118,6 +118,8 @@ public sealed class SnippetTests
         RenderedSnippet unknown = Render("${1:$FOO} $BAR ${FOO} ${UNKNOWN:default}", values);
         unknown.Text.ShouldBe("FOO BAR FOO default");
         Stops(unknown).ShouldBe("1:FOO|3:FOO|2:BAR|3:FOO|0:");
+        // Also in a default, as the protocol says, where VS Code's own snippets leave it.
+        Stops(Render("${TM_SELECTED_TEXT:$FOO}", values)).ShouldBe("1:FOO|0:");
     }
 
     [Fact]
@@ -165,8 +167,10 @@ public sealed class SnippetTests
         // Mirrors that would double the text twenty times over.
         AsWritten("${1:x}" + string.Concat(Enumerable.Range(2, 20).Select(i => $"${{{i}:${i - 1}${i - 1}}}")));
 
-        // Text crafted so that each "${1/" reads to its end, if parsing went on.
-        AsWritten(string.Concat(Enumerable.Repeat("${1/a/b/", 20_000)));
+        // Text crafted so that each "${1/" reads to its end, if parsing went on: in many tokens, or in few long ones.
+        // The stop at the end would parse, if parsing went on.
+        AsWritten(string.Concat(Enumerable.Repeat("${1/a/b/", 20_000)) + "${1:x}");
+        AsWritten(string.Concat(Enumerable.Repeat("${1/" + new string('a', 1_000), 200)) + "${1:x}");
 
         static void AsWritten(string snippet)
         {
@@ -177,7 +181,7 @@ public sealed class SnippetTests
     }
 
     [Fact]
-    public void Variables_add_at_most_10000_characters_and_later_ones_take_their_default()
+    public void Variables_add_at_most_10000_characters_and_later_ones_take_their_default_without_asking()
     {
         string line = new('a', 3_000);
 
@@ -187,6 +191,19 @@ public sealed class SnippetTests
         );
 
         rendered.Text.ShouldBe(line + line + line + "default");
+
+        // Each variable asked for counts, also one without a value: the rest are not asked for.
+        int asked = 0;
+        Render(
+            string.Concat(Enumerable.Repeat("$CLIPBOARD", 2 * Snippet.MaxAddedText)),
+            _ =>
+            {
+                asked++;
+                return null;
+            }
+        )
+            .Text.ShouldBeEmpty();
+        asked.ShouldBe(Snippet.MaxAddedText);
     }
 
     [Fact]
