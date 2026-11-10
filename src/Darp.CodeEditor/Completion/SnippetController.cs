@@ -548,7 +548,12 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
             delta += text.Length - length;
             copied = mirror.EndOffset;
         }
+        // The caret stays before what goes in where it is, as in an empty mirror right after the stop typed in.
+        TextAnchor caret = _buffer.CreateAnchor(_textArea.Caret.Offset);
+        caret.MovementType = AnchorMovementType.BeforeInsertion;
+        caret.SurviveDeletion = true;
         _buffer.Replace(start, end - start, new StringTextSource(replaced.ToString()), map);
+        _textArea.Caret.Offset = caret.Offset;
     }
 
     /// <summary>Ends the session once the selection is outside its stops, or the step that inserted it was undone.</summary>

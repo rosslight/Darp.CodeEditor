@@ -176,6 +176,8 @@ public sealed class SnippetSessionTests(UiFixture ui)
     [InlineData("${1:a${2:b} $2} = $1", 1, "x", "ax x = ax x")]
     // A mirror right after its placeholder does not take what is typed at the placeholder's end.
     [InlineData("${1:a}$1", 0, "xyz", "xyzxyz")]
+    // Empty mirrors side by side each take what is typed.
+    [InlineData("$1$1$1", 0, "ab", "ababab")]
     public Task Mirrors_follow_nested_and_neighbouring_stops_as_in_VS_Code(
         string snippet,
         int tabs,
