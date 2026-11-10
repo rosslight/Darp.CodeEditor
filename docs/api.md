@@ -103,7 +103,8 @@ rather than its view belong to the document, as in Monaco and CodeMirror.
 
 **Built in, with no settings:** current-line highlight, bracket matching, auto-closing brackets and quotes,
 auto-indent, whitespace shown inside the selection, scrolling past the last line, a context menu with Cut, Copy, Paste
-and Select All, and the look of errors, hover and completion below.
+and Select All, completion's snippets with their stops (section 6), and the look of errors, hover and completion
+below.
 
 **Caret and scroll position** belong to the editor, as in Monaco, and last as long as it does, like a list's scroll
 position. Setting `Document` shows the other document from its start, and a tab control may create a new editor each
@@ -123,7 +124,8 @@ template at the caret: `document.Replace(editor.Selection.Range, snippet)`. Sett
 comments (Ctrl+/) and indentation (Tab, Shift+Tab). On macOS, Cmd takes Ctrl's place, except for completion, and
 Cmd+Alt+F opens the replace bar, as AvaloniaEdit decides by the operating system. While completion's list shows, Up,
 Down, Page Up, Page Down, Enter, Tab and Escape are its; while signature help shows several signatures, Up and Down
-are its. Other keys, such as F5 or Ctrl+S, reach the app's key bindings.
+are its; while a snippet's stops are active, Tab and Shift+Tab are theirs, except Shift+Tab on the first stop, and so
+is Escape after completion and signature help. Other keys, such as F5 or Ctrl+S, reach the app's key bindings.
 
 **Indentation** belongs to the document (`CodeDocument.Indentation`), so all editors of one document agree. It starts
 as in VS Code, 2 spaces for YAML and 4 otherwise, and is not detected from the text.
@@ -131,8 +133,8 @@ as in VS Code, 2 spaces for YAML and 4 otherwise, and is not detected from the t
 **Look.** The text and everything around it are styled differently, as in Monaco and CodeMirror:
 
 - **The text area** takes its colors from `ColorTheme`, a VS Code color theme: syntax and language-server colors,
-  background, selection, caret, line numbers, current line, search and bracket matches, squiggles. Token colors are
-  made for their theme's background, so they come together.
+  background, selection, caret, line numbers, current line, search and bracket matches, squiggles, a snippet's
+  stops. Token colors are made for their theme's background, so they come together.
 - **Everything around the text** takes the app's look: completion, hover and signature help look like the app's
   flyouts and tooltips, and the search bar and scroll bars are the app's controls. They match Avalonia's Fluent
   theme, FluentAvalonia or any other theme, font, padding and corners included. Code inside popups keeps the editor's
@@ -253,7 +255,7 @@ text), semantic tokens (range and full, in the relative format, with the protoco
 completion and signature help. Completion items may have documentation in Markdown or plain text, commit characters,
 a deprecated flag or tag, preselection, an edit that inserts or replaces, and any of the protocol's 25 kinds; their
 detail, documentation and additional edits may come when they are resolved, and the request says how completion was
-asked for. Items are inserted as their text is: the client advertises no snippets. Signatures may have documentation
+asked for. Items may be snippets, which go in as VS Code inserts them (below). Signatures may have documentation
 in Markdown or plain text, parameters labelled by offsets, and an active parameter of their own, and the request says
 how it was asked for.
 
@@ -421,6 +423,74 @@ How the client talks to a server, where the protocol leaves a choice:
     read-only, the list's line scrolling out of view, the editor losing the keyboard focus, a server that starts or
     stops serving the document, new colors, nothing left that matches a complete list while no newer request is under
     way, and the editor no longer showing the document.
+- **Snippets** in completion items, with `insertTextFormat` 2 in a `textEdit` or an `insertText`, go in as VS Code
+  inserts them. The client parses them with VS Code's grammar where it reads the answer, off the UI thread: stops `$1`
+  and `${1}`, placeholders `${1:text}`, also nested, choices `${1|a,b|}`, the final stop `$0`, variables `$NAME` and
+  `${NAME:default}`, and the escapes `\$`, `\}` and `\\`, and `\,` and `\|` in choices. What does not parse is text, as
+  in VS Code. Stops of one number are mirrors: the first one with text gives the others its text, with the same values
+  of its variables. A snippet with stops gets a final stop at its end, unless it has one. A choice inserts its first
+  option as a placeholder; no list of its options shows.
+  - **What goes in.** The rules of a commit hold: the edit, grown by what was typed since, the additional edits, which
+    stay plain text, one undo step, and nothing in a read-only editor. Lines after the first start with the whitespace
+    that the snippet's line has before it, and their indentation is the document's; line breaks are the line's. Items
+    in plain text still go in as they are written; VS Code would indent their lines too, and the client does not
+    advertise `insertTextMode`.
+  - **Variables** have their values for the text and the caret before the commit: `TM_CURRENT_LINE`, the shown part of
+    the line, `TM_CURRENT_WORD`, `TM_LINE_INDEX`, `TM_LINE_NUMBER`, `CURSOR_INDEX` and `CURSOR_NUMBER`; `TM_FILENAME`,
+    `TM_FILENAME_BASE`, `TM_DIRECTORY`, `TM_DIRECTORY_BASE`, `TM_FILEPATH` and `RELATIVE_FILEPATH` from the document's
+    `FilePath`, the last one the whole path, as without a workspace in VS Code; `LINE_COMMENT`,
+    `BLOCK_COMMENT_START` and `BLOCK_COMMENT_END` from the language; the `CURRENT_` date and time variables from the
+    server's `TimeProvider`, one time for the snippet, with English names; `RANDOM`, `RANDOM_HEX` and `UUID`. These have
+    no value, so their default or nothing goes in: `TM_SELECTED_TEXT` and `SELECTION`, as completion never commits
+    over a selection; `CLIPBOARD`, as reading the app's clipboard would make the commit wait; `WORKSPACE_NAME` and
+    `WORKSPACE_FOLDER`; and the file's variables without a `FilePath`. A variable that VS Code does not know, without a
+    default, becomes a placeholder with its name, as the protocol says and as VS Code does for its own snippets, and
+    also in another variable's default, where VS Code's own snippets leave it; VS Code's completion inserts nothing for
+    it. Each variable is read once for the snippet, except the random ones, which VS Code draws for each.
+  - **Transformations**, such as `${1/(.*)/${1:/upcase}/}`, are read and not applied: a variable goes in as its value,
+    and a stop with one is a mirror of its number.
+  - The session.** After the commit, the first stop is selected, or the caret goes to the final stop, or after the text
+    of a snippet without stops. Tab selects the next stop and Shift+Tab the previous one; on the first stop, Shift+Tab
+    outdents, as in VS Code. When a placeholder's text is replaced, the stops inside it are gone, as in VS Code, and Tab
+    skips them, as it skips a stop whose text was deleted. Typing in a stop replaces its text, and its mirrors follow in
+    the same undo step and the same update, each mirror a change of its own; an undo takes them back with it. The
+    innermost stops' mirrors follow first, and a mirror that changes inside another stop changes that stop's mirrors
+    too, each number's once, as VS Code's cursors in nested mirrors do; the editor has one caret, so typing in a mirror
+    changes its stop as well. The selected stop, and the placeholders around it, grow as the user types at their edges;
+    its mirrors and the other stops don't, so a mirror right after its placeholder stays a copy. Completion and
+    signature help work in a stop: a committed item keeps the session, and a snippet committed inside a stop joins it,
+    with its stops, its final one too, right after that stop, as in VS Code.
+  - **The session ends** at the final stop; on Escape, after completion's list and signature help, while the text area
+    has the keyboard, so that the search bar closes first when it has the keyboard, as in VS Code; when the selection
+    leaves the stops; when the step that inserted the snippet is undone; when a change removes all of the snippet's
+    text, such as setting `Text`; when one change would copy more than 1,000 characters into mirrors, which keep their
+    text; when the editor becomes read-only; and when it no longer shows the document. Losing
+    the keyboard focus does not end it, as in VS Code. VS Code also hides a hover on any key, so its Escape ends the
+    session and hides the hover together; the editor closes one thing at a time, the hover after the session.
+  - **The stops' look:** boxes in the theme's `editor.snippetTabstopHighlightBackground`, and the final stop as a border
+    in `editor.snippetFinalTabstopHighlightBorder`, in VS Code's colors where the theme sets none, as long as the
+    session runs.
+  - **Limits,** sized for real snippets, which have a few lines and fewer than about 20 stops, so that the UI thread's
+    work with a snippet is bounded by small constants, whatever the server sends:
+    - Parsing, off the UI thread, reads a snippet's characters at most four times over, going back included: text
+      crafted to make VS Code's parser go back could otherwise cost time quadratic in its length.
+    - A snippet goes in as written, without stops, as a plain item goes in, when parsing would read more, when its
+      placeholders and variables nest deeper than 100 levels, when it has more than 30 stops, mirrors included, or when
+      its text would be longer than 5,000 characters with its mirrors, its variables' values and its indentation, each
+      part counting one too. Rendering stops there, so a commit renders at most that much on the UI thread, asks for
+      each variable once, and reads at most the shown part of the caret's line and of the line the snippet goes in.
+    - One change copies at most 1,000 characters into mirrors, each mirror a change of its own, so the work is that of
+      the mirrors and never that of the text between them; a change that would copy more ends the session.
+    - Each edit and caret move looks at each of the session's at most 30 stops, and each frame draws those in view.
+    - Measured at the limits (BenchmarkDotNet, i7-13700, warm, until a rendered frame shows it, in 5,000 lines of
+      JSON), with a first stop and its 28 mirrors each on a line of its own: committing a snippet of 4,800 characters
+      takes 20 ms, as long as committing the same text as plain text (21 ms). A keystroke whose mirrors copy 1,000
+      characters takes 19 ms (median; 21 ms mean), where the same keystroke without a session takes 10.8 ms (11.3 ms
+      mean). The snippet's own handling of the keystroke takes under 1 ms; the rest of the difference, about 8 ms, is
+      the editor's work for the lines the copies change: it tokenizes changed lines in view on the UI thread, at most
+      4 ms a layout pass, so that they show their colors in that frame, and lays them out again. That cost is the same
+      from 4 to 48 mirror lines, and only snippets of 2 mirror lines stay within a frame, so the limit of stops does
+      not bring the keystroke within one.
 - **Signature help** is asked for on the server's trigger characters, and again at once on its retrigger characters
   while it is open. While it is open, each edit and caret move restarts a pause of 120 ms, VS Code's, after which it
   asks again for a change of the content; the pause runs on the options' `TimeProvider`. Asking again says that it is
@@ -970,7 +1040,31 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   Up and Down, tells the server the one that shows, which keeps it, and leaves Up and Down to an open completion
   list; it shows above the line while completion's list shows below, and ends on Escape, on leaving the call, on
   focus loss and when the server stops serving the document;
-- the client advertises exactly what it implements, snippets not;
+- the client advertises exactly what it implements, snippets included;
+- snippets: VS Code's own test cases of its parser give its text, for stops, placeholders, choices, escapes and text
+  that does not parse; mirrors take their text and its variables' values, also nested, and mirrors of each other end;
+  variables take their values or their default, and unknown ones become placeholders, also in a default; transformations
+  are read and not applied. In the editor, a snippet goes in by its `insertText`, and by a text edit grown by what was
+  typed, indented by its line, in one undo step with its additional edits as plain text, and its first stop selected.
+  Tab and Shift+Tab move through the stops, Shift+Tab on the first one outdents, and the final stop ends the session;
+  typing in a stop changes its mirrors in the same undo step, also a pair that closes at its end, and undoing a
+  character keeps the session; a stop inside a placeholder changes the mirrors of both, the inner one first, and so does
+  typing in a mirror of it; a mirror right after its placeholder stays a copy, and empty mirrors side by side stay
+  apart; copies change the mirrors only, not a stop of a million characters between them; typing over a placeholder
+  drops the stops inside it; a change that would copy more than the limit into mirrors ends the session. Completion
+  inside a stop keeps the session, and a snippet committed there joins it. The session ends when the selection leaves
+  the stops, the insertion is undone, the text is replaced, the editor becomes read-only, and it stops showing the
+  document; Escape ends it after completion and signature help and before the hover and the search bar, and closes the
+  search bar first when the bar has the keyboard. The variables of the caret, the document's file, the language and the
+  server's clock go in, and the stops show in a theme's colors, in the rendered pixels. A snippet beyond each limit goes
+  in as written, also ones crafted so that parsing would take quadratic time, in many short tokens or few long ones, one
+  whose indentation would make it millions of characters long, and one of more variables than the limit, which are not
+  all asked for;
+- by hand, not in the tests, against VS Code's JSON server from `vscode-langservers-extracted` 4.10.0: with a schema
+  in `json.schemas`, it completes only now that the client advertises snippets. Its property snippets, such as
+  `"name": "$1"`, go in with the caret in the quotes, Tab goes after them, a value's snippet inside an object's
+  braces joins the session, and a schema's default snippet over several lines goes in indented by its line, with its
+  placeholders selected one after the other;
 - on linux-x64 (BenchmarkDotNet, i7-13700, warm), in 5,000 lines of JSON, against the fake server answering at once
   with 1,000 items: from Ctrl+Space until a rendered frame shows the list takes 18 ms (median 17.5 ms, p95 21.1 ms),
   within the budget of 50 ms; from typing a character until a rendered frame shows the list filtered to 125 items

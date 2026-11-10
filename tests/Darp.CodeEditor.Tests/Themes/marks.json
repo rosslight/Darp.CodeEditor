@@ -14,6 +14,8 @@
 		"editorWarning.foreground": "#00C0C0",
 		"editorInfo.foreground": "#8000FF",
 		"editorHint.foreground": "#008080",
-		"symbolIcon.methodForeground": "#FF0080"
+		"symbolIcon.methodForeground": "#FF0080",
+		"editor.snippetTabstopHighlightBackground": "#00FF80",
+		"editor.snippetFinalTabstopHighlightBorder": "#804000"
 	}
 }

@@ -360,7 +360,7 @@ public sealed class LanguageServerTests(UiFixture ui)
                             "hover": { "contentFormat": ["markdown", "plaintext"] },
                             "completion": {
                               "completionItem": {
-                                "snippetSupport": false,
+                                "snippetSupport": true,
                                 "commitCharactersSupport": true,
                                 "documentationFormat": ["markdown", "plaintext"],
                                 "deprecatedSupport": true,

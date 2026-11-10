@@ -66,7 +66,9 @@ namespace Darp.CodeEditor;
 /// and opening characters surround, on every line; Enter breaks only the caret's line and ends the rectangle. Tab and
 /// new lines indent by the document's <see cref="CodeDocument.Indentation"/>.
 /// Hover shows the server's Markdown, with code blocks highlighted by the document's grammar, below the messages of
-/// the diagnostics under the pointer. Completion items show VS Code's codicons, in the color theme's symbol colors.
+/// the diagnostics under the pointer. Completion items show VS Code's codicons, in the color theme's symbol colors. An
+/// item in the snippet syntax goes in as VS Code inserts it: its first stop is selected, and Tab and Shift+Tab move
+/// between its stops until the last one, Escape or the caret leaving them.
 /// The font defaults to a monospace one; set <c>FontFamily</c> and <c>FontSize</c> as for any control.
 /// </para>
 /// <para>
@@ -162,6 +164,9 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>Shows the diagnostics and the server's hover where the pointer rests.</summary>
     private HoverController? _hover;
+
+    /// <summary>The snippet that completion inserted last in the shown document, while the user tabs through it.</summary>
+    private SnippetController? _snippets;
 
     /// <summary>The server's completion of the shown document.</summary>
     private CompletionController? _completion;
@@ -513,11 +518,12 @@ public class CodeEditor : TemplatedControl
         {
             _part?.IsReadOnly = IsReadOnly || _shown is null;
             _searchBar?.UpdateReplaceRow();
-            // Nothing completes or asks for signatures where the user cannot type.
+            // Nothing completes, asks for signatures or tabs through a snippet where the user cannot type.
             if (IsReadOnly)
             {
                 _completion?.Close();
                 _signatureHelp?.Close();
+                _snippets?.End();
             }
         }
         else if (
@@ -599,8 +605,9 @@ public class CodeEditor : TemplatedControl
         _squiggles = new SquiggleLayer(part.TextArea, document) { Colors = _colors };
         _semantic = new SemanticHighlighter(textView, document, Dispatcher) { Theme = _theme };
         _hover = new HoverController(this, part.TextArea, document, _squiggles, _highlighter) { Colors = _colors };
+        _snippets = new SnippetController(part.TextArea, document) { Colors = _colors };
         // After the editing helpers: they see typed text first, so that a typed "(" has its ")" when it asks.
-        _completion = new CompletionController(this, part.TextArea, document, _highlighter)
+        _completion = new CompletionController(this, part.TextArea, document, _highlighter, _snippets)
         {
             Colors = _colors,
             Icons = _iconColors,
@@ -629,6 +636,8 @@ public class CodeEditor : TemplatedControl
         _hover = null;
         _completion?.Dispose();
         _completion = null;
+        _snippets?.Dispose();
+        _snippets = null;
         _signatureHelp?.Dispose();
         _signatureHelp = null;
         _squiggles?.Dispose();
@@ -656,9 +665,9 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>
     /// The editor's own keys, before AvaloniaEdit's: search, also in the search bar, as AvaloniaEdit decides them by
-    /// the operating system, and in the text area the keys of completion, of signature help and of the editing
-    /// helpers. Ctrl+F and Ctrl+H are the editor's even without a document, so that AvaloniaEdit's own search panel
-    /// never opens.
+    /// the operating system, and in the text area the keys of completion, of signature help, of a snippet's stops and
+    /// of the editing helpers. Ctrl+F and Ctrl+H are the editor's even without a document, so that AvaloniaEdit's own
+    /// search panel never opens.
     /// </summary>
     private void OnKeyDownTunnel(object? sender, KeyEventArgs e)
     {
@@ -674,8 +683,14 @@ public class CodeEditor : TemplatedControl
             e.Handled = true;
         else if (_part is not { TextArea.IsFocused: true })
             return;
-        else if (_completion?.OnKeyDown(e) == true || _signatureHelp?.OnKeyDown(e) == true)
+        else if (
+            _completion?.OnKeyDown(e) == true
+            || _signatureHelp?.OnKeyDown(e) == true
+            || _snippets?.OnKeyDown(e) == true
+        )
+        {
             e.Handled = true;
+        }
         else
             _helpers?.OnKeyDown(e);
     }
@@ -688,14 +703,22 @@ public class CodeEditor : TemplatedControl
     }
 
     /// <summary>
-    /// What Escape closes, one at a time: completion, signature help, the hover, the search bar. Each also ends what
-    /// still waits for its server.
+    /// What Escape closes, one at a time: completion, signature help, a snippet's stops while the text area has the
+    /// keyboard, the hover, the search bar, in the order of VS Code's keys. Each also ends what still waits for its
+    /// server.
     /// </summary>
     /// <returns>Whether it closed something the user saw.</returns>
     private bool Dismiss()
     {
-        if (_completion?.Close() == true || _signatureHelp?.Close() == true || _hover?.Close() == true)
+        if (
+            _completion?.Close() == true
+            || _signatureHelp?.Close() == true
+            || (_part is { TextArea.IsFocused: true } && _snippets?.End() == true)
+            || _hover?.Close() == true
+        )
+        {
             return true;
+        }
         if (_searchBar is not { IsOpen: true } bar)
             return false;
         bar.Close();
@@ -1008,6 +1031,7 @@ public class CodeEditor : TemplatedControl
             _iconColors = SymbolIconColors.From(theme);
             _completion?.Colors = colors;
             _completion?.Icons = _iconColors;
+            _snippets?.Colors = colors;
             _signatureHelp?.Colors = colors;
             _brackets?.Colors = colors;
             _whitespace?.Colors = colors;

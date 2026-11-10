@@ -821,8 +821,7 @@ internal sealed class ServerConnection
                 {
                     ["completionItem"] = new JsonObject
                     {
-                        // Items insert their text as it is.
-                        ["snippetSupport"] = false,
+                        ["snippetSupport"] = true,
                         ["commitCharactersSupport"] = true,
                         ["documentationFormat"] = new JsonArray("markdown", "plaintext"),
                         ["deprecatedSupport"] = true,

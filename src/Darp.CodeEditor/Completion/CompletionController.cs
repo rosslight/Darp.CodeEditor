@@ -57,6 +57,7 @@ internal sealed class CompletionController : IDisposable
     private readonly TextDocument _buffer;
     private readonly CodeDocument _document;
     private readonly BackgroundTextMateHighlighter _highlighter;
+    private readonly SnippetController _snippets;
     private readonly CompletionView _view = new();
     private readonly EditorPopup _popup;
     private TextAreaColors? _colors;
@@ -87,7 +88,8 @@ internal sealed class CompletionController : IDisposable
         CodeEditor editor,
         TextArea textArea,
         CodeDocument document,
-        BackgroundTextMateHighlighter highlighter
+        BackgroundTextMateHighlighter highlighter,
+        SnippetController snippets
     )
     {
         _editor = editor;
@@ -96,6 +98,7 @@ internal sealed class CompletionController : IDisposable
         _buffer = textArea.Document;
         _document = document;
         _highlighter = highlighter;
+        _snippets = snippets;
         _popup = new EditorPopup(editor, _view.Root, below: true);
         _view.Clicked += OnClicked;
         _buffer.Changing += OnBufferChanging;
@@ -615,9 +618,10 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>
     /// Commits an item: its edit, from where it starts to as far past the caret as it reached past where completion was
-    /// asked, and its additional edits, in one step that the user undoes; the caret goes after the item's text.
-    /// Additional edits that overlap others are left out. Additional edits that a resolve still under way brings come
-    /// later.
+    /// asked, and its additional edits, in one step that the user undoes; the caret goes after the item's text. A
+    /// snippet goes in as its text, with its variables' values for the text before the commit, and its first stop is
+    /// selected. Additional edits that overlap others are left out, and stay plain text. Additional edits that a resolve
+    /// still under way brings come later.
     /// </summary>
     private void Commit(Session session, int index)
     {
@@ -632,13 +636,12 @@ internal sealed class CompletionController : IDisposable
         CompletionItem item = session.ResolvedOf(selected) ?? selected;
         Request request = answer.Request;
         int caret = _textArea.Caret.Offset;
-        var main = new CompletionEdit(
-            TextRange.FromBounds(
-                item.Edit.Range.Start,
-                Math.Min(_buffer.GetLineByOffset(caret).EndOffset, caret + (item.Edit.Range.End - request.Offset))
-            ),
-            item.Edit.NewText
+        var range = TextRange.FromBounds(
+            item.Edit.Range.Start,
+            Math.Min(_buffer.GetLineByOffset(caret).EndOffset, caret + (item.Edit.Range.End - request.Offset))
         );
+        RenderedSnippet? snippet = item.Snippet is { } source ? _snippets.Render(source, range.Start) : null;
+        var main = new CompletionEdit(range, snippet?.Text ?? item.Edit.NewText);
         Resolve? late = null;
         if (item.AdditionalEdits is null && answer.List.Resolves)
         {
@@ -651,16 +654,18 @@ internal sealed class CompletionController : IDisposable
         }
         Close();
         var step = new object();
+        var mark = new SnippetMark();
         List<CompletionEdit> edits = WithoutOverlaps([main], Mapped(request.Snapshot, item.AdditionalEdits ?? []));
-        Apply(step, continued: false, edits);
+        Apply(step, continued: false, edits, snippet is null ? null : mark);
         // The item's text moved by the additional edits before it.
-        int shift = edits
-            .Skip(1)
-            .Where(e => e.Range.End <= main.Range.Start)
-            .Sum(e => e.NewText.Length - e.Range.Length);
+        int start =
+            main.Range.Start
+            + edits.Skip(1).Where(e => e.Range.End <= main.Range.Start).Sum(e => e.NewText.Length - e.Range.Length);
         _textArea.ClearSelection();
-        _textArea.Caret.Offset = main.Range.Start + shift + main.NewText.Length;
+        _textArea.Caret.Offset = start + main.NewText.Length;
         _textArea.Caret.BringCaretToView();
+        if (snippet is not null)
+            _snippets.Start(snippet, start, mark);
         if (late is not null)
             ApplyLateEdits(late, step, request.Snapshot);
     }
@@ -685,7 +690,7 @@ internal sealed class CompletionController : IDisposable
             {
                 return;
             }
-            Apply(step, continued: true, WithoutOverlaps([], Mapped(snapshot, additional)));
+            Apply(step, continued: true, WithoutOverlaps([], Mapped(snapshot, additional)), mark: null);
         }
         catch (Exception e)
         {
@@ -702,9 +707,10 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>
     /// Applies edits, from the last to the first, in the undo step <paramref name="step"/>: a new one, or the last one
-    /// continued.
+    /// continued. A snippet's <paramref name="mark"/> goes in first, so that undoing the step reaches it last, once
+    /// the text is back.
     /// </summary>
-    private void Apply(object step, bool continued, List<CompletionEdit> edits)
+    private void Apply(object step, bool continued, List<CompletionEdit> edits, SnippetMark? mark)
     {
         UndoStack undo = _buffer.UndoStack;
         if (continued)
@@ -713,6 +719,8 @@ internal sealed class CompletionController : IDisposable
             undo.StartUndoGroup(step);
         try
         {
+            if (mark is not null)
+                undo.Push(mark);
             using (_buffer.RunUpdate())
             {
                 foreach (CompletionEdit edit in edits.OrderByDescending(e => e.Range.Start))
