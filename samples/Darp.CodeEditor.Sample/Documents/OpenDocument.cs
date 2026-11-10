@@ -33,12 +33,17 @@ public sealed partial class OpenDocument : ObservableObject, IDisposable
     public LanguageServer? Server { get; }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Title))]
     public partial string Name { get; private set; }
 
     /// <summary>The file the document is saved in; null while it is only in memory.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(State))]
+    [NotifyPropertyChangedFor(nameof(Title))]
     public partial IStorageFile? File { get; private set; }
+
+    /// <summary>What the title bar calls the document: its file's full path, or its name while it has no file.</summary>
+    public string Title => File is { } file ? file.TryGetLocalPath() ?? file.Path.ToString() : Name;
 
     /// <summary>Whether the text is in a file, and whether the file holds the latest text.</summary>
     public DocumentState State =>

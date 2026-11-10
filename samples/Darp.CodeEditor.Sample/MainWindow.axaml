@@ -93,7 +93,7 @@
         </Style>
     </windowing:FAAppWindow.Styles>
 
-    <Grid RowDefinitions="Auto,*,Auto" Container.Name="window" Container.Sizing="Width">
+    <Grid RowDefinitions="Auto,*" Container.Name="window" Container.Sizing="Width">
         <!--
           The title bar holds the commands. On Windows and macOS the window's content extends into it, and the
           window's buttons are drawn over it: on the right on Windows, on the left on macOS.
@@ -175,8 +175,9 @@
             </StackPanel>
 
             <!--
-              What the page shows: the settings, or the document's name and state. It is centered in the space next
-              to the commands, and shortened with "…" where that space runs out.
+              What the page shows: the settings, or the document's full path and state, its name while it has no file.
+              It is centered in the space next to the commands, and shortened at its start where that space runs out,
+              so that the file name stays.
             -->
             <Panel Grid.Column="1" Margin="12,0" VerticalAlignment="Center" IsHitTestVisible="False">
                 <TextBlock
@@ -186,10 +187,10 @@
                 />
                 <TextBlock
                     HorizontalAlignment="Center"
-                    TextTrimming="CharacterEllipsis"
+                    TextTrimming="PrefixCharacterEllipsis"
                     IsVisible="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
                 >
-                    <Run Text="{Binding ShownDocument?.Name}" />
+                    <Run Text="{Binding ShownDocument?.Title}" />
                     <Run Foreground="{DynamicResource TextFillColorSecondaryBrush}">
                         <Run.Text>
                             <MultiBinding Converter="{x:Static local:MainWindow.StateText}">
@@ -203,7 +204,10 @@
             </Panel>
         </Grid>
 
-        <!-- The pane shows names in wide windows, icons only below 1000 px, and hides behind ☰ below 640 px. -->
+        <!--
+          The pane shows names in wide windows, icons only below 1000 px, and hides behind ☰ below 640 px. It reaches
+          the bottom of the window, as VS Code's side bar does; the status bar runs under the page only.
+        -->
         <fa:FANavigationView
             Grid.Row="1"
             Name="Navigation"
@@ -299,113 +303,111 @@
 
             <!-- One line divides the page from the title bar and the pane, in either theme. -->
             <Border BorderThickness="1,1,0,0" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
-                <Panel>
-                    <documents:DocumentView Name="DocumentPage" IsVisible="{Binding !ShowsSettings}" />
-                    <settings:SettingsView IsVisible="{Binding ShowsSettings}" />
-                </Panel>
+                <Grid RowDefinitions="*,Auto">
+                    <Panel>
+                        <documents:DocumentView Name="DocumentPage" IsVisible="{Binding !ShowsSettings}" />
+                        <settings:SettingsView IsVisible="{Binding ShowsSettings}" />
+                    </Panel>
+                    <!--
+                      The status bar, under the page, for the document the page shows: messages on the left, and the
+                      caret, the indentation, the language and its server on the right, as in VS Code. It stays while
+                      the settings show, empty, so that the page keeps its height.
+                    -->
+                    <Border
+                        Grid.Row="1"
+                        BorderThickness="0,1,0,0"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                    >
+                        <Grid Classes="status" Height="28" Margin="8,0" ColumnDefinitions="*,Auto,Auto,Auto,Auto">
+                            <!-- While the editor waits for the second key of a sequence, such as Ctrl+K Ctrl+I, as VS Code says. -->
+                            <TextBlock
+                                Classes="plain"
+                                TextTrimming="CharacterEllipsis"
+                                IsVisible="{Binding #DocumentPage.PendingKeys, Converter={x:Static ObjectConverters.IsNotNull}}"
+                            >
+                                <TextBlock.Text>
+                                    <MultiBinding Converter="{x:Static loc:FormatConverter.Instance}">
+                                        <Binding Path="Strings.WaitingForChord" />
+                                        <Binding Path="#DocumentPage.PendingKeys" />
+                                    </MultiBinding>
+                                </TextBlock.Text>
+                            </TextBlock>
+
+                            <Button
+                                Name="CaretButton"
+                                Grid.Column="1"
+                                IsVisible="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
+                            >
+                                <Button.Flyout>
+                                    <Flyout Placement="TopEdgeAlignedRight" Opened="OnGoToLineOpened">
+                                        <StackPanel Width="220" Spacing="8">
+                                            <TextBlock
+                                                Text="{Binding Strings.GoToLine}"
+                                                Theme="{StaticResource BodyStrongTextBlockStyle}"
+                                            />
+                                            <fa:FANumberBox
+                                                Name="LineNumber"
+                                                HorizontalAlignment="Stretch"
+                                                Minimum="1"
+                                                SimpleNumberFormat="F0"
+                                            />
+                                        </StackPanel>
+                                    </Flyout>
+                                </Button.Flyout>
+                                <TextBlock>
+                                    <TextBlock.Text>
+                                        <MultiBinding Converter="{x:Static loc:FormatConverter.Instance}">
+                                            <Binding Path="Strings.CaretPosition" />
+                                            <Binding Path="#DocumentPage.CaretPosition.Line" />
+                                            <Binding Path="#DocumentPage.CaretPosition.Column" />
+                                        </MultiBinding>
+                                    </TextBlock.Text>
+                                </TextBlock>
+                            </Button>
+
+                            <DropDownButton
+                                Grid.Column="2"
+                                IsVisible="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
+                            >
+                                <DropDownButton.Flyout>
+                                    <!-- The choices, from the code when it opens. -->
+                                    <fa:FAMenuFlyout
+                                        Placement="TopEdgeAlignedRight"
+                                        Opening="OnIndentationMenuOpening"
+                                    />
+                                </DropDownButton.Flyout>
+                                <TextBlock>
+                                    <TextBlock.Text>
+                                        <MultiBinding Converter="{x:Static local:MainWindow.IndentationText}">
+                                            <Binding Path="Strings.IndentSpaces" />
+                                            <Binding Path="Strings.IndentTabs" />
+                                            <Binding Path="ShownDocument?.Document.Indentation" />
+                                        </MultiBinding>
+                                    </TextBlock.Text>
+                                </TextBlock>
+                            </DropDownButton>
+
+                            <TextBlock Grid.Column="3" Classes="plain" Text="{Binding ShownDocument?.Type.Name}" />
+
+                            <!-- The document's language server and its state, which the server raises on the UI thread. -->
+                            <TextBlock
+                                Grid.Column="4"
+                                Classes="plain"
+                                IsVisible="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
+                            >
+                                <TextBlock.Text>
+                                    <MultiBinding Converter="{x:Static local:MainWindow.ServerText}">
+                                        <Binding Path="Strings.NoServer" />
+                                        <Binding Path="Strings.ServerNotInstalled" />
+                                        <Binding Path="ShownDocument?.Type.ServerName" />
+                                        <Binding Path="ShownDocument?.Server?.State" />
+                                    </MultiBinding>
+                                </TextBlock.Text>
+                            </TextBlock>
+                        </Grid>
+                    </Border>
+                </Grid>
             </Border>
         </fa:FANavigationView>
-
-        <!--
-          The status bar, under the pane and the page, for the document the page shows. It stays while the settings
-          show, empty, so that the pane keeps its height.
-        -->
-        <Grid Grid.Row="2" Classes="status" Height="28" Margin="12,0" ColumnDefinitions="Auto,*,Auto,Auto,Auto">
-            <Button
-                Name="CaretButton"
-                IsVisible="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
-            >
-                <Button.Flyout>
-                    <Flyout Placement="TopEdgeAlignedLeft" Opened="OnGoToLineOpened">
-                        <StackPanel Width="220" Spacing="8">
-                            <TextBlock
-                                Text="{Binding Strings.GoToLine}"
-                                Theme="{StaticResource BodyStrongTextBlockStyle}"
-                            />
-                            <fa:FANumberBox
-                                Name="LineNumber"
-                                HorizontalAlignment="Stretch"
-                                Minimum="1"
-                                SimpleNumberFormat="F0"
-                            />
-                        </StackPanel>
-                    </Flyout>
-                </Button.Flyout>
-                <TextBlock>
-                    <TextBlock.Text>
-                        <MultiBinding Converter="{x:Static loc:FormatConverter.Instance}">
-                            <Binding Path="Strings.CaretPosition" />
-                            <Binding Path="#DocumentPage.CaretPosition.Line" />
-                            <Binding Path="#DocumentPage.CaretPosition.Column" />
-                        </MultiBinding>
-                    </TextBlock.Text>
-                </TextBlock>
-            </Button>
-
-            <Panel Grid.Column="1" IsVisible="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}">
-                <Panel IsVisible="{Binding #DocumentPage.PendingKeys, Converter={x:Static ObjectConverters.IsNull}}">
-                    <TextBlock
-                        Classes="plain"
-                        Text="{Binding Strings.NoFile}"
-                        IsVisible="{Binding ShownDocument?.File, Converter={x:Static ObjectConverters.IsNull}}"
-                    />
-                    <TextBlock
-                        Classes="plain"
-                        Text="{Binding ShownDocument?.File?.Path.LocalPath}"
-                        TextTrimming="PrefixCharacterEllipsis"
-                        IsVisible="{Binding ShownDocument?.File, Converter={x:Static ObjectConverters.IsNotNull}}"
-                    />
-                </Panel>
-                <!-- While the editor waits for the second key of a sequence, such as Ctrl+K Ctrl+I, as VS Code says. -->
-                <TextBlock
-                    Classes="plain"
-                    IsVisible="{Binding #DocumentPage.PendingKeys, Converter={x:Static ObjectConverters.IsNotNull}}"
-                >
-                    <TextBlock.Text>
-                        <MultiBinding Converter="{x:Static loc:FormatConverter.Instance}">
-                            <Binding Path="Strings.WaitingForChord" />
-                            <Binding Path="#DocumentPage.PendingKeys" />
-                        </MultiBinding>
-                    </TextBlock.Text>
-                </TextBlock>
-            </Panel>
-
-            <DropDownButton
-                Grid.Column="2"
-                IsVisible="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
-            >
-                <DropDownButton.Flyout>
-                    <!-- The choices, from the code when it opens. -->
-                    <fa:FAMenuFlyout Placement="TopEdgeAlignedRight" Opening="OnIndentationMenuOpening" />
-                </DropDownButton.Flyout>
-                <TextBlock>
-                    <TextBlock.Text>
-                        <MultiBinding Converter="{x:Static local:MainWindow.IndentationText}">
-                            <Binding Path="Strings.IndentSpaces" />
-                            <Binding Path="Strings.IndentTabs" />
-                            <Binding Path="ShownDocument?.Document.Indentation" />
-                        </MultiBinding>
-                    </TextBlock.Text>
-                </TextBlock>
-            </DropDownButton>
-
-            <TextBlock Grid.Column="3" Classes="plain" Text="{Binding ShownDocument?.Type.Name}" />
-
-            <!-- The document's language server and its state, which the server raises on the UI thread. -->
-            <TextBlock
-                Grid.Column="4"
-                Classes="plain"
-                IsVisible="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
-            >
-                <TextBlock.Text>
-                    <MultiBinding Converter="{x:Static local:MainWindow.ServerText}">
-                        <Binding Path="Strings.NoServer" />
-                        <Binding Path="Strings.ServerNotInstalled" />
-                        <Binding Path="ShownDocument?.Type.ServerName" />
-                        <Binding Path="ShownDocument?.Server?.State" />
-                    </MultiBinding>
-                </TextBlock.Text>
-            </TextBlock>
-        </Grid>
     </Grid>
 </windowing:FAAppWindow>
