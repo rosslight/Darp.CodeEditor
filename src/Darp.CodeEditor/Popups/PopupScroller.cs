@@ -29,7 +29,12 @@ internal sealed class PopupScroller : Control
     /// <summary>Where a drag of the slider started: the pointer's y and the offset then; null while none runs.</summary>
     private (double Pointer, double Offset)? _drag;
 
-    public PopupScroller() => ClipToBounds = true;
+    public PopupScroller()
+    {
+        ClipToBounds = true;
+        // The app's focus look would draw over the content: the popup shows the keyboard by scrolling.
+        FocusAdorner = null;
+    }
 
     /// <summary>What scrolls. Replacing it scrolls back to the top.</summary>
     public Control? Child

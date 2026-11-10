@@ -50,7 +50,7 @@ public sealed class ThemeWindow : Window
         _editor.Document = workspace.Current?.Document;
         _editor.PropertyChanged += (_, e) =>
         {
-            if (e.Property == CodeEditor.CaretPositionProperty)
+            if (e.Property == CodeEditor.CaretPositionProperty || e.Property == CodeEditor.PendingKeysProperty)
                 UpdateStatus();
         };
         UpdateStatus();
@@ -70,13 +70,15 @@ public sealed class ThemeWindow : Window
         _editor.Focus();
     }
 
-    /// <summary>The caret's place.</summary>
+    /// <summary>The caret's place, or which first key of a sequence waits for its second.</summary>
     private void UpdateStatus() =>
-        _status.Text = Strings.Current.Format(
-            Strings.Current.CaretPosition,
-            _editor.CaretPosition.Line,
-            _editor.CaretPosition.Column
-        );
+        _status.Text = _editor.PendingKeys is { } pending
+            ? Strings.Current.Format(Strings.Current.WaitingForChord, pending)
+            : Strings.Current.Format(
+                Strings.Current.CaretPosition,
+                _editor.CaretPosition.Line,
+                _editor.CaretPosition.Column
+            );
 }
 
 /// <summary>One of the themes a <see cref="ThemeWindow"/> tries: Fluent or Simple, in a variant.</summary>

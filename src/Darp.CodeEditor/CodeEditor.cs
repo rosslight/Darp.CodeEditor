@@ -79,13 +79,13 @@ namespace Darp.CodeEditor;
 /// Replace All then does nothing: it never replaces only some of the matches.
 /// </para>
 /// <para>
-/// The editor handles only its own keys: editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation, search
-/// (Ctrl+F, Ctrl+H, F3, Shift+F3), completion (Ctrl+Space), comments (Ctrl+/) and indentation (Tab, Shift+Tab). On
-/// macOS, Cmd takes Ctrl's place for the clipboard, search and comments, and Cmd+Alt+F opens the replace bar, as
-/// AvaloniaEdit decides by the operating system. Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A
-/// right click opens the editor's context menu: Cut, Copy, Paste and Select All. For an app's Edit menu,
-/// <see cref="Cut"/>, <see cref="Copy"/>, <see cref="Paste"/> and <see cref="SelectAll"/> do the same, and the
-/// document's <c>Undo</c> and <c>Redo</c> the rest.
+/// The editor's commands run by <see cref="Keymap"/>, VS Code's keys by default: completion (Ctrl+Space), the hover at
+/// the caret (Ctrl+K Ctrl+I), signature help (Ctrl+Shift+Space), search (Ctrl+F, Ctrl+H, F3, Shift+F3) and comments
+/// (Ctrl+/). AvaloniaEdit handles editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation and indentation
+/// (Tab, Shift+Tab). Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A right click opens the
+/// editor's context menu: Cut, Copy, Paste and Select All. For an app's Edit menu, <see cref="Cut"/>,
+/// <see cref="Copy"/>, <see cref="Paste"/> and <see cref="SelectAll"/> do the same, and the document's <c>Undo</c> and
+/// <c>Redo</c> the rest.
 /// </para>
 /// <para>Members that take offsets or ranges clamp them to the text.</para>
 /// </remarks>
@@ -133,6 +133,16 @@ public class CodeEditor : TemplatedControl
             nameof(CaretPosition),
             editor => editor.CaretPosition
         );
+
+    /// <summary>Defines the <see cref="Keymap"/> property.</summary>
+    public static readonly StyledProperty<CodeEditorKeymap> KeymapProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        CodeEditorKeymap
+    >(nameof(Keymap), defaultValue: CodeEditorKeymap.Default);
+
+    /// <summary>Defines the <see cref="PendingKeys"/> property.</summary>
+    public static readonly DirectProperty<CodeEditor, KeyGesture?> PendingKeysProperty =
+        AvaloniaProperty.RegisterDirect<CodeEditor, KeyGesture?>(nameof(PendingKeys), editor => editor.PendingKeys);
 
     /// <summary>AvaloniaEdit's editor, from the template. The editor wraps it, so that its API stays out of ours.</summary>
     private TextEditor? _part;
@@ -219,6 +229,9 @@ public class CodeEditor : TemplatedControl
 
     private TextPosition _caretPosition = new(1, 1);
 
+    /// <summary>The first stroke of a key sequence, while the editor waits for its second; null otherwise.</summary>
+    private KeyStroke? _pending;
+
     /// <summary>The theme whose colors the part shows.</summary>
     private ColorThemeFile? _theme;
 
@@ -258,6 +271,8 @@ public class CodeEditor : TemplatedControl
         // Ahead of AvaloniaEdit's own keys, which its text area handles as they bubble, and of its typed text.
         AddHandler(KeyDownEvent, OnKeyDownTunnel, RoutingStrategies.Tunnel);
         AddHandler(TextInputEvent, OnTextInputTunnel, RoutingStrategies.Tunnel);
+        // A click ends the wait for a sequence's second key.
+        AddHandler(PointerPressedEvent, (_, _) => SetPending(null), RoutingStrategies.Tunnel, handledEventsToo: true);
     }
 
     /// <summary>
@@ -333,6 +348,21 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>The caret's line and column, for a status bar.</summary>
     public TextPosition CaretPosition => _caretPosition;
+
+    /// <summary>
+    /// Which keys run which of the editor's commands. Default: <see cref="CodeEditorKeymap.Default"/>, VS Code's keys.
+    /// </summary>
+    public CodeEditorKeymap Keymap
+    {
+        get => GetValue(KeymapProperty);
+        set => SetValue(KeymapProperty, value);
+    }
+
+    /// <summary>
+    /// The first stroke of a two-stroke key sequence while the editor waits for the second, such as Ctrl+K of Ctrl+K
+    /// Ctrl+I, for a status bar to say so; null otherwise.
+    /// </summary>
+    public KeyGesture? PendingKeys => _pending?.ToGesture();
 
     /// <summary>The semantic colors of the shown document, for benchmarks; null while it shows none.</summary>
     internal SemanticHighlighter? SemanticHighlighter => _semantic;
@@ -504,6 +534,7 @@ public class CodeEditor : TemplatedControl
     protected override void OnLostFocus(FocusChangedEventArgs e)
     {
         base.OnLostFocus(e);
+        SetPending(null);
         CheckFocus();
     }
 
@@ -706,21 +737,26 @@ public class CodeEditor : TemplatedControl
     private void OnDocumentDisposed(object? sender, EventArgs e) => Dispatcher.Post(UpdateShownDocument);
 
     /// <summary>
-    /// The editor's own keys, before AvaloniaEdit's: search, also in the search bar, as AvaloniaEdit decides them by
-    /// the operating system, and in the text area the keys of completion, of signature help, of a snippet's stops and
-    /// of the editing helpers. Ctrl+F and Ctrl+H are the editor's even without a document, so that AvaloniaEdit's own
-    /// search panel never opens.
+    /// The editor's own keys, before AvaloniaEdit's: the keymap's, also in the search bar, then Escape, and in the text
+    /// area the keys of completion's list, of signature help, of a snippet's stops and of the editing helpers.
     /// </summary>
     private void OnKeyDownTunnel(object? sender, KeyEventArgs e)
     {
-        bool shift = e.KeyModifiers == KeyModifiers.Shift;
-        if (ApplicationCommands.Find.Gesture.Matches(e) || ApplicationCommands.Replace.Gesture.Matches(e))
-        {
-            OpenSearch(replace: ApplicationCommands.Replace.Gesture.Matches(e));
+        // A modifier alone neither completes nor ends a key sequence.
+        if (
+            e.Key
+            is Key.LeftCtrl
+                or Key.RightCtrl
+                or Key.LeftShift
+                or Key.RightShift
+                or Key.LeftAlt
+                or Key.RightAlt
+                or Key.LWin
+                or Key.RWin
+        )
+            return;
+        if (RunKeymap(e))
             e.Handled = true;
-        }
-        else if (e.Key == Key.F3 && (e.KeyModifiers == KeyModifiers.None || shift))
-            e.Handled = FindNext(previous: shift);
         else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && Dismiss())
             e.Handled = true;
         else if (_part is not { TextArea.IsFocused: true })
@@ -735,6 +771,70 @@ public class CodeEditor : TemplatedControl
         }
         else
             _helpers?.OnKeyDown(e);
+    }
+
+    /// <summary>
+    /// Runs the keymap's command for <paramref name="e"/>: the second stroke of the sequence that waits, or a stroke of
+    /// its own; or starts waiting for a sequence's second stroke. A second stroke that completes nothing is an ordinary
+    /// key.
+    /// </summary>
+    /// <returns>Whether the key was the keymap's.</returns>
+    private bool RunKeymap(KeyEventArgs e)
+    {
+        CodeEditorKeymap keymap = Keymap;
+        if (_pending is { } pending)
+        {
+            SetPending(null);
+            if (keymap.CommandsFor(e, pending).Any(Run))
+                return true;
+        }
+        if (keymap.ChordStartedBy(e) is { } first)
+        {
+            SetPending(first);
+            return true;
+        }
+        return keymap.CommandsFor(e, null).Any(Run);
+    }
+
+    private void SetPending(KeyStroke? stroke)
+    {
+        if (_pending == stroke)
+            return;
+        KeyGesture? old = PendingKeys;
+        _pending = stroke;
+        RaisePropertyChanged(PendingKeysProperty, old, PendingKeys);
+    }
+
+    /// <summary>Runs one of <see cref="CodeEditorCommands"/>, where it applies.</summary>
+    /// <returns>Whether it applied: otherwise the key goes on, to another binding or as an ordinary key.</returns>
+    private bool Run(string command)
+    {
+        bool inText = _part is { TextArea.IsFocused: true } && _shown is not null;
+        switch (command)
+        {
+            case CodeEditorCommands.Find or CodeEditorCommands.Replace:
+                // Also without a document, so that AvaloniaEdit's own search panel never opens.
+                OpenSearch(replace: command == CodeEditorCommands.Replace);
+                return true;
+            case CodeEditorCommands.FindNext or CodeEditorCommands.FindPrevious:
+                return FindNext(previous: command == CodeEditorCommands.FindPrevious);
+            case CodeEditorCommands.TriggerSuggest when inText && !IsReadOnly:
+                _completion?.Trigger();
+                return true;
+            case CodeEditorCommands.ToggleSuggestionDetails when inText:
+                return _completion?.ToggleDetails() == true;
+            case CodeEditorCommands.ShowHover when inText:
+                _hover?.ShowAtCaret();
+                return true;
+            case CodeEditorCommands.TriggerParameterHints when inText && !IsReadOnly:
+                _signatureHelp?.Trigger();
+                return true;
+            case CodeEditorCommands.CommentLine when inText:
+                _helpers?.ToggleComment();
+                return true;
+            default:
+                return false;
+        }
     }
 
     /// <summary>Typed text, before AvaloniaEdit's text area takes it: a commit character commits completion's item.</summary>

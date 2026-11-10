@@ -39,6 +39,7 @@ namespace Darp.CodeEditor.Popups;
 internal sealed class HoverController : IDisposable
 {
     private readonly CodeEditor _editor;
+    private readonly TextArea _textArea;
     private readonly TextView _textView;
     private readonly TextDocument _buffer;
     private readonly CodeDocument _document;
@@ -61,6 +62,7 @@ internal sealed class HoverController : IDisposable
     )
     {
         _editor = editor;
+        _textArea = textArea;
         _textView = textArea.TextView;
         _buffer = textArea.Document;
         _document = document;
@@ -82,6 +84,8 @@ internal sealed class HoverController : IDisposable
         _buffer.Changed += OnClosingChange;
         _document.LanguageFeaturesChanged += OnClosingChange;
         _popup.Root.PointerExited += OnPointerExited;
+        _popup.Escaped += OnClosingChange;
+        _textArea.Caret.PositionChanged += OnCaretPositionChanged;
     }
 
     /// <summary>The colors of the color theme, for code in the popup, once it is loaded. New colors end the hover.</summary>
@@ -106,6 +110,9 @@ internal sealed class HoverController : IDisposable
         bool wasOpen = _popup.IsOpen;
         _hovered?.Cancellation.Cancel();
         _hovered = null;
+        if (_popup.IsFocusWithin)
+            _editor.FocusText();
+        _content.Focusable = false;
         _popup.Hide();
         return wasOpen;
     }
@@ -120,6 +127,33 @@ internal sealed class HoverController : IDisposable
         _buffer.Changed -= OnClosingChange;
         _document.LanguageFeaturesChanged -= OnClosingChange;
         _popup.Root.PointerExited -= OnPointerExited;
+        _popup.Escaped -= OnClosingChange;
+        _textArea.Caret.PositionChanged -= OnCaretPositionChanged;
+    }
+
+    /// <summary>
+    /// Shows the hover at the caret, as the user asks for it by key: the diagnostics there and the server's hover. When
+    /// it shows already, the keyboard goes into it, where the arrows, Page Up, Page Down, Home and End scroll it, and
+    /// Escape gives the keyboard back.
+    /// </summary>
+    public void ShowAtCaret()
+    {
+        if (_hovered is { FromKeyboard: true } && _popup.IsOpen)
+        {
+            _content.Focusable = true;
+            _popup.Focus(_content);
+            return;
+        }
+        int caret = _textArea.Caret.Offset;
+        DocumentLine line = _buffer.GetLineByOffset(caret);
+        // Right after a word, as the caret is when typing ends, the hover is the word's.
+        int offset =
+            caret > line.Offset
+            && (caret == line.EndOffset || !WordCharacters.IsWordCharacter(_buffer.GetCharAt(caret)))
+            && WordCharacters.IsWordCharacter(_buffer.GetCharAt(caret - 1))
+                ? caret - 1
+                : caret;
+        Start(offset, fromKeyboard: true);
     }
 
     /// <summary>
@@ -133,6 +167,12 @@ internal sealed class HoverController : IDisposable
             || (_hovered is { } current && IsHovered(current, offset))
         )
             return;
+        Start(offset, fromKeyboard: false);
+    }
+
+    /// <summary>Shows the diagnostics at <paramref name="offset"/> at once, and asks the server for its hover.</summary>
+    private void Start(int offset, bool fromKeyboard)
+    {
         Close();
         var budget = new HoverBudget();
         TextRange word = WordAt(_buffer, offset);
@@ -144,7 +184,10 @@ internal sealed class HoverController : IDisposable
             // Each diagnostic takes a line at least, so a hover never shows more of them than it has lines.
             HoverBlocks.Of(_squiggles.At(offset, HoverBudget.MaxLines), budget),
             budget
-        );
+        )
+        {
+            FromKeyboard = fromKeyboard,
+        };
         _hovered = hovered;
         if (hovered.Messages.Count > 0)
             Show(hovered, hovered.Messages);
@@ -202,7 +245,7 @@ internal sealed class HoverController : IDisposable
     /// <summary>Closes the popup once the pointer moves over other text.</summary>
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
-        if (_hovered is not { } hovered)
+        if (_hovered is not { FromKeyboard: false } hovered)
             return;
         if (OffsetAt(e.GetPosition(_textView)) is not { } offset || !IsHovered(hovered, offset))
             Close();
@@ -215,9 +258,16 @@ internal sealed class HoverController : IDisposable
     private void OnPointerExited(object? sender, PointerEventArgs e) =>
         _editor.Dispatcher.Post(() =>
         {
-            if (!_textView.IsPointerOver && !_popup.Root.IsPointerOver)
+            if (_hovered is { FromKeyboard: false } && !_textView.IsPointerOver && !_popup.Root.IsPointerOver)
                 Close();
         });
+
+    /// <summary>A hover asked for by key closes when the caret moves.</summary>
+    private void OnCaretPositionChanged(object? sender, EventArgs e)
+    {
+        if (_hovered is { FromKeyboard: true })
+            Close();
+    }
 
     private void OnClosingChange(object? sender, EventArgs e) => Close();
 
@@ -329,6 +379,9 @@ internal sealed class HoverController : IDisposable
         public IReadOnlyList<HoverBlock> Messages { get; } = messages;
 
         public HoverBudget Budget { get; } = budget;
+
+        /// <summary>Whether the user asked for it by key, at the caret, rather than by resting the pointer.</summary>
+        public bool FromKeyboard { get; init; }
 
         /// <summary>Cancels the server's request and the reading of its answer.</summary>
         public CancellationTokenSource Cancellation { get; } = new();

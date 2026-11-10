@@ -124,6 +124,13 @@ internal sealed class SignatureHelpController : IDisposable
         return true;
     }
 
+    /// <summary>Asks for signature help at the caret, as the user asks for it by key.</summary>
+    public void Trigger()
+    {
+        if (_document.Features?.SignatureHelp is not null)
+            Ask(SignatureHelpTriggerKind.Invoked, null);
+    }
+
     /// <summary>Ends signature help: closes the popup, and cancels what is under way.</summary>
     /// <returns>Whether the popup showed.</returns>
     public bool Close()

@@ -22,15 +22,15 @@ namespace Darp.CodeEditor.Benchmarks;
 public class HoverBenchmarks
 {
     private Window? _window;
-    private ScrollViewer? _content;
+    private PopupScroller? _content;
     private IReadOnlyList<HoverBlock> _blocks = [];
-    private CodeLook? _look;
+    private PopupLook? _look;
 
     [GlobalSetup]
     public void SetUp()
     {
         HeadlessEditor.SetUpApp();
-        _content = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        _content = new PopupScroller();
         _window = new Window
         {
             Width = 800,
@@ -62,19 +62,14 @@ public class HoverBenchmarks
         // The largest that a hover shows: nothing of it is cut.
         if (new HoverBudget().Fit(_blocks) is not [HoverCode { Runs.Count: var count }] || count != runs.Count)
             throw new InvalidOperationException("The hover is larger than a hover shows.");
-        _look = new CodeLook(
-            new FontFamily("DejaVu Sans Mono"),
-            14,
-            new ImmutableSolidColorBrush(Colors.White),
-            new ImmutableSolidColorBrush(Colors.Black)
-        );
+        _look = new PopupLook(new FontFamily("DejaVu Sans Mono"), 14, PopupColors.Default);
     }
 
     [Benchmark]
     public void ShowTheLargestHover()
     {
-        ScrollViewer content = _content ?? throw new InvalidOperationException("Not set up.");
-        content.Content = HoverView.Create(_blocks, _look ?? throw new InvalidOperationException("Not set up."));
+        PopupScroller content = _content ?? throw new InvalidOperationException("Not set up.");
+        content.Child = HoverView.Create(_blocks, _look ?? throw new InvalidOperationException("Not set up."));
         HeadlessEditor.Render(_window ?? throw new InvalidOperationException("Not set up."));
     }
 

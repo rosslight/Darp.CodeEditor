@@ -31,11 +31,6 @@ internal sealed class EditingHelpers : IDisposable
     /// <summary>The characters before which a pair closes, as VS Code's default <c>autoCloseBefore</c>.</summary>
     private const string CloseBefore = ";:.,=}])> \n\t";
 
-    /// <summary>The key that commands hold with Ctrl elsewhere, as AvaloniaEdit decides it: Cmd on macOS.</summary>
-    private static readonly KeyModifiers s_command = OperatingSystem.IsMacOS()
-        ? KeyModifiers.Meta
-        : KeyModifiers.Control;
-
     private readonly TextArea _textArea;
     private readonly CodeDocument _document;
     private readonly BackgroundTextMateHighlighter _highlighter;
@@ -75,26 +70,12 @@ internal sealed class EditingHelpers : IDisposable
         _autoClosed.Clear();
     }
 
-    /// <summary>Backspace and Ctrl+/, from the editor's key handler, while the text area has the keyboard.</summary>
+    /// <summary>Backspace, from the editor's key handler, while the text area has the keyboard.</summary>
     public void OnKeyDown(KeyEventArgs e)
     {
         if (e.Key == Key.Back && e.KeyModifiers == KeyModifiers.None && TypingOffsets() is { } offsets)
             e.Handled = DeletePairs(offsets);
-        else if (IsToggleComment(e))
-        {
-            ToggleComment();
-            e.Handled = true;
-        }
     }
-
-    /// <summary>
-    /// Ctrl+/, or Cmd+/ on macOS: the key that types a slash, also on layouts where it needs Shift, or the slash key
-    /// of a US layout or the number pad.
-    /// </summary>
-    private static bool IsToggleComment(KeyEventArgs e) =>
-        e.KeyModifiers.HasFlag(s_command)
-        && !e.KeyModifiers.HasFlag(KeyModifiers.Alt)
-        && (e.KeySymbol == "/" || (e.KeyModifiers == s_command && e.Key is Key.Oem2 or Key.Divide));
 
     private void OnTextEntering(object? sender, TextInputEventArgs e)
     {
@@ -600,10 +581,10 @@ internal sealed class EditingHelpers : IDisposable
     }
 
     /// <summary>
-    /// Ctrl+/: toggles line comments on the selected lines, or the caret's, with the language's line comment, or else
-    /// with its block comment around them.
+    /// Toggles line comments on the selected lines, or the caret's, with the language's line comment, or else with its
+    /// block comment around them.
     /// </summary>
-    private void ToggleComment()
+    public void ToggleComment()
     {
         LanguageConfiguration configuration = Configuration;
         (int first, int last) = SelectedLines();

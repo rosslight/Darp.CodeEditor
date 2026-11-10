@@ -64,6 +64,9 @@ internal sealed class CompletionController : IDisposable
     private TextAreaColors? _colors;
     private SymbolIconColors? _icons;
 
+    /// <summary>Whether the selected item's details show beside the list: for the app's run, as VS Code keeps it.</summary>
+    private static bool s_showsDetails = true;
+
     /// <summary>Completion from its first request until it ends; null while there is none.</summary>
     private Session? _session;
 
@@ -135,18 +138,12 @@ internal sealed class CompletionController : IDisposable
     }
 
     /// <summary>
-    /// The keys of completion, from the editor's key handler while the text area has the keyboard: Ctrl+Space, and
-    /// while the list shows, the keys that select and commit.
+    /// The keys of completion's list while it shows, from the editor's key handler while the text area has the
+    /// keyboard: the keys that select and commit.
     /// </summary>
     /// <returns>Whether the key was completion's.</returns>
     public bool OnKeyDown(KeyEventArgs e)
     {
-        // Also on macOS, where Cmd takes Ctrl's place for other keys: Cmd+Space is the system's search.
-        if (e.Key == Key.Space && e.KeyModifiers == KeyModifiers.Control)
-        {
-            Ask(new CompletionTrigger(CompletionTriggerKind.Invoked));
-            return true;
-        }
         if (_session is not { IsShowing: true } session || e.KeyModifiers != KeyModifiers.None)
             return false;
         int count = session.Items.Count;
@@ -174,6 +171,24 @@ internal sealed class CompletionController : IDisposable
             default:
                 return false;
         }
+    }
+
+    /// <summary>Asks for completion at the caret, as the user asks for it by key.</summary>
+    public void Trigger() => Ask(new CompletionTrigger(CompletionTriggerKind.Invoked), explicitly: true);
+
+    /// <summary>
+    /// Shows or hides the selected item's details while the list shows; the choice holds for the app's run, as VS Code
+    /// remembers it.
+    /// </summary>
+    /// <returns>Whether the list showed.</returns>
+    public bool ToggleDetails()
+    {
+        if (_session is not { IsShowing: true } session)
+            return false;
+        s_showsDetails = !s_showsDetails;
+        session.DetailsOf = null;
+        ResolveSelected(session);
+        return true;
     }
 
     /// <summary>
@@ -229,13 +244,14 @@ internal sealed class CompletionController : IDisposable
     /// Asks the server for completion at the caret. While completion is open, the request replaces the one under way,
     /// and the items that show stay until it answers.
     /// </summary>
-    private void Ask(CompletionTrigger trigger)
+    private void Ask(CompletionTrigger trigger, bool explicitly = false)
     {
         int caret = _textArea.Caret.Offset;
         if (!_textArea.ReadOnlySectionProvider.CanInsert(caret))
             return;
         var request = new Request(_document.CurrentSnapshot, WordBefore(caret));
         Session session = _session ??= new Session();
+        session.IsExplicit |= explicitly;
         session.Pending?.Cancellation.Cancel();
         session.Pending = request;
         AskAsync(session, request, trigger);
@@ -564,9 +580,12 @@ internal sealed class CompletionController : IDisposable
         session.DetailsOf = item;
         session.Details?.Cancel();
         session.Details = null;
-        if (item.Detail is null && item.Documentation is null)
+        if (!s_showsDetails || (item.Detail is null && item.Documentation is null))
         {
             _view.ShowDetails(null);
+            // Narrower now: placed again, as it may move right.
+            if (session.Place is { } shown)
+                _popup.Show(_textView, shown);
             return;
         }
         var cancellation = new CancellationTokenSource();
@@ -876,6 +895,9 @@ internal sealed class CompletionController : IDisposable
     /// <summary>Completion from its first request until it ends.</summary>
     private sealed class Session
     {
+        /// <summary>Whether the user asked for completion by key, rather than typing opening it.</summary>
+        public bool IsExplicit { get; set; }
+
         /// <summary>The answer whose items show; null until the first one.</summary>
         public Answer? Answer { get; set; }
 

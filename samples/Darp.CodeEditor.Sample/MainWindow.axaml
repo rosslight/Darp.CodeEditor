@@ -343,17 +343,31 @@
             </Button>
 
             <Panel Grid.Column="1" IsVisible="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <Panel IsVisible="{Binding #DocumentPage.PendingKeys, Converter={x:Static ObjectConverters.IsNull}}">
+                    <TextBlock
+                        Classes="plain"
+                        Text="{Binding Strings.NoFile}"
+                        IsVisible="{Binding ShownDocument?.File, Converter={x:Static ObjectConverters.IsNull}}"
+                    />
+                    <TextBlock
+                        Classes="plain"
+                        Text="{Binding ShownDocument?.File?.Path.LocalPath}"
+                        TextTrimming="PrefixCharacterEllipsis"
+                        IsVisible="{Binding ShownDocument?.File, Converter={x:Static ObjectConverters.IsNotNull}}"
+                    />
+                </Panel>
+                <!-- While the editor waits for the second key of a sequence, such as Ctrl+K Ctrl+I, as VS Code says. -->
                 <TextBlock
                     Classes="plain"
-                    Text="{Binding Strings.NoFile}"
-                    IsVisible="{Binding ShownDocument?.File, Converter={x:Static ObjectConverters.IsNull}}"
-                />
-                <TextBlock
-                    Classes="plain"
-                    Text="{Binding ShownDocument?.File?.Path.LocalPath}"
-                    TextTrimming="PrefixCharacterEllipsis"
-                    IsVisible="{Binding ShownDocument?.File, Converter={x:Static ObjectConverters.IsNotNull}}"
-                />
+                    IsVisible="{Binding #DocumentPage.PendingKeys, Converter={x:Static ObjectConverters.IsNotNull}}"
+                >
+                    <TextBlock.Text>
+                        <MultiBinding Converter="{x:Static loc:FormatConverter.Instance}">
+                            <Binding Path="Strings.WaitingForChord" />
+                            <Binding Path="#DocumentPage.PendingKeys" />
+                        </MultiBinding>
+                    </TextBlock.Text>
+                </TextBlock>
             </Panel>
 
             <DropDownButton

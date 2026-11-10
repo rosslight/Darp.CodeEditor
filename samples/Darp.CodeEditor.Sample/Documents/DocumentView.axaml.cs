@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Darp.CodeEditor;
 using Sample.Localization;
 
@@ -16,6 +17,10 @@ public sealed partial class DocumentView : UserControl
     public static readonly DirectProperty<DocumentView, TextPosition> CaretPositionProperty =
         AvaloniaProperty.RegisterDirect<DocumentView, TextPosition>(nameof(CaretPosition), view => view.CaretPosition);
 
+    /// <summary>Defines the <see cref="PendingKeys"/> property.</summary>
+    public static readonly DirectProperty<DocumentView, KeyGesture?> PendingKeysProperty =
+        AvaloniaProperty.RegisterDirect<DocumentView, KeyGesture?>(nameof(PendingKeys), view => view.PendingKeys);
+
     private Workspace? _workspace;
 
     /// <summary>The document the editor shows.</summary>
@@ -28,11 +33,16 @@ public sealed partial class DocumentView : UserControl
         {
             if (e.Property == CodeEditor.CaretPositionProperty)
                 RaisePropertyChanged(CaretPositionProperty, default, CaretPosition);
+            else if (e.Property == CodeEditor.PendingKeysProperty)
+                RaisePropertyChanged(PendingKeysProperty, (KeyGesture?)e.OldValue, PendingKeys);
         };
     }
 
     /// <summary>The caret's line and column, for the status bar.</summary>
     public TextPosition CaretPosition => Editor.CaretPosition;
+
+    /// <summary>The first key of a sequence while the editor waits for the second, for the status bar.</summary>
+    public KeyGesture? PendingKeys => Editor.PendingKeys;
 
     public void Undo()
     {
