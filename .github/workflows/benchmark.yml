@@ -51,12 +51,17 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           PULL_REQUEST: ${{ github.event.pull_request.number }}
           TARGET_BRANCH: ${{ github.base_ref }}
+          BASELINE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           marker='<!-- darp-codeeditor-benchmark-report -->'
           results=BenchmarkDotNet.Artifacts/results
+          # The base branch as the pull request names it now: on a pull request stacked on another one's branch, which
+          # the baseline comes from, github.base_ref has read main.
+          target=$(gh pr view "$PULL_REQUEST" --repo "$REPOSITORY" --json baseRefName --jq .baseRefName) \
+            || target=$TARGET_BRANCH
           {
             echo "$marker"
-            echo "## Benchmark: this pull request against \`$TARGET_BRANCH\`"
+            echo "## Benchmark: this pull request against \`$target\` at \`${BASELINE_SHA:0:7}\`"
             echo
             cat $results/*-report-comparison.md
             echo
