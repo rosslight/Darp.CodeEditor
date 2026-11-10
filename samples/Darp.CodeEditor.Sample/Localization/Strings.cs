@@ -71,6 +71,7 @@ public sealed class Strings : INotifyPropertyChanged
     public string ShowInFolder => Get();
     public string AllFiles => Get();
     public string OpenFailed => Get();
+    public string ExampleHasPath => Get();
     public string SaveFailed => Get();
     public string OpenInAnother => Get();
     public string Ok => Get();

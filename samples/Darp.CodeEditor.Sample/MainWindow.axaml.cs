@@ -130,6 +130,27 @@ public sealed partial class MainWindow : FAAppWindow
             viewModel.Workspace.Current = document;
     }
 
+    // FluentAvalonia 3.1.0 keeps an invoke of the item that is selected already for the next selection, which then
+    // looks for that item's control; a document just opened or created has none yet, and it throws. The selected
+    // document has nothing to invoke, so its item only closes the pane, as FluentAvalonia would.
+
+    private void OnDocumentTapped(object? sender, TappedEventArgs e) => KeepSelectedFromInvoking(sender, e);
+
+    private void OnDocumentKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key is Key.Enter or Key.Space)
+            KeepSelectedFromInvoking(sender, e);
+    }
+
+    private void KeepSelectedFromInvoking(object? sender, RoutedEventArgs e)
+    {
+        if (DocumentOf(sender) is not { } document || Navigation.SelectedItem != document)
+            return;
+        e.Handled = true;
+        if (Navigation.DisplayMode != FANavigationViewDisplayMode.Expanded)
+            Navigation.IsPaneOpen = false;
+    }
+
     private void OnDisplayModeChanged(object? sender, FANavigationViewDisplayModeChangedEventArgs e) =>
         PaneButton.IsVisible = e.DisplayMode != FANavigationViewDisplayMode.Expanded;
 
@@ -307,7 +328,7 @@ public sealed partial class MainWindow : FAAppWindow
             );
             if (file is null)
                 return false;
-            if (file.TryGetLocalPath() is { } path && Workspace?.IsOpenInAnother(document, path) == true)
+            if (file.TryGetLocalPath() is { } path && Workspace?.WithPath(path, except: document) is not null)
             {
                 await ShowErrorAsync(
                     Strings.Current.Format(Strings.Current.SaveFailed, file.Name),

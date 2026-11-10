@@ -243,6 +243,8 @@
                                 IconSource="Document"
                                 ToolTip.Tip="{Binding Name}"
                                 PointerReleased="OnDocumentPointerReleased"
+                                Tapped="OnDocumentTapped"
+                                KeyDown="OnDocumentKeyDown"
                             >
                                 <fa:FANavigationViewItem.InfoBadge>
                                     <fa:FAInfoBadge

@@ -111,6 +111,9 @@
   <data name="OpenFailed" xml:space="preserve">
     <value>{0} konnte nicht geöffnet werden</value>
   </data>
+  <data name="ExampleHasPath" xml:space="preserve">
+    <value>Das Beispiel {0} hat den Pfad dieser Datei. Schließen Sie es, um die Datei zu öffnen.</value>
+  </data>
   <data name="SaveFailed" xml:space="preserve">
     <value>{0} konnte nicht gespeichert werden</value>
   </data>

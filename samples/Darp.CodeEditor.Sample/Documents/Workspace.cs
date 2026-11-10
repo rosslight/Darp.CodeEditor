@@ -16,6 +16,11 @@ public sealed partial class Workspace : ObservableObject, IDisposable
 {
     private static readonly Uri s_examples = new("avares://Darp.CodeEditor.Sample/Documents/Examples/");
 
+    /// <summary>Compares file paths as the system does: Windows ignores case.</summary>
+    private static readonly StringComparer s_paths = OperatingSystem.IsWindows()
+        ? StringComparer.OrdinalIgnoreCase
+        : StringComparer.Ordinal;
+
     /// <summary>
     /// One language server for each file type whose server is installed, for as long as the app runs. Each one starts
     /// with its first document.
@@ -78,12 +83,22 @@ public sealed partial class Workspace : ObservableObject, IDisposable
         Add(name, type, "", file: null, filePath: null);
     }
 
-    /// <summary>Opens <paramref name="file"/>, or shows it if it is open already. The workspace owns the file.</summary>
+    /// <summary>
+    /// Opens <paramref name="file"/>, or shows the document that has its path already. The workspace owns the file.
+    /// </summary>
+    /// <exception cref="IOException">
+    /// The file can't be read, or an example has its path: the example's text is not the file's.
+    /// </exception>
     public async Task OpenAsync(IStorageFile file)
     {
-        if (Documents.FirstOrDefault(document => document.File?.Path == file.Path) is { } open)
+        OpenDocument? open = file.TryGetLocalPath() is { } path
+            ? WithPath(path)
+            : Documents.FirstOrDefault(document => document.File?.Path == file.Path);
+        if (open is not null)
         {
             file.Dispose();
+            if (open.File is null)
+                throw new IOException(Strings.Current.Format(Strings.Current.ExampleHasPath, open.Name));
             Current = open;
             return;
         }
@@ -103,11 +118,13 @@ public sealed partial class Workspace : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Whether a document other than <paramref name="document"/> has the file <paramref name="path"/>. A file
-    /// belongs to one document at a time: a language server serves one document per file.
+    /// The open document, other than <paramref name="except"/>, that has the file <paramref name="path"/>; null if
+    /// there is none. A path belongs to one document at a time: a language server serves one document per file.
     /// </summary>
-    public bool IsOpenInAnother(OpenDocument document, string path) =>
-        Documents.Any(open => open != document && open.Document.FilePath == path);
+    public OpenDocument? WithPath(string path, OpenDocument? except = null) =>
+        Documents.FirstOrDefault(open =>
+            open != except && open.Document.FilePath is { } other && s_paths.Equals(other, path)
+        );
 
     /// <summary>Closes <paramref name="document"/> for good, and shows its neighbor.</summary>
     public void Close(OpenDocument document)
