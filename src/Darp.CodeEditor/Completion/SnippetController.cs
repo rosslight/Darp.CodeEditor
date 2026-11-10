@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 using Avalonia;
 using Avalonia.Input;
 using Avalonia.Media;
@@ -35,7 +34,8 @@ namespace Darp.CodeEditor.Completion;
 /// <para>
 /// The UI thread's work is bounded by small constants: a session has at most <see cref="Snippet.MaxStops"/> stops, each
 /// change and caret move looks at each of them, and one change copies at most <see cref="MaxMirrorText"/> characters
-/// into mirrors, each copy a change that looks at each stop.
+/// into mirrors, each copy a change of that mirror alone, prepared with one look at each stop, and all of them with the
+/// change they follow one update and one undo step.
 /// </para>
 /// <para>
 /// The stops show as boxes in the theme's <c>editor.snippetTabstopHighlightBackground</c>, and the final stop as a
@@ -46,9 +46,10 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
 {
     /// <summary>
     /// The most characters that one change may copy into mirrors, and compare with them, before the session ends: many
-    /// times what a real snippet's mirrors hold, as names of a few words in a few mirrors.
+    /// times what a real snippet's mirrors hold, as names of a few words in a few mirrors. Each copy is a change of its
+    /// own, so the work is that of the mirrors and never that of the text between them.
     /// </summary>
-    public const int MaxMirrorText = 2_000;
+    public const int MaxMirrorText = 1_000;
 
     /// <summary>The width of the box of an empty stop, as VS Code's.</summary>
     private const double EmptyStopWidth = 2;
@@ -456,6 +457,9 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         var followed = new HashSet<List<Stop>>(ReferenceEqualityComparer.Instance);
         int budget = MaxMirrorText;
         _following = true;
+        // The copies, with the change they follow, are one update: one undo step, and one end of an update for the
+        // editor's work that waits for it.
+        IDisposable update = _buffer.RunUpdate();
         try
         {
             while (queue.TryDequeue(out Stop? stop, out _))
@@ -473,15 +477,16 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
                     return;
                 }
                 string text = _buffer.GetText(stop.StartOffset, length);
-                List<Stop> changing = mirrors.FindAll(mirror =>
-                    mirror.EndOffset - mirror.StartOffset != length
-                    || _buffer.GetText(mirror.StartOffset, length) != text
-                );
-                if (changing.Count == 0)
-                    continue;
-                Replace(session, changing, text);
-                foreach (Stop mirror in changing)
+                foreach (Stop mirror in mirrors)
                 {
+                    if (
+                        mirror.EndOffset - mirror.StartOffset == length
+                        && _buffer.GetText(mirror.StartOffset, length) == text
+                    )
+                    {
+                        continue;
+                    }
+                    Replace(session, mirror, text);
                     for (Stop? around = mirror.Parent; around is not null; around = around.Parent)
                     {
                         if (around.Group.Count > 1)
@@ -492,6 +497,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         }
         finally
         {
+            update.Dispose();
             _following = false;
             foreach (Stop stop in session.Stops)
                 stop.FollowEdits();
@@ -499,61 +505,31 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     }
 
     /// <summary>
-    /// Gives mirrors the text, in one change of the text from the first to the last, with a map of their edits, so that
-    /// the anchors move as for each edit and the editor's work per change happens once. The mirrors and the placeholders
-    /// around them take the new text; the other stops don't, also those that touch them, such as a mirror's placeholder
-    /// right before it: an empty one keeps its place before or after the mirror where it is, as in the order of the
-    /// text.
+    /// Gives a mirror the text, as a change of its own: the work is that of its text, never of the text between mirrors.
+    /// The mirror and the placeholders around it take the new text; the other stops don't, also those that touch it,
+    /// such as its placeholder right before it: an empty one keeps its place before or after it, as in the order of the
+    /// text, so that empty mirrors side by side stay apart. The caret stays before the text, as before a mirror right
+    /// after the stop typed in.
     /// </summary>
-    private void Replace(Session session, List<Stop> mirrors, string text)
+    private void Replace(Session session, Stop mirror, string text)
     {
-        var mirrorsAt = new Dictionary<int, (Stop Mirror, int Order)>();
-        foreach (Stop mirror in mirrors)
-            mirrorsAt.TryAdd(mirror.StartOffset, (mirror, session.Stops.IndexOf(mirror)));
+        int at = mirror.StartOffset;
+        int order = session.Stops.IndexOf(mirror);
         foreach (Stop stop in session.Stops)
             stop.Keep();
-        foreach (Stop mirror in mirrors)
-        {
-            for (Stop? around = mirror; around is not null; around = around.Parent)
-                around.Grow();
-        }
+        for (Stop? around = mirror; around is not null; around = around.Parent)
+            around.Grow();
         for (int i = 0; i < session.Stops.Count; i++)
         {
             Stop stop = session.Stops[i];
-            if (
-                stop.StartOffset == stop.EndOffset
-                && mirrorsAt.TryGetValue(stop.StartOffset, out (Stop Mirror, int Order) at)
-                && stop != at.Mirror
-                && !stop.Encloses(at.Mirror)
-            )
-            {
-                stop.Stay(after: i > at.Order);
-            }
+            if (stop != mirror && stop.StartOffset == at && stop.EndOffset == at && !stop.Encloses(mirror))
+                stop.Stay(after: i > order);
         }
-        mirrors.Sort((a, b) => a.StartOffset.CompareTo(b.StartOffset));
-        int start = mirrors[0].StartOffset;
-        int end = mirrors.Max(mirror => mirror.EndOffset);
-        var replaced = new StringBuilder(end - start + mirrors.Count * text.Length);
-        var map = new OffsetChangeMap();
-        int copied = start;
-        int delta = 0;
-        foreach (Stop mirror in mirrors)
-        {
-            // Mirrors of one number inside each other, as only a snippet of its own placeholders makes: the outer one.
-            if (mirror.StartOffset < copied)
-                continue;
-            int length = mirror.EndOffset - mirror.StartOffset;
-            replaced.Append(_buffer.GetText(copied, mirror.StartOffset - copied)).Append(text);
-            map.Add(new OffsetChangeMapEntry(mirror.StartOffset + delta, length, text.Length));
-            delta += text.Length - length;
-            copied = mirror.EndOffset;
-        }
-        // The caret stays before what goes in where it is, as in an empty mirror right after the stop typed in.
-        TextAnchor caret = _buffer.CreateAnchor(_textArea.Caret.Offset);
-        caret.MovementType = AnchorMovementType.BeforeInsertion;
-        caret.SurviveDeletion = true;
-        _buffer.Replace(start, end - start, new StringTextSource(replaced.ToString()), map);
-        _textArea.Caret.Offset = caret.Offset;
+        // Text that goes in where the caret is, into an empty mirror, would carry the caret along.
+        bool caretStays = mirror.EndOffset == at && _textArea.Caret.Offset == at;
+        _buffer.Replace(at, mirror.EndOffset - at, text);
+        if (caretStays)
+            _textArea.Caret.Offset = at;
     }
 
     /// <summary>Ends the session once the selection is outside its stops, or the step that inserted it was undone.</summary>

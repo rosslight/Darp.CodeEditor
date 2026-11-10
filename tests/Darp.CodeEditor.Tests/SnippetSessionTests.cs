@@ -176,8 +176,8 @@ public sealed class SnippetSessionTests(UiFixture ui)
     [InlineData("${1:a${2:b} $2} = $1", 1, "x", "ax x = ax x")]
     // A mirror right after its placeholder does not take what is typed at the placeholder's end.
     [InlineData("${1:a}$1", 0, "xyz", "xyzxyz")]
-    // Empty mirrors side by side each take what is typed.
-    [InlineData("$1$1$1", 0, "ab", "ababab")]
+    // Empty mirrors side by side each take what is typed, and stay apart.
+    [InlineData("$1$1$1", 0, "abcd", "abcdabcdabcd")]
     public Task Mirrors_follow_nested_and_neighbouring_stops_as_in_VS_Code(
         string snippet,
         int tabs,
@@ -202,6 +202,36 @@ public sealed class SnippetSessionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Copies_into_mirrors_change_only_the_mirrors_not_the_text_between_them() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Item("${1:a} $1 ${2:x} $1"));
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            window.Press(Key.Tab);
+            // A stop between the mirrors grows long.
+            string between = new('x', 1_000_000);
+            document.Replace(new TextRange(4, 1), between);
+            window.Press(Key.Tab, KeyModifiers.Shift);
+            editor.Selection.ShouldBe(new TextSelection(0, 1));
+            int largest = 0;
+            void OnChanging(object? sender, AvaloniaEdit.Document.DocumentChangeEventArgs e) =>
+                largest = Math.Max(largest, Math.Max(e.RemovalLength, e.InsertionLength));
+            document.Buffer.Changing += OnChanging;
+
+            window.Type("b");
+
+            document.Buffer.Changing -= OnChanging;
+            document.Text.ShouldBe("b b " + between + " b");
+            largest.ShouldBe(1);
+        });
+
+    [Fact]
     public Task Typing_over_a_placeholder_drops_the_stops_inside_it() =>
         _ui.Run(async () =>
         {
@@ -222,7 +252,7 @@ public sealed class SnippetSessionTests(UiFixture ui)
         });
 
     [Fact]
-    public Task A_change_that_would_copy_more_than_2000_characters_into_mirrors_ends_the_session() =>
+    public Task A_change_that_would_copy_more_than_1000_characters_into_mirrors_ends_the_session() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
@@ -237,7 +267,7 @@ public sealed class SnippetSessionTests(UiFixture ui)
             string text = new('a', Snippet.MaxStops - 1);
             document.Text.ShouldBe(text);
 
-            // 41 characters in each of the 49 stops would pass 2,000: the mirrors keep their text.
+            // 35 characters in each of the 29 stops would pass 1,000: the mirrors keep their text.
             string pasted = new('b', SnippetController.MaxMirrorText / (Snippet.MaxStops - 1) + 1);
             document.Replace(new TextRange(0, 1), pasted);
 

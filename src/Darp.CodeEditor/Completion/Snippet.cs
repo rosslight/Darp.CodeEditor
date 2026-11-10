@@ -29,10 +29,10 @@ namespace Darp.CodeEditor.Completion;
 internal sealed class Snippet
 {
     /// <summary>
-    /// The most stops that a snippet tracks, mirrors included: more than twice a real snippet's, and few enough that each
-    /// edit and caret move can look at all of them.
+    /// The most stops that a snippet tracks, mirrors included: half again as many as a real snippet has, and few enough
+    /// that each edit and caret move can look at all of them.
     /// </summary>
-    public const int MaxStops = 50;
+    public const int MaxStops = 30;
 
     /// <summary>How deep placeholders and variables may nest.</summary>
     public const int MaxNesting = 100;
