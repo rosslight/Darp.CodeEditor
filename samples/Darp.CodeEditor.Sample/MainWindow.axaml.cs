@@ -6,6 +6,7 @@ using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Avalonia.VisualTree;
 using CommunityToolkit.Mvvm.Input;
 using Darp.CodeEditor;
 using FluentAvalonia.UI.Controls;
@@ -33,10 +34,38 @@ public sealed partial class MainWindow : FAAppWindow
     private MainViewModel? _viewModel;
 
     /// <summary>
-    /// Whether a save or a close runs. They ask the user and write files, so the window runs one at a time and
-    /// ignores the commands meanwhile.
+    /// Whether an open, a save or a close runs. They ask the user, read and write files, and give documents their
+    /// files' paths, which only one document may have at a time, so the window runs one at a time and ignores the
+    /// commands meanwhile.
     /// </summary>
-    private bool _isSavingOrClosing;
+    private bool _isWorkingWithFiles;
+
+    /// <summary>
+    /// Keeps the pane's selected item from being invoked: by a tap, or by Enter or Space. FluentAvalonia 3.1.0 keeps
+    /// such an invoke for the next selection, which then looks for that item's control, and a document just opened or
+    /// created has none yet: it throws. The selected item has nothing to invoke, so it only closes the pane, as
+    /// FluentAvalonia would. Class handlers run before FluentAvalonia's own, for every item: documents and settings.
+    /// </summary>
+    static MainWindow()
+    {
+        TappedEvent.AddClassHandler<FANavigationViewItem>(KeepSelectedFromInvoking);
+        KeyDownEvent.AddClassHandler<FANavigationViewItem>(
+            (item, e) =>
+            {
+                if (e.Key is Key.Enter or Key.Space)
+                    KeepSelectedFromInvoking(item, e);
+            }
+        );
+    }
+
+    private static void KeepSelectedFromInvoking(FANavigationViewItem item, RoutedEventArgs e)
+    {
+        if (!item.IsSelected || item.FindAncestorOfType<FANavigationView>() is not { } navigation)
+            return;
+        e.Handled = true;
+        if (navigation.DisplayMode != FANavigationViewDisplayMode.Expanded)
+            navigation.IsPaneOpen = false;
+    }
 
     public MainWindow()
     {
@@ -128,27 +157,6 @@ public sealed partial class MainWindow : FAAppWindow
         viewModel.ShowsSettings = e.SelectedItem == SettingsItem;
         if (e.SelectedItem is OpenDocument document)
             viewModel.Workspace.Current = document;
-    }
-
-    // FluentAvalonia 3.1.0 keeps an invoke of the item that is selected already for the next selection, which then
-    // looks for that item's control; a document just opened or created has none yet, and it throws. The selected
-    // document has nothing to invoke, so its item only closes the pane, as FluentAvalonia would.
-
-    private void OnDocumentTapped(object? sender, TappedEventArgs e) => KeepSelectedFromInvoking(sender, e);
-
-    private void OnDocumentKeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.Key is Key.Enter or Key.Space)
-            KeepSelectedFromInvoking(sender, e);
-    }
-
-    private void KeepSelectedFromInvoking(object? sender, RoutedEventArgs e)
-    {
-        if (DocumentOf(sender) is not { } document || Navigation.SelectedItem != document)
-            return;
-        e.Handled = true;
-        if (Navigation.DisplayMode != FANavigationViewDisplayMode.Expanded)
-            Navigation.IsPaneOpen = false;
     }
 
     private void OnDisplayModeChanged(object? sender, FANavigationViewDisplayModeChangedEventArgs e) =>
@@ -280,30 +288,31 @@ public sealed partial class MainWindow : FAAppWindow
         return item;
     }
 
-    private async Task OpenAsync()
-    {
-        if (Workspace is not { } workspace)
-            return;
-        IReadOnlyList<IStorageFile> files = await StorageProvider.OpenFilePickerAsync(
-            new FilePickerOpenOptions
-            {
-                Title = Strings.Current.Open,
-                AllowMultiple = true,
-                FileTypeFilter = [AllFiles, .. FileType.All.Select(type => type.ToPickerType())],
-            }
-        );
-        foreach (IStorageFile file in files)
+    private Task OpenAsync() =>
+        OneAtATimeAsync(async () =>
         {
-            try
+            if (Workspace is not { } workspace)
+                return;
+            IReadOnlyList<IStorageFile> files = await StorageProvider.OpenFilePickerAsync(
+                new FilePickerOpenOptions
+                {
+                    Title = Strings.Current.Open,
+                    AllowMultiple = true,
+                    FileTypeFilter = [AllFiles, .. FileType.All.Select(type => type.ToPickerType())],
+                }
+            );
+            foreach (IStorageFile file in files)
             {
-                await workspace.OpenAsync(file);
+                try
+                {
+                    await workspace.OpenAsync(file);
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    await ShowErrorAsync(Strings.Current.Format(Strings.Current.OpenFailed, file.Name), e.Message);
+                }
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                await ShowErrorAsync(Strings.Current.Format(Strings.Current.OpenFailed, file.Name), e.Message);
-            }
-        }
-    }
+        });
 
     private Task SaveShownAsync(bool saveAs) =>
         ShownDocument is { } document ? OneAtATimeAsync(() => SaveAsync(document, saveAs)) : Task.CompletedTask;
@@ -328,6 +337,7 @@ public sealed partial class MainWindow : FAAppWindow
             );
             if (file is null)
                 return false;
+            // Opens and saves run one at a time: no other document takes the path while the file is written.
             if (file.TryGetLocalPath() is { } path && Workspace?.WithPath(path, except: document) is not null)
             {
                 await ShowErrorAsync(
@@ -384,16 +394,16 @@ public sealed partial class MainWindow : FAAppWindow
 
     private async Task OneAtATimeAsync(Func<Task> operation)
     {
-        if (_isSavingOrClosing)
+        if (_isWorkingWithFiles)
             return;
-        _isSavingOrClosing = true;
+        _isWorkingWithFiles = true;
         try
         {
             await operation();
         }
         finally
         {
-            _isSavingOrClosing = false;
+            _isWorkingWithFiles = false;
         }
     }
 

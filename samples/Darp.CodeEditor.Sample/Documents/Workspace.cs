@@ -91,17 +91,6 @@ public sealed partial class Workspace : ObservableObject, IDisposable
     /// </exception>
     public async Task OpenAsync(IStorageFile file)
     {
-        OpenDocument? open = file.TryGetLocalPath() is { } path
-            ? WithPath(path)
-            : Documents.FirstOrDefault(document => document.File?.Path == file.Path);
-        if (open is not null)
-        {
-            file.Dispose();
-            if (open.File is null)
-                throw new IOException(Strings.Current.Format(Strings.Current.ExampleHasPath, open.Name));
-            Current = open;
-            return;
-        }
         string text;
         try
         {
@@ -114,7 +103,20 @@ public sealed partial class Workspace : ObservableObject, IDisposable
             file.Dispose();
             throw;
         }
-        Add(file.Name, FileType.ForFile(file.Name), text, file, file.TryGetLocalPath());
+        // After the last await, so that no other open can take the path before the document has it.
+        string? path = file.TryGetLocalPath();
+        OpenDocument? open = path is not null
+            ? WithPath(path)
+            : Documents.FirstOrDefault(document => document.File?.Path == file.Path);
+        if (open is not null)
+        {
+            file.Dispose();
+            if (open.File is null)
+                throw new IOException(Strings.Current.Format(Strings.Current.ExampleHasPath, open.Name));
+            Current = open;
+            return;
+        }
+        Add(file.Name, FileType.ForFile(file.Name), text, file, path);
     }
 
     /// <summary>
