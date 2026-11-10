@@ -79,7 +79,7 @@ public sealed partial class Workspace : ObservableObject, IDisposable
     /// <summary>Creates an empty document in memory.</summary>
     public void New(FileType type)
     {
-        string name = Strings.Current.Format(Strings.Current.Untitled, ++_untitledCount);
+        string name = Strings.Default.FormatUntitled(++_untitledCount);
         Add(name, type, "", file: null, filePath: null);
     }
 
@@ -112,7 +112,7 @@ public sealed partial class Workspace : ObservableObject, IDisposable
         {
             file.Dispose();
             if (open.File is null)
-                throw new IOException(Strings.Current.Format(Strings.Current.ExampleHasPath, open.Name));
+                throw new IOException(Strings.Default.FormatExampleHasPath(open.Name));
             Current = open;
             return;
         }

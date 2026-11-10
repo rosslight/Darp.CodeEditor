@@ -25,11 +25,18 @@
       <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
     </PackageReference>
     <PackageReference Include="CommunityToolkit.Mvvm" />
+    <!-- Generates the Strings class of Localization/Strings.resx at build time. -->
+    <PackageReference Include="Darp.Utils.ResxSourceGenerator" PrivateAssets="all" />
     <PackageReference Include="FluentAvaloniaUI" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Darp.CodeEditor\Darp.CodeEditor.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Public, as the view model hands the strings to bindings. -->
+    <EmbeddedResource Update="Localization\Strings.resx" Public="true" EmitFormatMethods="true" />
   </ItemGroup>
 
   <ItemGroup>
