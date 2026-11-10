@@ -135,6 +135,15 @@ internal sealed class CompletionListBox : Control
         Refresh();
     }
 
+    /// <summary>Shows at most <paramref name="rows"/> rows, keeping the selected item in view.</summary>
+    public void SetMaxRows(int rows)
+    {
+        MaxRows = rows;
+        ScrollIntoView(_selected);
+        InvalidateMeasure();
+        Refresh();
+    }
+
     /// <summary>Selects the item at <paramref name="index"/>, and scrolls it into view.</summary>
     public void Select(int index)
     {

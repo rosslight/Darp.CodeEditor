@@ -59,6 +59,14 @@ internal sealed class HoverController : IDisposable
     /// <summary>The lowest the hover's most height gets: higher in higher editors.</summary>
     private const double MinMaxHeight = 250;
 
+    /// <summary>The smallest the user resizes the hover to.</summary>
+    private const double MinResizedWidth = 150;
+
+    private const double MinResizedHeight = 40;
+
+    /// <summary>Whether the user resized the hover that shows.</summary>
+    private bool _resized;
+
     /// <summary>The text hovered now, from the pointer's rest until the popup closes; null for none.</summary>
     private Hovered? _hovered;
 
@@ -88,6 +96,16 @@ internal sealed class HoverController : IDisposable
         };
         // Within the editor where it fits, rather than over the app's toolbar.
         _popup = new EditorPopup(editor, _frame) { PrefersEditorBounds = true };
+        // Resizable by its edges away from the word, for this hover only, as in VS Code.
+        _frame.ResizableEdges = () =>
+            PopupFrame.Edges.Right
+            | (_popup.LastPlacement?.Above == true ? PopupFrame.Edges.Top : PopupFrame.Edges.Bottom);
+        _frame.Resized += (size, maxHeight) =>
+        {
+            _resized = true;
+            _frame.Width = _frame.MaxWidth = Math.Max(MinResizedWidth, size.Width);
+            _frame.MaxHeight = Math.Max(MinResizedHeight, maxHeight);
+        };
         _textView.PointerHover += OnPointerHover;
         _textView.PointerMoved += OnPointerMoved;
         _textView.PointerExited += OnPointerExited;
@@ -188,6 +206,9 @@ internal sealed class HoverController : IDisposable
     private void Start(int offset, bool fromKeyboard)
     {
         Close();
+        // A new hover forgets the size the user gave the last one.
+        _frame.Width = double.NaN;
+        _resized = false;
         var budget = new HoverBudget();
         TextRange word = WordAt(_buffer, offset);
         var hovered = new Hovered(
@@ -252,9 +273,12 @@ internal sealed class HoverController : IDisposable
         _frame.Paint(colors.HoverBackground, colors.HoverBorder, colors.HoverForeground, colors.Shadow);
         _content.SliderBrushes = (colors.Slider, colors.SliderHover, colors.SliderActive);
         // At least 500 pixels wide, up to two thirds of the editor, and scrolling beyond half its height.
-        Size editor = _editor.Bounds.Size;
-        _frame.MaxWidth = Math.Max(MinMaxWidth, Math.Floor(editor.Width * 2 / 3));
-        _frame.MaxHeight = Math.Max(MinMaxHeight, Math.Floor(editor.Height / 2));
+        if (!_resized)
+        {
+            Size editor = _editor.Bounds.Size;
+            _frame.MaxWidth = Math.Max(MinMaxWidth, Math.Floor(editor.Width * 2 / 3));
+            _frame.MaxHeight = Math.Max(MinMaxHeight, Math.Floor(editor.Height / 2));
+        }
         _content.Child = HoverView.Create(blocks, new PopupLook(_editor.FontFamily, _editor.FontSize, colors));
         // Above the hovered word, where the pointer comes from.
         _popup.Show(_textView, () => TextViewBoxes.CharacterAt(_textView, hovered.Word.Start));
@@ -299,7 +323,7 @@ internal sealed class HoverController : IDisposable
                 {
                     if (_hiding != hiding || _hovered != hovered)
                         return;
-                    if (_popup.Root.IsPointerOver)
+                    if (_popup.Root.IsPointerOver || _frame.IsResizing)
                         StayOpen();
                     else
                         Close();

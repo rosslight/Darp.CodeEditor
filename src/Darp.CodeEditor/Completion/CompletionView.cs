@@ -30,6 +30,16 @@ internal sealed class CompletionView
     /// <summary>The frame's border, on each side.</summary>
     private const double Border = 1;
 
+    /// <summary>The narrowest the details get by resizing.</summary>
+    private const double MinDetailsWidth = 200;
+
+    /// <summary>The list's width, its rows and the details' size, as the user resized them: for the app's run, as VS Code keeps them.</summary>
+    private static double s_listWidth = DefaultWidth;
+
+    private static int s_listRows = DefaultRows;
+    private static double s_detailsWidth = DefaultDetailsWidth;
+    private static double? s_detailsHeight;
+
     private readonly CompletionListBox _list = new();
     private readonly PopupFrame _listFrame;
     private readonly PopupFrame _detailsFrame;
@@ -57,6 +67,14 @@ internal sealed class CompletionView
             OffsetX = -(Border + CompletionListBox.LabelInset),
         };
         _detailsPopup = new EditorPopup(editor, _detailsFrame);
+        _listFrame.ResizableEdges = () =>
+            _list.Message is not null
+                ? PopupFrame.Edges.None
+                : PopupFrame.Edges.Right
+                    | (_listPopup.LastPlacement?.Above == true ? PopupFrame.Edges.Top : PopupFrame.Edges.Bottom);
+        _listFrame.Resized += OnListResized;
+        _detailsFrame.ResizableEdges = DetailsEdges;
+        _detailsFrame.Resized += OnDetailsResized;
         _list.Clicked += index => Clicked?.Invoke(index);
         _listPopup.LeftView += (_, _) =>
         {
@@ -92,7 +110,8 @@ internal sealed class CompletionView
     )
     {
         Paint(look.Colors);
-        _list.PreferredWidth = DefaultWidth - 2 * Border;
+        _list.PreferredWidth = s_listWidth - 2 * Border;
+        _list.MaxRows = s_listRows;
         _list.Show(items, selected, look, icons, rowHeight);
     }
 
@@ -104,7 +123,7 @@ internal sealed class CompletionView
     public void ShowMessage(string message, PopupLook look, double rowHeight, bool narrow)
     {
         Paint(look.Colors);
-        _list.PreferredWidth = (narrow ? DefaultWidth / 2 : DefaultWidth) - 2 * Border;
+        _list.PreferredWidth = (narrow ? DefaultWidth / 2 : s_listWidth) - 2 * Border;
         _list.ShowMessage(message, look, rowHeight);
         ShowDetails(null);
     }
@@ -131,10 +150,44 @@ internal sealed class CompletionView
             _detailsPopup.Hide();
             return;
         }
-        // At most as tall as the list's most rows, so that it stays next to the list.
-        _detailsFrame.MaxHeight = Math.Max(_list.RowHeight * _list.MaxRows, _list.RowHeight * DefaultRows) + 2 * Border;
+        // At most as tall as the list's most rows, so that it stays next to the list, or as the user resized it.
+        _detailsFrame.MaxHeight =
+            s_detailsHeight ?? Math.Max(_list.RowHeight * _list.MaxRows, _list.RowHeight * DefaultRows) + 2 * Border;
         if (_listPopup.IsOpen)
-            _detailsPopup.ShowBeside(_listPopup, DefaultDetailsWidth);
+            _detailsPopup.ShowBeside(_listPopup, s_detailsWidth);
+    }
+
+    /// <summary>The list takes the width dragged to, and as many whole rows as fit the height.</summary>
+    private void OnListResized(Size size, double maxHeight)
+    {
+        s_listWidth = Math.Max(MinWidth, size.Width);
+        s_listRows = Math.Max(1, (int)Math.Round((size.Height - 2 * Border) / _list.RowHeight));
+        _list.PreferredWidth = s_listWidth - 2 * Border;
+        _list.SetMaxRows(s_listRows);
+    }
+
+    private void OnDetailsResized(Size size, double maxHeight)
+    {
+        s_detailsWidth = Math.Max(MinDetailsWidth, size.Width);
+        s_detailsHeight = Math.Max(3 * _list.RowHeight, maxHeight);
+        _detailsFrame.MaxHeight = s_detailsHeight.Value;
+        if (_listPopup.IsOpen)
+            _detailsPopup.ShowBeside(_listPopup, s_detailsWidth);
+    }
+
+    /// <summary>
+    /// The details' edges away from the list: the outer side beside it, or the bottom below it, and the edge away
+    /// from the line.
+    /// </summary>
+    private PopupFrame.Edges DetailsEdges()
+    {
+        Rect list = _listPopup.Root.Bounds;
+        Rect details = _detailsPopup.Root.Bounds;
+        bool above = _listPopup.LastPlacement?.Above == true;
+        bool stacked = details.Top >= list.Bottom - 1 || details.Bottom <= list.Top + 1;
+        PopupFrame.Edges horizontal =
+            stacked || details.Left >= list.Right - 1 ? PopupFrame.Edges.Right : PopupFrame.Edges.Left;
+        return horizontal | (above ? PopupFrame.Edges.Top : PopupFrame.Edges.Bottom);
     }
 
     private void Paint(PopupColors colors)
