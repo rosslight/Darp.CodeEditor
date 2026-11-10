@@ -162,7 +162,8 @@ public sealed class SignatureHelpTests(UiFixture ui)
                 fake,
                 CompletionTests.Items("alpha", "beta")
             );
-            const string text = "\n\n\n\n\ncall";
+            // Room for the signature above the line with any platform's fonts, and for the list below it.
+            const string text = "\n\n\n\n\n\n\n\n\n\n\n\ncall";
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
             using var window = new EditorWindow(new CodeEditor { Document = document });
             window.Editor.Selection = new TextSelection(text.Length);
