@@ -44,7 +44,8 @@ internal sealed class HoverController : IDisposable
     private readonly CodeDocument _document;
     private readonly SquiggleLayer _squiggles;
     private readonly BackgroundTextMateHighlighter _highlighter;
-    private readonly ScrollViewer _content = new() { HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+    private readonly PopupScroller _content = new();
+    private readonly PopupFrame _frame;
     private readonly EditorPopup _popup;
     private TextAreaColors? _colors;
 
@@ -65,7 +66,15 @@ internal sealed class HoverController : IDisposable
         _document = document;
         _squiggles = squiggles;
         _highlighter = highlighter;
-        _popup = new EditorPopup(editor, new AppToolTip { Content = _content });
+        _frame = new PopupFrame
+        {
+            Name = "Hover",
+            Child = _content,
+            Padding = new Thickness(8, 4, 4, 4),
+            MaxWidth = 500,
+            MaxHeight = 300,
+        };
+        _popup = new EditorPopup(editor, _frame);
         _textView.PointerHover += OnPointerHover;
         _textView.PointerMoved += OnPointerMoved;
         _textView.PointerExited += OnPointerExited;
@@ -182,8 +191,10 @@ internal sealed class HoverController : IDisposable
 
     private void Show(Hovered hovered, IReadOnlyList<HoverBlock> blocks)
     {
-        var code = new CodeLook(_editor.FontFamily, _editor.FontSize, _colors?.Background, _colors?.Foreground);
-        _content.Content = HoverView.Create(blocks, code);
+        PopupColors colors = _colors?.Popups ?? PopupColors.Default;
+        _frame.Paint(colors.HoverBackground, colors.HoverBorder, colors.HoverForeground, colors.Shadow);
+        _content.SliderBrushes = (colors.Slider, colors.SliderHover, colors.SliderActive);
+        _content.Child = HoverView.Create(blocks, new PopupLook(_editor.FontFamily, _editor.FontSize, colors));
         // Above the hovered word, where the pointer comes from.
         _popup.Show(_textView, () => TextViewBoxes.CharacterAt(_textView, hovered.Word.Start));
     }

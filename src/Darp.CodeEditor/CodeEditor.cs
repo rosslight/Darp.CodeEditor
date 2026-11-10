@@ -50,9 +50,10 @@ namespace Darp.CodeEditor;
 /// <para>
 /// The editor needs <see cref="CodeEditorStyles"/> in the app's styles. The text area takes its colors from
 /// <see cref="ColorTheme"/>: syntax and language-server colors, background, selection, caret, line numbers, search and
-/// bracket matches, and the squiggles under diagnostics. Everything around the text takes the app's look: completion,
-/// hover and signature help look like the app's flyouts and tooltips, and the search bar and scroll bars are the app's
-/// controls. Code inside popups keeps the editor's colors, background and font.
+/// bracket matches, and the squiggles under diagnostics. The popups belong to the editor, as in VS Code: completion,
+/// hover and signature help are the editor's own controls, in the color theme's widget colors by VS Code's keys, such
+/// as <c>editorSuggestWidget.background</c>, with prose in the app's font and code in the editor's. The search bar and
+/// the scroll bars are the app's controls.
 /// </para>
 /// <para>
 /// Built in, with no settings: the current line is highlighted, whitespace shows inside the selection, and the view
@@ -503,15 +504,37 @@ public class CodeEditor : TemplatedControl
     protected override void OnLostFocus(FocusChangedEventArgs e)
     {
         base.OnLostFocus(e);
-        // Raised as the focus leaves an element inside the editor; it may stay inside, as when it goes to the search bar.
+        CheckFocus();
+    }
+
+    /// <summary>
+    /// Closes the popups once the keyboard has left the editor and its popups. Posted, as the focus leaves an element
+    /// before it reaches the next: it may stay inside, as when it goes to the search bar or into a popup's text.
+    /// </summary>
+    internal void CheckFocus() =>
         Dispatcher.Post(() =>
         {
-            if (IsKeyboardFocusWithin)
+            if (
+                IsKeyboardFocusWithin
+                || TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is Visual focused
+                    && EditorPopup.OwnerOf(focused) == this
+            )
                 return;
             _hover?.Close();
             _completion?.Close();
             _signatureHelp?.Close();
         });
+
+    /// <summary>Gives the keyboard back to the text, as from a popup.</summary>
+    internal void FocusText() => _part?.TextArea.Focus();
+
+    /// <summary>Types <paramref name="text"/> into the text, as the user does, with the keyboard back in the text.</summary>
+    internal void TypeText(string text)
+    {
+        if (_part is not { } part || _shown is null)
+            return;
+        part.TextArea.Focus();
+        part.TextArea.RaiseEvent(new TextInputEventArgs { RoutedEvent = TextInputEvent, Text = text });
     }
 
     /// <inheritdoc />

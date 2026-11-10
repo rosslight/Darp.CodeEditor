@@ -20,8 +20,8 @@ namespace Darp.CodeEditor;
 /// ones. Override that resource in the app's theme dictionaries to give every editor other colors.
 /// </para>
 /// <para>
-/// Popups, the search bar and scroll bars take their look from the app's theme, whichever it is: completion, hover and
-/// signature help use the app's flyout and tooltip looks, and the search bar uses its text boxes and buttons.
+/// The search bar and scroll bars take their look from the app's theme, whichever it is. Completion, hover and signature
+/// help are the editor's own: their colors come from the editor's color theme, so app themes don't restyle them.
 /// </para>
 /// </remarks>
 public sealed partial class CodeEditorStyles : Styles

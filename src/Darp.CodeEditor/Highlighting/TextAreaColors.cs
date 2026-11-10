@@ -1,6 +1,7 @@
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
 using Darp.CodeEditor.Loading;
+using Darp.CodeEditor.Popups;
 
 namespace Darp.CodeEditor.Highlighting;
 
@@ -55,16 +56,21 @@ internal sealed record TextAreaColors(
     IPen SnippetFinalTabStopBorder
 )
 {
+    /// <summary>The colors of the editor's popups, from the same theme.</summary>
+    public required PopupColors Popups { get; init; }
+
     /// <summary>Reads the colors of <paramref name="theme"/>.</summary>
     public static TextAreaColors From(ColorThemeFile theme)
     {
         IReadOnlyDictionary<string, Color> colors = theme.Colors;
         bool dark = IsDark(theme);
         ImmutableSolidColorBrush? currentLine = Brush("editor.lineHighlightBackground");
+        IBrush foreground = Brush("editor.foreground") ?? Solid(dark ? 0xFFBBBBBB : 0xFF333333);
+        IBrush selection = Brush("editor.selectionBackground") ?? Solid(dark ? 0xFF264F78 : 0xFFADD6FF);
         return new TextAreaColors(
             Brush("editor.background") ?? Solid(dark ? 0xFF1E1E1E : 0xFFFFFFFF),
-            Brush("editor.foreground") ?? Solid(dark ? 0xFFBBBBBB : 0xFF333333),
-            Brush("editor.selectionBackground") ?? Solid(dark ? 0xFF264F78 : 0xFFADD6FF),
+            foreground,
+            selection,
             Brush("editorCursor.foreground") ?? Solid(dark ? 0xFFAEAFAD : 0xFF000000),
             Brush("editorLineNumber.foreground") ?? Solid(dark ? 0xFF858585 : 0xFF237893),
             // Transparent rather than none: AvaloniaEdit draws its own colors otherwise.
@@ -91,7 +97,10 @@ internal sealed record TextAreaColors(
             new ImmutablePen(
                 Brush("editor.snippetFinalTabstopHighlightBorder") ?? Solid(dark ? 0xFF525252 : 0x800A3264u)
             )
-        );
+        )
+        {
+            Popups = PopupColors.From(theme, foreground, selection),
+        };
 
         ImmutableSolidColorBrush? Brush(string key) =>
             colors.TryGetValue(key, out Color color) ? new ImmutableSolidColorBrush(color) : null;

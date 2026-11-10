@@ -189,4 +189,13 @@
   <data name="SourceCode" xml:space="preserve">
     <value>Quellcode auf GitHub</value>
   </data>
+  <data name="TryInTheme" xml:space="preserve">
+    <value>In Theme ausprobieren</value>
+  </data>
+  <data name="WaitingForChord" xml:space="preserve">
+    <value>({0}) wurde gedrückt. Warte auf die zweite Taste…</value>
+  </data>
+  <data name="ThemeWindowTitle" xml:space="preserve">
+    <value>Darp.CodeEditor in {0}</value>
+  </data>
 </root>

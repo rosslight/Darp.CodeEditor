@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Logging;
+using Avalonia.Media;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
@@ -571,10 +572,11 @@ internal sealed class CompletionController : IDisposable
         var cancellation = new CancellationTokenSource();
         session.Details = cancellation;
         TextMateGrammar? grammar = _highlighter.Grammar;
+        IBrush dimmed = (_colors?.Popups ?? PopupColors.Default).Description;
         try
         {
             IReadOnlyList<HoverBlock> blocks = await Task.Run(
-                () => DetailBlocks(item, grammar, cancellation.Token),
+                () => DetailBlocks(item, grammar, dimmed, cancellation.Token),
                 cancellation.Token
             );
             if (_session != session || cancellation.IsCancellationRequested || session.Place is not { } place)
@@ -593,13 +595,15 @@ internal sealed class CompletionController : IDisposable
     }
 
     /// <summary>
-    /// The detail, as code, and the documentation, as much of both as a hover shows: one budget for both, cut before
-    /// anything reads them, so that a server's long detail or documentation costs the UI thread no more than the
-    /// largest hover.
+    /// The detail, as plain text in the editor's font, dimmed, as VS Code shows it: a server's detail is any text, such as
+    /// "Auto-import", not always code. Then the documentation. As much of both as a hover shows: one budget for both,
+    /// cut before anything reads them, so that a server's long detail or documentation costs the UI thread no more than
+    /// the largest hover.
     /// </summary>
     private static IReadOnlyList<HoverBlock> DetailBlocks(
         CompletionItem item,
         TextMateGrammar? grammar,
+        IBrush dimmed,
         CancellationToken cancellationToken
     )
     {
@@ -608,8 +612,9 @@ internal sealed class CompletionController : IDisposable
         if (item.Detail is { } detail && budget.Take(detail) is { } kept)
         {
             // Lines end at \r\n, \n or \r, as everywhere in the library.
-            string[] lines = kept.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-            blocks.AddRange(budget.Fit([HoverBlocks.Highlight(lines, grammar, cancellationToken)]));
+            blocks.AddRange(
+                budget.Fit([new HoverCode([new CodeRun(kept.Replace("\r\n", "\n").Replace('\r', '\n'), dimmed)])])
+            );
         }
         if (item.Documentation is { } documentation)
             blocks.AddRange(HoverBlocks.Of(new HoverInfo([documentation], null), grammar, budget, cancellationToken));
@@ -827,7 +832,7 @@ internal sealed class CompletionController : IDisposable
         return TextRange.FromBounds(start, caret);
     }
 
-    private CodeLook Look() => new(_editor.FontFamily, _editor.FontSize, _colors?.Background, _colors?.Foreground);
+    private PopupLook Look() => new(_editor.FontFamily, _editor.FontSize, _colors?.Popups ?? PopupColors.Default);
 
     /// <summary>A request for completion.</summary>
     /// <param name="snapshot">The text it was asked for.</param>

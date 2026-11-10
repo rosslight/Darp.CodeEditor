@@ -46,7 +46,8 @@ internal sealed class SignatureHelpController : IDisposable
     private readonly TextDocument _buffer;
     private readonly CodeDocument _document;
     private readonly BackgroundTextMateHighlighter _highlighter;
-    private readonly ContentControl _content = new();
+    private readonly PopupScroller _content = new();
+    private readonly PopupFrame _frame;
     private readonly EditorPopup _popup;
     private TextAreaColors? _colors;
 
@@ -75,7 +76,15 @@ internal sealed class SignatureHelpController : IDisposable
         _buffer = textArea.Document;
         _document = document;
         _highlighter = highlighter;
-        _popup = new EditorPopup(editor, new AppToolTip { Content = _content });
+        _frame = new PopupFrame
+        {
+            Name = "SignatureHelp",
+            Child = _content,
+            Padding = new Avalonia.Thickness(8, 4, 4, 4),
+            MaxWidth = 440,
+            MaxHeight = 250,
+        };
+        _popup = new EditorPopup(editor, _frame);
         _textArea.TextEntered += OnTextEntered;
         _textArea.Caret.PositionChanged += OnEditOrCaretMove;
         _buffer.Changed += OnEditOrCaretMove;
@@ -270,8 +279,16 @@ internal sealed class SignatureHelpController : IDisposable
                     );
             if (_reading != reading)
                 return;
-            var look = new CodeLook(_editor.FontFamily, _editor.FontSize, _colors?.Background, _colors?.Foreground);
-            _content.Content = View(help, signature, label, blocks, look);
+            PopupColors colors = _colors?.Popups ?? PopupColors.Default;
+            _frame.Paint(colors.HoverBackground, colors.HoverBorder, colors.HoverForeground, colors.Shadow);
+            _content.SliderBrushes = (colors.Slider, colors.SliderHover, colors.SliderActive);
+            _content.Child = View(
+                help,
+                signature,
+                label,
+                blocks,
+                new PopupLook(_editor.FontFamily, _editor.FontSize, colors)
+            );
             _popup.Show(
                 _textView,
                 () =>
@@ -291,20 +308,20 @@ internal sealed class SignatureHelpController : IDisposable
     }
 
     /// <summary>
-    /// The signature as code, in the editor's font, colors and background, with the active parameter in bold; before
-    /// it which signature of how many, when there are more; below it the documentation.
+    /// The signature as code, in the editor's font, with the active parameter in bold in the hover's highlight color;
+    /// before it which signature of how many, when there are more; below it the documentation.
     /// </summary>
     /// <param name="help">The signature help.</param>
     /// <param name="signature">The signature that shows.</param>
     /// <param name="label">Its label, as much of it as the budget left, with "…" where it was cut.</param>
     /// <param name="documentation">The documentation.</param>
-    /// <param name="look">How code looks.</param>
+    /// <param name="look">How the popup looks.</param>
     private static Control View(
         SignatureHelpInfo help,
         SignatureInfo signature,
         string label,
         IReadOnlyList<HoverBlock> documentation,
-        CodeLook look
+        PopupLook look
     )
     {
         var inlines = new InlineCollection();
@@ -317,26 +334,20 @@ internal sealed class SignatureHelpController : IDisposable
         if (end > start)
         {
             inlines.Add(new Run(label[..start]));
-            inlines.Add(new Run(label[start..end]) { FontWeight = FontWeight.Bold });
+            inlines.Add(
+                new Run(label[start..end]) { FontWeight = FontWeight.Bold, Foreground = look.Colors.HoverHighlight }
+            );
             inlines.Add(new Run(label[end..]));
         }
         else
         {
             inlines.Add(new Run(label));
         }
-        var code = new Border
-        {
-            Background = look.Background,
-            Padding = new Avalonia.Thickness(6, 4),
-            Child = new TextBlock
-            {
-                Inlines = inlines,
-                FontFamily = look.FontFamily,
-                FontSize = look.FontSize,
-                Foreground = look.Foreground,
-                TextWrapping = TextWrapping.Wrap,
-            },
-        };
+        SelectableTextBlock code = HoverView.Text(look);
+        code.Inlines = inlines;
+        code.FontFamily = look.CodeFont;
+        code.FontSize = look.CodeSize;
+        code.Foreground = look.Colors.CodeForeground;
         var line = new DockPanel();
         if (help.Signatures.Count > 1)
         {
@@ -344,6 +355,7 @@ internal sealed class SignatureHelpController : IDisposable
             {
                 Text = $"{help.ActiveSignature + 1}/{help.Signatures.Count}",
                 VerticalAlignment = VerticalAlignment.Center,
+                Foreground = look.Colors.Description,
                 Margin = new Avalonia.Thickness(0, 0, 6, 0),
             };
             DockPanel.SetDock(counter, Dock.Left);

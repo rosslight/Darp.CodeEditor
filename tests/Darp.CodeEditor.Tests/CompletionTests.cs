@@ -578,8 +578,10 @@ public sealed class CompletionTests(UiFixture ui)
                 .ShouldContain(run => run.Text == "the console" && run.FontWeight == FontWeight.Bold);
             window.Press(Key.Down);
             await Wait.UntilAsync(() => DetailTexts(window).Contains("class System.Convert"));
-            // The code keeps the editor's foreground, also where its grammar gives no color.
-            window.RenderAndCountPixels(Colors.Black, BoundsInWindow(Details(window)!)).ShouldBeGreaterThan(20);
+            // The detail is plain text, dimmed in the theme's descriptionForeground, not colored as code.
+            window
+                .RenderAndCountPixels(Color.Parse("#717171"), BoundsInWindow(Details(window)!))
+                .ShouldBeGreaterThan(20);
             fake.LinesStartingWith("resolve ").Select(l => l.Split(' ')[^1]).ShouldBe(["Console", "Convert"]);
         });
 
@@ -950,7 +952,7 @@ public sealed class CompletionTests(UiFixture ui)
 
             await OpenAsync(window, text.Length);
 
-            FlyoutPresenter flyout = Flyout(window).ShouldNotBeNull();
+            PopupFrame flyout = Flyout(window).ShouldNotBeNull();
             window.Window.ActualThemeVariant.ShouldBe(ThemeVariant.Light);
             flyout.ActualThemeVariant.ShouldBe(ThemeVariant.Dark);
             Color background = flyout.Background.ShouldBeAssignableTo<ISolidColorBrush>()!.Color;
@@ -1091,8 +1093,8 @@ public sealed class CompletionTests(UiFixture ui)
     internal static ListBox? List(EditorWindow window) =>
         OverlayLayer.GetOverlayLayer(window.Window)?.GetVisualDescendants().OfType<ListBox>().FirstOrDefault();
 
-    /// <summary>The flyout around the list; null while it is closed.</summary>
-    internal static FlyoutPresenter? Flyout(EditorWindow window) => List(window)?.FindAncestorOfType<FlyoutPresenter>();
+    /// <summary>The frame around the list; null while it is closed.</summary>
+    internal static PopupFrame? Flyout(EditorWindow window) => PopupFrames.Find(window, "CompletionList");
 
     internal static Rect BoundsInWindow(Visual visual) =>
         visual.GetTransformedBounds() is { } bounds
@@ -1141,13 +1143,7 @@ public sealed class CompletionTests(UiFixture ui)
         );
 
     /// <summary>The details beside the list; null while none show.</summary>
-    private static FlyoutPresenter? Details(EditorWindow window) =>
-        OverlayLayer
-            .GetOverlayLayer(window.Window)
-            ?.GetVisualDescendants()
-            .OfType<FlyoutPresenter>()
-            .Skip(1)
-            .FirstOrDefault(f => f.IsVisible);
+    private static PopupFrame? Details(EditorWindow window) => PopupFrames.Find(window, "CompletionDetails");
 
     private static IReadOnlyList<string> DetailTexts(EditorWindow window) =>
         Details(window)

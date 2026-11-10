@@ -538,6 +538,7 @@ public sealed class SnippetSessionTests(UiFixture ui)
     }
 
     /// <summary>Signature help's popup; null while it is closed.</summary>
-    private static ToolTip? ToolTip(EditorWindow window) =>
-        OverlayLayer.GetOverlayLayer(window.Window)?.GetVisualDescendants().OfType<ToolTip>().FirstOrDefault();
+    /// <summary>Signature help's popup or the hover's; null while neither shows.</summary>
+    private static Popups.PopupFrame? ToolTip(EditorWindow window) =>
+        PopupFrames.Find(window, "SignatureHelp") ?? PopupFrames.Find(window, "Hover");
 }

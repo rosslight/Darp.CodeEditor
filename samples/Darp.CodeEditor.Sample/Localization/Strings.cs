@@ -97,6 +97,9 @@ public sealed class Strings : INotifyPropertyChanged
     public string About => Get();
     public string AboutDescription => Get();
     public string SourceCode => Get();
+    public string TryInTheme => Get();
+    public string WaitingForChord => Get();
+    public string ThemeWindowTitle => Get();
 
     /// <summary>Where a language server is in its life, in words: the texts <c>ServerRunning</c> and so on.</summary>
     public string Describe(LanguageServerState state) => Get($"Server{state}");

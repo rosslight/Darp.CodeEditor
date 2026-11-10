@@ -3,25 +3,38 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
+using Avalonia.Styling;
 
 namespace Darp.CodeEditor.Popups;
 
 /// <summary>
-/// The controls that show a hover's blocks: text in the popup's look, with the app's link and separator looks, and code
-/// in the editor's font, colors and background.
+/// The controls that show a hover's blocks, as VS Code's hover shows Markdown: prose in the app's font at one size, in
+/// the popup's foreground; code blocks on the popup's background in the editor's font and token colors; code spans on
+/// <c>textCodeBlock.background</c>; links in <c>textLink.foreground</c>. All text is selectable, and Ctrl+C copies the
+/// selection.
 /// </summary>
 internal static class HoverView
 {
     /// <summary>How far each level of a list is indented.</summary>
     private const double ListIndent = 16;
 
+    /// <summary>
+    /// The editor's own look of selectable text, so that an app's theme for <see cref="SelectableTextBlock"/> never
+    /// reaches popups: an I-beam, and nothing else.
+    /// </summary>
+    private static readonly ControlTheme s_selectableTheme = new(typeof(SelectableTextBlock))
+    {
+        Setters = { new Setter(InputElement.CursorProperty, new Cursor(StandardCursorType.Ibeam)) },
+    };
+
     /// <summary>The hand over links, made the first time it is needed.</summary>
     private static Cursor? s_hand;
 
-    public static Control Create(IReadOnlyList<HoverBlock> blocks, CodeLook code)
+    public static Control Create(IReadOnlyList<HoverBlock> blocks, PopupLook look)
     {
         var panel = new StackPanel { Spacing = 6 };
         foreach (HoverBlock block in blocks)
@@ -29,9 +42,9 @@ internal static class HoverView
             panel.Children.Add(
                 block switch
                 {
-                    HoverParagraph paragraph => Paragraph(paragraph, code),
-                    HoverCode codeBlock => Code(codeBlock, code),
-                    HoverRule => new Separator(),
+                    HoverParagraph paragraph => Paragraph(paragraph, look),
+                    HoverCode codeBlock => Code(codeBlock, look),
+                    HoverRule => Rule(look),
                     _ => throw new UnreachableException(),
                 }
             );
@@ -39,7 +52,45 @@ internal static class HoverView
         return panel;
     }
 
-    private static Control Paragraph(HoverParagraph paragraph, CodeLook code)
+    /// <summary>Selectable text in the editor's own look, with the color theme's selection.</summary>
+    public static SelectableTextBlock Text(PopupLook look) =>
+        new()
+        {
+            Theme = s_selectableTheme,
+            SelectionBrush = look.Colors.Selection,
+            TextWrapping = TextWrapping.Wrap,
+        };
+
+    /// <summary>A line between two parts, in the hover's border color.</summary>
+    public static Control Rule(PopupLook look) =>
+        new Border
+        {
+            Height = 1,
+            Background = look.Colors.HoverBorder,
+            Margin = new Thickness(0, 2),
+        };
+
+    /// <summary>Code in the editor's font, size and token colors, on the popup's background.</summary>
+    public static SelectableTextBlock Code(HoverCode block, PopupLook look)
+    {
+        var inlines = new InlineCollection();
+        foreach (CodeRun run in block.Runs)
+        {
+            // A run without a color of its own takes the block's, the editor's foreground.
+            var text = new Run(run.Text);
+            if (run.Foreground is { } foreground)
+                text.Foreground = foreground;
+            inlines.Add(text);
+        }
+        SelectableTextBlock code = Text(look);
+        code.Inlines = inlines;
+        code.FontFamily = look.CodeFont;
+        code.FontSize = look.CodeSize;
+        code.Foreground = look.Colors.CodeForeground;
+        return code;
+    }
+
+    private static Control Paragraph(HoverParagraph paragraph, PopupLook look)
     {
         var inlines = new InlineCollection();
         var links = new List<(int Start, int End, Uri Uri)>();
@@ -51,23 +102,22 @@ internal static class HoverView
                 run.FontWeight = FontWeight.Bold;
             if (span.Style.HasFlag(SpanStyle.Italic))
                 run.FontStyle = FontStyle.Italic;
-            // A small code span, in the editor's look at the paragraph's size, so that it fits its line.
+            // A small code span, in the editor's font at the paragraph's size, so that it fits its line.
             if (span.Style.HasFlag(SpanStyle.Code))
             {
-                run.FontFamily = code.FontFamily;
-                run.Background = code.Background;
-                if (code.Foreground is { } foreground)
-                    run.Foreground = foreground;
+                run.FontFamily = look.CodeFont;
+                run.Background = look.Colors.CodeSpanBackground;
             }
             if (span.Link is { } uri)
             {
-                run.TextDecorations = TextDecorations.Underline;
+                run.Foreground = look.Colors.Link;
                 links.Add((length, length + span.Text.Length, uri));
             }
             inlines.Add(run);
             length += span.Text.Length;
         }
-        var text = new TextBlock { Inlines = inlines, TextWrapping = TextWrapping.Wrap };
+        SelectableTextBlock text = Text(look);
+        text.Inlines = inlines;
         if (links.Count > 0)
             OpenLinks(text, links);
         if (paragraph.Marker is not { } marker)
@@ -83,51 +133,32 @@ internal static class HoverView
         return item;
     }
 
-    private static Control Code(HoverCode block, CodeLook look)
-    {
-        var inlines = new InlineCollection();
-        foreach (CodeRun run in block.Runs)
-        {
-            // A run without a color of its own takes the block's, the editor's foreground.
-            var text = new Run(run.Text);
-            if (run.Foreground is { } foreground)
-                text.Foreground = foreground;
-            inlines.Add(text);
-        }
-        return new Border
-        {
-            Background = look.Background,
-            Padding = new Thickness(6, 4),
-            Child = new TextBlock
-            {
-                Inlines = inlines,
-                FontFamily = look.FontFamily,
-                FontSize = look.FontSize,
-                Foreground = look.Foreground,
-                TextWrapping = TextWrapping.Wrap,
-            },
-        };
-    }
-
     /// <summary>
-    /// Opens the web page of a link that is clicked, through the app's launcher, and shows the hand over links. The text
-    /// takes no keyboard focus, so the editor keeps it.
+    /// Opens the web page of a link that is clicked without selecting, through the app's launcher, and shows the hand
+    /// over links.
     /// </summary>
-    private static void OpenLinks(TextBlock text, List<(int Start, int End, Uri Uri)> links)
+    private static void OpenLinks(SelectableTextBlock text, List<(int Start, int End, Uri Uri)> links)
     {
         text.PointerMoved += (_, e) =>
             text.Cursor = LinkAt(text, links, e) is null ? null : s_hand ??= new(StandardCursorType.Hand);
-        text.PointerReleased += (_, e) =>
-        {
-            if (
-                e.InitialPressMouseButton == MouseButton.Left
-                && LinkAt(text, links, e) is { } uri
-                && TopLevel.GetTopLevel(text) is { } topLevel
-            )
+        // The text handles the press and release itself, to select.
+        text.AddHandler(
+            InputElement.PointerReleasedEvent,
+            (_, e) =>
             {
-                Open(topLevel, uri);
-            }
-        };
+                if (
+                    e.InitialPressMouseButton == MouseButton.Left
+                    && text.SelectionStart == text.SelectionEnd
+                    && LinkAt(text, links, e) is { } uri
+                    && TopLevel.GetTopLevel(text) is { } topLevel
+                )
+                {
+                    Open(topLevel, uri);
+                }
+            },
+            RoutingStrategies.Bubble,
+            handledEventsToo: true
+        );
     }
 
     private static Uri? LinkAt(TextBlock text, List<(int Start, int End, Uri Uri)> links, PointerEventArgs e)
@@ -148,9 +179,8 @@ internal static class HoverView
     private static async void Open(TopLevel topLevel, Uri uri) => await topLevel.Launcher.LaunchUriAsync(uri);
 }
 
-/// <summary>How code looks in a popup: as in the editor.</summary>
-/// <param name="FontFamily">The editor's font.</param>
-/// <param name="FontSize">The editor's font size.</param>
-/// <param name="Background">The text area's background; null while the color theme loads.</param>
-/// <param name="Foreground">The text area's foreground; null while the color theme loads.</param>
-internal sealed record CodeLook(FontFamily FontFamily, double FontSize, IBrush? Background, IBrush? Foreground);
+/// <summary>How a popup looks: code as in the editor, everything else in the popup colors of its color theme.</summary>
+/// <param name="CodeFont">The editor's font.</param>
+/// <param name="CodeSize">The editor's font size.</param>
+/// <param name="Colors">The popups' colors.</param>
+internal sealed record PopupLook(FontFamily CodeFont, double CodeSize, PopupColors Colors);

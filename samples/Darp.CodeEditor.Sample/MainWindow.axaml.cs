@@ -226,6 +226,27 @@ public sealed partial class MainWindow : FAAppWindow
         menu.Items.Add(MenuItem(strings.Replace, FASymbol.Switch, DocumentPage.Replace, shows));
         menu.Items.Add(MenuItem(strings.GoToLine, FASymbol.Go, OpenGoToLine, shows));
         menu.Items.Add(MenuItem(strings.InsertDateTime, FASymbol.Calendar, DocumentPage.InsertDateTime, shows));
+        menu.Items.Add(new FAMenuFlyoutSeparator());
+        var themes = new FAMenuFlyoutSubItem
+        {
+            Text = strings.TryInTheme,
+            IconSource = new FASymbolIconSource { Symbol = FASymbol.ColorBackground },
+        };
+        foreach (ThemeChoiceOfWindow choice in ThemeChoiceOfWindow.All)
+        {
+            themes.Items.Add(
+                MenuItem(
+                    choice.Name,
+                    icon: null,
+                    () =>
+                    {
+                        if (Workspace is { } workspace)
+                            new ThemeWindow(workspace, choice).Show();
+                    }
+                )
+            );
+        }
+        menu.Items.Add(themes);
     }
 
     private void ToggleWordWrap()

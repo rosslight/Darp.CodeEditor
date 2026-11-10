@@ -41,16 +41,13 @@ internal sealed class CompletionView
     private const double Gap = 2;
 
     private readonly ListBox _list;
-    private readonly FlyoutPresenter _details;
+    private readonly PopupFrame _listFrame;
+    private readonly PopupFrame _details;
     private readonly Layout _layout;
 
-    private readonly ScrollViewer _detailsContent = new()
-    {
-        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-        MaxWidth = DetailsWidth,
-    };
+    private readonly PopupScroller _detailsContent = new() { MaxWidth = DetailsWidth };
 
-    private CodeLook? _look;
+    private PopupLook? _look;
     private SymbolIconColors? _icons;
     private double _rowHeight;
 
@@ -75,13 +72,15 @@ internal sealed class CompletionView
             }
         );
         _list.AddHandler(InputElement.PointerPressedEvent, OnPointerPressed, RoutingStrategies.Tunnel);
-        _details = new FlyoutPresenter { Content = _detailsContent, IsVisible = false };
-        var listFlyout = new FlyoutPresenter { Content = _list };
-        // A theme's flyout may scroll across, as Fluent's does: its content then takes no width from it, and the
-        // details would not wrap.
-        ScrollViewer.SetHorizontalScrollBarVisibility(listFlyout, ScrollBarVisibility.Disabled);
-        ScrollViewer.SetHorizontalScrollBarVisibility(_details, ScrollBarVisibility.Disabled);
-        _layout = new Layout(listFlyout, _details);
+        _details = new PopupFrame
+        {
+            Name = "CompletionDetails",
+            Child = _detailsContent,
+            Padding = new Thickness(5, 4, 1, 4),
+            IsVisible = false,
+        };
+        _listFrame = new PopupFrame { Name = "CompletionList", Child = _list };
+        _layout = new Layout(_listFrame, _details);
     }
 
     /// <summary>The view's outermost control.</summary>
@@ -108,12 +107,16 @@ internal sealed class CompletionView
     public void Show(
         IReadOnlyList<ShownItem> items,
         int selected,
-        CodeLook look,
+        PopupLook look,
         SymbolIconColors? icons,
         double rowHeight
     )
     {
         (_look, _icons, _rowHeight) = (look, icons, rowHeight);
+        PopupColors colors = look.Colors;
+        _listFrame.Paint(colors.SuggestBackground, colors.SuggestBorder, colors.SuggestForeground, colors.Shadow);
+        _details.Paint(colors.SuggestBackground, colors.SuggestBorder, colors.WidgetForeground, colors.Shadow);
+        _detailsContent.SliderBrushes = (colors.Slider, colors.SliderHover, colors.SliderActive);
         _list.MaxHeight = rowHeight * VisibleItems;
         _detailsContent.MaxHeight = rowHeight * VisibleItems;
         _list.ItemsSource = items;
@@ -130,7 +133,7 @@ internal sealed class CompletionView
     /// <summary>Shows the selected item's details beside the list; null hides them.</summary>
     public void ShowDetails(Control? details)
     {
-        _detailsContent.Content = details;
+        _detailsContent.Child = details;
         _details.IsVisible = details is not null;
     }
 
@@ -262,8 +265,8 @@ internal sealed class CompletionView
             if (DataContext is not ShownItem { Item: var item } shown)
                 return;
             Height = _view._rowHeight;
-            _label.FontFamily = _view._look?.FontFamily ?? FontFamily.Default;
-            _label.FontSize = _view._look?.FontSize ?? 12;
+            _label.FontFamily = _view._look?.CodeFont ?? FontFamily.Default;
+            _label.FontSize = _view._look?.CodeSize ?? 12;
             _label.Inlines = Label(Shortened(item.Label), shown.Highlights);
             _label.TextDecorations = item.IsDeprecated ? TextDecorations.Strikethrough : null;
             _icon.IsVisible = _view._icons is not null;

@@ -2,6 +2,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
+using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
 
@@ -24,9 +26,21 @@ namespace Darp.CodeEditor.Popups;
 /// resized or the text reflows, and it closes when its place's line leaves the view it is in, which
 /// <see cref="LeftView"/> reports.
 /// </para>
+/// <para>
+/// Its text can take the keyboard, to select and copy. Meanwhile the editor counts it as its own: the editor's other
+/// popups stay. Escape gives the keyboard back to the editor, which <see cref="Escaped"/> reports, and typed text goes
+/// back into the editor's text.
+/// </para>
 /// </remarks>
 internal sealed class EditorPopup
 {
+    /// <summary>The editor that a popup's root belongs to.</summary>
+    private static readonly AttachedProperty<CodeEditor?> s_ownerProperty = AvaloniaProperty.RegisterAttached<
+        EditorPopup,
+        Visual,
+        CodeEditor?
+    >("Owner");
+
     private readonly CodeEditor _editor;
     private readonly ThemeVariantScope _root;
     private readonly bool _below;
@@ -48,11 +62,22 @@ internal sealed class EditorPopup
     {
         _editor = editor;
         _root = new ThemeVariantScope { Child = content };
+        _root.SetValue(s_ownerProperty, editor);
+        _root.AddHandler(InputElement.KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
+        _root.AddHandler(InputElement.TextInputEvent, OnTextInput, RoutingStrategies.Tunnel);
+        _root.LostFocus += (_, _) => editor.CheckFocus();
         _below = below;
     }
 
     /// <summary>Raised when the popup closed because its place's line left the view.</summary>
     public event EventHandler? LeftView;
+
+    /// <summary>Raised when Escape gave the keyboard back to the editor from the popup.</summary>
+    public event EventHandler? Escaped;
+
+    /// <summary>The editor whose popup <paramref name="visual"/> is in; null outside the editors' popups.</summary>
+    public static CodeEditor? OwnerOf(Visual visual) =>
+        visual.GetSelfAndVisualAncestors().Select(v => v.GetValue(s_ownerProperty)).FirstOrDefault(o => o is not null);
 
     /// <summary>The popup's outermost control, for the pointer over it.</summary>
     public Control Root => _root;
@@ -106,6 +131,30 @@ internal sealed class EditorPopup
         foreach (IDisposable binding in _bindings)
             binding.Dispose();
         _bindings = [];
+    }
+
+    /// <summary>Whether the popup or something in it has the keyboard.</summary>
+    public bool IsFocusWithin => _root.IsKeyboardFocusWithin;
+
+    /// <summary>Puts the keyboard into the popup, for scrolling it with the keys.</summary>
+    public void Focus(InputElement target) => target.Focus(NavigationMethod.Tab);
+
+    private void OnKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape || e.KeyModifiers != KeyModifiers.None)
+            return;
+        e.Handled = true;
+        _editor.FocusText();
+        Escaped?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Typed text goes into the editor's text, with the keyboard.</summary>
+    private void OnTextInput(object? sender, TextInputEventArgs e)
+    {
+        if (e.Text is not { Length: > 0 } text)
+            return;
+        e.Handled = true;
+        _editor.TypeText(text);
     }
 
     /// <summary>A layout pass ended: the window or the place may have moved.</summary>

@@ -17,6 +17,9 @@
     <PackageReference Include="Avalonia" />
     <PackageReference Include="Avalonia.Desktop" />
     <PackageReference Include="Avalonia.Fonts.Inter" />
+    <!-- Avalonia's own themes, for the windows that try the editor under each of them. -->
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Themes.Simple" />
     <PackageReference Include="AvaloniaUI.DiagnosticsSupport">
       <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
       <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
