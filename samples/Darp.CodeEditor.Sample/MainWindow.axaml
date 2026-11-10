@@ -136,7 +136,7 @@
                 <Button
                     Classes="command wide"
                     ToolTip.Tip="{Binding Strings.Undo}"
-                    IsEnabled="{Binding ShownDocument.Document.CanUndo, FallbackValue=False}"
+                    IsEnabled="{Binding ShownDocument?.Document.CanUndo, TargetNullValue=False}"
                     Click="OnUndo"
                 >
                     <fa:FASymbolIcon Symbol="Undo" />
@@ -144,7 +144,7 @@
                 <Button
                     Classes="command wide"
                     ToolTip.Tip="{Binding Strings.Redo}"
-                    IsEnabled="{Binding ShownDocument.Document.CanRedo, FallbackValue=False}"
+                    IsEnabled="{Binding ShownDocument?.Document.CanRedo, TargetNullValue=False}"
                     Click="OnRedo"
                 >
                     <fa:FASymbolIcon Symbol="Redo" />
@@ -189,11 +189,11 @@
                     TextTrimming="CharacterEllipsis"
                     IsVisible="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
                 >
-                    <Run Text="{Binding ShownDocument.Name}" />
+                    <Run Text="{Binding ShownDocument?.Name}" />
                     <Run Foreground="{DynamicResource TextFillColorSecondaryBrush}">
                         <Run.Text>
                             <MultiBinding Converter="{x:Static local:MainWindow.StateText}">
-                                <Binding Path="ShownDocument.State" />
+                                <Binding Path="ShownDocument?.State" />
                                 <Binding Path="Strings.StateNoFile" />
                                 <Binding Path="Strings.StateUnsaved" />
                             </MultiBinding>
@@ -346,13 +346,13 @@
                 <TextBlock
                     Classes="plain"
                     Text="{Binding Strings.NoFile}"
-                    IsVisible="{Binding ShownDocument.File, Converter={x:Static ObjectConverters.IsNull}}"
+                    IsVisible="{Binding ShownDocument?.File, Converter={x:Static ObjectConverters.IsNull}}"
                 />
                 <TextBlock
                     Classes="plain"
-                    Text="{Binding ShownDocument.File.Path.LocalPath}"
+                    Text="{Binding ShownDocument?.File?.Path.LocalPath}"
                     TextTrimming="PrefixCharacterEllipsis"
-                    IsVisible="{Binding ShownDocument.File, Converter={x:Static ObjectConverters.IsNotNull}}"
+                    IsVisible="{Binding ShownDocument?.File, Converter={x:Static ObjectConverters.IsNotNull}}"
                 />
             </Panel>
 
@@ -369,13 +369,13 @@
                         <MultiBinding Converter="{x:Static local:MainWindow.IndentationText}">
                             <Binding Path="Strings.IndentSpaces" />
                             <Binding Path="Strings.IndentTabs" />
-                            <Binding Path="ShownDocument.Document.Indentation" />
+                            <Binding Path="ShownDocument?.Document.Indentation" />
                         </MultiBinding>
                     </TextBlock.Text>
                 </TextBlock>
             </DropDownButton>
 
-            <TextBlock Grid.Column="3" Classes="plain" Text="{Binding ShownDocument.Type.Name}" />
+            <TextBlock Grid.Column="3" Classes="plain" Text="{Binding ShownDocument?.Type.Name}" />
         </Grid>
     </Grid>
 </windowing:FAAppWindow>
