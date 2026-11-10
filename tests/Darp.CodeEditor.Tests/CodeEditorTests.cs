@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using Avalonia;
 using Avalonia.Controls;
@@ -7,6 +8,7 @@ using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using AvaloniaEdit;
 using AvaloniaEdit.Rendering;
 
@@ -426,25 +428,105 @@ public sealed class CodeEditorTests(UiFixture ui)
         });
 
     [Fact]
-    public Task The_context_menu_offers_cut_copy_paste_and_select_all() =>
+    public Task The_context_menu_offers_the_editors_commands_with_their_keys() =>
         _ui.Run(async () =>
+        {
+            await CodeLanguage.Json.Loaded;
+            using var window = new EditorWindow(Editor("one two"));
+            CodeEditor editor = window.Editor;
+            MenuFlyout menu = editor.ContextFlyout.ShouldBeAssignableTo<MenuFlyout>()!;
+            window.Click(window.PointAt(1), MouseButton.Right);
+            menu.IsOpen.ShouldBeTrue();
+            MenuItem[] items = [.. menu.Items.OfType<MenuItem>()];
+            items
+                .Select(item => item.Header as string)
+                .ShouldBe([
+                    "Show Hover",
+                    "Cut",
+                    "Copy",
+                    "Paste",
+                    "Select All",
+                    "Toggle Line Comment",
+                    "Find",
+                    "Replace",
+                ]);
+            // A sequence of two strokes shows in full, where a menu item shows one gesture.
+            string[] hoverKeys =
+            [
+                .. new[] { Key.K, Key.I }.Select(key => new KeyGesture(key, EditorWindow.Command).ToString("p", null)),
+            ];
+            KeysShownBy(items[0]).ShouldBe(string.Join(' ', hoverKeys));
+            KeysShownBy(items[5]).ShouldBe(new KeyGesture(Key.Oem2, EditorWindow.Command).ToString("p", null));
+            menu.Hide();
+
+            editor.Selection = new TextSelection(4, 7);
+            items[2].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            (await Clipboard(window).TryGetTextAsync()).ShouldBe("two");
+            items[4].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            editor.Selection.ShouldBe(new TextSelection(0, 7));
+            // The editor's commands run once the menu has closed.
+            items[5].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Dispatcher.UIThread.RunJobs();
+            DocumentOf(editor).Text.ShouldBe("// one two");
+
+            editor.IsReadOnly = true;
+            window.Click(window.PointAt(1), MouseButton.Right);
+            menu.IsOpen.ShouldBeTrue();
+            items.Select(item => item.IsEnabled).ShouldBe([true, false, true, false, true, false, true, false]);
+            menu.Hide();
+        });
+
+    [Fact]
+    public Task The_context_menu_speaks_the_ui_culture() =>
+        _ui.Run(() =>
+        {
+            CultureInfo culture = CultureInfo.CurrentUICulture;
+            try
+            {
+                using var window = new EditorWindow(Editor("one two"));
+                MenuFlyout menu = window.Editor.ContextFlyout.ShouldBeAssignableTo<MenuFlyout>()!;
+                CultureInfo.CurrentUICulture = new CultureInfo("de-DE");
+                window.Click(window.PointAt(1), MouseButton.Right);
+                menu.Items.OfType<MenuItem>().Select(item => item.Header as string).ShouldContain("Kopieren");
+                menu.Hide();
+            }
+            finally
+            {
+                CultureInfo.CurrentUICulture = culture;
+            }
+        });
+
+    [Fact]
+    public Task A_right_click_moves_the_caret_unless_it_is_in_the_selection() =>
+        _ui.Run(() =>
+        {
+            using var window = new EditorWindow(Editor("one two three"));
+            CodeEditor editor = window.Editor;
+            MenuFlyout menu = editor.ContextFlyout.ShouldBeAssignableTo<MenuFlyout>()!;
+            // Just after the left edge of a character: the caret goes before it.
+            Point Before(int offset) => window.PointAt(offset) - new Point(window.TextView.WideSpaceWidth / 2 - 1, 0);
+
+            editor.Selection = new TextSelection(4, 7);
+            window.Click(Before(5), MouseButton.Right);
+            menu.Hide();
+            editor.Selection.ShouldBe(new TextSelection(4, 7));
+
+            window.Click(Before(9), MouseButton.Right);
+            menu.Hide();
+            editor.Selection.ShouldBe(new TextSelection(9));
+        });
+
+    [Fact]
+    public Task An_apps_context_menu_replaces_the_editors() =>
+        _ui.Run(() =>
         {
             using var window = new EditorWindow(Editor("one two"));
             CodeEditor editor = window.Editor;
-            ContextMenu menu = editor.ContextMenu.ShouldBeOfType<ContextMenu>();
-            MenuItem[] items = [.. menu.Items.OfType<MenuItem>()];
-            items.Select(item => item.Header as string).ShouldBe(["Cut", "Copy", "Paste", "Select All"]);
-
-            editor.Selection = new TextSelection(4, 7);
-            items[1].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-            (await Clipboard(window).TryGetTextAsync()).ShouldBe("two");
-            items[3].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-            editor.Selection.ShouldBe(new TextSelection(0, 7));
-
-            editor.IsReadOnly = true;
-            window.Click(new Point(200, 10), MouseButton.Right);
+            var menu = new ContextMenu { ItemsSource = new[] { "App" } };
+            editor.ContextMenu = menu;
+            window.Click(window.PointAt(1), MouseButton.Right);
             menu.IsOpen.ShouldBeTrue();
-            items.Select(item => item.IsEnabled).ShouldBe([false, true, false, true]);
+            editor.ContextFlyout.ShouldNotBeNull().IsOpen.ShouldBeFalse();
             menu.Close();
         });
 
@@ -722,6 +804,10 @@ public sealed class CodeEditorTests(UiFixture ui)
 
     private static void ShouldShowAcross(TextView textView, int offset) =>
         X(textView, offset).ShouldBeInRange(textView.ScrollOffset.X, textView.ScrollOffset.X + textView.Bounds.Width);
+
+    /// <summary>The keys that a menu item's template shows.</summary>
+    private static string? KeysShownBy(MenuItem item) =>
+        item.GetVisualDescendants().OfType<TextBlock>().Single(text => text.Name == "PART_InputGestureText").Text;
 
     private static IClipboard Clipboard(EditorWindow window) =>
         window.Window.Clipboard ?? throw new InvalidOperationException("The window has no clipboard.");
