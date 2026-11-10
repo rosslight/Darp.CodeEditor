@@ -3,8 +3,20 @@ using Darp.CodeEditor;
 
 namespace Sample.Documents;
 
-/// <summary>A kind of document that the app creates and opens: its name, its language and its file extensions.</summary>
-public sealed record FileType(string Name, CodeLanguage Language, IReadOnlyList<string> Extensions)
+/// <summary>
+/// A kind of document that the app creates and opens: its name, its language, its file extensions and its language
+/// server.
+/// </summary>
+/// <param name="ServerName">
+/// The executable of the language server for the type, which the <see cref="Workspace"/> looks for on PATH; null for
+/// types without one. The app ships no servers: the user installs them.
+/// </param>
+public sealed record FileType(
+    string Name,
+    CodeLanguage Language,
+    IReadOnlyList<string> Extensions,
+    string? ServerName = null
+)
 {
     /// <summary>Python: a language that the app defines itself, from the files of VS Code's Python extension.</summary>
     /// <remarks>
@@ -19,16 +31,17 @@ public sealed record FileType(string Name, CodeLanguage Language, IReadOnlyList<
                 grammar: new Uri("avares://Darp.CodeEditor.Sample/Languages/MagicPython.tmLanguage.json"),
                 configuration: new Uri("avares://Darp.CodeEditor.Sample/Languages/python.language-configuration.json")
             ),
-            [".py"]
+            [".py"],
+            "pyright-langserver"
         );
 
     public static FileType Text { get; } = new("Text", CodeLanguage.PlainText, [".txt"]);
 
-    public static FileType Json { get; } = new("JSON", CodeLanguage.Json, [".json"]);
+    public static FileType Json { get; } = new("JSON", CodeLanguage.Json, [".json"], "vscode-json-language-server");
 
     public static FileType Xml { get; } = new("XML", CodeLanguage.Xml, [".xml"]);
 
-    public static FileType Yaml { get; } = new("YAML", CodeLanguage.Yaml, [".yaml", ".yml"]);
+    public static FileType Yaml { get; } = new("YAML", CodeLanguage.Yaml, [".yaml", ".yml"], "yaml-language-server");
 
     /// <summary>Every file type, for the file pickers.</summary>
     public static IReadOnlyList<FileType> All { get; } = [Text, Json, Xml, Yaml, Python];

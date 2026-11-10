@@ -75,6 +75,30 @@
   <data name="StateUnsaved" xml:space="preserve">
     <value>unsaved changes</value>
   </data>
+  <data name="NoServer" xml:space="preserve">
+    <value>No language server</value>
+  </data>
+  <data name="ServerNotInstalled" xml:space="preserve">
+    <value>{0} not installed</value>
+  </data>
+  <data name="ServerNotStarted" xml:space="preserve">
+    <value>not started</value>
+  </data>
+  <data name="ServerStarting" xml:space="preserve">
+    <value>starting</value>
+  </data>
+  <data name="ServerRunning" xml:space="preserve">
+    <value>running</value>
+  </data>
+  <data name="ServerRestarting" xml:space="preserve">
+    <value>restarting</value>
+  </data>
+  <data name="ServerFailed" xml:space="preserve">
+    <value>failed</value>
+  </data>
+  <data name="ServerStopped" xml:space="preserve">
+    <value>stopped</value>
+  </data>
   <data name="CopyPath" xml:space="preserve">
     <value>Copy path</value>
   </data>
@@ -89,6 +113,9 @@
   </data>
   <data name="SaveFailed" xml:space="preserve">
     <value>Couldn't save {0}</value>
+  </data>
+  <data name="OpenInAnother" xml:space="preserve">
+    <value>The file is open in another document.</value>
   </data>
   <data name="Ok" xml:space="preserve">
     <value>OK</value>

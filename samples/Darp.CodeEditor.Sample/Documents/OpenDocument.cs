@@ -11,13 +11,13 @@ namespace Sample.Documents;
 /// </summary>
 public sealed partial class OpenDocument : ObservableObject, IDisposable
 {
-    public OpenDocument(string name, FileType type, string text, IStorageFile? file)
+    public OpenDocument(string name, FileType type, CodeDocument document, LanguageServer? server, IStorageFile? file)
     {
         Name = name;
         Type = type;
+        Document = document;
+        Server = server;
         File = file;
-        Document = CodeDocument.Create(type.Language, text);
-        Document.FilePath = file?.TryGetLocalPath();
         Document.PropertyChanged += OnDocumentChanged;
     }
 
@@ -25,6 +25,12 @@ public sealed partial class OpenDocument : ObservableObject, IDisposable
     public CodeDocument Document { get; }
 
     public FileType Type { get; }
+
+    /// <summary>
+    /// The language server that serves the document, for the status bar; null if its type has none or it isn't
+    /// installed. The <see cref="Workspace"/> owns it.
+    /// </summary>
+    public LanguageServer? Server { get; }
 
     [ObservableProperty]
     public partial string Name { get; private set; }

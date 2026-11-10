@@ -77,6 +77,22 @@ public sealed partial class MainWindow : FAAppWindow
             }
         );
 
+    /// <summary>
+    /// The status bar's text for a document's language server. Its values are the texts for no server and for a
+    /// server that isn't installed, which change with the language, the name of the type's server, and the server's
+    /// state, null without a server.
+    /// </summary>
+    public static FuncMultiValueConverter<object?, string> ServerText { get; } =
+        new(values =>
+            values.ToList() switch
+            {
+                [string noServer, _, null, _] => noServer,
+                [_, _, string name, LanguageServerState state] => $"{name}: {Strings.Current.Describe(state)}",
+                [_, string notInstalled, string name, _] => Strings.Current.Format(notInstalled, name),
+                _ => "",
+            }
+        );
+
     private static FilePickerFileType AllFiles => new(Strings.Current.AllFiles) { Patterns = ["*"] };
 
     private Workspace? Workspace => _viewModel?.Workspace;
@@ -291,6 +307,15 @@ public sealed partial class MainWindow : FAAppWindow
             );
             if (file is null)
                 return false;
+            if (file.TryGetLocalPath() is { } path && Workspace?.IsOpenInAnother(document, path) == true)
+            {
+                await ShowErrorAsync(
+                    Strings.Current.Format(Strings.Current.SaveFailed, file.Name),
+                    Strings.Current.OpenInAnother
+                );
+                file.Dispose();
+                return false;
+            }
         }
         try
         {

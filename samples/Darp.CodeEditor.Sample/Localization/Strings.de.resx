@@ -75,6 +75,30 @@
   <data name="StateUnsaved" xml:space="preserve">
     <value>ungespeicherte Änderungen</value>
   </data>
+  <data name="NoServer" xml:space="preserve">
+    <value>Kein Sprachserver</value>
+  </data>
+  <data name="ServerNotInstalled" xml:space="preserve">
+    <value>{0} nicht installiert</value>
+  </data>
+  <data name="ServerNotStarted" xml:space="preserve">
+    <value>nicht gestartet</value>
+  </data>
+  <data name="ServerStarting" xml:space="preserve">
+    <value>startet</value>
+  </data>
+  <data name="ServerRunning" xml:space="preserve">
+    <value>läuft</value>
+  </data>
+  <data name="ServerRestarting" xml:space="preserve">
+    <value>startet neu</value>
+  </data>
+  <data name="ServerFailed" xml:space="preserve">
+    <value>fehlgeschlagen</value>
+  </data>
+  <data name="ServerStopped" xml:space="preserve">
+    <value>beendet</value>
+  </data>
   <data name="CopyPath" xml:space="preserve">
     <value>Pfad kopieren</value>
   </data>
@@ -89,6 +113,9 @@
   </data>
   <data name="SaveFailed" xml:space="preserve">
     <value>{0} konnte nicht gespeichert werden</value>
+  </data>
+  <data name="OpenInAnother" xml:space="preserve">
+    <value>Die Datei ist in einem anderen Dokument geöffnet.</value>
   </data>
   <data name="Ok" xml:space="preserve">
     <value>OK</value>

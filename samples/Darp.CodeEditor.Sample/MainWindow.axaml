@@ -310,7 +310,7 @@
           The status bar, under the pane and the page, for the document the page shows. It stays while the settings
           show, empty, so that the pane keeps its height.
         -->
-        <Grid Grid.Row="2" Classes="status" Height="28" Margin="12,0" ColumnDefinitions="Auto,*,Auto,Auto">
+        <Grid Grid.Row="2" Classes="status" Height="28" Margin="12,0" ColumnDefinitions="Auto,*,Auto,Auto,Auto">
             <Button
                 Name="CaretButton"
                 IsVisible="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
@@ -376,6 +376,22 @@
             </DropDownButton>
 
             <TextBlock Grid.Column="3" Classes="plain" Text="{Binding ShownDocument?.Type.Name}" />
+
+            <!-- The document's language server and its state, which the server raises on the UI thread. -->
+            <TextBlock
+                Grid.Column="4"
+                Classes="plain"
+                IsVisible="{Binding ShownDocument, Converter={x:Static ObjectConverters.IsNotNull}}"
+            >
+                <TextBlock.Text>
+                    <MultiBinding Converter="{x:Static local:MainWindow.ServerText}">
+                        <Binding Path="Strings.NoServer" />
+                        <Binding Path="Strings.ServerNotInstalled" />
+                        <Binding Path="ShownDocument?.Type.ServerName" />
+                        <Binding Path="ShownDocument?.Server?.State" />
+                    </MultiBinding>
+                </TextBlock.Text>
+            </TextBlock>
         </Grid>
     </Grid>
 </windowing:FAAppWindow>

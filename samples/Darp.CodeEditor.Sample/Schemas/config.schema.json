@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Configuration",
+  "description": "The app's settings: its window, the files opened last, saving and logging.",
+  "type": "object",
+  "properties": {
+    "window": {
+      "description": "The main window as the app starts.",
+      "type": "object",
+      "properties": {
+        "width": {
+          "description": "The window's width, in pixels.",
+          "type": "integer",
+          "minimum": 320,
+          "default": 1200
+        },
+        "height": {
+          "description": "The window's height, in pixels.",
+          "type": "integer",
+          "minimum": 240,
+          "default": 760
+        },
+        "maximized": {
+          "description": "Whether the window starts maximized.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "recentFiles": {
+      "description": "The files opened last, the newest first.",
+      "type": "array",
+      "items": { "type": "string" },
+      "maxItems": 10
+    },
+    "autosave": {
+      "description": "Saving changes without asking.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Whether the app saves changes by itself.",
+          "type": "boolean",
+          "default": true
+        },
+        "intervalSeconds": {
+          "description": "How often the app saves changes, in seconds.",
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 3600,
+          "default": 30
+        }
+      },
+      "additionalProperties": false
+    },
+    "logging": {
+      "description": "What the app writes to its log.",
+      "type": "object",
+      "properties": {
+        "level": {
+          "description": "The least severe messages that the log keeps.",
+          "enum": ["trace", "debug", "information", "warning", "error", "none"],
+          "default": "information"
+        },
+        "file": {
+          "description": "The file the log goes to; null for none.",
+          "type": ["string", "null"],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -34,6 +34,8 @@
     <AvaloniaResource Include="Languages\*.json" />
     <!-- The documents the app starts with, in memory. -->
     <AvaloniaResource Include="Documents\Examples\*" />
+    <!-- The examples' JSON schemas, as files next to the app: language servers read schemas by their URIs. -->
+    <None Include="Schemas\*.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
