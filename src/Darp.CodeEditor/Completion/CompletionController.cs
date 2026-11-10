@@ -69,6 +69,15 @@ internal sealed class CompletionController : IDisposable
     /// <summary>Completion from its first request until it ends; null while there is none.</summary>
     private Session? _session;
 
+    /// <summary>
+    /// The message that shows at the word instead of a list after the user asked by key: "Loading…" while the server
+    /// takes long, or "No suggestions." once it answered with none; null while none shows.
+    /// </summary>
+    private string? _message;
+
+    /// <summary>The wait after asking by key before "Loading…" shows; null while none runs.</summary>
+    private ITimer? _loading;
+
     /// <summary>Cancels the resolve of the item committed last, whose additional edits are still to come.</summary>
     private CancellationTokenSource? _lateEdits;
 
@@ -143,6 +152,9 @@ internal sealed class CompletionController : IDisposable
     /// <returns>Whether the key was completion's.</returns>
     public bool OnKeyDown(KeyEventArgs e)
     {
+        // "No suggestions." shows until the next key.
+        if (_session is null)
+            HideMessage();
         if (_session is not { IsShowing: true } session || e.KeyModifiers != KeyModifiers.None)
             return false;
         int count = session.Items.Count;
@@ -213,8 +225,10 @@ internal sealed class CompletionController : IDisposable
     /// <returns>Whether the list showed.</returns>
     public bool Close()
     {
+        StopLoading();
+        bool messageShowed = HideMessage();
         if (_session is not { } session)
-            return false;
+            return messageShowed;
         _session = null;
         session.Pending?.Cancellation.Cancel();
         session.Filtering?.Cancellation.Cancel();
@@ -223,7 +237,7 @@ internal sealed class CompletionController : IDisposable
         session.Details?.Cancel();
         _view.Hide();
         _view.ShowDetails(null);
-        return session.IsShowing;
+        return session.IsShowing || session.ShowsNoMatch || messageShowed;
     }
 
     public void Dispose()
@@ -249,8 +263,11 @@ internal sealed class CompletionController : IDisposable
         if (!_textArea.ReadOnlySectionProvider.CanInsert(caret))
             return;
         var request = new Request(_document.CurrentSnapshot, WordBefore(caret));
+        HideMessage();
         Session session = _session ??= new Session();
         session.IsExplicit |= explicitly;
+        if (explicitly && !session.IsShowing)
+            StartLoading(session, request);
         session.Pending?.Cancellation.Cancel();
         session.Pending = request;
         AskAsync(session, request, trigger);
@@ -270,10 +287,20 @@ internal sealed class CompletionController : IDisposable
             if (_session != session || session.Pending != request)
                 return;
             session.Pending = null;
-            if (list is null || (list.Items.Count == 0 && !list.IsIncomplete))
+            StopLoading();
+            // Nothing here, as in a comment or a string, where some servers answer an empty list that is incomplete:
+            // asking again on each key would never end. Asked by key, the user learns so; otherwise nothing shows.
+            if (list is null || list.Items.Count == 0)
             {
-                Close();
-                return;
+                if (!session.IsExplicit || session.Answer is null)
+                {
+                    bool explicitly = session.IsExplicit;
+                    Close();
+                    if (explicitly)
+                        ShowMessage("No suggestions.", request);
+                    return;
+                }
+                list ??= new CompletionList([], isIncomplete: false, resolve: null);
             }
             session.Answer = new Answer(list, request);
             Update();
@@ -288,7 +315,11 @@ internal sealed class CompletionController : IDisposable
     private void Update()
     {
         if (_session is not { } session)
+        {
+            // "No suggestions." shows until the caret moves.
+            HideMessage();
             return;
+        }
         int caret = _textArea.Caret.Offset;
         Request latest = session.Latest;
         if (
@@ -421,14 +452,21 @@ internal sealed class CompletionController : IDisposable
     {
         if (filtered.Items.Count == 0)
         {
-            // An incomplete list may have more for what is typed, and a newer request, as for a trigger character typed
-            // while the list showed, brings a list of its own: its answer shows, or ends completion when it has nothing.
-            if (key.Answer.List.IsIncomplete || session.Pending is not null)
+            // Asked by key, the list stays and says that nothing matches, as IntelliJ's does, so that the user sees it
+            // and can type back. Otherwise, an incomplete list may have more for what is typed, and a newer request, as
+            // for a trigger character typed while the list showed, brings a list of its own: its answer shows, or ends
+            // completion when it has nothing.
+            if (session.IsExplicit)
+                ShowNoMatch(session, key);
+            else if (key.Answer.List.IsIncomplete || session.Pending is not null)
                 Hide(session);
             else
                 Close();
             return;
         }
+        session.ShowsNoMatch = false;
+        StopLoading();
+        _message = null;
         session.Items = filtered.Items;
         session.Selected = filtered.Selected;
         session.Shown = key;
@@ -445,6 +483,74 @@ internal sealed class CompletionController : IDisposable
         // Placing it may have ended completion, as its line is out of view.
         if (_session == session)
             ResolveSelected(session);
+    }
+
+    /// <summary>
+    /// The list, at the word, says that nothing matches what is typed: the items that showed are gone, and Enter and
+    /// Tab go to the text again.
+    /// </summary>
+    private void ShowNoMatch(Session session, FilterKey key)
+    {
+        StopLoading();
+        session.Filtering?.Cancellation.Cancel();
+        session.Filtering = null;
+        session.CommitAt = null;
+        session.Shown = null;
+        session.Items = [];
+        session.DetailsOf = null;
+        session.Details?.Cancel();
+        session.ShowsNoMatch = true;
+        int wordStart = key.Answer.Request.Word.Start;
+        _view.ShowMessage("No suggestions.", Look(), _textView.DefaultLineHeight, narrow: false);
+        _view.Open(_textView, () => TextViewBoxes.CharacterAt(_textView, Math.Min(wordStart, _buffer.TextLength)));
+    }
+
+    /// <summary>Shows <paramref name="message"/> at the word of <paramref name="request"/>, as VS Code does after a request by key.</summary>
+    private void ShowMessage(string message, Request request)
+    {
+        _message = message;
+        int wordStart = request.Word.Start;
+        _view.ShowMessage(message, Look(), _textView.DefaultLineHeight, narrow: true);
+        _view.Open(_textView, () => TextViewBoxes.CharacterAt(_textView, Math.Min(wordStart, _buffer.TextLength)));
+    }
+
+    /// <summary>Hides the message, if it shows on its own.</summary>
+    /// <returns>Whether it showed.</returns>
+    private bool HideMessage()
+    {
+        if (_message is null)
+            return false;
+        _message = null;
+        if (_session is not { IsShowing: true } and not { ShowsNoMatch: true })
+            _view.Hide();
+        return true;
+    }
+
+    /// <summary>"Loading…" shows once a request by key takes longer than 50 ms, VS Code's wait, until the list shows.</summary>
+    private void StartLoading(Session session, Request request)
+    {
+        StopLoading();
+        ITimer? loading = null;
+        loading = _document.TimeProvider.CreateTimer(
+            _ =>
+                _editor.Dispatcher.Post(() =>
+                {
+                    if (_loading != loading || _session != session || session.IsShowing || session.ShowsNoMatch)
+                        return;
+                    StopLoading();
+                    ShowMessage("Loading…", request);
+                }),
+            null,
+            TimeSpan.FromMilliseconds(50),
+            Timeout.InfiniteTimeSpan
+        );
+        _loading = loading;
+    }
+
+    private void StopLoading()
+    {
+        _loading?.Dispose();
+        _loading = null;
     }
 
     /// <summary>
@@ -505,6 +611,7 @@ internal sealed class CompletionController : IDisposable
     /// <summary>Hides the list while completion waits for an answer; a filter of the old one under way stops.</summary>
     private void Hide(Session session)
     {
+        session.ShowsNoMatch = false;
         session.Filtering?.Cancellation.Cancel();
         session.Filtering = null;
         session.CommitAt = null;
@@ -881,6 +988,9 @@ internal sealed class CompletionController : IDisposable
     {
         /// <summary>Whether the user asked for completion by key, rather than typing opening it.</summary>
         public bool IsExplicit { get; set; }
+
+        /// <summary>Whether the list shows that nothing matches what is typed.</summary>
+        public bool ShowsNoMatch { get; set; }
 
         /// <summary>The answer whose items show; null until the first one.</summary>
         public Answer? Answer { get; set; }

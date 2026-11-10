@@ -92,13 +92,19 @@ internal sealed class CompletionView
     )
     {
         Paint(look.Colors);
+        _list.PreferredWidth = DefaultWidth - 2 * Border;
         _list.Show(items, selected, look, icons, rowHeight);
     }
 
     /// <summary>Shows <paramref name="message"/> in the list, such as "No suggestions.", without items or details.</summary>
-    public void ShowMessage(string message, PopupLook look, double rowHeight)
+    /// <param name="message">The message.</param>
+    /// <param name="look">How it looks.</param>
+    /// <param name="rowHeight">The editor's line height.</param>
+    /// <param name="narrow">Whether it shows on its own, half as wide as the list, as VS Code shows it.</param>
+    public void ShowMessage(string message, PopupLook look, double rowHeight, bool narrow)
     {
         Paint(look.Colors);
+        _list.PreferredWidth = (narrow ? DefaultWidth / 2 : DefaultWidth) - 2 * Border;
         _list.ShowMessage(message, look, rowHeight);
         ShowDetails(null);
     }

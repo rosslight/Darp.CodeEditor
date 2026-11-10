@@ -452,11 +452,12 @@ public sealed class CompletionTests(UiFixture ui)
             document.Undo();
             document.Text.ShouldBe(text);
 
-            // But not "Write", whose own replace the server's: the list closes, as nothing matches any more.
+            // But not "Write", whose own replace the server's: nothing matches any more, which the list asked for by
+            // key says.
             await OpenAsync(window, 10);
             window.Type(";");
             document.Text.ShouldBe("Console.Wr;");
-            await Wait.UntilAsync(() => List(window) is null);
+            await Wait.UntilAsync(() => List(window)?.Message == "No suggestions.");
         });
 
     [Fact]
@@ -1002,6 +1003,99 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     /// <summary>Makes the fake server answer completion with <paramref name="result"/>, until the document is disposed.</summary>
+    [Fact]
+    public Task Asked_by_key_an_empty_answer_says_No_suggestions_until_the_next_key() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items());
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Editor.Selection = new TextSelection(3);
+
+            window.Press(Key.Space, KeyModifiers.Control);
+
+            await Wait.UntilAsync(() => List(window)?.Message == "No suggestions.");
+            Labels(window).ShouldBeEmpty();
+            window.Press(Key.Right);
+            List(window).ShouldBeNull();
+            // Escape closes it too, and goes no further.
+            window.Press(Key.Space, KeyModifiers.Control);
+            await Wait.UntilAsync(() => List(window)?.Message == "No suggestions.");
+            window.Press(Key.Escape);
+            List(window).ShouldBeNull();
+        });
+
+    [Fact]
+    public Task Opened_by_typing_an_empty_incomplete_answer_shows_nothing_and_asks_no_more() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            // As a server answers in a comment or a string: nothing, but incomplete.
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                new JsonObject { ["isIncomplete"] = true, ["items"] = new JsonArray() }
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            window.Type("a");
+            await fake.WaitForAsync("completion ");
+            await BarrierAsync(server, fake);
+            window.Type("bcd");
+            await BarrierAsync(server, fake);
+
+            List(window).ShouldBeNull();
+            fake.LinesStartingWith("completion ").Count.ShouldBe(1);
+        });
+
+    [Fact]
+    public Task Asked_by_key_a_list_that_typing_filters_empty_says_so_and_comes_back() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("alpha", "beta"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await OpenAsync(window, 0);
+
+            window.Type("q");
+            await Wait.UntilAsync(() => List(window)?.Message == "No suggestions.");
+            window.Press(Key.Back);
+
+            await WaitForLabelsAsync(window, ["alpha", "beta"]);
+        });
+
+    [Fact]
+    public Task Ctrl_Space_toggles_the_details_while_the_list_shows() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse("""{ "items": [ { "label": "Console", "detail": "class System.Console" } ] }""")
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "Co");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await OpenAsync(window, 2);
+            await Wait.UntilAsync(() => DetailTexts(window).Contains("class System.Console"));
+
+            window.Press(Key.Space, KeyModifiers.Control);
+
+            Details(window).ShouldBeNull();
+            // The selected row shows the detail instead, and the list stays.
+            await Wait.UntilAsync(() => Row(window, "Console").Right.Text == "class System.Console");
+            fake.LinesStartingWith("completion ").Count.ShouldBe(1);
+            window.Press(Key.Space, KeyModifiers.Control);
+            await Wait.UntilAsync(() => DetailTexts(window).Contains("class System.Console"));
+        });
+
     /// <summary>
     /// Starts the server, and waits until <paramref name="document"/> is open in it: editors ask only then, once the
     /// start's settings went out.
