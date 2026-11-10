@@ -137,6 +137,27 @@ internal static class Markdown
         return end - start;
     }
 
+    /// <summary>The character of a common HTML entity at <paramref name="start"/>, and the entity's length; null for none.</summary>
+    private static (char Character, int Length)? Entity(string text, int start)
+    {
+        foreach ((string name, char character) in s_entities)
+        {
+            if (string.CompareOrdinal(text, start, name, 0, name.Length) == 0)
+                return (character, name.Length);
+        }
+        return null;
+    }
+
+    private static readonly (string Name, char Character)[] s_entities =
+    [
+        ("&nbsp;", ' '),
+        ("&amp;", '&'),
+        ("&lt;", '<'),
+        ("&gt;", '>'),
+        ("&quot;", '"'),
+        ("&#39;", '\''),
+    ];
+
     /// <summary>
     /// Appends the spans of <paramref name="text"/>, all with <paramref name="link"/>. Code spans, escapes, links and
     /// autolinks are read first, and runs of <c>*</c> and <c>_</c> kept as delimiters; then emphasis pairs them, as
@@ -190,6 +211,12 @@ internal static class Markdown
                 Flush();
                 parts.Add(new Part(autolink.Uri.OriginalString, SpanStyle.None, autolink.Uri));
                 i = autolink.End;
+            }
+            else if (c == '&' && Entity(text, i) is var (character, length))
+            {
+                // The entities that servers write in docstrings, such as Pyright's "&nbsp;" for a leading space.
+                plain.Append(character);
+                i += length;
             }
             else
             {

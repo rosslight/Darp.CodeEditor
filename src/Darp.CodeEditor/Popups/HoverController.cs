@@ -50,8 +50,20 @@ internal sealed class HoverController : IDisposable
     private readonly EditorPopup _popup;
     private TextAreaColors? _colors;
 
+    /// <summary>VS Code's delay before a hover closes once the pointer left it, so that it can reach the popup.</summary>
+    private static readonly TimeSpan s_hidingDelay = TimeSpan.FromMilliseconds(300);
+
+    /// <summary>The narrowest the hover's most width gets: wider in wider editors.</summary>
+    private const double MinMaxWidth = 500;
+
+    /// <summary>The lowest the hover's most height gets: higher in higher editors.</summary>
+    private const double MinMaxHeight = 250;
+
     /// <summary>The text hovered now, from the pointer's rest until the popup closes; null for none.</summary>
     private Hovered? _hovered;
+
+    /// <summary>The delay before the hover closes, once the pointer left it; null while none runs.</summary>
+    private ITimer? _hiding;
 
     public HoverController(
         CodeEditor editor,
@@ -73,10 +85,9 @@ internal sealed class HoverController : IDisposable
             Name = "Hover",
             Child = _content,
             Padding = new Thickness(8, 4, 4, 4),
-            MaxWidth = 500,
-            MaxHeight = 300,
         };
-        _popup = new EditorPopup(editor, _frame);
+        // Within the editor where it fits, rather than over the app's toolbar.
+        _popup = new EditorPopup(editor, _frame) { PrefersEditorBounds = true };
         _textView.PointerHover += OnPointerHover;
         _textView.PointerMoved += OnPointerMoved;
         _textView.PointerExited += OnPointerExited;
@@ -84,6 +95,7 @@ internal sealed class HoverController : IDisposable
         _buffer.Changed += OnClosingChange;
         _document.LanguageFeaturesChanged += OnClosingChange;
         _popup.Root.PointerExited += OnPointerExited;
+        _popup.Root.PointerEntered += OnPointerEnteredPopup;
         _popup.Escaped += OnClosingChange;
         _textArea.Caret.PositionChanged += OnCaretPositionChanged;
     }
@@ -107,6 +119,7 @@ internal sealed class HoverController : IDisposable
     /// <returns>Whether a popup was open.</returns>
     public bool Close()
     {
+        StayOpen();
         bool wasOpen = _popup.IsOpen;
         _hovered?.Cancellation.Cancel();
         _hovered = null;
@@ -127,6 +140,7 @@ internal sealed class HoverController : IDisposable
         _buffer.Changed -= OnClosingChange;
         _document.LanguageFeaturesChanged -= OnClosingChange;
         _popup.Root.PointerExited -= OnPointerExited;
+        _popup.Root.PointerEntered -= OnPointerEnteredPopup;
         _popup.Escaped -= OnClosingChange;
         _textArea.Caret.PositionChanged -= OnCaretPositionChanged;
     }
@@ -237,30 +251,71 @@ internal sealed class HoverController : IDisposable
         PopupColors colors = _colors?.Popups ?? PopupColors.Default;
         _frame.Paint(colors.HoverBackground, colors.HoverBorder, colors.HoverForeground, colors.Shadow);
         _content.SliderBrushes = (colors.Slider, colors.SliderHover, colors.SliderActive);
+        // At least 500 pixels wide, up to two thirds of the editor, and scrolling beyond half its height.
+        Size editor = _editor.Bounds.Size;
+        _frame.MaxWidth = Math.Max(MinMaxWidth, Math.Floor(editor.Width * 2 / 3));
+        _frame.MaxHeight = Math.Max(MinMaxHeight, Math.Floor(editor.Height / 2));
         _content.Child = HoverView.Create(blocks, new PopupLook(_editor.FontFamily, _editor.FontSize, colors));
         // Above the hovered word, where the pointer comes from.
         _popup.Show(_textView, () => TextViewBoxes.CharacterAt(_textView, hovered.Word.Start));
     }
 
-    /// <summary>Closes the popup once the pointer moves over other text.</summary>
+    /// <summary>
+    /// Over other text, the popup closes after <see cref="s_hidingDelay"/>, unless the pointer reaches it or comes back
+    /// meanwhile: it may cross other text on its way into the popup.
+    /// </summary>
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
         if (_hovered is not { FromKeyboard: false } hovered)
             return;
         if (OffsetAt(e.GetPosition(_textView)) is not { } offset || !IsHovered(hovered, offset))
-            Close();
+            HideSoon();
+        else
+            StayOpen();
     }
 
     /// <summary>
-    /// Closes the popup once the pointer has left both the text and the popup: posted, as the pointer enters the other
-    /// only after it left the one.
+    /// The pointer left the text or the popup: the popup closes after <see cref="s_hidingDelay"/> unless the pointer is
+    /// over it by then. Posted, as the pointer enters the other only after it left the one.
     /// </summary>
     private void OnPointerExited(object? sender, PointerEventArgs e) =>
         _editor.Dispatcher.Post(() =>
         {
-            if (_hovered is { FromKeyboard: false } && !_textView.IsPointerOver && !_popup.Root.IsPointerOver)
-                Close();
+            if (_hovered is { FromKeyboard: false } && !_popup.Root.IsPointerOver)
+                HideSoon();
         });
+
+    private void OnPointerEnteredPopup(object? sender, PointerEventArgs e) => StayOpen();
+
+    /// <summary>Closes the hover after the hiding delay, unless something keeps it open meanwhile.</summary>
+    private void HideSoon()
+    {
+        if (_hiding is not null || _hovered is not { } hovered)
+            return;
+        ITimer? hiding = null;
+        hiding = _document.TimeProvider.CreateTimer(
+            _ =>
+                _editor.Dispatcher.Post(() =>
+                {
+                    if (_hiding != hiding || _hovered != hovered)
+                        return;
+                    if (_popup.Root.IsPointerOver)
+                        StayOpen();
+                    else
+                        Close();
+                }),
+            null,
+            s_hidingDelay,
+            Timeout.InfiniteTimeSpan
+        );
+        _hiding = hiding;
+    }
+
+    private void StayOpen()
+    {
+        _hiding?.Dispose();
+        _hiding = null;
+    }
 
     /// <summary>A hover asked for by key closes when the caret moves.</summary>
     private void OnCaretPositionChanged(object? sender, EventArgs e)

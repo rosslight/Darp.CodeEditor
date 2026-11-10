@@ -190,14 +190,47 @@ public sealed class HoverTests(UiFixture ui)
             window.MoveMouse(BoundsInWindow(popup).Center);
             Popup(window).ShouldBeSameAs(popup);
 
-            // Out of the popup to the side of the editor.
+            // Out of the popup to the side of the editor: it closes after a moment.
             window.MoveMouse(outside.TranslatePoint(new Point(50, 50), window.Window)!.Value);
-            Popup(window).ShouldBeNull();
+            await Wait.UntilAsync(() => Popup(window) is null);
 
-            // Over another word, though under the same diagnostic.
-            await HoverAsync(window, 0, "one is a word in");
+            // Over another word, though under the same diagnostic: it stays a moment, so that the pointer can cross
+            // other text on its way into the popup, and keeps it then.
+            popup = await HoverAsync(window, 0, "one is a word in");
             window.MoveMouse(window.PointAt(text.IndexOf("two", StringComparison.Ordinal)));
+            Popup(window).ShouldBeSameAs(popup);
+            window.MoveMouse(BoundsInWindow(popup).Center);
+            await Task.Delay(TimeSpan.FromMilliseconds(500));
+            Popup(window).ShouldBeSameAs(popup);
+            window.MoveMouse(window.PointAt(text.IndexOf("two", StringComparison.Ordinal)));
+            await Wait.UntilAsync(() => Popup(window) is null);
+        });
+
+    [Fact]
+    public Task Ctrl_K_Ctrl_I_shows_the_hover_at_the_caret_and_again_puts_the_keyboard_into_it() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            const string text = "one two";
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+            // Right after the word, as typing leaves the caret.
+            editor.Selection = new TextSelection(3);
+
+            window.Press(Key.K, EditorWindow.Command);
+            window.Press(Key.I, EditorWindow.Command);
+
+            PopupFrame popup = await WaitForPopupAsync(window, "one is a word in");
+            Texts(popup).ShouldContain($"{text} (echo)");
+            window.Press(Key.K, EditorWindow.Command);
+            window.Press(Key.I, EditorWindow.Command);
+            popup.IsKeyboardFocusWithin.ShouldBeTrue();
+            window.Press(Key.Escape);
             Popup(window).ShouldBeNull();
+            EditorWindow.PartOf(editor).TextArea.IsFocused.ShouldBeTrue();
         });
 
     [Fact]
@@ -418,7 +451,7 @@ public sealed class HoverTests(UiFixture ui)
             Popup(window).ShouldBeSameAs(popup);
 
             window.MoveMouse(window.PointAt(text.IndexOf("end", StringComparison.Ordinal)));
-            Popup(window).ShouldBeNull();
+            await Wait.UntilAsync(() => Popup(window) is null);
         });
 
     [Fact]
@@ -437,13 +470,13 @@ public sealed class HoverTests(UiFixture ui)
             // Over the "...", where the hidden tail starts.
             window.MoveMouse(window.PointAt(VisibleText.LineLimit));
 
-            Popup(window).ShouldBeNull();
+            await Wait.UntilAsync(() => Popup(window) is null);
 
             // Straight on to the next line, past the hidden tail.
             await HoverAsync(window, 5, "long");
             window.MoveMouse(window.PointAt(text.Length - 2));
 
-            Popup(window).ShouldBeNull();
+            await Wait.UntilAsync(() => Popup(window) is null);
         });
 
     [Fact]

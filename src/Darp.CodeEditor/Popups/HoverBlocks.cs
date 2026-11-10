@@ -154,23 +154,24 @@ internal static class HoverBlocks
 }
 
 /// <summary>
-/// How much a hover shows, so that the UI thread builds and lays it out well within a frame: at most
+/// How much a hover shows, so that the UI thread builds and lays it out within a frame: at most
 /// <see cref="MaxCharacters"/> characters on <see cref="MaxLines"/> lines, in <see cref="MaxRuns"/> runs, its parts in
-/// order. The text is cut where any of them runs out, and "…" marks the cut. A hover is a tooltip that scrolls, so more
-/// would not help the user.
+/// order. The text is cut where any of them runs out, and "…" marks the cut. The hover scrolls; the limits let a long
+/// signature, such as Python's <c>subprocess.run</c> with about 35 lines and 250 runs, show with its documentation.
 /// </summary>
 /// <remarks>
 /// The UI thread's cost follows the runs, the pieces of text of one style or one color that it builds and shapes one by
-/// one, more than the characters: about 10 µs a run and 1 µs a character (the hover benchmark). The text is cut before
-/// it is read, which bounds the work in the background too, and what is read is cut by its runs.
+/// one, more than the characters: about 10 µs a run and 1 µs a character. The hover benchmark's largest hover, its frame
+/// included, took 12.3 ms with these limits and 7.8 ms with the earlier 2,000 characters, 50 lines and 250 runs. The text
+/// is cut before it is read, which bounds the work in the background too, and what is read is cut by its runs.
 /// </remarks>
 internal sealed class HoverBudget
 {
-    public const int MaxCharacters = 2_000;
+    public const int MaxCharacters = 5_000;
 
-    public const int MaxLines = 50;
+    public const int MaxLines = 120;
 
-    public const int MaxRuns = 250;
+    public const int MaxRuns = 500;
 
     private int _characters = MaxCharacters;
     private int _lines = MaxLines;
