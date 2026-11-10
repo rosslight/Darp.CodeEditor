@@ -484,10 +484,10 @@ How the client talks to a server, where the protocol leaves a choice:
     - Each edit and caret move looks at each of the session's at most 50 stops, and each frame draws those in view.
     - Measured at the limits (BenchmarkDotNet, i7-13700, warm, until a rendered frame shows it, in 5,000 lines of
       JSON), with a first stop and its 48 mirrors each on a line of its own: committing a snippet of 4,800 characters
-      takes 23 ms (median; 24 ms mean), where committing the same text as plain text takes 21 ms (19 ms mean); a
-      keystroke whose mirrors copy 1,960 characters takes 13 ms (12.7 ms median), where the same keystroke without a
-      session takes 10.5 ms. So the snippet's own share is about 2 to 3 ms; the rest is the editor's work for any text
-      that changes that many lines.
+      takes 25 ms, where committing the same text as plain text takes 23 ms; a keystroke whose mirrors copy 1,960
+      characters takes 12.8 ms (median 12.1 ms), where the same keystroke without a session takes 11.2 ms (median
+      11.0 ms). So the snippet's own share is about 2 ms; the rest is the editor's work for any text that changes that
+      many lines.
 - **Signature help** is asked for on the server's trigger characters, and again at once on its retrigger characters
   while it is open. While it is open, each edit and caret move restarts a pause of 120 ms, VS Code's, after which it
   asks again for a change of the content; the pause runs on the options' `TimeProvider`. Asking again says that it is
