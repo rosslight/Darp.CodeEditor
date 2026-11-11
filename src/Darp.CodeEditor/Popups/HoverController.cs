@@ -35,10 +35,12 @@ namespace Darp.CodeEditor.Popups;
 /// <para>
 /// <see cref="Close"/> ends the hover, for every reason it ends: the pointer leaves both, also for another word under
 /// the same diagnostic, unless the user clicked into the popup; then a click outside it, or the window losing the
-/// focus; typing, scrolling and Escape; the editor losing the keyboard focus; a server that starts or stops serving the
-/// document, whose information the hover showed; new colors, which its code was drawn in; and the editor no longer
-/// showing the document. Ending it cancels the server's request and the reading of its answer if they are still under
-/// way, and drops what they would show, also before any popup opened.
+/// focus; a click in the editor, and a key in the text, as the editor decides (<see cref="CloseOnKey"/>), unless the
+/// user clicked into the popup; typing, scrolling and Escape; the editor losing the keyboard focus; a server that
+/// starts or stops serving the document, whose information the hover showed; new colors, which its code was drawn in;
+/// and the editor no longer showing the document. Ending it cancels the server's request and the reading of its answer
+/// if they are still under way, and drops what they would show, also before any popup opened. After a click in the
+/// editor, also one that drags a selection, no hover starts until the pointer moves on, as in VS Code.
 /// </para>
 /// </remarks>
 internal sealed class HoverController : IDisposable
@@ -83,6 +85,13 @@ internal sealed class HoverController : IDisposable
     /// none does.
     /// </summary>
     private TopLevel? _watched;
+
+    /// <summary>
+    /// Where the last click in the editor pressed or released its button, in the text view, until the pointer moves
+    /// away from there; null otherwise. Meanwhile no hover starts: AvaloniaEdit's would start again where the pointer
+    /// rests after the click, and VS Code's only starts as the mouse moves.
+    /// </summary>
+    private Point? _clickedAt;
 
     public HoverController(
         CodeEditor editor,
@@ -134,6 +143,19 @@ internal sealed class HoverController : IDisposable
         );
         _popup.Escaped += OnClosingChange;
         _textArea.Caret.PositionChanged += OnCaretPositionChanged;
+        // Also where the editor's parts handle the press, as the text does to select. The popup is not in the editor.
+        _editor.AddHandler(
+            InputElement.PointerPressedEvent,
+            OnEditorPointerPressed,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true
+        );
+        _editor.AddHandler(
+            InputElement.PointerReleasedEvent,
+            OnEditorPointerReleased,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true
+        );
     }
 
     /// <summary>The colors of the color theme, for code in the popup, once it is loaded. New colors end the hover.</summary>
@@ -167,6 +189,13 @@ internal sealed class HoverController : IDisposable
         return wasOpen;
     }
 
+    /// <summary>
+    /// Ends the hover for a key in the text, unless the user clicked into it, as VS Code does: the editor leaves out
+    /// the keys that keep it, such as those that start a key sequence or show the hover.
+    /// </summary>
+    /// <returns>Whether a popup was open.</returns>
+    public bool CloseOnKey() => _hovered is not { IsHeld: true } && Close();
+
     public void Dispose()
     {
         Close();
@@ -181,6 +210,8 @@ internal sealed class HoverController : IDisposable
         _popup.Root.RemoveHandler(InputElement.PointerPressedEvent, OnPointerPressedInPopup);
         _popup.Escaped -= OnClosingChange;
         _textArea.Caret.PositionChanged -= OnCaretPositionChanged;
+        _editor.RemoveHandler(InputElement.PointerPressedEvent, OnEditorPointerPressed);
+        _editor.RemoveHandler(InputElement.PointerReleasedEvent, OnEditorPointerReleased);
     }
 
     /// <summary>
@@ -210,12 +241,14 @@ internal sealed class HoverController : IDisposable
 
     /// <summary>
     /// The pointer rests: over the text already hovered, nothing changes; over other text, its diagnostics show, and
-    /// the server is asked for its hover, unless the user clicked into the popup that shows.
+    /// the server is asked for its hover, unless the user clicked into the popup that shows, or clicked in the editor
+    /// and the pointer has not moved on since.
     /// </summary>
     private void OnPointerHover(object? sender, PointerEventArgs e)
     {
         if (
-            _hovered is { IsHeld: true }
+            _clickedAt is not null
+            || _hovered is { IsHeld: true }
             || OffsetAt(e.GetPosition(_textView)) is not { } offset
             || (_hovered is { } current && IsHovered(current, offset))
         )
@@ -311,6 +344,8 @@ internal sealed class HoverController : IDisposable
     /// </summary>
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
+        if (_clickedAt is { } clicked && e.GetPosition(_textView) != clicked)
+            _clickedAt = null;
         if (_hovered is not { FromKeyboard: false, IsHeld: false } hovered)
             return;
         if (OffsetAt(e.GetPosition(_textView)) is not { } offset || !IsHovered(hovered, offset))
@@ -332,6 +367,19 @@ internal sealed class HoverController : IDisposable
         });
 
     private void OnPointerEnteredPopup(object? sender, PointerEventArgs e) => StayOpen();
+
+    /// <summary>
+    /// A click in the editor ends the hover, as in VS Code: on the text, also on the hovered word, its margin, its
+    /// scroll bars or the search bar.
+    /// </summary>
+    private void OnEditorPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        _clickedAt = e.GetPosition(_textView);
+        Close();
+    }
+
+    private void OnEditorPointerReleased(object? sender, PointerReleasedEventArgs e) =>
+        _clickedAt = e.GetPosition(_textView);
 
     /// <summary>
     /// The user clicked into the popup, other than on an edge to resize it: it stays wherever the pointer goes, until a

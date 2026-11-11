@@ -328,7 +328,7 @@ public sealed class SnippetSessionTests(UiFixture ui)
         });
 
     [Fact]
-    public Task Escape_ends_the_session_after_completion_and_signature_help_and_before_the_hover_and_the_search_bar() =>
+    public Task Escape_ends_the_session_after_completion_and_signature_help_along_with_the_hover_and_before_the_search_bar() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
@@ -363,8 +363,8 @@ public sealed class SnippetSessionTests(UiFixture ui)
             window.Press(Key.Tab);
             editor.Selection.ShouldBe(new TextSelection(5));
 
-            // With the keyboard in the text, Escape ends the session before the hover closes, and the hover before the
-            // bar.
+            // With the keyboard in the text, Escape ends the session and the hover together, as in VS Code, and then
+            // the bar.
             editor.OpenSearch();
             EditorWindow.PartOf(editor).TextArea.Focus();
             window.MoveMouse(window.PointAt(1));
@@ -377,8 +377,6 @@ public sealed class SnippetSessionTests(UiFixture ui)
                         .OfType<TextBlock>()
                         .Any(t => (t.Inlines?.Text ?? t.Text ?? "").Contains("is a word in", StringComparison.Ordinal));
             });
-            window.Press(Key.Escape);
-            ToolTip(window).ShouldNotBeNull();
             window.Press(Key.Escape);
             ToolTip(window).ShouldBeNull();
             bar.IsOpen.ShouldBeTrue();

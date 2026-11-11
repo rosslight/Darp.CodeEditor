@@ -264,6 +264,67 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_click_in_the_editor_and_a_key_in_the_text_end_the_hover_unless_the_key_starts_a_sequence() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer("--no-diagnostics");
+            await using var server = new LanguageServer(fake.Options);
+            const string text = "one two three";
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            await server.StartAsync();
+            int two = text.IndexOf("two", StringComparison.Ordinal);
+
+            // A click, also on the hovered word; until the pointer moves, it shows no other.
+            await HoverAsync(window, two, "two is a word in");
+            int asked = fake.LinesStartingWith("hover ").Count;
+            window.Click(window.PointAt(two), MouseButton.Left);
+            Popup(window).ShouldBeNull();
+            await Task.Delay(TimeSpan.FromMilliseconds(500));
+            window.Layout();
+            fake.LinesStartingWith("hover ").Count.ShouldBe(asked);
+
+            // An arrow key, which moves no caret of a hover the mouse opened.
+            await HoverAsync(window, two, "two is a word in");
+            window.Press(Key.Right);
+            Popup(window).ShouldBeNull();
+
+            // Not the first key of a sequence, which may show the hover.
+            await HoverAsync(window, two, "two is a word in");
+            window.Press(Key.K, EditorWindow.Command);
+            Popup(window).ShouldNotBeNull();
+        });
+
+    [Fact]
+    public Task No_hover_starts_while_the_mouse_drags_a_selection_nor_where_it_rests_after() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer("--no-diagnostics");
+            await using var server = new LanguageServer(fake.Options);
+            const string text = "one two three";
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            await server.StartAsync();
+            int three = text.IndexOf("three", StringComparison.Ordinal);
+
+            // Each pause is longer than the pointer rests before a hover starts.
+            window.MoveMouse(window.PointAt(0));
+            window.Window.MouseDown(window.PointAt(0), MouseButton.Left);
+            window.Window.MouseMove(window.PointAt(three), RawInputModifiers.LeftMouseButton);
+            await Task.Delay(TimeSpan.FromMilliseconds(500));
+            window.Window.MouseUp(window.PointAt(three), MouseButton.Left);
+            await Task.Delay(TimeSpan.FromMilliseconds(500));
+            window.Layout();
+            fake.LinesStartingWith("hover ").ShouldBeEmpty();
+            editor.Selection.IsEmpty.ShouldBeFalse();
+
+            // Once the pointer moves on, resting it starts one again.
+            await HoverAsync(window, three, "three is a word in");
+        });
+
+    [Fact]
     public Task Ctrl_K_Ctrl_I_shows_the_hover_at_the_caret_and_again_puts_the_keyboard_into_it() =>
         _ui.Run(async () =>
         {

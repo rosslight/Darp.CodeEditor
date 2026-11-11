@@ -816,12 +816,13 @@ public class CodeEditor : TemplatedControl
     private void OnDocumentDisposed(object? sender, EventArgs e) => Dispatcher.Post(UpdateShownDocument);
 
     /// <summary>
-    /// The editor's own keys, before AvaloniaEdit's: the keymap's, also in the search bar, then Escape, and in the text
+    /// The editor's own keys, before AvaloniaEdit's: in the text area, a key ends the hover first, as in VS Code, unless
+    /// it keeps it (<see cref="KeepsHover"/>); then the keymap's, also in the search bar, then Escape, and in the text
     /// area the keys of completion's list, of signature help, of a snippet's stops and of the editing helpers.
     /// </summary>
     private void OnKeyDownTunnel(object? sender, KeyEventArgs e)
     {
-        // A modifier alone neither completes nor ends a key sequence.
+        // A modifier alone neither completes nor ends a key sequence, nor ends the hover.
         if (
             e.Key
             is Key.LeftCtrl
@@ -834,9 +835,10 @@ public class CodeEditor : TemplatedControl
                 or Key.RWin
         )
             return;
+        bool closedHover = _part is { TextArea.IsFocused: true } && !KeepsHover(e) && _hover?.CloseOnKey() == true;
         if (RunKeymap(e))
             e.Handled = true;
-        else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && Dismiss())
+        else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && (Dismiss() || closedHover))
             e.Handled = true;
         else if (_part is not { TextArea.IsFocused: true })
             return;
@@ -873,6 +875,18 @@ public class CodeEditor : TemplatedControl
             return true;
         }
         return keymap.CommandsFor(e, null).Any(Run);
+    }
+
+    /// <summary>
+    /// Whether a key in the text leaves the hover open, as in VS Code: one that starts a key sequence, or shows the
+    /// hover, which then takes the keyboard. Every other key ends it.
+    /// </summary>
+    private bool KeepsHover(KeyEventArgs e)
+    {
+        CodeEditorKeymap keymap = Keymap;
+        return (_pending is { } pending && keymap.CommandsFor(e, pending).Contains(CodeEditorCommands.ShowHover))
+            || keymap.ChordStartedBy(e) is not null
+            || keymap.CommandsFor(e, null).Contains(CodeEditorCommands.ShowHover);
     }
 
     private void SetPending(KeyStroke? stroke)
