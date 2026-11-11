@@ -1,3 +1,4 @@
+using System.Globalization;
 using Avalonia;
 using Avalonia.Headless;
 using Avalonia.Themes.Fluent;
@@ -13,6 +14,9 @@ public sealed class UiFixture : IAsyncDisposable
 {
     /// <summary>The name of the collection whose tests share the fixture.</summary>
     public const string Collection = "UI";
+
+    /// <summary>The editor's own texts, which tests compare, in English on every machine.</summary>
+    static UiFixture() => CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
 
     private readonly HeadlessUnitTestSession _session = HeadlessUnitTestSession.StartNew(
         typeof(TestApp),

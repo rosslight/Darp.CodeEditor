@@ -3,7 +3,6 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
-using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
@@ -83,7 +82,11 @@ namespace Darp.CodeEditor;
 /// the caret (Ctrl+K Ctrl+I), signature help (Ctrl+Shift+Space), search (Ctrl+F, Ctrl+H, F3, Shift+F3) and comments
 /// (Ctrl+/). AvaloniaEdit handles editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation and indentation
 /// (Tab, Shift+Tab). Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A right click opens the
-/// editor's context menu: Cut, Copy, Paste and Select All. For an app's Edit menu, <see cref="Cut"/>,
+/// editor's context menu, with the keys of its items and in the UI culture's language: Show Hover, Cut, Copy, Paste,
+/// Select All, Toggle Line Comment, Find and Replace. As in VS Code, a right click outside the selection moves the
+/// caret there first. The menu is the editor's <c>ContextFlyout</c>, as in Avalonia's text box: an app replaces it with
+/// its own <c>ContextFlyout</c> or <c>ContextMenu</c>, or removes it by setting <c>ContextFlyout</c> to null. For an
+/// app's Edit menu, <see cref="Cut"/>,
 /// <see cref="Copy"/>, <see cref="Paste"/> and <see cref="SelectAll"/> do the same, and the document's <c>Undo</c> and
 /// <c>Redo</c> the rest.
 /// </para>
@@ -207,6 +210,9 @@ public class CodeEditor : TemplatedControl
     /// </summary>
     private readonly RoutedCommandBinding[] _searchCommands;
 
+    /// <summary>The editor's own context menu, as its context flyout until the app sets another.</summary>
+    private readonly EditorMenu _defaultMenu;
+
     /// <summary>
     /// Where the editor is in <see cref="Document"/> while the part cannot tell: while it shows nothing, and while the
     /// scroll position waits for the first layout.
@@ -260,7 +266,8 @@ public class CodeEditor : TemplatedControl
         // AvaloniaEdit checks Dispatcher.UIThread: on another dispatcher, the editor would fail later and elsewhere.
         if (Application.Current?.Dispatcher != Dispatcher)
             throw new InvalidOperationException("The editor works only on the app's main UI thread.");
-        ContextMenu = CreateContextMenu();
+        ContextFlyout = _defaultMenu = new EditorMenu(this);
+        AddHandler(ContextRequestedEvent, OnContextRequestedTunnel, RoutingStrategies.Tunnel);
         _searchCommands =
         [
             new(ApplicationCommands.Find, (_, _) => OpenSearch()),
@@ -593,6 +600,37 @@ public class CodeEditor : TemplatedControl
             UpdateHighlighting();
     }
 
+    /// <summary>
+    /// A context request in the text, before the menu opens. A right click moves the caret to the click, unless it is
+    /// inside the selection, as in VS Code; a menu opened by key opens at the caret.
+    /// </summary>
+    private void OnContextRequestedTunnel(object? sender, ContextRequestedEventArgs e)
+    {
+        if (
+            e.Handled
+            || _shown is null
+            || _part?.TextArea is not { } area
+            || e.Source is not Visual source
+            || !area.IsVisualAncestorOf(source) && area != source
+        )
+            return;
+        TextView view = area.TextView;
+        if (!e.TryGetPosition(view, out Point point))
+        {
+            Rect caret = area.Caret.CalculateCaretRectangle().Translate(-view.ScrollOffset);
+            _defaultMenu.OpenAt(view.TranslatePoint(caret.BottomLeft, this));
+            return;
+        }
+        _defaultMenu.OpenAt(null);
+        if (view.GetPosition(point + view.ScrollOffset) is not { } clicked)
+            return;
+        if (!area.Selection.Contains(area.Document.GetOffset(clicked.Location)))
+        {
+            area.ClearSelection();
+            area.Caret.Position = clicked;
+        }
+    }
+
     /// <summary>Whether a theme variant is dark: Dark, or one that inherits from it.</summary>
     private static bool IsDark(ThemeVariant variant)
     {
@@ -805,11 +843,23 @@ public class CodeEditor : TemplatedControl
         RaisePropertyChanged(PendingKeysProperty, old, PendingKeys);
     }
 
-    /// <summary>Runs one of <see cref="CodeEditorCommands"/>, where it applies.</summary>
-    /// <returns>Whether it applied: otherwise the key goes on, to another binding or as an ordinary key.</returns>
-    private bool Run(string command)
+    /// <summary>Whether the editor shows a document's text: without one, it is empty.</summary>
+    internal bool ShowsText => _shown is not null;
+
+    /// <summary>Runs one of <see cref="CodeEditorCommands"/> from the context menu, on the text.</summary>
+    internal void RunFromMenu(string command)
     {
-        bool inText = _part is { TextArea.IsFocused: true } && _shown is not null;
+        FocusText();
+        Run(command, inText: _shown is not null);
+    }
+
+    /// <summary>Runs one of <see cref="CodeEditorCommands"/> by key, where it applies.</summary>
+    /// <returns>Whether it applied: otherwise the key goes on, to another binding or as an ordinary key.</returns>
+    private bool Run(string command) =>
+        Run(command, inText: _part is { TextArea.IsFocused: true } && _shown is not null);
+
+    private bool Run(string command, bool inText)
+    {
         switch (command)
         {
             case CodeEditorCommands.Find or CodeEditorCommands.Replace:
@@ -1202,34 +1252,6 @@ public class CodeEditor : TemplatedControl
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default
         );
-
-    /// <summary>The editor's context menu, in the app's look.</summary>
-    private ContextMenu CreateContextMenu()
-    {
-        PlatformHotkeyConfiguration? keys = Application.Current?.PlatformSettings?.HotkeyConfiguration;
-        MenuItem cut = Item("Cut", keys?.Cut, Cut);
-        MenuItem paste = Item("Paste", keys?.Paste, Paste);
-        var menu = new ContextMenu
-        {
-            ItemsSource = new Control[]
-            {
-                cut,
-                Item("Copy", keys?.Copy, Copy),
-                paste,
-                new Separator(),
-                Item("Select All", keys?.SelectAll, SelectAll),
-            },
-        };
-        menu.Opening += (_, _) => cut.IsEnabled = paste.IsEnabled = !IsReadOnly && _shown is not null;
-        return menu;
-
-        static MenuItem Item(string header, List<KeyGesture>? gestures, Action action)
-        {
-            var item = new MenuItem { Header = header, InputGesture = gestures?.FirstOrDefault() };
-            item.Click += (_, _) => action();
-            return item;
-        }
-    }
 
     /// <summary>A grammar that loads in the background, with the theme it loads with.</summary>
     private sealed record GrammarLoad(

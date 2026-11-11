@@ -156,6 +156,10 @@ public sealed class CodeEditorKeymap
         return null;
     }
 
+    /// <summary>The keys of <paramref name="command"/>'s latest binding, for a menu to show; none if it has no binding.</summary>
+    internal IReadOnlyList<KeyGesture> GesturesOf(string command) =>
+        _effective.LastOrDefault(binding => binding.Command == command)?.Gestures ?? [];
+
     private static IEnumerable<CodeEditorKeyBinding> DefaultBindings(bool mac)
     {
         string command = mac ? "cmd" : "ctrl";

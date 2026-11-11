@@ -66,9 +66,6 @@
   <data name="Untitled" xml:space="preserve">
     <value>Untitled {0}</value>
   </data>
-  <data name="NoFile" xml:space="preserve">
-    <value>No file</value>
-  </data>
   <data name="StateNoFile" xml:space="preserve">
     <value>not saved to a file</value>
   </data>

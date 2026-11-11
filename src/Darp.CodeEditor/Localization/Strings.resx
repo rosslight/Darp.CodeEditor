@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="ShowHover" xml:space="preserve">
+    <value>Show Hover</value>
+  </data>
+  <data name="Cut" xml:space="preserve">
+    <value>Cut</value>
+  </data>
+  <data name="Copy" xml:space="preserve">
+    <value>Copy</value>
+  </data>
+  <data name="Paste" xml:space="preserve">
+    <value>Paste</value>
+  </data>
+  <data name="SelectAll" xml:space="preserve">
+    <value>Select All</value>
+  </data>
+  <data name="CommentLine" xml:space="preserve">
+    <value>Toggle Line Comment</value>
+  </data>
+  <data name="Find" xml:space="preserve">
+    <value>Find</value>
+  </data>
+  <data name="Replace" xml:space="preserve">
+    <value>Replace</value>
+  </data>
+  <data name="ReplaceAll" xml:space="preserve">
+    <value>Replace All</value>
+  </data>
+  <data name="MatchCase" xml:space="preserve">
+    <value>Match Case</value>
+  </data>
+  <data name="MatchWholeWord" xml:space="preserve">
+    <value>Match Whole Word</value>
+  </data>
+  <data name="UseRegularExpression" xml:space="preserve">
+    <value>Use Regular Expression</value>
+  </data>
+  <data name="PreviousMatch" xml:space="preserve">
+    <value>Previous Match (Shift+F3)</value>
+  </data>
+  <data name="NextMatch" xml:space="preserve">
+    <value>Next Match (F3)</value>
+  </data>
+  <data name="CloseSearch" xml:space="preserve">
+    <value>Close (Escape)</value>
+  </data>
+  <data name="NoResults" xml:space="preserve">
+    <value>No results</value>
+  </data>
+  <data name="MatchCount" xml:space="preserve">
+    <value>{0} of {1:N0}{2}</value>
+  </data>
+  <data name="TooManyMatches" xml:space="preserve">
+    <value>More than {0:N0} matches: only the first {0:N0} show, and Replace All is off.</value>
+  </data>
+  <data name="SearchTimedOut" xml:space="preserve">
+    <value>The search stopped after {0:0.#} s: matches may be missing, and Replace All is off.</value>
+  </data>
+</root>

@@ -28,7 +28,7 @@ public sealed class ThemeWindow : Window
 
     public ThemeWindow(Workspace workspace, ThemeChoiceOfWindow choice)
     {
-        Title = Strings.Current.Format(Strings.Current.ThemeWindowTitle, choice.Name);
+        Title = Strings.Default.FormatThemeWindowTitle(choice.Name);
         Width = 1000;
         Height = 680;
         Styles.Add(choice.Fluent ? new FluentTheme() : new SimpleTheme());
@@ -73,12 +73,8 @@ public sealed class ThemeWindow : Window
     /// <summary>The caret's place, or which first key of a sequence waits for its second.</summary>
     private void UpdateStatus() =>
         _status.Text = _editor.PendingKeys is { } pending
-            ? Strings.Current.Format(Strings.Current.WaitingForChord, pending)
-            : Strings.Current.Format(
-                Strings.Current.CaretPosition,
-                _editor.CaretPosition.Line,
-                _editor.CaretPosition.Column
-            );
+            ? Strings.Default.FormatWaitingForChord(pending)
+            : Strings.Default.FormatCaretPosition(_editor.CaretPosition.Line, _editor.CaretPosition.Column);
 }
 
 /// <summary>One of the themes a <see cref="ThemeWindow"/> tries: Fluent or Simple, in a variant.</summary>

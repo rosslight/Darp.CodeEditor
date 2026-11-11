@@ -179,6 +179,15 @@ public sealed class CodeDocumentTests(UiFixture ui)
             CodeDocument.Create(CodeLanguage.Json).Indentation.ShouldBe(Indentation.Spaces(4));
         });
 
+    [Fact]
+    public Task Indentation_starts_as_the_initial_text_indents() =>
+        _ui.Run(() =>
+        {
+            CodeDocument.Create(CodeLanguage.Json, "{\n  \"a\": 1\n}").Indentation.ShouldBe(Indentation.Spaces(2));
+            CodeDocument.Create(CodeLanguage.Yaml, "a:\n    b: 1\n").Indentation.ShouldBe(Indentation.Spaces(4));
+            CodeDocument.Create(CodeLanguage.PlainText, "a\n\tb\n").Indentation.ShouldBe(Indentation.Tabs(4));
+        });
+
     [Theory]
     [InlineData(0)]
     [InlineData(1_001)]

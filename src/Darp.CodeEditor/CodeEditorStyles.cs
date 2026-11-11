@@ -20,7 +20,9 @@ namespace Darp.CodeEditor;
 /// ones. Override that resource in the app's theme dictionaries to give every editor other colors.
 /// </para>
 /// <para>
-/// The search bar and scroll bars take their look from the app's theme, whichever it is. Completion, hover and signature
+/// The search bar, scroll bars and context menu take their look from the app's theme, whichever it is. Where the app's
+/// theme has no <c>MenuFlyoutPresenter</c> theme, as FluentAvalonia's, the menu takes one of these styles, with the
+/// menu flyout resources of Fluent themes. Completion, hover and signature
 /// help are the editor's own: their colors come from the editor's color theme, so app themes don't restyle them.
 /// </para>
 /// </remarks>

@@ -63,7 +63,7 @@ public sealed partial class DocumentView : UserControl
     public void InsertDateTime()
     {
         // Replaces the selection, as typing does, in one step that the user can undo.
-        Editor.Document?.Replace(Editor.Selection.Range, DateTime.Now.ToString("g", Strings.Current.Culture));
+        Editor.Document?.Replace(Editor.Selection.Range, DateTime.Now.ToString("g", Strings.Default.Culture));
         Editor.Focus();
     }
 

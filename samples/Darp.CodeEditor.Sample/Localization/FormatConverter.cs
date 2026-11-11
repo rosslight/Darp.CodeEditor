@@ -17,6 +17,6 @@ public sealed class FormatConverter : IMultiValueConverter
     {
         if (values.Count == 0 || values[0] is not string text || values.Any(value => value is UnsetValueType))
             return AvaloniaProperty.UnsetValue;
-        return Strings.Current.Format(text, [.. values.Skip(1)]);
+        return Strings.Default.Format(text, [.. values.Skip(1)]);
     }
 }

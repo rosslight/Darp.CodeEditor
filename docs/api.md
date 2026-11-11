@@ -102,8 +102,9 @@ rather than its view belong to the document, as in Monaco and CodeMirror.
 | `SaveViewState()`, `RestoreViewState(state)` | the caret, the selection and the scroll position, for an app that switches one editor between documents |
 
 **Built in, with no settings:** current-line highlight, bracket matching, auto-closing brackets and quotes,
-auto-indent, whitespace shown inside the selection, scrolling past the last line, a context menu with Cut, Copy, Paste
-and Select All, completion's snippets with their stops (section 6), and the look of errors, hover and completion
+auto-indent, whitespace shown inside the selection, scrolling past the last line, a context menu with Show Hover, Cut,
+Copy, Paste, Select All, Toggle Line Comment, Find and Replace in English or German, VS Code's words for double-click
+and for deleting by words (Ctrl+Backspace, Ctrl+Delete; Alt on macOS), completion's snippets with their stops (section 6), and the look of errors, hover and completion
 below.
 
 **Caret and scroll position** belong to the editor, as in Monaco, and last as long as it does, like a list's scroll
@@ -128,7 +129,8 @@ are its; while a snippet's stops are active, Tab and Shift+Tab are theirs, excep
 is Escape after completion and signature help. Other keys, such as F5 or Ctrl+S, reach the app's key bindings.
 
 **Indentation** belongs to the document (`CodeDocument.Indentation`), so all editors of one document agree. It starts
-as in VS Code, 2 spaces for YAML and 4 otherwise, and is not detected from the text.
+as VS Code's `editor.detectIndentation` guesses it from the initial text; where the text gives no answer, VS Code's
+default applies: 2 spaces for YAML and 4 otherwise.
 
 **Look.** The text and everything around it are styled differently, as in Monaco and CodeMirror:
 
@@ -188,7 +190,7 @@ ruler shows them. Scripts of 5,000 lines need them to find errors outside the vi
 changing it, so they wait until the core works.
 
 **Later, when asked for:** whitespace display modes, rulers, folding, a minimap, placeholder text for empty
-documents, indentation detected from the text, markers that the app adds, and a view state that can be stored across
+documents, markers that the app adds, and a view state that can be stored across
 app starts.
 
 ## 3. Who owns what
@@ -1105,8 +1107,8 @@ Still open:
   matching, and the outdent of a closing bracket typed on an empty line by its opening bracket's line, without a
   decrease pattern. VS Code also strips strings and comments from a line before matching its indentation patterns;
   the editor matches the line as it is;
-- the editor's own text, before v1: its context menu and its search bar are in English only, also in an app that
-  shows another language, such as the sample app in German. How apps get them in their language is not decided yet.
+- the editor's own text, before v1: its context menu and search bar speak English and German, by the UI culture as
+  they open. How apps add other languages is not decided yet.
 
 ## 10. Open questions
 

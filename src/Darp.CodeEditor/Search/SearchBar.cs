@@ -13,6 +13,7 @@ using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.Loading;
+using Darp.CodeEditor.Localization;
 
 namespace Darp.CodeEditor.Search;
 
@@ -39,14 +40,17 @@ internal sealed class SearchBar : UserControl
         "M3,2 L8,7 L13,2 L14,3 L9,8 L14,13 L13,14 L8,9 L3,14 L2,13 L7,8 L2,3 Z"
     );
 
-    private readonly TextBox _find = new() { PlaceholderText = "Find", Width = 220 };
-    private readonly ToggleButton _matchCase = Toggle("Aa", "Match Case");
-    private readonly ToggleButton _wholeWord = Toggle("ab", "Match Whole Word");
-    private readonly ToggleButton _regex = Toggle(".*", "Use Regular Expression");
+    private readonly TextBox _find = new() { Width = 220 };
+    private readonly ToggleButton _matchCase = new() { Content = "Aa" };
+    private readonly ToggleButton _wholeWord = new() { Content = "ab" };
+    private readonly ToggleButton _regex = new() { Content = ".*" };
     private readonly TextBlock _count = new() { MinWidth = 80, VerticalAlignment = VerticalAlignment.Center };
-    private readonly TextBox _replace = new() { PlaceholderText = "Replace", Width = 220 };
-    private readonly Button _replaceOne = new() { Content = "Replace" };
-    private readonly Button _replaceAll = new() { Content = "Replace All" };
+    private readonly Button _previous;
+    private readonly Button _next;
+    private readonly Button _close;
+    private readonly TextBox _replace = new() { Width = 220 };
+    private readonly Button _replaceOne = new();
+    private readonly Button _replaceAll = new();
     private readonly StackPanel _replaceRow;
     private readonly TextBlock _message = new() { TextWrapping = TextWrapping.Wrap, IsVisible = false };
 
@@ -83,6 +87,10 @@ internal sealed class SearchBar : UserControl
         VerticalAlignment = VerticalAlignment.Top;
         // Clear of the vertical scroll bar.
         Margin = new Thickness(0, 0, 24, 0);
+        _previous = IconButton(s_previous, FindPrevious);
+        _next = IconButton(s_next, FindNext);
+        _close = IconButton(s_close, Close);
+        ShowTexts();
         _replaceRow = Row(_replace, _replaceOne, _replaceAll);
         _replaceRow.IsVisible = false;
         // About the width of the rows, which a longer message wraps to.
@@ -96,16 +104,7 @@ internal sealed class SearchBar : UserControl
                 Spacing = 4,
                 Children =
                 {
-                    Row(
-                        _find,
-                        _matchCase,
-                        _wholeWord,
-                        _regex,
-                        _count,
-                        IconButton(s_previous, "Previous Match (Shift+F3)", FindPrevious),
-                        IconButton(s_next, "Next Match (F3)", FindNext),
-                        IconButton(s_close, "Close (Escape)", Close)
-                    ),
+                    Row(_find, _matchCase, _wholeWord, _regex, _count, _previous, _next, _close),
                     _replaceRow,
                     _message,
                 },
@@ -258,6 +257,8 @@ internal sealed class SearchBar : UserControl
     private void Open(bool replace, string? text, bool focus, Move move)
     {
         bool wasOpen = IsOpen;
+        if (!wasOpen)
+            ShowTexts();
         _replaceMode = replace;
         bool rowChanged = ShowReplaceRow();
         IsVisible = true;
@@ -499,10 +500,10 @@ internal sealed class SearchBar : UserControl
         _count.Text = result switch
         {
             null or { Outcome: SearchOutcome.InvalidPattern } => null,
-            { Matches.Count: 0 } => "No results",
+            { Matches.Count: 0 } => Strings.Default.NoResults,
             _ => string.Format(
                 culture,
-                "{0} of {1:N0}{2}",
+                Strings.Default.MatchCount,
                 Index(result) is { } index ? (index + 1).ToString(culture) : "?",
                 count,
                 result.Outcome == SearchOutcome.TooManyMatches ? "+" : ""
@@ -512,12 +513,12 @@ internal sealed class SearchBar : UserControl
         {
             SearchOutcome.TooManyMatches => string.Format(
                 culture,
-                "More than {0:N0} matches: only the first {0:N0} show, and Replace All is off.",
+                Strings.Default.TooManyMatches,
                 TextSearch.MaxMatches
             ),
             SearchOutcome.OutOfTime => string.Format(
                 culture,
-                "The search stopped after {0:0.#} s: matches may be missing, and Replace All is off.",
+                Strings.Default.SearchTimedOut,
                 TextSearch.TimeLimit.TotalSeconds
             ),
             SearchOutcome.InvalidPattern => result.Error,
@@ -593,14 +594,22 @@ internal sealed class SearchBar : UserControl
         return row;
     }
 
-    private static ToggleButton Toggle(string content, string tip)
+    /// <summary>The bar's texts in the UI culture, as it opens: the app may switch its language while it runs.</summary>
+    private void ShowTexts()
     {
-        var toggle = new ToggleButton { Content = content };
-        ToolTip.SetTip(toggle, tip);
-        return toggle;
+        _find.PlaceholderText = Strings.Default.Find;
+        _replace.PlaceholderText = Strings.Default.Replace;
+        _replaceOne.Content = Strings.Default.Replace;
+        _replaceAll.Content = Strings.Default.ReplaceAll;
+        ToolTip.SetTip(_matchCase, Strings.Default.MatchCase);
+        ToolTip.SetTip(_wholeWord, Strings.Default.MatchWholeWord);
+        ToolTip.SetTip(_regex, Strings.Default.UseRegularExpression);
+        ToolTip.SetTip(_previous, Strings.Default.PreviousMatch);
+        ToolTip.SetTip(_next, Strings.Default.NextMatch);
+        ToolTip.SetTip(_close, Strings.Default.CloseSearch);
     }
 
-    private static Button IconButton(Geometry icon, string tip, Action action)
+    private static Button IconButton(Geometry icon, Action action)
     {
         var button = new Button
         {
@@ -611,7 +620,6 @@ internal sealed class SearchBar : UserControl
                 Height = 12,
             },
         };
-        ToolTip.SetTip(button, tip);
         button.Click += (_, _) => action();
         return button;
     }
