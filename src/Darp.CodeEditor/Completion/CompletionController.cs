@@ -33,12 +33,14 @@ namespace Darp.CodeEditor.Completion;
 /// is left, as VS Code does when the caret moves back: the list's positions no longer fit the text.
 /// </para>
 /// <para>
-/// Up, Down, Page Up and Page Down select, and Enter, Tab, a click or one of the selected item's commit characters
-/// commit it: its edit, or its text over the word, and its additional edits, such as an import, in one step that the
-/// user undoes. While the filter of the current text still runs, they commit the item that shows if it matches the
-/// current text, checked on the UI thread for that item alone; otherwise Enter and Tab commit what that filter selects
-/// once it has run, unless the text, by any editor or code, or the caret changes before, and a commit character goes in
-/// as text, as it does when nothing matches: deciding later would hold back or reorder what the user types. A read-only
+/// Up, Down, Page Up and Page Down select, and the keymap's accept commands, a click or one of the selected item's
+/// commit characters commit it: its edit, or its text over the word, and its additional edits, such as an import, in
+/// one step that the user undoes. <see cref="Accept"/> inserts, over the word up to the caret, or replaces, over the
+/// rest of the word too; a click and a commit character insert. While the filter of the current text still runs, they
+/// commit the item that shows if it matches the current text, checked on the UI thread for that item alone; otherwise
+/// accepting commits what that filter selects once it has run, unless the text, by any editor or code, or the caret
+/// changes before, and a commit character goes in as text, as it does when nothing matches: deciding later would hold
+/// back or reorder what the user types. A read-only
 /// editor neither completes nor commits. The server resolves the selected item, so that its detail and documentation
 /// show beside the list. An item whose additional edits are still to come when it is committed gets them when they
 /// come, in its step, if that step is still the last one: otherwise they are dropped, as the user moved on.
@@ -156,7 +158,7 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>
     /// The keys of completion's list while it shows, from the editor's key handler while the text area has the
-    /// keyboard: the keys that select and commit.
+    /// keyboard: the keys that select. The keys that commit are the keymap's, for <see cref="Accept"/>.
     /// </summary>
     /// <returns>Whether the key was completion's.</returns>
     public bool OnKeyDown(KeyEventArgs e)
@@ -182,15 +184,26 @@ internal sealed class CompletionController : IDisposable
             case Key.PageUp:
                 Select(session, Math.Max(0, session.Selected - page));
                 return true;
-            case Key.Enter or Key.Tab:
-                if (CanCommit(session, session.Selected))
-                    Commit(session, session.Selected);
-                else
-                    CommitWhenFiltered(session);
-                return true;
             default:
                 return false;
         }
+    }
+
+    /// <summary>
+    /// Commits the selected item while the list shows, for the keymap's accept commands: inserting, its text goes over
+    /// the word up to the caret, and the rest of the word stays after it; replacing, it goes over the rest of the word
+    /// too, or as far as the item's replace range reaches.
+    /// </summary>
+    /// <returns>Whether the list showed: otherwise the key goes on, as to a new line or an indent.</returns>
+    public bool Accept(bool replace)
+    {
+        if (_session is not { IsShowing: true } session)
+            return false;
+        if (CanCommit(session, session.Selected))
+            Commit(session, session.Selected, replace);
+        else
+            CommitWhenFiltered(session, replace);
+        return true;
     }
 
     /// <summary>Asks for completion at the caret, as the user asks for it by key.</summary>
@@ -491,7 +504,7 @@ internal sealed class CompletionController : IDisposable
         session.Shown = key;
         if (session.CommitAt == key)
         {
-            Commit(session, session.Selected);
+            Commit(session, session.Selected, session.CommitReplaces);
             return;
         }
         int wordStart = key.Answer.Request.Word.Start;
@@ -505,8 +518,8 @@ internal sealed class CompletionController : IDisposable
     }
 
     /// <summary>
-    /// The list, at the word, says that nothing matches what is typed: the items that showed are gone, and Enter and
-    /// Tab go to the text again.
+    /// The list, at the word, says that nothing matches what is typed: the items that showed are gone, and the keys
+    /// that accept go to the text again.
     /// </summary>
     private void ShowNoMatch(Session session, FilterKey key)
     {
@@ -596,14 +609,15 @@ internal sealed class CompletionController : IDisposable
     }
 
     /// <summary>
-    /// Commits what the filter of the current text selects once it has run, for Enter or Tab, unless the text or the
-    /// caret changes before; starts that filter if none runs.
+    /// Commits what the filter of the current text selects once it has run, for <see cref="Accept"/>, unless the text
+    /// or the caret changes before; starts that filter if none runs.
     /// </summary>
-    private void CommitWhenFiltered(Session session)
+    private void CommitWhenFiltered(Session session, bool replace)
     {
         if (session.Answer is not { } answer)
             return;
         session.CommitAt = CurrentKey(answer);
+        session.CommitReplaces = replace;
         Filter(session, answer, _textArea.Caret.Offset);
     }
 
@@ -751,13 +765,13 @@ internal sealed class CompletionController : IDisposable
     }
 
     /// <summary>
-    /// Commits an item: its edit, from where it starts to as far past the caret as it reached past where completion was
-    /// asked, and its additional edits, in one step that the user undoes; the caret goes after the item's text. A
-    /// snippet goes in as its text, with its variables' values for the text before the commit, and its first stop is
-    /// selected. Additional edits that overlap others are left out, and stay plain text. Additional edits that a resolve
-    /// still under way brings come later.
+    /// Commits an item: its edit, from where it starts to as far past the caret as its insert range, or its replace
+    /// range for <paramref name="replace"/>, reached past where completion was asked, and its additional edits, in one
+    /// step that the user undoes; the caret goes after the item's text. A snippet goes in as its text, with its
+    /// variables' values for the text before the commit, and its first stop is selected. Additional edits that overlap
+    /// others are left out, and stay plain text. Additional edits that a resolve still under way brings come later.
     /// </summary>
-    private void Commit(Session session, int index)
+    private void Commit(Session session, int index, bool replace = false)
     {
         if (session.Shown?.Answer is not { } answer)
             return;
@@ -770,9 +784,10 @@ internal sealed class CompletionController : IDisposable
         CompletionItem item = session.ResolvedOf(selected) ?? selected;
         Request request = answer.Request;
         int caret = _textArea.Caret.Offset;
+        int end = replace ? item.ReplaceRange.End : item.Edit.Range.End;
         var range = TextRange.FromBounds(
             item.Edit.Range.Start,
-            Math.Min(_buffer.GetLineByOffset(caret).EndOffset, caret + (item.Edit.Range.End - request.Offset))
+            Math.Min(_buffer.GetLineByOffset(caret).EndOffset, caret + (end - request.Offset))
         );
         RenderedSnippet? snippet = item.Snippet is { } source ? _snippets.Render(source, range.Start) : null;
         var main = new CompletionEdit(range, snippet?.Text ?? item.Edit.NewText);
@@ -1100,10 +1115,13 @@ internal sealed class CompletionController : IDisposable
         public Filtering? Filtering { get; set; }
 
         /// <summary>
-        /// The filter whose selection Enter or Tab commits once it has run; null for none. A filter for anything else
-        /// drops it.
+        /// The filter whose selection <see cref="Accept"/> commits once it has run; null for none. A filter for
+        /// anything else drops it.
         /// </summary>
         public FilterKey? CommitAt { get; set; }
+
+        /// <summary>Whether the commit that waits for <see cref="CommitAt"/> replaces the rest of the word.</summary>
+        public bool CommitReplaces { get; set; }
 
         /// <summary>The items that show, in order.</summary>
         public List<ShownItem> Items { get; set; } = [];

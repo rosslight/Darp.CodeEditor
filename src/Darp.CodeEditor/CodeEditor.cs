@@ -873,6 +873,10 @@ public class CodeEditor : TemplatedControl
                 return true;
             case CodeEditorCommands.ToggleSuggestionDetails when inText:
                 return _completion?.ToggleDetails() == true;
+            case CodeEditorCommands.AcceptSelectedSuggestion
+            or CodeEditorCommands.AcceptAlternativeSelectedSuggestion when inText:
+                return _completion?.Accept(replace: command == CodeEditorCommands.AcceptAlternativeSelectedSuggestion)
+                    == true;
             case CodeEditorCommands.ShowHover when inText:
                 _hover?.ShowAtCaret();
                 return true;

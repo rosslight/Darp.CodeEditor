@@ -497,7 +497,7 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
-    public Task Edits_replace_their_range_also_with_what_was_typed_since_and_an_insert_replace_edit_inserts() =>
+    public Task Edits_replace_their_range_also_with_what_was_typed_since_and_an_insert_replace_edit_inserts_or_replaces() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
@@ -526,12 +526,23 @@ public sealed class CompletionTests(UiFixture ui)
                 window.Press(Key.Enter);
                 document.Text.ShouldBe("log.writeXYZ");
                 document.Undo();
+                // A text edit's range is also what replacing goes over.
+                await OpenAsync(window, 7);
+                window.Press(Key.Tab);
+                document.Text.ShouldBe("log.writeXYZ");
+                document.Undo();
 
-                // VS Code's default: an insert and replace edit inserts.
+                // An insert and replace edit: Enter inserts over its insert range, Tab replaces its replace range.
                 await OpenAsync(window, 7);
                 window.Press(Key.Down);
                 window.Press(Key.Enter);
                 document.Text.ShouldBe("log.writeAllXYZ");
+                document.Undo();
+                await OpenAsync(window, 7);
+                window.Press(Key.Down);
+                window.Press(Key.Tab);
+                document.Text.ShouldBe("log.writeAll");
+                window.Editor.Selection.ShouldBe(new TextSelection(12));
             }
 
             document.Text = "log.w";
@@ -553,6 +564,75 @@ public sealed class CompletionTests(UiFixture ui)
                 window.Press(Key.Enter);
                 document.Text.ShouldBe("log.write");
             }
+        });
+
+    [Fact]
+    public Task Enter_inserts_before_the_rest_of_the_word_and_Tab_and_Shift_Enter_replace_it() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("println"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "print");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            // Inside a word, Enter inserts and keeps the rest of the word.
+            await OpenAsync(window, 3);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("printlnnt");
+            window.Editor.Selection.ShouldBe(new TextSelection(7));
+            document.Undo();
+
+            // Tab replaces the rest of the word, and so does Shift+Enter, also after typing on.
+            await OpenAsync(window, 3);
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("println");
+            window.Editor.Selection.ShouldBe(new TextSelection(7));
+            document.Text = "print";
+            await OpenAsync(window, 3);
+            window.Type("n");
+            await WaitForLabelsAsync(window, ["println"]);
+            window.Press(Key.Enter, KeyModifiers.Shift);
+            document.Text.ShouldBe("println");
+
+            // At a word's end, both do the same.
+            document.Text = "pri";
+            await OpenAsync(window, 3);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("println");
+            document.Text = "pri";
+            await OpenAsync(window, 3);
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("println");
+
+            // Without a list, the keys go on: Enter makes a new line, and Tab indents.
+            window.Press(Key.Enter);
+            window.Press(Key.Tab);
+            document.Text.ShouldStartWith("println\n");
+            document.Text.Length.ShouldBeGreaterThan("println\n".Length);
+            document.Text.Trim().ShouldBe("println");
+        });
+
+    [Fact]
+    public Task Tab_bound_to_accepting_the_selected_item_inserts_as_in_VS_Code() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("println"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "print");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Editor.Keymap = CodeEditorKeymap.FromJson(
+                """[ { "key": "tab", "command": "acceptSelectedSuggestion" } ]"""
+            );
+
+            await OpenAsync(window, 3);
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("printlnnt");
+            document.Undo();
+            await OpenAsync(window, 3);
+            window.Press(Key.Enter, KeyModifiers.Shift);
+            document.Text.ShouldBe("println");
         });
 
     [Fact]

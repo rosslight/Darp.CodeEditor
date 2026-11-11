@@ -14,13 +14,14 @@ namespace Darp.CodeEditor;
 /// and a binding whose command starts with <c>-</c> removes the earlier bindings of that command, of its keys only when
 /// it names keys. Where several bindings share a key, the latest whose command applies runs, so that one key can do
 /// different things where they make sense, such as Ctrl+Space, which asks for completion, or toggles the details
-/// while the list shows. <c>when</c> clauses are read and ignored.
+/// while the list shows, and Enter, which accepts completion's item while the list shows and otherwise goes on to make
+/// a new line. <c>when</c> clauses are read and ignored.
 /// </para>
 /// <para>
 /// After the first stroke of a two-stroke sequence, the editor waits for the second, and shows that in
 /// <see cref="CodeEditor.PendingKeys"/>. A second stroke that completes no sequence counts as an ordinary key; losing the
-/// keyboard or a click ends the wait. The keys inside open popups, such as Up, Down, Enter and Escape in completion's
-/// list, and the keys of AvaloniaEdit's editing, such as the clipboard's, are not in the keymap.
+/// keyboard or a click ends the wait. The keys inside open popups, such as Up, Down and Escape in completion's list,
+/// and the keys of AvaloniaEdit's editing, such as the clipboard's, are not in the keymap.
 /// </para>
 /// <para>
 /// A keymap is immutable, and can be shared between editors.
@@ -63,12 +64,16 @@ public sealed class CodeEditorKeymap
 
     /// <summary>
     /// VS Code's keys for the editor's commands, on this operating system. On macOS, Cmd takes Ctrl's place, except
-    /// for completion's Ctrl+Space: Cmd+Space is the system's search.
+    /// for completion's Ctrl+Space: Cmd+Space is the system's search. Accepting completion's item differs, as in
+    /// IntelliJ: Enter inserts it and keeps the rest of the word, and Tab replaces the rest of the word, as Shift+Enter
+    /// does in VS Code. Binding Tab to <see cref="CodeEditorCommands.AcceptSelectedSuggestion"/> gives VS Code's keys.
     /// </summary>
     /// <remarks>
     /// <list type="table">
     /// <listheader><term>Keys (macOS)</term><description>Command</description></listheader>
     /// <item><term>ctrl+space</term><description><see cref="CodeEditorCommands.TriggerSuggest"/>, and <see cref="CodeEditorCommands.ToggleSuggestionDetails"/> while the list shows</description></item>
+    /// <item><term>enter</term><description><see cref="CodeEditorCommands.AcceptSelectedSuggestion"/> while the list shows</description></item>
+    /// <item><term>tab, shift+enter</term><description><see cref="CodeEditorCommands.AcceptAlternativeSelectedSuggestion"/> while the list shows</description></item>
     /// <item><term>ctrl+k ctrl+i (cmd+k cmd+i)</term><description><see cref="CodeEditorCommands.ShowHover"/></description></item>
     /// <item><term>ctrl+shift+space (shift+cmd+space)</term><description><see cref="CodeEditorCommands.TriggerParameterHints"/></description></item>
     /// <item><term>ctrl+f (cmd+f)</term><description><see cref="CodeEditorCommands.Find"/></description></item>
@@ -165,6 +170,9 @@ public sealed class CodeEditorKeymap
         string command = mac ? "cmd" : "ctrl";
         yield return new("ctrl+space", CodeEditorCommands.TriggerSuggest);
         yield return new("ctrl+space", CodeEditorCommands.ToggleSuggestionDetails);
+        yield return new("enter", CodeEditorCommands.AcceptSelectedSuggestion);
+        yield return new("tab", CodeEditorCommands.AcceptAlternativeSelectedSuggestion);
+        yield return new("shift+enter", CodeEditorCommands.AcceptAlternativeSelectedSuggestion);
         yield return new($"{command}+k {command}+i", CodeEditorCommands.ShowHover);
         yield return new(mac ? "shift+cmd+space" : "ctrl+shift+space", CodeEditorCommands.TriggerParameterHints);
         yield return new($"{command}+f", CodeEditorCommands.Find);
@@ -229,6 +237,18 @@ public static class CodeEditorCommands
     /// app's run.
     /// </summary>
     public const string ToggleSuggestionDetails = "toggleSuggestionDetails";
+
+    /// <summary>
+    /// While completion's list shows, accepts the selected item and inserts it: its text goes over the word up to the
+    /// caret, and the rest of the word stays after it.
+    /// </summary>
+    public const string AcceptSelectedSuggestion = "acceptSelectedSuggestion";
+
+    /// <summary>
+    /// While completion's list shows, accepts the selected item the other way, replacing: its text goes over the rest of
+    /// the word too, or as far as the server's replace range for it reaches.
+    /// </summary>
+    public const string AcceptAlternativeSelectedSuggestion = "acceptAlternativeSelectedSuggestion";
 
     /// <summary>Shows the hover at the caret: the diagnostics there and the server's hover. Again, it takes the keyboard.</summary>
     public const string ShowHover = "editor.action.showHover";

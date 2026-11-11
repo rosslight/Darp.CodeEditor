@@ -55,6 +55,22 @@ public sealed class KeymapTests(UiFixture ui)
     }
 
     [Fact]
+    public void By_default_Enter_accepts_completions_item_inserting_and_Tab_and_Shift_Enter_replacing()
+    {
+        CodeEditorKeymap keymap = CodeEditorKeymap.Default;
+
+        keymap
+            .CommandsFor(Key(Keys.Enter, KeyModifiers.None), null)
+            .ShouldBe([CodeEditorCommands.AcceptSelectedSuggestion]);
+        keymap
+            .CommandsFor(Key(Keys.Tab, KeyModifiers.None), null)
+            .ShouldBe([CodeEditorCommands.AcceptAlternativeSelectedSuggestion]);
+        keymap
+            .CommandsFor(Key(Keys.Enter, KeyModifiers.Shift), null)
+            .ShouldBe([CodeEditorCommands.AcceptAlternativeSelectedSuggestion]);
+    }
+
+    [Fact]
     public void A_punctuation_key_matches_where_the_layout_types_its_character()
     {
         CodeEditorKeymap keymap = CodeEditorKeymap.Empty.With(new CodeEditorKeyBinding("ctrl+/", "comment"));
