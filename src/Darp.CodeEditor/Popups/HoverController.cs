@@ -2,7 +2,9 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Logging;
+using Avalonia.VisualTree;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
@@ -26,14 +28,17 @@ namespace Darp.CodeEditor.Popups;
 /// </para>
 /// <para>
 /// The hovered text is the word under the pointer, and the range that the server's hover names. The popup stays while
-/// the pointer is over it or over the popup, so that its links can be clicked and it can be scrolled.
+/// the pointer is over it or over the popup, so that its links can be clicked and it can be scrolled. Once the user
+/// clicked into the popup, as to select its text, it stays wherever the pointer goes, also while a drag crosses its
+/// edge, and resting the pointer on other text shows no other hover, as in VS Code.
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends the hover, for every reason it ends: the pointer leaves both, also for another word under
-/// the same diagnostic; typing, scrolling and Escape; the editor losing the keyboard focus; a server that starts or
-/// stops serving the document, whose information the hover showed; new colors, which its code was drawn in; and the
-/// editor no longer showing the document. Ending it cancels the server's request and the reading of its answer if they
-/// are still under way, and drops what they would show, also before any popup opened.
+/// the same diagnostic, unless the user clicked into the popup; then a click outside it, or the window losing the
+/// focus; typing, scrolling and Escape; the editor losing the keyboard focus; a server that starts or stops serving the
+/// document, whose information the hover showed; new colors, which its code was drawn in; and the editor no longer
+/// showing the document. Ending it cancels the server's request and the reading of its answer if they are still under
+/// way, and drops what they would show, also before any popup opened.
 /// </para>
 /// </remarks>
 internal sealed class HoverController : IDisposable
@@ -72,6 +77,12 @@ internal sealed class HoverController : IDisposable
 
     /// <summary>The delay before the hover closes, once the pointer left it; null while none runs.</summary>
     private ITimer? _hiding;
+
+    /// <summary>
+    /// The window whose clicks and focus loss a hover that the user clicked into watches, as they end it; null while
+    /// none does.
+    /// </summary>
+    private TopLevel? _watched;
 
     public HoverController(
         CodeEditor editor,
@@ -114,6 +125,13 @@ internal sealed class HoverController : IDisposable
         _document.LanguageFeaturesChanged += OnClosingChange;
         _popup.Root.PointerExited += OnPointerExited;
         _popup.Root.PointerEntered += OnPointerEnteredPopup;
+        // Also when its text handles the press, to select.
+        _popup.Root.AddHandler(
+            InputElement.PointerPressedEvent,
+            OnPointerPressedInPopup,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true
+        );
         _popup.Escaped += OnClosingChange;
         _textArea.Caret.PositionChanged += OnCaretPositionChanged;
     }
@@ -138,6 +156,7 @@ internal sealed class HoverController : IDisposable
     public bool Close()
     {
         StayOpen();
+        Unwatch();
         bool wasOpen = _popup.IsOpen;
         _hovered?.Cancellation.Cancel();
         _hovered = null;
@@ -159,6 +178,7 @@ internal sealed class HoverController : IDisposable
         _document.LanguageFeaturesChanged -= OnClosingChange;
         _popup.Root.PointerExited -= OnPointerExited;
         _popup.Root.PointerEntered -= OnPointerEnteredPopup;
+        _popup.Root.RemoveHandler(InputElement.PointerPressedEvent, OnPointerPressedInPopup);
         _popup.Escaped -= OnClosingChange;
         _textArea.Caret.PositionChanged -= OnCaretPositionChanged;
     }
@@ -190,12 +210,13 @@ internal sealed class HoverController : IDisposable
 
     /// <summary>
     /// The pointer rests: over the text already hovered, nothing changes; over other text, its diagnostics show, and
-    /// the server is asked for its hover.
+    /// the server is asked for its hover, unless the user clicked into the popup that shows.
     /// </summary>
     private void OnPointerHover(object? sender, PointerEventArgs e)
     {
         if (
-            OffsetAt(e.GetPosition(_textView)) is not { } offset
+            _hovered is { IsHeld: true }
+            || OffsetAt(e.GetPosition(_textView)) is not { } offset
             || (_hovered is { } current && IsHovered(current, offset))
         )
             return;
@@ -290,7 +311,7 @@ internal sealed class HoverController : IDisposable
     /// </summary>
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
-        if (_hovered is not { FromKeyboard: false } hovered)
+        if (_hovered is not { FromKeyboard: false, IsHeld: false } hovered)
             return;
         if (OffsetAt(e.GetPosition(_textView)) is not { } offset || !IsHovered(hovered, offset))
             HideSoon();
@@ -300,16 +321,66 @@ internal sealed class HoverController : IDisposable
 
     /// <summary>
     /// The pointer left the text or the popup: the popup closes after <see cref="s_hidingDelay"/> unless the pointer is
-    /// over it by then. Posted, as the pointer enters the other only after it left the one.
+    /// over it by then. Posted, as the pointer enters the other only after it left the one. A drag that selects the
+    /// popup's text leaves it too, when it crosses its edge.
     /// </summary>
     private void OnPointerExited(object? sender, PointerEventArgs e) =>
         _editor.Dispatcher.Post(() =>
         {
-            if (_hovered is { FromKeyboard: false } && !_popup.Root.IsPointerOver)
+            if (_hovered is { FromKeyboard: false, IsHeld: false } && !_popup.Root.IsPointerOver)
                 HideSoon();
         });
 
     private void OnPointerEnteredPopup(object? sender, PointerEventArgs e) => StayOpen();
+
+    /// <summary>
+    /// The user clicked into the popup, other than on an edge to resize it: it stays wherever the pointer goes, until a
+    /// click outside it or the window losing the focus.
+    /// </summary>
+    private void OnPointerPressedInPopup(object? sender, PointerPressedEventArgs e)
+    {
+        if (_hovered is not { } hovered || _frame.IsResizing)
+            return;
+        hovered.IsHeld = true;
+        StayOpen();
+        if (_watched is not null || TopLevel.GetTopLevel(_editor) is not { } window)
+            return;
+        _watched = window;
+        window.AddHandler(
+            InputElement.PointerPressedEvent,
+            OnPointerPressedInWindow,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true
+        );
+        if (window is WindowBase deactivates)
+            deactivates.Deactivated += OnClosingChange;
+    }
+
+    /// <summary>
+    /// A click outside the popup ends it, once the click is done: what it clicked takes the keyboard, or the text gets it
+    /// back from the popup.
+    /// </summary>
+    private void OnPointerPressedInWindow(object? sender, PointerPressedEventArgs e)
+    {
+        if (e.Source is Visual source && (source == _popup.Root || _popup.Root.IsVisualAncestorOf(source)))
+            return;
+        Hovered? hovered = _hovered;
+        _editor.Dispatcher.Post(() =>
+        {
+            if (_hovered == hovered)
+                Close();
+        });
+    }
+
+    private void Unwatch()
+    {
+        if (_watched is not { } window)
+            return;
+        _watched = null;
+        window.RemoveHandler(InputElement.PointerPressedEvent, OnPointerPressedInWindow);
+        if (window is WindowBase deactivates)
+            deactivates.Deactivated -= OnClosingChange;
+    }
 
     /// <summary>Closes the hover after the hiding delay, unless something keeps it open meanwhile.</summary>
     private void HideSoon()
@@ -461,6 +532,9 @@ internal sealed class HoverController : IDisposable
 
         /// <summary>Whether the user asked for it by key, at the caret, rather than by resting the pointer.</summary>
         public bool FromKeyboard { get; init; }
+
+        /// <summary>Whether the user clicked into the popup: then it stays wherever the pointer goes.</summary>
+        public bool IsHeld { get; set; }
 
         /// <summary>Cancels the server's request and the reading of its answer.</summary>
         public CancellationTokenSource Cancellation { get; } = new();

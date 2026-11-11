@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
+using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Styling;
@@ -204,6 +205,62 @@ public sealed class HoverTests(UiFixture ui)
             Popup(window).ShouldBeSameAs(popup);
             window.MoveMouse(window.PointAt(text.IndexOf("two", StringComparison.Ordinal)));
             await Wait.UntilAsync(() => Popup(window) is null);
+        });
+
+    [Fact]
+    public Task Clicked_into_to_select_its_text_the_popup_stays_wherever_the_pointer_goes_until_a_click_outside_or_typing() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            const string text = "one two\nthree";
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+            int three = text.IndexOf("three", StringComparison.Ordinal);
+            SelectableTextBlock paragraph = Paragraph(await HoverAsync(window, three, "three is a word in"));
+            Rect box = BoundsInWindow(paragraph);
+            var from = new Point(box.Left + 1, box.Center.Y);
+            var to = new Point(box.Left + 40, box.Center.Y);
+            window.MoveMouse(window.PointAt(three) + new Point(0, 5));
+            window.MoveMouse(from);
+
+            // A drag that selects its text, out over its edge and back: the popup stays.
+            window.Window.MouseDown(from, MouseButton.Left);
+            window.Window.MouseMove(to, RawInputModifiers.LeftMouseButton);
+            window.Window.MouseMove(window.PointAt(0), RawInputModifiers.LeftMouseButton);
+            await Task.Delay(TimeSpan.FromMilliseconds(500));
+            window.Window.MouseMove(to, RawInputModifiers.LeftMouseButton);
+            window.Window.MouseUp(to, MouseButton.Left);
+            window.Layout();
+            IsShown(paragraph).ShouldBeTrue();
+            paragraph.SelectedText.ShouldNotBeEmpty();
+
+            // Clicked into, it stays also over other text, which shows no hover of its own, as in VS Code.
+            window.MoveMouse(window.PointAt(0));
+            await Task.Delay(TimeSpan.FromMilliseconds(500));
+            window.Layout();
+            IsShown(paragraph).ShouldBeTrue();
+            paragraph.SelectedText.ShouldNotBeEmpty();
+
+            // A click outside it ends it.
+            window.Click(window.PointAt(0), MouseButton.Left);
+            await Wait.UntilAsync(() => Popup(window) is null);
+            EditorWindow.PartOf(editor).TextArea.IsFocused.ShouldBeTrue();
+
+            // So does typing, which goes into the text.
+            paragraph = Paragraph(await HoverAsync(window, three, "three is a word in"));
+            box = BoundsInWindow(paragraph);
+            window.MoveMouse(box.Center);
+            window.Click(box.Center, MouseButton.Left);
+            window.MoveMouse(window.PointAt(0));
+            await Task.Delay(TimeSpan.FromMilliseconds(500));
+            IsShown(paragraph).ShouldBeTrue();
+            int caret = editor.Selection.Caret;
+            window.Type("x");
+            Popup(window).ShouldBeNull();
+            document.Text.ShouldBe(text.Insert(caret, "x"));
         });
 
     [Fact]
@@ -523,6 +580,16 @@ public sealed class HoverTests(UiFixture ui)
         });
         return popup ?? throw new InvalidOperationException();
     }
+
+    /// <summary>The paragraph of the server's hover, "… is a word in …".</summary>
+    private static SelectableTextBlock Paragraph(PopupFrame popup) =>
+        popup
+            .GetVisualDescendants()
+            .OfType<SelectableTextBlock>()
+            .First(block => TextOf(block).Contains("is a word in", StringComparison.Ordinal));
+
+    /// <summary>Whether <paramref name="content"/> still shows: a new hover shows new content in the same frame.</summary>
+    private static bool IsShown(Visual content) => TopLevel.GetTopLevel(content) is not null;
 
     /// <summary>The hover's popup in the window's overlay layer; null while it is closed.</summary>
     private static PopupFrame? Popup(EditorWindow window) => PopupFrames.Find(window, "Hover");
