@@ -1139,6 +1139,34 @@ public sealed class CompletionTests(UiFixture ui)
             fake.LinesStartingWith("completion ").Count.ShouldBe(1);
         });
 
+    [Theory]
+    [InlineData(Key.Down, 2)]
+    [InlineData(Key.PageDown, 2)]
+    [InlineData(Key.Up, 0)]
+    [InlineData(Key.PageUp, 0)]
+    public Task With_one_item_the_keys_that_select_move_the_caret_and_leaving_the_line_ends_completion(
+        Key key,
+        int line
+    ) =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("ZeroDivisionError"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "above\n\nbelow");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Editor.Selection = new TextSelection(6);
+            window.Type("Zero");
+            await WaitForLabelsAsync(window, ["ZeroDivisionError"]);
+
+            // As in VS Code: selecting needs more than one item, so the key goes on to the text.
+            window.Press(key);
+
+            window.Editor.CaretPosition.Line.ShouldBe(line + 1);
+            List(window).ShouldBeNull();
+            document.Text.ShouldBe("above\nZero\nbelow");
+        });
+
     /// <summary>Makes the fake server answer completion with <paramref name="result"/>, until the document is disposed.</summary>
     [Fact]
     public Task Asked_by_key_an_empty_answer_says_No_suggestions_until_the_next_key() =>

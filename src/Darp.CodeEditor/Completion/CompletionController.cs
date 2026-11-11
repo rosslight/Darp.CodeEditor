@@ -158,7 +158,9 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>
     /// The keys of completion's list while it shows, from the editor's key handler while the text area has the
-    /// keyboard: the keys that select. The keys that commit are the keymap's, for <see cref="Accept"/>.
+    /// keyboard: the keys that select, while it shows more than one item. With one, they go on to the text, as in VS
+    /// Code, and a caret that leaves the line ends completion. The keys that commit are the keymap's, for
+    /// <see cref="Accept"/>.
     /// </summary>
     /// <returns>Whether the key was completion's.</returns>
     public bool OnKeyDown(KeyEventArgs e)
@@ -166,7 +168,7 @@ internal sealed class CompletionController : IDisposable
         // "No suggestions." shows until the next key.
         if (_session is null)
             HideMessage();
-        if (_session is not { IsShowing: true } session || e.KeyModifiers != KeyModifiers.None)
+        if (_session is not { IsShowing: true, Items.Count: > 1 } session || e.KeyModifiers != KeyModifiers.None)
             return false;
         int count = session.Items.Count;
         int page = _view.List.VisibleRows - 1;
