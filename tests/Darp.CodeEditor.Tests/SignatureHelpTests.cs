@@ -245,6 +245,37 @@ public sealed class SignatureHelpTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_click_that_moves_the_caret_ends_signature_help_and_a_key_that_moves_it_asks_again() =>
+        _ui.Run(async () =>
+        {
+            var time = new ManualTime();
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "call");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await CompletionTests.StartServingAsync(server, document);
+            window.Editor.Selection = new TextSelection(4);
+            window.Type("(xy");
+            await WaitForSignatureAsync(window, "first", "Calls with two.");
+            time.Advance(TimeSpan.FromMilliseconds(120));
+            await fake.WaitForAsync("signatureHelp ", 2);
+
+            // As in VS Code: a key that moves the caret asks again after the pause, a click ends it.
+            window.Press(Key.Left);
+            time.Advance(TimeSpan.FromMilliseconds(120));
+            await fake.WaitForAsync("signatureHelp ", 3);
+            Popup(window).ShouldNotBeNull();
+            // Between "(" and "x": a quarter of a character right of their boundary.
+            window.Click(window.PointAt(5) - new Point(window.TextView.WideSpaceWidth / 4, 0), MouseButton.Left);
+
+            window.Editor.Selection.ShouldBe(new TextSelection(5));
+            Popup(window).ShouldBeNull();
+            time.Advance(TimeSpan.FromMilliseconds(120));
+            await CompletionTests.BarrierAsync(server, fake);
+            fake.LinesStartingWith("signatureHelp ").Count.ShouldBe(3);
+        });
+
+    [Fact]
     public Task A_read_only_editor_ends_signature_help() =>
         _ui.Run(async () =>
         {

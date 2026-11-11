@@ -47,10 +47,10 @@ namespace Darp.CodeEditor.Completion;
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends completion, for every reason it ends: Escape, the caret leaving the line or moving back
-/// past the word, a selection, the editor becoming read-only, the list scrolling out of view, the editor losing the
-/// keyboard focus, a server that starts or stops serving the document, new colors, the list running out of matches, and
-/// the editor no longer showing the document. Ending it cancels the request still under way with
-/// <c>$/cancelRequest</c>, and so does a newer request; a late answer is dropped.
+/// past the word, a click or drag that moves the caret, a selection, the editor becoming read-only, the list scrolling
+/// out of view, the editor losing the keyboard focus, a server that starts or stops serving the document, new colors,
+/// the list running out of matches, and the editor no longer showing the document. Ending it cancels the request still
+/// under way with <c>$/cancelRequest</c>, and so does a newer request; a late answer is dropped.
 /// </para>
 /// </remarks>
 internal sealed class CompletionController : IDisposable
@@ -977,11 +977,18 @@ internal sealed class CompletionController : IDisposable
         return i == word.Length && i > exponent;
     }
 
+    /// <summary>
+    /// A caret moved by the keyboard filters, asks again or ends completion; one moved by the pointer, as by a click,
+    /// ends it, as in VS Code.
+    /// </summary>
     private void OnCaretPositionChanged(object? sender, EventArgs e)
     {
         if (_quiet is { } quiet && _textArea.Caret.Offset != quiet.End)
             _quiet = null;
-        Update();
+        if (_editor.PointerMovesCaret)
+            Close();
+        else
+            Update();
     }
 
     /// <summary>

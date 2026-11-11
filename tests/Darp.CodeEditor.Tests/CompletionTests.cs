@@ -1118,6 +1118,27 @@ public sealed class CompletionTests(UiFixture ui)
             await Wait.UntilAsync(() => List(window) is null);
         });
 
+    [Fact]
+    public Task A_click_that_moves_the_caret_ends_completion_and_asks_nothing() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("print", "property"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Type("pri");
+            await WaitForLabelsAsync(window, ["print"]);
+
+            // Between "p" and "r": a quarter of a character right of their boundary.
+            window.Click(window.PointAt(1) - new Point(window.TextView.WideSpaceWidth / 4, 0), MouseButton.Left);
+
+            window.Editor.Selection.ShouldBe(new TextSelection(1));
+            List(window).ShouldBeNull();
+            await BarrierAsync(server, fake);
+            fake.LinesStartingWith("completion ").Count.ShouldBe(1);
+        });
+
     /// <summary>Makes the fake server answer completion with <paramref name="result"/>, until the document is disposed.</summary>
     [Fact]
     public Task Asked_by_key_an_empty_answer_says_No_suggestions_until_the_next_key() =>

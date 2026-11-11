@@ -280,6 +280,28 @@ public class CodeEditor : TemplatedControl
         AddHandler(TextInputEvent, OnTextInputTunnel, RoutingStrategies.Tunnel);
         // A click ends the wait for a sequence's second key.
         AddHandler(PointerPressedEvent, (_, _) => SetPending(null), RoutingStrategies.Tunnel, handledEventsToo: true);
+        TrackPointer(PointerPressedEvent);
+        TrackPointer(PointerMovedEvent);
+        TrackPointer(PointerReleasedEvent);
+
+        // The caret that the text area moves while it handles a pointer event moves by the pointer: tunneling, the
+        // event reaches the editor before the text area, and bubbling after it.
+        void TrackPointer<T>(RoutedEvent<T> pointerEvent)
+            where T : RoutedEventArgs
+        {
+            AddHandler(
+                pointerEvent,
+                (_, _) => PointerMovesCaret = true,
+                RoutingStrategies.Tunnel,
+                handledEventsToo: true
+            );
+            AddHandler(
+                pointerEvent,
+                (_, _) => PointerMovesCaret = false,
+                RoutingStrategies.Bubble,
+                handledEventsToo: true
+            );
+        }
     }
 
     /// <summary>
@@ -373,6 +395,12 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>The semantic colors of the shown document, for benchmarks; null while it shows none.</summary>
     internal SemanticHighlighter? SemanticHighlighter => _semantic;
+
+    /// <summary>
+    /// Whether the caret moves by the pointer now, as a click or a drag moves it: while the editor routes a pointer
+    /// event. Completion and signature help end then, as in VS Code.
+    /// </summary>
+    internal bool PointerMovesCaret { get; private set; }
 
     /// <summary>
     /// Scrolls <paramref name="range"/> into view: not at all when it is visible, centered when it is not. A range
