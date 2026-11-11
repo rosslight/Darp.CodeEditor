@@ -79,9 +79,10 @@ namespace Darp.CodeEditor;
 /// </para>
 /// <para>
 /// The editor's commands run by <see cref="Keymap"/>, VS Code's keys by default: completion (Ctrl+Space), the hover at
-/// the caret (Ctrl+K Ctrl+I), signature help (Ctrl+Shift+Space), search (Ctrl+F, Ctrl+H, F3, Shift+F3) and comments
-/// (Ctrl+/). AvaloniaEdit handles editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation and indentation
-/// (Tab, Shift+Tab). Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A right click opens the
+/// the caret (Ctrl+K Ctrl+I), signature help (Ctrl+Shift+Space), search (Ctrl+F, Ctrl+H, F3, Shift+F3), the search
+/// bar's options (Alt+C, Alt+W, Alt+R, also from the text) and comments (Ctrl+/). AvaloniaEdit handles editing, the
+/// clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation and indentation (Tab, Shift+Tab). Other keys, such as F5 or
+/// Ctrl+S, go on to the app's key bindings. A right click opens the
 /// editor's context menu, with the keys of its items and in the UI culture's language: Show Hover, Cut, Copy, Paste,
 /// Select All, Toggle Line Comment, Find and Replace. As in VS Code, a right click outside the selection moves the
 /// caret there first. The menu is the editor's <c>ContextFlyout</c>, as in Avalonia's text box: an app replaces it with
@@ -886,9 +887,29 @@ public class CodeEditor : TemplatedControl
             case CodeEditorCommands.CommentLine when inText:
                 _helpers?.ToggleComment();
                 return true;
+            // From the text or the search bar.
+            case CodeEditorCommands.ToggleFindCaseSensitive
+            or CodeEditorCommands.ToggleFindWholeWord
+            or CodeEditorCommands.ToggleFindRegex:
+                return ToggleSearchOption(command);
             default:
                 return false;
         }
+    }
+
+    /// <summary>Turns one of the search bar's options on or off, as Alt+C, Alt+W and Alt+R do.</summary>
+    /// <returns>Whether there is a document to search.</returns>
+    private bool ToggleSearchOption(string command)
+    {
+        if (CreatedSearchBar() is not { } bar)
+            return false;
+        if (command == CodeEditorCommands.ToggleFindCaseSensitive)
+            bar.ToggleMatchCase();
+        else if (command == CodeEditorCommands.ToggleFindWholeWord)
+            bar.ToggleWholeWord();
+        else
+            bar.ToggleRegex();
+        return true;
     }
 
     /// <summary>Typed text, before AvaloniaEdit's text area takes it: a commit character commits completion's item.</summary>

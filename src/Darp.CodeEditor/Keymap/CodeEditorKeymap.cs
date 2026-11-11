@@ -80,6 +80,7 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+h (alt+cmd+f)</term><description><see cref="CodeEditorCommands.Replace"/></description></item>
     /// <item><term>f3, shift+f3</term><description><see cref="CodeEditorCommands.FindNext"/>, <see cref="CodeEditorCommands.FindPrevious"/></description></item>
     /// <item><term>ctrl+/ (cmd+/)</term><description><see cref="CodeEditorCommands.CommentLine"/></description></item>
+    /// <item><term>alt+c, alt+w, alt+r (alt+cmd+c, alt+cmd+w, alt+cmd+r)</term><description><see cref="CodeEditorCommands.ToggleFindCaseSensitive"/>, <see cref="CodeEditorCommands.ToggleFindWholeWord"/>, <see cref="CodeEditorCommands.ToggleFindRegex"/>, from the text or the search bar</description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default => s_default.Value;
@@ -180,6 +181,12 @@ public sealed class CodeEditorKeymap
         yield return new("f3", CodeEditorCommands.FindNext);
         yield return new("shift+f3", CodeEditorCommands.FindPrevious);
         yield return new($"{command}+/", CodeEditorCommands.CommentLine);
+
+        // The search bar's options, from the text or the bar.
+        string toggle = mac ? "alt+cmd" : "alt";
+        yield return new($"{toggle}+c", CodeEditorCommands.ToggleFindCaseSensitive);
+        yield return new($"{toggle}+w", CodeEditorCommands.ToggleFindWholeWord);
+        yield return new($"{toggle}+r", CodeEditorCommands.ToggleFindRegex);
     }
 }
 
@@ -270,4 +277,21 @@ public static class CodeEditorCommands
 
     /// <summary>Comments or uncomments the selected lines.</summary>
     public const string CommentLine = "editor.action.commentLine";
+
+    /// <summary>
+    /// Turns the search bar's Match Case on or off, also while the bar is closed, for the next search. An open bar
+    /// searches again, and leaves the selection where it is.
+    /// </summary>
+    public const string ToggleFindCaseSensitive = "toggleFindCaseSensitive";
+
+    /// <summary>
+    /// Turns the search bar's Match Whole Word on or off, as <see cref="ToggleFindCaseSensitive"/> does Match Case.
+    /// </summary>
+    public const string ToggleFindWholeWord = "toggleFindWholeWord";
+
+    /// <summary>
+    /// Turns the search bar's Use Regular Expression on or off, as <see cref="ToggleFindCaseSensitive"/> does Match
+    /// Case.
+    /// </summary>
+    public const string ToggleFindRegex = "toggleFindRegex";
 }

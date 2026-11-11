@@ -208,6 +208,18 @@ internal sealed class SearchBar : UserControl
     /// <summary>Selects the previous match, opening the bar if it is closed, without taking the keyboard.</summary>
     public void FindPrevious(string? text) => Go(Move.Previous, text);
 
+    /// <summary>
+    /// Turns Match Case on or off, as its key does, also while the bar is closed, for the next search. Unlike a click
+    /// on the toggle, the key leaves the selection where it is, as in VS Code.
+    /// </summary>
+    public void ToggleMatchCase() => Toggle(_matchCase);
+
+    /// <summary>Turns Match Whole Word on or off, as <see cref="ToggleMatchCase"/> does Match Case.</summary>
+    public void ToggleWholeWord() => Toggle(_wholeWord);
+
+    /// <summary>Turns Use Regular Expression on or off, as <see cref="ToggleMatchCase"/> does Match Case.</summary>
+    public void ToggleRegex() => Toggle(_regex);
+
     /// <summary>Closes the bar, and gives the keyboard back to the text.</summary>
     public void Close()
     {
@@ -583,6 +595,16 @@ internal sealed class SearchBar : UserControl
         e.Handled = true;
     }
 
+    /// <summary>
+    /// Turns <paramref name="option"/> on or off, and keeps the move that a search under way still has to make.
+    /// </summary>
+    private void Toggle(ToggleButton option)
+    {
+        Move move = _move;
+        option.IsChecked = option.IsChecked != true;
+        _move = move;
+    }
+
     private void FindNext() => Go(Move.Next, null);
 
     private void FindPrevious() => Go(Move.Previous, null);
@@ -601,13 +623,21 @@ internal sealed class SearchBar : UserControl
         _replace.PlaceholderText = Strings.Default.Replace;
         _replaceOne.Content = Strings.Default.Replace;
         _replaceAll.Content = Strings.Default.ReplaceAll;
-        ToolTip.SetTip(_matchCase, Strings.Default.MatchCase);
-        ToolTip.SetTip(_wholeWord, Strings.Default.MatchWholeWord);
-        ToolTip.SetTip(_regex, Strings.Default.UseRegularExpression);
+        ToolTip.SetTip(_matchCase, WithKeys(Strings.Default.MatchCase, CodeEditorCommands.ToggleFindCaseSensitive));
+        ToolTip.SetTip(_wholeWord, WithKeys(Strings.Default.MatchWholeWord, CodeEditorCommands.ToggleFindWholeWord));
+        ToolTip.SetTip(_regex, WithKeys(Strings.Default.UseRegularExpression, CodeEditorCommands.ToggleFindRegex));
         ToolTip.SetTip(_previous, Strings.Default.PreviousMatch);
         ToolTip.SetTip(_next, Strings.Default.NextMatch);
         ToolTip.SetTip(_close, Strings.Default.CloseSearch);
     }
+
+    /// <summary>
+    /// A toggle's text with the keys that the editor's keymap binds to its command, as VS Code shows them.
+    /// </summary>
+    private string WithKeys(string text, string command) =>
+        _shown?.Editor.Keymap.GesturesOf(command) is { Count: > 0 } keys
+            ? $"{text} ({string.Join(' ', keys.Select(key => key.ToString("p", null)))})"
+            : text;
 
     private static Button IconButton(Geometry icon, Action action)
     {

@@ -348,6 +348,39 @@ public sealed class SearchTests(UiFixture ui)
             bar.Message.ShouldBeNull();
         });
 
+    [Fact]
+    public Task Alt_C_W_and_R_toggle_the_options_from_the_text_and_from_the_query_without_moving_the_selection() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("|a.b A.b axb zaxb", CodeLanguage.PlainText);
+            KeyModifiers toggle = OperatingSystem.IsMacOS() ? KeyModifiers.Alt | KeyModifiers.Meta : KeyModifiers.Alt;
+
+            // From the text, with the bar closed: the next search uses it.
+            window.Press(Key.C, toggle);
+            SearchBar bar = BarOf(window);
+            bar.IsOpen.ShouldBeFalse();
+            bar.MatchCaseToggle.IsChecked.ShouldBe(true);
+
+            // As in VS Code, the toggles name their keys.
+            window.Editor.OpenSearch();
+            ToolTip
+                .GetTip(bar.MatchCaseToggle)
+                .ShouldBe($"Match Case ({new KeyGesture(Key.C, toggle).ToString("p", null)})");
+            window.Type("a.b");
+            await Wait.UntilAsync(() => bar.Count == "1 of 1");
+
+            // From the query, which keeps its text.
+            window.Press(Key.C, toggle);
+            await Wait.UntilAsync(() => bar.Count == "1 of 2");
+            window.Press(Key.R, toggle);
+            await Wait.UntilAsync(() => bar.Count == "1 of 4");
+            window.Press(Key.W, toggle);
+            await Wait.UntilAsync(() => bar.Count == "1 of 3");
+            bar.FindBox.Text.ShouldBe("a.b");
+            bar.FindBox.IsFocused.ShouldBeTrue();
+            window.Editor.Selection.ShouldBe(new TextSelection(0, 3));
+        });
+
     private static SearchBar BarOf(EditorWindow window) =>
         window.Editor.GetVisualDescendants().OfType<SearchBar>().Single();
 
