@@ -162,6 +162,65 @@ public sealed class CompletionTests(UiFixture ui)
             document.Text.ShouldBe("[\n  xyl,\n  qab,\n  cmd,\n  12\n]\n// note w\n");
         });
 
+    /// <summary>Languages with JSON's grammar, and where typing opens completion in them.</summary>
+    public static TheoryData<string, bool, bool, bool> QuickSuggestionLanguages =>
+        new()
+        {
+            // VS Code's default; JSON's, which adds strings; and comments only.
+            { "default", true, false, false },
+            { "json", true, false, true },
+            { "comments", false, true, false },
+        };
+
+    [Theory]
+    [MemberData(nameof(QuickSuggestionLanguages))]
+    public Task Typing_opens_the_list_in_code_comments_and_strings_as_the_languages_quick_suggestions_say(
+        string language,
+        bool inCode,
+        bool inComments,
+        bool inStrings
+    ) =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("xenon"));
+            CodeLanguage json = CodeLanguage.Json;
+            CodeLanguage codeLanguage = language switch
+            {
+                "json" => json,
+                "comments" => new CodeLanguage("comments", json.Grammar, json.Configuration)
+                {
+                    QuickSuggestions = new QuickSuggestions(Other: false, Comments: true, Strings: false),
+                },
+                _ => new CodeLanguage("default", json.Grammar, json.Configuration),
+            };
+            const string text = "[\n  \"\",\n  \n]\n// \n";
+            using CodeDocument document = server.CreateDocument(codeLanguage, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            // JSON's comment color: the grammar knows the comment.
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return window.ColorAt(text.IndexOf("//", StringComparison.Ordinal)) == Color.Parse("#008000");
+            });
+
+            (await OpensAsync(document.Text.IndexOf("\"\"", StringComparison.Ordinal) + 1)).ShouldBe(inStrings);
+            (await OpensAsync(document.Text.IndexOf("  \n]", StringComparison.Ordinal) + 2)).ShouldBe(inCode);
+            (await OpensAsync(document.Text.IndexOf("// ", StringComparison.Ordinal) + 3)).ShouldBe(inComments);
+
+            // Whether typing "x" at the offset asks for completion.
+            async Task<bool> OpensAsync(int offset)
+            {
+                int asked = fake.LinesStartingWith("completion ").Count;
+                window.Editor.Selection = new TextSelection(offset);
+                window.Type("x");
+                await BarrierAsync(server, fake);
+                window.Press(Key.Escape);
+                return fake.LinesStartingWith("completion ").Count > asked;
+            }
+        });
+
     [Fact]
     public Task Backspace_alone_opens_nothing_and_typing_after_it_opens_the_list_again() =>
         _ui.Run(async () =>

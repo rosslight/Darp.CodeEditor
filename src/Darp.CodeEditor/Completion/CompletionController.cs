@@ -22,9 +22,10 @@ namespace Darp.CodeEditor.Completion;
 /// <remarks>
 /// <para>
 /// Completion opens on Ctrl+Space, also on macOS, on the server's trigger characters, and, as VS Code's quick
-/// suggestions, on a word character typed outside a comment at a word's end or as its first character; Backspace opens
-/// nothing. Until the server answers, nothing shows; what is typed meanwhile filters its answer. The list is the
-/// server's for where it was asked: typing on filters and ranks it on the client, with the matching of
+/// suggestions, on a word character typed at a word's end or as its first character, in code, comments or strings as
+/// the language's <see cref="CodeLanguage.QuickSuggestions"/> say; Backspace opens nothing. Until the server answers,
+/// nothing shows; what is typed meanwhile filters its answer. The list is the server's for where it was asked: typing
+/// on filters and ranks it on the client, with the matching of
 /// <see cref="CompletionMatcher"/>, and selects the first item, or the one the server preselects among the best. As in
 /// VS Code, typing on ranks the items that show, and anything else, such as Backspace, all of the answer's items; up
 /// to 2,000 ranked items tolerate a typo. The matching runs off the UI thread, whatever the list's length: each change
@@ -991,12 +992,15 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>
     /// Whether the character just typed opens completion, as VS Code's quick suggestions decide: it is a word
-    /// character that ends a word, or that is the first character of a word, and the word is no number. Not in a
-    /// comment; VS Code asks there too in strings, as its JSON and YAML settings say. Not while typing on in a word
-    /// that a request found nothing for.
+    /// character that ends a word, or that is the first character of a word, and the word is no number. In code,
+    /// comments and strings as the language's <see cref="CodeLanguage.QuickSuggestions"/> say, by the token of the
+    /// character typed. Not while typing on in a word that a request found nothing for.
     /// </summary>
     private bool OpensByTyping(char typed)
     {
+        QuickSuggestions where = _document.Language.QuickSuggestions;
+        if (where is { Other: false, Comments: false, Strings: false })
+            return false;
         int caret = _textArea.Caret.Offset;
         TextRange before = WordBefore(caret);
         if (!WordCharacters.IsWordCharacter(typed) || before.Length == 0)
@@ -1008,7 +1012,15 @@ internal sealed class CompletionController : IDisposable
             return false;
         if (IsNumber(_buffer.GetText(word.Start, word.Length)))
             return false;
-        return _highlighter.ContextAt(caret) is not { Before: TokenType.Comment };
+        // Everywhere: no need to tokenize.
+        if (where is { Other: true, Comments: true, Strings: true })
+            return true;
+        return (_highlighter.ContextAt(caret)?.Before ?? TokenType.Other) switch
+        {
+            TokenType.Comment => where.Comments,
+            TokenType.String => where.Strings,
+            _ => where.Other,
+        };
     }
 
     /// <summary>
