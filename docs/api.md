@@ -103,7 +103,8 @@ rather than its view belong to the document, as in Monaco and CodeMirror.
 
 **Built in, with no settings:** current-line highlight, bracket matching, auto-closing brackets and quotes,
 auto-indent, whitespace shown inside the selection, scrolling past the last line, a context menu with Show Hover, Cut,
-Copy, Paste, Select All, Toggle Line Comment, Find and Replace in English or German, completion's snippets with their stops (section 6), and the look of errors, hover and completion
+Copy, Paste, Select All, Toggle Line Comment, Find and Replace in English or German, VS Code's words for double-click
+and for deleting by words (Ctrl+Backspace, Ctrl+Delete; Alt on macOS), completion's snippets with their stops (section 6), and the look of errors, hover and completion
 below.
 
 **Caret and scroll position** belong to the editor, as in Monaco, and last as long as it does, like a list's scroll

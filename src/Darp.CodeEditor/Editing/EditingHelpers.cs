@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using Avalonia;
 using Avalonia.Input;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
@@ -44,6 +45,8 @@ internal sealed class EditingHelpers : IDisposable
     /// <summary>The pair to close once the character being typed is in.</summary>
     private AutoClosingPair? _closing;
 
+    private readonly WordSelection _wordSelection;
+
     public EditingHelpers(TextArea textArea, CodeDocument document, BackgroundTextMateHighlighter highlighter)
     {
         _textArea = textArea;
@@ -52,6 +55,7 @@ internal sealed class EditingHelpers : IDisposable
         textArea.TextEntering += OnTextEntering;
         textArea.TextEntered += OnTextEntered;
         textArea.Caret.PositionChanged += OnCaretPositionChanged;
+        _wordSelection = new WordSelection(textArea);
     }
 
     private TextDocument Buffer => _textArea.Document;
@@ -67,14 +71,51 @@ internal sealed class EditingHelpers : IDisposable
         _textArea.TextEntering -= OnTextEntering;
         _textArea.TextEntered -= OnTextEntered;
         _textArea.Caret.PositionChanged -= OnCaretPositionChanged;
+        _wordSelection.Dispose();
         _autoClosed.Clear();
     }
 
-    /// <summary>Backspace, from the editor's key handler, while the text area has the keyboard.</summary>
+    /// <summary>
+    /// Backspace, and deleting by words, from the editor's key handler, while the text area has the keyboard. Words go
+    /// with Ctrl+Backspace and Ctrl+Delete, or Alt on macOS, the platform's key for moving by words.
+    /// </summary>
     public void OnKeyDown(KeyEventArgs e)
     {
+        KeyModifiers words =
+            Application.Current?.PlatformSettings?.HotkeyConfiguration.WholeWordTextActionModifiers
+            ?? KeyModifiers.Control;
         if (e.Key == Key.Back && e.KeyModifiers == KeyModifiers.None && TypingOffsets() is { } offsets)
             e.Handled = DeletePairs(offsets);
+        else if (e.Key is Key.Back or Key.Delete && e.KeyModifiers == words)
+            e.Handled = DeleteWord(left: e.Key == Key.Back);
+    }
+
+    /// <summary>
+    /// Deletes the selection, or by VS Code's <c>deleteWordLeft</c> and <c>deleteWordRight</c>
+    /// (<see cref="WordRules"/>): before the caret, an empty pair that the editor closed goes as a whole first.
+    /// </summary>
+    /// <returns>Whether it handled the key: not in an empty rectangle selection, which AvaloniaEdit keeps.</returns>
+    private bool DeleteWord(bool left)
+    {
+        if (_textArea.Selection is RectangleSelection { Length: 0 })
+            return false;
+        if (!_textArea.Selection.IsEmpty)
+        {
+            _textArea.Selection.ReplaceSelectionWithText(string.Empty);
+            return true;
+        }
+        int caret = _textArea.Caret.Offset;
+        if (left && DeletePairs([caret]))
+            return true;
+        if (
+            (left ? WordRules.DeleteWordLeft(Buffer, caret) : WordRules.DeleteWordRight(Buffer, caret)) is { } range
+            && CanChange(range.Start, range.Length)
+        )
+        {
+            Buffer.Remove(range.Start, range.Length);
+            _textArea.Caret.BringCaretToView();
+        }
+        return true;
     }
 
     private void OnTextEntering(object? sender, TextInputEventArgs e)
