@@ -85,10 +85,12 @@ namespace Darp.CodeEditor;
 /// the caret (Ctrl+K Ctrl+I), signature help (Ctrl+Shift+Space), search (Ctrl+F, Ctrl+H, F3, Shift+F3) and comments
 /// (Ctrl+/). Ctrl+D selects the word at the caret, the first step of VS Code's Ctrl+D, which goes on to add carets at
 /// the next matches. Ctrl+Left and Ctrl+Right, Alt on macOS, move by VS Code's words, and select with Shift.
-/// AvaloniaEdit handles editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A) and navigation, and the editor
-/// indents as VS Code does: Tab replaces a selection inside a line and indents whole lines, and Shift+Tab outdents.
-/// Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A right click opens the editor's
-/// context menu, with the keys of its items and in the UI culture's language: Show Hover, Cut, Copy, Paste,
+/// AvaloniaEdit's keys edit, navigate and use the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), as VS Code's do: Tab
+/// replaces a selection inside a line and indents whole lines, Shift+Tab outdents, and without a selection Ctrl+C and
+/// Ctrl+X take the caret's whole line, which Ctrl+V pastes above the caret's line
+/// (<see cref="EmptySelectionClipboard"/>). Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A
+/// right click opens the
+/// editor's context menu, with the keys of its items and in the UI culture's language: Show Hover, Cut, Copy, Paste,
 /// Select All, Toggle Line Comment, Find and Replace. As in VS Code, a right click outside the selection moves the
 /// caret there first. The menu is the editor's <c>ContextFlyout</c>, as in Avalonia's text box: an app replaces it with
 /// its own <c>ContextFlyout</c> or <c>ContextMenu</c>, or removes it by setting <c>ContextFlyout</c> to null. For an
@@ -152,6 +154,12 @@ public class CodeEditor : TemplatedControl
     /// <summary>Defines the <see cref="PendingKeys"/> property.</summary>
     public static readonly DirectProperty<CodeEditor, KeyGesture?> PendingKeysProperty =
         AvaloniaProperty.RegisterDirect<CodeEditor, KeyGesture?>(nameof(PendingKeys), editor => editor.PendingKeys);
+
+    /// <summary>Defines the <see cref="EmptySelectionClipboard"/> property.</summary>
+    public static readonly StyledProperty<bool> EmptySelectionClipboardProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        bool
+    >(nameof(EmptySelectionClipboard), defaultValue: true);
 
     /// <summary>Defines the <see cref="UseTabStops"/> property.</summary>
     public static readonly StyledProperty<bool> UseTabStopsProperty = AvaloniaProperty.Register<CodeEditor, bool>(
@@ -222,6 +230,12 @@ public class CodeEditor : TemplatedControl
     /// </summary>
     private readonly RoutedCommandBinding[] _searchCommands;
 
+    /// <summary>
+    /// AvaloniaEdit's clipboard commands, for the part's text area, ahead of its own: the editor's copy, cut and paste,
+    /// by key, from the menu and from code.
+    /// </summary>
+    private readonly RoutedCommandBinding[] _clipboardCommands;
+
     /// <summary>The editor's own context menu, as its context flyout until the app sets another.</summary>
     private readonly EditorMenu _defaultMenu;
 
@@ -286,6 +300,12 @@ public class CodeEditor : TemplatedControl
             new(ApplicationCommands.Replace, (_, _) => OpenSearch(replace: true)),
             new(SearchCommands.FindNext, (_, _) => FindNext(previous: false)),
             new(SearchCommands.FindPrevious, (_, _) => FindNext(previous: true)),
+        ];
+        _clipboardCommands =
+        [
+            new(ApplicationCommands.Copy, (_, _) => _helpers?.Copy()),
+            new(ApplicationCommands.Cut, (_, _) => _helpers?.Cut()),
+            new(ApplicationCommands.Paste, (_, _) => _helpers?.Paste()),
         ];
         // Ahead of AvaloniaEdit's own keys, which its text area handles as they bubble, and of its typed text.
         AddHandler(KeyDownEvent, OnKeyDownTunnel, RoutingStrategies.Tunnel);
@@ -395,6 +415,18 @@ public class CodeEditor : TemplatedControl
         set => SetValue(UseTabStopsProperty, value);
     }
 
+    /// <summary>
+    /// Whether copying or cutting without a selection takes the caret's whole line with its line break, VS Code's
+    /// <c>editor.emptySelectionClipboard</c>. A line copied so pastes as a whole line above the caret's line, while
+    /// nothing is selected and the clipboard still holds it. Without it, copy and cut need a selection. Default: true,
+    /// as in VS Code.
+    /// </summary>
+    public bool EmptySelectionClipboard
+    {
+        get => GetValue(EmptySelectionClipboardProperty);
+        set => SetValue(EmptySelectionClipboardProperty, value);
+    }
+
     /// <summary>The semantic colors of the shown document, for benchmarks; null while it shows none.</summary>
     internal SemanticHighlighter? SemanticHighlighter => _semantic;
 
@@ -466,21 +498,30 @@ public class CodeEditor : TemplatedControl
             bar.Open(replace && !IsReadOnly, SelectedLineText(part.TextArea));
     }
 
-    /// <summary>Moves the selection to the clipboard, as Ctrl+X does. No effect in a read-only editor.</summary>
+    /// <summary>
+    /// Moves the selection to the clipboard, as Ctrl+X does; without one, the caret's line, with
+    /// <see cref="EmptySelectionClipboard"/>. No effect in a read-only editor.
+    /// </summary>
     public void Cut()
     {
         if (_shown is not null)
             _part?.Cut();
     }
 
-    /// <summary>Copies the selection to the clipboard, as Ctrl+C does.</summary>
+    /// <summary>
+    /// Copies the selection to the clipboard, as Ctrl+C does; without one, the caret's line, with
+    /// <see cref="EmptySelectionClipboard"/>.
+    /// </summary>
     public void Copy()
     {
         if (_shown is not null)
             _part?.Copy();
     }
 
-    /// <summary>Replaces the selection with the clipboard's text, as Ctrl+V does. No effect in a read-only editor.</summary>
+    /// <summary>
+    /// Replaces the selection with the clipboard's text, as Ctrl+V does; a line that the editor copied without a
+    /// selection goes in above the caret's line. No effect in a read-only editor.
+    /// </summary>
     public void Paste()
     {
         if (_shown is not null)
@@ -506,6 +547,8 @@ public class CodeEditor : TemplatedControl
             previous.TemplateApplied -= OnPartTemplateApplied;
             foreach (RoutedCommandBinding binding in _searchCommands)
                 previous.TextArea.CommandBindings.Remove(binding);
+            foreach (RoutedCommandBinding binding in _clipboardCommands)
+                previous.TextArea.CommandBindings.Remove(binding);
         }
         _part = e.NameScope.Find<TextEditor>("PART_TextEditor");
         _root = e.NameScope.Find<Panel>("PART_Root");
@@ -529,6 +572,9 @@ public class CodeEditor : TemplatedControl
             part.TemplateApplied += OnPartTemplateApplied;
             foreach (RoutedCommandBinding binding in _searchCommands)
                 part.TextArea.CommandBindings.Add(binding);
+            // First, as the first binding of a command runs.
+            for (int i = 0; i < _clipboardCommands.Length; i++)
+                part.TextArea.CommandBindings.Insert(i, _clipboardCommands[i]);
             RemoveDeleteLine(part.TextArea);
         }
         UpdateShownDocument();

@@ -1,7 +1,10 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
+using Avalonia.Logging;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
@@ -64,6 +67,9 @@ internal sealed class EditingHelpers : IDisposable
     /// <summary>The closing text to type in a step of its own once the opening is in.</summary>
     private (AutoClosingPair Pair, int[] Offsets)? _closeAfter;
 
+    /// <summary>Whether the editor stopped showing the document: a paste that reads the clipboard meanwhile drops it.</summary>
+    private bool _disposed;
+
     private readonly WordSelection _wordSelection;
 
     public EditingHelpers(
@@ -100,6 +106,7 @@ internal sealed class EditingHelpers : IDisposable
         _wordSelection.Dispose();
         _undo.Dispose();
         _autoClosed.Clear();
+        _disposed = true;
     }
 
     /// <summary>
@@ -453,6 +460,131 @@ internal sealed class EditingHelpers : IDisposable
             return false;
         _textArea.Caret.BringCaretToView();
         return true;
+    }
+
+    /// <summary>
+    /// Copies the selection, as Ctrl+C does; without one, with <see cref="CodeEditor.EmptySelectionClipboard"/>, the
+    /// caret's line with a line break, as VS Code does, and otherwise nothing.
+    /// </summary>
+    public void Copy()
+    {
+        if (CopiedText() is { } copied)
+            SetClipboard(copied.Text, copied.IsLine);
+    }
+
+    /// <summary>
+    /// Moves what <see cref="Copy"/> copies to the clipboard, as Ctrl+X does, in a step of its own: without a
+    /// selection, the caret's line with the line break after it, or the last line with the one before it, as VS Code's
+    /// cut does. Nothing in a read-only editor.
+    /// </summary>
+    public void Cut()
+    {
+        if (_editor.IsReadOnly || CopiedText() is not { } copied)
+            return;
+        _undo.Edit(
+            EditKind.Other,
+            stopBefore: true,
+            () =>
+            {
+                Selection selection = _textArea.Selection;
+                if (copied.IsLine)
+                {
+                    DocumentLine line = Buffer.GetLineByOffset(_textArea.Caret.Offset);
+                    (int start, int end) =
+                        line.NextLine is { } next ? (line.Offset, next.Offset)
+                        : line.PreviousLine is { } previous ? (previous.EndOffset, line.EndOffset)
+                        : (line.Offset, line.EndOffset);
+                    selection = Selection.Create(_textArea, start, end);
+                }
+                // Through a selection, which leaves read-only text and a long line's collapsed rest.
+                selection.ReplaceSelectionWithText(string.Empty);
+                _textArea.Caret.BringCaretToView();
+            },
+            stopAfter: true
+        );
+        SetClipboard(copied.Text, copied.IsLine);
+    }
+
+    /// <summary>
+    /// Pastes the clipboard's text, as Ctrl+V does, in a step of its own, once the clipboard has given it: over the
+    /// selection, or, when it is the line that <see cref="Copy"/> or <see cref="Cut"/> took without a selection and
+    /// nothing is selected, as a whole line above the caret's line, which keeps the caret where it is, as VS Code's
+    /// paste does. Line breaks become the document's. Nothing in a read-only editor.
+    /// </summary>
+    public async void Paste()
+    {
+        if (_editor.IsReadOnly || TopLevel.GetTopLevel(_textArea)?.Clipboard is not { } clipboard)
+            return;
+        string? text;
+        try
+        {
+            text = await clipboard.TryGetTextAsync();
+        }
+        catch (Exception e)
+        {
+            Logger
+                .TryGet(LogEventLevel.Warning, AssetFiles.LogArea)
+                ?.Log(this, "Reading the clipboard failed: {Exception}", e);
+            return;
+        }
+        if (_disposed || _editor.IsReadOnly || string.IsNullOrEmpty(text) || !CanInsert(_textArea.Caret.Offset))
+            return;
+        bool asLine =
+            _editor.EmptySelectionClipboard
+            && CopiedLines.IsLine(text)
+            && _textArea.Selection is { IsEmpty: true } and not RectangleSelection
+            && text.IndexOf('\n') == text.Length - 1;
+        string pasted = TextUtilities.NormalizeNewLines(
+            text,
+            TextUtilities.GetNewLineFromDocument(Buffer, _textArea.Caret.Line)
+        );
+        _undo.Edit(
+            EditKind.Other,
+            stopBefore: true,
+            () =>
+            {
+                if (asLine)
+                    Buffer.Insert(Buffer.GetLineByOffset(_textArea.Caret.Offset).Offset, pasted);
+                else
+                    _textArea.Selection.ReplaceSelectionWithText(pasted);
+                _textArea.Caret.BringCaretToView();
+            },
+            stopAfter: true
+        );
+    }
+
+    /// <summary>
+    /// What copy takes, with the app's line breaks: the selection; without one, with
+    /// <see cref="CodeEditor.EmptySelectionClipboard"/>, the caret's line and a line break, also after the last line;
+    /// otherwise nothing.
+    /// </summary>
+    private (string Text, bool IsLine)? CopiedText()
+    {
+        if (!_textArea.Selection.IsEmpty)
+            return (TextUtilities.NormalizeNewLines(_textArea.Selection.GetText(), Environment.NewLine), false);
+        if (!_editor.EmptySelectionClipboard)
+            return null;
+        return (Buffer.GetText(Buffer.GetLineByOffset(_textArea.Caret.Offset)) + Environment.NewLine, true);
+    }
+
+    /// <summary>
+    /// Puts <paramref name="text"/> on the clipboard, and notes whether it is a whole line. The platform's clipboard
+    /// can fail now and then; the text is then not copied, as in AvaloniaEdit.
+    /// </summary>
+    private async void SetClipboard(string text, bool isLine)
+    {
+        CopiedLines.Copied(text, isLine);
+        try
+        {
+            if (TopLevel.GetTopLevel(_textArea)?.Clipboard is { } clipboard)
+                await clipboard.SetTextAsync(text);
+        }
+        catch (Exception e)
+        {
+            Logger
+                .TryGet(LogEventLevel.Warning, AssetFiles.LogArea)
+                ?.Log(this, "Writing to the clipboard failed: {Exception}", e);
+        }
     }
 
     /// <summary>
