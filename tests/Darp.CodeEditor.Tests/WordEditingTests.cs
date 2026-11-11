@@ -76,6 +76,36 @@ public sealed class WordEditingTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe("alpha be|ta\ngamma");
         });
 
+    [Fact]
+    public Task Ctrl_Right_and_Ctrl_Left_move_by_VS_Codes_words_and_with_Shift_select() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("|alpha beta", CodeLanguage.PlainText);
+
+            window.Press(Key.Right, Words);
+            MarkedText.Of(window).ShouldBe("alpha| beta");
+            window.Press(Key.Right, Words | KeyModifiers.Shift);
+            window.Editor.Selection.ShouldBe(new TextSelection(5, 10));
+            window.Press(Key.Left, Words);
+            MarkedText.Of(window).ShouldBe("alpha |beta");
+            window.Press(Key.Left, Words | KeyModifiers.Shift);
+            window.Editor.Selection.ShouldBe(new TextSelection(6, 0));
+        });
+
+    [Fact]
+    public Task Ctrl_Shift_Right_selects_a_word_without_the_space_after_it() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("|alpha beta", CodeLanguage.PlainText);
+
+            window.Press(Key.Right, Words | KeyModifiers.Shift);
+
+            MarkedText.Of(window).ShouldBe("«alpha» beta");
+        });
+
+    /// <summary>The platform's key for moving by words: Ctrl, or Alt on macOS, as in VS Code.</summary>
+    private static KeyModifiers Words => OperatingSystem.IsMacOS() ? KeyModifiers.Alt : KeyModifiers.Control;
+
     private static void DoubleClick(EditorWindow window, Point point)
     {
         window.Click(point, MouseButton.Left);

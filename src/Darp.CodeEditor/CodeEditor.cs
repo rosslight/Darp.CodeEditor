@@ -81,9 +81,10 @@ namespace Darp.CodeEditor;
 /// The editor's commands run by <see cref="Keymap"/>, VS Code's keys by default: completion (Ctrl+Space), the hover at
 /// the caret (Ctrl+K Ctrl+I), signature help (Ctrl+Shift+Space), search (Ctrl+F, Ctrl+H, F3, Shift+F3) and comments
 /// (Ctrl+/). Ctrl+D selects the word at the caret, the first step of VS Code's Ctrl+D, which goes on to add carets at
-/// the next matches. AvaloniaEdit handles editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation and
-/// indentation (Tab, Shift+Tab). Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A right click opens the
-/// editor's context menu, with the keys of its items and in the UI culture's language: Show Hover, Cut, Copy, Paste,
+/// the next matches. Ctrl+Left and Ctrl+Right, Alt on macOS, move by VS Code's words, and select with Shift.
+/// AvaloniaEdit handles editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation and indentation (Tab,
+/// Shift+Tab). Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A right click opens the editor's
+/// context menu, with the keys of its items and in the UI culture's language: Show Hover, Cut, Copy, Paste,
 /// Select All, Toggle Line Comment, Find and Replace. As in VS Code, a right click outside the selection moves the
 /// caret there first. The menu is the editor's <c>ContextFlyout</c>, as in Avalonia's text box: an app replaces it with
 /// its own <c>ContextFlyout</c> or <c>ContextMenu</c>, or removes it by setting <c>ContextFlyout</c> to null. For an
@@ -903,6 +904,17 @@ public class CodeEditor : TemplatedControl
                 return true;
             case CodeEditorCommands.AddSelectionToNextFindMatch when inText:
                 _helpers?.SelectWordAtCaret();
+                return true;
+            case CodeEditorCommands.CursorWordLeft
+            or CodeEditorCommands.CursorWordLeftSelect
+            or CodeEditorCommands.CursorWordEndRight
+            or CodeEditorCommands.CursorWordEndRightSelect when inText:
+                _helpers?.MoveWord(
+                    left: command is CodeEditorCommands.CursorWordLeft or CodeEditorCommands.CursorWordLeftSelect,
+                    select: command
+                        is CodeEditorCommands.CursorWordLeftSelect
+                            or CodeEditorCommands.CursorWordEndRightSelect
+                );
                 return true;
             default:
                 return false;

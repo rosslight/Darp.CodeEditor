@@ -81,6 +81,8 @@ public sealed class CodeEditorKeymap
     /// <item><term>f3, shift+f3</term><description><see cref="CodeEditorCommands.FindNext"/>, <see cref="CodeEditorCommands.FindPrevious"/></description></item>
     /// <item><term>ctrl+/ (cmd+/)</term><description><see cref="CodeEditorCommands.CommentLine"/></description></item>
     /// <item><term>ctrl+d (cmd+d)</term><description><see cref="CodeEditorCommands.AddSelectionToNextFindMatch"/></description></item>
+    /// <item><term>ctrl+left, ctrl+shift+left (alt+left, alt+shift+left)</term><description><see cref="CodeEditorCommands.CursorWordLeft"/>, <see cref="CodeEditorCommands.CursorWordLeftSelect"/></description></item>
+    /// <item><term>ctrl+right, ctrl+shift+right (alt+right, alt+shift+right)</term><description><see cref="CodeEditorCommands.CursorWordEndRight"/>, <see cref="CodeEditorCommands.CursorWordEndRightSelect"/></description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default => s_default.Value;
@@ -183,7 +185,12 @@ public sealed class CodeEditorKeymap
         yield return new($"{command}+/", CodeEditorCommands.CommentLine);
 
         // Editing.
+        string words = mac ? "alt" : "ctrl";
         yield return new($"{command}+d", CodeEditorCommands.AddSelectionToNextFindMatch);
+        yield return new($"{words}+left", CodeEditorCommands.CursorWordLeft);
+        yield return new($"{words}+shift+left", CodeEditorCommands.CursorWordLeftSelect);
+        yield return new($"{words}+right", CodeEditorCommands.CursorWordEndRight);
+        yield return new($"{words}+shift+right", CodeEditorCommands.CursorWordEndRightSelect);
     }
 }
 
@@ -282,4 +289,22 @@ public static class CodeEditorCommands
     /// a caret at each next match; the editor has one caret, so it stops at the word.
     /// </summary>
     public const string AddSelectionToNextFindMatch = "editor.action.addSelectionToNextFindMatch";
+
+    /// <summary>
+    /// Moves the caret to the start of the word before it, by VS Code's word separators; a single separator after a
+    /// word, such as the dot of <c>foo.bar</c>, goes with the word.
+    /// </summary>
+    public const string CursorWordLeft = "cursorWordLeft";
+
+    /// <summary>Selects to the start of the word before the caret, as <see cref="CursorWordLeft"/> moves.</summary>
+    public const string CursorWordLeftSelect = "cursorWordLeftSelect";
+
+    /// <summary>
+    /// Moves the caret to the end of the word after it, by VS Code's word separators; a single separator before a word
+    /// goes with the word.
+    /// </summary>
+    public const string CursorWordEndRight = "cursorWordEndRight";
+
+    /// <summary>Selects to the end of the word after the caret, as <see cref="CursorWordEndRight"/> moves.</summary>
+    public const string CursorWordEndRightSelect = "cursorWordEndRightSelect";
 }

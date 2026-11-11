@@ -121,6 +121,52 @@ internal static class WordRules
     }
 
     /// <summary>
+    /// Where VS Code's <c>cursorWordLeft</c>, Ctrl+Left, puts the caret: at the start of the word or run of separators
+    /// before <paramref name="caret"/>, and past a single separator right after a word, such as the dot of
+    /// <c>foo.bar</c>; at the line's start without one. From a line's start, it starts from the end of the line before.
+    /// </summary>
+    public static int MoveWordLeft(TextDocument document, int caret)
+    {
+        DocumentLine line = document.GetLineByOffset(caret);
+        int column = caret - line.Offset;
+        if (column == 0 && line.PreviousLine is { } previous)
+            (line, column) = (previous, previous.Length);
+        string text = document.GetText(line);
+        Word? word = PreviousWord(text, column);
+        if (
+            word is { Type: CharClass.Separator } separator
+            && separator.End - separator.Start == 1
+            && separator.Start > 0
+            && Classify(text[separator.Start - 1]) == CharClass.Regular
+        )
+            word = PreviousWord(text, separator.Start);
+        return line.Offset + (word?.Start ?? 0);
+    }
+
+    /// <summary>
+    /// Where VS Code's <c>cursorWordEndRight</c>, Ctrl+Right, puts the caret: at the end of the word or run of
+    /// separators after <paramref name="caret"/>, and past a single separator right before a word; at the line's end
+    /// without one. From a line's end, it starts from the start of the line after.
+    /// </summary>
+    public static int MoveWordRight(TextDocument document, int caret)
+    {
+        DocumentLine line = document.GetLineByOffset(caret);
+        int column = caret - line.Offset;
+        if (column == line.Length && line.NextLine is { } next)
+            (line, column) = (next, 0);
+        string text = document.GetText(line);
+        Word? word = NextWord(text, column);
+        if (
+            word is { Type: CharClass.Separator } separator
+            && separator.End - separator.Start == 1
+            && separator.End < text.Length
+            && Classify(text[separator.End]) == CharClass.Regular
+        )
+            word = NextWord(text, separator.End);
+        return line.Offset + (word?.End ?? text.Length);
+    }
+
+    /// <summary>
     /// The word or run of separators that ends at or after <paramref name="column"/> and starts before it, the nearest
     /// one to the left of <paramref name="column"/>; null if there is none on the line.
     /// </summary>

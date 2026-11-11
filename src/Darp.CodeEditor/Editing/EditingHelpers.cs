@@ -131,6 +131,24 @@ internal sealed class EditingHelpers : IDisposable
     }
 
     /// <summary>
+    /// Moves the caret by VS Code's words, from where it is (<see cref="WordRules.MoveWordLeft"/>,
+    /// <see cref="WordRules.MoveWordRight"/>): ending the selection, or with <paramref name="select"/> extending it
+    /// from its anchor, as AvaloniaEdit extends a selection.
+    /// </summary>
+    public void MoveWord(bool left, bool select)
+    {
+        TextViewPosition from = _textArea.Caret.Position;
+        int caret = _textArea.Caret.Offset;
+        int to = left ? WordRules.MoveWordLeft(Buffer, caret) : WordRules.MoveWordRight(Buffer, caret);
+        if (!select)
+            _textArea.ClearSelection();
+        _textArea.Caret.Offset = to;
+        if (select)
+            _textArea.Selection = _textArea.Selection.StartSelectionOrSetEndpoint(from, _textArea.Caret.Position);
+        _textArea.Caret.BringCaretToView();
+    }
+
+    /// <summary>
     /// Deletes the selection, or by VS Code's <c>deleteWordLeft</c> and <c>deleteWordRight</c>
     /// (<see cref="WordRules"/>): before the caret, an empty pair that the editor closed goes as a whole first.
     /// </summary>
