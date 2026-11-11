@@ -816,9 +816,9 @@ public class CodeEditor : TemplatedControl
     private void OnDocumentDisposed(object? sender, EventArgs e) => Dispatcher.Post(UpdateShownDocument);
 
     /// <summary>
-    /// The editor's own keys, before AvaloniaEdit's: in the text area, a key ends the hover first, as in VS Code, unless
-    /// it keeps it (<see cref="KeepsHover"/>); then the keymap's, also in the search bar, then Escape, and in the text
-    /// area the keys of completion's list, of signature help, of a snippet's stops and of the editing helpers.
+    /// The editor's own keys, before AvaloniaEdit's: first the hover's end (<see cref="CloseHoverOnKey"/>), then the
+    /// keymap's, also in the search bar, then Escape, and in the text area the keys of completion's list, of signature
+    /// help, of a snippet's stops and of the editing helpers.
     /// </summary>
     private void OnKeyDownTunnel(object? sender, KeyEventArgs e)
     {
@@ -835,7 +835,7 @@ public class CodeEditor : TemplatedControl
                 or Key.RWin
         )
             return;
-        bool closedHover = _part is { TextArea.IsFocused: true } && !KeepsHover(e) && _hover?.CloseOnKey() == true;
+        bool closedHover = CloseHoverOnKey(e);
         if (RunKeymap(e))
             e.Handled = true;
         else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && (Dismiss() || closedHover))
@@ -875,6 +875,19 @@ public class CodeEditor : TemplatedControl
             return true;
         }
         return keymap.CommandsFor(e, null).Any(Run);
+    }
+
+    /// <summary>
+    /// Ends the hover for a key, as VS Code does: Escape ends it, also from the search bar, along with what else it
+    /// dismisses; in the text, so does any key but those that keep it (<see cref="KeepsHover"/>), unless the user
+    /// clicked into the hover.
+    /// </summary>
+    /// <returns>Whether a hover was open.</returns>
+    private bool CloseHoverOnKey(KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None)
+            return _hover?.Close() == true;
+        return _part is { TextArea.IsFocused: true } && !KeepsHover(e) && _hover?.CloseOnKey() == true;
     }
 
     /// <summary>
@@ -974,9 +987,9 @@ public class CodeEditor : TemplatedControl
     }
 
     /// <summary>
-    /// What Escape closes, one at a time: completion, signature help, a snippet's stops while the text area has the
-    /// keyboard, the hover, the search bar, in the order of VS Code's keys. Each also ends what still waits for its
-    /// server.
+    /// What Escape closes besides the hover, one at a time: completion, signature help, a snippet's stops while the
+    /// text area has the keyboard, the search bar, in the order of VS Code's keys. Each also ends what still waits for
+    /// its server.
     /// </summary>
     /// <returns>Whether it closed something the user saw.</returns>
     private bool Dismiss()
@@ -985,7 +998,6 @@ public class CodeEditor : TemplatedControl
             _completion?.Close() == true
             || _signatureHelp?.Close() == true
             || (_part is { TextArea.IsFocused: true } && _snippets?.End() == true)
-            || _hover?.Close() == true
         )
         {
             return true;

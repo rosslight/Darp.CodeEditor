@@ -10,6 +10,7 @@ using Avalonia.VisualTree;
 using Darp.CodeEditor.Diagnostics;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Popups;
+using Darp.CodeEditor.Search;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -322,6 +323,41 @@ public sealed class HoverTests(UiFixture ui)
 
             // Once the pointer moves on, resting it starts one again.
             await HoverAsync(window, three, "three is a word in");
+        });
+
+    [Fact]
+    public Task Escape_ends_the_hover_along_with_the_search_bar_or_completion() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer("--no-diagnostics");
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await CompletionTests.SetCompletionAsync(
+                server,
+                fake,
+                CompletionTests.Items("Console")
+            );
+            const string text = "one two\nCon";
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+
+            // Opening the search bar ends the hover; Escape in the query ends one shown since, and the bar.
+            await HoverAsync(window, 0, "one is a word in");
+            window.Press(Key.F, EditorWindow.Command);
+            Popup(window).ShouldBeNull();
+            SearchBar bar = editor.GetVisualDescendants().OfType<SearchBar>().Single();
+            bar.FindBox.IsFocused.ShouldBeTrue();
+            await HoverAsync(window, 4, "two is a word in");
+            window.Press(Key.Escape);
+            Popup(window).ShouldBeNull();
+            bar.IsOpen.ShouldBeFalse();
+
+            // In the text, it ends completion's list too.
+            await CompletionTests.OpenAsync(window, text.Length);
+            await HoverAsync(window, 0, "one is a word in");
+            window.Press(Key.Escape);
+            Popup(window).ShouldBeNull();
+            CompletionTests.List(window).ShouldBeNull();
         });
 
     [Fact]
