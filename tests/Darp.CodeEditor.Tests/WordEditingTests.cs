@@ -37,6 +37,45 @@ public sealed class WordEditingTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe("a|");
         });
 
+    [Fact]
+    public Task Ctrl_D_selects_the_word_at_the_caret_and_deletes_no_line() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("alpha be|ta\ngamma", CodeLanguage.PlainText);
+
+            window.Press(Key.D, EditorWindow.Command);
+            MarkedText.Of(window).ShouldBe("alpha «beta»\ngamma");
+
+            // Without carets on several lines, there is no next match to add a caret at.
+            window.Press(Key.D, EditorWindow.Command);
+            MarkedText.Of(window).ShouldBe("alpha «beta»\ngamma");
+        });
+
+    [Theory]
+    [InlineData("alpha | beta")]
+    [InlineData("a |== b")]
+    public Task Ctrl_D_away_from_a_word_changes_nothing(string marked) =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show(marked, CodeLanguage.PlainText);
+
+            window.Press(Key.D, EditorWindow.Command);
+
+            MarkedText.Of(window).ShouldBe(marked);
+        });
+
+    [Fact]
+    public Task Without_its_binding_Ctrl_D_changes_nothing() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("alpha be|ta\ngamma", CodeLanguage.PlainText);
+            window.Editor.Keymap = CodeEditorKeymap.Empty;
+
+            window.Press(Key.D, EditorWindow.Command);
+
+            MarkedText.Of(window).ShouldBe("alpha be|ta\ngamma");
+        });
+
     private static void DoubleClick(EditorWindow window, Point point)
     {
         window.Click(point, MouseButton.Left);

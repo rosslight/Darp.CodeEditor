@@ -115,6 +115,22 @@ internal sealed class EditingHelpers : IDisposable
     }
 
     /// <summary>
+    /// Selects the word at the caret, as VS Code's <c>addSelectionToNextFindMatch</c> starts when nothing is selected
+    /// (<see cref="WordRules.WordAtCaret"/>). With a selection, or away from a word, nothing changes.
+    /// </summary>
+    public void SelectWordAtCaret()
+    {
+        if (_textArea.Selection is RectangleSelection || !_textArea.Selection.IsEmpty)
+            return;
+        DocumentLine line = Buffer.GetLineByOffset(_textArea.Caret.Offset);
+        if (WordRules.WordAtCaret(Buffer.GetText(line), _textArea.Caret.Offset - line.Offset) is not { } word)
+            return;
+        _textArea.Caret.Offset = line.Offset + word.End;
+        _textArea.Selection = Selection.Create(_textArea, line.Offset + word.Start, line.Offset + word.End);
+        _textArea.Caret.BringCaretToView();
+    }
+
+    /// <summary>
     /// Deletes the selection, or by VS Code's <c>deleteWordLeft</c> and <c>deleteWordRight</c>
     /// (<see cref="WordRules"/>): before the caret, an empty pair that the editor closed goes as a whole first.
     /// </summary>

@@ -29,6 +29,20 @@ internal static class WordRules
     }
 
     /// <summary>
+    /// The word that VS Code's <c>getWordAtPosition</c> finds at <paramref name="column"/>, for Ctrl+D: a run of word
+    /// characters that the column touches, the one on the left first. Null at separators and spaces.
+    /// </summary>
+    public static (int Start, int End)? WordAtCaret(string line, int column)
+    {
+        return Touched(PreviousWord(line, column)) ?? Touched(NextWord(line, column));
+
+        (int Start, int End)? Touched(Word? word) =>
+            word is { Type: CharClass.Regular } found && found.Start <= column && column <= found.End
+                ? (found.Start, found.End)
+                : null;
+    }
+
+    /// <summary>
     /// Where a drag that started with a double-click puts the caret, at <paramref name="column"/> of
     /// <paramref name="line"/>, which starts at <paramref name="lineOffset"/>: it grows the selection by whole words,
     /// and keeps the word it started with, <paramref name="start"/>.

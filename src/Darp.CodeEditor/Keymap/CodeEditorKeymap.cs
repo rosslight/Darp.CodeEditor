@@ -80,6 +80,7 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+h (alt+cmd+f)</term><description><see cref="CodeEditorCommands.Replace"/></description></item>
     /// <item><term>f3, shift+f3</term><description><see cref="CodeEditorCommands.FindNext"/>, <see cref="CodeEditorCommands.FindPrevious"/></description></item>
     /// <item><term>ctrl+/ (cmd+/)</term><description><see cref="CodeEditorCommands.CommentLine"/></description></item>
+    /// <item><term>ctrl+d (cmd+d)</term><description><see cref="CodeEditorCommands.AddSelectionToNextFindMatch"/></description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default => s_default.Value;
@@ -180,6 +181,9 @@ public sealed class CodeEditorKeymap
         yield return new("f3", CodeEditorCommands.FindNext);
         yield return new("shift+f3", CodeEditorCommands.FindPrevious);
         yield return new($"{command}+/", CodeEditorCommands.CommentLine);
+
+        // Editing.
+        yield return new($"{command}+d", CodeEditorCommands.AddSelectionToNextFindMatch);
     }
 }
 
@@ -270,4 +274,12 @@ public static class CodeEditorCommands
 
     /// <summary>Comments or uncomments the selected lines.</summary>
     public const string CommentLine = "editor.action.commentLine";
+
+    // Editing.
+
+    /// <summary>
+    /// Selects the word at the caret when nothing is selected, the first step of VS Code's command. Its next steps add
+    /// a caret at each next match; the editor has one caret, so it stops at the word.
+    /// </summary>
+    public const string AddSelectionToNextFindMatch = "editor.action.addSelectionToNextFindMatch";
 }

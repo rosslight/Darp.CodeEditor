@@ -77,6 +77,24 @@ public sealed class WordRulesTests
     ) =>
         WordRules.DragTo(TextRange.FromBounds(startWordStart, startWordEnd), line, 0, column).ShouldBe((anchor, caret));
 
+    [Theory]
+    [InlineData("fo|o bar", "«foo» bar")]
+    [InlineData("foo| bar", "«foo» bar")]
+    [InlineData("foo |bar", "foo «bar»")]
+    [InlineData("foo.|bar", "foo.«bar»")]
+    // Only a word, not a run of separators or spaces.
+    [InlineData("a =|= b", null)]
+    [InlineData("foo | bar", null)]
+    [InlineData("|", null)]
+    public void Ctrl_D_selects_VS_Codes_word_at_the_caret(string marked, string? selected)
+    {
+        (string line, TextSelection caret) = MarkedText.Parse(marked);
+        (int Start, int End)? word = WordRules.WordAtCaret(line, caret.Caret);
+        (word is { } found ? MarkedText.Format(line, new TextSelection(found.Start, found.End)) : null).ShouldBe(
+            selected
+        );
+    }
+
     private static string Delete(string marked, Func<TextDocument, int, TextRange?> rule)
     {
         (string text, TextSelection caret) = MarkedText.Parse(marked);

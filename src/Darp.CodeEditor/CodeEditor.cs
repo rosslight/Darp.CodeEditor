@@ -80,8 +80,9 @@ namespace Darp.CodeEditor;
 /// <para>
 /// The editor's commands run by <see cref="Keymap"/>, VS Code's keys by default: completion (Ctrl+Space), the hover at
 /// the caret (Ctrl+K Ctrl+I), signature help (Ctrl+Shift+Space), search (Ctrl+F, Ctrl+H, F3, Shift+F3) and comments
-/// (Ctrl+/). AvaloniaEdit handles editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation and indentation
-/// (Tab, Shift+Tab). Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A right click opens the
+/// (Ctrl+/). Ctrl+D selects the word at the caret, the first step of VS Code's Ctrl+D, which goes on to add carets at
+/// the next matches. AvaloniaEdit handles editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation and
+/// indentation (Tab, Shift+Tab). Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A right click opens the
 /// editor's context menu, with the keys of its items and in the UI culture's language: Show Hover, Cut, Copy, Paste,
 /// Select All, Toggle Line Comment, Find and Replace. As in VS Code, a right click outside the selection moves the
 /// caret there first. The menu is the editor's <c>ContextFlyout</c>, as in Avalonia's text box: an app replaces it with
@@ -505,8 +506,22 @@ public class CodeEditor : TemplatedControl
             part.TemplateApplied += OnPartTemplateApplied;
             foreach (RoutedCommandBinding binding in _searchCommands)
                 part.TextArea.CommandBindings.Add(binding);
+            RemoveDeleteLine(part.TextArea);
         }
         UpdateShownDocument();
+    }
+
+    /// <summary>
+    /// Removes AvaloniaEdit's Ctrl+D, which deletes the caret's line: in VS Code, the key selects the word at the caret,
+    /// and the keymap binds it so.
+    /// </summary>
+    private static void RemoveDeleteLine(TextArea textArea)
+    {
+        ICollection<RoutedCommandBinding> bindings = textArea.DefaultInputHandler.Editing.CommandBindings;
+        foreach (
+            RoutedCommandBinding binding in bindings.Where(b => b.Command == AvaloniaEditCommands.DeleteLine).ToList()
+        )
+            bindings.Remove(binding);
     }
 
     /// <inheritdoc />
@@ -885,6 +900,9 @@ public class CodeEditor : TemplatedControl
                 return true;
             case CodeEditorCommands.CommentLine when inText:
                 _helpers?.ToggleComment();
+                return true;
+            case CodeEditorCommands.AddSelectionToNextFindMatch when inText:
+                _helpers?.SelectWordAtCaret();
                 return true;
             default:
                 return false;

@@ -71,6 +71,14 @@ public sealed class KeymapTests(UiFixture ui)
     }
 
     [Fact]
+    public void By_default_Ctrl_D_selects_the_word_as_VS_Codes_addSelectionToNextFindMatch_starts()
+    {
+        CodeEditorKeymap
+            .Default.CommandsFor(Key(Keys.D, EditorWindow.Command), null)
+            .ShouldBe([CodeEditorCommands.AddSelectionToNextFindMatch]);
+    }
+
+    [Fact]
     public void A_punctuation_key_matches_where_the_layout_types_its_character()
     {
         CodeEditorKeymap keymap = CodeEditorKeymap.Empty.With(new CodeEditorKeyBinding("ctrl+/", "comment"));
