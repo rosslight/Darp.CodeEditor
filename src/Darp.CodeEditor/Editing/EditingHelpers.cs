@@ -34,6 +34,7 @@ internal sealed class EditingHelpers : IDisposable
     /// <summary>The characters before which a pair closes, as VS Code's default <c>autoCloseBefore</c>.</summary>
     private const string CloseBefore = ";:.,=}])> \n\t";
 
+    private readonly CodeEditor _editor;
     private readonly TextArea _textArea;
     private readonly CodeDocument _document;
     private readonly BackgroundTextMateHighlighter _highlighter;
@@ -64,8 +65,14 @@ internal sealed class EditingHelpers : IDisposable
 
     private readonly WordSelection _wordSelection;
 
-    public EditingHelpers(TextArea textArea, CodeDocument document, BackgroundTextMateHighlighter highlighter)
+    public EditingHelpers(
+        CodeEditor editor,
+        TextArea textArea,
+        CodeDocument document,
+        BackgroundTextMateHighlighter highlighter
+    )
     {
+        _editor = editor;
         _textArea = textArea;
         _document = document;
         _highlighter = highlighter;
@@ -184,8 +191,9 @@ internal sealed class EditingHelpers : IDisposable
     }
 
     /// <summary>
-    /// Backspace, VS Code's <c>deleteLeft</c>: an empty pair that the editor closed, in a step of its own, or
-    /// AvaloniaEdit's Backspace, in the step of the Backspace before it unless it joins lines.
+    /// Backspace, VS Code's <c>deleteLeft</c>: an empty pair that the editor closed, in a step of its own; in a line's
+    /// indentation with <see cref="CodeEditor.UseTabStops"/>, back to the tab stop before the caret; or else
+    /// AvaloniaEdit's Backspace. Other than the pair, in the step of the Backspace before it unless it joins lines.
     /// </summary>
     private bool DeleteLeft()
     {
@@ -195,6 +203,24 @@ internal sealed class EditingHelpers : IDisposable
             return true;
         }
         int caret = _textArea.Caret.Offset;
+        if (
+            _editor.UseTabStops
+            && _textArea.Selection is { IsEmpty: true } and not RectangleSelection
+            && IndentationBefore(caret) is { } indentation
+        )
+        {
+            _undo.Edit(
+                EditKind.DeletingLeft,
+                _undo.Previous != EditKind.DeletingLeft,
+                () =>
+                {
+                    if (CanChange(indentation.Start, indentation.Length))
+                        Buffer.Remove(indentation.Start, indentation.Length);
+                    _textArea.Caret.BringCaretToView();
+                }
+            );
+            return true;
+        }
         bool joinsLines = _textArea.Selection.IsEmpty
             ? caret > 0 && caret == Buffer.GetLineByOffset(caret).Offset
             : _textArea.Selection is not RectangleSelection && _textArea.Selection.IsMultiline;
@@ -204,6 +230,25 @@ internal sealed class EditingHelpers : IDisposable
             () => EditingCommands.Backspace.Execute(null, _textArea)
         );
         return true;
+    }
+
+    /// <summary>
+    /// What Backspace deletes at <paramref name="caret"/> in its line's indentation by tab stops, VS Code's
+    /// <c>getDeleteLeftRange</c>: back to the tab stop before the caret, from inside the indentation or right after it,
+    /// or anywhere on a line of whitespace only. Null elsewhere, and at the line's start.
+    /// </summary>
+    private TextRange? IndentationBefore(int caret)
+    {
+        DocumentLine line = Buffer.GetLineByOffset(caret);
+        int column = caret - line.Offset;
+        string text = Buffer.GetText(line);
+        if (column == 0 || column > LeadingWhitespace(text))
+            return null;
+        var indenting = new Indenting(_document.Indentation);
+        int size = _document.Indentation.Size;
+        int from = indenting.Width(text.AsSpan(0, column));
+        int to = Math.Max(0, from - 1 - (from - 1) % size);
+        return TextRange.FromBounds(line.Offset + indenting.OffsetOf(text, to), caret);
     }
 
     /// <summary>

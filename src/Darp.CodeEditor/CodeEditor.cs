@@ -152,6 +152,12 @@ public class CodeEditor : TemplatedControl
     public static readonly DirectProperty<CodeEditor, KeyGesture?> PendingKeysProperty =
         AvaloniaProperty.RegisterDirect<CodeEditor, KeyGesture?>(nameof(PendingKeys), editor => editor.PendingKeys);
 
+    /// <summary>Defines the <see cref="UseTabStops"/> property.</summary>
+    public static readonly StyledProperty<bool> UseTabStopsProperty = AvaloniaProperty.Register<CodeEditor, bool>(
+        nameof(UseTabStops),
+        defaultValue: true
+    );
+
     /// <summary>AvaloniaEdit's editor, from the template. The editor wraps it, so that its API stays out of ours.</summary>
     private TextEditor? _part;
 
@@ -375,6 +381,17 @@ public class CodeEditor : TemplatedControl
     /// Ctrl+I, for a status bar to say so; null otherwise.
     /// </summary>
     public KeyGesture? PendingKeys => _pending?.ToGesture();
+
+    /// <summary>
+    /// Whether spaces and tabs go in and out by tab stops, VS Code's <c>editor.useTabStops</c>: Backspace in a line's
+    /// indentation deletes back to the tab stop before the caret, rather than one character. Default: true, as in VS
+    /// Code.
+    /// </summary>
+    public bool UseTabStops
+    {
+        get => GetValue(UseTabStopsProperty);
+        set => SetValue(UseTabStopsProperty, value);
+    }
 
     /// <summary>The semantic colors of the shown document, for benchmarks; null while it shows none.</summary>
     internal SemanticHighlighter? SemanticHighlighter => _semantic;
@@ -717,7 +734,7 @@ public class CodeEditor : TemplatedControl
         Select(part, place?.Selection ?? new TextSelection(0));
         TextView textView = part.TextArea.TextView;
         _highlighter = new BackgroundTextMateHighlighter(textView, buffer, Dispatcher, null);
-        _helpers = new EditingHelpers(part.TextArea, document, _highlighter);
+        _helpers = new EditingHelpers(this, part.TextArea, document, _highlighter);
         _brackets = new BracketHighlighter(part.TextArea, document, _highlighter) { Colors = _colors };
         _whitespace = new WhitespaceLayer(part.TextArea) { Colors = _colors };
         _squiggles = new SquiggleLayer(part.TextArea, document) { Colors = _colors };

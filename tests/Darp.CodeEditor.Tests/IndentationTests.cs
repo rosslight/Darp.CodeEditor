@@ -169,6 +169,59 @@ public sealed class IndentationTests(UiFixture ui)
     }
 
     /// <summary>A language with word brackets, and indentation patterns that ignore case.</summary>
+    [Theory]
+    // In the indentation, back to the tab stop before the caret, as VS Code with useTabStops.
+    [InlineData("    |alpha", "  |alpha")]
+    [InlineData("   |alpha", "  |alpha")]
+    [InlineData("  |  alpha", "|  alpha")]
+    [InlineData("      |", "    |")]
+    [InlineData("\t  |alpha", "\t|alpha")]
+    [InlineData("\t\t|alpha", "\t|alpha")]
+    // After it, one character.
+    [InlineData("  a|lpha", "  |lpha")]
+    [InlineData("  alpha  |", "  alpha |")]
+    [InlineData("alpha\n|", "alpha|")]
+    public Task Backspace_in_a_lines_indentation_deletes_back_to_the_tab_stop_before(string before, string after) =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show(before, CodeLanguage.PlainText);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            document.Indentation = before.Contains('\t') ? Indentation.Tabs(4) : Indentation.Spaces(2);
+
+            window.Press(Key.Back);
+
+            MarkedText.Of(window).ShouldBe(after);
+        });
+
+    [Fact]
+    public Task Without_tab_stops_Backspace_in_the_indentation_deletes_one_character() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("    |alpha", CodeLanguage.PlainText);
+            window.Editor.Document.ShouldNotBeNull().Indentation = Indentation.Spaces(2);
+            window.Editor.UseTabStops = false;
+
+            window.Press(Key.Back);
+
+            MarkedText.Of(window).ShouldBe("   |alpha");
+        });
+
+    [Fact]
+    public Task Backspaces_in_the_indentation_are_one_undo_step() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("    |alpha", CodeLanguage.PlainText);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            document.Indentation = Indentation.Spaces(2);
+
+            window.Press(Key.Back);
+            window.Press(Key.Back, KeyModifiers.Shift);
+            MarkedText.Of(window).ShouldBe("|alpha");
+
+            document.Undo();
+            MarkedText.Of(window).ShouldBe("    |alpha");
+        });
+
     private static CodeLanguage Pascal { get; } =
         new(
             "pascal",
