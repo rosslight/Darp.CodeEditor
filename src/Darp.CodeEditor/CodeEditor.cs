@@ -64,7 +64,10 @@ namespace Darp.CodeEditor;
 /// and comments toggle with the line comment, or else the block comment. Brackets in strings and comments don't match,
 /// and pairs that the language excludes there don't close. In a rectangle selection, pairs close, step over and delete,
 /// and opening characters surround, on every line; Enter breaks only the caret's line and ends the rectangle. Tab and
-/// new lines indent by the document's <see cref="CodeDocument.Indentation"/>.
+/// new lines indent by the document's <see cref="CodeDocument.Indentation"/>. Undo takes back typing in VS Code's
+/// steps: a word with the space before it, a new line or a pair that closed with what was typed after it, Backspaces or
+/// Deletes in a row; a caret move ends a step. Undo puts back the selection from before the step, and redo the one
+/// after it.
 /// Hover shows the server's Markdown, with code blocks highlighted by the document's grammar, below the messages of
 /// the diagnostics under the pointer. Completion items show VS Code's codicons, in the color theme's symbol colors. An
 /// item in the snippet syntax goes in as VS Code inserts it: its first stop is selected, and Tab and Shift+Tab move
@@ -921,11 +924,17 @@ public class CodeEditor : TemplatedControl
         }
     }
 
-    /// <summary>Typed text, before AvaloniaEdit's text area takes it: a commit character commits completion's item.</summary>
+    /// <summary>
+    /// Typed text, before AvaloniaEdit's text area takes it: a commit character commits completion's item, and the
+    /// text goes in through the editing helpers, in VS Code's undo steps.
+    /// </summary>
     private void OnTextInputTunnel(object? sender, TextInputEventArgs e)
     {
-        if (_part is { TextArea.IsFocused: true })
-            _completion?.OnTextInput(e);
+        if (_part is not { TextArea.IsFocused: true })
+            return;
+        _completion?.OnTextInput(e);
+        if (!e.Handled)
+            _helpers?.Type(e);
     }
 
     /// <summary>
