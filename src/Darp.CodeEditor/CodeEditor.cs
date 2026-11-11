@@ -79,8 +79,8 @@ namespace Darp.CodeEditor;
 /// </para>
 /// <para>
 /// The editor's commands run by <see cref="Keymap"/>, VS Code's keys by default: completion (Ctrl+Space), the hover at
-/// the caret (Ctrl+K Ctrl+I), signature help (Ctrl+Shift+Space), search (Ctrl+F, Ctrl+H, F3, Shift+F3) and comments
-/// (Ctrl+/). AvaloniaEdit handles editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation and indentation
+/// the caret (Ctrl+K Ctrl+I), signature help (Ctrl+Shift+Space), search (Ctrl+F, Ctrl+H, F3, Shift+F3), comments
+/// (Ctrl+/) and the next and previous diagnostic (F8, Shift+F8; also with Alt). AvaloniaEdit handles editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation and indentation
 /// (Tab, Shift+Tab). Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A right click opens the
 /// editor's context menu, with the keys of its items and in the UI culture's language: Show Hover, Cut, Copy, Paste,
 /// Select All, Toggle Line Comment, Find and Replace. As in VS Code, a right click outside the selection moves the
@@ -147,6 +147,12 @@ public class CodeEditor : TemplatedControl
     public static readonly DirectProperty<CodeEditor, KeyGesture?> PendingKeysProperty =
         AvaloniaProperty.RegisterDirect<CodeEditor, KeyGesture?>(nameof(PendingKeys), editor => editor.PendingKeys);
 
+    /// <summary>Defines the <see cref="DiagnosticOrder"/> property.</summary>
+    public static readonly StyledProperty<DiagnosticOrder> DiagnosticOrderProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        DiagnosticOrder
+    >(nameof(DiagnosticOrder));
+
     /// <summary>AvaloniaEdit's editor, from the template. The editor wraps it, so that its API stays out of ours.</summary>
     private TextEditor? _part;
 
@@ -194,6 +200,9 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>The server's signature help of the shown document.</summary>
     private SignatureHelpController? _signatureHelp;
+
+    /// <summary>Goes through the shown document's diagnostics, as F8 does.</summary>
+    private DiagnosticNavigation? _diagnosticNavigation;
 
     /// <summary>The template's panel, which the search bar goes into, over the text.</summary>
     private Panel? _root;
@@ -392,6 +401,16 @@ public class CodeEditor : TemplatedControl
     /// Ctrl+I, for a status bar to say so; null otherwise.
     /// </summary>
     public KeyGesture? PendingKeys => _pending?.ToGesture();
+
+    /// <summary>
+    /// The order in which F8 and Shift+F8 go through the document's errors, warnings and information, as VS Code's
+    /// <c>problems.sortOrder</c>. Default: <see cref="DiagnosticOrder.Severity"/>, VS Code's.
+    /// </summary>
+    public DiagnosticOrder DiagnosticOrder
+    {
+        get => GetValue(DiagnosticOrderProperty);
+        set => SetValue(DiagnosticOrderProperty, value);
+    }
 
     /// <summary>The semantic colors of the shown document, for benchmarks; null while it shows none.</summary>
     internal SemanticHighlighter? SemanticHighlighter => _semantic;
@@ -740,6 +759,7 @@ public class CodeEditor : TemplatedControl
             Icons = _iconColors,
         };
         _signatureHelp = new SignatureHelpController(this, part.TextArea, document, _highlighter) { Colors = _colors };
+        _diagnosticNavigation = new DiagnosticNavigation(part.TextArea, document);
         _searchBar?.Attach(this, part.TextArea, document);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
         _waitingForLayout = true;
@@ -767,6 +787,8 @@ public class CodeEditor : TemplatedControl
         _snippets = null;
         _signatureHelp?.Dispose();
         _signatureHelp = null;
+        _diagnosticNavigation?.Dispose();
+        _diagnosticNavigation = null;
         _squiggles?.Dispose();
         _squiggles = null;
         _semantic?.Dispose();
@@ -914,9 +936,29 @@ public class CodeEditor : TemplatedControl
             case CodeEditorCommands.CommentLine when inText:
                 _helpers?.ToggleComment();
                 return true;
+            case CodeEditorCommands.NextMarker
+            or CodeEditorCommands.NextMarkerInFiles
+            or CodeEditorCommands.PreviousMarker
+            or CodeEditorCommands.PreviousMarkerInFiles when inText:
+                GoToDiagnostic(next: command is CodeEditorCommands.NextMarker or CodeEditorCommands.NextMarkerInFiles);
+                return true;
             default:
                 return false;
         }
+    }
+
+    /// <summary>
+    /// Goes to the next or previous diagnostic, as VS Code's F8 and Shift+F8 do: the caret goes to where it starts, or
+    /// stays inside it, the line scrolls into view, centered when it was out of view, and the diagnostic's message
+    /// shows in the hover there, where VS Code shows it in a widget between the lines.
+    /// </summary>
+    private void GoToDiagnostic(bool next)
+    {
+        if (_part is not { } part || _diagnosticNavigation?.Move(next, DiagnosticOrder) is not { } caret)
+            return;
+        Select(part, new TextSelection(caret));
+        ScrollTo(new TextRange(caret, 0));
+        _hover?.ShowAt(caret);
     }
 
     /// <summary>Typed text, before AvaloniaEdit's text area takes it: a commit character commits completion's item.</summary>

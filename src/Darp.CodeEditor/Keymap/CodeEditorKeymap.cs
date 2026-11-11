@@ -80,6 +80,8 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+h (alt+cmd+f)</term><description><see cref="CodeEditorCommands.Replace"/></description></item>
     /// <item><term>f3, shift+f3</term><description><see cref="CodeEditorCommands.FindNext"/>, <see cref="CodeEditorCommands.FindPrevious"/></description></item>
     /// <item><term>ctrl+/ (cmd+/)</term><description><see cref="CodeEditorCommands.CommentLine"/></description></item>
+    /// <item><term>f8, shift+f8</term><description><see cref="CodeEditorCommands.NextMarkerInFiles"/>, <see cref="CodeEditorCommands.PreviousMarkerInFiles"/></description></item>
+    /// <item><term>alt+f8, shift+alt+f8</term><description><see cref="CodeEditorCommands.NextMarker"/>, <see cref="CodeEditorCommands.PreviousMarker"/></description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default => s_default.Value;
@@ -180,6 +182,17 @@ public sealed class CodeEditorKeymap
         yield return new("f3", CodeEditorCommands.FindNext);
         yield return new("shift+f3", CodeEditorCommands.FindPrevious);
         yield return new($"{command}+/", CodeEditorCommands.CommentLine);
+        foreach (CodeEditorKeyBinding binding in DiagnosticBindings())
+            yield return binding;
+    }
+
+    /// <summary>The keys that go to the next and previous diagnostic, VS Code's on every operating system.</summary>
+    private static IEnumerable<CodeEditorKeyBinding> DiagnosticBindings()
+    {
+        yield return new("alt+f8", CodeEditorCommands.NextMarker);
+        yield return new("shift+alt+f8", CodeEditorCommands.PreviousMarker);
+        yield return new("f8", CodeEditorCommands.NextMarkerInFiles);
+        yield return new("shift+f8", CodeEditorCommands.PreviousMarkerInFiles);
     }
 }
 
@@ -270,4 +283,25 @@ public static class CodeEditorCommands
 
     /// <summary>Comments or uncomments the selected lines.</summary>
     public const string CommentLine = "editor.action.commentLine";
+
+    /// <summary>
+    /// Goes to the next diagnostic of the document, in <see cref="CodeEditor.DiagnosticOrder"/>, after the last one to
+    /// the first: the caret goes to where it starts, and its message shows in the hover at the caret.
+    /// </summary>
+    public const string NextMarker = "editor.action.marker.next";
+
+    /// <summary>Goes to the previous diagnostic of the document, as <see cref="NextMarker"/> goes to the next.</summary>
+    public const string PreviousMarker = "editor.action.marker.prev";
+
+    /// <summary>
+    /// Goes to the next diagnostic, as <see cref="NextMarker"/> does: an editor knows only its document, so after the
+    /// last one it goes to the first, where VS Code goes on to the next file.
+    /// </summary>
+    public const string NextMarkerInFiles = "editor.action.marker.nextInFiles";
+
+    /// <summary>
+    /// Goes to the previous diagnostic, as <see cref="PreviousMarker"/> does: an editor knows only its document, so
+    /// before the first one it goes to the last, where VS Code goes on to the previous file.
+    /// </summary>
+    public const string PreviousMarkerInFiles = "editor.action.marker.prevInFiles";
 }
