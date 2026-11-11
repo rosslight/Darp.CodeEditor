@@ -85,8 +85,9 @@ namespace Darp.CodeEditor;
 /// the caret (Ctrl+K Ctrl+I), signature help (Ctrl+Shift+Space), search (Ctrl+F, Ctrl+H, F3, Shift+F3) and comments
 /// (Ctrl+/). Ctrl+D selects the word at the caret, the first step of VS Code's Ctrl+D, which goes on to add carets at
 /// the next matches. Ctrl+Left and Ctrl+Right, Alt on macOS, move by VS Code's words, and select with Shift.
-/// AvaloniaEdit handles editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation and indentation (Tab,
-/// Shift+Tab). Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A right click opens the editor's
+/// AvaloniaEdit handles editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A) and navigation, and the editor
+/// indents as VS Code does: Tab replaces a selection inside a line and indents whole lines, and Shift+Tab outdents.
+/// Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A right click opens the editor's
 /// context menu, with the keys of its items and in the UI culture's language: Show Hover, Cut, Copy, Paste,
 /// Select All, Toggle Line Comment, Find and Replace. As in VS Code, a right click outside the selection moves the
 /// caret there first. The menu is the editor's <c>ContextFlyout</c>, as in Avalonia's text box: an app replaces it with
@@ -384,8 +385,9 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>
     /// Whether spaces and tabs go in and out by tab stops, VS Code's <c>editor.useTabStops</c>: Backspace in a line's
-    /// indentation deletes back to the tab stop before the caret, rather than one character. Default: true, as in VS
-    /// Code.
+    /// indentation deletes back to the tab stop before the caret, rather than one character, and Tab and Shift+Tab move
+    /// the selected lines' indentation to the next or the previous tab stop, rather than adding or removing a level.
+    /// Default: true, as in VS Code.
     /// </summary>
     public bool UseTabStops
     {

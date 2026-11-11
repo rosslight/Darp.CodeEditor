@@ -14,7 +14,8 @@ namespace Darp.CodeEditor.Editing;
 /// The editing helpers of one editor's view of a document, from the language's editing rules, as VS Code applies
 /// them: Enter indents the new line, typing outdents a line that comes to match the decrease pattern, opening
 /// characters bring their closing ones, which are typed over and deleted with them, and opening characters surround a
-/// selection. Ctrl+/ toggles comments. Tab and Shift+Tab are AvaloniaEdit's, with the document's indentation.
+/// selection. Ctrl+/ toggles comments. Tab and Shift+Tab indent and outdent as VS Code's do, with the document's
+/// indentation; Tab without a selection is AvaloniaEdit's.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -102,10 +103,10 @@ internal sealed class EditingHelpers : IDisposable
     }
 
     /// <summary>
-    /// Enter, Backspace, Delete, deleting by words, and the arrow keys with a selection, from the editor's key handler,
-    /// while the text area has the keyboard, after the keys of its popups. Words go with Ctrl+Backspace and
-    /// Ctrl+Delete, or Alt on macOS, the platform's key for moving by words. Shift+Enter and Shift+Backspace do as
-    /// Enter and Backspace.
+    /// Enter, Backspace, Delete, deleting by words, Tab and Shift+Tab, and the arrow keys with a selection, from the
+    /// editor's key handler, while the text area has the keyboard, after the keys of its popups. Words go with
+    /// Ctrl+Backspace and Ctrl+Delete, or Alt on macOS, the platform's key for moving by words. Shift+Enter and
+    /// Shift+Backspace do as Enter and Backspace.
     /// </summary>
     public void OnKeyDown(KeyEventArgs e)
     {
@@ -123,6 +124,8 @@ internal sealed class EditingHelpers : IDisposable
             e.Handled = DeleteRight();
         else if (e.Key is Key.Back or Key.Delete && e.KeyModifiers == words)
             e.Handled = DeleteWord(left: e.Key == Key.Back);
+        else if (e.Key == Key.Tab && e.KeyModifiers is KeyModifiers.None or KeyModifiers.Shift)
+            e.Handled = Tab(outdent: e.KeyModifiers == KeyModifiers.Shift);
         else if (e.Key is Key.Left or Key.Right or Key.Up or Key.Down && e.KeyModifiers == KeyModifiers.None)
             e.Handled = CollapseSelection(e.Key);
     }
@@ -230,6 +233,168 @@ internal sealed class EditingHelpers : IDisposable
             () => EditingCommands.Backspace.Execute(null, _textArea)
         );
         return true;
+    }
+
+    /// <summary>
+    /// Tab with a selection, VS Code's <c>tab</c>: a selection inside one line, short of the whole line, gives way to
+    /// whitespace up to the next tab stop from its start; whole lines, one or more, are indented. Shift+Tab, VS Code's
+    /// <c>outdent</c>, outdents the selected lines or the caret's. Each is a step of its own. Tab without a selection,
+    /// and both keys in a rectangle selection, are AvaloniaEdit's.
+    /// </summary>
+    /// <returns>Whether it handled the key.</returns>
+    private bool Tab(bool outdent)
+    {
+        Selection selection = _textArea.Selection;
+        if (selection is RectangleSelection || (selection.IsEmpty && !outdent))
+            return false;
+        int from = selection.IsEmpty ? _textArea.Caret.Offset : selection.SurroundingSegment.Offset;
+        int to = selection.IsEmpty ? from : selection.SurroundingSegment.EndOffset;
+        DocumentLine line = Buffer.GetLineByOffset(from);
+        bool withinLine =
+            !outdent && !selection.IsEmpty && to <= line.EndOffset && (from > line.Offset || to < line.EndOffset);
+        _undo.Edit(
+            EditKind.Other,
+            stopBefore: true,
+            () =>
+            {
+                if (withinLine)
+                    ReplaceWithIndentation(from - line.Offset, line);
+                else
+                    ShiftLines(outdent);
+                _textArea.Caret.BringCaretToView();
+            },
+            stopAfter: true
+        );
+        return true;
+    }
+
+    /// <summary>
+    /// Replaces the selection, which starts at <paramref name="column"/> of <paramref name="line"/>, with a tab, or with
+    /// spaces up to the next tab stop: VS Code's <c>_replaceJumpToNextIndent</c>.
+    /// </summary>
+    private void ReplaceWithIndentation(int column, DocumentLine line)
+    {
+        Indentation indentation = _document.Indentation;
+        int columns = new Indenting(indentation).Width(Buffer.GetText(line.Offset, column));
+        _textArea.Selection.ReplaceSelectionWithText(
+            indentation.UseTabs ? "\t" : new string(' ', indentation.Size - columns % indentation.Size)
+        );
+    }
+
+    /// <summary>
+    /// Indents or outdents the selected lines, or the caret's, as VS Code's <c>ShiftCommand</c>: with
+    /// <see cref="CodeEditor.UseTabStops"/>, a line's indentation goes to the next or the previous tab stop, in the
+    /// document's indentation; without, a level goes in at the line's start, or up to a level comes out. A last line
+    /// that the selection touches only at its start takes no part, nor do empty lines when several are indented. The
+    /// selection follows the text as VS Code's tracked selection does.
+    /// </summary>
+    private void ShiftLines(bool outdent)
+    {
+        Selection selection = _textArea.Selection;
+        int caret = _textArea.Caret.Offset;
+        int anchor = selection.IsEmpty ? caret : Buffer.GetOffset(selection.StartPosition.Location);
+        int start = Math.Min(anchor, caret);
+        int end = Math.Max(anchor, caret);
+        DocumentLine first = Buffer.GetLineByOffset(start);
+        DocumentLine last = Buffer.GetLineByOffset(end);
+        if (last != first && last.Offset == end)
+            last = last.PreviousLine;
+        Indentation indentation = _document.Indentation;
+        var indenting = new Indenting(indentation);
+        bool tabStops = _editor.UseTabStops;
+        var edits = new List<(int Offset, int Length, string Text)>();
+        // VS Code keeps the start where it was when it is in the first line's indentation.
+        bool startStays = false;
+        for (DocumentLine line = first; ; line = line.NextLine)
+        {
+            string text = Buffer.GetText(line);
+            int whitespace = LeadingWhitespace(text);
+            bool skipped = outdent ? whitespace == 0 : text.Length == 0 && first != last;
+            if (!skipped)
+            {
+                (int length, string inserted) =
+                    tabStops
+                        ? (
+                            whitespace,
+                            outdent ? indenting.Unshift(text[..whitespace]) : indenting.Shift(text[..whitespace])
+                        )
+                    : outdent ? (OneLevel(text, whitespace), "")
+                    : (0, indentation.UseTabs ? "\t" : new string(' ', indentation.Size));
+                if (line == first && !selection.IsEmpty)
+                    startStays = tabStops ? start - line.Offset <= whitespace : !outdent && start == line.Offset;
+                if (!text.AsSpan(0, length).SequenceEqual(inserted) && CanChange(line.Offset, length))
+                    edits.Add((line.Offset, length, inserted));
+            }
+            if (line == last)
+                break;
+        }
+        if (edits.Count == 0)
+            return;
+        int newStart;
+        int newEnd;
+        if (
+            selection.IsEmpty
+            && (tabStops ? string.IsNullOrWhiteSpace(Buffer.GetText(first)) : !outdent && first.Length == 0)
+        )
+        {
+            // As VS Code: on a line of whitespace only, the caret goes to the end of the new indentation.
+            newStart = newEnd = edits[^1].Offset + edits[^1].Text.Length;
+        }
+        else
+        {
+            // As VS Code tracks a selection: its start stays before text that goes in where it is, its end after, and a
+            // caret stays before only at its line's end.
+            bool caretAtEnd = selection.IsEmpty && caret == first.EndOffset;
+            newStart = MapThrough(edits, start, sticksBefore: !selection.IsEmpty || caretAtEnd);
+            newEnd = selection.IsEmpty ? newStart : MapThrough(edits, end, sticksBefore: false);
+            if (startStays && newStart - first.Offset > start - first.Offset)
+                newStart = start;
+        }
+        ReplaceInOneChange(edits);
+        (int newAnchor, int newCaret) = anchor <= caret ? (newStart, newEnd) : (newEnd, newStart);
+        _textArea.Caret.Offset = newCaret;
+        if (selection.IsEmpty)
+            _textArea.ClearSelection();
+        else
+            _textArea.Selection = Selection.Create(_textArea, newAnchor, newCaret);
+
+        // VS Code's outdent without tab stops: up to a level of spaces, or up to and with the first tab.
+        int OneLevel(string text, int whitespace)
+        {
+            int length = Math.Min(whitespace, indentation.Size);
+            int tab = text.IndexOf('\t', 0, length);
+            return tab >= 0 ? tab + 1 : length;
+        }
+    }
+
+    /// <summary>
+    /// Where <paramref name="offset"/> goes through <paramref name="edits"/>, in order and apart, as VS Code moves a
+    /// marker through an edit: text that goes in where it is goes after it if it <paramref name="sticksBefore"/>, and
+    /// a replaced text keeps it where the old and the new text overlap.
+    /// </summary>
+    private static int MapThrough(List<(int Offset, int Length, string Text)> edits, int offset, bool sticksBefore)
+    {
+        int delta = 0;
+        foreach ((int start, int removed, string text) in edits)
+        {
+            int end = start + removed;
+            int inserted = text.Length;
+            if (offset < start)
+                break;
+            if (offset > end)
+            {
+                delta += inserted - removed;
+                continue;
+            }
+            int common = Math.Min(removed, inserted);
+            int mapped =
+                removed == 0 ? (sticksBefore ? offset : offset + inserted)
+                : offset < start + common || (offset == start + common && (removed > inserted || sticksBefore)) ? offset
+                : removed > inserted ? start + inserted
+                : offset + inserted - removed;
+            return mapped + delta;
+        }
+        return offset + delta;
     }
 
     /// <summary>
