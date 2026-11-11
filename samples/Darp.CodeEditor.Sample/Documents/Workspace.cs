@@ -97,11 +97,12 @@ public sealed partial class Workspace : ObservableObject, IDisposable
 
     /// <summary>
     /// Opens <paramref name="file"/>, or shows the document that has its path already. The workspace owns the file.
+    /// With <paramref name="show"/> false, the current document stays.
     /// </summary>
     /// <exception cref="IOException">
     /// The file can't be read, or an example has its path: the example's text is not the file's.
     /// </exception>
-    public async Task OpenAsync(IStorageFile file)
+    public async Task OpenAsync(IStorageFile file, bool show = true)
     {
         string text;
         try
@@ -125,27 +126,25 @@ public sealed partial class Workspace : ObservableObject, IDisposable
             file.Dispose();
             if (open.File is null)
                 throw new IOException(Strings.Default.FormatExampleHasPath(open.Name));
-            Current = open;
+            if (show)
+                Current = open;
             return;
         }
-        Add(file.Name, FileType.ForFile(file.Name), text, file, path);
+        Add(file.Name, FileType.ForFile(file.Name), text, file, path, show);
     }
 
     /// <summary>
-    /// Opens the schema <paramref name="path"/>, one of <see cref="ServerSettings.Schemas"/>, or shows it if it is open.
-    /// Its edits apply to the documents it validates as the server allows: VS Code's JSON server takes the text as the
-    /// user types, the YAML server the file once saved.
+    /// Opens the schema <paramref name="path"/>, one of <see cref="ServerSettings.Schemas"/>, unless it is open, and
+    /// keeps showing the current document. Its edits apply to the documents it validates as the server allows: VS
+    /// Code's JSON server takes the text as the user types, the YAML server the file once saved.
     /// </summary>
     /// <exception cref="IOException">The file can't be read.</exception>
     public async Task OpenSchemaAsync(string path, IStorageProvider storage)
     {
-        if (WithPath(path) is { } open)
-        {
-            Current = open;
+        if (WithPath(path) is not null)
             return;
-        }
         IStorageFile file = await storage.TryGetFileFromPathAsync(path) ?? throw new FileNotFoundException(null, path);
-        await OpenAsync(file);
+        await OpenAsync(file, show: false);
     }
 
     /// <summary>
@@ -186,10 +185,10 @@ public sealed partial class Workspace : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Adds a document and shows it. A file type whose server is installed gets its documents from that server, which
-    /// serves them from then on; the others get documents without a server.
+    /// Adds a document, and shows it if <paramref name="show"/>. A file type whose server is installed gets its
+    /// documents from that server, which serves them from then on; the others get documents without a server.
     /// </summary>
-    private void Add(string name, FileType type, string text, IStorageFile? file, string? filePath)
+    private void Add(string name, FileType type, string text, IStorageFile? file, string? filePath, bool show = true)
     {
         LanguageServer? server = _servers.GetValueOrDefault(type);
         CodeDocument document;
@@ -204,7 +203,8 @@ public sealed partial class Workspace : ObservableObject, IDisposable
         document.TextChanged += OnTextChanged;
         open.PropertyChanged += OnDocumentPropertyChanged;
         Documents.Add(open);
-        Current = open;
+        if (show)
+            Current = open;
         if (ServerSettings.IsSchema(filePath))
             _schemasChanged.Start();
     }
