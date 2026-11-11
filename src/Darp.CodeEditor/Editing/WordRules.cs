@@ -107,6 +107,16 @@ internal static class WordRules
     }
 
     /// <summary>
+    /// The word at <paramref name="column"/>, as VS Code's <c>getWordAtPosition</c> finds it, such as for the search's
+    /// query: the run of word characters it touches, the one on the left first; null where it touches none.
+    /// </summary>
+    public static (int Start, int End)? WordAtPosition(string line, int column) =>
+        PreviousWord(line, column) is { Type: CharClass.Regular } left && left.Touches(column) ? (left.Start, left.End)
+        : NextWord(line, column) is { Type: CharClass.Regular } right && right.Touches(column)
+            ? (right.Start, right.End)
+        : null;
+
+    /// <summary>
     /// The word or run of separators that ends at or after <paramref name="column"/> and starts before it, the nearest
     /// one to the left of <paramref name="column"/>; null if there is none on the line.
     /// </summary>

@@ -144,6 +144,13 @@ public class CodeEditor : TemplatedControl
         CodeEditorKeymap
     >(nameof(Keymap), defaultValue: CodeEditorKeymap.Default);
 
+    /// <summary>Defines the <see cref="SeedSearchStringFromSelection"/> property.</summary>
+    public static readonly StyledProperty<SeedSearchString> SeedSearchStringFromSelectionProperty =
+        AvaloniaProperty.Register<CodeEditor, SeedSearchString>(
+            nameof(SeedSearchStringFromSelection),
+            defaultValue: SeedSearchString.Always
+        );
+
     /// <summary>Defines the <see cref="PendingKeys"/> property.</summary>
     public static readonly DirectProperty<CodeEditor, KeyGesture?> PendingKeysProperty =
         AvaloniaProperty.RegisterDirect<CodeEditor, KeyGesture?>(nameof(PendingKeys), editor => editor.PendingKeys);
@@ -367,6 +374,18 @@ public class CodeEditor : TemplatedControl
     }
 
     /// <summary>
+    /// What the search takes from the text as its query, as VS Code's <c>editor.find.seedSearchStringFromSelection</c>:
+    /// when the search bar opens, and on F3 and Shift+F3 while the query is empty. Default:
+    /// <see cref="SeedSearchString.Always"/>, the selection within one line, or without a selection the word at the
+    /// caret. The replace bar takes only a selection.
+    /// </summary>
+    public SeedSearchString SeedSearchStringFromSelection
+    {
+        get => GetValue(SeedSearchStringFromSelectionProperty);
+        set => SetValue(SeedSearchStringFromSelectionProperty, value);
+    }
+
+    /// <summary>
     /// The first stroke of a two-stroke key sequence while the editor waits for the second, such as Ctrl+K of Ctrl+K
     /// Ctrl+I, for a status bar to say so; null otherwise.
     /// </summary>
@@ -434,13 +453,33 @@ public class CodeEditor : TemplatedControl
     }
 
     /// <summary>
-    /// Opens the search bar, as Ctrl+F does, or the replace bar, as Ctrl+H does, and puts the keyboard in its query. A
-    /// selection within one line becomes the search text. A read-only editor opens the search bar either way.
+    /// Opens the search bar, as Ctrl+F does, or the replace bar, as Ctrl+H does, as VS Code opens them. The search bar
+    /// takes its query from the text as <see cref="SeedSearchStringFromSelection"/> says, by default the selection
+    /// within one line or else the word at the caret, puts the keyboard into it, and leaves the replace row of an open
+    /// bar as it is. The replace bar takes only a selection within one line, and then puts the keyboard into the
+    /// replacement, as it does when the query has the keyboard; otherwise into the query. A read-only editor opens the
+    /// search bar either way.
     /// </summary>
     public void OpenSearch(bool replace = false)
     {
-        if (_part is { } part && CreatedSearchBar() is { } bar)
-            bar.Open(replace && !IsReadOnly, SelectedLineText(part.TextArea));
+        if (_part is not { } part || CreatedSearchBar() is not { } bar)
+            return;
+        SeedSearchString seed = SeedSearchStringFromSelection;
+        if (!replace || IsReadOnly)
+        {
+            bar.Open(replace: false, seed == SeedSearchString.Never ? null : SearchString(part.TextArea, seed));
+            return;
+        }
+        bool fromQuery = bar.IsQueryFocused;
+        bool takesSelection =
+            !fromQuery
+            && seed != SeedSearchString.Never
+            && part.TextArea.Selection is { IsEmpty: false, IsMultiline: false };
+        bar.Open(
+            replace: true,
+            takesSelection ? SearchString(part.TextArea, seed) : null,
+            focusReplacement: fromQuery || takesSelection
+        );
     }
 
     /// <summary>Moves the selection to the clipboard, as Ctrl+X does. No effect in a read-only editor.</summary>
@@ -943,14 +982,17 @@ public class CodeEditor : TemplatedControl
     }
 
     /// <summary>
-    /// Selects the next or previous match, as F3 and Shift+F3 do, opening the bar for the selection if it is closed.
+    /// Selects the next or previous match, as F3 and Shift+F3 do, opening the bar if it is closed. The query stays, as
+    /// in VS Code: only an empty one is taken from the text, as <see cref="SeedSearchStringFromSelection"/> says.
     /// </summary>
     /// <returns>Whether there is a document to search.</returns>
     private bool FindNext(bool previous)
     {
         if (_part is not { } part || CreatedSearchBar() is not { } bar)
             return false;
-        string? text = bar.IsOpen ? null : SelectedLineText(part.TextArea);
+        SeedSearchString seed = SeedSearchStringFromSelection;
+        string? text =
+            bar.Query.Length == 0 && seed != SeedSearchString.Never ? SearchString(part.TextArea, seed) : null;
         if (previous)
             bar.FindPrevious(text);
         else
@@ -984,9 +1026,27 @@ public class CodeEditor : TemplatedControl
             panel.Uninstall();
     }
 
-    /// <summary>The selected text, if it is within one line: what a search starts with.</summary>
-    private static string? SelectedLineText(TextArea textArea) =>
-        textArea.Selection is { IsEmpty: false, IsMultiline: false } selection ? selection.GetText() : null;
+    /// <summary>
+    /// What the search takes from the text, as VS Code's <c>getSelectionSearchString</c> does: the selection within one
+    /// line, unless it is too long, or without a selection the word at the caret, unless <paramref name="seed"/> takes
+    /// only a selection. Null for nothing.
+    /// </summary>
+    private static string? SearchString(TextArea textArea, SeedSearchString seed)
+    {
+        EditorSelection selection = textArea.Selection;
+        if (selection.IsMultiline)
+            return null;
+        if (!selection.IsEmpty)
+            return selection.Length < Search.TextSearch.MaxQueryLength ? selection.GetText() : null;
+        if (seed == SeedSearchString.Selection)
+            return null;
+        TextDocument buffer = textArea.Document;
+        DocumentLine line = buffer.GetLineByOffset(textArea.Caret.Offset);
+        string text = buffer.GetText(line);
+        return WordRules.WordAtPosition(text, textArea.Caret.Offset - line.Offset) is var (start, end)
+            ? text[start..end]
+            : null;
+    }
 
     /// <summary>Applies a new indentation of the shown document at once. Raised on the UI thread.</summary>
     private void OnDocumentPropertyChanged(object? sender, PropertyChangedEventArgs e)

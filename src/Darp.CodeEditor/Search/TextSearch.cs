@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.RegularExpressions;
 using AvaloniaEdit.Document;
 using Darp.CodeEditor.Editing;
@@ -82,6 +83,25 @@ internal static class TextSearch
     /// A single match can run for as long again before the regular expression's own timeout stops it.
     /// </summary>
     public static readonly TimeSpan TimeLimit = TimeSpan.FromSeconds(1);
+
+    /// <summary>The longest selection that the search takes as its query, as in VS Code.</summary>
+    public const int MaxQueryLength = 524_288;
+
+    /// <summary>
+    /// A regular expression that matches <paramref name="text"/>, as VS Code escapes text for its query: with a
+    /// backslash before each of <c>\ { } * + ? | ^ $ . [ ] ( )</c>.
+    /// </summary>
+    public static string Escape(string text)
+    {
+        var escaped = new StringBuilder(text.Length);
+        foreach (char c in text)
+        {
+            if (c is '\\' or '{' or '}' or '*' or '+' or '?' or '|' or '^' or '$' or '.' or '[' or ']' or '(' or ')')
+                escaped.Append('\\');
+            escaped.Append(c);
+        }
+        return escaped.ToString();
+    }
 
     /// <summary>
     /// Finds the matches of <paramref name="query"/> in <paramref name="snapshot"/>, with the text that replaces each

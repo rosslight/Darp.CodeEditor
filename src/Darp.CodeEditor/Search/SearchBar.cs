@@ -122,6 +122,14 @@ internal sealed class SearchBar : UserControl
         _replace.KeyDown += OnReplaceKeyDown;
     }
 
+    /// <summary>Which text box takes the keyboard as the bar opens.</summary>
+    private enum KeyboardTarget
+    {
+        None,
+        Query,
+        Replacement,
+    }
+
     private enum Move
     {
         None,
@@ -135,6 +143,12 @@ internal sealed class SearchBar : UserControl
 
     /// <summary>Whether the bar is open.</summary>
     public bool IsOpen => IsVisible;
+
+    /// <summary>The query, also while the bar is closed: the next search is for it.</summary>
+    public string Query => _find.Text ?? "";
+
+    /// <summary>Whether the query has the keyboard.</summary>
+    public bool IsQueryFocused => _find.IsKeyboardFocusWithin;
 
     /// <summary>The colors of the color theme, once it is loaded.</summary>
     public TextAreaColors? Colors
@@ -197,15 +211,24 @@ internal sealed class SearchBar : UserControl
     }
 
     /// <summary>
-    /// Opens the bar, or the bar with its replace row, with <paramref name="text"/> as the query if given, and puts
-    /// the keyboard in the query.
+    /// Opens the bar, with its replace row if <paramref name="replace"/>, and otherwise with the row as it was in an
+    /// open bar, as in VS Code. <paramref name="text"/> from the document, if given, becomes the query, escaped while
+    /// the bar uses a regular expression, and leaves the selection where it is. The keyboard goes into the query, or
+    /// into the replacement if <paramref name="focusReplacement"/> and the row shows.
     /// </summary>
-    public void Open(bool replace, string? text) => Open(replace, text, focus: true, Move.None);
+    public void Open(bool replace, string? text, bool focusReplacement = false) =>
+        Open(replace, text, focusReplacement ? KeyboardTarget.Replacement : KeyboardTarget.Query, Move.None);
 
-    /// <summary>Selects the next match, opening the bar if it is closed, without taking the keyboard.</summary>
+    /// <summary>
+    /// Selects the next match, opening the bar if it is closed, without taking the keyboard; for
+    /// <paramref name="text"/> from the document as the new query, if given.
+    /// </summary>
     public void FindNext(string? text) => Go(Move.Next, text);
 
-    /// <summary>Selects the previous match, opening the bar if it is closed, without taking the keyboard.</summary>
+    /// <summary>
+    /// Selects the previous match, opening the bar if it is closed, without taking the keyboard; for
+    /// <paramref name="text"/> from the document as the new query, if given.
+    /// </summary>
     public void FindPrevious(string? text) => Go(Move.Previous, text);
 
     /// <summary>
@@ -266,31 +289,33 @@ internal sealed class SearchBar : UserControl
         _font = [];
     }
 
-    private void Open(bool replace, string? text, bool focus, Move move)
+    private void Open(bool replace, string? text, KeyboardTarget focus, Move move)
     {
         bool wasOpen = IsOpen;
         if (!wasOpen)
             ShowTexts();
-        _replaceMode = replace;
+        _replaceMode = replace || (wasOpen && _replaceMode);
         bool rowChanged = ShowReplaceRow();
         IsVisible = true;
-        if (text is not null && text != _find.Text)
+        string? query = text is not null && _regex.IsChecked == true ? TextSearch.Escape(text) : text;
+        if (query is not null && query != _find.Text)
         {
-            // Searches from the selection, as for any new query; the next or previous match from there if asked.
-            _find.Text = text;
-            if (move != Move.None)
-                _move = move;
+            // Unlike a typed query, it leaves the selection where it is, as in VS Code; the next or previous match from
+            // there if asked.
+            _find.Text = query;
+            _move = move;
         }
         else if (!wasOpen || rowChanged)
             Search(move);
         else if (move != Move.None)
             Go(move, null);
-        if (focus)
+        if (focus != KeyboardTarget.None)
         {
             // A bar shown for the first time has no text box in the visual tree until it is laid out.
             UpdateLayout();
-            _find.Focus();
-            _find.SelectAll();
+            TextBox box = focus == KeyboardTarget.Replacement && _replaceRow.IsVisible ? _replace : _find;
+            box.Focus();
+            box.SelectAll();
         }
     }
 
@@ -309,9 +334,9 @@ internal sealed class SearchBar : UserControl
 
     private void Go(Move move, string? text)
     {
-        if (!IsOpen)
+        if (!IsOpen || text is not null)
         {
-            Open(false, text, focus: false, move);
+            Open(false, text, KeyboardTarget.None, move);
             return;
         }
         if (_searching is null && _result is not null)
