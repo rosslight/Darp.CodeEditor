@@ -23,12 +23,13 @@ namespace Darp.CodeEditor.Completion;
 /// <para>
 /// Completion opens on Ctrl+Space, also on macOS, on the server's trigger characters, and, as VS Code's quick
 /// suggestions, on a word character typed outside a comment at a word's end or as its first character; Backspace opens
-/// nothing. Until the server answers, nothing shows; what is typed meanwhile filters its answer. The list
-/// is the server's for where it was asked: typing on filters and ranks it on the client, with the matching of
-/// <see cref="CompletionMatcher"/>, and selects the first item, or the one the server preselects among the best. The
-/// matching runs off the UI thread, whatever the list's length: each change cancels the filter under way, and the list
-/// shows the newest result, the previous one meanwhile. A list
-/// that the server marks incomplete is asked for again as the user types on, and shows meanwhile. Moving back before
+/// nothing. Until the server answers, nothing shows; what is typed meanwhile filters its answer. The list is the
+/// server's for where it was asked: typing on filters and ranks it on the client, with the matching of
+/// <see cref="CompletionMatcher"/>, and selects the first item, or the one the server preselects among the best. As in
+/// VS Code, typing on ranks the items that show, and anything else, such as Backspace, all of the answer's items; up
+/// to 2,000 ranked items tolerate a typo. The matching runs off the UI thread, whatever the list's length: each change
+/// cancels the filter under way, and the list shows the newest result, the previous one meanwhile. A list that the
+/// server marks incomplete is asked for again as the user types on, and shows meanwhile. Moving back before
 /// where completion was asked, and any edit before it, as by another editor of the document, asks again while a word
 /// is left, as VS Code does when the caret moves back: the list's positions no longer fit the text.
 /// </para>
@@ -402,11 +403,19 @@ internal sealed class CompletionController : IDisposable
         session.Filtering?.Cancellation.Cancel();
         if (session.CommitAt != key)
             session.CommitAt = null;
-        var filtering = new Filtering(key, new CancellationTokenSource());
+        var filtering = new Filtering(key, Refiltered(session, key), new CancellationTokenSource());
         session.Filtering = filtering;
         // The UI thread reads no text: each item's typed text is read off it, from the snapshot of the key's version.
         FilterAsync(session, filtering, _document.CurrentSnapshot);
     }
+
+    /// <summary>
+    /// The items that show, when a filter for <paramref name="key"/> ranks them instead of all of the answer's items,
+    /// as VS Code refilters: they were filtered for the same answer with the caret further back, as typing on leaves
+    /// them. Null otherwise, as after Backspace.
+    /// </summary>
+    private static List<ShownItem>? Refiltered(Session session, FilterKey key) =>
+        session.Shown is { } shown && shown.Answer == key.Answer && key.Caret > shown.Caret ? session.Items : null;
 
     /// <summary>Shows a filter's result, unless completion ended, or a newer filter replaced it.</summary>
     private async void FilterAsync(Session session, Filtering filtering, TextSnapshot snapshot)
@@ -415,7 +424,13 @@ internal sealed class CompletionController : IDisposable
         {
             CancellationToken cancellationToken = filtering.Cancellation.Token;
             Task<Filtered?> ranking = _matching.ContinueWith(
-                _ => Rank(filtering.Key.Answer.List.Items, snapshot, filtering.Key.Caret, cancellationToken),
+                _ =>
+                    Rank(
+                        filtering.Shown?.ConvertAll(shown => shown.Item) ?? filtering.Key.Answer.List.Items,
+                        snapshot,
+                        filtering.Key.Caret,
+                        cancellationToken
+                    ),
                 CancellationToken.None,
                 TaskContinuationOptions.DenyChildAttach,
                 TaskScheduler.Default
@@ -443,7 +458,8 @@ internal sealed class CompletionController : IDisposable
     /// <summary>
     /// Off the UI thread, after the filter before: the items that match the text typed for each, from where its edit
     /// starts up to <paramref name="caret"/>, best first, and the one to select; null once cancelled. Of each typed
-    /// text only what the matcher reads is read, however far before the caret the edit starts.
+    /// text only what the matcher reads is read, however far before the caret the edit starts. Up to
+    /// <see cref="CompletionMatcher.MaxGracefulItems"/> items match gracefully, tolerating a typo.
     /// </summary>
     private Filtered? Rank(
         IReadOnlyList<CompletionItem> items,
@@ -589,7 +605,7 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>
     /// Whether the item at <paramref name="index"/> may be committed now: the list shows the filter of the current
-    /// text, or the item matches it, which is checked for that item alone.
+    /// text, or the item matches it, which is checked for that item alone, as gracefully as the filter matches.
     /// </summary>
     private bool CanCommit(Session session, int index)
     {
@@ -601,11 +617,13 @@ internal sealed class CompletionController : IDisposable
         int caret = _textArea.Caret.Offset;
         if (shown.Answer.Request.IsStale || caret < shown.Answer.Request.Offset)
             return false;
+        int ranked = Refiltered(session, CurrentKey(shown.Answer))?.Count ?? shown.Answer.List.Items.Count;
         return (_itemMatcher ??= new CompletionMatcher()).Match(
             Typed(_document.CurrentSnapshot, item.Edit.Range.Start, caret),
             item.Label,
             item.FilterText,
-            item.FilterTextIsLabel
+            item.FilterTextIsLabel,
+            graceful: ranked <= CompletionMatcher.MaxGracefulItems
         )
             is not null;
     }
@@ -1090,7 +1108,10 @@ internal sealed class CompletionController : IDisposable
     private readonly record struct FilterKey(Answer Answer, int Version, int Caret);
 
     /// <summary>A filter under way.</summary>
-    private sealed record Filtering(FilterKey Key, CancellationTokenSource Cancellation);
+    /// <param name="Key">What it filters for.</param>
+    /// <param name="Shown">The items that showed, which it ranks; null to rank all of the answer's items.</param>
+    /// <param name="Cancellation">Stops it.</param>
+    private sealed record Filtering(FilterKey Key, List<ShownItem>? Shown, CancellationTokenSource Cancellation);
 
     /// <summary>A filter's result: the items that match, in order, and the one to select.</summary>
     private sealed record Filtered(List<ShownItem> Items, int Selected);

@@ -232,6 +232,50 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_typo_of_two_neighbouring_characters_finds_the_item_while_typing_and_on_Ctrl_Space() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("print", "property"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Type("pr");
+            await WaitForLabelsAsync(window, ["print", "property"]);
+
+            window.Type("nit");
+
+            await WaitForLabelsAsync(window, ["print"]);
+            window.Render();
+            RowRuns(window, "print").ShouldBe([("print", true)]);
+            window.Press(Key.Escape);
+            await OpenAsync(window, 5);
+            Labels(window).ShouldBe(["print"]);
+        });
+
+    [Fact]
+    public Task Typing_on_ranks_what_shows_so_that_a_list_of_over_2000_items_tolerates_a_typo_once_typing_shortened_it() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            string[] labels = [.. Enumerable.Range(0, 2000).Select(i => $"x{i}"), "print"];
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items(labels));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Type("p");
+            await WaitForLabelsAsync(window, ["print"]);
+
+            window.Type("rni");
+
+            await WaitForLabelsAsync(window, ["print"]);
+            // Asked for there, the list is ranked whole, strictly: it has more than 2,000 items.
+            window.Press(Key.Escape);
+            window.Press(Key.Space, KeyModifiers.Control);
+            await Wait.UntilAsync(() => List(window)?.Message == "No suggestions.");
+        });
+
+    [Fact]
     public Task Typing_filters_the_list_off_the_UI_thread_and_the_list_shows_the_newest_result() =>
         _ui.Run(async () =>
         {
