@@ -532,12 +532,12 @@ public sealed class CompletionTests(UiFixture ui)
             document.Undo();
             document.Text.ShouldBe(text);
 
-            // But not "Write", whose own replace the server's: nothing matches any more, which the list asked for by
-            // key says.
+            // But not "Write", whose own replace the server's: nothing matches any more, and the caret left the word,
+            // which ends even the list asked for by key, as in VS Code.
             await OpenAsync(window, 10);
             window.Type(";");
             document.Text.ShouldBe("Console.Wr;");
-            await Wait.UntilAsync(() => List(window)?.Message == "No suggestions.");
+            await Wait.UntilAsync(() => List(window) is null);
         });
 
     [Fact]
@@ -1275,21 +1275,99 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
-    public Task Asked_by_key_a_list_that_typing_filters_empty_says_so_and_comes_back() =>
+    public Task Asked_by_key_a_list_that_typing_filters_empty_stays_frozen_while_the_caret_is_in_a_word() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("print", "property"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "pri");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await OpenAsync(window, 3);
+
+            window.Type("zzzz");
+
+            // As in VS Code: the list stays as it was, without the matched characters in bold.
+            await WaitForFrozenAsync(window, "print");
+            Labels(window).ShouldBe(["print"]);
+            List(window).ShouldNotBeNull().Message.ShouldBeNull();
+            // Typing back to a match shows the matches again; the caret leaving the word ends it.
+            for (int i = 0; i < 4; i++)
+                window.Press(Key.Back);
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return RowRuns(window, "print").SequenceEqual([("pri", true), ("nt", false)]);
+            });
+            window.Type("zz");
+            await WaitForFrozenAsync(window, "print");
+            window.Type(" ");
+            await Wait.UntilAsync(() => List(window) is null);
+            fake.LinesStartingWith("completion ").Count.ShouldBe(1);
+        });
+
+    [Fact]
+    public Task Asked_by_key_a_list_with_no_match_for_the_word_says_No_suggestions_and_typing_on_keeps_it() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
             await using var server = new LanguageServer(fake.Options);
             using CodeDocument answer = await SetCompletionAsync(server, fake, Items("alpha", "beta"));
-            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "q");
             using var window = new EditorWindow(new CodeEditor { Document = document });
-            await OpenAsync(window, 0);
+            window.Editor.Selection = new TextSelection(1);
 
-            window.Type("q");
+            window.Press(Key.Space, KeyModifiers.Control);
+
             await Wait.UntilAsync(() => List(window)?.Message == "No suggestions.");
-            window.Press(Key.Back);
+            window.Type("q");
+            await BarrierAsync(server, fake);
+            window.Layout();
+            List(window).ShouldNotBeNull().Message.ShouldBe("No suggestions.");
+            fake.LinesStartingWith("completion ").Count.ShouldBe(1);
+        });
 
-            await WaitForLabelsAsync(window, ["alpha", "beta"]);
+    [Fact]
+    public Task A_frozen_list_commits_its_item_over_what_was_typed_by_key_and_click_but_not_by_commit_characters() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse("""{ "items": [ { "label": "print", "commitCharacters": ["("] } ] }""")
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "pri");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            await OpenAsync(window, 3);
+            window.Type("zz");
+            await WaitForFrozenAsync(window, "print");
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("print");
+
+            document.Text = "pri";
+            await OpenAsync(window, 3);
+            window.Type("zz");
+            await WaitForFrozenAsync(window, "print");
+            window.Click(RowCenter(window, 0), MouseButton.Left);
+            document.Text.ShouldBe("print");
+
+            // Also while the filter of what was typed last still runs: once it has, the item commits.
+            document.Text = "pri";
+            await OpenAsync(window, 3);
+            TypeAlone(window, "z");
+            PressAlone(window, Key.Enter);
+            await Wait.UntilAsync(() => document.Text == "print");
+
+            // As in VS Code, its commit characters go in as text.
+            document.Text = "pri";
+            await OpenAsync(window, 3);
+            window.Type("zz");
+            await WaitForFrozenAsync(window, "print");
+            window.Type("(");
+            document.Text.ShouldBe("prizz(");
         });
 
     [Fact]
@@ -1396,6 +1474,14 @@ public sealed class CompletionTests(UiFixture ui)
         {
             window.Render();
             return Labels(window).SequenceEqual(labels);
+        });
+
+    /// <summary>Waits until the list shows <paramref name="label"/> frozen: without its matched characters in bold.</summary>
+    private static Task WaitForFrozenAsync(EditorWindow window, string label) =>
+        Wait.UntilAsync(() =>
+        {
+            window.Render();
+            return Labels(window).Contains(label) && RowRuns(window, label).SequenceEqual([(label, false)]);
         });
 
     /// <summary>The labels of the items that the list shows, in order; none while it is closed.</summary>
