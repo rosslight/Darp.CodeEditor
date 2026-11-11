@@ -143,12 +143,12 @@ public sealed class PairTests(UiFixture ui)
             window.Press(Key.Back);
             document.Text.ShouldBe("[1,[3]\n 2,[3]\n]");
 
-            // Each was one step on both lines: Backspace, the second pair, the 3, and the first pair.
+            // Each step on both lines, as VS Code's undo stops go: Backspace, the second pair, and the first pair with
+            // what was typed inside it.
             document.Undo();
             document.Text.ShouldBe("[1,[3][]\n 2,[3][]\n]");
             document.Undo();
-            document.Undo();
-            document.Text.ShouldBe("[1,[]\n 2,[]\n]");
+            document.Text.ShouldBe("[1,[3]\n 2,[3]\n]");
             document.Undo();
             document.Text.ShouldBe("[1,\n 2,\n]");
         });

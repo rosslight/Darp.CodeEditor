@@ -29,6 +29,20 @@ internal static class WordRules
     }
 
     /// <summary>
+    /// The word that VS Code's <c>getWordAtPosition</c> finds at <paramref name="column"/>, for Ctrl+D: a run of word
+    /// characters that the column touches, the one on the left first. Null at separators and spaces.
+    /// </summary>
+    public static (int Start, int End)? WordAtCaret(string line, int column)
+    {
+        return Touched(PreviousWord(line, column)) ?? Touched(NextWord(line, column));
+
+        (int Start, int End)? Touched(Word? word) =>
+            word is { Type: CharClass.Regular } found && found.Start <= column && column <= found.End
+                ? (found.Start, found.End)
+                : null;
+    }
+
+    /// <summary>
     /// Where a drag that started with a double-click puts the caret, at <paramref name="column"/> of
     /// <paramref name="line"/>, which starts at <paramref name="lineOffset"/>: it grows the selection by whole words,
     /// and keeps the word it started with, <paramref name="start"/>.
@@ -115,6 +129,52 @@ internal static class WordRules
         : NextWord(line, column) is { Type: CharClass.Regular } right && right.Touches(column)
             ? (right.Start, right.End)
         : null;
+
+    /// <summary>
+    /// Where VS Code's <c>cursorWordLeft</c>, Ctrl+Left, puts the caret: at the start of the word or run of separators
+    /// before <paramref name="caret"/>, and past a single separator right after a word, such as the dot of
+    /// <c>foo.bar</c>; at the line's start without one. From a line's start, it starts from the end of the line before.
+    /// </summary>
+    public static int MoveWordLeft(TextDocument document, int caret)
+    {
+        DocumentLine line = document.GetLineByOffset(caret);
+        int column = caret - line.Offset;
+        if (column == 0 && line.PreviousLine is { } previous)
+            (line, column) = (previous, previous.Length);
+        string text = document.GetText(line);
+        Word? word = PreviousWord(text, column);
+        if (
+            word is { Type: CharClass.Separator } separator
+            && separator.End - separator.Start == 1
+            && separator.Start > 0
+            && Classify(text[separator.Start - 1]) == CharClass.Regular
+        )
+            word = PreviousWord(text, separator.Start);
+        return line.Offset + (word?.Start ?? 0);
+    }
+
+    /// <summary>
+    /// Where VS Code's <c>cursorWordEndRight</c>, Ctrl+Right, puts the caret: at the end of the word or run of
+    /// separators after <paramref name="caret"/>, and past a single separator right before a word; at the line's end
+    /// without one. From a line's end, it starts from the start of the line after.
+    /// </summary>
+    public static int MoveWordRight(TextDocument document, int caret)
+    {
+        DocumentLine line = document.GetLineByOffset(caret);
+        int column = caret - line.Offset;
+        if (column == line.Length && line.NextLine is { } next)
+            (line, column) = (next, 0);
+        string text = document.GetText(line);
+        Word? word = NextWord(text, column);
+        if (
+            word is { Type: CharClass.Separator } separator
+            && separator.End - separator.Start == 1
+            && separator.End < text.Length
+            && Classify(text[separator.End]) == CharClass.Regular
+        )
+            word = NextWord(text, separator.End);
+        return line.Offset + (word?.End ?? text.Length);
+    }
 
     /// <summary>
     /// The word or run of separators that ends at or after <paramref name="column"/> and starts before it, the nearest

@@ -37,6 +37,75 @@ public sealed class WordEditingTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe("a|");
         });
 
+    [Fact]
+    public Task Ctrl_D_selects_the_word_at_the_caret_and_deletes_no_line() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("alpha be|ta\ngamma", CodeLanguage.PlainText);
+
+            window.Press(Key.D, EditorWindow.Command);
+            MarkedText.Of(window).ShouldBe("alpha «beta»\ngamma");
+
+            // Without carets on several lines, there is no next match to add a caret at.
+            window.Press(Key.D, EditorWindow.Command);
+            MarkedText.Of(window).ShouldBe("alpha «beta»\ngamma");
+        });
+
+    [Theory]
+    [InlineData("alpha | beta")]
+    [InlineData("a |== b")]
+    public Task Ctrl_D_away_from_a_word_changes_nothing(string marked) =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show(marked, CodeLanguage.PlainText);
+
+            window.Press(Key.D, EditorWindow.Command);
+
+            MarkedText.Of(window).ShouldBe(marked);
+        });
+
+    [Fact]
+    public Task Without_its_binding_Ctrl_D_changes_nothing() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("alpha be|ta\ngamma", CodeLanguage.PlainText);
+            window.Editor.Keymap = CodeEditorKeymap.Empty;
+
+            window.Press(Key.D, EditorWindow.Command);
+
+            MarkedText.Of(window).ShouldBe("alpha be|ta\ngamma");
+        });
+
+    [Fact]
+    public Task Ctrl_Right_and_Ctrl_Left_move_by_VS_Codes_words_and_with_Shift_select() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("|alpha beta", CodeLanguage.PlainText);
+
+            window.Press(Key.Right, Words);
+            MarkedText.Of(window).ShouldBe("alpha| beta");
+            window.Press(Key.Right, Words | KeyModifiers.Shift);
+            window.Editor.Selection.ShouldBe(new TextSelection(5, 10));
+            window.Press(Key.Left, Words);
+            MarkedText.Of(window).ShouldBe("alpha |beta");
+            window.Press(Key.Left, Words | KeyModifiers.Shift);
+            window.Editor.Selection.ShouldBe(new TextSelection(6, 0));
+        });
+
+    [Fact]
+    public Task Ctrl_Shift_Right_selects_a_word_without_the_space_after_it() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("|alpha beta", CodeLanguage.PlainText);
+
+            window.Press(Key.Right, Words | KeyModifiers.Shift);
+
+            MarkedText.Of(window).ShouldBe("«alpha» beta");
+        });
+
+    /// <summary>The platform's key for moving by words: Ctrl, or Alt on macOS, as in VS Code.</summary>
+    private static KeyModifiers Words => OperatingSystem.IsMacOS() ? KeyModifiers.Alt : KeyModifiers.Control;
+
     private static void DoubleClick(EditorWindow window, Point point)
     {
         window.Click(point, MouseButton.Left);

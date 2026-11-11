@@ -77,6 +77,53 @@ public sealed class WordRulesTests
     ) =>
         WordRules.DragTo(TextRange.FromBounds(startWordStart, startWordEnd), line, 0, column).ShouldBe((anchor, caret));
 
+    [Theory]
+    [InlineData("fo|o bar", "«foo» bar")]
+    [InlineData("foo| bar", "«foo» bar")]
+    [InlineData("foo |bar", "foo «bar»")]
+    [InlineData("foo.|bar", "foo.«bar»")]
+    // Only a word, not a run of separators or spaces.
+    [InlineData("a =|= b", null)]
+    [InlineData("foo | bar", null)]
+    [InlineData("|", null)]
+    public void Ctrl_D_selects_VS_Codes_word_at_the_caret(string marked, string? selected)
+    {
+        (string line, TextSelection caret) = MarkedText.Parse(marked);
+        (int Start, int End)? word = WordRules.WordAtCaret(line, caret.Caret);
+        (word is { } found ? MarkedText.Format(line, new TextSelection(found.Start, found.End)) : null).ShouldBe(
+            selected
+        );
+    }
+
+    [Theory]
+    [InlineData("|alpha beta", "alpha| beta")]
+    [InlineData("alpha| beta", "alpha beta|")]
+    [InlineData("|foo.bar", "foo|.bar")]
+    // A single separator before a word goes with the word.
+    [InlineData("foo|.bar", "foo.bar|")]
+    [InlineData("foo|..bar", "foo..|bar")]
+    [InlineData("a|  ", "a  |")]
+    // At a line's end, to the end of the next line's first word; at the text's end, nowhere.
+    [InlineData("foo|\n  bar", "foo\n  bar|")]
+    [InlineData("foo  |", "foo  |")]
+    public void Ctrl_Right_moves_as_VS_Codes_cursorWordEndRight(string before, string after) =>
+        Move(before, WordRules.MoveWordRight).ShouldBe(after);
+
+    [Theory]
+    [InlineData("alpha beta|", "alpha |beta")]
+    [InlineData("alpha |beta", "|alpha beta")]
+    [InlineData("foo.bar|", "foo.|bar")]
+    // A single separator after a word goes with the word.
+    [InlineData("foo.|bar", "|foo.bar")]
+    [InlineData("foo..|bar", "foo|..bar")]
+    [InlineData("(|foo", "|(foo")]
+    [InlineData("  |foo", "|  foo")]
+    // At a line's start, to the start of the line before's last word; at the text's start, nowhere.
+    [InlineData("a foo\n|bar", "a |foo\nbar")]
+    [InlineData("|foo", "|foo")]
+    public void Ctrl_Left_moves_as_VS_Codes_cursorWordLeft(string before, string after) =>
+        Move(before, WordRules.MoveWordLeft).ShouldBe(after);
+
     private static string Delete(string marked, Func<TextDocument, int, TextRange?> rule)
     {
         (string text, TextSelection caret) = MarkedText.Parse(marked);
@@ -85,5 +132,11 @@ public sealed class WordRulesTests
             return marked;
         document.Remove(range.Start, range.Length);
         return MarkedText.Format(document.Text, new TextSelection(range.Start));
+    }
+
+    private static string Move(string marked, Func<TextDocument, int, int> rule)
+    {
+        (string text, TextSelection caret) = MarkedText.Parse(marked);
+        return MarkedText.Format(text, new TextSelection(rule(new TextDocument(text), caret.Caret)));
     }
 }

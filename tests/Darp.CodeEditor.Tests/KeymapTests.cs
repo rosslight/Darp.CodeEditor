@@ -84,6 +84,30 @@ public sealed class KeymapTests(UiFixture ui)
     }
 
     [Fact]
+    public void By_default_Ctrl_D_selects_the_word_as_VS_Codes_addSelectionToNextFindMatch_starts()
+    {
+        CodeEditorKeymap
+            .Default.CommandsFor(Key(Keys.D, EditorWindow.Command), null)
+            .ShouldBe([CodeEditorCommands.AddSelectionToNextFindMatch]);
+    }
+
+    [Fact]
+    public void By_default_Ctrl_Left_and_Ctrl_Right_move_by_words_as_VS_Code_binds_them()
+    {
+        KeyModifiers words = OperatingSystem.IsMacOS() ? KeyModifiers.Alt : KeyModifiers.Control;
+        CodeEditorKeymap keymap = CodeEditorKeymap.Default;
+
+        keymap.CommandsFor(Key(Keys.Left, words), null).ShouldBe([CodeEditorCommands.CursorWordLeft]);
+        keymap
+            .CommandsFor(Key(Keys.Left, words | KeyModifiers.Shift), null)
+            .ShouldBe([CodeEditorCommands.CursorWordLeftSelect]);
+        keymap.CommandsFor(Key(Keys.Right, words), null).ShouldBe([CodeEditorCommands.CursorWordEndRight]);
+        keymap
+            .CommandsFor(Key(Keys.Right, words | KeyModifiers.Shift), null)
+            .ShouldBe([CodeEditorCommands.CursorWordEndRightSelect]);
+    }
+
+    [Fact]
     public void A_punctuation_key_matches_where_the_layout_types_its_character()
     {
         CodeEditorKeymap keymap = CodeEditorKeymap.Empty.With(new CodeEditorKeyBinding("ctrl+/", "comment"));
