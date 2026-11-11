@@ -29,8 +29,9 @@ namespace Darp.CodeEditor.Popups;
 /// <para>
 /// The hovered text is the word under the pointer, and the range that the server's hover names. The popup stays while
 /// the pointer is over it or over the popup, so that its links can be clicked and it can be scrolled. Once the user
-/// clicked into the popup, as to select its text, it stays wherever the pointer goes, also while a drag crosses its
-/// edge, and resting the pointer on other text shows no other hover, as in VS Code.
+/// clicked into the popup, as to select its text, or put the keyboard into it (<see cref="ShowAtCaret"/>), it stays
+/// wherever the pointer goes, also while a drag crosses its edge, and resting the pointer on other text shows no other
+/// hover, as in VS Code.
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends the hover, for every reason it ends: the pointer leaves both, also for another word under
@@ -216,13 +217,16 @@ internal sealed class HoverController : IDisposable
 
     /// <summary>
     /// Shows the hover at the caret, as the user asks for it by key: the diagnostics there and the server's hover. When
-    /// it shows already, the keyboard goes into it, where the arrows, Page Up, Page Down, Home and End scroll it, and
-    /// Escape gives the keyboard back.
+    /// a hover shows already, also one the pointer opened, the keyboard goes into it, as in VS Code: there the arrows,
+    /// Page Up, Page Down, Home and End scroll it, Escape gives the keyboard back, and it stays wherever the pointer
+    /// goes.
     /// </summary>
     public void ShowAtCaret()
     {
-        if (_hovered is { FromKeyboard: true } && _popup.IsOpen)
+        if (_hovered is { } shown && _popup.IsOpen)
         {
+            shown.IsHeld = true;
+            StayOpen();
             _content.Focusable = true;
             _popup.Focus(_content);
             return;
@@ -581,7 +585,10 @@ internal sealed class HoverController : IDisposable
         /// <summary>Whether the user asked for it by key, at the caret, rather than by resting the pointer.</summary>
         public bool FromKeyboard { get; init; }
 
-        /// <summary>Whether the user clicked into the popup: then it stays wherever the pointer goes.</summary>
+        /// <summary>
+        /// Whether the user clicked into the popup, or put the keyboard into it: then it stays wherever the pointer
+        /// goes.
+        /// </summary>
         public bool IsHeld { get; set; }
 
         /// <summary>Cancels the server's request and the reading of its answer.</summary>

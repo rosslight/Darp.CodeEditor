@@ -388,6 +388,35 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Ctrl_K_Ctrl_I_puts_the_keyboard_into_a_hover_the_mouse_opened_which_then_stays_where_the_pointer_goes() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer("--no-diagnostics");
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            await server.StartAsync();
+            await HoverAsync(window, 4, "two is a word in");
+
+            window.Press(Key.K, EditorWindow.Command);
+            window.Press(Key.I, EditorWindow.Command);
+
+            // The word under the pointer's, not the caret's.
+            PopupFrame popup = Popup(window).ShouldNotBeNull();
+            popup.IsKeyboardFocusWithin.ShouldBeTrue();
+            Texts(popup).ShouldContain(t => t.Contains("two is a word in", StringComparison.Ordinal));
+            window.MoveMouse(window.PointAt(0) + new Point(0, 200));
+            // Longer than the hover waits for the pointer to come back.
+            await Task.Delay(TimeSpan.FromMilliseconds(500));
+            window.Layout();
+            Popup(window).ShouldNotBeNull().IsKeyboardFocusWithin.ShouldBeTrue();
+            window.Press(Key.Escape);
+            Popup(window).ShouldBeNull();
+            EditorWindow.PartOf(editor).TextArea.IsFocused.ShouldBeTrue();
+        });
+
+    [Fact]
     public Task The_popup_closes_on_typing_Escape_scrolling_and_focus_loss() =>
         _ui.Run(async () =>
         {
