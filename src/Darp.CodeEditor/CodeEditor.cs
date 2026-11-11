@@ -75,7 +75,8 @@ namespace Darp.CodeEditor;
 /// The search bar searches as the user types, in the background: plain text or a .NET regular expression, line by
 /// line, with Match Case and Match Whole Word. A search stops after 1 second, as a regular expression such as
 /// <c>(a+)+$</c> can take far longer, and keeps 10,000 matches at most. The bar says so when a search stops early, and
-/// Replace All then does nothing: it never replaces only some of the matches.
+/// Replace All then does nothing: it never replaces only some of the matches. A regular expression's replacement is in
+/// VS Code's syntax, not .NET's: <c>$1</c> for a group, and <c>\U$1</c> for it in upper case.
 /// </para>
 /// <para>
 /// The editor's commands run by <see cref="Keymap"/>, VS Code's keys by default: completion (Ctrl+Space), the hover at

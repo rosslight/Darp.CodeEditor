@@ -105,8 +105,9 @@ internal static class TextSearch
 
     /// <summary>
     /// Finds the matches of <paramref name="query"/> in <paramref name="snapshot"/>, with the text that replaces each
-    /// one when <paramref name="replacement"/> is given: itself, or for a regular expression with its substitutions,
-    /// such as <c>$1</c>.
+    /// one when <paramref name="replacement"/> is given: itself, or for a regular expression with its substitutions in
+    /// VS Code's syntax (<see cref="ReplacePattern"/>), such as <c>$1</c> or <c>\U$1</c>. Its line breaks are those of
+    /// the match's line, as VS Code makes them its text's.
     /// </summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
     public static SearchResult Find(
@@ -141,7 +142,16 @@ internal static class TextSearch
             query,
             replacement,
             matches,
-            FindAll(snapshot.GetText(), query, regex, replacement, matches, cancellationToken),
+            FindAll(
+                snapshot.GetText(),
+                query,
+                regex,
+                replacement is null ? null
+                    : query.UseRegex ? ReplacePattern.Parse(replacement)
+                    : ReplacePattern.Static(replacement),
+                matches,
+                cancellationToken
+            ),
             null
         );
     }
@@ -150,12 +160,14 @@ internal static class TextSearch
         string text,
         SearchQuery query,
         Regex regex,
-        string? replacement,
+        ReplacePattern? replacement,
         TextSegmentCollection<SearchMatch> matches,
         CancellationToken cancellationToken
     )
     {
         long start = Stopwatch.GetTimestamp();
+        // As AvaloniaEdit's new lines take it: the line's own, else the line's before, else the system's.
+        string lineBreak = Environment.NewLine;
         try
         {
             for (int lineStart = 0; ; )
@@ -163,6 +175,11 @@ internal static class TextSearch
                 int lineEnd = text.AsSpan(lineStart).IndexOfAny('\r', '\n') is var found and >= 0
                     ? lineStart + found
                     : text.Length;
+                if (lineEnd < text.Length)
+                    lineBreak =
+                        text.AsSpan(lineEnd).StartsWith("\r\n") ? "\r\n"
+                        : text[lineEnd] == '\r' ? "\r"
+                        : "\n";
                 for (
                     Match match = regex.Match(text, lineStart, lineEnd - lineStart);
                     match.Success;
@@ -178,9 +195,9 @@ internal static class TextSearch
                         return SearchOutcome.TooManyMatches;
                     matches.Add(
                         new SearchMatch(
-                            replacement is null ? ""
-                            : query.UseRegex ? match.Result(replacement)
-                            : replacement
+                            replacement is null
+                                ? ""
+                                : TextUtilities.NormalizeNewLines(replacement.Build(match), lineBreak)
                         )
                         {
                             StartOffset = match.Index,
@@ -192,7 +209,7 @@ internal static class TextSearch
                     return SearchOutcome.OutOfTime;
                 if (lineEnd == text.Length)
                     return SearchOutcome.Complete;
-                lineStart = text.AsSpan(lineEnd).StartsWith("\r\n") ? lineEnd + 2 : lineEnd + 1;
+                lineStart = lineEnd + lineBreak.Length;
             }
         }
         catch (RegexMatchTimeoutException)

@@ -24,6 +24,30 @@ public sealed class TextSearchTests
     }
 
     [Fact]
+    public void Only_a_regular_expression_reads_its_replacement_and_its_line_breaks_are_the_lines()
+    {
+        TextSnapshot snapshot = TextSnapshot.FromString("foo\r\nfoo");
+        const string replacement = @"\U$1\n";
+
+        SearchResult regex = TextSearch.Find(
+            snapshot,
+            new SearchQuery("(foo)", MatchCase: false, WholeWord: false, UseRegex: true),
+            replacement,
+            CancellationToken.None
+        );
+        SearchResult text = TextSearch.Find(
+            snapshot,
+            new SearchQuery("foo", MatchCase: false, WholeWord: false, UseRegex: false),
+            replacement,
+            CancellationToken.None
+        );
+
+        // The last line has no line break of its own: it takes the one before.
+        regex.Matches.Select(match => match.Replacement).ShouldBe(["FOO\r\n", "FOO\r\n"]);
+        text.Matches.Select(match => match.Replacement).ShouldBe([replacement, replacement]);
+    }
+
+    [Fact]
     public void A_cancelled_search_stops()
     {
         using var cancelled = new CancellationTokenSource();
