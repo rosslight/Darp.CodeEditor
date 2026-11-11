@@ -116,13 +116,13 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
-    public Task Typing_that_starts_a_word_opens_the_list_but_not_inside_a_word_or_a_comment() =>
+    public Task Typing_at_a_words_end_or_its_first_character_opens_the_list_but_not_inside_a_word_a_number_or_a_comment() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
             await using var server = new LanguageServer(fake.Options);
             using CodeDocument answer = await SetCompletionAsync(server, fake, Items("xenon", "xylophone"));
-            const string text = "[\n  ,\n  ab\n]\n// note\n";
+            const string text = "[\n  ,\n  ab,\n  cd,\n  \n]\n// note\n";
             using CodeDocument document = server.CreateDocument(CodeLanguage.Json, text);
             using var window = new EditorWindow(new CodeEditor { Document = document });
             // JSON's comment color: the grammar knows the comment.
@@ -140,15 +140,51 @@ public sealed class CompletionTests(UiFixture ui)
             await WaitForLabelsAsync(window, ["xylophone"]);
             window.Press(Key.Escape);
 
-            // On in the same word, before a word, and in a comment: no request.
-            window.Type("z");
+            // As in VS Code: typing on at the word's end asks again, and so does a first character before a word.
+            window.Type("l");
+            (await fake.WaitForAsync("completion ", 2)).ShouldEndWith(" 1 - 7");
+            await WaitForLabelsAsync(window, ["xylophone"]);
+            window.Press(Key.Escape);
             window.Editor.Selection = new TextSelection(document.Text.IndexOf("ab", StringComparison.Ordinal));
             window.Type("q");
+            (await fake.WaitForAsync("completion ", 3)).ShouldEndWith(" 1 - 12");
+            window.Press(Key.Escape);
+
+            // Inside a word, in a number, and in a comment: no request.
+            window.Editor.Selection = new TextSelection(document.Text.IndexOf("cd", StringComparison.Ordinal) + 1);
+            window.Type("m");
+            window.Editor.Selection = new TextSelection(document.Text.IndexOf("\n]", StringComparison.Ordinal));
+            window.Type("12");
             window.Editor.Selection = new TextSelection(document.Text.IndexOf("note", StringComparison.Ordinal) + 4);
             window.Type(" w");
             await BarrierAsync(server, fake);
+            fake.LinesStartingWith("completion ").Count.ShouldBe(3);
+            document.Text.ShouldBe("[\n  xyl,\n  qab,\n  cmd,\n  12\n]\n// note w\n");
+        });
+
+    [Fact]
+    public Task Backspace_alone_opens_nothing_and_typing_after_it_opens_the_list_again() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("print", "property"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Type("pri");
+            await WaitForLabelsAsync(window, ["print"]);
+            window.Press(Key.Escape);
+
+            window.Press(Key.Back);
+            window.Press(Key.Back);
+            await BarrierAsync(server, fake);
+            List(window).ShouldBeNull();
             fake.LinesStartingWith("completion ").Count.ShouldBe(1);
-            document.Text.ShouldBe("[\n  xyz,\n  qab\n]\n// note w\n");
+
+            window.Type("r");
+
+            (await fake.WaitForAsync("completion ", 2)).ShouldEndWith(" 1 - 2");
+            await WaitForLabelsAsync(window, ["print", "property"]);
         });
 
     [Fact]
@@ -1028,7 +1064,7 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
-    public Task Opened_by_typing_an_empty_incomplete_answer_shows_nothing_and_asks_no_more() =>
+    public Task Opened_by_typing_an_empty_incomplete_answer_shows_nothing_and_typing_on_in_its_word_asks_no_more() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
@@ -1050,6 +1086,19 @@ public sealed class CompletionTests(UiFixture ui)
 
             List(window).ShouldBeNull();
             fake.LinesStartingWith("completion ").Count.ShouldBe(1);
+
+            // Backspace asks nothing; typing after it asks again, and so does a new word.
+            window.Press(Key.Back);
+            await BarrierAsync(server, fake);
+            fake.LinesStartingWith("completion ").Count.ShouldBe(1);
+            window.Type("x");
+            (await fake.WaitForAsync("completion ", 2)).ShouldEndWith(" 1 - 4");
+            await BarrierAsync(server, fake);
+            window.Type("y");
+            await BarrierAsync(server, fake);
+            fake.LinesStartingWith("completion ").Count.ShouldBe(2);
+            window.Type(" z");
+            (await fake.WaitForAsync("completion ", 3)).ShouldEndWith(" 1 - 7");
         });
 
     [Fact]

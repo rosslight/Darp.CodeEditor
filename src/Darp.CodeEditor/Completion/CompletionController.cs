@@ -21,8 +21,9 @@ namespace Darp.CodeEditor.Completion;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Completion opens on Ctrl+Space, also on macOS, on the server's trigger characters, and when typing starts a word
-/// outside a comment. Until the server answers, nothing shows; what is typed meanwhile filters its answer. The list
+/// Completion opens on Ctrl+Space, also on macOS, on the server's trigger characters, and, as VS Code's quick
+/// suggestions, on a word character typed outside a comment at a word's end or as its first character; Backspace opens
+/// nothing. Until the server answers, nothing shows; what is typed meanwhile filters its answer. The list
 /// is the server's for where it was asked: typing on filters and ranks it on the client, with the matching of
 /// <see cref="CompletionMatcher"/>, and selects the first item, or the one the server preselects among the best. The
 /// matching runs off the UI thread, whatever the list's length: each change cancels the filter under way, and the list
@@ -77,6 +78,14 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>The wait after asking by key before "Loading…" shows; null while none runs.</summary>
     private ITimer? _loading;
+
+    /// <summary>
+    /// The word, up to the caret, that a request opened by typing found nothing for; null for none. Typing on in it
+    /// asks no more: a server that answers nothing there, as Pyright does in strings, would be asked again on every
+    /// key. Anything else, such as Backspace, a caret move or another editor's edit, ends it, so that typing after it
+    /// asks again.
+    /// </summary>
+    private TextRange? _quiet;
 
     /// <summary>Cancels the resolve of the item committed last, whose additional edits are still to come.</summary>
     private CancellationTokenSource? _lateEdits;
@@ -263,6 +272,7 @@ internal sealed class CompletionController : IDisposable
         if (!_textArea.ReadOnlySectionProvider.CanInsert(caret))
             return;
         var request = new Request(_document.CurrentSnapshot, WordBefore(caret));
+        _quiet = null;
         HideMessage();
         Session session = _session ??= new Session();
         session.IsExplicit |= explicitly;
@@ -289,7 +299,8 @@ internal sealed class CompletionController : IDisposable
             session.Pending = null;
             StopLoading();
             // Nothing here, as in a comment or a string, where some servers answer an empty list that is incomplete:
-            // asking again on each key would never end. Asked by key, the user learns so; otherwise nothing shows.
+            // asking again on each key would never end. Asked by key, the user learns so; otherwise nothing shows,
+            // and typing on in the word asks no more.
             if (list is null || list.Items.Count == 0)
             {
                 if (!session.IsExplicit || session.Answer is null)
@@ -298,6 +309,14 @@ internal sealed class CompletionController : IDisposable
                     Close();
                     if (explicitly)
                         ShowMessage("No suggestions.", request);
+                    else if (
+                        !request.IsStale
+                        && WordBefore(_textArea.Caret.Offset) is { Length: > 0 } word
+                        && word.Start == request.Word.Start
+                    )
+                    {
+                        _quiet = word;
+                    }
                     return;
                 }
                 list ??= new CompletionList([], isIncomplete: false, resolve: null);
@@ -876,7 +895,9 @@ internal sealed class CompletionController : IDisposable
         }
     }
 
-    /// <summary>Opens completion on the server's trigger characters, and when typing starts a word.</summary>
+    /// <summary>
+    /// Opens completion on the server's trigger characters, and on a word character typed while completion is closed.
+    /// </summary>
     private void OnTextEntered(object? sender, TextInputEventArgs e)
     {
         if (e.Text is not { Length: > 0 } text || _document.Features?.Completion is not { } provider)
@@ -884,32 +905,86 @@ internal sealed class CompletionController : IDisposable
         char typed = text[^1];
         if (provider.TriggerCharacters.Contains(typed))
             Ask(new CompletionTrigger(CompletionTriggerKind.TriggerCharacter, typed));
-        else if (_session is null && StartsWord(typed))
+        else if (_session is null && OpensByTyping(typed))
             Ask(new CompletionTrigger(CompletionTriggerKind.Invoked));
     }
 
     /// <summary>
-    /// Whether the character just typed starts a word outside a comment: it is the whole word before the caret, and no
-    /// word goes on after the caret. VS Code asks there too in strings, as its JSON and YAML settings say.
+    /// Whether the character just typed opens completion, as VS Code's quick suggestions decide: it is a word
+    /// character that ends a word, or that is the first character of a word, and the word is no number. Not in a
+    /// comment; VS Code asks there too in strings, as its JSON and YAML settings say. Not while typing on in a word
+    /// that a request found nothing for.
     /// </summary>
-    private bool StartsWord(char typed)
+    private bool OpensByTyping(char typed)
     {
         int caret = _textArea.Caret.Offset;
-        if (!WordCharacters.IsWordCharacter(typed) || WordBefore(caret).Length != 1)
+        TextRange before = WordBefore(caret);
+        if (!WordCharacters.IsWordCharacter(typed) || before.Length == 0)
             return false;
-        if (
-            caret < _buffer.GetLineByOffset(caret).EndOffset
-            && WordCharacters.IsWordCharacter(_buffer.GetCharAt(caret))
-        )
+        if (_quiet is { } quiet && quiet.Start == before.Start && quiet.End == caret)
+            return false;
+        TextRange word = TextRange.FromBounds(before.Start, WordAfter(caret));
+        if (word.End != caret && before.Length != 1)
+            return false;
+        if (IsNumber(_buffer.GetText(word.Start, word.Length)))
             return false;
         return _highlighter.ContextAt(caret) is not { Before: TokenType.Comment };
     }
 
-    private void OnCaretPositionChanged(object? sender, EventArgs e) => Update();
+    /// <summary>
+    /// Whether <paramref name="word"/> reads as a number, as VS Code tells by JavaScript's <c>Number</c>: decimal
+    /// digits, with an exponent, or hexadecimal, binary or octal ones after their prefix. A word holds no sign or dot.
+    /// </summary>
+    private static bool IsNumber(string word)
+    {
+        if (word == "Infinity")
+            return true;
+        if (word.Length > 2 && word[0] == '0' && char.ToLowerInvariant(word[1]) is 'x' or 'b' or 'o')
+        {
+            Func<char, bool> isDigit = char.ToLowerInvariant(word[1]) switch
+            {
+                'x' => char.IsAsciiHexDigit,
+                'b' => c => c is '0' or '1',
+                _ => c => c is >= '0' and <= '7',
+            };
+            return word.Skip(2).All(isDigit);
+        }
+        int i = 0;
+        while (i < word.Length && char.IsAsciiDigit(word[i]))
+            i++;
+        if (i == 0 || i == word.Length)
+            return i > 0;
+        if (char.ToLowerInvariant(word[i]) != 'e')
+            return false;
+        int exponent = ++i;
+        while (i < word.Length && char.IsAsciiDigit(word[i]))
+            i++;
+        return i == word.Length && i > exponent;
+    }
 
-    /// <summary>A part of a change before where completion was asked makes the request stale.</summary>
+    private void OnCaretPositionChanged(object? sender, EventArgs e)
+    {
+        if (_quiet is { } quiet && _textArea.Caret.Offset != quiet.End)
+            _quiet = null;
+        Update();
+    }
+
+    /// <summary>
+    /// Typing on after <see cref="_quiet"/>'s word goes on with it; any other change ends it. A part of a change before
+    /// where completion was asked makes the request stale.
+    /// </summary>
     private void OnBufferChanging(object? sender, DocumentChangeEventArgs e)
     {
+        if (_quiet is { } quiet)
+        {
+            _quiet =
+                e.RemovalLength == 0 && e.Offset == quiet.End
+                    ? quiet with
+                    {
+                        Length = quiet.Length + e.InsertionLength,
+                    }
+                    : null;
+        }
         if (_session is not { } session)
             return;
         foreach (Request? request in (Request?[])[session.Answer?.Request, session.Pending])
@@ -940,6 +1015,19 @@ internal sealed class CompletionController : IDisposable
         while (start > first && WordCharacters.IsWordCharacter(_buffer.GetCharAt(start - 1)))
             start--;
         return TextRange.FromBounds(start, caret);
+    }
+
+    /// <summary>
+    /// Where the word that goes on after <paramref name="caret"/> ends, reaching as far as <see cref="WordBefore"/>
+    /// does; the caret itself when no word goes on.
+    /// </summary>
+    private int WordAfter(int caret)
+    {
+        int last = Math.Min(_buffer.GetLineByOffset(caret).EndOffset, caret + HoverController.MaxWordReach);
+        int end = caret;
+        while (end < last && WordCharacters.IsWordCharacter(_buffer.GetCharAt(end)))
+            end++;
+        return end;
     }
 
     private PopupLook Look() => new(_editor.FontFamily, _editor.FontSize, _colors?.Popups ?? PopupColors.Default);
