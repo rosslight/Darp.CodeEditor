@@ -1107,8 +1107,8 @@ Still open:
   matching, and the outdent of a closing bracket typed on an empty line by its opening bracket's line, without a
   decrease pattern. VS Code also strips strings and comments from a line before matching its indentation patterns;
   the editor matches the line as it is;
-- the editor's own text, before v1: its context menu speaks English and German, by the UI culture as it opens; its
-  search bar is in English only. How apps add other languages is not decided yet.
+- the editor's own text, before v1: its context menu and search bar speak English and German, by the UI culture as
+  they open. How apps add other languages is not decided yet.
 
 ## 10. Open questions
 

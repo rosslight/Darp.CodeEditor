@@ -36,4 +36,37 @@
   <data name="Replace" xml:space="preserve">
     <value>Ersetzen</value>
   </data>
+  <data name="ReplaceAll" xml:space="preserve">
+    <value>Alle ersetzen</value>
+  </data>
+  <data name="MatchCase" xml:space="preserve">
+    <value>Groß-/Kleinschreibung beachten</value>
+  </data>
+  <data name="MatchWholeWord" xml:space="preserve">
+    <value>Nur ganzes Wort suchen</value>
+  </data>
+  <data name="UseRegularExpression" xml:space="preserve">
+    <value>Regulären Ausdruck verwenden</value>
+  </data>
+  <data name="PreviousMatch" xml:space="preserve">
+    <value>Vorheriger Treffer (Shift+F3)</value>
+  </data>
+  <data name="NextMatch" xml:space="preserve">
+    <value>Nächster Treffer (F3)</value>
+  </data>
+  <data name="CloseSearch" xml:space="preserve">
+    <value>Schließen (Escape)</value>
+  </data>
+  <data name="NoResults" xml:space="preserve">
+    <value>Keine Ergebnisse</value>
+  </data>
+  <data name="MatchCount" xml:space="preserve">
+    <value>{0} von {1:N0}{2}</value>
+  </data>
+  <data name="TooManyMatches" xml:space="preserve">
+    <value>Mehr als {0:N0} Treffer: Nur die ersten {0:N0} werden angezeigt, und „Alle ersetzen“ ist aus.</value>
+  </data>
+  <data name="SearchTimedOut" xml:space="preserve">
+    <value>Die Suche hat nach {0:0.#} s angehalten: Treffer können fehlen, und „Alle ersetzen“ ist aus.</value>
+  </data>
 </root>
