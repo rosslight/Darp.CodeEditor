@@ -76,8 +76,9 @@ internal sealed class EditingHelpers : IDisposable
     }
 
     /// <summary>
-    /// Backspace, and deleting by words, from the editor's key handler, while the text area has the keyboard. Words go
-    /// with Ctrl+Backspace and Ctrl+Delete, or Alt on macOS, the platform's key for moving by words.
+    /// Backspace, deleting by words, and the arrow keys with a selection, from the editor's key handler, while the text
+    /// area has the keyboard, after the keys of its popups. Words go with Ctrl+Backspace and Ctrl+Delete, or Alt on
+    /// macOS, the platform's key for moving by words.
     /// </summary>
     public void OnKeyDown(KeyEventArgs e)
     {
@@ -88,6 +89,29 @@ internal sealed class EditingHelpers : IDisposable
             e.Handled = DeletePairs(offsets);
         else if (e.Key is Key.Back or Key.Delete && e.KeyModifiers == words)
             e.Handled = DeleteWord(left: e.Key == Key.Back);
+        else if (e.Key is Key.Left or Key.Right or Key.Up or Key.Down && e.KeyModifiers == KeyModifiers.None)
+            e.Handled = CollapseSelection(e.Key);
+    }
+
+    /// <summary>
+    /// An arrow key without Shift ends a selection as VS Code's <c>cursorLeft</c>, <c>cursorRight</c>, <c>cursorUp</c>
+    /// and <c>cursorDown</c> do, whichever end the caret is on: Left puts the caret at the selection's start and Right
+    /// at its end, and go no further; Up and Down go one line up from its start or down from its end, by AvaloniaEdit's
+    /// move, which keeps the column. A rectangle selection is left to AvaloniaEdit.
+    /// </summary>
+    /// <returns>Whether it handled the key: Up and Down go on to AvaloniaEdit's move.</returns>
+    private bool CollapseSelection(Key key)
+    {
+        if (_textArea.Selection is RectangleSelection || _textArea.Selection.IsEmpty)
+            return false;
+        ISegment selected = _textArea.Selection.SurroundingSegment;
+        _textArea.ClearSelection();
+        // Setting the caret also forgets the column that the moves up and down keep.
+        _textArea.Caret.Offset = key is Key.Left or Key.Up ? selected.Offset : selected.EndOffset;
+        if (key is Key.Up or Key.Down)
+            return false;
+        _textArea.Caret.BringCaretToView();
+        return true;
     }
 
     /// <summary>
