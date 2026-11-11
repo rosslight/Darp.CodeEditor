@@ -162,6 +162,65 @@ public sealed class CompletionTests(UiFixture ui)
             document.Text.ShouldBe("[\n  xyl,\n  qab,\n  cmd,\n  12\n]\n// note w\n");
         });
 
+    /// <summary>Languages with JSON's grammar, and where typing opens completion in them.</summary>
+    public static TheoryData<string, bool, bool, bool> QuickSuggestionLanguages =>
+        new()
+        {
+            // VS Code's default; JSON's, which adds strings; and comments only.
+            { "default", true, false, false },
+            { "json", true, false, true },
+            { "comments", false, true, false },
+        };
+
+    [Theory]
+    [MemberData(nameof(QuickSuggestionLanguages))]
+    public Task Typing_opens_the_list_in_code_comments_and_strings_as_the_languages_quick_suggestions_say(
+        string language,
+        bool inCode,
+        bool inComments,
+        bool inStrings
+    ) =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("xenon"));
+            CodeLanguage json = CodeLanguage.Json;
+            CodeLanguage codeLanguage = language switch
+            {
+                "json" => json,
+                "comments" => new CodeLanguage("comments", json.Grammar, json.Configuration)
+                {
+                    QuickSuggestions = new QuickSuggestions(Other: false, Comments: true, Strings: false),
+                },
+                _ => new CodeLanguage("default", json.Grammar, json.Configuration),
+            };
+            const string text = "[\n  \"\",\n  \n]\n// \n";
+            using CodeDocument document = server.CreateDocument(codeLanguage, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            // JSON's comment color: the grammar knows the comment.
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return window.ColorAt(text.IndexOf("//", StringComparison.Ordinal)) == Color.Parse("#008000");
+            });
+
+            (await OpensAsync(document.Text.IndexOf("\"\"", StringComparison.Ordinal) + 1)).ShouldBe(inStrings);
+            (await OpensAsync(document.Text.IndexOf("  \n]", StringComparison.Ordinal) + 2)).ShouldBe(inCode);
+            (await OpensAsync(document.Text.IndexOf("// ", StringComparison.Ordinal) + 3)).ShouldBe(inComments);
+
+            // Whether typing "x" at the offset asks for completion.
+            async Task<bool> OpensAsync(int offset)
+            {
+                int asked = fake.LinesStartingWith("completion ").Count;
+                window.Editor.Selection = new TextSelection(offset);
+                window.Type("x");
+                await BarrierAsync(server, fake);
+                window.Press(Key.Escape);
+                return fake.LinesStartingWith("completion ").Count > asked;
+            }
+        });
+
     [Fact]
     public Task Backspace_alone_opens_nothing_and_typing_after_it_opens_the_list_again() =>
         _ui.Run(async () =>
@@ -229,6 +288,50 @@ public sealed class CompletionTests(UiFixture ui)
             window.Render();
             RowRuns(window, "readConsole").ShouldBe([("read", false), ("Con", true), ("sole", false)]);
             fake.LinesStartingWith("completion ").Count.ShouldBe(1);
+        });
+
+    [Fact]
+    public Task A_typo_of_two_neighbouring_characters_finds_the_item_while_typing_and_on_Ctrl_Space() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("print", "property"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Type("pr");
+            await WaitForLabelsAsync(window, ["print", "property"]);
+
+            window.Type("nit");
+
+            await WaitForLabelsAsync(window, ["print"]);
+            window.Render();
+            RowRuns(window, "print").ShouldBe([("print", true)]);
+            window.Press(Key.Escape);
+            await OpenAsync(window, 5);
+            Labels(window).ShouldBe(["print"]);
+        });
+
+    [Fact]
+    public Task Typing_on_ranks_what_shows_so_that_a_list_of_over_2000_items_tolerates_a_typo_once_typing_shortened_it() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            string[] labels = [.. Enumerable.Range(0, 2000).Select(i => $"x{i}"), "print"];
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items(labels));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Type("p");
+            await WaitForLabelsAsync(window, ["print"]);
+
+            window.Type("rni");
+
+            await WaitForLabelsAsync(window, ["print"]);
+            // Asked for there, the list is ranked whole, strictly: it has more than 2,000 items.
+            window.Press(Key.Escape);
+            window.Press(Key.Space, KeyModifiers.Control);
+            await Wait.UntilAsync(() => List(window)?.Message == "No suggestions.");
         });
 
     [Fact]
@@ -488,12 +591,12 @@ public sealed class CompletionTests(UiFixture ui)
             document.Undo();
             document.Text.ShouldBe(text);
 
-            // But not "Write", whose own replace the server's: nothing matches any more, which the list asked for by
-            // key says.
+            // But not "Write", whose own replace the server's: nothing matches any more, and the caret left the word,
+            // which ends even the list asked for by key, as in VS Code.
             await OpenAsync(window, 10);
             window.Type(";");
             document.Text.ShouldBe("Console.Wr;");
-            await Wait.UntilAsync(() => List(window)?.Message == "No suggestions.");
+            await Wait.UntilAsync(() => List(window) is null);
         });
 
     [Fact]
@@ -1118,6 +1221,55 @@ public sealed class CompletionTests(UiFixture ui)
             await Wait.UntilAsync(() => List(window) is null);
         });
 
+    [Fact]
+    public Task A_click_that_moves_the_caret_ends_completion_and_asks_nothing() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("print", "property"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Type("pri");
+            await WaitForLabelsAsync(window, ["print"]);
+
+            // Between "p" and "r": a quarter of a character right of their boundary.
+            window.Click(window.PointAt(1) - new Point(window.TextView.WideSpaceWidth / 4, 0), MouseButton.Left);
+
+            window.Editor.Selection.ShouldBe(new TextSelection(1));
+            List(window).ShouldBeNull();
+            await BarrierAsync(server, fake);
+            fake.LinesStartingWith("completion ").Count.ShouldBe(1);
+        });
+
+    [Theory]
+    [InlineData(Key.Down, 2)]
+    [InlineData(Key.PageDown, 2)]
+    [InlineData(Key.Up, 0)]
+    [InlineData(Key.PageUp, 0)]
+    public Task With_one_item_the_keys_that_select_move_the_caret_and_leaving_the_line_ends_completion(
+        Key key,
+        int line
+    ) =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("ZeroDivisionError"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "above\n\nbelow");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Editor.Selection = new TextSelection(6);
+            window.Type("Zero");
+            await WaitForLabelsAsync(window, ["ZeroDivisionError"]);
+
+            // As in VS Code: selecting needs more than one item, so the key goes on to the text.
+            window.Press(key);
+
+            window.Editor.CaretPosition.Line.ShouldBe(line + 1);
+            List(window).ShouldBeNull();
+            document.Text.ShouldBe("above\nZero\nbelow");
+        });
+
     /// <summary>Makes the fake server answer completion with <paramref name="result"/>, until the document is disposed.</summary>
     [Fact]
     public Task Asked_by_key_an_empty_answer_says_No_suggestions_until_the_next_key() =>
@@ -1182,21 +1334,99 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
-    public Task Asked_by_key_a_list_that_typing_filters_empty_says_so_and_comes_back() =>
+    public Task Asked_by_key_a_list_that_typing_filters_empty_stays_frozen_while_the_caret_is_in_a_word() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("print", "property"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "pri");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await OpenAsync(window, 3);
+
+            window.Type("zzzz");
+
+            // As in VS Code: the list stays as it was, without the matched characters in bold.
+            await WaitForFrozenAsync(window, "print");
+            Labels(window).ShouldBe(["print"]);
+            List(window).ShouldNotBeNull().Message.ShouldBeNull();
+            // Typing back to a match shows the matches again; the caret leaving the word ends it.
+            for (int i = 0; i < 4; i++)
+                window.Press(Key.Back);
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return RowRuns(window, "print").SequenceEqual([("pri", true), ("nt", false)]);
+            });
+            window.Type("zz");
+            await WaitForFrozenAsync(window, "print");
+            window.Type(" ");
+            await Wait.UntilAsync(() => List(window) is null);
+            fake.LinesStartingWith("completion ").Count.ShouldBe(1);
+        });
+
+    [Fact]
+    public Task Asked_by_key_a_list_with_no_match_for_the_word_says_No_suggestions_and_typing_on_keeps_it() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
             await using var server = new LanguageServer(fake.Options);
             using CodeDocument answer = await SetCompletionAsync(server, fake, Items("alpha", "beta"));
-            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "q");
             using var window = new EditorWindow(new CodeEditor { Document = document });
-            await OpenAsync(window, 0);
+            window.Editor.Selection = new TextSelection(1);
 
-            window.Type("q");
+            window.Press(Key.Space, KeyModifiers.Control);
+
             await Wait.UntilAsync(() => List(window)?.Message == "No suggestions.");
-            window.Press(Key.Back);
+            window.Type("q");
+            await BarrierAsync(server, fake);
+            window.Layout();
+            List(window).ShouldNotBeNull().Message.ShouldBe("No suggestions.");
+            fake.LinesStartingWith("completion ").Count.ShouldBe(1);
+        });
 
-            await WaitForLabelsAsync(window, ["alpha", "beta"]);
+    [Fact]
+    public Task A_frozen_list_commits_its_item_over_what_was_typed_by_key_and_click_but_not_by_commit_characters() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse("""{ "items": [ { "label": "print", "commitCharacters": ["("] } ] }""")
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "pri");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            await OpenAsync(window, 3);
+            window.Type("zz");
+            await WaitForFrozenAsync(window, "print");
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("print");
+
+            document.Text = "pri";
+            await OpenAsync(window, 3);
+            window.Type("zz");
+            await WaitForFrozenAsync(window, "print");
+            window.Click(RowCenter(window, 0), MouseButton.Left);
+            document.Text.ShouldBe("print");
+
+            // Also while the filter of what was typed last still runs: once it has, the item commits.
+            document.Text = "pri";
+            await OpenAsync(window, 3);
+            TypeAlone(window, "z");
+            PressAlone(window, Key.Enter);
+            await Wait.UntilAsync(() => document.Text == "print");
+
+            // As in VS Code, its commit characters go in as text.
+            document.Text = "pri";
+            await OpenAsync(window, 3);
+            window.Type("zz");
+            await WaitForFrozenAsync(window, "print");
+            window.Type("(");
+            document.Text.ShouldBe("prizz(");
         });
 
     [Fact]
@@ -1303,6 +1533,14 @@ public sealed class CompletionTests(UiFixture ui)
         {
             window.Render();
             return Labels(window).SequenceEqual(labels);
+        });
+
+    /// <summary>Waits until the list shows <paramref name="label"/> frozen: without its matched characters in bold.</summary>
+    private static Task WaitForFrozenAsync(EditorWindow window, string label) =>
+        Wait.UntilAsync(() =>
+        {
+            window.Render();
+            return Labels(window).Contains(label) && RowRuns(window, label).SequenceEqual([(label, false)]);
         });
 
     /// <summary>The labels of the items that the list shows, in order; none while it is closed.</summary>

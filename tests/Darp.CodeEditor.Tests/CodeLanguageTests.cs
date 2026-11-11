@@ -22,6 +22,21 @@ public sealed class CodeLanguageTests
         json.Configuration.IndentationRules.ShouldNotBeNull().StartMatching().Decreases("  },").ShouldBeTrue();
     }
 
+    [Fact]
+    public void Quick_suggestions_are_VS_Codes_in_code_only_and_also_in_strings_for_JSON_and_YAML()
+    {
+        var code = new QuickSuggestions(Other: true, Comments: false, Strings: false);
+        var alsoStrings = new QuickSuggestions(Other: true, Comments: false, Strings: true);
+
+        QuickSuggestions.Default.ShouldBe(code);
+        new CodeLanguage("toml").QuickSuggestions.ShouldBe(code);
+        CodeLanguage.PlainText.QuickSuggestions.ShouldBe(code);
+        CodeLanguage.Xml.QuickSuggestions.ShouldBe(code);
+        CodeLanguage.Json.QuickSuggestions.ShouldBe(alsoStrings);
+        CodeLanguage.Yaml.QuickSuggestions.ShouldBe(alsoStrings);
+        new CodeLanguage("toml") { QuickSuggestions = alsoStrings }.QuickSuggestions.ShouldBe(alsoStrings);
+    }
+
     /// <summary>Each built-in language, with a line that its grammar gives scopes of its own.</summary>
     public static TheoryData<string, string> BuiltInSamples =>
         new()

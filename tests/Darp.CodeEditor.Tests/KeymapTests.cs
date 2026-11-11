@@ -71,6 +71,19 @@ public sealed class KeymapTests(UiFixture ui)
     }
 
     [Fact]
+    public void By_default_F8_and_Alt_F8_go_to_the_next_diagnostic_and_with_Shift_to_the_previous_one()
+    {
+        CodeEditorKeymap keymap = CodeEditorKeymap.Default;
+
+        keymap.CommandsFor(Key(Keys.F8, KeyModifiers.None), null).ShouldBe([CodeEditorCommands.NextMarkerInFiles]);
+        keymap.CommandsFor(Key(Keys.F8, KeyModifiers.Shift), null).ShouldBe([CodeEditorCommands.PreviousMarkerInFiles]);
+        keymap.CommandsFor(Key(Keys.F8, KeyModifiers.Alt), null).ShouldBe([CodeEditorCommands.NextMarker]);
+        keymap
+            .CommandsFor(Key(Keys.F8, KeyModifiers.Alt | KeyModifiers.Shift), null)
+            .ShouldBe([CodeEditorCommands.PreviousMarker]);
+    }
+
+    [Fact]
     public void A_punctuation_key_matches_where_the_layout_types_its_character()
     {
         CodeEditorKeymap keymap = CodeEditorKeymap.Empty.With(new CodeEditorKeyBinding("ctrl+/", "comment"));

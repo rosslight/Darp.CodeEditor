@@ -24,15 +24,16 @@ namespace Darp.CodeEditor.Completion;
 /// <remarks>
 /// <para>
 /// It opens when the user types one of the server's trigger characters, such as <c>(</c>, and asks again at once on a
-/// retrigger character, such as <c>,</c>, while it is open. While it is open, each edit and caret move restarts a pause
-/// of 120 ms, VS Code's; once it passes, it asks again, telling the server the signature that shows. A newer request,
-/// and every edit, cancels the request under way, and an answer about older text is dropped. Up and Down show the
-/// other signatures, while completion's list is closed.
+/// retrigger character, such as <c>,</c>, while it is open. While it is open, each edit and each caret move by the
+/// keyboard restarts a pause of 120 ms, VS Code's; once it passes, it asks again, telling the server the signature that
+/// shows. A newer request, and every edit, cancels the request under way, and an answer about older text is dropped. Up
+/// and Down show the other signatures, while completion's list is closed.
 /// </para>
 /// <para>
-/// <see cref="Close"/> ends it, for every reason it ends: Escape, leaving the call, when the server answers with none,
-/// the editor becoming read-only, the editor losing the keyboard focus, a server that starts or stops serving the
-/// document, new colors, the caret's line scrolling out of view, and the editor no longer showing the document.
+/// <see cref="Close"/> ends it, for every reason it ends: Escape, leaving the call, a click or drag that moves the caret,
+/// when the server answers with none, the editor becoming read-only, the editor losing the keyboard focus, a server that
+/// starts or stops serving the document, new colors, the caret's line scrolling out of view, and the editor no longer
+/// showing the document.
 /// </para>
 /// </remarks>
 internal sealed class SignatureHelpController : IDisposable
@@ -90,7 +91,7 @@ internal sealed class SignatureHelpController : IDisposable
         };
         _popup = new EditorPopup(editor, _frame);
         _textArea.TextEntered += OnTextEntered;
-        _textArea.Caret.PositionChanged += OnEditOrCaretMove;
+        _textArea.Caret.PositionChanged += OnCaretPositionChanged;
         _buffer.Changed += OnEditOrCaretMove;
         _document.LanguageFeaturesChanged += OnClosingChange;
         _popup.LeftView += OnClosingChange;
@@ -152,7 +153,7 @@ internal sealed class SignatureHelpController : IDisposable
     {
         Close();
         _textArea.TextEntered -= OnTextEntered;
-        _textArea.Caret.PositionChanged -= OnEditOrCaretMove;
+        _textArea.Caret.PositionChanged -= OnCaretPositionChanged;
         _buffer.Changed -= OnEditOrCaretMove;
         _document.LanguageFeaturesChanged -= OnClosingChange;
         _popup.LeftView -= OnClosingChange;
@@ -176,6 +177,15 @@ internal sealed class SignatureHelpController : IDisposable
     {
         if (IsActive)
             Wait();
+    }
+
+    /// <summary>A caret moved by the pointer, as by a click, ends signature help, as in VS Code.</summary>
+    private void OnCaretPositionChanged(object? sender, EventArgs e)
+    {
+        if (_editor.PointerMovesCaret)
+            Close();
+        else
+            OnEditOrCaretMove(sender, e);
     }
 
     /// <summary>Cancels the request under way, and asks again once the pause has passed.</summary>

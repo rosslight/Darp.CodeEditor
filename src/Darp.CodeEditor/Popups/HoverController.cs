@@ -197,6 +197,12 @@ internal sealed class HoverController : IDisposable
     /// <returns>Whether a popup was open.</returns>
     public bool CloseOnKey() => _hovered is not { IsHeld: true } && Close();
 
+    /// <summary>
+    /// Shows the hover at <paramref name="offset"/> as <see cref="ShowAtCaret"/> does at the caret, at the offset as it
+    /// is, also right after a word: where a diagnostic starts, for going to it.
+    /// </summary>
+    public void ShowAt(int offset) => Start(offset, fromKeyboard: true);
+
     public void Dispose()
     {
         Close();

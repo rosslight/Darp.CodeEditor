@@ -22,15 +22,23 @@ namespace Darp.CodeEditor.Completion;
 /// <remarks>
 /// <para>
 /// Completion opens on Ctrl+Space, also on macOS, on the server's trigger characters, and, as VS Code's quick
-/// suggestions, on a word character typed outside a comment at a word's end or as its first character; Backspace opens
-/// nothing. Until the server answers, nothing shows; what is typed meanwhile filters its answer. The list
-/// is the server's for where it was asked: typing on filters and ranks it on the client, with the matching of
-/// <see cref="CompletionMatcher"/>, and selects the first item, or the one the server preselects among the best. The
-/// matching runs off the UI thread, whatever the list's length: each change cancels the filter under way, and the list
-/// shows the newest result, the previous one meanwhile. A list
-/// that the server marks incomplete is asked for again as the user types on, and shows meanwhile. Moving back before
+/// suggestions, on a word character typed at a word's end or as its first character, in code, comments or strings as
+/// the language's <see cref="CodeLanguage.QuickSuggestions"/> say; Backspace opens nothing. Until the server answers,
+/// nothing shows; what is typed meanwhile filters its answer. The list is the server's for where it was asked: typing
+/// on filters and ranks it on the client, with the matching of
+/// <see cref="CompletionMatcher"/>, and selects the first item, or the one the server preselects among the best. As in
+/// VS Code, typing on ranks the items that show, and anything else, such as Backspace, all of the answer's items; up
+/// to 2,000 ranked items tolerate a typo. The matching runs off the UI thread, whatever the list's length: each change
+/// cancels the filter under way, and the list shows the newest result, the previous one meanwhile. A list that the
+/// server marks incomplete is asked for again as the user types on, and shows meanwhile. Moving back before
 /// where completion was asked, and any edit before it, as by another editor of the document, asks again while a word
 /// is left, as VS Code does when the caret moves back: the list's positions no longer fit the text.
+/// </para>
+/// <para>
+/// When nothing matches what is typed, a list opened by typing ends. One asked for by key stays as VS Code's does:
+/// frozen, as the answer's items showed last, without their matched characters in bold, while the caret is in a word;
+/// accepting or a click commits the selected item over what was typed, and its commit characters go in as text. It
+/// says "No suggestions." when none of the answer's items showed, as when nothing matched where it was asked.
 /// </para>
 /// <para>
 /// Up, Down, Page Up and Page Down select, and the keymap's accept commands, a click or one of the selected item's
@@ -47,10 +55,10 @@ namespace Darp.CodeEditor.Completion;
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends completion, for every reason it ends: Escape, the caret leaving the line or moving back
-/// past the word, a selection, the editor becoming read-only, the list scrolling out of view, the editor losing the
-/// keyboard focus, a server that starts or stops serving the document, new colors, the list running out of matches, and
-/// the editor no longer showing the document. Ending it cancels the request still under way with
-/// <c>$/cancelRequest</c>, and so does a newer request; a late answer is dropped.
+/// past the word, a click or drag that moves the caret, a selection, the editor becoming read-only, the list scrolling
+/// out of view, the editor losing the keyboard focus, a server that starts or stops serving the document, new colors,
+/// the list running out of matches as above, and the editor no longer showing the document. Ending it cancels the
+/// request still under way with <c>$/cancelRequest</c>, and so does a newer request; a late answer is dropped.
 /// </para>
 /// </remarks>
 internal sealed class CompletionController : IDisposable
@@ -158,7 +166,9 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>
     /// The keys of completion's list while it shows, from the editor's key handler while the text area has the
-    /// keyboard: the keys that select. The keys that commit are the keymap's, for <see cref="Accept"/>.
+    /// keyboard: the keys that select, while it shows more than one item. With one, they go on to the text, as in VS
+    /// Code, and a caret that leaves the line ends completion. The keys that commit are the keymap's, for
+    /// <see cref="Accept"/>.
     /// </summary>
     /// <returns>Whether the key was completion's.</returns>
     public bool OnKeyDown(KeyEventArgs e)
@@ -166,7 +176,7 @@ internal sealed class CompletionController : IDisposable
         // "No suggestions." shows until the next key.
         if (_session is null)
             HideMessage();
-        if (_session is not { IsShowing: true } session || e.KeyModifiers != KeyModifiers.None)
+        if (_session is not { IsShowing: true, Items.Count: > 1 } session || e.KeyModifiers != KeyModifiers.None)
             return false;
         int count = session.Items.Count;
         int page = _view.List.VisibleRows - 1;
@@ -226,12 +236,12 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>
     /// Text the user types, before it goes in: one of the selected item's commit characters commits it, and then goes in
-    /// after it, if the item is known to match the current text.
+    /// after it, if the item is known to match the current text. A frozen list commits nothing so, as in VS Code.
     /// </summary>
     public void OnTextInput(TextInputEventArgs e)
     {
         if (
-            _session is { IsShowing: true } session
+            _session is { IsShowing: true, FrozenAt: null } session
             && e.Text is [char typed]
             && session.Items[session.Selected].Item.CommitCharacters.Contains(typed)
             && CanCommit(session, session.Selected)
@@ -400,11 +410,19 @@ internal sealed class CompletionController : IDisposable
         session.Filtering?.Cancellation.Cancel();
         if (session.CommitAt != key)
             session.CommitAt = null;
-        var filtering = new Filtering(key, new CancellationTokenSource());
+        var filtering = new Filtering(key, Refiltered(session, key), new CancellationTokenSource());
         session.Filtering = filtering;
         // The UI thread reads no text: each item's typed text is read off it, from the snapshot of the key's version.
         FilterAsync(session, filtering, _document.CurrentSnapshot);
     }
+
+    /// <summary>
+    /// The items that show, when a filter for <paramref name="key"/> ranks them instead of all of the answer's items,
+    /// as VS Code refilters: they were filtered for the same answer with the caret further back, as typing on leaves
+    /// them. Null otherwise, as after Backspace.
+    /// </summary>
+    private static List<ShownItem>? Refiltered(Session session, FilterKey key) =>
+        session.Shown is { } shown && shown.Answer == key.Answer && key.Caret > shown.Caret ? session.Items : null;
 
     /// <summary>Shows a filter's result, unless completion ended, or a newer filter replaced it.</summary>
     private async void FilterAsync(Session session, Filtering filtering, TextSnapshot snapshot)
@@ -413,7 +431,13 @@ internal sealed class CompletionController : IDisposable
         {
             CancellationToken cancellationToken = filtering.Cancellation.Token;
             Task<Filtered?> ranking = _matching.ContinueWith(
-                _ => Rank(filtering.Key.Answer.List.Items, snapshot, filtering.Key.Caret, cancellationToken),
+                _ =>
+                    Rank(
+                        filtering.Shown?.ConvertAll(shown => shown.Item) ?? filtering.Key.Answer.List.Items,
+                        snapshot,
+                        filtering.Key.Caret,
+                        cancellationToken
+                    ),
                 CancellationToken.None,
                 TaskContinuationOptions.DenyChildAttach,
                 TaskScheduler.Default
@@ -441,7 +465,8 @@ internal sealed class CompletionController : IDisposable
     /// <summary>
     /// Off the UI thread, after the filter before: the items that match the text typed for each, from where its edit
     /// starts up to <paramref name="caret"/>, best first, and the one to select; null once cancelled. Of each typed
-    /// text only what the matcher reads is read, however far before the caret the edit starts.
+    /// text only what the matcher reads is read, however far before the caret the edit starts. Up to
+    /// <see cref="CompletionMatcher.MaxGracefulItems"/> items match gracefully, tolerating a typo.
     /// </summary>
     private Filtered? Rank(
         IReadOnlyList<CompletionItem> items,
@@ -484,19 +509,27 @@ internal sealed class CompletionController : IDisposable
     {
         if (filtered.Items.Count == 0)
         {
-            // Asked by key, the list stays and says that nothing matches, as IntelliJ's does, so that the user sees it
-            // and can type back. Otherwise, an incomplete list may have more for what is typed, and a newer request, as
-            // for a trigger character typed while the list showed, brings a list of its own: its answer shows, or ends
-            // completion when it has nothing.
-            if (session.IsExplicit)
+            // As in VS Code: asked by key, the items of the answer that showed last stay, frozen, while the caret is in
+            // a word; when none of its items showed, the list says that nothing matches. Otherwise, an incomplete list
+            // may have more for what is typed, and a newer request, as for a trigger character typed while the list
+            // showed, brings a list of its own: its answer shows, or ends completion when it has nothing.
+            if (!session.IsExplicit)
+            {
+                if (key.Answer.List.IsIncomplete || session.Pending is not null)
+                    Hide(session);
+                else
+                    Close();
+            }
+            else if (session.Shown?.Answer != key.Answer)
                 ShowNoMatch(session, key);
-            else if (key.Answer.List.IsIncomplete || session.Pending is not null)
-                Hide(session);
-            else
+            else if (WordBefore(key.Caret).Length == 0)
                 Close();
+            else
+                Freeze(session, key);
             return;
         }
         session.ShowsNoMatch = false;
+        session.FrozenAt = null;
         StopLoading();
         _message = null;
         session.Items = filtered.Items;
@@ -518,6 +551,33 @@ internal sealed class CompletionController : IDisposable
     }
 
     /// <summary>
+    /// The list keeps showing its items for the text that <paramref name="key"/> is for, which none of them matches,
+    /// as VS Code's frozen list: without their matched characters in bold, and without committing on their commit
+    /// characters. The keys that accept, and a click, commit the selected item over what was typed; an accept that
+    /// waited for this filter does so now.
+    /// </summary>
+    private void Freeze(Session session, FilterKey key)
+    {
+        bool wasFrozen = session.FrozenAt is not null;
+        session.FrozenAt = key;
+        if (session.CommitAt == key)
+        {
+            Commit(session, session.Selected, session.CommitReplaces);
+            return;
+        }
+        if (!wasFrozen)
+        {
+            _view.Show(
+                [.. session.Items.Select(shown => shown with { Highlights = [] })],
+                session.Selected,
+                Look(),
+                _icons,
+                _textView.DefaultLineHeight
+            );
+        }
+    }
+
+    /// <summary>
     /// The list, at the word, says that nothing matches what is typed: the items that showed are gone, and the keys
     /// that accept go to the text again.
     /// </summary>
@@ -527,6 +587,7 @@ internal sealed class CompletionController : IDisposable
         session.Filtering?.Cancellation.Cancel();
         session.Filtering = null;
         session.CommitAt = null;
+        session.FrozenAt = null;
         session.Shown = null;
         session.Items = [];
         session.DetailsOf = null;
@@ -587,7 +648,7 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>
     /// Whether the item at <paramref name="index"/> may be committed now: the list shows the filter of the current
-    /// text, or the item matches it, which is checked for that item alone.
+    /// text, or the item matches it, which is checked for that item alone, as gracefully as the filter matches.
     /// </summary>
     private bool CanCommit(Session session, int index)
     {
@@ -595,15 +656,19 @@ internal sealed class CompletionController : IDisposable
             return false;
         if (session.Answer is { } answer && shown == CurrentKey(answer))
             return true;
+        if (session.FrozenAt is { } frozen && frozen == CurrentKey(frozen.Answer))
+            return true;
         CompletionItem item = session.Items[index].Item;
         int caret = _textArea.Caret.Offset;
         if (shown.Answer.Request.IsStale || caret < shown.Answer.Request.Offset)
             return false;
+        int ranked = Refiltered(session, CurrentKey(shown.Answer))?.Count ?? shown.Answer.List.Items.Count;
         return (_itemMatcher ??= new CompletionMatcher()).Match(
             Typed(_document.CurrentSnapshot, item.Edit.Range.Start, caret),
             item.Label,
             item.FilterText,
-            item.FilterTextIsLabel
+            item.FilterTextIsLabel,
+            graceful: ranked <= CompletionMatcher.MaxGracefulItems
         )
             is not null;
     }
@@ -648,6 +713,7 @@ internal sealed class CompletionController : IDisposable
         session.Filtering?.Cancellation.Cancel();
         session.Filtering = null;
         session.CommitAt = null;
+        session.FrozenAt = null;
         session.Shown = null;
         session.Items = [];
         session.DetailsOf = null;
@@ -926,12 +992,15 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>
     /// Whether the character just typed opens completion, as VS Code's quick suggestions decide: it is a word
-    /// character that ends a word, or that is the first character of a word, and the word is no number. Not in a
-    /// comment; VS Code asks there too in strings, as its JSON and YAML settings say. Not while typing on in a word
-    /// that a request found nothing for.
+    /// character that ends a word, or that is the first character of a word, and the word is no number. In code,
+    /// comments and strings as the language's <see cref="CodeLanguage.QuickSuggestions"/> say, by the token of the
+    /// character typed. Not while typing on in a word that a request found nothing for.
     /// </summary>
     private bool OpensByTyping(char typed)
     {
+        QuickSuggestions where = _document.Language.QuickSuggestions;
+        if (where is { Other: false, Comments: false, Strings: false })
+            return false;
         int caret = _textArea.Caret.Offset;
         TextRange before = WordBefore(caret);
         if (!WordCharacters.IsWordCharacter(typed) || before.Length == 0)
@@ -943,7 +1012,15 @@ internal sealed class CompletionController : IDisposable
             return false;
         if (IsNumber(_buffer.GetText(word.Start, word.Length)))
             return false;
-        return _highlighter.ContextAt(caret) is not { Before: TokenType.Comment };
+        // Everywhere: no need to tokenize.
+        if (where is { Other: true, Comments: true, Strings: true })
+            return true;
+        return (_highlighter.ContextAt(caret)?.Before ?? TokenType.Other) switch
+        {
+            TokenType.Comment => where.Comments,
+            TokenType.String => where.Strings,
+            _ => where.Other,
+        };
     }
 
     /// <summary>
@@ -977,11 +1054,18 @@ internal sealed class CompletionController : IDisposable
         return i == word.Length && i > exponent;
     }
 
+    /// <summary>
+    /// A caret moved by the keyboard filters, asks again or ends completion; one moved by the pointer, as by a click,
+    /// ends it, as in VS Code.
+    /// </summary>
     private void OnCaretPositionChanged(object? sender, EventArgs e)
     {
         if (_quiet is { } quiet && _textArea.Caret.Offset != quiet.End)
             _quiet = null;
-        Update();
+        if (_editor.PointerMovesCaret)
+            Close();
+        else
+            Update();
     }
 
     /// <summary>
@@ -1081,7 +1165,10 @@ internal sealed class CompletionController : IDisposable
     private readonly record struct FilterKey(Answer Answer, int Version, int Caret);
 
     /// <summary>A filter under way.</summary>
-    private sealed record Filtering(FilterKey Key, CancellationTokenSource Cancellation);
+    /// <param name="Key">What it filters for.</param>
+    /// <param name="Shown">The items that showed, which it ranks; null to rank all of the answer's items.</param>
+    /// <param name="Cancellation">Stops it.</param>
+    private sealed record Filtering(FilterKey Key, List<ShownItem>? Shown, CancellationTokenSource Cancellation);
 
     /// <summary>A filter's result: the items that match, in order, and the one to select.</summary>
     private sealed record Filtered(List<ShownItem> Items, int Selected);
@@ -1094,6 +1181,12 @@ internal sealed class CompletionController : IDisposable
 
         /// <summary>Whether the list shows that nothing matches what is typed.</summary>
         public bool ShowsNoMatch { get; set; }
+
+        /// <summary>
+        /// The filter that found no match while the items of <see cref="Shown"/> stay, frozen; null while the list is
+        /// not frozen.
+        /// </summary>
+        public FilterKey? FrozenAt { get; set; }
 
         /// <summary>The answer whose items show; null until the first one.</summary>
         public Answer? Answer { get; set; }

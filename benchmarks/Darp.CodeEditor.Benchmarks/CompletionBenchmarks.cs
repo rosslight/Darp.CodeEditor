@@ -143,6 +143,125 @@ public class CompletionBenchmarks
 }
 
 /// <summary>
+/// Filtering as many items as are matched with typos tolerated, 2,000, as in VS Code, in the setup of
+/// <see cref="CompletionBenchmarks"/>: from typing the fifth character of a word that one item in eight starts with
+/// until a rendered frame shows the filtered list. Each of those items is matched as typed, and with neighbouring
+/// characters swapped.
+/// </summary>
+[NotInBaseline]
+[InvocationCount(1)]
+[WarmupCount(40)]
+[IterationCount(20)]
+public class CompletionGracefulBenchmarks
+{
+    private const int Items = 2000;
+
+    private LanguageServer? _server;
+    private Window? _window;
+    private CodeDocument? _document;
+
+    /// <summary>The text's length before an iteration.</summary>
+    private int _length;
+
+    [GlobalSetup]
+    public void SetUp()
+    {
+        HeadlessEditor.SetUpApp();
+        string fakeServer = Path.Combine(AppContext.BaseDirectory, "Darp.CodeEditor.Tests.FakeServer.dll");
+        _server = new LanguageServer(
+            new LanguageServerOptions
+            {
+                FileName = Environment.ProcessPath ?? "dotnet",
+                Arguments =
+                [
+                    fakeServer,
+                    "--completion-items",
+                    $"{Items}",
+                    "--no-diagnostics",
+                    "--semantic-tokens",
+                    "none",
+                ],
+            }
+        );
+        Task start = _server.StartAsync();
+        CompletionBenchmarks.RunJobsUntil(() => start.IsCompleted, "The language server did not start.");
+        start.GetAwaiter().GetResult();
+        _document = _server.CreateDocument(CodeLanguage.Json, HeadlessEditor.Json(5000));
+        // Editors ask only once the document is open in the server, after the start's settings went out.
+        CodeDocument document = _document;
+        CompletionBenchmarks.RunJobsUntil(
+            () => document.Features is not null,
+            "The document did not open in the server."
+        );
+        var editor = new CodeEditor { Document = _document };
+        _window = HeadlessEditor.Show(editor);
+        HeadlessEditor.RenderUntilColored(_window, editor, HeadlessEditor.JsonKey);
+        int caret = _document.CurrentSnapshot.GetOffset(new TextPosition(2500, 3));
+        editor.Selection = new TextSelection(caret);
+        editor.ScrollTo(new TextRange(caret, 0));
+        HeadlessEditor.RenderUntilColored(_window, editor, HeadlessEditor.JsonKey);
+        editor.Focus();
+        _length = _document.CurrentSnapshot.Length;
+    }
+
+    /// <summary>Opens the list, and types the first four characters of "alpha".</summary>
+    [IterationSetup]
+    public void OpenTheListAndType()
+    {
+        Window window = _window ?? throw new InvalidOperationException("Not set up.");
+        window.KeyPress(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
+        window.KeyRelease(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
+        CompletionBenchmarks.RunJobsUntil(
+            () => CompletionBenchmarks.List(window) is { ItemCount: Items },
+            "The list did not show."
+        );
+        foreach (char c in "alph")
+            window.KeyTextInput(c.ToString());
+        CompletionBenchmarks.RunJobsUntil(
+            () => CompletionBenchmarks.List(window)?.RowOf(0)?.Item is { Highlights.Length: 4 },
+            "The list was not filtered."
+        );
+        HeadlessEditor.Render(window);
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("CI")]
+    public void TypeTheFifthCharacterOfAWordUntilAFrameShowsTheFilteredList()
+    {
+        Window window = _window ?? throw new InvalidOperationException("Not set up.");
+        window.KeyTextInput("a");
+        CompletionBenchmarks.RunJobsUntil(
+            () =>
+                CompletionBenchmarks.List(window) is { ItemCount: Items / 8 } list
+                && list.RowOf(0)?.Item is { Highlights.Length: 5 },
+            "The list was not filtered."
+        );
+        HeadlessEditor.Render(window);
+    }
+
+    /// <summary>Closes the list, and deletes what was typed, so that each iteration starts alike.</summary>
+    [IterationCleanup]
+    public void CloseTheList()
+    {
+        Window window = _window ?? throw new InvalidOperationException("Not set up.");
+        CodeDocument document = _document ?? throw new InvalidOperationException("Not set up.");
+        window.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
+        window.KeyRelease(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
+        while (document.CurrentSnapshot.Length != _length && document.CanUndo)
+            document.Undo();
+        HeadlessEditor.Render(window);
+    }
+
+    [GlobalCleanup]
+    public void Close()
+    {
+        _window?.Close();
+        _document?.Dispose();
+        _server?.Dispose();
+    }
+}
+
+/// <summary>
 /// The UI thread's time for a keystroke in the worst case that the design's budgets consider: 10,000 items of 128
 /// characters, such as long names a server sends, and a typed word of 64 characters that every label holds in order,
 /// so that matching runs fully for each. Filtering runs off the UI thread, so the keystroke with its frame costs what a
