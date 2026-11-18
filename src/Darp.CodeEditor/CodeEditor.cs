@@ -1113,6 +1113,13 @@ public class CodeEditor : TemplatedControl
                             or CodeEditorCommands.CursorWordEndRightSelect
                 );
                 return true;
+            // Lines and selections.
+            case CodeEditorCommands.MoveLinesUp or CodeEditorCommands.MoveLinesDown when inText && !IsReadOnly:
+                _helpers?.MoveLines(down: command == CodeEditorCommands.MoveLinesDown);
+                return true;
+            case CodeEditorCommands.CopyLinesUp or CodeEditorCommands.CopyLinesDown when inText && !IsReadOnly:
+                _helpers?.CopyLines(down: command == CodeEditorCommands.CopyLinesDown);
+                return true;
             default:
                 return false;
         }

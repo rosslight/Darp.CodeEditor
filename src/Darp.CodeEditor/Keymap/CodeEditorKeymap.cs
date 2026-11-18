@@ -86,6 +86,8 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+d (cmd+d)</term><description><see cref="CodeEditorCommands.AddSelectionToNextFindMatch"/></description></item>
     /// <item><term>ctrl+left, ctrl+shift+left (alt+left, alt+shift+left)</term><description><see cref="CodeEditorCommands.CursorWordLeft"/>, <see cref="CodeEditorCommands.CursorWordLeftSelect"/></description></item>
     /// <item><term>ctrl+right, ctrl+shift+right (alt+right, alt+shift+right)</term><description><see cref="CodeEditorCommands.CursorWordEndRight"/>, <see cref="CodeEditorCommands.CursorWordEndRightSelect"/></description></item>
+    /// <item><term>alt+up, alt+down</term><description><see cref="CodeEditorCommands.MoveLinesUp"/>, <see cref="CodeEditorCommands.MoveLinesDown"/></description></item>
+    /// <item><term>shift+alt+up, shift+alt+down (Linux: ctrl+shift+alt+up, ctrl+shift+alt+down)</term><description><see cref="CodeEditorCommands.CopyLinesUp"/>, <see cref="CodeEditorCommands.CopyLinesDown"/></description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default => s_default.Value;
@@ -202,6 +204,25 @@ public sealed class CodeEditorKeymap
         yield return new($"{words}+shift+right", CodeEditorCommands.CursorWordEndRightSelect);
         foreach (CodeEditorKeyBinding binding in DiagnosticBindings())
             yield return binding;
+
+        // Lines and selections.
+        foreach (
+            CodeEditorKeyBinding binding in LineAndSelectionBindings(mac, linux: !mac && OperatingSystem.IsLinux())
+        )
+            yield return binding;
+    }
+
+    /// <summary>
+    /// The keys of the commands on lines and selections, VS Code's on each operating system: Linux has keys of its
+    /// own for some of them, where its desktops take VS Code's other ones.
+    /// </summary>
+    internal static IEnumerable<CodeEditorKeyBinding> LineAndSelectionBindings(bool mac, bool linux)
+    {
+        string copy = linux ? "ctrl+shift+alt" : "shift+alt";
+        yield return new("alt+up", CodeEditorCommands.MoveLinesUp);
+        yield return new("alt+down", CodeEditorCommands.MoveLinesDown);
+        yield return new($"{copy}+up", CodeEditorCommands.CopyLinesUp);
+        yield return new($"{copy}+down", CodeEditorCommands.CopyLinesDown);
     }
 
     /// <summary>The keys that go to the next and previous diagnostic, VS Code's on every operating system.</summary>
@@ -365,4 +386,22 @@ public static class CodeEditorCommands
 
     /// <summary>Selects to the end of the word after the caret, as <see cref="CursorWordEndRight"/> moves.</summary>
     public const string CursorWordEndRightSelect = "cursorWordEndRightSelect";
+
+    // Lines and selections.
+
+    /// <summary>
+    /// Moves the selected lines, or the caret's, above the line before them. With the language's indentation rules,
+    /// they take the indentation that their new place gives them, as with VS Code's <c>editor.autoIndent</c> at its
+    /// default. The selection moves with them.
+    /// </summary>
+    public const string MoveLinesUp = "editor.action.moveLinesUpAction";
+
+    /// <summary>Moves the selected lines, or the caret's, below the line after them, as <see cref="MoveLinesUp"/> moves.</summary>
+    public const string MoveLinesDown = "editor.action.moveLinesDownAction";
+
+    /// <summary>Copies the selected lines, or the caret's, above them; the selection stays on the lines above.</summary>
+    public const string CopyLinesUp = "editor.action.copyLinesUpAction";
+
+    /// <summary>Copies the selected lines, or the caret's, below them; the selection goes down with the copy.</summary>
+    public const string CopyLinesDown = "editor.action.copyLinesDownAction";
 }

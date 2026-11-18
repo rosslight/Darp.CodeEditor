@@ -33,7 +33,7 @@ namespace Darp.CodeEditor.Editing;
 /// types, found on the UI thread within a short time limit. While they are unknown, such a pair does not close.
 /// </para>
 /// </remarks>
-internal sealed class EditingHelpers : IDisposable
+internal sealed partial class EditingHelpers : IDisposable
 {
     /// <summary>The characters before which a pair closes, as VS Code's default <c>autoCloseBefore</c>.</summary>
     private const string CloseBefore = ";:.,=}])> \n\t";
