@@ -87,6 +87,7 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+left, ctrl+shift+left (alt+left, alt+shift+left)</term><description><see cref="CodeEditorCommands.CursorWordLeft"/>, <see cref="CodeEditorCommands.CursorWordLeftSelect"/></description></item>
     /// <item><term>ctrl+right, ctrl+shift+right (alt+right, alt+shift+right)</term><description><see cref="CodeEditorCommands.CursorWordEndRight"/>, <see cref="CodeEditorCommands.CursorWordEndRightSelect"/></description></item>
     /// <item><term>alt+p, alt+l (alt+cmd+p, alt+cmd+l)</term><description><see cref="CodeEditorCommands.TogglePreserveCase"/>, <see cref="CodeEditorCommands.ToggleFindInSelection"/>, from the text or the search bar</description></item>
+    /// <item><term>up, alt+up; down, alt+down</term><description><see cref="CodeEditorCommands.HistoryShowPrevious"/>, <see cref="CodeEditorCommands.HistoryShowNext"/> in the search bar's query or replacement</description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default => s_default.Value;
@@ -213,6 +214,11 @@ public sealed class CodeEditorKeymap
         string toggle = mac ? "alt+cmd" : "alt";
         yield return new($"{toggle}+p", CodeEditorCommands.TogglePreserveCase);
         yield return new($"{toggle}+l", CodeEditorCommands.ToggleFindInSelection);
+        // Secondary keys first: the latest binding is the one that menus and the bar's hint show.
+        yield return new("alt+up", CodeEditorCommands.HistoryShowPrevious);
+        yield return new("up", CodeEditorCommands.HistoryShowPrevious);
+        yield return new("alt+down", CodeEditorCommands.HistoryShowNext);
+        yield return new("down", CodeEditorCommands.HistoryShowNext);
     }
 
     /// <summary>The keys that go to the next and previous diagnostic, VS Code's on every operating system.</summary>
@@ -392,4 +398,16 @@ public static class CodeEditorCommands
     /// bar is open; closing the bar turns it off, as in VS Code. Without a selection, it stays off.
     /// </summary>
     public const string ToggleFindInSelection = "toggleFindInSelection";
+
+    /// <summary>
+    /// In the search bar's query or replacement, shows the entry before in its history (<see cref="SearchHistory"/>),
+    /// as Up does in VS Code; in a text of several lines, only from its start. Elsewhere it does not apply.
+    /// </summary>
+    public const string HistoryShowPrevious = "history.showPrevious";
+
+    /// <summary>
+    /// In the search bar's query or replacement, shows the entry after in its history, and past the latest an empty
+    /// text, as Down does in VS Code; in a text of several lines, only from its end. Elsewhere it does not apply.
+    /// </summary>
+    public const string HistoryShowNext = "history.showNext";
 }

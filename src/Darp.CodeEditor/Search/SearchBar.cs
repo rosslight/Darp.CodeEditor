@@ -91,6 +91,20 @@ internal sealed class SearchBar : UserControl
     /// <summary>Whether the bar selects a match, which leaves <see cref="_from"/> where it is.</summary>
     private bool _selecting;
 
+    /// <summary>The histories of the query and the replacement while the editor has none: the bar's own.</summary>
+    private readonly SearchHistory _findHistory = new();
+
+    private readonly SearchHistory _replaceHistory = new();
+
+    /// <summary>Where Up and Down are in the query's history.</summary>
+    private readonly SearchHistoryCursor _findCursor = new();
+
+    /// <summary>Where Up and Down are in the replacement's history.</summary>
+    private readonly SearchHistoryCursor _replaceCursor = new();
+
+    /// <summary>The pause after which the query and the replacement go into their histories; null for none.</summary>
+    private ITimer? _historyPause;
+
     /// <summary>
     /// The ranges that Find in Selection searches, which follow the edits; null while it is off. It is on for the
     /// document shown until the bar closes, as in VS Code.
@@ -135,13 +149,20 @@ internal sealed class SearchBar : UserControl
         _matchCase.IsCheckedChanged += (_, _) => OnQueryChanged();
         _wholeWord.IsCheckedChanged += (_, _) => OnQueryChanged();
         _regex.IsCheckedChanged += (_, _) => OnQueryChanged();
-        _replace.TextChanging += (_, _) => Search(Move.None);
-        _preserveCase.IsCheckedChanged += (_, _) => Search(Move.None);
+        _replace.TextChanging += (_, _) => OnReplacementChanged();
+        _preserveCase.IsCheckedChanged += (_, _) => OnReplacementChanged();
         _replaceOne.Click += (_, _) => ReplaceOne();
         _replaceAll.Click += (_, _) => ReplaceAll();
         _findInSelection.Click += (_, _) => OnFindInSelectionClicked();
         _find.GotFocus += (_, _) => FollowTheSelection();
         _replace.GotFocus += (_, _) => FollowTheSelection();
+        // As in VS Code, a box with a history says so while it has the keyboard.
+        foreach (TextBox box in (TextBox[])[_find, _replace])
+        {
+            box.GotFocus += (_, _) => ShowHistoryHint(box);
+            box.LostFocus += (_, _) => ShowHistoryHint(box);
+            box.TextChanged += (_, _) => ShowHistoryHint(box);
+        }
         // Ahead of the text boxes' own keys: Enter goes to the next match rather than into the text.
         _find.AddHandler(KeyDownEvent, OnFindKeyDown, RoutingStrategies.Tunnel);
         _replace.AddHandler(KeyDownEvent, OnReplaceKeyDown, RoutingStrategies.Tunnel);
@@ -237,6 +258,8 @@ internal sealed class SearchBar : UserControl
             return;
         CancelSearch();
         _move = Move.None;
+        _historyPause?.Dispose();
+        _historyPause = null;
         shown.Buffer.Changed -= OnBufferChanged;
         shown.Buffer.TextChanged -= OnTextChanged;
         shown.TextArea.SelectionChanged -= OnSelectionChanged;
@@ -313,6 +336,7 @@ internal sealed class SearchBar : UserControl
     /// <summary>Closes the bar, ends Find in Selection, as in VS Code, and gives the keyboard back to the text.</summary>
     public void Close()
     {
+        PauseForHistory();
         IsVisible = false;
         CancelSearch();
         _move = Move.None;
@@ -365,7 +389,10 @@ internal sealed class SearchBar : UserControl
     {
         bool wasOpen = IsOpen;
         if (!wasOpen)
+        {
             ShowTexts();
+            PauseForHistory();
+        }
         // As VS Code starts its search again, also in an open bar.
         _from = Caret();
         _replaceMode = replace || (wasOpen && _replaceMode);
@@ -420,7 +447,108 @@ internal sealed class SearchBar : UserControl
             _move = move;
     }
 
-    private void OnQueryChanged() => Search(Move.First);
+    private void OnQueryChanged()
+    {
+        PauseForHistory();
+        Search(Move.First);
+    }
+
+    private void OnReplacementChanged()
+    {
+        PauseForHistory();
+        Search(Move.None);
+    }
+
+    /// <summary>
+    /// Puts the query and the replacement into their histories once nothing changes for half a second, as VS Code
+    /// does after a change of what it searches for, of its options, or as its bar opens or closes.
+    /// </summary>
+    private void PauseForHistory()
+    {
+        if (_shown is not { } shown)
+            return;
+        _historyPause?.Dispose();
+        ITimer? pause = null;
+        pause = shown.Document.TimeProvider.CreateTimer(
+            _ =>
+                Dispatcher.Post(() =>
+                {
+                    if (_historyPause != pause)
+                        return;
+                    _historyPause = null;
+                    pause?.Dispose();
+                    RecordHistory();
+                }),
+            null,
+            TimeSpan.FromMilliseconds(500),
+            Timeout.InfiniteTimeSpan
+        );
+        _historyPause = pause;
+    }
+
+    /// <summary>Adds the query and the replacement to their histories, unless empty or the entries shown.</summary>
+    private void RecordHistory()
+    {
+        if (_shown is null)
+            return;
+        _findCursor.Add(FindHistory, _find.Text ?? "");
+        _replaceCursor.Add(ReplaceHistory, _replace.Text ?? "");
+    }
+
+    /// <summary>The query's history: the editor's, or the bar's own.</summary>
+    private SearchHistory FindHistory => _shown?.Editor.FindHistory ?? _findHistory;
+
+    /// <summary>The replacement's history: the editor's, or the bar's own.</summary>
+    private SearchHistory ReplaceHistory => _shown?.Editor.ReplaceHistory ?? _replaceHistory;
+
+    /// <summary>
+    /// Shows the entry before or after in the history of the text box that has the keyboard, as Up and Down do in VS
+    /// Code: in a text of several lines, Up only from its start and Down only from its end.
+    /// </summary>
+    /// <returns>Whether a text box of the bar had the keyboard there.</returns>
+    public bool ShowHistory(bool previous)
+    {
+        TextBox? box =
+            _find.IsFocused ? _find
+            : _replace.IsFocused && _replaceRow.IsVisible ? _replace
+            : null;
+        if (box is null)
+            return false;
+        string text = box.Text ?? "";
+        int start = Math.Min(box.SelectionStart, box.SelectionEnd);
+        int end = Math.Max(box.SelectionStart, box.SelectionEnd);
+        if (text.Contains('\n') && (previous ? start > 0 : end < text.Length))
+            return false;
+        (SearchHistory history, SearchHistoryCursor cursor) =
+            box == _find ? (FindHistory, _findCursor) : (ReplaceHistory, _replaceCursor);
+        string? shown = previous ? cursor.Previous(history, text) : cursor.Next(history, text);
+        if (shown is not null && shown != text)
+        {
+            box.Text = shown;
+            box.CaretIndex = shown.Length;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// The box's placeholder, with VS Code's hint at Up and Down while it has the keyboard and a history to go through,
+    /// and the keymap binds them.
+    /// </summary>
+    private void ShowHistoryHint(TextBox box)
+    {
+        string placeholder = box == _find ? Strings.Default.Find : Strings.Default.Replace;
+        bool hint =
+            box.IsFocused
+            && (box == _find ? FindHistory : ReplaceHistory).Entries.Count > 0
+            && _shown?.Editor.Keymap is { } keymap
+            && keymap.GesturesOf(CodeEditorCommands.HistoryShowPrevious)
+                is [{ Key: Key.Up, KeyModifiers: KeyModifiers.None }]
+            && keymap.GesturesOf(CodeEditorCommands.HistoryShowNext)
+                is [{ Key: Key.Down, KeyModifiers: KeyModifiers.None }];
+        box.PlaceholderText = hint
+            ? string.Format(CultureInfo.CurrentCulture, Strings.Default.HistoryHint, placeholder, "\u21C5")
+            : placeholder;
+    }
 
     /// <summary>
     /// Starts a search of the current text in the background, in place of the one under way, if the bar is open and
@@ -664,6 +792,7 @@ internal sealed class SearchBar : UserControl
         _findInSelection.IsChecked = _scope is not null;
         if (IsOpen)
             _shown?.ScopeLayer.Scope = _scope;
+        PauseForHistory();
         Search(move);
     }
 

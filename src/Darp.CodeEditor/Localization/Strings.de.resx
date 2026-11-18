@@ -75,4 +75,7 @@
   <data name="FindInSelection" xml:space="preserve">
     <value>In Auswahl suchen</value>
   </data>
+  <data name="HistoryHint" xml:space="preserve">
+    <value>{0} ({1} für Verlauf)</value>
+  </data>
 </root>

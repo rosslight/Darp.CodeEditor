@@ -191,6 +191,18 @@ public class CodeEditor : TemplatedControl
         AutoFindInSelection
     >(nameof(AutoFindInSelection), defaultValue: AutoFindInSelection.Never);
 
+    /// <summary>Defines the <see cref="FindHistory"/> property.</summary>
+    public static readonly StyledProperty<SearchHistory?> FindHistoryProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        SearchHistory?
+    >(nameof(FindHistory), defaultValue: new SearchHistory());
+
+    /// <summary>Defines the <see cref="ReplaceHistory"/> property.</summary>
+    public static readonly StyledProperty<SearchHistory?> ReplaceHistoryProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        SearchHistory?
+    >(nameof(ReplaceHistory), defaultValue: new SearchHistory());
+
     /// <summary>AvaloniaEdit's editor, from the template. The editor wraps it, so that its API stays out of ours.</summary>
     private TextEditor? _part;
 
@@ -508,6 +520,29 @@ public class CodeEditor : TemplatedControl
     {
         get => GetValue(AutoFindInSelectionProperty);
         set => SetValue(AutoFindInSelectionProperty, value);
+    }
+
+    /// <summary>
+    /// What the search bar's query recalls with Up and Down, as VS Code's find history: it takes the query once the user
+    /// has paused for half a second. Default: one history that every editor shares, as VS Code's
+    /// <c>editor.find.history</c> by default keeps one for the editors of a workspace. Set a history of the app's own to
+    /// share it among some editors only, or to keep its entries, as VS Code keeps them with the workspace; null for
+    /// one that only this editor's bar has, and nothing keeps, as VS Code's <c>never</c>.
+    /// </summary>
+    public SearchHistory? FindHistory
+    {
+        get => GetValue(FindHistoryProperty);
+        set => SetValue(FindHistoryProperty, value);
+    }
+
+    /// <summary>
+    /// What the search bar's replacement recalls with Up and Down, as VS Code's replace history and
+    /// <c>editor.find.replaceHistory</c>, as <see cref="FindHistory"/> does for the query.
+    /// </summary>
+    public SearchHistory? ReplaceHistory
+    {
+        get => GetValue(ReplaceHistoryProperty);
+        set => SetValue(ReplaceHistoryProperty, value);
     }
 
     /// <summary>The semantic colors of the shown document, for benchmarks; null while it shows none.</summary>
@@ -1144,6 +1179,9 @@ public class CodeEditor : TemplatedControl
             case CodeEditorCommands.TogglePreserveCase
             or CodeEditorCommands.ToggleFindInSelection:
                 return ToggleSearchOption(command);
+            // In the search bar's query or replacement.
+            case CodeEditorCommands.HistoryShowPrevious or CodeEditorCommands.HistoryShowNext:
+                return _searchBar?.ShowHistory(previous: command == CodeEditorCommands.HistoryShowPrevious) == true;
             default:
                 return false;
         }
