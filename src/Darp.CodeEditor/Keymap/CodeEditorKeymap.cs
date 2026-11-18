@@ -88,6 +88,9 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+right, ctrl+shift+right (alt+right, alt+shift+right)</term><description><see cref="CodeEditorCommands.CursorWordEndRight"/>, <see cref="CodeEditorCommands.CursorWordEndRightSelect"/></description></item>
     /// <item><term>alt+up, alt+down</term><description><see cref="CodeEditorCommands.MoveLinesUp"/>, <see cref="CodeEditorCommands.MoveLinesDown"/></description></item>
     /// <item><term>shift+alt+up, shift+alt+down (Linux: ctrl+shift+alt+up, ctrl+shift+alt+down)</term><description><see cref="CodeEditorCommands.CopyLinesUp"/>, <see cref="CodeEditorCommands.CopyLinesDown"/></description></item>
+    /// <item><term>ctrl+shift+k (shift+cmd+k)</term><description><see cref="CodeEditorCommands.DeleteLines"/></description></item>
+    /// <item><term>ctrl+enter, ctrl+shift+enter (cmd+enter, shift+cmd+enter)</term><description><see cref="CodeEditorCommands.InsertLineAfter"/>, <see cref="CodeEditorCommands.InsertLineBefore"/></description></item>
+    /// <item><term>ctrl+], ctrl+[ (cmd+], cmd+[)</term><description><see cref="CodeEditorCommands.IndentLines"/>, <see cref="CodeEditorCommands.OutdentLines"/></description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default => s_default.Value;
@@ -223,6 +226,12 @@ public sealed class CodeEditorKeymap
         yield return new("alt+down", CodeEditorCommands.MoveLinesDown);
         yield return new($"{copy}+up", CodeEditorCommands.CopyLinesUp);
         yield return new($"{copy}+down", CodeEditorCommands.CopyLinesDown);
+        string command = mac ? "cmd" : "ctrl";
+        yield return new($"{command}+shift+k", CodeEditorCommands.DeleteLines);
+        yield return new($"{command}+enter", CodeEditorCommands.InsertLineAfter);
+        yield return new($"{command}+shift+enter", CodeEditorCommands.InsertLineBefore);
+        yield return new($"{command}+]", CodeEditorCommands.IndentLines);
+        yield return new($"{command}+[", CodeEditorCommands.OutdentLines);
     }
 
     /// <summary>The keys that go to the next and previous diagnostic, VS Code's on every operating system.</summary>
@@ -404,4 +413,24 @@ public static class CodeEditorCommands
 
     /// <summary>Copies the selected lines, or the caret's, below them; the selection goes down with the copy.</summary>
     public const string CopyLinesDown = "editor.action.copyLinesDownAction";
+
+    /// <summary>
+    /// Deletes the selected lines, or the caret's; the caret keeps its column on the line that comes up in their place.
+    /// </summary>
+    public const string DeleteLines = "editor.action.deleteLines";
+
+    /// <summary>
+    /// Inserts a line below the caret's, indented as Enter at the end of the caret's line indents, and puts the caret on
+    /// it.
+    /// </summary>
+    public const string InsertLineAfter = "editor.action.insertLineAfter";
+
+    /// <summary>Inserts a line above the caret's, as <see cref="InsertLineAfter"/> inserts one below.</summary>
+    public const string InsertLineBefore = "editor.action.insertLineBefore";
+
+    /// <summary>Indents the selected lines, or the caret's, as Tab indents whole lines.</summary>
+    public const string IndentLines = "editor.action.indentLines";
+
+    /// <summary>Outdents the selected lines, or the caret's, as Shift+Tab does.</summary>
+    public const string OutdentLines = "editor.action.outdentLines";
 }

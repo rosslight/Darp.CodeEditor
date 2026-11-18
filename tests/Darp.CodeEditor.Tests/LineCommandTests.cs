@@ -173,6 +173,130 @@ public sealed class LineCommandTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe("a\nb|\nc");
         });
 
+    [Theory]
+    [InlineData("a\nfo|o\nbar\nc", "a\nba|r\nc")]
+    [InlineData("a\nbc|", "a|")]
+    [InlineData("a\n«b\nc»\nd", "a\nd|")]
+    [InlineData("«a\n»b", "|b")]
+    [InlineData("ab|c", "|")]
+    public Task Ctrl_Shift_K_deletes_the_lines_and_the_caret_keeps_its_column_on_the_line_in_their_place(
+        string marked,
+        string expected
+    ) =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show(marked, CodeLanguage.PlainText);
+
+            window.Press(Key.K, EditorWindow.Command | KeyModifiers.Shift);
+
+            MarkedText.Of(window).ShouldBe(expected);
+            DocumentOf(window).Undo();
+            MarkedText.Of(window).ShouldBe(marked);
+        });
+
+    [Fact]
+    public Task Ctrl_Shift_K_in_an_empty_text_makes_no_step() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("|", CodeLanguage.PlainText);
+
+            window.Press(Key.K, EditorWindow.Command | KeyModifiers.Shift);
+
+            DocumentOf(window).CanUndo.ShouldBeFalse();
+        });
+
+    [Theory]
+    // VS Code's tests: above the first line the caret stays at the start, on the new line.
+    [InlineData("Fi|rst line\nSecond line\nThird line", true, "|\nFirst line\nSecond line\nThird line")]
+    [InlineData("First line\nSe|cond line\nThird line", true, "First line\n|\nSecond line\nThird line")]
+    [InlineData("Fi|rst line\nSecond line\nThird line", false, "First line\n|\nSecond line\nThird line")]
+    [InlineData("First line\nSecond line\nTh|ird line", false, "First line\nSecond line\nThird line\n|")]
+    [InlineData("«First» line\nSecond line", false, "First line\n|\nSecond line")]
+    public Task Ctrl_Enter_and_Ctrl_Shift_Enter_insert_a_line_below_or_above_the_caret_and_put_the_caret_on_it(
+        string marked,
+        bool above,
+        string expected
+    ) =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show(marked, CodeLanguage.PlainText);
+
+            window.Press(Key.Enter, EditorWindow.Command | (above ? KeyModifiers.Shift : KeyModifiers.None));
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
+    [Theory]
+    [InlineData("{|\n}", false, "{\n    |\n}")]
+    [InlineData("{\n    \"a\": |1\n}", true, "{\n    |\n    \"a\": 1\n}")]
+    [InlineData("{\n    \"a\": |1\n}", false, "{\n    \"a\": 1\n    |\n}")]
+    public Task An_inserted_line_is_indented_as_Enter_at_the_end_of_the_line_above_indents(
+        string marked,
+        bool above,
+        string expected
+    ) =>
+        _ui.Run(async () =>
+        {
+            await CodeLanguage.Json.Loaded;
+            using EditorWindow window = MarkedText.Show(marked, CodeLanguage.Json);
+            DocumentOf(window).Indentation = Indentation.Spaces(4);
+
+            window.Press(Key.Enter, EditorWindow.Command | (above ? KeyModifiers.Shift : KeyModifiers.None));
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
+    [Theory]
+    // VS Code's tests: the line indents without a selection too, and the caret stays at its text.
+    [InlineData("f|unction baz() {", false, true, "\tf|unction baz() {")]
+    [InlineData("|Some text", false, true, "\t|Some text")]
+    [InlineData("    a|b", true, false, "a|b")]
+    [InlineData("«a\nb»", false, false, "«    a\n    b»")]
+    public Task Ctrl_close_and_open_bracket_indent_and_outdent_the_lines(
+        string marked,
+        bool outdent,
+        bool tabs,
+        string expected
+    ) =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show(marked, CodeLanguage.PlainText);
+            DocumentOf(window).Indentation = tabs ? Indentation.Tabs(4) : Indentation.Spaces(4);
+
+            window.Press(outdent ? Key.OemOpenBrackets : Key.OemCloseBrackets, EditorWindow.Command);
+
+            MarkedText.Of(window).ShouldBe(expected);
+            DocumentOf(window).Undo();
+            MarkedText.Of(window).ShouldBe(marked);
+        });
+
+    [Fact]
+    public Task Indenting_an_empty_line_without_tab_stops_puts_the_caret_after_the_indentation() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("|", CodeLanguage.PlainText);
+            window.Editor.UseTabStops = false;
+            DocumentOf(window).Indentation = Indentation.Spaces(4);
+
+            window.Press(Key.OemCloseBrackets, EditorWindow.Command);
+
+            MarkedText.Of(window).ShouldBe("    |");
+        });
+
+    [Fact]
+    public Task A_read_only_editor_deletes_inserts_and_indents_no_lines() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("a\nb|\nc", CodeLanguage.PlainText);
+            window.Editor.IsReadOnly = true;
+
+            window.Press(Key.K, EditorWindow.Command | KeyModifiers.Shift);
+            window.Press(Key.Enter, EditorWindow.Command);
+            window.Press(Key.OemCloseBrackets, EditorWindow.Command);
+
+            MarkedText.Of(window).ShouldBe("a\nb|\nc");
+        });
+
     [Fact]
     public void By_default_the_keys_of_the_line_commands_are_VS_Codes()
     {

@@ -1120,6 +1120,15 @@ public class CodeEditor : TemplatedControl
             case CodeEditorCommands.CopyLinesUp or CodeEditorCommands.CopyLinesDown when inText && !IsReadOnly:
                 _helpers?.CopyLines(down: command == CodeEditorCommands.CopyLinesDown);
                 return true;
+            case CodeEditorCommands.DeleteLines when inText && !IsReadOnly:
+                _helpers?.DeleteLines();
+                return true;
+            case CodeEditorCommands.InsertLineAfter or CodeEditorCommands.InsertLineBefore when inText && !IsReadOnly:
+                _helpers?.InsertLine(above: command == CodeEditorCommands.InsertLineBefore);
+                return true;
+            case CodeEditorCommands.IndentLines or CodeEditorCommands.OutdentLines when inText && !IsReadOnly:
+                _helpers?.IndentLines(outdent: command == CodeEditorCommands.OutdentLines);
+                return true;
             default:
                 return false;
         }

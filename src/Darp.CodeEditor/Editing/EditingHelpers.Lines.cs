@@ -386,6 +386,98 @@ internal sealed partial class EditingHelpers
     }
 
     /// <summary>
+    /// Deletes the selected lines, or the caret's, with a line break, as VS Code's <c>deleteLines</c> does: the one
+    /// after them, or for the last line the one before. The caret keeps its column, on the line that comes up in their
+    /// place, or on the line above when the last lines go.
+    /// </summary>
+    public void DeleteLines()
+    {
+        if (Buffer.TextLength == 0)
+            return;
+        _undo.Edit(EditKind.Other, stopBefore: true, DoDeleteLines, stopAfter: true);
+    }
+
+    private void DoDeleteLines()
+    {
+        (int anchor, int caret) = SelectionEnds();
+        int start = Math.Min(anchor, caret);
+        int end = Math.Max(anchor, caret);
+        DocumentLine first = Buffer.GetLineByOffset(start);
+        DocumentLine last = Buffer.GetLineByOffset(end);
+        if (first != last && end == last.Offset)
+            last = last.PreviousLine;
+        int column = caret - Buffer.GetLineByOffset(caret).Offset;
+        int lineNumber = first.LineNumber;
+        (int from, int to) = (first.Offset, last.EndOffset);
+        if (last.NextLine is { } next)
+            to = next.Offset;
+        else if (first.PreviousLine is { } previous)
+        {
+            from = previous.EndOffset;
+            lineNumber--;
+        }
+        if (!CanChange(from, to - from))
+            return;
+        Buffer.Remove(from, to - from);
+        DocumentLine line = Buffer.GetLineByNumber(lineNumber);
+        Select(line.Offset + Math.Min(column, line.Length), line.Offset + Math.Min(column, line.Length));
+    }
+
+    /// <summary>
+    /// Inserts a line below the caret's, or above it, and puts the caret on it, indented as Enter at the end of the line
+    /// above indents it: VS Code's <c>insertLineAfter</c> and <c>insertLineBefore</c>. Above the first line, the new line
+    /// stays empty. As in VS Code, the step ends at the next edit, of any kind, rather than right away.
+    /// </summary>
+    public void InsertLine(bool above) => _undo.Edit(EditKind.Other, stopBefore: true, () => DoInsertLine(above));
+
+    private void DoInsertLine(bool above)
+    {
+        DocumentLine caretLine = Buffer.GetLineByOffset(_textArea.Caret.Offset);
+        if (above && caretLine.PreviousLine is null)
+        {
+            if (!CanInsert(0))
+                return;
+            Buffer.Insert(0, TextUtilities.GetNewLineFromDocument(Buffer, 1));
+            Select(0, 0);
+            return;
+        }
+        DocumentLine line = above ? caretLine.PreviousLine : caretLine;
+        if (!CanInsert(line.EndOffset))
+            return;
+        string text = Buffer.GetText(line);
+        NewLine newLine = NewLineAt(
+            line,
+            text,
+            text.Length,
+            TextUtilities.GetNewLineFromDocument(Buffer, line.LineNumber)
+        );
+        int caret = line.EndOffset + newLine.Caret;
+        Buffer.Insert(line.EndOffset, newLine.Text);
+        Select(caret, caret);
+    }
+
+    /// <summary>
+    /// Indents or outdents the selected lines, or the caret's, as VS Code's <c>indentLines</c> and
+    /// <c>outdentLines</c> do: as Tab does with whole lines selected, and Shift+Tab, also without a selection. Nothing
+    /// in a rectangle selection.
+    /// </summary>
+    public void IndentLines(bool outdent)
+    {
+        if (_textArea.Selection is RectangleSelection)
+            return;
+        _undo.Edit(
+            EditKind.Other,
+            stopBefore: true,
+            () =>
+            {
+                ShiftLines(outdent);
+                _textArea.Caret.BringCaretToView();
+            },
+            stopAfter: true
+        );
+    }
+
+    /// <summary>
     /// The selection's anchor and caret, as offsets; for a rectangle selection, its corners. VS Code's line commands
     /// take the lines between them.
     /// </summary>
