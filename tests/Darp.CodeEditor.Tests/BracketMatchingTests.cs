@@ -1,3 +1,4 @@
+using Avalonia.Input;
 using Avalonia.Media;
 using AvaloniaEdit.Document;
 using Darp.CodeEditor.Editing;
@@ -99,6 +100,26 @@ public sealed class BracketMatchingTests(UiFixture ui)
             document.Replace(new TextRange(document.CurrentSnapshot.GetOffset(new TextPosition(2, 2)), 1), "*");
 
             await Wait.UntilAsync(() => window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)) == 0);
+        });
+
+    /// <summary>As in VS Code, a pair shows only for a caret without a selection.</summary>
+    [Fact]
+    public Task A_selection_shows_no_pair() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = await ShowColored("|[1, 2] ");
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(5, 1)).ShouldBeGreaterThan(0);
+
+            // The bracket selected, with the caret after it.
+            window.Press(Key.Right, KeyModifiers.Shift);
+            window.Editor.Selection.ShouldBe(new TextSelection(0, 1));
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(5, 1)).ShouldBe(0);
+
+            // A selection that leaves the caret where it was, next to a bracket.
+            window.Editor.Selection = new TextSelection(6);
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)).ShouldBeGreaterThan(0);
+            window.Editor.Selection = new TextSelection(7, 6);
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)).ShouldBe(0);
         });
 
     private static async Task<EditorWindow> ShowColored(string marked)
