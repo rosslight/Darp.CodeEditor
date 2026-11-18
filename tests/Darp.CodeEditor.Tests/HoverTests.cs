@@ -598,6 +598,51 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task The_hover_grows_up_to_VS_Codes_limits_and_to_the_size_the_user_resized_a_hover_to() =>
+        _ui.Run(async () =>
+        {
+            HoverController.LastResizedSize = default;
+            try
+            {
+                var fake = new FakeServer("--no-diagnostics");
+                await using var server = new LanguageServer(fake.Options);
+                using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two");
+                using var window = new EditorWindow(new CodeEditor { Document = document }, width: 1600, height: 1200);
+                await server.StartAsync();
+
+                // 66% of the editor's width, and a quarter of its height, at least 750 by 250 pixels.
+                PopupFrame popup = await HoverAsync(window, 1, "one is a word in");
+                popup.MaxWidth.ShouldBe(1056);
+                popup.MaxHeight.ShouldBe(300);
+
+                // Below the first line: its right and bottom edges resize it.
+                Rect bounds = BoundsInWindow(popup);
+                var corner = new Point(bounds.Right - 2, bounds.Bottom - 2);
+                var dragged = new Point(corner.X + 1_200, corner.Y + 400);
+                window.MoveMouse(corner);
+                window.Window.MouseDown(corner, MouseButton.Left);
+                window.Window.MouseMove(dragged, RawInputModifiers.LeftMouseButton);
+                window.Window.MouseUp(dragged, MouseButton.Left);
+                window.Layout();
+                Size resized = HoverController.LastResizedSize;
+                resized.Width.ShouldBeGreaterThan(1056);
+                resized.Height.ShouldBeGreaterThan(300);
+                popup.Width.ShouldBe(resized.Width);
+
+                // A later hover takes the size of its content, and may grow as large as the resized one.
+                window.Press(Key.Escape);
+                popup = await HoverAsync(window, 4, "two is a word in");
+                popup.Width.ShouldBe(double.NaN);
+                popup.MaxWidth.ShouldBe(resized.Width);
+                popup.MaxHeight.ShouldBe(resized.Height);
+            }
+            finally
+            {
+                HoverController.LastResizedSize = default;
+            }
+        });
+
+    [Fact]
     public Task The_popup_stays_inside_a_window_that_narrows() =>
         _ui.Run(async () =>
         {

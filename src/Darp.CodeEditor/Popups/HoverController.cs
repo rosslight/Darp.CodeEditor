@@ -66,16 +66,20 @@ internal sealed class HoverController : IDisposable
     /// <summary>VS Code's delay before a hover closes once the pointer left it, so that it can reach the popup.</summary>
     private static readonly TimeSpan s_hidingDelay = TimeSpan.FromMilliseconds(300);
 
-    /// <summary>The narrowest the hover's most width gets: wider in wider editors.</summary>
-    private const double MinMaxWidth = 500;
+    /// <summary>The narrowest the hover's most width gets, VS Code's: wider in wider editors.</summary>
+    private const double MinMaxWidth = 750;
 
-    /// <summary>The lowest the hover's most height gets: higher in higher editors.</summary>
+    /// <summary>The lowest the hover's most height gets, VS Code's: higher in higher editors.</summary>
     private const double MinMaxHeight = 250;
 
-    /// <summary>The smallest the user resizes the hover to.</summary>
+    /// <summary>The narrowest the user resizes the hover to, VS Code's.</summary>
     private const double MinResizedWidth = 150;
 
-    private const double MinResizedHeight = 40;
+    /// <summary>
+    /// The size the user resized a hover to last, for the app's run, as VS Code keeps it: later hovers grow up to it.
+    /// Empty before.
+    /// </summary>
+    internal static Size LastResizedSize { get; set; }
 
     /// <summary>Whether the user resized the hover that shows.</summary>
     private bool _resized;
@@ -138,8 +142,11 @@ internal sealed class HoverController : IDisposable
         _frame.Resized += (size, maxHeight) =>
         {
             _resized = true;
+            // At least a line high, as in VS Code.
+            double minHeight = _textView.DefaultLineHeight + 8;
             _frame.Width = _frame.MaxWidth = Math.Max(MinResizedWidth, size.Width);
-            _frame.MaxHeight = Math.Max(MinResizedHeight, maxHeight);
+            _frame.MaxHeight = Math.Max(minHeight, maxHeight);
+            LastResizedSize = new Size(_frame.Width, Math.Max(minHeight, size.Height));
         };
         _textView.PointerMoved += OnPointerMoved;
         _textView.PointerExited += OnPointerExited;
@@ -293,7 +300,7 @@ internal sealed class HoverController : IDisposable
     private Hovered Begin(int offset, bool fromKeyboard)
     {
         Close();
-        // A new hover forgets the size the user gave the last one.
+        // A new hover takes the size of its content, within its limits, which a resize raises.
         _frame.Width = double.NaN;
         _resized = false;
         var budget = new HoverBudget();
@@ -425,12 +432,14 @@ internal sealed class HoverController : IDisposable
         PopupColors colors = _colors?.Popups ?? PopupColors.Default;
         _frame.Paint(colors.HoverBackground, colors.HoverBorder, colors.HoverForeground, colors.Shadow);
         _content.SliderBrushes = (colors.Slider, colors.SliderHover, colors.SliderActive);
-        // At least 500 pixels wide, up to two thirds of the editor, and scrolling beyond half its height.
+        // VS Code's limits: up to 66% of the editor's width and a quarter of its height, at least 750 by 250 pixels,
+        // and as large as the user resized a hover to last. The content scrolls beyond them.
         if (!_resized)
         {
             Size editor = _editor.Bounds.Size;
-            _frame.MaxWidth = Math.Max(MinMaxWidth, Math.Floor(editor.Width * 2 / 3));
-            _frame.MaxHeight = Math.Max(MinMaxHeight, Math.Floor(editor.Height / 2));
+            Size last = LastResizedSize;
+            _frame.MaxWidth = Math.Max(Math.Max(MinMaxWidth, Math.Floor(editor.Width * 0.66)), last.Width);
+            _frame.MaxHeight = Math.Max(Math.Max(MinMaxHeight, Math.Floor(editor.Height / 4)), last.Height);
         }
         _content.Child = HoverView.Create(blocks, new PopupLook(_editor.FontFamily, _editor.FontSize, colors));
         // Above the hovered word, where the pointer comes from.
