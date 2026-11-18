@@ -259,6 +259,63 @@ public sealed class SearchTests(UiFixture ui)
             window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(text);
         });
 
+    /// <summary>
+    /// As in VS Code, a regular expression that can match a line break searches across lines, and the match shows over
+    /// both lines.
+    /// </summary>
+    [Fact]
+    public Task A_regular_expression_with_a_line_break_finds_and_highlights_matches_across_lines() =>
+        _ui.Run(async () =>
+        {
+            var editor = new CodeEditor
+            {
+                Document = CodeDocument.Create(CodeLanguage.PlainText, "foo\r\nbar\nfoo bar"),
+                ColorTheme = new CodeEditorColorTheme
+                {
+                    Source = new Uri("avares://Darp.CodeEditor.Tests/Themes/marks.json"),
+                },
+            };
+            using var window = new EditorWindow(editor);
+            editor.OpenSearch();
+            SearchBar bar = BarOf(window);
+            bar.RegexToggle.IsChecked = true;
+
+            bar.FindBox.Text = @"foo\nbar";
+
+            await Wait.UntilAsync(() => bar.Count == "1 of 1");
+            editor.Selection.ShouldBe(new TextSelection(0, 8));
+            await Wait.UntilAsync(() => window.RenderAndCountPixels(Color.Parse("#00C000"), new TextRange(0, 3)) > 0);
+            window.RenderAndCountPixels(Color.Parse("#00C000"), new TextRange(5, 3)).ShouldBeGreaterThan(0);
+            window.RenderAndCountPixels(Color.Parse("#00C000"), new TextRange(13, 3)).ShouldBe(0);
+        });
+
+    /// <summary>
+    /// As in VS Code, Ctrl+Enter, also on macOS, starts a new line in the query, which then grows and searches across
+    /// lines; Enter goes on to the next match.
+    /// </summary>
+    [Fact]
+    public Task Ctrl_Enter_starts_a_new_line_in_the_query() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("|foo\nbar foo\nbar", CodeLanguage.PlainText);
+            window.Editor.OpenSearch();
+            SearchBar bar = BarOf(window);
+            window.Layout();
+            double height = bar.FindBox.Bounds.Height;
+
+            window.Type("foo");
+            window.Press(Key.Enter, KeyModifiers.Control);
+            window.Type("bar");
+
+            bar.FindBox.Text.ShouldBe("foo\nbar");
+            await Wait.UntilAsync(() => bar.Count == "1 of 2");
+            window.Layout();
+            bar.FindBox.Bounds.Height.ShouldBeGreaterThan(height);
+            window.Press(Key.Enter);
+            window.Editor.Selection.ShouldBe(new TextSelection(8, 15));
+            bar.FindBox.Text.ShouldBe("foo\nbar");
+        });
+
     [Fact]
     public Task A_pathological_regular_expression_stops_with_a_message_and_Replace_All_is_refused() =>
         _ui.Run(async () =>

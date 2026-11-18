@@ -22,8 +22,16 @@ public class SearchBenchmarks
 {
     private TextSnapshot? _snapshot;
 
+    /// <summary>The same lines apart by <c>\r\n</c>, which a search across lines reads with <c>\n</c>.</summary>
+    private TextSnapshot? _crLfSnapshot;
+
     [GlobalSetup]
-    public void SetUp() => _snapshot = TextSnapshot.FromString(HeadlessEditor.Json(5000));
+    public void SetUp()
+    {
+        string json = HeadlessEditor.Json(5000);
+        _snapshot = TextSnapshot.FromString(json);
+        _crLfSnapshot = TextSnapshot.FromString(json.Replace("\n", "\r\n", StringComparison.Ordinal));
+    }
 
     /// <summary>A word on every line: about 5,000 matches.</summary>
     [Benchmark]
@@ -39,11 +47,21 @@ public class SearchBenchmarks
     [Benchmark]
     public int FindNothing() => Find(new SearchQuery("missing", MatchCase: false, WholeWord: false, UseRegex: false));
 
-    private int Find(SearchQuery query)
+    /// <summary>A regular expression across the end of every line: about 5,000 matches, in all of the text at once.</summary>
+    [Benchmark]
+    public int FindAcrossLines() => Find(new SearchQuery("\",\\n", MatchCase: true, WholeWord: false, UseRegex: true));
+
+    /// <summary>The same, in lines apart by <c>\r\n</c>: the search first makes them <c>\n</c>.</summary>
+    [Benchmark]
+    public int FindAcrossCrLfLines() =>
+        Find(new SearchQuery("\",\\n", MatchCase: true, WholeWord: false, UseRegex: true), _crLfSnapshot);
+
+    private int Find(SearchQuery query, TextSnapshot? snapshot = null)
     {
         SearchResult result = TextSearch.Find(
-            _snapshot ?? throw new InvalidOperationException("Not set up."),
+            snapshot ?? _snapshot ?? throw new InvalidOperationException("Not set up."),
             query,
+            null,
             null,
             CancellationToken.None
         );

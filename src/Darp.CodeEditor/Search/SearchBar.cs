@@ -40,7 +40,7 @@ internal sealed class SearchBar : UserControl
         "M3,2 L8,7 L13,2 L14,3 L9,8 L14,13 L13,14 L8,9 L3,14 L2,13 L7,8 L2,3 Z"
     );
 
-    private readonly TextBox _find = new() { Width = 220 };
+    private readonly TextBox _find = QueryBox();
     private readonly ToggleButton _matchCase = new() { Content = "Aa" };
     private readonly ToggleButton _wholeWord = new() { Content = "ab" };
     private readonly ToggleButton _regex = new() { Content = ".*" };
@@ -48,7 +48,7 @@ internal sealed class SearchBar : UserControl
     private readonly Button _previous;
     private readonly Button _next;
     private readonly Button _close;
-    private readonly TextBox _replace = new() { Width = 220 };
+    private readonly TextBox _replace = QueryBox();
     private readonly ToggleButton _preserveCase = new() { Content = "AB" };
     private readonly Button _replaceOne = new();
     private readonly Button _replaceAll = new();
@@ -120,8 +120,9 @@ internal sealed class SearchBar : UserControl
         _preserveCase.IsCheckedChanged += (_, _) => Search(Move.None);
         _replaceOne.Click += (_, _) => ReplaceOne();
         _replaceAll.Click += (_, _) => ReplaceAll();
-        _find.KeyDown += OnFindKeyDown;
-        _replace.KeyDown += OnReplaceKeyDown;
+        // Ahead of the text boxes' own keys: Enter goes to the next match rather than into the text.
+        _find.AddHandler(KeyDownEvent, OnFindKeyDown, RoutingStrategies.Tunnel);
+        _replace.AddHandler(KeyDownEvent, OnReplaceKeyDown, RoutingStrategies.Tunnel);
     }
 
     /// <summary>Which text box takes the keyboard as the bar opens.</summary>
@@ -379,7 +380,8 @@ internal sealed class SearchBar : UserControl
             return;
         }
         var query = new SearchQuery(
-            text,
+            // A text box takes line breaks as they are pasted.
+            text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n'),
             _matchCase.IsChecked == true,
             _wholeWord.IsChecked == true,
             _regex.IsChecked == true
@@ -390,7 +392,7 @@ internal sealed class SearchBar : UserControl
         _searching = searching;
         // Cancelled, the task ends as cancelled, not as failed.
         Task<SearchResult> search = Task.Run(
-            () => TextSearch.Find(snapshot, query, replacement, searching.Token),
+            () => TextSearch.Find(snapshot, query, replacement, null, searching.Token),
             searching.Token
         );
         search.ContinueWith(
@@ -607,27 +609,36 @@ internal sealed class SearchBar : UserControl
     }
 
     /// <summary>
-    /// Enter selects the next match, and Shift+Enter the previous one. Tab goes on to the replacement, as in VS Code.
+    /// Enter selects the next match, and Shift+Enter the previous one; Ctrl+Enter, also on macOS, starts a new line in
+    /// the query, as in VS Code. Tab goes on to the replacement.
     /// </summary>
     private void OnFindKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Tab && e.KeyModifiers == KeyModifiers.None && _replaceRow.IsVisible)
             _replace.Focus(NavigationMethod.Tab);
-        else if (e.Key == Key.Enter)
+        else if (e.Key == Key.Enter && e.KeyModifiers == KeyModifiers.Control)
+            _find.SelectedText = "\n";
+        else if (e.Key == Key.Enter && e.KeyModifiers is KeyModifiers.None or KeyModifiers.Shift)
             Go(e.KeyModifiers == KeyModifiers.Shift ? Move.Previous : Move.Next, null);
-        else
+        // Other keys with Enter don't break the line either.
+        else if (e.Key != Key.Enter)
             return;
         e.Handled = true;
     }
 
-    /// <summary>Enter replaces the selected match. Shift+Tab goes back to the query, as in VS Code.</summary>
+    /// <summary>
+    /// Enter replaces the selected match; Ctrl+Enter, also on macOS, and Shift+Enter start a new line in the
+    /// replacement, as in VS Code. Shift+Tab goes back to the query.
+    /// </summary>
     private void OnReplaceKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Tab && e.KeyModifiers == KeyModifiers.Shift)
             _find.Focus(NavigationMethod.Tab);
-        else if (e.Key == Key.Enter)
+        else if (e.Key == Key.Enter && e.KeyModifiers is KeyModifiers.Control or KeyModifiers.Shift)
+            _replace.SelectedText = "\n";
+        else if (e.Key == Key.Enter && e.KeyModifiers == KeyModifiers.None)
             ReplaceOne();
-        else
+        else if (e.Key != Key.Enter)
             return;
         e.Handled = true;
     }
@@ -645,6 +656,19 @@ internal sealed class SearchBar : UserControl
     private void FindNext() => Go(Move.Next, null);
 
     private void FindPrevious() => Go(Move.Previous, null);
+
+    /// <summary>
+    /// A text box of the query or the replacement, as VS Code's: it holds line breaks, as <c>\n</c>, and grows with
+    /// them up to about six lines, VS Code's 118 pixels; long lines scroll rather than wrap.
+    /// </summary>
+    private static TextBox QueryBox() =>
+        new()
+        {
+            Width = 220,
+            AcceptsReturn = true,
+            NewLine = "\n",
+            MaxLines = 6,
+        };
 
     private static StackPanel Row(params Control[] children)
     {
