@@ -1132,6 +1132,9 @@ public class CodeEditor : TemplatedControl
             case CodeEditorCommands.ExpandLineSelection when inText:
                 _helpers?.ExpandLineSelection();
                 return true;
+            case CodeEditorCommands.BlockComment when inText && !IsReadOnly:
+                _helpers?.BlockComment();
+                return true;
             default:
                 return false;
         }
