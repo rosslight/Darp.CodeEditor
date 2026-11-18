@@ -51,7 +51,8 @@ namespace Darp.CodeEditor.Completion;
 /// back or reorder what the user types. A read-only
 /// editor neither completes nor commits. The server resolves the selected item, so that its detail and documentation
 /// show beside the list. An item whose additional edits are still to come when it is committed gets them when they
-/// come, in its step, if that step is still the last one: otherwise they are dropped, as the user moved on.
+/// come, as in VS Code, unless the text changed before where they start since: in its step while that is the last one,
+/// and otherwise in a step of their own.
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends completion, for every reason it ends: Escape, the caret leaving the line or moving back
@@ -862,6 +863,7 @@ internal sealed class CompletionController : IDisposable
             }
         }
         Close();
+        TextSnapshot before = _document.CurrentSnapshot;
         var step = new object();
         var mark = new SnippetMark();
         List<CompletionEdit> edits = WithoutOverlaps([main], Mapped(request.Snapshot, item.AdditionalEdits ?? []));
@@ -876,14 +878,19 @@ internal sealed class CompletionController : IDisposable
         if (snippet is not null)
             _snippets.Start(snippet, start, mark);
         if (late is not null)
-            ApplyLateEdits(late, step, request.Snapshot);
+            ApplyLateEdits(late, step, request.Snapshot, before);
     }
 
     /// <summary>
-    /// Applies the additional edits that a committed item's resolve brings, in the commit's undo step, if that step is
-    /// still the last one; drops them otherwise.
+    /// Applies the additional edits that a committed item's resolve brings, as VS Code does: unless the text changed
+    /// before where one of them starts since the commit, the commit's own edit included, as by typing above an import.
+    /// They go in the commit's undo step while it is the last one, and otherwise in a step of their own.
     /// </summary>
-    private async void ApplyLateEdits(Resolve late, object step, TextSnapshot snapshot)
+    /// <param name="late">The resolve.</param>
+    /// <param name="step">The commit's undo step.</param>
+    /// <param name="snapshot">The text that the item's list was asked for, which its edits are in.</param>
+    /// <param name="before">The text before the commit.</param>
+    private async void ApplyLateEdits(Resolve late, object step, TextSnapshot snapshot, TextSnapshot before)
     {
         _lateEdits?.Cancel();
         _lateEdits = late.Cancellation;
@@ -893,13 +900,26 @@ internal sealed class CompletionController : IDisposable
             if (
                 late.Cancellation.IsCancellationRequested
                 || item?.AdditionalEdits is not { Count: > 0 } additional
-                || _buffer.UndoStack.LastGroupDescriptor != step
                 || !_textArea.ReadOnlySectionProvider.CanInsert(_textArea.Caret.Offset)
             )
             {
                 return;
             }
-            Apply(step, continued: true, WithoutOverlaps([], Mapped(snapshot, additional)), mark: null);
+            // Where the commit and the changes after it start, against where the edits start before the commit.
+            var asked = new SnapshotEdits(snapshot, before);
+            if (
+                new SnapshotEdits(before, _document.CurrentSnapshot).EarliestEnd is { } changed
+                && additional.Any(edit => changed < asked.Map(edit.Range).Start)
+            )
+            {
+                return;
+            }
+            Apply(
+                _buffer.UndoStack.LastGroupDescriptor == step ? step : new object(),
+                continued: _buffer.UndoStack.LastGroupDescriptor == step,
+                WithoutOverlaps([], Mapped(snapshot, additional)),
+                mark: null
+            );
         }
         catch (Exception e)
         {

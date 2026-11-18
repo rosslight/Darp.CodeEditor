@@ -29,6 +29,12 @@ internal sealed class SnapshotEdits
     public TextSnapshot Snapshot { get; }
 
     /// <summary>
+    /// Where the earliest of the edits ends in the text it changed, the text before it; null without edits. As VS Code
+    /// tells whether text was changed before a place, each edit by its own text.
+    /// </summary>
+    public int? EarliestEnd => _edits.Length == 0 ? null : _edits.Min(edit => edit.Offset + edit.RemovalLength);
+
+    /// <summary>
     /// <paramref name="range"/>, clamped to the text of <see cref="Snapshot"/>, in the later text. Text typed at either
     /// edge stays outside it, and a range whose text was deleted shrinks to where it was.
     /// </summary>

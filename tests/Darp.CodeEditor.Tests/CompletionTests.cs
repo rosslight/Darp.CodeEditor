@@ -968,7 +968,7 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
-    public Task Additional_edits_that_come_after_the_commit_join_its_step_while_it_is_the_last_one() =>
+    public Task Additional_edits_that_come_after_the_commit_join_its_step_while_it_is_the_last_one_or_take_their_own() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
@@ -992,7 +992,8 @@ public sealed class CompletionTests(UiFixture ui)
                 document.Text.ShouldBe(text);
             }
 
-            // The user typed on before they came: they are dropped.
+            // The user typed on after the item, below where they go, before they came: they go in a step of their own,
+            // as in VS Code.
             using (await CommandAsync(server, fake, "hold-resolve", "holding resolve", 2))
             {
                 await OpenAsync(window, 5);
@@ -1002,9 +1003,48 @@ public sealed class CompletionTests(UiFixture ui)
             }
             using (await CommandAsync(server, fake, "release-resolve", "released resolve", 2))
             {
+                await Wait.UntilAsync(() => document.Text == "using System;\nx\nConsole!");
+                document.Undo();
+                document.Text.ShouldBe("x\nConsole!");
+            }
+        });
+
+    [Fact]
+    public Task Additional_edits_that_come_late_are_dropped_after_a_change_before_where_they_go() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            // The import goes on the second line, above the item.
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [ { "label": "Console", "data": { "additionalTextEdits": [
+                      { "range": { "start": { "line": 1, "character": 0 }, "end": { "line": 1, "character": 0 } },
+                        "newText": "using System;\n" } ] } } ] }
+                    """
+                )
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "x\ny\nCon");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+
+            using (await CommandAsync(server, fake, "hold-resolve", "holding resolve"))
+            {
+                await OpenAsync(window, 7);
+                await fake.WaitForAsync("resolve ");
+                window.Press(Key.Enter);
+                // On the first line, before where the import goes.
+                editor.Selection = new TextSelection(1);
+                window.Type("!");
+            }
+            using (await CommandAsync(server, fake, "release-resolve", "released resolve"))
+            {
                 // A list shows after the late answer: the client has read it by then.
                 await OpenAsync(window, document.Text.Length);
-                document.Text.ShouldBe("x\nConsole!");
+                document.Text.ShouldBe("x!\ny\nConsole");
             }
         });
 
