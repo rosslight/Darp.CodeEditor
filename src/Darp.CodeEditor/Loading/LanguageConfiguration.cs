@@ -24,6 +24,23 @@ internal sealed record LanguageConfiguration(
     /// <summary>The rules for Enter, VS Code's <c>onEnterRules</c>, in their order: the first that matches applies.</summary>
     public IReadOnlyList<OnEnterRule> OnEnterRules { get; init; } = [];
 
+    /// <summary>
+    /// Finds the brackets, opening and closing, as VS Code's <c>getBracketRegExp</c> does: in any case, and a bracket of
+    /// letters, such as <c>begin</c>, as a whole word. Null without brackets.
+    /// </summary>
+    public Regex? BracketPattern { get; } = BracketPatternOf(Brackets);
+
+    private static Regex? BracketPatternOf(IReadOnlyList<CharacterPair> pairs)
+    {
+        string[] brackets = [.. pairs.SelectMany(p => new[] { p.Open, p.Close }).Where(b => b.Length > 0).Distinct()];
+        if (brackets.Length == 0)
+            return null;
+        IEnumerable<string> alternatives = brackets.Select(b =>
+            b.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or ' ') ? $@"\b{Regex.Escape(b)}\b" : Regex.Escape(b)
+        );
+        return new Regex(string.Join('|', alternatives), RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
     /// <summary>Reads a <c>language-configuration.json</c> file.</summary>
     public static LanguageConfiguration Read(Uri file)
     {

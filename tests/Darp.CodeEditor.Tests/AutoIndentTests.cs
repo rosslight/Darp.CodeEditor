@@ -94,7 +94,7 @@ public sealed class AutoIndentTests(UiFixture ui)
         });
 
     [Fact]
-    public Task YAML_indents_by_its_brackets_and_rules_for_Enter_but_not_by_its_indentation_rules() =>
+    public Task YAML_doesnt_indent_by_its_indentation_rules() =>
         _ui.Run(async () =>
         {
             // As VS Code's YAML extension sets editor.autoIndent for the language.
@@ -103,11 +103,40 @@ public sealed class AutoIndentTests(UiFixture ui)
             using EditorWindow window = Show("key:|\n", CodeLanguage.Yaml);
 
             window.Press(Key.Enter);
-            MarkedText.Of(window).ShouldBe("key:\n|\n");
 
-            window.Type("a: [");
+            MarkedText.Of(window).ShouldBe("key:\n|\n");
+        });
+
+    [Theory]
+    // A bracket in a string or a comment before the caret doesn't indent the new line.
+    [InlineData("{\n  \"a\": \"abc{|\"\n}", "{\n  \"a\": \"abc{\n  |\"\n}")]
+    [InlineData("{\n  // a list: [|\n}", "{\n  // a list: [\n  |\n}")]
+    // Nor does one in a comment at the line's end, after the text: here the comma keeps the indentation.
+    [InlineData("{\n  \"a\": 1, // {|\n}", "{\n  \"a\": 1, // {\n  |\n}")]
+    public Task Enter_leaves_out_the_brackets_in_strings_and_comments(string marked, string expected) =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = await ShowColored(marked, CodeLanguage.Json, indentation: 2);
+
             window.Press(Key.Enter);
-            MarkedText.Of(window).ShouldBe("key:\na: [\n    |\n]\n");
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
+    [Fact]
+    public Task Typing_a_line_that_outdents_leaves_out_the_brackets_in_comments_above() =>
+        _ui.Run(async () =>
+        {
+            // The line above ends with an opening brace in a comment, which would keep the closing bracket indented.
+            using EditorWindow window = await ShowColored(
+                "{\n  \"a\": [\n    1 // {\n    |",
+                CodeLanguage.Json,
+                indentation: 2
+            );
+
+            window.Type("]");
+
+            MarkedText.Of(window).ShouldBe("{\n  \"a\": [\n    1 // {\n  ]|");
         });
 
     /// <summary>The rules for Enter of <c>enter.language-configuration.json</c>, with the editor's default auto-indent.</summary>
@@ -117,11 +146,26 @@ public sealed class AutoIndentTests(UiFixture ui)
             configuration: new Uri("avares://Darp.CodeEditor.Tests/Languages/enter.language-configuration.json")
         );
 
-    /// <summary>An editor of the marked text, in a document indented by 4 spaces.</summary>
-    private static EditorWindow Show(string marked, CodeLanguage language)
+    /// <summary>An editor of the marked text, in a document indented by <paramref name="indentation"/> spaces.</summary>
+    private static EditorWindow Show(string marked, CodeLanguage language, int indentation = 4)
     {
         EditorWindow window = MarkedText.Show(marked, language);
-        window.Editor.Document.ShouldNotBeNull().Indentation = Indentation.Spaces(4);
+        window.Editor.Document.ShouldNotBeNull().Indentation = Indentation.Spaces(indentation);
+        return window;
+    }
+
+    /// <summary>
+    /// <see cref="Show"/>, once the grammar colors the text, with more than one color: strings and comments are known
+    /// by their tokens.
+    /// </summary>
+    private static async Task<EditorWindow> ShowColored(string marked, CodeLanguage language, int indentation = 4)
+    {
+        EditorWindow window = Show(marked, language, indentation);
+        await Wait.UntilAsync(() =>
+        {
+            window.Render();
+            return window.RenderedColors().Count > 1;
+        });
         return window;
     }
 }

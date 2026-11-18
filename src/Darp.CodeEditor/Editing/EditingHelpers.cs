@@ -1093,8 +1093,9 @@ internal sealed class EditingHelpers : IDisposable
     /// <summary>
     /// What Enter inserts at <paramref name="column"/> of a line, as VS Code's <c>_enter</c> decides it, as far as the
     /// language's <see cref="CodeLanguage.AutoIndent"/> goes: the language's rules for Enter (<see cref="EnterAction"/>),
-    /// then its brackets, then its indentation rules. Without any of them, the new line keeps the line's indentation up
-    /// to the caret.
+    /// then its brackets, then its indentation rules, which see the lines without the brackets in their strings,
+    /// comments and regular expressions (<see cref="RuleText"/>). Without any of them, the new line keeps the line's
+    /// indentation up to the caret.
     /// </summary>
     private NewLine NewLineAt(DocumentLine line, string text, int column, string lineBreak)
     {
@@ -1105,11 +1106,12 @@ internal sealed class EditingHelpers : IDisposable
         Indenting indenting = new(_document.Indentation);
         // VS Code's getIndentationAtPosition: the line's indentation, up to the caret.
         string indentation = text[..Math.Min(column, LeadingWhitespace(text))];
-        string before = text[..column];
-        string after = text[column..];
+        int[]? tokens = RuleTokens(line.LineNumber, text, tokenizeNow: true);
+        string before = RuleText.Of(text, tokens, configuration.BracketPattern, 0, column);
+        string after = RuleText.Of(text, tokens, configuration.BracketPattern, column, text.Length);
         if (autoIndent >= AutoIndent.Brackets)
         {
-            string previous = line.PreviousLine is { } above ? Buffer.GetText(above) : "";
+            string previous = line.PreviousLine is { } above ? RuleLine(above.LineNumber) : "";
             if (EnterActionAt(configuration, autoIndent, previous, before, after) is { } action)
                 return NewLineFor(action, indentation, indenting, lineBreak);
         }
@@ -1192,7 +1194,8 @@ internal sealed class EditingHelpers : IDisposable
 
     /// <summary>
     /// The indentation of a new line after <paramref name="before"/>, the text before the caret, by the indentation
-    /// rules: VS Code's <c>getIndentForEnter</c>. Null when matching runs out of time.
+    /// rules: VS Code's <c>getIndentForEnter</c>. The texts before and after the caret are as the rules see them
+    /// (<see cref="RuleText"/>), and so are the lines above. Null when matching runs out of time.
     /// </summary>
     private string? IndentByRules(IndentationRules rules, DocumentLine line, string before, string after)
     {
@@ -1205,7 +1208,8 @@ internal sealed class EditingHelpers : IDisposable
                 matching,
                 line.LineNumber + 1,
                 honorIntentional: true,
-                number => number == line.LineNumber ? before : LineText(number)
+                number => number == line.LineNumber ? before : LineText(number),
+                number => number == line.LineNumber ? before : RuleLine(number)
             );
             if (inherited is not { } action)
                 return before[..LeadingWhitespace(before)];
@@ -1232,7 +1236,14 @@ internal sealed class EditingHelpers : IDisposable
         DocumentLine line = Buffer.GetLineByOffset(caret);
         string text = Buffer.GetText(line);
         int typed = caret - 1 - line.Offset;
-        if (typed < 0 || OutdentedIndentation(rules, line.LineNumber, text, typed) is not { } outdented)
+        if (typed < 0)
+            return false;
+        // The typed character as it is, as VS Code adds it to the text around it.
+        int[]? tokens = RuleTokens(line.LineNumber, text, tokenizeNow: true);
+        Regex? brackets = Configuration.BracketPattern;
+        string before = RuleText.Of(text, tokens, brackets, 0, typed);
+        string around = before + text[typed] + RuleText.Of(text, tokens, brackets, typed + 1, text.Length);
+        if (OutdentedIndentation(rules, line.LineNumber, around, before.Length) is not { } outdented)
             return false;
         string indentation = new Indenting(_document.Indentation).Normalize(outdented);
         int current = LeadingWhitespace(text);
@@ -1258,15 +1269,21 @@ internal sealed class EditingHelpers : IDisposable
         int caret = _textArea.Caret.Offset;
         DocumentLine line = Buffer.GetLineByOffset(caret);
         int column = caret - line.Offset;
-        string text = Buffer.GetText(line).Insert(column, typed.ToString());
-        return OutdentedIndentation(rules, line.LineNumber, text, column) is { } outdented
+        string old = Buffer.GetText(line);
+        int[]? tokens = RuleTokens(line.LineNumber, old + typed, tokenizeNow: true);
+        Regex? brackets = Configuration.BracketPattern;
+        string before = RuleText.Of(old, tokens, brackets, 0, column);
+        string around = before + typed + RuleText.Of(old, tokens, brackets, column, old.Length);
+        string text = old.Insert(column, typed.ToString());
+        return OutdentedIndentation(rules, line.LineNumber, around, before.Length) is { } outdented
             && new Indenting(_document.Indentation).Normalize(outdented) != text[..LeadingWhitespace(text)];
     }
 
     /// <summary>
     /// The indentation of line <paramref name="lineNumber"/>, if the character typed at <paramref name="typed"/> made
-    /// its <paramref name="text"/> match the decrease pattern: VS Code's <c>getIndentActionForType</c>. Null when it
-    /// didn't, when no line above has text, or when matching runs out of time.
+    /// its <paramref name="text"/>, as the rules see it, match the decrease pattern: VS Code's
+    /// <c>getIndentActionForType</c>. Null when it didn't, when no line above has text, or when matching runs out of
+    /// time.
     /// </summary>
     private string? OutdentedIndentation(IndentationRules rules, int lineNumber, string text, int typed)
     {
@@ -1275,7 +1292,10 @@ internal sealed class EditingHelpers : IDisposable
         {
             if (matching.Decreases(text.Remove(typed, 1)) || !matching.Decreases(text))
                 return null;
-            if (InheritedIndentation(matching, lineNumber, honorIntentional: false, LineText) is not { } inherited)
+            if (
+                InheritedIndentation(matching, lineNumber, honorIntentional: false, LineText, RuleLine)
+                is not { } inherited
+            )
                 return null;
             return inherited.Increases
                 ? inherited.Indentation
@@ -1297,18 +1317,27 @@ internal sealed class EditingHelpers : IDisposable
     /// Whether a line above that neither increases nor decreases gives its own indentation, as the user may have
     /// indented it on purpose. Otherwise the lines above it are searched for one that does.
     /// </param>
-    /// <param name="lineText">The text of a line by its number.</param>
+    /// <param name="lineText">The text of a line by its number, for its indentation.</param>
+    /// <param name="ruleText">
+    /// The text of a line by its number as the rules see it (<see cref="RuleText"/>), for matching; by default
+    /// <paramref name="lineText"/>.
+    /// </param>
     internal static Inherited? InheritedIndentation(
         IndentationMatching matching,
         int lineNumber,
         bool honorIntentional,
-        Func<int, string> lineText
+        Func<int, string> lineText,
+        Func<int, string>? ruleText = null
     )
     {
         if (lineNumber <= 1)
             return new Inherited("", false);
         // Every line read counts against the time, also the empty ones that the scans skip.
         string Read(int number) => matching.Read(lineText, number);
+        bool Increases(int number) =>
+            matching.Increases(ruleText is null ? Read(number) : matching.Read(ruleText, number));
+        bool Decreases(int number) =>
+            matching.Decreases(ruleText is null ? Read(number) : matching.Read(ruleText, number));
         // The first line with text above empty lines takes no indentation.
         for (int prior = lineNumber - 1; prior > 0; prior--)
         {
@@ -1321,17 +1350,16 @@ internal sealed class EditingHelpers : IDisposable
         if (preceding < 1)
             return null;
         string text = Read(preceding);
-        if (matching.Increases(text))
+        if (Increases(preceding))
             return new Inherited(Leading(text), true);
-        if (matching.Decreases(text) || preceding == 1 || honorIntentional)
+        if (Decreases(preceding) || preceding == 1 || honorIntentional)
             return new Inherited(Leading(text), false);
         for (int above = preceding - 1; above > 0; above--)
         {
-            string aboveText = Read(above);
-            if (matching.Increases(aboveText))
-                return new Inherited(Leading(aboveText), true);
-            if (matching.Decreases(aboveText))
-                return new Inherited(Leading(aboveText), false);
+            if (Increases(above))
+                return new Inherited(Leading(Read(above)), true);
+            if (Decreases(above))
+                return new Inherited(Leading(Read(above)), false);
         }
         return new Inherited(Leading(Read(1)), false);
 
@@ -1507,6 +1535,27 @@ internal sealed class EditingHelpers : IDisposable
     }
 
     private string LineText(int lineNumber) => Buffer.GetText(Buffer.GetLineByNumber(lineNumber));
+
+    /// <summary>
+    /// The text of line <paramref name="lineNumber"/> as the rules see it (<see cref="RuleText"/>), by its tokens as
+    /// last tokenized while they are exact; as it is otherwise.
+    /// </summary>
+    private string RuleLine(int lineNumber)
+    {
+        string text = LineText(lineNumber);
+        int[]? tokens = RuleTokens(lineNumber, text, tokenizeNow: false);
+        return RuleText.Of(text, tokens, Configuration.BracketPattern, 0, text.Length);
+    }
+
+    /// <summary>
+    /// The exact tokens of line <paramref name="lineNumber"/>, for <see cref="RuleText"/>; with
+    /// <paramref name="tokenizeNow"/>, tokenized now if need be. None when <paramref name="text"/> has no brackets to
+    /// take out, so that most lines need no tokens.
+    /// </summary>
+    private int[]? RuleTokens(int lineNumber, string text, bool tokenizeNow) =>
+        Configuration.BracketPattern is { } brackets && brackets.IsMatch(text)
+            ? _highlighter.ExactTokensOf(lineNumber, tokenizeNow)
+            : null;
 
     private bool CanInsert(int offset) => _textArea.ReadOnlySectionProvider.CanInsert(offset);
 
