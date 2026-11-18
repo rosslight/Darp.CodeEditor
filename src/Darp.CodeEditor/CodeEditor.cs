@@ -225,6 +225,19 @@ public class CodeEditor : TemplatedControl
     public static readonly StyledProperty<SelectedTextMatchMode> SelectedTextMatchModeProperty =
         AvaloniaProperty.Register<CodeEditor, SelectedTextMatchMode>(nameof(SelectedTextMatchMode));
 
+    /// <summary>Defines the <see cref="OccurrencesHighlight"/> property.</summary>
+    public static readonly StyledProperty<OccurrencesHighlight> OccurrencesHighlightProperty =
+        AvaloniaProperty.Register<CodeEditor, OccurrencesHighlight>(
+            nameof(OccurrencesHighlight),
+            defaultValue: OccurrencesHighlight.SingleFile
+        );
+
+    /// <summary>Defines the <see cref="OccurrencesHighlightDelay"/> property.</summary>
+    public static readonly StyledProperty<TimeSpan> OccurrencesHighlightDelayProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        TimeSpan
+    >(nameof(OccurrencesHighlightDelay));
+
     /// <summary>AvaloniaEdit's editor, from the template. The editor wraps it, so that its API stays out of ours.</summary>
     private TextEditor? _part;
 
@@ -278,6 +291,9 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>Highlights the other occurrences of the selection in the shown document.</summary>
     private SelectionHighlighter? _selectionHighlights;
+
+    /// <summary>Highlights the occurrences of the symbol at the caret in the shown document.</summary>
+    private OccurrenceHighlighter? _occurrences;
 
     /// <summary>The template's panel, which the search bar goes into, over the text.</summary>
     private Panel? _root;
@@ -613,6 +629,32 @@ public class CodeEditor : TemplatedControl
         set => SetValue(SelectedTextMatchModeProperty, value);
     }
 
+    /// <summary>
+    /// Whether the editor highlights the occurrences of the symbol at the caret, as VS Code's
+    /// <c>editor.occurrencesHighlight</c>: those the language server finds, with the reads in the color theme's
+    /// <c>editor.wordHighlightBackground</c> and the writes in <c>editor.wordHighlightStrongBackground</c>, or without a
+    /// server, or when it finds none, those of the word, in <c>editor.wordHighlightTextBackground</c>. F7 and Shift+F7
+    /// go through them. Default: <see cref="OccurrencesHighlight.SingleFile"/>, as in VS Code.
+    /// </summary>
+    public OccurrencesHighlight OccurrencesHighlight
+    {
+        get => GetValue(OccurrencesHighlightProperty);
+        set => SetValue(OccurrencesHighlightProperty, value);
+    }
+
+    /// <summary>
+    /// How long after asking for the occurrences of the symbol at the caret they show at the earliest, as VS Code's
+    /// <c>editor.occurrencesHighlightDelay</c>. Default: none, as in VS Code.
+    /// </summary>
+    public TimeSpan OccurrencesHighlightDelay
+    {
+        get => GetValue(OccurrencesHighlightDelayProperty);
+        set => SetValue(OccurrencesHighlightDelayProperty, value);
+    }
+
+    /// <summary>The occurrences of the symbol at the caret that the editor highlights, for tests.</summary>
+    internal IReadOnlyList<LanguageClient.Occurrence> Occurrences => _occurrences?.Highlights ?? [];
+
     /// <summary>The other occurrences of the selection that the editor highlights, for tests.</summary>
     internal IReadOnlyList<TextRange> SelectionHighlights => _selectionHighlights?.Highlights ?? [];
 
@@ -863,6 +905,8 @@ public class CodeEditor : TemplatedControl
             _hover?.Close();
             _completion?.Close();
             _signatureHelp?.Close();
+            // As in VS Code, once the keyboard left the editor.
+            _occurrences?.Stop();
         });
 
     /// <summary>Gives the keyboard back to the text, as from a popup.</summary>
@@ -907,6 +951,8 @@ public class CodeEditor : TemplatedControl
             || change.Property == SelectedTextMatchModeProperty
         )
             _selectionHighlights?.Update();
+        else if (change.Property == OccurrencesHighlightProperty && OccurrencesHighlight == OccurrencesHighlight.Off)
+            _occurrences?.Stop();
     }
 
     /// <summary>
@@ -1027,6 +1073,7 @@ public class CodeEditor : TemplatedControl
             Colors = _colors?.Highlights,
             SearchBar = _searchBar,
         };
+        _occurrences = new OccurrenceHighlighter(this, part.TextArea, document) { Colors = _colors?.Highlights };
         _searchBar?.Attach(this, part.TextArea, document);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
         _waitingForLayout = true;
@@ -1058,6 +1105,8 @@ public class CodeEditor : TemplatedControl
         _diagnosticNavigation = null;
         _selectionHighlights?.Dispose();
         _selectionHighlights = null;
+        _occurrences?.Dispose();
+        _occurrences = null;
         _squiggles?.Dispose();
         _squiggles = null;
         _semantic?.Dispose();
@@ -1267,6 +1316,9 @@ public class CodeEditor : TemplatedControl
             // In the search bar's query or replacement.
             case CodeEditorCommands.HistoryShowPrevious or CodeEditorCommands.HistoryShowNext:
                 return _searchBar?.ShowHistory(previous: command == CodeEditorCommands.HistoryShowPrevious) == true;
+            // While occurrences show.
+            case CodeEditorCommands.NextWordHighlight or CodeEditorCommands.PreviousWordHighlight when inText:
+                return _occurrences?.Move(next: command == CodeEditorCommands.NextWordHighlight) == true;
             default:
                 return false;
         }
@@ -1694,6 +1746,7 @@ public class CodeEditor : TemplatedControl
             _signatureHelp?.Colors = colors;
             _brackets?.Colors = colors;
             _selectionHighlights?.Colors = colors.Highlights;
+            _occurrences?.Colors = colors.Highlights;
             _whitespace?.Colors = colors;
             _squiggles?.Colors = colors;
             _hover?.Colors = colors;

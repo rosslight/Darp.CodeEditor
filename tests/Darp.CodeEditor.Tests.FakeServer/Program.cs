@@ -20,6 +20,9 @@
 // says it shows, or the first. Completion in a document with the word "slow" is never answered. A request about a
 // document that is not open is answered with an error.
 //
+// Document highlights are the occurrences of the word at the position, as whole words: one followed by " =" is a
+// write, the others are reads. The word "none" is answered with null, "nothing" with no highlights, and "slow" never.
+//
 // Arguments:
 //   --initialize never      never answer initialize
 //   --stderr <text>         write a line to standard error at start
@@ -224,6 +227,7 @@ internal sealed class FakeServer
                                     ["triggerCharacters"] = new JsonArray("("),
                                     ["retriggerCharacters"] = new JsonArray(","),
                                 },
+                                ["documentHighlightProvider"] = true,
                             },
                         }
                     );
@@ -270,6 +274,9 @@ internal sealed class FakeServer
                 break;
             case "textDocument/signatureHelp":
                 SignatureHelp(id, Required(parameters, "params"));
+                break;
+            case "textDocument/documentHighlight":
+                DocumentHighlight(id, Required(parameters, "params"));
                 break;
             case "workspace/didChangeConfiguration":
                 Log($"configuration changed {parameters?.ToJsonString()}");
@@ -486,6 +493,49 @@ internal sealed class FakeServer
                 },
             }
         );
+    }
+
+    private void DocumentHighlight(JsonNode? id, JsonNode parameters)
+    {
+        if (Known(id, "documentHighlight", parameters) is not { } document)
+            return;
+        string text = document.Text;
+        (int start, int end) = WordAt(text, Offset(text, Required(parameters["position"], "position")));
+        string word = text[start..end];
+        Log($"documentHighlight {id?.ToJsonString()} {word}");
+        if (word == "slow")
+            return;
+        if (word is "none" or "")
+        {
+            Reply(id, null);
+            return;
+        }
+        var highlights = new JsonArray();
+        if (word != "nothing")
+        {
+            for (
+                int at = text.IndexOf(word, StringComparison.Ordinal);
+                at >= 0;
+                at = text.IndexOf(word, at + 1, StringComparison.Ordinal)
+            )
+            {
+                if (WordAt(text, at) != (at, at + word.Length))
+                    continue;
+                bool write = text.AsSpan(at + word.Length).StartsWith(" =", StringComparison.Ordinal);
+                highlights.Add(
+                    new JsonObject
+                    {
+                        ["range"] = new JsonObject
+                        {
+                            ["start"] = Position(text, at),
+                            ["end"] = Position(text, at + word.Length),
+                        },
+                        ["kind"] = write ? 3 : 2,
+                    }
+                );
+            }
+        }
+        Reply(id, highlights);
     }
 
     /// <summary>

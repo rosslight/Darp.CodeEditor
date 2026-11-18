@@ -25,7 +25,14 @@ internal sealed record ServerFeatures(
             SemanticTokensProvider.Read(capabilities.SemanticTokensProvider),
             CompletionProvider.Read(capabilities.CompletionProvider),
             SignatureHelpProvider.Read(capabilities.SignatureHelpProvider)
-        );
+        )
+        {
+            DocumentHighlight =
+                capabilities.DocumentHighlightProvider is { ValueKind: JsonValueKind.True or JsonValueKind.Object },
+        };
+
+    /// <summary>Whether it answers <c>textDocument/documentHighlight</c>.</summary>
+    public bool DocumentHighlight { get; init; }
 
     /// <summary>
     /// The single characters of a list of strings, as typing checks them; longer strings, and lists of another JSON type,

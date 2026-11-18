@@ -88,6 +88,7 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+right, ctrl+shift+right (alt+right, alt+shift+right)</term><description><see cref="CodeEditorCommands.CursorWordEndRight"/>, <see cref="CodeEditorCommands.CursorWordEndRightSelect"/></description></item>
     /// <item><term>alt+p, alt+l (alt+cmd+p, alt+cmd+l)</term><description><see cref="CodeEditorCommands.TogglePreserveCase"/>, <see cref="CodeEditorCommands.ToggleFindInSelection"/>, from the text or the search bar</description></item>
     /// <item><term>up, alt+up; down, alt+down</term><description><see cref="CodeEditorCommands.HistoryShowPrevious"/>, <see cref="CodeEditorCommands.HistoryShowNext"/> in the search bar's query or replacement</description></item>
+    /// <item><term>f7, shift+f7</term><description><see cref="CodeEditorCommands.NextWordHighlight"/>, <see cref="CodeEditorCommands.PreviousWordHighlight"/> while occurrences show</description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default => s_default.Value;
@@ -219,6 +220,8 @@ public sealed class CodeEditorKeymap
         yield return new("up", CodeEditorCommands.HistoryShowPrevious);
         yield return new("alt+down", CodeEditorCommands.HistoryShowNext);
         yield return new("down", CodeEditorCommands.HistoryShowNext);
+        yield return new("f7", CodeEditorCommands.NextWordHighlight);
+        yield return new("shift+f7", CodeEditorCommands.PreviousWordHighlight);
     }
 
     /// <summary>The keys that go to the next and previous diagnostic, VS Code's on every operating system.</summary>
@@ -410,4 +413,16 @@ public static class CodeEditorCommands
     /// text, as Down does in VS Code; in a text of several lines, only from its end. Elsewhere it does not apply.
     /// </summary>
     public const string HistoryShowNext = "history.showNext";
+
+    /// <summary>
+    /// While the occurrences of the symbol at the caret show (<see cref="CodeEditor.OccurrencesHighlight"/>), moves
+    /// the caret to the start of the next one, after the last to the first; otherwise it does not apply.
+    /// </summary>
+    public const string NextWordHighlight = "editor.action.wordHighlight.next";
+
+    /// <summary>
+    /// While the occurrences of the symbol at the caret show, moves the caret to the start of the previous one, as
+    /// <see cref="NextWordHighlight"/> moves to the next.
+    /// </summary>
+    public const string PreviousWordHighlight = "editor.action.wordHighlight.prev";
 }

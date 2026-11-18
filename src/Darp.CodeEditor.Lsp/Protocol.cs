@@ -33,12 +33,14 @@ internal sealed record InitializeResult(ServerCapabilities Capabilities);
 /// <param name="SemanticTokensProvider">An object with a <c>legend</c>, and <c>range</c> and <c>full</c> when offered.</param>
 /// <param name="CompletionProvider">An object with trigger and commit characters, and whether items resolve.</param>
 /// <param name="SignatureHelpProvider">An object with trigger and retrigger characters.</param>
+/// <param name="DocumentHighlightProvider">True, or an object of options.</param>
 internal sealed record ServerCapabilities(
     JsonElement? TextDocumentSync = null,
     JsonElement? HoverProvider = null,
     JsonElement? SemanticTokensProvider = null,
     JsonElement? CompletionProvider = null,
-    JsonElement? SignatureHelpProvider = null
+    JsonElement? SignatureHelpProvider = null,
+    JsonElement? DocumentHighlightProvider = null
 );
 
 internal sealed record TextDocumentItem(string Uri, string LanguageId, int Version, string Text);

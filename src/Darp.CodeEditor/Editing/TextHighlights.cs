@@ -1,5 +1,7 @@
+using Avalonia;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
+using Avalonia.Media.TextFormatting;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Rendering;
 
@@ -30,11 +32,46 @@ internal static class TextHighlights
             (IBrush? brush, IPen? pen) = style(highlight);
             if (brush is null)
                 continue;
-            var builder = new BackgroundGeometryBuilder { AlignToWholePixels = true };
-            builder.AddSegment(textView, highlight);
-            if (builder.CreateGeometry() is { } geometry)
-                context.DrawGeometry(brush, pen, geometry);
+            // Rectangles rather than a geometry each, which cost a frame tens of kilobytes per highlight.
+            if (WithinTextLine(textView, highlight) is { } rectangle)
+            {
+                context.DrawRectangle(brush, pen, PixelAligned(rectangle));
+                continue;
+            }
+            foreach (Rect part in BackgroundGeometryBuilder.GetRectsForSegment(textView, highlight))
+                context.DrawRectangle(brush, pen, PixelAligned(part));
         }
+    }
+
+    /// <summary>
+    /// Where the text view shows <paramref name="segment"/>, when it lies within one row of a line in view, as most
+    /// highlights do: from the positions of its ends in the row, which cost far less than the text's bounds. Null
+    /// otherwise.
+    /// </summary>
+    private static Rect? WithinTextLine(TextView textView, ISegment segment)
+    {
+        DocumentLine line = textView.Document.GetLineByOffset(segment.Offset);
+        if (segment.EndOffset > line.EndOffset || textView.GetVisualLine(line.LineNumber) is not { } visualLine)
+            return null;
+        int lineStart = visualLine.FirstDocumentLine.Offset;
+        int start = visualLine.GetVisualColumn(segment.Offset - lineStart);
+        int end = visualLine.GetVisualColumn(segment.EndOffset - lineStart);
+        TextLine row = visualLine.GetTextLine(start);
+        if (visualLine.GetTextLine(end, isAtEndOfLine: true) != row)
+            return null;
+        double left = visualLine.GetTextLineVisualXPosition(row, start);
+        double right = visualLine.GetTextLineVisualXPosition(row, end);
+        double top = visualLine.GetTextLineVisualYPosition(row, VisualYPosition.LineTop);
+        Vector scroll = textView.ScrollOffset;
+        return new Rect(left - scroll.X, top - scroll.Y, right - left, row.Height);
+    }
+
+    /// <summary>A rectangle with its edges on whole pixels, as the text view's other backgrounds are drawn.</summary>
+    private static Rect PixelAligned(Rect rectangle)
+    {
+        double left = Math.Round(rectangle.Left);
+        double top = Math.Round(rectangle.Top);
+        return new Rect(left, top, Math.Round(rectangle.Right) - left, Math.Round(rectangle.Bottom) - top);
     }
 
     /// <summary>
