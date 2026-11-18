@@ -21,7 +21,7 @@ namespace Darp.CodeEditor;
 /// After the first stroke of a two-stroke sequence, the editor waits for the second, and shows that in
 /// <see cref="CodeEditor.PendingKeys"/>. A second stroke that completes no sequence counts as an ordinary key; losing the
 /// keyboard or a click ends the wait. The keys inside open popups, such as Up, Down and Escape in completion's list,
-/// and the keys of AvaloniaEdit's editing, such as the clipboard's, are not in the keymap.
+/// and the keys of AvaloniaEdit's editing, such as the clipboard's, are not in the keymap; undo and redo are.
 /// </para>
 /// <para>
 /// A keymap is immutable, and can be shared between editors.
@@ -86,6 +86,9 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+d (cmd+d)</term><description><see cref="CodeEditorCommands.AddSelectionToNextFindMatch"/></description></item>
     /// <item><term>ctrl+left, ctrl+shift+left (alt+left, alt+shift+left)</term><description><see cref="CodeEditorCommands.CursorWordLeft"/>, <see cref="CodeEditorCommands.CursorWordLeftSelect"/></description></item>
     /// <item><term>ctrl+right, ctrl+shift+right (alt+right, alt+shift+right)</term><description><see cref="CodeEditorCommands.CursorWordEndRight"/>, <see cref="CodeEditorCommands.CursorWordEndRightSelect"/></description></item>
+    /// <item><term>ctrl+i (cmd+i; also alt+escape)</term><description><see cref="CodeEditorCommands.TriggerSuggest"/>, and <see cref="CodeEditorCommands.ToggleSuggestionDetails"/> while the list shows, as ctrl+space</description></item>
+    /// <item><term>ctrl+z (cmd+z)</term><description><see cref="CodeEditorCommands.Undo"/></description></item>
+    /// <item><term>ctrl+y, ctrl+shift+z (shift+cmd+z)</term><description><see cref="CodeEditorCommands.Redo"/></description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default => s_default.Value;
@@ -202,6 +205,16 @@ public sealed class CodeEditorKeymap
         yield return new($"{words}+shift+right", CodeEditorCommands.CursorWordEndRightSelect);
         foreach (CodeEditorKeyBinding binding in DiagnosticBindings())
             yield return binding;
+
+        // Typing, Enter, Tab and caret movement: keys that AvaloniaEdit bound to other commands.
+        yield return new($"{command}+i", CodeEditorCommands.TriggerSuggest);
+        yield return new($"{command}+i", CodeEditorCommands.ToggleSuggestionDetails);
+        if (mac)
+            yield return new("alt+escape", CodeEditorCommands.TriggerSuggest);
+        yield return new($"{command}+z", CodeEditorCommands.Undo);
+        if (!mac)
+            yield return new("ctrl+y", CodeEditorCommands.Redo);
+        yield return new($"{command}+shift+z", CodeEditorCommands.Redo);
     }
 
     /// <summary>The keys that go to the next and previous diagnostic, VS Code's on every operating system.</summary>
@@ -365,4 +378,15 @@ public static class CodeEditorCommands
 
     /// <summary>Selects to the end of the word after the caret, as <see cref="CursorWordEndRight"/> moves.</summary>
     public const string CursorWordEndRightSelect = "cursorWordEndRightSelect";
+
+    // Typing, Enter, Tab and caret movement.
+
+    /// <summary>
+    /// Undoes the document's last step, as <see cref="CodeDocument.Undo"/> does, and brings the caret into view; nothing
+    /// in a read-only editor, as in VS Code.
+    /// </summary>
+    public const string Undo = "undo";
+
+    /// <summary>Redoes the last undone step, as <see cref="Undo"/> undoes it.</summary>
+    public const string Redo = "redo";
 }

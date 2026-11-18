@@ -89,7 +89,7 @@ public sealed class IndentationTests(UiFixture ui)
     ) =>
         _ui.Run(async () =>
         {
-            CodeLanguage codeLanguage = language == "yaml" ? CodeLanguage.Yaml : Pascal;
+            CodeLanguage codeLanguage = language == "yaml" ? YamlByIndentationRules : Pascal;
             await codeLanguage.Loaded;
             using EditorWindow window = MarkedText.Show(marked, codeLanguage);
 
@@ -325,6 +325,10 @@ public sealed class IndentationTests(UiFixture ui)
 
             MarkedText.Of(window).ShouldBe(expected);
         });
+
+    /// <summary>YAML with its indentation rules, which VS Code's YAML extension, and so the built-in language, leaves off.</summary>
+    private static CodeLanguage YamlByIndentationRules { get; } =
+        new("yaml", CodeLanguage.Yaml.Grammar, CodeLanguage.Yaml.Configuration) { AutoIndent = AutoIndent.Full };
 
     private static CodeLanguage Pascal { get; } =
         new(

@@ -8,6 +8,7 @@ using Avalonia.Logging;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
+using AvaloniaEdit.Rendering;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.Loading;
 
@@ -15,10 +16,12 @@ namespace Darp.CodeEditor.Editing;
 
 /// <summary>
 /// The editing helpers of one editor's view of a document, from the language's editing rules, as VS Code applies
-/// them: Enter indents the new line, typing outdents a line that comes to match the decrease pattern, opening
-/// characters bring their closing ones, which are typed over and deleted with them, and opening characters surround a
-/// selection. Ctrl+/ toggles comments. Tab and Shift+Tab indent and outdent as VS Code's do, with the document's
-/// indentation; Tab without a selection is AvaloniaEdit's.
+/// them, as far as the language's <see cref="CodeLanguage.AutoIndent"/> goes: Enter indents the new line by the rules
+/// for Enter, the brackets and the indentation rules, typing outdents a line that comes to match the decrease pattern,
+/// a closing bracket typed first on its line lines up with its opening one, opening characters bring their closing
+/// ones, which are typed over and deleted with them, and opening characters surround a selection. Ctrl+/ toggles
+/// comments. Tab and Shift+Tab indent and outdent as VS Code's do, with the document's indentation; Tab without a
+/// selection is AvaloniaEdit's, except on a blank line, which goes to its indentation by the rules.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -60,6 +63,12 @@ internal sealed class EditingHelpers : IDisposable
     /// holds; not found, when it was not looked for.
     /// </summary>
     private (bool Found, AutoClosingPair? Pair) _planned;
+
+    /// <summary>
+    /// The indentation that the closing bracket that <see cref="Type"/> types takes, from its opening bracket's line,
+    /// found before it goes in; null for none.
+    /// </summary>
+    private string? _electric;
 
     /// <summary>Whether <see cref="Type"/> types: the closing text of a long opening then waits for its own step.</summary>
     private bool _typing;
@@ -110,10 +119,10 @@ internal sealed class EditingHelpers : IDisposable
     }
 
     /// <summary>
-    /// Enter, Backspace, Delete, deleting by words, Tab and Shift+Tab, and the arrow keys with a selection, from the
-    /// editor's key handler, while the text area has the keyboard, after the keys of its popups. Words go with
-    /// Ctrl+Backspace and Ctrl+Delete, or Alt on macOS, the platform's key for moving by words. Shift+Enter and
-    /// Shift+Backspace do as Enter and Backspace.
+    /// Enter, Backspace, Delete, deleting by words, Tab and Shift+Tab, the arrow keys with a selection, Up and Down at
+    /// the document's ends and Home on a blank line, from the editor's key handler, while the text area has the
+    /// keyboard, after the keys of its popups. Words go with Ctrl+Backspace and Ctrl+Delete, or Alt on macOS, the
+    /// platform's key for moving by words. Shift+Enter and Shift+Backspace do as Enter and Backspace.
     /// </summary>
     public void OnKeyDown(KeyEventArgs e)
     {
@@ -133,8 +142,12 @@ internal sealed class EditingHelpers : IDisposable
             e.Handled = DeleteWord(left: e.Key == Key.Back);
         else if (e.Key == Key.Tab && e.KeyModifiers is KeyModifiers.None or KeyModifiers.Shift)
             e.Handled = Tab(outdent: e.KeyModifiers == KeyModifiers.Shift);
-        else if (e.Key is Key.Left or Key.Right or Key.Up or Key.Down && e.KeyModifiers == KeyModifiers.None)
+        else if (e.Key is Key.Up or Key.Down && e.KeyModifiers is KeyModifiers.None or KeyModifiers.Shift)
+            e.Handled = MoveVertically(e.Key, select: e.KeyModifiers == KeyModifiers.Shift);
+        else if (e.Key is Key.Left or Key.Right && e.KeyModifiers == KeyModifiers.None)
             e.Handled = CollapseSelection(e.Key);
+        else if (LineStartKey(e) is { } select)
+            e.Handled = MoveToBlankLineStart(select);
     }
 
     /// <summary>
@@ -157,6 +170,7 @@ internal sealed class EditingHelpers : IDisposable
         {
             _typing = false;
             _planned = default;
+            _electric = null;
         }
         e.Handled = true;
         if (_closeAfter is { } close)
@@ -169,7 +183,8 @@ internal sealed class EditingHelpers : IDisposable
     /// <summary>
     /// The kind of typing <paramref name="text"/>, and whether it starts or ends an undo step, in the order in which
     /// VS Code's <c>typeWithInterceptors</c> picks how to type a character: Enter, an outdented line, a closing
-    /// character typed over, a pair that closes, a surrounded selection, or else plain typing.
+    /// character typed over, a pair that closes, a surrounded selection, a closing bracket that lines up with its
+    /// opening one, or else plain typing.
     /// </summary>
     private (EditKind Kind, bool StopBefore, bool StopAfter) TypingStep(string text)
     {
@@ -194,6 +209,12 @@ internal sealed class EditingHelpers : IDisposable
                 _planned = (true, pair);
                 if (pair is { } closing)
                     return (EditKind.TypingOther, true, closing.Open.Length > 1);
+                // As VS Code, it goes on in the step before it, and ends that step.
+                if (_textArea.Selection is not RectangleSelection && ElectricIndentation(typed) is { } indentation)
+                {
+                    _electric = indentation;
+                    return (EditKind.TypingOther, false, true);
+                }
             }
         }
         EditKind kind = UndoStops.Typing(text, previous);
@@ -243,17 +264,20 @@ internal sealed class EditingHelpers : IDisposable
     }
 
     /// <summary>
-    /// Tab with a selection, VS Code's <c>tab</c>: a selection inside one line, short of the whole line, gives way to
-    /// whitespace up to the next tab stop from its start; whole lines, one or more, are indented. Shift+Tab, VS Code's
-    /// <c>outdent</c>, outdents the selected lines or the caret's. Each is a step of its own. Tab without a selection,
-    /// and both keys in a rectangle selection, are AvaloniaEdit's.
+    /// Tab, VS Code's <c>tab</c>: a selection inside one line, short of the whole line, gives way to whitespace up to the
+    /// next tab stop from its start; whole lines, one or more, are indented; without a selection, a blank line goes to
+    /// its indentation (<see cref="TabInBlankLine"/>). Shift+Tab, VS Code's <c>outdent</c>, outdents the selected lines
+    /// or the caret's. Each is a step of its own. Tab without a selection elsewhere, and both keys in a rectangle
+    /// selection, are AvaloniaEdit's.
     /// </summary>
     /// <returns>Whether it handled the key.</returns>
     private bool Tab(bool outdent)
     {
         Selection selection = _textArea.Selection;
-        if (selection is RectangleSelection || (selection.IsEmpty && !outdent))
+        if (selection is RectangleSelection)
             return false;
+        if (selection.IsEmpty && !outdent)
+            return TabInBlankLine();
         int from = selection.IsEmpty ? _textArea.Caret.Offset : selection.SurroundingSegment.Offset;
         int to = selection.IsEmpty ? from : selection.SurroundingSegment.EndOffset;
         DocumentLine line = Buffer.GetLineByOffset(from);
@@ -273,6 +297,83 @@ internal sealed class EditingHelpers : IDisposable
             stopAfter: true
         );
         return true;
+    }
+
+    /// <summary>
+    /// Tab without a selection on a line of whitespace only, as VS Code's <c>tab</c> does: the line takes the
+    /// indentation that the language's rules give it (<see cref="GoodIndentation"/>), or one level, in a step of its
+    /// own, unless it starts with that indentation already. Then, as elsewhere, AvaloniaEdit's Tab puts whitespace up
+    /// to the next tab stop at the caret.
+    /// </summary>
+    /// <returns>Whether it handled the key.</returns>
+    private bool TabInBlankLine()
+    {
+        int caret = _textArea.Caret.Offset;
+        DocumentLine line = Buffer.GetLineByOffset(caret);
+        string text = Buffer.GetText(line);
+        if (LeadingWhitespace(text) < text.Length || !CanChange(line.Offset, line.Length))
+            return false;
+        string good = new Indenting(_document.Indentation).Normalize(GoodIndentation(line.LineNumber) ?? "\t");
+        if (text.StartsWith(good, StringComparison.Ordinal))
+            return false;
+        _undo.Edit(
+            EditKind.Other,
+            stopBefore: true,
+            () =>
+            {
+                Buffer.Replace(line.Offset, line.Length, good);
+                _textArea.Caret.Offset = line.Offset + good.Length;
+                _textArea.Caret.BringCaretToView();
+            },
+            stopAfter: true
+        );
+        return true;
+    }
+
+    /// <summary>
+    /// The indentation that line <paramref name="lineNumber"/> should have, VS Code's <c>_goodIndentForLine</c>: by the
+    /// indentation rules from the lines above, with <see cref="AutoIndent.Full"/>; otherwise by what Enter would do at
+    /// the end of the closest line above with text. Null for none, or no indentation.
+    /// </summary>
+    private string? GoodIndentation(int lineNumber)
+    {
+        AutoIndent autoIndent = _document.Language.AutoIndent;
+        LanguageConfiguration configuration = Configuration;
+        var indenting = new Indenting(_document.Indentation);
+        if (autoIndent == AutoIndent.Full && configuration.IndentationRules is { } rules)
+        {
+            try
+            {
+                Inherited? inherited = InheritedIndentation(
+                    rules.StartMatching(),
+                    lineNumber,
+                    honorIntentional: false,
+                    LineText,
+                    RuleLine
+                );
+                if (inherited is { } action)
+                {
+                    string indentation = action.Increases ? indenting.Shift(action.Indentation) : action.Indentation;
+                    return indentation.Length > 0 ? indenting.Normalize(indentation) : null;
+                }
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                return null;
+            }
+        }
+        int above = lineNumber - 1;
+        while (above >= 1 && string.IsNullOrWhiteSpace(LineText(above)))
+            above--;
+        if (above < 1)
+            return null;
+        string text = LineText(above);
+        string previous = above > 1 ? RuleLine(above - 1) : "";
+        if (EnterActionAt(configuration, autoIndent, previous, RuleLine(above), "") is not { } enter)
+            return null;
+        (string own, string append) = Resolved(enter, text[..LeadingWhitespace(text)]);
+        string good = own + append;
+        return good.Length > 0 ? good : null;
     }
 
     /// <summary>
@@ -459,6 +560,96 @@ internal sealed class EditingHelpers : IDisposable
         if (key is Key.Up or Key.Down)
             return false;
         _textArea.Caret.BringCaretToView();
+        return true;
+    }
+
+    /// <summary>
+    /// Up and Down, with Shift to select, as VS Code's <c>cursorUp</c> and <c>cursorDown</c>: on the document's first
+    /// row, Up goes to the document's start, and on its last row, Down to its end, where AvaloniaEdit leaves the caret.
+    /// The column the caret came from stays the one to go back to, as VS Code keeps the columns it left over, unless the
+    /// caret was at the start or the end already. Elsewhere, and in a rectangle selection, AvaloniaEdit moves.
+    /// </summary>
+    /// <returns>Whether it handled the key.</returns>
+    private bool MoveVertically(Key key, bool select)
+    {
+        if (_textArea.Selection is RectangleSelection)
+            return false;
+        if (!select)
+            CollapseSelection(key);
+        bool up = key == Key.Up;
+        if (!IsOnEdgeRow(up))
+            return false;
+        Caret caret = _textArea.Caret;
+        TextViewPosition from = caret.Position;
+        int target = up ? 0 : Buffer.TextLength;
+        double column =
+            caret.Offset == target ? double.NaN
+            : double.IsNaN(caret.DesiredXPos) ? _textArea.TextView.GetVisualPosition(from, VisualYPosition.LineTop).X
+            : caret.DesiredXPos;
+        if (!select)
+            _textArea.ClearSelection();
+        caret.Offset = target;
+        caret.DesiredXPos = column;
+        if (select)
+            _textArea.Selection = _textArea.Selection.StartSelectionOrSetEndpoint(from, caret.Position);
+        caret.BringCaretToView();
+        return true;
+    }
+
+    /// <summary>
+    /// Whether the caret is on the document's first row, going <paramref name="up"/>, or on its last: the first or the
+    /// last row of a line that wraps.
+    /// </summary>
+    private bool IsOnEdgeRow(bool up)
+    {
+        Caret caret = _textArea.Caret;
+        if (caret.Line != (up ? 1 : Buffer.LineCount))
+            return false;
+        VisualLine line = _textArea.TextView.GetOrConstructVisualLine(Buffer.GetLineByNumber(caret.Line));
+        int row = line.TextLines.IndexOf(line.GetTextLine(caret.VisualColumn, caret.Position.IsAtEndOfLine));
+        return up ? row <= 0 : row < 0 || row == line.TextLines.Count - 1;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="e"/> is the platform's key for going to the line's start: false for Home, true for
+    /// Shift+Home, which selects; null for another key.
+    /// </summary>
+    private static bool? LineStartKey(KeyEventArgs e)
+    {
+        PlatformHotkeyConfiguration? keys = Application.Current?.PlatformSettings?.HotkeyConfiguration;
+        if (keys is null)
+            return null;
+        if (keys.MoveCursorToTheStartOfLine.Exists(gesture => gesture.Matches(e)))
+            return false;
+        if (keys.MoveCursorToTheStartOfLineWithSelection.Exists(gesture => gesture.Matches(e)))
+            return true;
+        return null;
+    }
+
+    /// <summary>
+    /// Home on a line of whitespace only, with Shift to select, as VS Code's <c>cursorHome</c>: to the line's start, and
+    /// there it stays, where AvaloniaEdit goes to the line's end, as after the whitespace that indents text. On other lines,
+    /// and in a rectangle selection, AvaloniaEdit moves: to the first character that is not whitespace, and from there
+    /// to the line's start.
+    /// </summary>
+    /// <returns>Whether it handled the key.</returns>
+    private bool MoveToBlankLineStart(bool select)
+    {
+        Caret caret = _textArea.Caret;
+        DocumentLine line = Buffer.GetLineByNumber(caret.Line);
+        if (
+            _textArea.Selection is RectangleSelection
+            || line.Length == 0
+            || LeadingWhitespace(Buffer.GetText(line)) < line.Length
+        )
+            return false;
+        TextViewPosition from = caret.Position;
+        if (!select)
+            _textArea.ClearSelection();
+        caret.Offset = line.Offset;
+        if (select)
+            _textArea.Selection = _textArea.Selection.StartSelectionOrSetEndpoint(from, caret.Position);
+        caret.BringCaretToView();
         return true;
     }
 
@@ -700,6 +891,77 @@ internal sealed class EditingHelpers : IDisposable
             _closeAfter = (longPair, offsets);
         else if (closing is { } pair)
             Close(pair, offsets);
+        else if (_electric is { } indentation)
+            Reindent(indentation);
+    }
+
+    /// <summary>
+    /// The indentation of the caret's line when <paramref name="typed"/> goes in at the caret and completes a closing
+    /// bracket that is first on the line, as VS Code's electric characters do (its
+    /// <c>_typeInterceptorElectricChar</c>): the indentation of the line of the opening bracket that it matches, if that
+    /// is on a line above. Null otherwise, and in a string, comment or regular expression, or while the tokens there
+    /// are unknown. Only brackets of one character each are matched.
+    /// </summary>
+    private string? ElectricIndentation(char typed)
+    {
+        LanguageConfiguration configuration = Configuration;
+        if (
+            configuration.BracketPattern is not { } brackets
+            || !configuration.Brackets.Any(b => b.Close.EndsWith(typed))
+        )
+            return null;
+        int caret = _textArea.Caret.Offset;
+        DocumentLine line = Buffer.GetLineByOffset(caret);
+        string text = Buffer.GetText(line);
+        int column = caret - line.Offset;
+        if (_document.Language.Loaded.Result.Grammar is not null)
+        {
+            if (_highlighter.ExactTokensOf(line.LineNumber, tokenizeNow: true) is not { } tokens)
+                return null;
+            if (TokenTypes.At(tokens, column) != TokenType.Other)
+                return null;
+        }
+        // The last bracket up to the caret, with the typed character: a closing one, first on the line.
+        string before = text[..column] + typed;
+        Match last = Match.Empty;
+        for (Match next = brackets.Match(before); next.Success; next = next.NextMatch())
+            last = next;
+        if (
+            !last.Success
+            || configuration.Brackets.Any(b => string.Equals(b.Open, last.Value, StringComparison.OrdinalIgnoreCase))
+            || LeadingWhitespace(before) < last.Index
+        )
+            return null;
+        foreach (CharacterPair pair in configuration.Brackets)
+        {
+            if (
+                pair is not { Open: [char open], Close: [char close] }
+                || !string.Equals(pair.Close, last.Value, StringComparison.OrdinalIgnoreCase)
+                || BracketMatcher.FindOpening(Buffer, caret, open, close, _highlighter.TokensOf) is not { } opening
+            )
+                continue;
+            DocumentLine openingLine = Buffer.GetLineByOffset(opening);
+            if (openingLine == line)
+                return null;
+            string openingText = Buffer.GetText(openingLine);
+            string indentation = new Indenting(_document.Indentation).Normalize(
+                openingText[..LeadingWhitespace(openingText)]
+            );
+            return indentation == text[..LeadingWhitespace(text)] ? null : indentation;
+        }
+        return null;
+    }
+
+    /// <summary>Gives the caret's line <paramref name="indentation"/>, in the undo step of the character just typed.</summary>
+    private void Reindent(string indentation)
+    {
+        int caret = _textArea.Caret.Offset;
+        DocumentLine line = Buffer.GetLineByOffset(caret);
+        int current = LeadingWhitespace(Buffer.GetText(line));
+        if (!CanChange(line.Offset, current))
+            return;
+        InTypedUndoStep(() => Buffer.Replace(line.Offset, current, indentation));
+        _textArea.Caret.Offset = caret + indentation.Length - current;
     }
 
     /// <summary>
@@ -995,33 +1257,35 @@ internal sealed class EditingHelpers : IDisposable
     }
 
     /// <summary>
-    /// What Enter inserts at <paramref name="column"/> of a line, as VS Code decides it from the brackets and the
-    /// indentation rules. Between a pair of brackets, the caret goes on a line indented one level more, and the
-    /// closing bracket on the next line; after an opening bracket, the new line is indented one level more. Otherwise
-    /// the indentation rules decide; without them, the new line keeps the line's indentation.
+    /// What Enter inserts at <paramref name="column"/> of a line, as VS Code's <c>_enter</c> decides it, as far as the
+    /// language's <see cref="CodeLanguage.AutoIndent"/> goes: the language's rules for Enter (<see cref="EnterAction"/>),
+    /// then its brackets, then its indentation rules, which see the lines without the brackets in their strings,
+    /// comments and regular expressions (<see cref="RuleText"/>). Without any of them, the new line keeps the line's
+    /// indentation up to the caret.
     /// </summary>
     private NewLine NewLineAt(DocumentLine line, string text, int column, string lineBreak)
     {
+        AutoIndent autoIndent = _document.Language.AutoIndent;
+        if (autoIndent == AutoIndent.None)
+            return new NewLine(lineBreak, lineBreak.Length, 0);
         LanguageConfiguration configuration = Configuration;
         Indenting indenting = new(_document.Indentation);
-        string before = text[..column];
-        string after = text[column..];
-        string indentation = before[..LeadingWhitespace(before)];
+        // VS Code's getIndentationAtPosition: the line's indentation, up to the caret.
+        string indentation = text[..Math.Min(column, LeadingWhitespace(text))];
+        int[]? tokens = RuleTokens(line.LineNumber, text, tokenizeNow: true);
+        string before = RuleText.Of(text, tokens, configuration.BracketPattern, 0, column);
+        string after = RuleText.Of(text, tokens, configuration.BracketPattern, column, text.Length);
+        if (autoIndent >= AutoIndent.Brackets)
+        {
+            string previous = line.PreviousLine is { } above ? RuleLine(above.LineNumber) : "";
+            if (EnterActionAt(configuration, autoIndent, previous, before, after) is { } action)
+                return NewLineFor(action, indentation, indenting, lineBreak);
+        }
         if (
-            before.Length > 0
-            && after.Length > 0
-            && configuration.Brackets.Any(b => EndsWithOpening(before, b.Open) && StartsWithClosing(after, b.Close))
+            autoIndent == AutoIndent.Full
+            && configuration.IndentationRules is { } rules
+            && IndentByRules(rules, line, before, after) is { } byRules
         )
-        {
-            string inner = lineBreak + indenting.Shift(indentation);
-            return new NewLine(inner + lineBreak + indenting.Normalize(indentation), inner.Length, 0);
-        }
-        if (before.Length > 0 && configuration.Brackets.Any(b => EndsWithOpening(before, b.Open)))
-        {
-            string inner = lineBreak + indenting.Shift(indentation);
-            return new NewLine(inner, inner.Length, 0);
-        }
-        if (configuration.IndentationRules is { } rules && IndentByRules(rules, line, before, after) is { } byRules)
         {
             // The new line replaces the indentation of the text it takes along; on a line of whitespace only, all of
             // the rest.
@@ -1035,8 +1299,79 @@ internal sealed class EditingHelpers : IDisposable
     }
 
     /// <summary>
+    /// What Enter does by the language's rules for Enter and its brackets, VS Code's <c>OnEnterSupport.onEnter</c>: the
+    /// first rule whose expressions match the texts, with <see cref="AutoIndent.Advanced"/>; between an opening and a
+    /// closing bracket, indent and outdent; after an opening bracket, indent. Null when none applies.
+    /// </summary>
+    private static EnterAction? EnterActionAt(
+        LanguageConfiguration configuration,
+        AutoIndent autoIndent,
+        string previous,
+        string before,
+        string after
+    )
+    {
+        if (autoIndent >= AutoIndent.Advanced)
+        {
+            foreach (OnEnterRule rule in configuration.OnEnterRules)
+            {
+                if (rule.Matches(previous, before, after))
+                    return rule.Action;
+            }
+        }
+        if (
+            before.Length > 0
+            && after.Length > 0
+            && configuration.Brackets.Any(b => EndsWithOpening(before, b.Open) && StartsWithClosing(after, b.Close))
+        )
+            return new EnterAction(IndentAction.IndentOutdent, "", 0);
+        if (before.Length > 0 && configuration.Brackets.Any(b => EndsWithOpening(before, b.Open)))
+            return new EnterAction(IndentAction.Indent, "", 0);
+        return null;
+    }
+
+    /// <summary>
+    /// The new line for <paramref name="action"/> after a line indented by <paramref name="indentation"/> up to the
+    /// caret, as VS Code's <c>getEnterAction</c> and <c>_enter</c> make it: the indentation without the characters the
+    /// action removes, one level more or less as it says, and the text it appends. Between brackets, the text after
+    /// the caret goes on a line of its own, at the indentation.
+    /// </summary>
+    private static NewLine NewLineFor(EnterAction action, string indentation, Indenting indenting, string lineBreak)
+    {
+        (indentation, string append) = Resolved(action, indentation);
+        if (action.Indent == IndentAction.IndentOutdent)
+        {
+            string inner = lineBreak + indenting.Normalize(indentation + append);
+            return new NewLine(inner + lineBreak + indenting.Normalize(indentation), inner.Length, 0);
+        }
+        if (action.Indent == IndentAction.Outdent)
+            indentation = indenting.Unshift(indentation);
+        string inserted = lineBreak + indenting.Normalize(indentation + append);
+        return new NewLine(inserted, inserted.Length, 0);
+    }
+
+    /// <summary>
+    /// The indentation for <paramref name="action"/> after a line indented by <paramref name="indentation"/>, without
+    /// the characters it removes, and the text to append, as VS Code's <c>getEnterAction</c> gives them: a tab first to
+    /// indent, which the document's indentation turns into its own.
+    /// </summary>
+    private static (string Indentation, string Append) Resolved(EnterAction action, string indentation)
+    {
+        if (action.RemoveText > 0)
+            indentation = indentation[..Math.Max(0, indentation.Length - action.RemoveText)];
+        string append = action.Indent switch
+        {
+            IndentAction.Indent => "\t" + action.AppendText,
+            IndentAction.IndentOutdent when action.AppendText.Length == 0 => "\t",
+            _ => action.AppendText,
+        };
+        return (indentation, append);
+    }
+
+    /// <summary>
     /// The indentation of a new line after <paramref name="before"/>, the text before the caret, by the indentation
-    /// rules: VS Code's <c>getIndentForEnter</c>. Null when matching runs out of time.
+    /// rules: VS Code's <c>getIndentForEnter</c>. The texts before and after the caret are as the rules see them
+    /// (<see cref="RuleText"/>), and so are the lines above. Null when matching runs out of time.
     /// </summary>
     private string? IndentByRules(IndentationRules rules, DocumentLine line, string before, string after)
     {
@@ -1049,7 +1384,8 @@ internal sealed class EditingHelpers : IDisposable
                 matching,
                 line.LineNumber + 1,
                 honorIntentional: true,
-                number => number == line.LineNumber ? before : LineText(number)
+                number => number == line.LineNumber ? before : LineText(number),
+                number => number == line.LineNumber ? before : RuleLine(number)
             );
             if (inherited is not { } action)
                 return before[..LeadingWhitespace(before)];
@@ -1064,19 +1400,26 @@ internal sealed class EditingHelpers : IDisposable
 
     /// <summary>
     /// Outdents the caret's line when the character just typed made it match the language's decrease pattern, as VS
-    /// Code does: to the indentation that the lines above give it, in the undo step of the character. When matching
-    /// runs out of time, the line stays as typed.
+    /// Code does with <see cref="AutoIndent.Full"/>: to the indentation that the lines above give it, in the undo step
+    /// of the character. When matching runs out of time, the line stays as typed.
     /// </summary>
     /// <returns>Whether the line's indentation changed.</returns>
     private bool Outdent()
     {
-        if (Configuration.IndentationRules is not { } rules)
+        if (_document.Language.AutoIndent < AutoIndent.Full || Configuration.IndentationRules is not { } rules)
             return false;
         int caret = _textArea.Caret.Offset;
         DocumentLine line = Buffer.GetLineByOffset(caret);
         string text = Buffer.GetText(line);
         int typed = caret - 1 - line.Offset;
-        if (typed < 0 || OutdentedIndentation(rules, line.LineNumber, text, typed) is not { } outdented)
+        if (typed < 0)
+            return false;
+        // The typed character as it is, as VS Code adds it to the text around it.
+        int[]? tokens = RuleTokens(line.LineNumber, text, tokenizeNow: true);
+        Regex? brackets = Configuration.BracketPattern;
+        string before = RuleText.Of(text, tokens, brackets, 0, typed);
+        string around = before + text[typed] + RuleText.Of(text, tokens, brackets, typed + 1, text.Length);
+        if (OutdentedIndentation(rules, line.LineNumber, around, before.Length) is not { } outdented)
             return false;
         string indentation = new Indenting(_document.Indentation).Normalize(outdented);
         int current = LeadingWhitespace(text);
@@ -1093,20 +1436,30 @@ internal sealed class EditingHelpers : IDisposable
     /// </summary>
     private bool WouldOutdent(char typed)
     {
-        if (Configuration.IndentationRules is not { } rules || _textArea.Selection is RectangleSelection)
+        if (
+            _document.Language.AutoIndent < AutoIndent.Full
+            || Configuration.IndentationRules is not { } rules
+            || _textArea.Selection is RectangleSelection
+        )
             return false;
         int caret = _textArea.Caret.Offset;
         DocumentLine line = Buffer.GetLineByOffset(caret);
         int column = caret - line.Offset;
-        string text = Buffer.GetText(line).Insert(column, typed.ToString());
-        return OutdentedIndentation(rules, line.LineNumber, text, column) is { } outdented
+        string old = Buffer.GetText(line);
+        int[]? tokens = RuleTokens(line.LineNumber, old + typed, tokenizeNow: true);
+        Regex? brackets = Configuration.BracketPattern;
+        string before = RuleText.Of(old, tokens, brackets, 0, column);
+        string around = before + typed + RuleText.Of(old, tokens, brackets, column, old.Length);
+        string text = old.Insert(column, typed.ToString());
+        return OutdentedIndentation(rules, line.LineNumber, around, before.Length) is { } outdented
             && new Indenting(_document.Indentation).Normalize(outdented) != text[..LeadingWhitespace(text)];
     }
 
     /// <summary>
     /// The indentation of line <paramref name="lineNumber"/>, if the character typed at <paramref name="typed"/> made
-    /// its <paramref name="text"/> match the decrease pattern: VS Code's <c>getIndentActionForType</c>. Null when it
-    /// didn't, when no line above has text, or when matching runs out of time.
+    /// its <paramref name="text"/>, as the rules see it, match the decrease pattern: VS Code's
+    /// <c>getIndentActionForType</c>. Null when it didn't, when no line above has text, or when matching runs out of
+    /// time.
     /// </summary>
     private string? OutdentedIndentation(IndentationRules rules, int lineNumber, string text, int typed)
     {
@@ -1115,7 +1468,10 @@ internal sealed class EditingHelpers : IDisposable
         {
             if (matching.Decreases(text.Remove(typed, 1)) || !matching.Decreases(text))
                 return null;
-            if (InheritedIndentation(matching, lineNumber, honorIntentional: false, LineText) is not { } inherited)
+            if (
+                InheritedIndentation(matching, lineNumber, honorIntentional: false, LineText, RuleLine)
+                is not { } inherited
+            )
                 return null;
             return inherited.Increases
                 ? inherited.Indentation
@@ -1137,18 +1493,27 @@ internal sealed class EditingHelpers : IDisposable
     /// Whether a line above that neither increases nor decreases gives its own indentation, as the user may have
     /// indented it on purpose. Otherwise the lines above it are searched for one that does.
     /// </param>
-    /// <param name="lineText">The text of a line by its number.</param>
+    /// <param name="lineText">The text of a line by its number, for its indentation.</param>
+    /// <param name="ruleText">
+    /// The text of a line by its number as the rules see it (<see cref="RuleText"/>), for matching; by default
+    /// <paramref name="lineText"/>.
+    /// </param>
     internal static Inherited? InheritedIndentation(
         IndentationMatching matching,
         int lineNumber,
         bool honorIntentional,
-        Func<int, string> lineText
+        Func<int, string> lineText,
+        Func<int, string>? ruleText = null
     )
     {
         if (lineNumber <= 1)
             return new Inherited("", false);
         // Every line read counts against the time, also the empty ones that the scans skip.
         string Read(int number) => matching.Read(lineText, number);
+        bool Increases(int number) =>
+            matching.Increases(ruleText is null ? Read(number) : matching.Read(ruleText, number));
+        bool Decreases(int number) =>
+            matching.Decreases(ruleText is null ? Read(number) : matching.Read(ruleText, number));
         // The first line with text above empty lines takes no indentation.
         for (int prior = lineNumber - 1; prior > 0; prior--)
         {
@@ -1161,17 +1526,16 @@ internal sealed class EditingHelpers : IDisposable
         if (preceding < 1)
             return null;
         string text = Read(preceding);
-        if (matching.Increases(text))
+        if (Increases(preceding))
             return new Inherited(Leading(text), true);
-        if (matching.Decreases(text) || preceding == 1 || honorIntentional)
+        if (Decreases(preceding) || preceding == 1 || honorIntentional)
             return new Inherited(Leading(text), false);
         for (int above = preceding - 1; above > 0; above--)
         {
-            string aboveText = Read(above);
-            if (matching.Increases(aboveText))
-                return new Inherited(Leading(aboveText), true);
-            if (matching.Decreases(aboveText))
-                return new Inherited(Leading(aboveText), false);
+            if (Increases(above))
+                return new Inherited(Leading(Read(above)), true);
+            if (Decreases(above))
+                return new Inherited(Leading(Read(above)), false);
         }
         return new Inherited(Leading(Read(1)), false);
 
@@ -1347,6 +1711,27 @@ internal sealed class EditingHelpers : IDisposable
     }
 
     private string LineText(int lineNumber) => Buffer.GetText(Buffer.GetLineByNumber(lineNumber));
+
+    /// <summary>
+    /// The text of line <paramref name="lineNumber"/> as the rules see it (<see cref="RuleText"/>), by its tokens as
+    /// last tokenized while they are exact; as it is otherwise.
+    /// </summary>
+    private string RuleLine(int lineNumber)
+    {
+        string text = LineText(lineNumber);
+        int[]? tokens = RuleTokens(lineNumber, text, tokenizeNow: false);
+        return RuleText.Of(text, tokens, Configuration.BracketPattern, 0, text.Length);
+    }
+
+    /// <summary>
+    /// The exact tokens of line <paramref name="lineNumber"/>, for <see cref="RuleText"/>; with
+    /// <paramref name="tokenizeNow"/>, tokenized now if need be. None when <paramref name="text"/> has no brackets to
+    /// take out, so that most lines need no tokens.
+    /// </summary>
+    private int[]? RuleTokens(int lineNumber, string text, bool tokenizeNow) =>
+        Configuration.BracketPattern is { } brackets && brackets.IsMatch(text)
+            ? _highlighter.ExactTokensOf(lineNumber, tokenizeNow)
+            : null;
 
     private bool CanInsert(int offset) => _textArea.ReadOnlySectionProvider.CanInsert(offset);
 

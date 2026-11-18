@@ -60,8 +60,10 @@ namespace Darp.CodeEditor;
 /// 3,000 characters and collapses the rest into "...", which can't be edited. Editing follows the language's rules, as
 /// VS Code applies them: the bracket next to the caret and its match are boxed, pairs close as you type, typing their
 /// closing character steps over it and Backspace deletes an empty pair, opening characters surround the selection, new
-/// lines are indented by the brackets and the indentation rules, a line that comes to match the decrease rule outdents,
-/// and comments toggle with the line comment, or else the block comment. Brackets in strings and comments don't match,
+/// lines are indented by the language's rules for Enter, the brackets and the indentation rules, and a line that comes
+/// to match the decrease rule outdents, as far as the language's <see cref="CodeLanguage.AutoIndent"/> goes, a closing
+/// bracket typed first on its line lines up with the line of its opening bracket, and comments toggle with the line
+/// comment, or else the block comment. Brackets in strings and comments don't match,
 /// and pairs that the language excludes there don't close. In a rectangle selection, pairs close, step over and delete,
 /// and opening characters surround, on every line; Enter breaks only the caret's line and ends the rectangle. Tab and
 /// new lines indent by the document's <see cref="CodeDocument.Indentation"/>. Undo takes back typing in VS Code's
@@ -82,14 +84,16 @@ namespace Darp.CodeEditor;
 /// VS Code's syntax, not .NET's: <c>$1</c> for a group, and <c>\U$1</c> for it in upper case.
 /// </para>
 /// <para>
-/// The editor's commands run by <see cref="Keymap"/>, VS Code's keys by default: completion (Ctrl+Space), the hover at
+/// The editor's commands run by <see cref="Keymap"/>, VS Code's keys by default: completion (Ctrl+Space, Ctrl+I), undo
+/// and redo (Ctrl+Z; Ctrl+Y, Ctrl+Shift+Z), the hover at
 /// the caret (Ctrl+K Ctrl+I), signature help (Ctrl+Shift+Space), search (Ctrl+F, Ctrl+H, F3, Shift+F3), the search
 /// bar's options (Alt+C, Alt+W, Alt+R, also from the text), comments (Ctrl+/) and the next and previous diagnostic
 /// (F8, Shift+F8; also with Alt). Ctrl+D selects the word at the caret, the first step of VS Code's Ctrl+D, which goes
 /// on to add carets at the next matches. Ctrl+Left and Ctrl+Right, Alt on macOS, move by VS Code's words, and select
 /// with Shift. AvaloniaEdit's keys edit, navigate and use the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), as VS Code's
-/// do: Tab replaces a selection inside a line and indents whole lines, Shift+Tab outdents, and without a selection
-/// Ctrl+C and Ctrl+X take the caret's whole line, which Ctrl+V pastes above the caret's line
+/// do: Tab replaces a selection inside a line and indents whole lines, and on a blank line goes to the indentation that
+/// the language's rules give it, Shift+Tab outdents, and without a selection Ctrl+C and Ctrl+X take the caret's whole
+/// line, which Ctrl+V pastes above the caret's line
 /// (<see cref="EmptySelectionClipboard"/>). Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A
 /// right click opens the
 /// editor's context menu, with the keys of its items and in the UI culture's language: Show Hover, Cut, Copy, Paste,
@@ -664,6 +668,7 @@ public class CodeEditor : TemplatedControl
             for (int i = 0; i < _clipboardCommands.Length; i++)
                 part.TextArea.CommandBindings.Insert(i, _clipboardCommands[i]);
             RemoveDeleteLine(part.TextArea);
+            RemoveIndentAndUndoKeys(part.TextArea);
         }
         UpdateShownDocument();
     }
@@ -679,6 +684,24 @@ public class CodeEditor : TemplatedControl
             RoutedCommandBinding binding in bindings.Where(b => b.Command == AvaloniaEditCommands.DeleteLine).ToList()
         )
             bindings.Remove(binding);
+    }
+
+    /// <summary>
+    /// Removes AvaloniaEdit's Ctrl+I, which indents the selected lines, and its Ctrl+Z and Ctrl+Y: in VS Code, Ctrl+I
+    /// asks for completion, and the keymap binds it so, and undo and redo are the keymap's, with VS Code's keys on each
+    /// operating system.
+    /// </summary>
+    private static void RemoveIndentAndUndoKeys(TextArea textArea)
+    {
+        RemoveBindings(textArea.DefaultInputHandler.Editing.CommandBindings, AvaloniaEditCommands.IndentSelection);
+        RemoveBindings(textArea.DefaultInputHandler.CommandBindings, ApplicationCommands.Undo);
+        RemoveBindings(textArea.DefaultInputHandler.CommandBindings, ApplicationCommands.Redo);
+
+        static void RemoveBindings(ICollection<RoutedCommandBinding> bindings, RoutedCommand command)
+        {
+            foreach (RoutedCommandBinding binding in bindings.Where(b => b.Command == command).ToList())
+                bindings.Remove(binding);
+        }
     }
 
     /// <inheritdoc />
@@ -1113,9 +1136,28 @@ public class CodeEditor : TemplatedControl
                             or CodeEditorCommands.CursorWordEndRightSelect
                 );
                 return true;
+            // Typing, Enter, Tab and caret movement.
+            case CodeEditorCommands.Undo or CodeEditorCommands.Redo when inText:
+                UndoOrRedo(redo: command == CodeEditorCommands.Redo);
+                return true;
             default:
                 return false;
         }
+    }
+
+    /// <summary>
+    /// Undoes or redoes a step of the shown document, as the keymap's undo and redo do, and brings the caret into view:
+    /// nothing in a read-only editor, as in VS Code.
+    /// </summary>
+    private void UndoOrRedo(bool redo)
+    {
+        if (IsReadOnly || _shown is not { } shown || _part is not { } part)
+            return;
+        if (redo)
+            shown.Redo();
+        else
+            shown.Undo();
+        part.TextArea.Caret.BringCaretToView();
     }
 
     /// <summary>Turns one of the search bar's options on or off, as Alt+C, Alt+W and Alt+R do.</summary>

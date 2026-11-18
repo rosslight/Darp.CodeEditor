@@ -6,7 +6,8 @@ namespace Darp.CodeEditor.Loading;
 
 /// <summary>
 /// The editing rules of a language, from VS Code's <c>language-configuration.json</c>: comments, brackets,
-/// auto-closing and surrounding pairs, and indentation rules. Other settings of the file are not read.
+/// auto-closing and surrounding pairs, indentation rules and the rules for Enter. Other settings of the file are not
+/// read.
 /// </summary>
 internal sealed record LanguageConfiguration(
     string? LineComment,
@@ -19,6 +20,26 @@ internal sealed record LanguageConfiguration(
 {
     /// <summary>No editing rules.</summary>
     public static LanguageConfiguration None { get; } = new(null, null, [], [], [], null);
+
+    /// <summary>The rules for Enter, VS Code's <c>onEnterRules</c>, in their order: the first that matches applies.</summary>
+    public IReadOnlyList<OnEnterRule> OnEnterRules { get; init; } = [];
+
+    /// <summary>
+    /// Finds the brackets, opening and closing, as VS Code's <c>getBracketRegExp</c> does: in any case, and a bracket of
+    /// letters, such as <c>begin</c>, as a whole word. Null without brackets.
+    /// </summary>
+    public Regex? BracketPattern { get; } = BracketPatternOf(Brackets);
+
+    private static Regex? BracketPatternOf(IReadOnlyList<CharacterPair> pairs)
+    {
+        string[] brackets = [.. pairs.SelectMany(p => new[] { p.Open, p.Close }).Where(b => b.Length > 0).Distinct()];
+        if (brackets.Length == 0)
+            return null;
+        IEnumerable<string> alternatives = brackets.Select(b =>
+            b.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or ' ') ? $@"\b{Regex.Escape(b)}\b" : Regex.Escape(b)
+        );
+        return new Regex(string.Join('|', alternatives), RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
 
     /// <summary>Reads a <c>language-configuration.json</c> file.</summary>
     public static LanguageConfiguration Read(Uri file)
@@ -53,7 +74,59 @@ internal sealed record LanguageConfiguration(
                     Pattern(rules.GetProperty("decreaseIndentPattern"))
                 )
                 : null
-        );
+        )
+        {
+            OnEnterRules = Property(root, "onEnterRules") is { ValueKind: JsonValueKind.Array } onEnterRules
+                ? [.. onEnterRules.EnumerateArray().Select(OnEnter).OfType<OnEnterRule>()]
+                : [],
+        };
+    }
+
+    /// <summary>
+    /// A rule of <c>onEnterRules</c>; null for one that VS Code skips: without an action of a known kind, or with a
+    /// regular expression that is missing or that .NET can't read.
+    /// </summary>
+    private static OnEnterRule? OnEnter(JsonElement rule)
+    {
+        if (Property(rule, "action") is not { ValueKind: JsonValueKind.Object } action)
+            return null;
+        IndentAction? indent = Property(action, "indent") is { ValueKind: JsonValueKind.String } kind
+            ? kind.GetString() switch
+            {
+                "none" => IndentAction.None,
+                "indent" => IndentAction.Indent,
+                "indentOutdent" => IndentAction.IndentOutdent,
+                "outdent" => IndentAction.Outdent,
+                _ => null,
+            }
+            : null;
+        if (indent is not { } indentAction)
+            return null;
+        try
+        {
+            if (Property(rule, "beforeText") is not { } beforeText)
+                return null;
+            return new OnEnterRule(
+                Pattern(beforeText),
+                Property(rule, "afterText") is { } afterText ? Pattern(afterText) : null,
+                Property(rule, "previousLineText") is { } previousLineText ? Pattern(previousLineText) : null,
+                new EnterAction(
+                    indentAction,
+                    Property(action, "appendText") is { ValueKind: JsonValueKind.String } append
+                        ? append.GetString() ?? ""
+                        : "",
+                    Property(action, "removeText") is { ValueKind: JsonValueKind.Number } remove
+                    && remove.TryGetInt32(out int removed)
+                        ? Math.Max(0, removed)
+                        : 0
+                )
+            );
+        }
+        catch (Exception e)
+            when (e is ArgumentException or InvalidDataException or InvalidOperationException or KeyNotFoundException)
+        {
+            return null;
+        }
     }
 
     private static JsonElement? Property(JsonElement? element, string name) =>
@@ -122,6 +195,56 @@ internal readonly record struct CharacterPair(string Open, string Close);
 /// <param name="NotInString">Not closed automatically inside a string.</param>
 /// <param name="NotInComment">Not closed automatically inside a comment.</param>
 internal readonly record struct AutoClosingPair(string Open, string Close, bool NotInString, bool NotInComment);
+
+/// <summary>
+/// A rule for Enter: when the text before the caret matches <paramref name="BeforeText"/>, and the text after it and the
+/// line above match the others if given, the new line takes <paramref name="Action"/>. Each regular expression is
+/// matched within <see cref="IndentationRules.MatchTimeout"/>.
+/// </summary>
+internal sealed record OnEnterRule(Regex BeforeText, Regex? AfterText, Regex? PreviousLineText, EnterAction Action)
+{
+    /// <summary>
+    /// Whether the rule applies to the texts around the caret: a match that runs out of time counts as none.
+    /// </summary>
+    public bool Matches(string previousLineText, string beforeText, string afterText)
+    {
+        try
+        {
+            return BeforeText.IsMatch(beforeText)
+                && (AfterText?.IsMatch(afterText) ?? true)
+                && (PreviousLineText?.IsMatch(previousLineText) ?? true);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return false;
+        }
+    }
+}
+
+/// <summary>What Enter does to the new line, VS Code's <c>EnterAction</c>.</summary>
+/// <param name="Indent">How the new line is indented, from the indentation of the caret's line.</param>
+/// <param name="AppendText">Text that goes in after the new line's indentation, such as <c>// </c>.</param>
+/// <param name="RemoveText">How many characters of indentation the new line takes off.</param>
+internal readonly record struct EnterAction(IndentAction Indent, string AppendText, int RemoveText);
+
+/// <summary>How Enter indents the new line, VS Code's <c>IndentAction</c>.</summary>
+internal enum IndentAction
+{
+    /// <summary>As the caret's line.</summary>
+    None,
+
+    /// <summary>One level more than the caret's line.</summary>
+    Indent,
+
+    /// <summary>
+    /// Two new lines: the caret goes on the first, one level more, and the text after the caret on the second, at the
+    /// caret's line's indentation, as between brackets.
+    /// </summary>
+    IndentOutdent,
+
+    /// <summary>One level less than the caret's line.</summary>
+    Outdent,
+}
 
 /// <summary>When a line indents or outdents: regular expressions on its text, with the flags the file gives.</summary>
 /// <param name="IncreaseIndentPattern">The lines after a matching line are indented one level more.</param>
