@@ -328,6 +328,17 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     ) => Task.FromResult<IReadOnlyList<TextRange>?>(null);
 
     /// <summary>
+    /// The server's occurrences of the symbol at <paramref name="position"/> of <paramref name="snapshot"/>, the current
+    /// text, for an editor; null without an answer, and when <paramref name="cancellationToken"/> cancelled it: the
+    /// editor then takes the words of the text. Never waits on the calling thread.
+    /// </summary>
+    internal virtual Task<IReadOnlyList<Occurrence>?> DocumentHighlightsAsync(
+        TextSnapshot snapshot,
+        TextPosition position,
+        CancellationToken cancellationToken
+    ) => Task.FromResult<IReadOnlyList<Occurrence>?>(null);
+
+    /// <summary>
     /// What the server that serves the document offers its editors now, such as the characters that ask for
     /// completion; null without a running server.
     /// </summary>

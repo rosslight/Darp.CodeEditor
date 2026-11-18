@@ -187,17 +187,31 @@ public sealed class SearchTests(UiFixture ui)
             window.Editor.Selection.ShouldBe(new TextSelection(2, 3));
         });
 
+    /// <summary>
+    /// As in VS Code, the replace bar doesn't open in a read-only editor, and an editor that becomes read-only hides
+    /// the replace row, which stays hidden once the editor can be edited again.
+    /// </summary>
     [Fact]
-    public Task A_read_only_editor_opens_the_search_bar_without_replacing() =>
+    public Task A_read_only_editor_never_shows_the_replace_row() =>
         _ui.Run(() =>
         {
             using EditorWindow window = MarkedText.Show("|one", CodeLanguage.PlainText);
+            KeyGesture replace = ApplicationCommands.Replace.Gesture;
             window.Editor.IsReadOnly = true;
 
+            window.Press(replace.Key, replace.KeyModifiers);
             window.Editor.OpenSearch(replace: true);
+            window.Editor.GetVisualDescendants().OfType<SearchBar>().ShouldBeEmpty();
 
-            BarOf(window).IsOpen.ShouldBeTrue();
-            BarOf(window).ReplaceBox.IsEffectivelyVisible.ShouldBeFalse();
+            window.Editor.IsReadOnly = false;
+            window.Press(replace.Key, replace.KeyModifiers);
+            SearchBar bar = BarOf(window);
+            bar.ReplaceBox.IsEffectivelyVisible.ShouldBeTrue();
+            window.Editor.IsReadOnly = true;
+            bar.IsOpen.ShouldBeTrue();
+            bar.ReplaceBox.IsEffectivelyVisible.ShouldBeFalse();
+            window.Editor.IsReadOnly = false;
+            bar.ReplaceBox.IsEffectivelyVisible.ShouldBeFalse();
         });
 
     [Fact]
@@ -225,24 +239,90 @@ public sealed class SearchTests(UiFixture ui)
             window.RenderAndCountPixels(Color.Parse("#0000FF"), new TextRange(4, 3)).ShouldBe(0);
         });
 
+    /// <summary>
+    /// As VS Code, the bar highlights only so many matches, and says so in the tip of the count, but Replace All replaces
+    /// all of them, in one undo step.
+    /// </summary>
     [Fact]
-    public Task A_search_that_finds_more_matches_than_it_keeps_says_so_and_refuses_Replace_All() =>
+    public Task Replace_All_replaces_also_the_matches_beyond_those_highlighted() =>
         _ui.Run(async () =>
         {
-            string text = string.Concat(Enumerable.Repeat("a\n", TextSearch.MaxMatches + 1));
+            string text = string.Concat(Enumerable.Repeat("a\n", TextSearch.MaxMatches + 2));
             using EditorWindow window = MarkedText.Show("|" + text, CodeLanguage.PlainText);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
 
             window.Editor.OpenSearch(replace: true);
             SearchBar bar = BarOf(window);
             bar.ReplaceBox.Text = "b";
             window.Type("a");
-            await Wait.UntilAsync(() => bar.Message is not null);
+            await Wait.UntilAsync(() => bar.ReplaceAllButton.IsEnabled);
 
-            bar.Message.ShouldNotBeNull().ShouldContain("Replace All is off");
-            bar.Count.ShouldNotBeNull().ShouldEndWith("+");
-            bar.ReplaceAllButton.IsEnabled.ShouldBeFalse();
+            bar.Count.ShouldBe("1 of 19,999+");
+            bar.CountTip.ShouldBe(
+                "Only the first 19,999 matches are highlighted, but Replace All replaces all of them."
+            );
+            bar.Message.ShouldBeNull();
             Click(bar, "Replace All");
-            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(text);
+            document.Text.ShouldBe(string.Concat(Enumerable.Repeat("b\n", TextSearch.MaxMatches + 2)));
+            document.Undo();
+            document.Text.ShouldBe(text);
+        });
+
+    /// <summary>
+    /// As in VS Code, a regular expression that can match a line break searches across lines, and the match shows over
+    /// both lines.
+    /// </summary>
+    [Fact]
+    public Task A_regular_expression_with_a_line_break_finds_and_highlights_matches_across_lines() =>
+        _ui.Run(async () =>
+        {
+            var editor = new CodeEditor
+            {
+                Document = CodeDocument.Create(CodeLanguage.PlainText, "foo\r\nbar\nfoo bar"),
+                ColorTheme = new CodeEditorColorTheme
+                {
+                    Source = new Uri("avares://Darp.CodeEditor.Tests/Themes/marks.json"),
+                },
+            };
+            using var window = new EditorWindow(editor);
+            editor.OpenSearch();
+            SearchBar bar = BarOf(window);
+            bar.RegexToggle.IsChecked = true;
+
+            bar.FindBox.Text = @"foo\nbar";
+
+            await Wait.UntilAsync(() => bar.Count == "1 of 1");
+            editor.Selection.ShouldBe(new TextSelection(0, 8));
+            await Wait.UntilAsync(() => window.RenderAndCountPixels(Color.Parse("#00C000"), new TextRange(0, 3)) > 0);
+            window.RenderAndCountPixels(Color.Parse("#00C000"), new TextRange(5, 3)).ShouldBeGreaterThan(0);
+            window.RenderAndCountPixels(Color.Parse("#00C000"), new TextRange(13, 3)).ShouldBe(0);
+        });
+
+    /// <summary>
+    /// As in VS Code, Ctrl+Enter, also on macOS, starts a new line in the query, which then grows and searches across
+    /// lines; Enter goes on to the next match.
+    /// </summary>
+    [Fact]
+    public Task Ctrl_Enter_starts_a_new_line_in_the_query() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("|foo\nbar foo\nbar", CodeLanguage.PlainText);
+            window.Editor.OpenSearch();
+            SearchBar bar = BarOf(window);
+            window.Layout();
+            double height = bar.FindBox.Bounds.Height;
+
+            window.Type("foo");
+            window.Press(Key.Enter, KeyModifiers.Control);
+            window.Type("bar");
+
+            bar.FindBox.Text.ShouldBe("foo\nbar");
+            await Wait.UntilAsync(() => bar.Count == "1 of 2");
+            window.Layout();
+            bar.FindBox.Bounds.Height.ShouldBeGreaterThan(height);
+            window.Press(Key.Enter);
+            window.Editor.Selection.ShouldBe(new TextSelection(8, 15));
+            bar.FindBox.Text.ShouldBe("foo\nbar");
         });
 
     [Fact]
@@ -486,6 +566,32 @@ public sealed class SearchTests(UiFixture ui)
             await Wait.UntilAsync(() => window.Editor.Selection == new TextSelection(8, 9));
             bar.FindBox.Text.ShouldBe("a");
         });
+
+    [Fact]
+    public Task Alt_P_preserves_the_case_of_each_match_that_it_replaces() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("|Foo FOO foo", CodeLanguage.PlainText);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            window.Editor.OpenSearch(replace: true);
+            SearchBar bar = BarOf(window);
+            window.Type("foo");
+            bar.ReplaceBox.Text = "bar";
+
+            window.Press(Key.P, Toggle);
+
+            bar.PreserveCaseToggle.IsChecked.ShouldBe(true);
+            ToolTip
+                .GetTip(bar.PreserveCaseToggle)
+                .ShouldBe($"Preserve Case ({new KeyGesture(Key.P, Toggle).ToString("p", null)})");
+            await Wait.UntilAsync(() => bar.ReplaceAllButton.IsEnabled);
+            Click(bar, "Replace All");
+            document.Text.ShouldBe("Bar BAR bar");
+        });
+
+    /// <summary>The modifiers of the search bar's toggles: Alt, and Alt+Cmd on macOS.</summary>
+    private static KeyModifiers Toggle =>
+        OperatingSystem.IsMacOS() ? KeyModifiers.Alt | KeyModifiers.Meta : KeyModifiers.Alt;
 
     private static SearchBar BarOf(EditorWindow window) =>
         window.Editor.GetVisualDescendants().OfType<SearchBar>().Single();

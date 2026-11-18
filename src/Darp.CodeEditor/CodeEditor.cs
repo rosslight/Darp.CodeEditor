@@ -77,17 +77,20 @@ namespace Darp.CodeEditor;
 /// The font defaults to a monospace one; set <c>FontFamily</c> and <c>FontSize</c> as for any control.
 /// </para>
 /// <para>
-/// The search bar searches as the user types, in the background: plain text or a .NET regular expression, line by
-/// line, with Match Case and Match Whole Word. A search stops after 1 second, as a regular expression such as
-/// <c>(a+)+$</c> can take far longer, and keeps 10,000 matches at most. The bar says so when a search stops early, and
-/// Replace All then does nothing: it never replaces only some of the matches. A regular expression's replacement is in
-/// VS Code's syntax, not .NET's: <c>$1</c> for a group, and <c>\U$1</c> for it in upper case.
+/// The search bar searches as the user types, in the background: plain text or a .NET regular expression, with Match
+/// Case and Match Whole Word, line by line unless the query can match a line break, as in VS Code: a regular expression
+/// with <c>\n</c>, or a query with a line break, which Ctrl+Enter types. A search stops after 1 second, as a regular
+/// expression such as <c>(a+)+$</c> can take far longer, and highlights 19,999 matches at most, as VS Code does; Replace
+/// All replaces all of them. The bar says so when a search stops early, and Replace All then does nothing: it never
+/// replaces only some of the matches. A regular expression's replacement is in VS Code's syntax, not .NET's: <c>$1</c>
+/// for a group, and <c>\U$1</c> for it in upper case.
 /// </para>
 /// <para>
 /// The editor's commands run by <see cref="Keymap"/>, VS Code's keys by default: completion (Ctrl+Space, Ctrl+I), undo
 /// and redo (Ctrl+Z; Ctrl+Y, Ctrl+Shift+Z), the hover at
 /// the caret (Ctrl+K Ctrl+I), signature help (Ctrl+Shift+Space), search (Ctrl+F, Ctrl+H, F3, Shift+F3), the search
-/// bar's options (Alt+C, Alt+W, Alt+R, also from the text), comments (Ctrl+/) and the next and previous diagnostic
+/// bar's options (Alt+C, Alt+W, Alt+R, Alt+P, and Alt+L for Find in Selection, also from the text), comments (Ctrl+/)
+/// and the next and previous diagnostic
 /// (F8, Shift+F8; also with Alt). Ctrl+D selects the word at the caret, the first step of VS Code's Ctrl+D, which goes
 /// on to add carets at the next matches. Ctrl+Left and Ctrl+Right, Alt on macOS, move by VS Code's words, and select
 /// with Shift. AvaloniaEdit's keys edit, navigate and use the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), as VS Code's
@@ -192,6 +195,59 @@ public class CodeEditor : TemplatedControl
         defaultValue: true
     );
 
+    /// <summary>Defines the <see cref="AutoFindInSelection"/> property.</summary>
+    public static readonly StyledProperty<AutoFindInSelection> AutoFindInSelectionProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        AutoFindInSelection
+    >(nameof(AutoFindInSelection), defaultValue: AutoFindInSelection.Never);
+
+    /// <summary>Defines the <see cref="FindHistory"/> property.</summary>
+    public static readonly StyledProperty<SearchHistory?> FindHistoryProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        SearchHistory?
+    >(nameof(FindHistory), defaultValue: new SearchHistory());
+
+    /// <summary>Defines the <see cref="ReplaceHistory"/> property.</summary>
+    public static readonly StyledProperty<SearchHistory?> ReplaceHistoryProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        SearchHistory?
+    >(nameof(ReplaceHistory), defaultValue: new SearchHistory());
+
+    /// <summary>Defines the <see cref="SelectionHighlight"/> property.</summary>
+    public static readonly StyledProperty<bool> SelectionHighlightProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        bool
+    >(nameof(SelectionHighlight), defaultValue: true);
+
+    /// <summary>Defines the <see cref="SelectionHighlightMaxLength"/> property.</summary>
+    public static readonly StyledProperty<int> SelectionHighlightMaxLengthProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        int
+    >(nameof(SelectionHighlightMaxLength), defaultValue: 200);
+
+    /// <summary>Defines the <see cref="SelectionHighlightMultiline"/> property.</summary>
+    public static readonly StyledProperty<bool> SelectionHighlightMultilineProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        bool
+    >(nameof(SelectionHighlightMultiline));
+
+    /// <summary>Defines the <see cref="SelectedTextMatchMode"/> property.</summary>
+    public static readonly StyledProperty<SelectedTextMatchMode> SelectedTextMatchModeProperty =
+        AvaloniaProperty.Register<CodeEditor, SelectedTextMatchMode>(nameof(SelectedTextMatchMode));
+
+    /// <summary>Defines the <see cref="OccurrencesHighlight"/> property.</summary>
+    public static readonly StyledProperty<OccurrencesHighlight> OccurrencesHighlightProperty =
+        AvaloniaProperty.Register<CodeEditor, OccurrencesHighlight>(
+            nameof(OccurrencesHighlight),
+            defaultValue: OccurrencesHighlight.SingleFile
+        );
+
+    /// <summary>Defines the <see cref="OccurrencesHighlightDelay"/> property.</summary>
+    public static readonly StyledProperty<TimeSpan> OccurrencesHighlightDelayProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        TimeSpan
+    >(nameof(OccurrencesHighlightDelay));
+
     /// <summary>AvaloniaEdit's editor, from the template. The editor wraps it, so that its API stays out of ours.</summary>
     private TextEditor? _part;
 
@@ -251,6 +307,12 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>Selects columns in the shown document, by keys and by Shift+Alt+drag.</summary>
     private ColumnSelection? _columnSelection;
+
+    /// <summary>Highlights the other occurrences of the selection in the shown document.</summary>
+    private SelectionHighlighter? _selectionHighlights;
+
+    /// <summary>Highlights the occurrences of the symbol at the caret in the shown document.</summary>
+    private OccurrenceHighlighter? _occurrences;
 
     /// <summary>The template's panel, which the search bar goes into, over the text.</summary>
     private Panel? _root;
@@ -519,6 +581,113 @@ public class CodeEditor : TemplatedControl
         set => SetValue(SmartSelectProperty, value);
     }
 
+    /// <summary>
+    /// When the search bar turns Find in Selection on by itself, as VS Code's <c>editor.find.autoFindInSelection</c>:
+    /// as Ctrl+F or Ctrl+H opens it, or F3 while it is closed, it then searches only the selection. Find in Selection
+    /// also turns on and off with its toggle on the bar, and with Alt+L. Default: <see cref="AutoFindInSelection.Never"/>,
+    /// as in VS Code.
+    /// </summary>
+    public AutoFindInSelection AutoFindInSelection
+    {
+        get => GetValue(AutoFindInSelectionProperty);
+        set => SetValue(AutoFindInSelectionProperty, value);
+    }
+
+    /// <summary>
+    /// What the search bar's query recalls with Up and Down, as VS Code's find history: it takes the query once the user
+    /// has paused for half a second. Default: one history that every editor shares, as VS Code's
+    /// <c>editor.find.history</c> by default keeps one for the editors of a workspace. Set a history of the app's own to
+    /// share it among some editors only, or to keep its entries, as VS Code keeps them with the workspace; null for
+    /// one that only this editor's bar has, and nothing keeps, as VS Code's <c>never</c>.
+    /// </summary>
+    public SearchHistory? FindHistory
+    {
+        get => GetValue(FindHistoryProperty);
+        set => SetValue(FindHistoryProperty, value);
+    }
+
+    /// <summary>
+    /// What the search bar's replacement recalls with Up and Down, as VS Code's replace history and
+    /// <c>editor.find.replaceHistory</c>, as <see cref="FindHistory"/> does for the query.
+    /// </summary>
+    public SearchHistory? ReplaceHistory
+    {
+        get => GetValue(ReplaceHistoryProperty);
+        set => SetValue(ReplaceHistoryProperty, value);
+    }
+
+    /// <summary>
+    /// Whether selecting text highlights its other occurrences, as VS Code's <c>editor.selectionHighlight</c>, in the
+    /// color theme's <c>editor.selectionHighlightBackground</c>: within a line, unless
+    /// <see cref="SelectionHighlightMultiline"/>, and up to <see cref="SelectionHighlightMaxLength"/> characters, as
+    /// <see cref="SelectedTextMatchMode"/> matches them. Default: true, as in VS Code.
+    /// </summary>
+    public bool SelectionHighlight
+    {
+        get => GetValue(SelectionHighlightProperty);
+        set => SetValue(SelectionHighlightProperty, value);
+    }
+
+    /// <summary>
+    /// How many characters a selection can have and still highlight its occurrences, as VS Code's
+    /// <c>editor.selectionHighlightMaxLength</c>; 0 for any number. Default: 200, as in VS Code.
+    /// </summary>
+    public int SelectionHighlightMaxLength
+    {
+        get => GetValue(SelectionHighlightMaxLengthProperty);
+        set => SetValue(SelectionHighlightMaxLengthProperty, value);
+    }
+
+    /// <summary>
+    /// Whether a selection over several lines highlights its occurrences too, as VS Code's
+    /// <c>editor.selectionHighlightMultiline</c>. Default: false, as in VS Code.
+    /// </summary>
+    public bool SelectionHighlightMultiline
+    {
+        get => GetValue(SelectionHighlightMultilineProperty);
+        set => SetValue(SelectionHighlightMultilineProperty, value);
+    }
+
+    /// <summary>
+    /// How the occurrences of the selected text match it, as VS Code's <c>editor.selectedTextMatchMode</c>. Default:
+    /// <see cref="SelectedTextMatchMode.FindOptions"/>, with the search bar's Match Case and Match Whole Word, as in VS
+    /// Code.
+    /// </summary>
+    public SelectedTextMatchMode SelectedTextMatchMode
+    {
+        get => GetValue(SelectedTextMatchModeProperty);
+        set => SetValue(SelectedTextMatchModeProperty, value);
+    }
+
+    /// <summary>
+    /// Whether the editor highlights the occurrences of the symbol at the caret, as VS Code's
+    /// <c>editor.occurrencesHighlight</c>: those the language server finds, with the reads in the color theme's
+    /// <c>editor.wordHighlightBackground</c> and the writes in <c>editor.wordHighlightStrongBackground</c>, or without a
+    /// server, or when it finds none, those of the word, in <c>editor.wordHighlightTextBackground</c>. F7 and Shift+F7
+    /// go through them. Default: <see cref="OccurrencesHighlight.SingleFile"/>, as in VS Code.
+    /// </summary>
+    public OccurrencesHighlight OccurrencesHighlight
+    {
+        get => GetValue(OccurrencesHighlightProperty);
+        set => SetValue(OccurrencesHighlightProperty, value);
+    }
+
+    /// <summary>
+    /// How long after asking for the occurrences of the symbol at the caret they show at the earliest, as VS Code's
+    /// <c>editor.occurrencesHighlightDelay</c>. Default: none, as in VS Code.
+    /// </summary>
+    public TimeSpan OccurrencesHighlightDelay
+    {
+        get => GetValue(OccurrencesHighlightDelayProperty);
+        set => SetValue(OccurrencesHighlightDelayProperty, value);
+    }
+
+    /// <summary>The occurrences of the symbol at the caret that the editor highlights, for tests.</summary>
+    internal IReadOnlyList<LanguageClient.Occurrence> Occurrences => _occurrences?.Highlights ?? [];
+
+    /// <summary>The other occurrences of the selection that the editor highlights, for tests.</summary>
+    internal IReadOnlyList<TextRange> SelectionHighlights => _selectionHighlights?.Highlights ?? [];
+
     /// <summary>The semantic colors of the shown document, for benchmarks; null while it shows none.</summary>
     internal SemanticHighlighter? SemanticHighlighter => _semantic;
 
@@ -591,15 +760,18 @@ public class CodeEditor : TemplatedControl
     /// takes its query from the text as <see cref="SeedSearchStringFromSelection"/> says, by default the selection
     /// within one line or else the word at the caret, puts the keyboard into it, and leaves the replace row of an open
     /// bar as it is. The replace bar takes only a selection within one line, and then puts the keyboard into the
-    /// replacement, as it does when the query has the keyboard; otherwise into the query. A read-only editor opens the
-    /// search bar either way.
+    /// replacement, as it does when the query has the keyboard; otherwise into the query. A read-only editor opens no
+    /// replace bar, as in VS Code.
     /// </summary>
     public void OpenSearch(bool replace = false)
     {
+        if (replace && IsReadOnly)
+            return;
         if (_part is not { } part || CreatedSearchBar() is not { } bar)
             return;
         SeedSearchString seed = SeedSearchStringFromSelection;
-        if (!replace || IsReadOnly)
+        FindInSelectionAsItOpens(part.TextArea, bar);
+        if (!replace)
         {
             bar.Open(replace: false, seed == SeedSearchString.Never ? null : SearchString(part.TextArea, seed));
             return;
@@ -783,6 +955,8 @@ public class CodeEditor : TemplatedControl
             _hover?.Close();
             _completion?.Close();
             _signatureHelp?.Close();
+            // As in VS Code, once the keyboard left the editor.
+            _occurrences?.Stop();
         });
 
     /// <summary>Gives the keyboard back to the text, as from a popup.</summary>
@@ -820,6 +994,15 @@ public class CodeEditor : TemplatedControl
             || change.Property == ThemeVariantScope.ActualThemeVariantProperty
         )
             UpdateHighlighting();
+        else if (
+            change.Property == SelectionHighlightProperty
+            || change.Property == SelectionHighlightMaxLengthProperty
+            || change.Property == SelectionHighlightMultilineProperty
+            || change.Property == SelectedTextMatchModeProperty
+        )
+            _selectionHighlights?.Update();
+        else if (change.Property == OccurrencesHighlightProperty && OccurrencesHighlight == OccurrencesHighlight.Off)
+            _occurrences?.Stop();
     }
 
     /// <summary>
@@ -938,6 +1121,12 @@ public class CodeEditor : TemplatedControl
         _cursorHistory = new CursorHistory(part.TextArea, Dispatcher);
         _smartSelection = new SmartSelection(this, part.TextArea, document, _highlighter);
         _columnSelection = new ColumnSelection(part.TextArea);
+        _selectionHighlights = new SelectionHighlighter(this, part.TextArea, document)
+        {
+            Colors = _colors?.Highlights,
+            SearchBar = _searchBar,
+        };
+        _occurrences = new OccurrenceHighlighter(this, part.TextArea, document) { Colors = _colors?.Highlights };
         _searchBar?.Attach(this, part.TextArea, document);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
         _waitingForLayout = true;
@@ -973,6 +1162,10 @@ public class CodeEditor : TemplatedControl
         _smartSelection = null;
         _columnSelection?.Dispose();
         _columnSelection = null;
+        _selectionHighlights?.Dispose();
+        _selectionHighlights = null;
+        _occurrences?.Dispose();
+        _occurrences = null;
         _squiggles?.Dispose();
         _squiggles = null;
         _semantic?.Dispose();
@@ -1123,8 +1316,10 @@ public class CodeEditor : TemplatedControl
     {
         switch (command)
         {
-            case CodeEditorCommands.Find or CodeEditorCommands.Replace:
-                // Also without a document, so that AvaloniaEdit's own search panel never opens.
+            // Also without a document, so that AvaloniaEdit's own search panel never opens; as in VS Code, the replace
+            // bar not in a read-only editor.
+            case CodeEditorCommands.Find:
+            case CodeEditorCommands.Replace when !IsReadOnly:
                 OpenSearch(replace: command == CodeEditorCommands.Replace);
                 return true;
             case CodeEditorCommands.FindNext or CodeEditorCommands.FindPrevious:
@@ -1231,6 +1426,17 @@ public class CodeEditor : TemplatedControl
                     }
                 );
                 return true;
+
+            // Find, replace and highlights: from the text or the search bar.
+            case CodeEditorCommands.TogglePreserveCase
+            or CodeEditorCommands.ToggleFindInSelection:
+                return ToggleSearchOption(command);
+            // In the search bar's query or replacement.
+            case CodeEditorCommands.HistoryShowPrevious or CodeEditorCommands.HistoryShowNext:
+                return _searchBar?.ShowHistory(previous: command == CodeEditorCommands.HistoryShowPrevious) == true;
+            // While occurrences show.
+            case CodeEditorCommands.NextWordHighlight or CodeEditorCommands.PreviousWordHighlight when inText:
+                return _occurrences?.Move(next: command == CodeEditorCommands.NextWordHighlight) == true;
             default:
                 return false;
         }
@@ -1251,7 +1457,7 @@ public class CodeEditor : TemplatedControl
         part.TextArea.Caret.BringCaretToView();
     }
 
-    /// <summary>Turns one of the search bar's options on or off, as Alt+C, Alt+W and Alt+R do.</summary>
+    /// <summary>Turns one of the search bar's options on or off, as Alt+C, Alt+W, Alt+R, Alt+P and Alt+L do.</summary>
     /// <returns>Whether there is a document to search.</returns>
     private bool ToggleSearchOption(string command)
     {
@@ -1261,6 +1467,10 @@ public class CodeEditor : TemplatedControl
             bar.ToggleMatchCase();
         else if (command == CodeEditorCommands.ToggleFindWholeWord)
             bar.ToggleWholeWord();
+        else if (command == CodeEditorCommands.TogglePreserveCase)
+            bar.TogglePreserveCase();
+        else if (command == CodeEditorCommands.ToggleFindInSelection)
+            bar.ToggleFindInSelection();
         else
             bar.ToggleRegex();
         return true;
@@ -1327,11 +1537,29 @@ public class CodeEditor : TemplatedControl
         SeedSearchString seed = SeedSearchStringFromSelection;
         string? text =
             bar.Query.Length == 0 && seed != SeedSearchString.Never ? SearchString(part.TextArea, seed) : null;
+        if (!bar.IsOpen)
+            FindInSelectionAsItOpens(part.TextArea, bar);
         if (previous)
             bar.FindPrevious(text);
         else
             bar.FindNext(text);
         return true;
+    }
+
+    /// <summary>
+    /// Turns Find in Selection on as the search bar opens, as <see cref="AutoFindInSelection"/> says: as VS Code does
+    /// whenever its search starts, by Ctrl+F, Ctrl+H, or F3 while the bar is closed.
+    /// </summary>
+    private void FindInSelectionAsItOpens(TextArea textArea, SearchBar bar)
+    {
+        bool scoped = AutoFindInSelection switch
+        {
+            AutoFindInSelection.Always => true,
+            AutoFindInSelection.Multiline => textArea.Selection.IsMultiline,
+            _ => false,
+        };
+        if (scoped)
+            bar.FindInSelection();
     }
 
     /// <summary>
@@ -1345,10 +1573,15 @@ public class CodeEditor : TemplatedControl
             var bar = new SearchBar { Colors = _colors };
             root.Children.Add(bar);
             bar.Attach(this, part.TextArea, shown);
+            bar.StateChanged += OnSearchStateChanged;
             _searchBar = bar;
+            _selectionHighlights?.SearchBar = bar;
         }
         return _shown is null ? null : _searchBar;
     }
+
+    /// <summary>The search bar's query or options changed, or it opened or closed: the highlights follow.</summary>
+    private void OnSearchStateChanged(object? sender, EventArgs e) => _selectionHighlights?.Update();
 
     /// <summary>
     /// Removes the search panel that AvaloniaEdit's editor installs with each template, its input handler and its
@@ -1645,6 +1878,8 @@ public class CodeEditor : TemplatedControl
             _snippets?.Colors = colors;
             _signatureHelp?.Colors = colors;
             _brackets?.Colors = colors;
+            _selectionHighlights?.Colors = colors.Highlights;
+            _occurrences?.Colors = colors.Highlights;
             _whitespace?.Colors = colors;
             _squiggles?.Colors = colors;
             _hover?.Colors = colors;

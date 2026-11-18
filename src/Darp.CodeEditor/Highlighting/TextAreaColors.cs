@@ -59,6 +59,9 @@ internal sealed record TextAreaColors(
     /// <summary>The colors of the editor's popups, from the same theme.</summary>
     public required PopupColors Popups { get; init; }
 
+    /// <summary>The colors of the find range and of the occurrences highlighted, from the same theme.</summary>
+    public required HighlightColors Highlights { get; init; }
+
     /// <summary>Reads the colors of <paramref name="theme"/>.</summary>
     public static TextAreaColors From(ColorThemeFile theme)
     {
@@ -100,6 +103,7 @@ internal sealed record TextAreaColors(
         )
         {
             Popups = PopupColors.From(theme, foreground, selection),
+            Highlights = HighlightColors.From(theme, dark),
         };
 
         ImmutableSolidColorBrush? Brush(string key) =>

@@ -397,7 +397,8 @@ public sealed class LanguageServerTests(UiFixture ui)
                               ],
                               "formats": ["relative"],
                               "augmentsSyntaxTokens": true
-                            }
+                            },
+                            "documentHighlight": { "dynamicRegistration": false }
                           }
                         }
                         """

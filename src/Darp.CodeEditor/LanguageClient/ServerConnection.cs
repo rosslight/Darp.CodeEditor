@@ -357,6 +357,38 @@ internal sealed class ServerConnection
     }
 
     /// <summary>
+    /// The server's occurrences of the symbol at <paramref name="position"/> of an open document, for an editor. Null
+    /// when the server does not run, the document is not open in it, it offers none, failed or answered null, and when
+    /// <paramref name="cancellationToken"/> cancelled the request: the editor then takes the words of the text, as VS
+    /// Code does.
+    /// </summary>
+    /// <param name="document">The document.</param>
+    /// <param name="snapshot">The document's text that <paramref name="position"/> is in.</param>
+    /// <param name="position">The caret.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    public Task<IReadOnlyList<Occurrence>?> DocumentHighlightsAsync(
+        ServerDocument document,
+        TextSnapshot snapshot,
+        TextPosition position,
+        CancellationToken cancellationToken
+    )
+    {
+        if (Target(document) is not { Features.DocumentHighlight: true } target)
+            return Task.FromResult<IReadOnlyList<Occurrence>?>(null);
+        var parameters = new TextDocumentPositionParams(
+            new TextDocumentIdentifier(target.Uri),
+            Positions.ToLsp(position)
+        );
+        return RequestForEditorAsync(
+            target.Rpc,
+            "textDocument/documentHighlight",
+            writer => JsonSerializer.Serialize(writer, parameters, LspJsonContext.Default.TextDocumentPositionParams),
+            result => DocumentHighlights.Read(result, snapshot),
+            cancellationToken
+        );
+    }
+
+    /// <summary>
     /// What the running server offers the editors of a document; null while it does not run or the document is not
     /// open in it.
     /// </summary>
@@ -896,6 +928,7 @@ internal sealed class ServerConnection
                     // Semantic colors are drawn over the TextMate colors.
                     ["augmentsSyntaxTokens"] = true,
                 },
+                ["documentHighlight"] = new JsonObject { ["dynamicRegistration"] = false },
             },
         };
 

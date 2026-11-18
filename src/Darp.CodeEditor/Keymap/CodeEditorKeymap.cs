@@ -100,6 +100,9 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+u (cmd+u)</term><description><see cref="CodeEditorCommands.CursorUndo"/></description></item>
     /// <item><term>shift+alt+right, shift+alt+left (ctrl+cmd+shift+right and ctrl+shift+right, ctrl+cmd+shift+left and ctrl+shift+left)</term><description><see cref="CodeEditorCommands.SmartSelectExpand"/>, <see cref="CodeEditorCommands.SmartSelectShrink"/></description></item>
     /// <item><term>ctrl+shift+alt with left, right, up, down, pageup, pagedown (cmd+shift+alt with them; none on Linux)</term><description><see cref="CodeEditorCommands.CursorColumnSelectLeft"/>, <see cref="CodeEditorCommands.CursorColumnSelectRight"/>, <see cref="CodeEditorCommands.CursorColumnSelectUp"/>, <see cref="CodeEditorCommands.CursorColumnSelectDown"/>, <see cref="CodeEditorCommands.CursorColumnSelectPageUp"/>, <see cref="CodeEditorCommands.CursorColumnSelectPageDown"/></description></item>
+    /// <item><term>alt+p, alt+l (alt+cmd+p, alt+cmd+l)</term><description><see cref="CodeEditorCommands.TogglePreserveCase"/>, <see cref="CodeEditorCommands.ToggleFindInSelection"/>, from the text or the search bar</description></item>
+    /// <item><term>up, alt+up; down, alt+down</term><description><see cref="CodeEditorCommands.HistoryShowPrevious"/>, <see cref="CodeEditorCommands.HistoryShowNext"/> in the search bar's query or replacement</description></item>
+    /// <item><term>f7, shift+f7</term><description><see cref="CodeEditorCommands.NextWordHighlight"/>, <see cref="CodeEditorCommands.PreviousWordHighlight"/> while occurrences show</description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default => s_default.Value;
@@ -231,6 +234,8 @@ public sealed class CodeEditorKeymap
             CodeEditorKeyBinding binding in LineAndSelectionBindings(mac, linux: !mac && OperatingSystem.IsLinux())
         )
             yield return binding;
+        foreach (CodeEditorKeyBinding binding in FindBindings(mac))
+            yield return binding;
     }
 
     /// <summary>
@@ -276,6 +281,21 @@ public sealed class CodeEditorKeymap
             yield return new($"{columns}+pageup", CodeEditorCommands.CursorColumnSelectPageUp);
             yield return new($"{columns}+pagedown", CodeEditorCommands.CursorColumnSelectPageDown);
         }
+    }
+
+    /// <summary>The keys of find, replace and the highlights, VS Code's: Cmd joins Alt on macOS, as for the toggles.</summary>
+    private static IEnumerable<CodeEditorKeyBinding> FindBindings(bool mac)
+    {
+        string toggle = mac ? "alt+cmd" : "alt";
+        yield return new($"{toggle}+p", CodeEditorCommands.TogglePreserveCase);
+        yield return new($"{toggle}+l", CodeEditorCommands.ToggleFindInSelection);
+        // Secondary keys first: the latest binding is the one that menus and the bar's hint show.
+        yield return new("alt+up", CodeEditorCommands.HistoryShowPrevious);
+        yield return new("up", CodeEditorCommands.HistoryShowPrevious);
+        yield return new("alt+down", CodeEditorCommands.HistoryShowNext);
+        yield return new("down", CodeEditorCommands.HistoryShowNext);
+        yield return new("f7", CodeEditorCommands.NextWordHighlight);
+        yield return new("shift+f7", CodeEditorCommands.PreviousWordHighlight);
     }
 
     /// <summary>The keys that go to the next and previous diagnostic, VS Code's on every operating system.</summary>
@@ -364,7 +384,7 @@ public static class CodeEditorCommands
     /// <summary>Opens the search bar.</summary>
     public const string Find = "actions.find";
 
-    /// <summary>Opens the replace bar.</summary>
+    /// <summary>Opens the replace bar; in a read-only editor it does not apply, as in VS Code.</summary>
     public const string Replace = "editor.action.startFindReplaceAction";
 
     /// <summary>Selects the next match.</summary>
@@ -555,4 +575,44 @@ public static class CodeEditorCommands
 
     /// <summary>Selects columns a page further down, as <see cref="CursorColumnSelectLeft"/> does left.</summary>
     public const string CursorColumnSelectPageDown = "cursorColumnSelectPageDown";
+
+    // Find, replace and highlights.
+
+    /// <summary>
+    /// Turns the replace row's Preserve Case on or off, also while the bar or the row is hidden: a replacement without
+    /// groups then takes the case of each match, so that replacing <c>Foo</c> and <c>FOO</c> with <c>bar</c> gives
+    /// <c>Bar</c> and <c>BAR</c>.
+    /// </summary>
+    public const string TogglePreserveCase = "togglePreserveCase";
+
+    /// <summary>
+    /// Turns Find in Selection on for the selection, or off, also while the bar is closed, for the next search: the bar
+    /// then searches only the selected lines, whole, or the selection within a line, which stay highlighted while the
+    /// bar is open; closing the bar turns it off, as in VS Code. Without a selection, it stays off.
+    /// </summary>
+    public const string ToggleFindInSelection = "toggleFindInSelection";
+
+    /// <summary>
+    /// In the search bar's query or replacement, shows the entry before in its history (<see cref="SearchHistory"/>),
+    /// as Up does in VS Code; in a text of several lines, only from its start. Elsewhere it does not apply.
+    /// </summary>
+    public const string HistoryShowPrevious = "history.showPrevious";
+
+    /// <summary>
+    /// In the search bar's query or replacement, shows the entry after in its history, and past the latest an empty
+    /// text, as Down does in VS Code; in a text of several lines, only from its end. Elsewhere it does not apply.
+    /// </summary>
+    public const string HistoryShowNext = "history.showNext";
+
+    /// <summary>
+    /// While the occurrences of the symbol at the caret show (<see cref="CodeEditor.OccurrencesHighlight"/>), moves
+    /// the caret to the start of the next one, after the last to the first; otherwise it does not apply.
+    /// </summary>
+    public const string NextWordHighlight = "editor.action.wordHighlight.next";
+
+    /// <summary>
+    /// While the occurrences of the symbol at the caret show, moves the caret to the start of the previous one, as
+    /// <see cref="NextWordHighlight"/> moves to the next.
+    /// </summary>
+    public const string PreviousWordHighlight = "editor.action.wordHighlight.prev";
 }

@@ -94,6 +94,12 @@ internal sealed class ServerDocument : CodeDocument
         CancellationToken cancellationToken
     ) => _server.SelectionRangesAsync(this, snapshot, offset, cancellationToken);
 
+    internal override Task<IReadOnlyList<Occurrence>?> DocumentHighlightsAsync(
+        TextSnapshot snapshot,
+        TextPosition position,
+        CancellationToken cancellationToken
+    ) => _server.DocumentHighlightsAsync(this, snapshot, position, cancellationToken);
+
     internal override ServerFeatures? Features => _server.FeaturesOf(this);
 
     internal override TimeProvider TimeProvider => _server.TimeProvider;
