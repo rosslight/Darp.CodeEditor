@@ -26,7 +26,12 @@ internal sealed class CompletionList
         Items = items;
         IsIncomplete = isIncomplete;
         _resolve = resolve;
+        // Here, where the server's answer is read, off the UI thread.
+        NeedsClipboard = items.Any(item => item.Snippet is { NeedsClipboard: true });
     }
+
+    /// <summary>Whether an item's snippet has the variable <c>CLIPBOARD</c>: completion reads the clipboard for it.</summary>
+    public bool NeedsClipboard { get; }
 
     /// <summary>The items, sorted by their <see cref="CompletionItem.SortKey"/>.</summary>
     public IReadOnlyList<CompletionItem> Items { get; }
@@ -346,4 +351,6 @@ internal static class InsertTextFormat
 internal static class CompletionItemKinds
 {
     public const int Property = 10;
+
+    public const int Value = 12;
 }

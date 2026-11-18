@@ -1,13 +1,18 @@
 using System.Globalization;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
+using Avalonia.Logging;
 using Avalonia.Media;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
+using Darp.CodeEditor.LanguageClient;
 using Darp.CodeEditor.Loading;
+using Darp.CodeEditor.Lsp;
 using Darp.CodeEditor.Popups;
 
 namespace Darp.CodeEditor.Completion;
@@ -27,15 +32,26 @@ namespace Darp.CodeEditor.Completion;
 /// <para>
 /// The session ends at the final stop, on <see cref="End"/>, as for Escape, when the selection leaves the stops, when
 /// the step that inserted the snippet is undone, when a change removes all of its text, such as setting the document's
-/// text, when one change would copy more than <see cref="MaxMirrorText"/> characters into mirrors, and when the editor
-/// stops showing the document. A snippet that goes in inside a stop while a session runs, as completion inside a
-/// placeholder commits one, joins it: its stops come right after the selected stop, as in VS Code.
+/// text, and when the editor stops showing the document. A snippet that goes in inside a stop while a session runs, as
+/// completion inside a placeholder commits one, joins it: its stops come right after the selected stop, as in VS Code.
 /// </para>
 /// <para>
-/// The UI thread's work is bounded by small constants: a session has at most <see cref="Snippet.MaxStops"/> stops, each
-/// change and caret move looks at each of them, and one change copies at most <see cref="MaxMirrorText"/> characters
-/// into mirrors, each copy a change of that mirror alone, prepared with one look at each stop, and all of them with the
-/// change they follow one update and one undo step.
+/// When the selected stop is a choice, such as <c>${1|red,green,blue|}</c>, completion's list offers its options, as in
+/// VS Code: <see cref="ChoiceSelected"/> asks for it each time another choice is selected, and while it is selected,
+/// <see cref="ChoiceCompletion"/> is the list that completion shows instead of the server's. Committing an option
+/// selects the next stop, with <see cref="Next"/>.
+/// </para>
+/// <para>
+/// When Tab or Shift+Tab leaves a number, the stops of that number with a transformation, such as
+/// <c>${1/(.*)/${1:/upcase}/}</c>, take their text transformed, as in VS Code: its lines after the first indented by the
+/// line the snippet went in, in the document's indentation. These changes are an undo step of their own, and mirrors do
+/// not follow them.
+/// </para>
+/// <para>
+/// As in VS Code, a session has as many stops as its snippets, and mirrors copy whatever the stop they follow holds.
+/// The UI thread's work grows with them, and no faster: each change and caret move looks at each stop, and the copies
+/// that follow a change are each a change of that mirror alone, prepared with a look at the stops that it touches, and
+/// all of them with the change they follow one update and one undo step.
 /// </para>
 /// <para>
 /// The stops show as boxes in the theme's <c>editor.snippetTabstopHighlightBackground</c>, and the final stop as a
@@ -44,15 +60,11 @@ namespace Darp.CodeEditor.Completion;
 /// </remarks>
 internal sealed class SnippetController : IBackgroundRenderer, IDisposable
 {
-    /// <summary>
-    /// The most characters that one change may copy into mirrors, and compare with them, before the session ends: many
-    /// times what a real snippet's mirrors hold, as names of a few words in a few mirrors. Each copy is a change of its
-    /// own, so the work is that of the mirrors and never that of the text between them.
-    /// </summary>
-    public const int MaxMirrorText = 1_000;
-
     /// <summary>The width of the box of an empty stop, as VS Code's.</summary>
     private const double EmptyStopWidth = 2;
+
+    /// <summary>The longest selection that typing over keeps for <c>TM_SELECTED_TEXT</c>, VS Code's limit.</summary>
+    private const int MaxOvertyped = 51_200;
 
     private readonly TextArea _textArea;
     private readonly TextDocument _buffer;
@@ -69,6 +81,21 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     /// <summary>Whether the controller selects a stop: it does not follow its own selection.</summary>
     private bool _selecting;
 
+    /// <summary>
+    /// The stops that the copy into a mirror under way made other than <see cref="Stop.Keep"/>: they keep again once it
+    /// is done, so that each copy looks only at the stops that it touches.
+    /// </summary>
+    private readonly List<Stop> _adjusted = [];
+
+    /// <summary>The selected stop whose choice <see cref="ChoiceSelected"/> told of last; null while none is selected.</summary>
+    private Stop? _choice;
+
+    /// <summary>
+    /// The selection that typing replaced last, and whether it spanned lines, as VS Code's overtyping capturer keeps it
+    /// for <c>TM_SELECTED_TEXT</c>; null once typing replaced none.
+    /// </summary>
+    private (string Text, bool IsMultiline)? _overtyped;
+
     public SnippetController(TextArea textArea, CodeDocument document)
     {
         _textArea = textArea;
@@ -78,8 +105,21 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         _buffer.TextChanged += OnBufferTextChanged;
         _textArea.Caret.PositionChanged += OnSelectionChanged;
         _textArea.SelectionChanged += OnSelectionChanged;
+        _textArea.TextEntering += OnTextEntering;
         _textArea.TextView.BackgroundRenderers.Add(this);
     }
+
+    /// <summary>
+    /// Another choice is selected: completion should show its options, as VS Code asks for them once the selection is
+    /// set. Not again while the same choice stays selected.
+    /// </summary>
+    public event EventHandler? ChoiceSelected;
+
+    /// <summary>
+    /// Whether completion is open, from its first request until it ends: typing then keeps what typing replaced before
+    /// for <c>TM_SELECTED_TEXT</c>, as in VS Code. Null for never.
+    /// </summary>
+    public Func<bool>? IsCompleting { get; set; }
 
     /// <summary>Behind the selection, in the layer that the text view draws itself whenever a layer changes.</summary>
     public KnownLayer Layer => KnownLayer.Background;
@@ -97,35 +137,46 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     /// <summary>
     /// <paramref name="snippet"/> as it goes in at <paramref name="start"/>: indented by the whitespace before it on
     /// its line, and with the values of its variables for the caret and the text as they are now, before it goes in.
-    /// The UI thread reads at most the shown part of the caret's line, and of the line it goes in.
+    /// <c>SELECTION</c> and <c>TM_SELECTED_TEXT</c> are the selection, or else the selection that typing replaced last,
+    /// and <c>CLIPBOARD</c> is <paramref name="clipboard"/>, as in VS Code. The UI thread reads at most the shown part of
+    /// the caret's line, and of the line it goes in, besides the selected text.
     /// </summary>
-    public RenderedSnippet Render(Snippet snippet, int start)
+    /// <param name="snippet">The snippet.</param>
+    /// <param name="start">Where it goes in.</param>
+    /// <param name="clipboard">The clipboard's text, read for the snippet; null for none.</param>
+    public RenderedSnippet Render(Snippet snippet, int start, string? clipboard = null)
     {
         DocumentLine line = _buffer.GetLineByOffset(start);
-        int indentationEnd = line.Offset;
-        int limit = Math.Min(start, VisibleText.End(line));
-        while (indentationEnd < limit && _buffer.GetCharAt(indentationEnd) is ' ' or '\t')
-            indentationEnd++;
         int caret = _textArea.Caret.Offset;
         DocumentLine caretLine = _buffer.GetLineByOffset(caret);
+        (string? selected, bool multiline, int selectedAt) = Selected();
         // One time for all of the snippet's variables, as in VS Code.
         DateTimeOffset now = _document.TimeProvider.GetLocalNow();
         // Each name is resolved once, except the random ones, which VS Code draws for each variable.
         var values = new Dictionary<string, string?>(StringComparer.Ordinal);
+        string lineBreak = TextUtilities.GetNewLineFromDocument(_buffer, line.LineNumber);
         return snippet.Render(
             new SnippetContext(
-                _buffer.GetText(line.Offset, indentationEnd - line.Offset),
+                LineIndentation(start),
                 _document.Indentation,
-                TextUtilities.GetNewLineFromDocument(_buffer, line.LineNumber),
+                lineBreak,
                 name =>
                     SnippetVariables.Random(name)
                     ?? (values.TryGetValue(name, out string? value) ? value : values[name] = Variable(name))
             )
+            {
+                MultilineSelectionIndentation = multiline ? LineIndentation(selectedAt) : null,
+            }
         );
 
         string? Variable(string name) =>
             name switch
             {
+                "SELECTION" or "TM_SELECTED_TEXT" => selected,
+                // As pasted: in the line's line breaks.
+                "CLIPBOARD" => SnippetVariables.Clipboard(clipboard) is { } text
+                    ? TextUtilities.NormalizeNewLines(text, lineBreak)
+                    : null,
                 "TM_CURRENT_LINE" => _buffer.GetText(caretLine.Offset, VisibleText.End(caretLine) - caretLine.Offset),
                 "TM_CURRENT_WORD" => WordAt(caretLine, caret) is { Length: > 0 } word ? word : null,
                 "TM_LINE_INDEX" => (caretLine.LineNumber - 1).ToString(CultureInfo.InvariantCulture),
@@ -142,10 +193,30 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     }
 
     /// <summary>
+    /// The clipboard's text, as completion reads it for a snippet with <c>CLIPBOARD</c> before its list shows, as VS
+    /// Code does; null for none, and when the platform's clipboard fails.
+    /// </summary>
+    public async Task<string?> ReadClipboardAsync()
+    {
+        if (TopLevel.GetTopLevel(_textArea)?.Clipboard is not IClipboard clipboard)
+            return null;
+        try
+        {
+            return await clipboard.TryGetTextAsync();
+        }
+        catch (Exception e)
+        {
+            Logger
+                .TryGet(LogEventLevel.Warning, AssetFiles.LogArea)
+                ?.Log(this, "Reading the clipboard failed: {Exception}", e);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Starts the session of a snippet that went in at <paramref name="start"/>, in the undo step of
     /// <paramref name="mark"/>, and selects its first stop; without stops, the caret stays where it is. Inside a stop of
-    /// the session that runs, the snippet joins it, unless they would have more than <see cref="Snippet.MaxStops"/>
-    /// stops together.
+    /// the session that runs, the snippet joins it.
     /// </summary>
     public void Start(RenderedSnippet snippet, int start, SnippetMark mark)
     {
@@ -154,7 +225,6 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         int end = start + snippet.Text.Length;
         if (
             _session is { } session
-            && session.Stops.Count + snippet.Stops.Count <= Snippet.MaxStops
             // The innermost: placeholders come before those inside them.
             && session.Stops.LastOrDefault(stop =>
                 !stop.IsFinal && !stop.IsGone && stop.StartOffset <= start && end <= stop.EndOffset
@@ -165,14 +235,16 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
             // VS Code's merge: the snippet's stops, its final one too, come right after the selected stop, and in the
             // order of the text right after the stop they are in.
             List<Stop> joining = CreateStops(snippet, start, enclosing, isFinal: false);
-            session.Stops.InsertRange(session.Stops.IndexOf(enclosing) + 1, joining);
+            session.Stops.InsertRange(enclosing.Order + 1, joining);
+            Number(session.Stops);
             session.Groups.InsertRange(session.Current + 1, Groups(snippet, joining));
             Move(session, forward: true);
             return;
         }
         End();
         List<Stop> stops = CreateStops(snippet, start, parent: null, isFinal: true);
-        var started = new Session(stops, Groups(snippet, stops), mark);
+        Number(stops);
+        var started = new Session(stops, Groups(snippet, stops), mark, LineIndentation(start));
         _session = started;
         Move(started, forward: true);
     }
@@ -197,6 +269,56 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         return false;
     }
 
+    /// <summary>
+    /// The options of the selected choice as completion's list, as VS Code's choice provider gives them: each over the
+    /// choice's text, in their order, as values; while that text is one of them, each matches it, so that all show.
+    /// Null while no choice is selected, or the caret is outside it. Committing one should go on to <see cref="Next"/>.
+    /// </summary>
+    public CompletionList? ChoiceCompletion()
+    {
+        if (_session is null || _choice is not { Choice: { } options } stop)
+            return null;
+        var range = TextRange.FromBounds(stop.StartOffset, stop.EndOffset);
+        int caret = _textArea.Caret.Offset;
+        if (caret < range.Start || caret > range.End)
+            return null;
+        string word = _buffer.GetText(range.Start, range.Length);
+        bool isAnyOption = options.Contains(word);
+        var items = new List<CompletionItem>(options.Count);
+        for (int i = 0; i < options.Count; i++)
+        {
+            string option = options[i];
+            string filterText = isAnyOption ? word + "_" + option : option;
+            items.Add(
+                new CompletionItem(
+                    option,
+                    CompletionItemKinds.Value,
+                    Detail: null,
+                    Documentation: null,
+                    IsDeprecated: false,
+                    IsPreselected: false,
+                    filterText,
+                    string.Equals(filterText, option, StringComparison.OrdinalIgnoreCase),
+                    new CompletionSortKey(new string('a', i + 1), option, CompletionItemKinds.Value),
+                    new CompletionEdit(range, option),
+                    range,
+                    Snippet: null,
+                    AdditionalEdits: null,
+                    CommitCharacters: "",
+                    Source: default
+                )
+            );
+        }
+        return new CompletionList(items, isIncomplete: false, resolve: null);
+    }
+
+    /// <summary>Selects the next stop, as Tab does, while a session runs.</summary>
+    public void Next()
+    {
+        if (_session is { } session)
+            Move(session, forward: true);
+    }
+
     /// <summary>Ends the session; the text and the selection stay as they are.</summary>
     /// <returns>Whether a session ran.</returns>
     public bool End()
@@ -204,6 +326,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         if (_session is null)
             return false;
         _session = null;
+        _choice = null;
         _edited.Clear();
         _textArea.TextView.InvalidateLayer(Layer);
         return true;
@@ -250,6 +373,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         _buffer.TextChanged -= OnBufferTextChanged;
         _textArea.Caret.PositionChanged -= OnSelectionChanged;
         _textArea.SelectionChanged -= OnSelectionChanged;
+        _textArea.TextEntering -= OnTextEntering;
         _textArea.TextView.BackgroundRenderers.Remove(this);
     }
 
@@ -260,6 +384,8 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     /// </summary>
     private void Move(Session session, bool forward)
     {
+        if (session.Current >= 0)
+            Transform(session, session.Groups[session.Current]);
         int current = session.Current;
         int next = forward ? current + 1 : current - 1;
         while (next >= 0 && next < session.Groups.Count)
@@ -279,8 +405,97 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
             stop.FollowEdits();
         Select(selected);
         if (current == session.Groups.Count - 1)
+        {
             End();
+        }
+        else if (selected.Choice is null)
+        {
+            _choice = null;
+        }
+        else if (selected != _choice)
+        {
+            _choice = selected;
+            ChoiceSelected?.Invoke(this, EventArgs.Empty);
+        }
         _textArea.TextView.InvalidateLayer(Layer);
+    }
+
+    /// <summary>
+    /// Gives the stops of <paramref name="group"/> with a transformation their text transformed, as changes of their
+    /// own in one undo step, which mirrors do not follow; not those that are gone.
+    /// </summary>
+    private void Transform(Session session, List<Stop> group)
+    {
+        List<(Stop Stop, string Text)> transformed = [];
+        // From the last in the text to the first, as mirrors are copied.
+        foreach (Stop stop in group.OrderByDescending(stop => stop.StartOffset).ThenByDescending(stop => stop.Order))
+        {
+            if (stop.Transform is not { } transform || stop.IsGone)
+                continue;
+            string text = _buffer.GetText(stop.StartOffset, stop.EndOffset - stop.StartOffset);
+            string result = Indented(transform.Resolve(text), session.LineIndentation, stop.StartOffset);
+            if (result != text)
+                transformed.Add((stop, result));
+        }
+        if (transformed.Count == 0)
+            return;
+        ILookup<int, Stop> empty = session
+            .Stops.Where(other => other.StartOffset == other.EndOffset)
+            .ToLookup(other => other.StartOffset);
+        foreach (Stop stop in session.Stops)
+            stop.Keep();
+        _following = true;
+        UndoStack undo = _buffer.UndoStack;
+        undo.StartUndoGroup();
+        try
+        {
+            using (_buffer.RunUpdate())
+            {
+                foreach ((Stop stop, string text) in transformed)
+                    Replace(stop, text, empty[stop.StartOffset]);
+            }
+        }
+        finally
+        {
+            undo.EndUndoGroup();
+            _following = false;
+        }
+    }
+
+    /// <summary>
+    /// A transformation's <paramref name="text"/> as VS Code puts it in at <paramref name="offset"/>: each line after
+    /// the first starts with <paramref name="lineIndentation"/>, the indentation of the line the snippet went in, the
+    /// whole indentation in the document's; line breaks are those of the line.
+    /// </summary>
+    private string Indented(string text, string lineIndentation, int offset)
+    {
+        if (text.AsSpan().IndexOfAny('\r', '\n') < 0)
+            return text;
+        var indenting = new Indenting(_document.Indentation);
+        string lineBreak = TextUtilities.GetNewLineFromDocument(_buffer, _buffer.GetLineByOffset(offset).LineNumber);
+        string[] lines = text.Split(["\r\n", "\r", "\n"], StringSplitOptions.None);
+        for (int i = 1; i < lines.Length; i++)
+        {
+            string line = lineIndentation + lines[i];
+            int whitespace = 0;
+            while (whitespace < line.Length && line[whitespace] is ' ' or '\t')
+                whitespace++;
+            lines[i] = indenting.Normalize(line[..whitespace]) + line[whitespace..];
+        }
+        return string.Join(lineBreak, lines);
+    }
+
+    /// <summary>
+    /// The whitespace at the start of the line of <paramref name="offset"/>, up to it, in the shown part of the line.
+    /// </summary>
+    private string LineIndentation(int offset)
+    {
+        DocumentLine line = _buffer.GetLineByOffset(offset);
+        int end = line.Offset;
+        int limit = Math.Min(offset, VisibleText.End(line));
+        while (end < limit && _buffer.GetCharAt(end) is ' ' or '\t')
+            end++;
+        return _buffer.GetText(line.Offset, end - line.Offset);
     }
 
     /// <summary>Selects a stop's text, with the caret at its end; an empty stop puts the caret there.</summary>
@@ -317,9 +532,20 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
                     hadText: stop.End > stop.Start,
                     isFinal && stop.Index == 0
                 )
+                {
+                    Transform = stop.Transform,
+                    Choice = stop.Choice,
+                }
             );
         }
         return stops;
+    }
+
+    /// <summary>Gives each stop its place in <paramref name="stops"/>, the session's.</summary>
+    private static void Number(List<Stop> stops)
+    {
+        for (int i = 0; i < stops.Count; i++)
+            stops[i].Order = i;
     }
 
     /// <summary>
@@ -368,6 +594,43 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         while (end < last && WordCharacters.IsWordCharacter(_buffer.GetCharAt(end)))
             end++;
         return _buffer.GetText(start, end - start);
+    }
+
+    /// <summary>
+    /// The selected text for <c>SELECTION</c> and <c>TM_SELECTED_TEXT</c>, as VS Code finds it: the selection, or else
+    /// the selection that typing replaced last; whether it spans lines, and where it starts, or the caret for the one
+    /// typing replaced. Null text without either.
+    /// </summary>
+    private (string? Text, bool IsMultiline, int At) Selected()
+    {
+        Selection selection = _textArea.Selection;
+        if (!selection.IsEmpty)
+        {
+            return (
+                selection.GetText(),
+                selection.StartPosition.Line != selection.EndPosition.Line,
+                selection.SurroundingSegment.Offset
+            );
+        }
+        return _overtyped is { } overtyped
+            ? (overtyped.Text, overtyped.IsMultiline, _textArea.Caret.Offset)
+            : (null, false, _textArea.Caret.Offset);
+    }
+
+    /// <summary>
+    /// Before typed text goes in, while completion is not open: keeps the selection it replaces, up to
+    /// <see cref="MaxOvertyped"/> characters, or forgets the one kept when it replaces none, as VS Code's overtyping
+    /// capturer does.
+    /// </summary>
+    private void OnTextEntering(object? sender, TextInputEventArgs e)
+    {
+        if (IsCompleting?.Invoke() == true)
+            return;
+        Selection selection = _textArea.Selection;
+        _overtyped = null;
+        if (selection.IsEmpty || selection.Length > MaxOvertyped)
+            return;
+        _overtyped = (selection.GetText(), selection.StartPosition.Line != selection.EndPosition.Line);
     }
 
     /// <summary>The language's comments; null while they load.</summary>
@@ -437,8 +700,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     /// undone, and gives the mirrors of the stops that the change was inside their text. The innermost stops' mirrors
     /// follow first, and a mirror inside a stop of another number has that stop's mirrors follow in turn, as VS Code's
     /// cursors in nested mirrors do; each number once. A mirror around or inside its own stop keeps its text, as copying
-    /// would grow it forever. A change that would copy more than <see cref="MaxMirrorText"/> characters ends the
-    /// session instead.
+    /// would grow it forever.
     /// </summary>
     private void OnBufferTextChanged(object? sender, EventArgs e)
     {
@@ -455,8 +717,9 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         var queue = new PriorityQueue<Stop, int>(_edited.Select(stop => (stop, -stop.Depth)));
         _edited.Clear();
         var followed = new HashSet<List<Stop>>(ReferenceEqualityComparer.Instance);
-        int budget = MaxMirrorText;
         _following = true;
+        foreach (Stop stop in session.Stops)
+            stop.Keep();
         // The copies, with the change they follow, are one update: one undo step, and one end of an update for the
         // editor's work that waits for it.
         IDisposable update = _buffer.RunUpdate();
@@ -467,16 +730,21 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
                 if (stop.IsGone || !followed.Add(stop.Group))
                     continue;
                 int length = stop.EndOffset - stop.StartOffset;
-                List<Stop> mirrors = stop.Group.FindAll(mirror =>
-                    mirror != stop && !mirror.IsGone && !mirror.Overlaps(stop)
-                );
-                budget -= length * (mirrors.Count + 1);
-                if (budget < 0)
-                {
-                    End();
-                    return;
-                }
+                // From the last in the text to the first: a copy moves only the text after it, so that where the
+                // empty stops were before the copies holds for each mirror still to come.
+                List<Stop> mirrors =
+                [
+                    .. stop
+                        .Group.Where(mirror => mirror != stop && !mirror.IsGone && !mirror.Overlaps(stop))
+                        .OrderByDescending(mirror => mirror.StartOffset)
+                        .ThenByDescending(mirror => mirror.Order),
+                ];
+                if (mirrors.Count == 0)
+                    continue;
                 string text = _buffer.GetText(stop.StartOffset, length);
+                ILookup<int, Stop> empty = session
+                    .Stops.Where(other => other.StartOffset == other.EndOffset)
+                    .ToLookup(other => other.StartOffset);
                 foreach (Stop mirror in mirrors)
                 {
                     if (
@@ -486,7 +754,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
                     {
                         continue;
                     }
-                    Replace(session, mirror, text);
+                    Replace(mirror, text, empty[mirror.StartOffset]);
                     for (Stop? around = mirror.Parent; around is not null; around = around.Parent)
                     {
                         if (around.Group.Count > 1)
@@ -502,40 +770,48 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
             foreach (Stop stop in session.Stops)
                 stop.FollowEdits();
         }
+        OnSelectionChanged(this, EventArgs.Empty);
     }
 
     /// <summary>
-    /// Gives a mirror the text, as a change of its own: the work is that of its text, never of the text between mirrors.
-    /// The mirror and the placeholders around it take the new text; the other stops don't, also those that touch it,
-    /// such as its placeholder right before it: an empty one keeps its place before or after it, as in the order of the
-    /// text, so that empty mirrors side by side stay apart. The caret stays before the text, as before a mirror right
-    /// after the stop typed in.
+    /// Gives a mirror the text, as a change of its own: the work is that of its text and of the stops it touches, never
+    /// of the text between mirrors nor of the other stops. The mirror and the placeholders around it take the new text;
+    /// the other stops don't, also those that touch it, such as its placeholder right before it: an empty one of
+    /// <paramref name="empty"/>, those that were empty where the mirror starts, keeps its place before or after it, as
+    /// in the order of the text, so that empty mirrors side by side stay apart. The caret stays before the text, as
+    /// before a mirror right after the stop typed in. All stops but those it changes <see cref="Stop.Keep"/>.
     /// </summary>
-    private void Replace(Session session, Stop mirror, string text)
+    private void Replace(Stop mirror, string text, IEnumerable<Stop> empty)
     {
         int at = mirror.StartOffset;
-        int order = session.Stops.IndexOf(mirror);
-        foreach (Stop stop in session.Stops)
-            stop.Keep();
         for (Stop? around = mirror; around is not null; around = around.Parent)
-            around.Grow();
-        for (int i = 0; i < session.Stops.Count; i++)
         {
-            Stop stop = session.Stops[i];
+            around.Grow();
+            _adjusted.Add(around);
+        }
+        foreach (Stop stop in empty)
+        {
             if (stop != mirror && stop.StartOffset == at && stop.EndOffset == at && !stop.Encloses(mirror))
-                stop.Stay(after: i > order);
+            {
+                stop.Stay(after: stop.Order > mirror.Order);
+                _adjusted.Add(stop);
+            }
         }
         // Text that goes in where the caret is, into an empty mirror, would carry the caret along.
         bool caretStays = mirror.EndOffset == at && _textArea.Caret.Offset == at;
         _buffer.Replace(at, mirror.EndOffset - at, text);
         if (caretStays)
             _textArea.Caret.Offset = at;
+        foreach (Stop stop in _adjusted)
+            stop.Keep();
+        _adjusted.Clear();
     }
 
     /// <summary>Ends the session once the selection is outside its stops, or the step that inserted it was undone.</summary>
     private void OnSelectionChanged(object? sender, EventArgs e)
     {
-        if (_selecting || _session is not { } session)
+        // The copies into mirrors leave the selection in the stop typed in: it is looked at once they are done.
+        if (_selecting || _following || _session is not { } session)
             return;
         ISegment selected = _textArea.Selection.IsEmpty
             ? Segment(_textArea.Caret.Offset, _textArea.Caret.Offset)
@@ -555,7 +831,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     }
 
     /// <summary>A snippet's session: its stops, the order Tab selects them in, and the selected group.</summary>
-    private sealed class Session(List<Stop> stops, List<List<Stop>> groups, SnippetMark mark)
+    private sealed class Session(List<Stop> stops, List<List<Stop>> groups, SnippetMark mark, string lineIndentation)
     {
         /// <summary>
         /// The stops, mirrors included, of the snippet and of those that joined it, in the order of the text:
@@ -571,6 +847,9 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
 
         /// <summary>The selected group in <see cref="Groups"/>; -1 before the first.</summary>
         public int Current { get; set; } = -1;
+
+        /// <summary>The whitespace before the snippet on its line, which a transformation's lines start with.</summary>
+        public string LineIndentation { get; } = lineIndentation;
     }
 
     /// <summary>A stop in the text: a placeholder, a mirror, or the final stop.</summary>
@@ -591,6 +870,15 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         public int Depth { get; } = parent is null ? 0 : parent.Depth + 1;
 
         public bool IsFinal { get; } = isFinal;
+
+        /// <summary>Its place among the session's stops, in the order of the text as they went in.</summary>
+        public int Order { get; set; }
+
+        /// <summary>What its text becomes as Tab or Shift+Tab leaves its number; null for none.</summary>
+        public SnippetTransform? Transform { get; init; }
+
+        /// <summary>The options of a choice; null for a stop that is no choice.</summary>
+        public IReadOnlyList<string>? Choice { get; init; }
 
         /// <summary>The stops of its number, itself included: its mirrors.</summary>
         public List<Stop> Group { get; set; } = [];

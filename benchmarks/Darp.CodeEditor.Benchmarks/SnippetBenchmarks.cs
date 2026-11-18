@@ -11,12 +11,12 @@ using Darp.CodeEditor.Completion;
 namespace Darp.CodeEditor.Benchmarks;
 
 /// <summary>
-/// The UI thread's time for snippets at the limits, until a rendered frame shows them, in 5,000 lines of JSON, warm:
-/// the most stops, a first stop and its mirrors, each mirror on a line of its own, which the line's indentation starts.
-/// Committing one from the list renders nearly the most text a snippet may have, inserts it and starts its session; a
-/// keystroke at the end of another's first stop has its mirrors copy nearly the most that one change may copy. Each
-/// beside the same work without a snippet: the same text committed as plain text, and a keystroke after the session
-/// ended, so that the difference is the snippet's own. Not in the CI category: no budget names this case.
+/// The UI thread's time for snippets, until a rendered frame shows them, in 5,000 lines of JSON, warm: a first stop and
+/// its mirrors, each mirror on a line of its own, which the line's indentation starts. Committing one from the list
+/// renders nearly the most text a snippet may have, inserts it and starts its session; a keystroke at the end of
+/// another's first stop has its 28 mirrors copy it; one at the end of a third's has 500 mirrors copy it, as many as fit
+/// that text. Each beside the same work without a snippet: the same text committed as plain text, and a keystroke after
+/// the session ended, so that the difference is the snippet's own. Not in the CI category: no budget names this case.
 /// </summary>
 [NotInBaseline]
 [InvocationCount(1)]
@@ -26,8 +26,11 @@ namespace Darp.CodeEditor.Benchmarks;
 [MaxColumn]
 public class SnippetBenchmarks
 {
-    /// <summary>The mirrors of the first stop, which with it and the final stop are the most stops.</summary>
-    private const int Mirrors = Snippet.MaxStops - 2;
+    /// <summary>The mirrors of the first stop: with it and the final stop, 30 stops.</summary>
+    private const int Mirrors = 28;
+
+    /// <summary>The mirrors of the first stop of the snippet with many, each copying one character.</summary>
+    private const int ManyMirrors = 500;
 
     /// <summary>The indentation of the line that the snippets go in, which each mirror's line starts with.</summary>
     private const int Indentation = 2;
@@ -35,8 +38,8 @@ public class SnippetBenchmarks
     /// <summary>The first stop's length that comes nearest the most text a snippet may have, its parts counted.</summary>
     private const int CommitStop = (Snippet.MaxText - 4 * (Mirrors + 1)) / (Mirrors + 1) - Indentation - 1;
 
-    /// <summary>The first stop's length that, grown by a keystroke, comes nearest the most that mirrors may copy.</summary>
-    private const int KeystrokeStop = SnippetController.MaxMirrorText / (Mirrors + 1) - 1;
+    /// <summary>The first stop's length before a keystroke grows it: the mirrors copy 1,000 characters.</summary>
+    private const int KeystrokeStop = 1_000 / (Mirrors + 1) - 1;
 
     private readonly ConcurrentQueue<string> _serverLines = new();
     private LanguageServer? _server;
@@ -71,6 +74,7 @@ public class SnippetBenchmarks
         var items = new JsonArray(
             Item("commit", SnippetText(CommitStop), 2),
             Item("keystroke", SnippetText(KeystrokeStop), 2),
+            Item("many", SnippetText(0, ManyMirrors), 2),
             Item("plain", Rendered(CommitStop), null)
         );
         _answer = _server.CreateDocument(
@@ -118,7 +122,7 @@ public class SnippetBenchmarks
     }
 
     [IterationSetup(Target = nameof(CommitTheSameTextAsPlainText))]
-    public void OpenTheListOnThePlainText() => OpenTheList(2);
+    public void OpenTheListOnThePlainText() => OpenTheList(3);
 
     /// <summary>The snippet's text, as an item in plain text.</summary>
     [Benchmark]
@@ -130,26 +134,23 @@ public class SnippetBenchmarks
     }
 
     [IterationSetup(Target = nameof(KeystrokeThatTheMirrorsCopy))]
-    public void CommitBeforeTheKeystroke()
-    {
-        OpenTheList(1);
-        Commit();
-        Window window = _window ?? throw new InvalidOperationException("Not set up.");
-        // At the end of the first stop, which its mirrors copy as it grows.
-        (_editor ?? throw new InvalidOperationException("Not set up.")).Selection = new TextSelection(
-            _start + KeystrokeStop
-        );
-        HeadlessEditor.Render(window);
-    }
+    public void CommitBeforeTheKeystroke() => CommitBeforeAKeystroke(1, KeystrokeStop);
 
-    /// <summary>A keystroke at the end of the first stop, which its mirrors copy, nearly as much as they may.</summary>
+    /// <summary>A keystroke at the end of the first stop, which its 28 mirrors copy, 1,000 characters in all.</summary>
     [Benchmark]
     public void KeystrokeThatTheMirrorsCopy() => Type(Mirrors + 1);
+
+    [IterationSetup(Target = nameof(KeystrokeThatManyMirrorsCopy))]
+    public void CommitBeforeTheKeystrokeInManyMirrors() => CommitBeforeAKeystroke(2, 0);
+
+    /// <summary>A keystroke in the empty first stop, which its 500 mirrors copy.</summary>
+    [Benchmark]
+    public void KeystrokeThatManyMirrorsCopy() => Type(ManyMirrors + 1);
 
     [IterationSetup(Target = nameof(KeystrokeWithoutASession))]
     public void CommitAndEndTheSession()
     {
-        CommitBeforeTheKeystroke();
+        CommitBeforeAKeystroke(1, KeystrokeStop);
         Window window = _window ?? throw new InvalidOperationException("Not set up.");
         window.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
         window.KeyRelease(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
@@ -183,8 +184,8 @@ public class SnippetBenchmarks
     }
 
     /// <summary>A first stop of <paramref name="length"/> characters, then each of its mirrors on a line of its own.</summary>
-    private static string SnippetText(int length) =>
-        "${1:" + new string('p', length) + "}" + string.Concat(Enumerable.Repeat("\n$1", Mirrors));
+    private static string SnippetText(int length, int mirrors = Mirrors) =>
+        "${1:" + new string('p', length) + "}" + string.Concat(Enumerable.Repeat("\n$1", mirrors));
 
     /// <summary>The text that <see cref="SnippetText"/> renders at the line's indentation.</summary>
     private static string Rendered(int length) =>
@@ -203,7 +204,7 @@ public class SnippetBenchmarks
         window.KeyPress(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
         window.KeyRelease(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
         CompletionBenchmarks.RunJobsUntil(
-            () => CompletionBenchmarks.List(window) is { ItemCount: 3 },
+            () => CompletionBenchmarks.List(window) is { ItemCount: 4 },
             "The list did not show."
         );
         for (int i = 0; i < index; i++)
@@ -211,6 +212,19 @@ public class SnippetBenchmarks
             window.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.ArrowDown, null);
             window.KeyRelease(Key.Down, RawInputModifiers.None, PhysicalKey.ArrowDown, null);
         }
+        HeadlessEditor.Render(window);
+    }
+
+    /// <summary>
+    /// Commits the snippet at <paramref name="index"/>, and puts the caret at the end of its first stop of
+    /// <paramref name="length"/> characters, which its mirrors copy as it grows.
+    /// </summary>
+    private void CommitBeforeAKeystroke(int index, int length)
+    {
+        OpenTheList(index);
+        Commit();
+        Window window = _window ?? throw new InvalidOperationException("Not set up.");
+        (_editor ?? throw new InvalidOperationException("Not set up.")).Selection = new TextSelection(_start + length);
         HeadlessEditor.Render(window);
     }
 
