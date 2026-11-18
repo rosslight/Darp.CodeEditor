@@ -285,23 +285,13 @@ internal sealed class SignatureHelpController : IDisposable
             }.OfType<HoverText>(),
         ];
         TextMateGrammar? grammar = _highlighter.Grammar;
-        // As much as a hover shows, the signatures first: a server's long signatures or documentation cost the UI thread
-        // no more than the largest hover.
-        var budget = new HoverBudget();
-        var labels = new List<string>();
-        foreach (SignatureInfo each in help.Signatures)
-        {
-            if (budget.Take(each.Label) is not { } label)
-                break;
-            labels.Add(label);
-        }
         try
         {
             IReadOnlyList<HoverBlock> blocks =
                 documentation.Length == 0
                     ? []
                     : await Task.Run(
-                        () => HoverBlocks.Of(new HoverInfo(documentation, null), grammar, budget, reading.Token),
+                        () => HoverBlocks.Of(new HoverInfo(documentation, null), grammar, reading.Token),
                         reading.Token
                     );
             if (_reading != reading)
@@ -318,7 +308,6 @@ internal sealed class SignatureHelpController : IDisposable
             int columns = Math.Max(20, (int)(room / Math.Max(1, _textView.WideSpaceWidth)));
             _content.Child = SignatureView.Create(
                 help,
-                labels,
                 blocks,
                 new PopupLook(_editor.FontFamily, _editor.FontSize, colors),
                 columns,

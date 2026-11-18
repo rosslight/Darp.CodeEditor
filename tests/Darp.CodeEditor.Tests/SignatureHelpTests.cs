@@ -293,7 +293,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
         });
 
     [Fact]
-    public Task A_long_signature_and_documentation_show_only_as_much_as_a_hover() =>
+    public Task A_long_signature_and_documentation_show_in_full() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
@@ -329,13 +329,16 @@ public sealed class SignatureHelpTests(UiFixture ui)
                 return popup is not null
                     && Runs(popup).Any(run => run.Text == "first" && run.FontWeight == FontWeight.Bold);
             });
-            // The signature uses up the budget: the documentation does not show. Too long for a line, it breaks after
-            // its comma.
+            // All of the signature, which breaks after its comma, too long for a line; and all of the documentation,
+            // in parts, over the frames after.
             string label = Signature(popup!).Inlines?.Text ?? "";
-            label.ShouldStartWith("call(first,\n    xxx");
-            label.Replace("\n    ", " ").Length.ShouldBe(HoverBudget.MaxCharacters + 1);
-            label.ShouldEndWith("…");
-            Texts(popup!).Sum(text => text.Length).ShouldBe(label.Length);
+            label.ShouldBe("call(first,\n    " + new string('x', 5_000) + ")");
+            string documentation = string.Concat(Enumerable.Repeat("word ", 2_000)).TrimEnd();
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return string.Concat(Texts(popup!).Skip(1)) == documentation;
+            });
         });
 
     /// <summary>Opens signature help on "call" anew: types "(" after it.</summary>

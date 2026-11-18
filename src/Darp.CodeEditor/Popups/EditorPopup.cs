@@ -27,6 +27,9 @@ namespace Darp.CodeEditor.Popups;
 /// <see cref="LeftView"/> reports.
 /// </para>
 /// <para>
+/// Content that grows, as a long hover that is built in parts (<see cref="HoverContent"/>), places it again.
+/// </para>
+/// <para>
 /// Its text can take the keyboard, to select and copy. Meanwhile the editor counts it as its own: the editor's other
 /// popups stay. Escape gives the keyboard back to the editor, which <see cref="Escaped"/> reports, and typed text goes
 /// back into the editor's text.
@@ -71,6 +74,7 @@ internal sealed class EditorPopup
         _root.SetValue(s_ownerProperty, editor);
         _root.AddHandler(InputElement.KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
         _root.AddHandler(InputElement.TextInputEvent, OnTextInput, RoutingStrategies.Tunnel);
+        _root.AddHandler(HoverContent.GrewEvent, OnContentGrew);
         _root.LostFocus += (_, _) => editor.CheckFocus();
         _below = below;
     }
@@ -197,6 +201,19 @@ internal sealed class EditorPopup
             return;
         e.Handled = true;
         _editor.TypeText(text);
+    }
+
+    /// <summary>
+    /// More of the content was built: the popup is placed again, as for new content, so that it stays inside the
+    /// window when it grows.
+    /// </summary>
+    private void OnContentGrew(object? sender, RoutedEventArgs e)
+    {
+        _placed = null;
+        if (_beside is not null)
+            PlaceBeside();
+        else
+            Place();
     }
 
     /// <summary>A layout pass ended: the window or the place may have moved.</summary>

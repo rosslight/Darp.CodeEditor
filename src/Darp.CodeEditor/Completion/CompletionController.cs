@@ -805,9 +805,8 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>
     /// The detail, as plain text in the editor's font, dimmed, as VS Code shows it: a server's detail is any text, such as
-    /// "Auto-import", not always code. Then the documentation. As much of both as a hover shows: one budget for both,
-    /// cut before anything reads them, so that a server's long detail or documentation costs the UI thread no more than
-    /// the largest hover.
+    /// "Auto-import", not always code. Then the documentation. All of both, as in VS Code: the details build in parts, as
+    /// a long hover does.
     /// </summary>
     private static IReadOnlyList<HoverBlock> DetailBlocks(
         CompletionItem item,
@@ -816,17 +815,12 @@ internal sealed class CompletionController : IDisposable
         CancellationToken cancellationToken
     )
     {
-        var budget = new HoverBudget();
         var blocks = new List<HoverBlock>();
-        if (item.Detail is { } detail && budget.Take(detail) is { } kept)
-        {
-            // Lines end at \r\n, \n or \r, as everywhere in the library.
-            blocks.AddRange(
-                budget.Fit([new HoverCode([new CodeRun(kept.Replace("\r\n", "\n").Replace('\r', '\n'), dimmed)])])
-            );
-        }
+        // Lines end at \r\n, \n or \r, as everywhere in the library.
+        if (item.Detail is { } detail)
+            blocks.Add(new HoverCode([new CodeRun(detail.Replace("\r\n", "\n").Replace('\r', '\n'), dimmed)]));
         if (item.Documentation is { } documentation)
-            blocks.AddRange(HoverBlocks.Of(new HoverInfo([documentation], null), grammar, budget, cancellationToken));
+            blocks.AddRange(HoverBlocks.Of(new HoverInfo([documentation], null), grammar, cancellationToken));
         return blocks;
     }
 

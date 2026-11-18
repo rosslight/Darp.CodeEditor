@@ -643,6 +643,65 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_long_hover_shows_all_of_its_content_and_scrolls() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer("--no-diagnostics");
+            await using var server = new LanguageServer(fake.Options);
+            // The server's hover shows the hovered line as code: 20,000 characters.
+            string line = string.Concat(Enumerable.Repeat("word ", 4_000)).TrimEnd();
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, line);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await server.StartAsync();
+
+            PopupFrame popup = await HoverAsync(window, 1, "word is a word in");
+
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return string.Concat(CodeTexts(popup)) == line;
+            });
+            PopupScroller scroller = popup.GetVisualDescendants().OfType<PopupScroller>().Single();
+            Control content = Content(popup);
+            content.Bounds.Height.ShouldBeGreaterThan(scroller.Bounds.Height);
+            BoundsInWindow(popup).Height.ShouldBeLessThanOrEqualTo(popup.MaxHeight);
+        });
+
+    [Fact]
+    public Task Hover_content_builds_a_part_at_once_and_the_next_parts_in_the_frames_after_while_it_shows() =>
+        _ui.Run(() =>
+        {
+            // 300 paragraphs of 100 characters: 6 parts of 50 paragraphs, by their characters.
+            HoverBlock[] blocks =
+            [
+                .. Enumerable.Range(0, 300).Select(i => new HoverParagraph([new HoverSpan(new string('p', 100))])),
+            ];
+            var look = new PopupLook(new FontFamily("DejaVu Sans Mono"), 13, PopupColors.Default);
+            HoverContent content = HoverView.Create(blocks, look);
+            content.Children.Count.ShouldBe(50);
+            var host = new Border();
+            using var window = new EditorWindow(new CodeEditor(), host);
+            int grew = 0;
+            host.AddHandler(HoverContent.GrewEvent, (_, _) => grew++);
+
+            // Out of view by the next frame: nothing more is built.
+            host.Child = content;
+            host.Child = null;
+            window.Render();
+            content.Children.Count.ShouldBe(50);
+            content.IsComplete.ShouldBeFalse();
+
+            // In view, a part a frame; the headless platform renders the frames that follow one at once.
+            host.Child = content;
+            window.Render();
+            content.IsComplete.ShouldBeTrue();
+            content.Children.Count.ShouldBe(300);
+            grew.ShouldBe(5);
+            // The space between blocks, as before.
+            content.Children[1].Margin.Top.ShouldBe(HoverView.Spacing);
+        });
+
+    [Fact]
     public Task The_popup_stays_inside_a_window_that_narrows() =>
         _ui.Run(async () =>
         {
@@ -705,7 +764,7 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
-    public Task A_hover_takes_the_few_most_severe_diagnostics_of_however_many_there_are() =>
+    public Task The_most_severe_diagnostics_are_found_among_however_many_there_are() =>
         _ui.Run(() =>
         {
             CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "word");
@@ -727,12 +786,10 @@ public sealed class HoverTests(UiFixture ui)
             window.Layout();
             using var squiggles = new SquiggleLayer(EditorWindow.PartOf(editor).TextArea, document);
 
-            IReadOnlyList<Diagnostic> shown = squiggles.At(1, HoverBudget.MaxLines);
+            IReadOnlyList<Diagnostic> shown = squiggles.At(1, 120);
 
-            // The errors, which come every fourth, in the server's order; no more than a hover has lines.
-            shown
-                .Select(d => d.Message)
-                .ShouldBe(Enumerable.Range(0, HoverBudget.MaxLines).Select(i => $"{4 * i + 3}"));
+            // The errors, which come every fourth, in the server's order; no more than asked for.
+            shown.Select(d => d.Message).ShouldBe(Enumerable.Range(0, 120).Select(i => $"{4 * i + 3}"));
         });
 
     [Fact]
@@ -856,6 +913,14 @@ public sealed class HoverTests(UiFixture ui)
     private static double Luminance(Color color) => (0.2126 * color.R + 0.7152 * color.G + 0.0722 * color.B) / 255;
 
     private static Control Content(PopupFrame popup) => PopupFrames.Content(popup);
+
+    /// <summary>The texts of the hover's code blocks and their pieces: in the editor's font, set on them.</summary>
+    private static IEnumerable<string> CodeTexts(PopupFrame popup) =>
+        popup
+            .GetVisualDescendants()
+            .OfType<SelectableTextBlock>()
+            .Where(block => block.IsSet(TextBlock.FontFamilyProperty))
+            .Select(TextOf);
 
     private static IEnumerable<string> Texts(PopupFrame popup) =>
         popup.GetVisualDescendants().OfType<TextBlock>().Select(TextOf);

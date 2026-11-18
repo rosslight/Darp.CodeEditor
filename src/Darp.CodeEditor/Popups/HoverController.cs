@@ -303,17 +303,8 @@ internal sealed class HoverController : IDisposable
         // A new hover takes the size of its content, within its limits, which a resize raises.
         _frame.Width = double.NaN;
         _resized = false;
-        var budget = new HoverBudget();
         TextRange word = WordAt(_buffer, offset);
-        var hovered = new Hovered(
-            offset,
-            word,
-            AlongWord(_buffer, word),
-            _document.CurrentSnapshot,
-            // Each diagnostic takes a line at least, so a hover never shows more of them than it has lines.
-            HoverBlocks.Of(_squiggles.At(offset, HoverBudget.MaxLines), budget),
-            budget
-        )
+        var hovered = new Hovered(offset, word, AlongWord(_buffer, word), _document.CurrentSnapshot)
         {
             FromKeyboard = fromKeyboard,
         };
@@ -335,10 +326,11 @@ internal sealed class HoverController : IDisposable
             Timeout.InfiniteTimeSpan
         );
 
-    /// <summary>The delay is over: what is known shows.</summary>
+    /// <summary>The delay is over: the diagnostics there now, as VS Code takes them then, and what else is known show.</summary>
     private void Due(Hovered hovered)
     {
         hovered.IsDue = true;
+        hovered.Messages = HoverBlocks.Of(_squiggles.At(hovered.Offset, int.MaxValue));
         Render(hovered);
     }
 
@@ -372,7 +364,7 @@ internal sealed class HoverController : IDisposable
             {
                 TextMateGrammar? grammar = _highlighter.Grammar;
                 IReadOnlyList<HoverBlock> blocks = await Task.Run(
-                    () => HoverBlocks.Of(hover, grammar, hovered.Budget, cancellation),
+                    () => HoverBlocks.Of(hover, grammar, cancellation),
                     cancellation
                 );
                 if (_hovered != hovered)
@@ -715,16 +707,7 @@ internal sealed class HoverController : IDisposable
     /// <param name="word">The word there, which the popup is next to.</param>
     /// <param name="along">The word characters around it, which the pointer may move along.</param>
     /// <param name="snapshot">The text when the pointer rested: the popup closes when it changes.</param>
-    /// <param name="messages">The diagnostics' messages.</param>
-    /// <param name="budget">What is left of the text the hover shows, for the server's hover after the messages.</param>
-    private sealed class Hovered(
-        int offset,
-        TextRange word,
-        TextRange along,
-        TextSnapshot snapshot,
-        IReadOnlyList<HoverBlock> messages,
-        HoverBudget budget
-    )
+    private sealed class Hovered(int offset, TextRange word, TextRange along, TextSnapshot snapshot)
     {
         public int Offset { get; } = offset;
 
@@ -737,9 +720,8 @@ internal sealed class HoverController : IDisposable
 
         public TextSnapshot Snapshot { get; } = snapshot;
 
-        public IReadOnlyList<HoverBlock> Messages { get; } = messages;
-
-        public HoverBudget Budget { get; } = budget;
+        /// <summary>The diagnostics' messages, once the delay is over.</summary>
+        public IReadOnlyList<HoverBlock> Messages { get; set; } = [];
 
         /// <summary>Whether the user asked for it by key, at the caret, rather than by resting the pointer.</summary>
         public bool FromKeyboard { get; init; }
