@@ -306,6 +306,19 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
         ?? Task.FromResult<SignatureHelpInfo?>(null);
 
     /// <summary>
+    /// The selection ranges for an editor that shows <paramref name="document"/>, from the running server; null without
+    /// one.
+    /// </summary>
+    internal Task<IReadOnlyList<TextRange>?> SelectionRangesAsync(
+        ServerDocument document,
+        TextSnapshot snapshot,
+        int offset,
+        CancellationToken cancellationToken
+    ) =>
+        Connection()?.SelectionRangesAsync(document, snapshot, offset, cancellationToken)
+        ?? Task.FromResult<IReadOnlyList<TextRange>?>(null);
+
+    /// <summary>
     /// What the running server offers the editors of <paramref name="document"/>; null while none runs or the document
     /// is not open in it yet.
     /// </summary>

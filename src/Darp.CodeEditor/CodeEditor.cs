@@ -180,6 +180,12 @@ public class CodeEditor : TemplatedControl
         bool
     >(nameof(EmptySelectionClipboard), defaultValue: true);
 
+    /// <summary>Defines the <see cref="SmartSelect"/> property.</summary>
+    public static readonly StyledProperty<SmartSelectOptions> SmartSelectProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        SmartSelectOptions
+    >(nameof(SmartSelect), defaultValue: SmartSelectOptions.Default);
+
     /// <summary>Defines the <see cref="UseTabStops"/> property.</summary>
     public static readonly StyledProperty<bool> UseTabStopsProperty = AvaloniaProperty.Register<CodeEditor, bool>(
         nameof(UseTabStops),
@@ -236,6 +242,15 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>Goes through the shown document's diagnostics, as F8 does.</summary>
     private DiagnosticNavigation? _diagnosticNavigation;
+
+    /// <summary>The selections that the caret left in the shown document, for cursor undo.</summary>
+    private CursorHistory? _cursorHistory;
+
+    /// <summary>Expands and shrinks the selection in the shown document.</summary>
+    private SmartSelection? _smartSelection;
+
+    /// <summary>Selects columns in the shown document, by keys and by Shift+Alt+drag.</summary>
+    private ColumnSelection? _columnSelection;
 
     /// <summary>The template's panel, which the search bar goes into, over the text.</summary>
     private Panel? _root;
@@ -493,6 +508,17 @@ public class CodeEditor : TemplatedControl
         set => SetValue(EmptySelectionClipboardProperty, value);
     }
 
+    /// <summary>
+    /// What expanding the selection, Shift+Alt+Right, goes through besides the language server's ranges, VS Code's
+    /// <c>editor.smartSelect</c>: the parts of a word between its humps or underscores, and lines from their first text
+    /// to their last before they are taken whole. Default: <see cref="SmartSelectOptions.Default"/>, both, as in VS Code.
+    /// </summary>
+    public SmartSelectOptions SmartSelect
+    {
+        get => GetValue(SmartSelectProperty);
+        set => SetValue(SmartSelectProperty, value);
+    }
+
     /// <summary>The semantic colors of the shown document, for benchmarks; null while it shows none.</summary>
     internal SemanticHighlighter? SemanticHighlighter => _semantic;
 
@@ -669,6 +695,7 @@ public class CodeEditor : TemplatedControl
                 part.TextArea.CommandBindings.Insert(i, _clipboardCommands[i]);
             RemoveDeleteLine(part.TextArea);
             RemoveIndentAndUndoKeys(part.TextArea);
+            ColumnSelection.RemoveBoxSelectionKeys(part.TextArea);
         }
         UpdateShownDocument();
     }
@@ -908,6 +935,9 @@ public class CodeEditor : TemplatedControl
         };
         _signatureHelp = new SignatureHelpController(this, part.TextArea, document, _highlighter) { Colors = _colors };
         _diagnosticNavigation = new DiagnosticNavigation(part.TextArea, document);
+        _cursorHistory = new CursorHistory(part.TextArea, Dispatcher);
+        _smartSelection = new SmartSelection(this, part.TextArea, document, _highlighter);
+        _columnSelection = new ColumnSelection(part.TextArea);
         _searchBar?.Attach(this, part.TextArea, document);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
         _waitingForLayout = true;
@@ -937,6 +967,12 @@ public class CodeEditor : TemplatedControl
         _signatureHelp = null;
         _diagnosticNavigation?.Dispose();
         _diagnosticNavigation = null;
+        _cursorHistory?.Dispose();
+        _cursorHistory = null;
+        _smartSelection?.Dispose();
+        _smartSelection = null;
+        _columnSelection?.Dispose();
+        _columnSelection = null;
         _squiggles?.Dispose();
         _squiggles = null;
         _semantic?.Dispose();
@@ -1139,6 +1175,61 @@ public class CodeEditor : TemplatedControl
             // Typing, Enter, Tab and caret movement.
             case CodeEditorCommands.Undo or CodeEditorCommands.Redo when inText:
                 UndoOrRedo(redo: command == CodeEditorCommands.Redo);
+                return true;
+            // Lines and selections.
+            case CodeEditorCommands.MoveLinesUp or CodeEditorCommands.MoveLinesDown when inText && !IsReadOnly:
+                _helpers?.MoveLines(down: command == CodeEditorCommands.MoveLinesDown);
+                return true;
+            case CodeEditorCommands.CopyLinesUp or CodeEditorCommands.CopyLinesDown when inText && !IsReadOnly:
+                _helpers?.CopyLines(down: command == CodeEditorCommands.CopyLinesDown);
+                return true;
+            case CodeEditorCommands.DeleteLines when inText && !IsReadOnly:
+                _helpers?.DeleteLines();
+                return true;
+            case CodeEditorCommands.InsertLineAfter or CodeEditorCommands.InsertLineBefore when inText && !IsReadOnly:
+                _helpers?.InsertLine(above: command == CodeEditorCommands.InsertLineBefore);
+                return true;
+            case CodeEditorCommands.IndentLines or CodeEditorCommands.OutdentLines when inText && !IsReadOnly:
+                _helpers?.IndentLines(outdent: command == CodeEditorCommands.OutdentLines);
+                return true;
+            case CodeEditorCommands.ExpandLineSelection when inText:
+                _helpers?.ExpandLineSelection();
+                return true;
+            case CodeEditorCommands.BlockComment when inText && !IsReadOnly:
+                _helpers?.BlockComment();
+                return true;
+            case CodeEditorCommands.JumpToBracket when inText:
+                _helpers?.JumpToBracket();
+                return true;
+            case CodeEditorCommands.SelectToBracket when inText:
+                _helpers?.SelectToBracket();
+                return true;
+            case CodeEditorCommands.CursorUndo or CodeEditorCommands.CursorRedo when inText:
+                if (command == CodeEditorCommands.CursorUndo)
+                    _cursorHistory?.Undo();
+                else
+                    _cursorHistory?.Redo();
+                return true;
+            case CodeEditorCommands.SmartSelectExpand or CodeEditorCommands.SmartSelectShrink when inText:
+                _smartSelection?.Run(expand: command == CodeEditorCommands.SmartSelectExpand);
+                return true;
+            case CodeEditorCommands.CursorColumnSelectLeft
+            or CodeEditorCommands.CursorColumnSelectRight
+            or CodeEditorCommands.CursorColumnSelectUp
+            or CodeEditorCommands.CursorColumnSelectDown
+            or CodeEditorCommands.CursorColumnSelectPageUp
+            or CodeEditorCommands.CursorColumnSelectPageDown when inText:
+                _columnSelection?.Move(
+                    command switch
+                    {
+                        CodeEditorCommands.CursorColumnSelectLeft => ColumnMove.Left,
+                        CodeEditorCommands.CursorColumnSelectRight => ColumnMove.Right,
+                        CodeEditorCommands.CursorColumnSelectUp => ColumnMove.Up,
+                        CodeEditorCommands.CursorColumnSelectDown => ColumnMove.Down,
+                        CodeEditorCommands.CursorColumnSelectPageUp => ColumnMove.PageUp,
+                        _ => ColumnMove.PageDown,
+                    }
+                );
                 return true;
             default:
                 return false;

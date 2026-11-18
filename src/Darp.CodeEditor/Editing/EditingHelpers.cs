@@ -36,7 +36,7 @@ namespace Darp.CodeEditor.Editing;
 /// types, found on the UI thread within a short time limit. While they are unknown, such a pair does not close.
 /// </para>
 /// </remarks>
-internal sealed class EditingHelpers : IDisposable
+internal sealed partial class EditingHelpers : IDisposable
 {
     /// <summary>The characters before which a pair closes, as VS Code's default <c>autoCloseBefore</c>.</summary>
     private const string CloseBefore = ";:.,=}])> \n\t";
@@ -1560,17 +1560,23 @@ internal sealed class EditingHelpers : IDisposable
 
     /// <summary>
     /// Toggles line comments on the selected lines, or the caret's, with the language's line comment, or else with its
-    /// block comment around them.
+    /// block comment around them (<see cref="ToggleBlockCommentOnLines"/>), in a step of its own.
     /// </summary>
-    public void ToggleComment()
-    {
-        LanguageConfiguration configuration = Configuration;
-        (int first, int last) = SelectedLines();
-        if (configuration.LineComment is { } token)
-            ToggleLineComment(token, first, last);
-        else if (configuration.BlockComment is { } block)
-            ToggleBlockComment(block, first, last);
-    }
+    public void ToggleComment() =>
+        _undo.Edit(
+            EditKind.Other,
+            stopBefore: true,
+            () =>
+            {
+                LanguageConfiguration configuration = Configuration;
+                (int first, int last) = SelectedLines();
+                if (configuration.LineComment is { } token)
+                    ToggleLineComment(token, first, last);
+                else if (configuration.BlockComment is { } block)
+                    ToggleBlockCommentOnLines(block);
+            },
+            stopAfter: true
+        );
 
     /// <summary>
     /// Comments the lines at their smallest indentation, by its width in columns, with a space after the token, or
@@ -1635,52 +1641,6 @@ internal sealed class EditingHelpers : IDisposable
         }
         replaced.Append(text, copied, text.Length - copied);
         Buffer.Replace(start, text.Length, new StringTextSource(replaced.ToString()), map);
-    }
-
-    /// <summary>
-    /// Puts the block comment around the lines, from their first text to the end of the last, with a space inside
-    /// each token, or removes it when it is around them already, as VS Code does for languages without a line
-    /// comment. On a line of whitespace only, the caret goes inside an empty comment.
-    /// </summary>
-    private void ToggleBlockComment(CharacterPair block, int first, int last)
-    {
-        DocumentLine firstLine = Buffer.GetLineByNumber(first);
-        int start = firstLine.Offset + LeadingWhitespace(Buffer.GetText(firstLine));
-        int end = Buffer.GetLineByNumber(last).EndOffset;
-        if (!CanChange(start, end - start))
-            return;
-        string content = Buffer.GetText(start, end - start).TrimEnd();
-        (string open, string close) = block;
-        if (
-            content.Length >= open.Length + close.Length
-            && content.StartsWith(open, StringComparison.Ordinal)
-            && content.EndsWith(close, StringComparison.Ordinal)
-        )
-        {
-            int openLength =
-                content.Length > open.Length && content[open.Length] == ' ' ? open.Length + 1 : open.Length;
-            int closeStart = content.Length - close.Length;
-            if (closeStart > openLength && content[closeStart - 1] == ' ')
-                closeStart--;
-            using (Buffer.RunUpdate())
-            {
-                Buffer.Remove(start + closeStart, content.Length - closeStart);
-                Buffer.Remove(start, openLength);
-            }
-        }
-        else if (start == end)
-        {
-            Buffer.Insert(start, open + "  " + close);
-            _textArea.Caret.Offset = start + open.Length + 1;
-        }
-        else
-        {
-            using (Buffer.RunUpdate())
-            {
-                Buffer.Insert(end, " " + close);
-                Buffer.Insert(start, open + " ");
-            }
-        }
     }
 
     /// <summary>The lines of the selection, without a last line it only touches at its start; or the caret's line.</summary>

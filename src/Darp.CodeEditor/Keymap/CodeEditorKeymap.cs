@@ -89,6 +89,17 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+i (cmd+i; also alt+escape)</term><description><see cref="CodeEditorCommands.TriggerSuggest"/>, and <see cref="CodeEditorCommands.ToggleSuggestionDetails"/> while the list shows, as ctrl+space</description></item>
     /// <item><term>ctrl+z (cmd+z)</term><description><see cref="CodeEditorCommands.Undo"/></description></item>
     /// <item><term>ctrl+y, ctrl+shift+z (shift+cmd+z)</term><description><see cref="CodeEditorCommands.Redo"/></description></item>
+    /// <item><term>alt+up, alt+down</term><description><see cref="CodeEditorCommands.MoveLinesUp"/>, <see cref="CodeEditorCommands.MoveLinesDown"/></description></item>
+    /// <item><term>shift+alt+up, shift+alt+down (Linux: ctrl+shift+alt+up, ctrl+shift+alt+down)</term><description><see cref="CodeEditorCommands.CopyLinesUp"/>, <see cref="CodeEditorCommands.CopyLinesDown"/></description></item>
+    /// <item><term>ctrl+shift+k (shift+cmd+k)</term><description><see cref="CodeEditorCommands.DeleteLines"/></description></item>
+    /// <item><term>ctrl+enter, ctrl+shift+enter (cmd+enter, shift+cmd+enter)</term><description><see cref="CodeEditorCommands.InsertLineAfter"/>, <see cref="CodeEditorCommands.InsertLineBefore"/></description></item>
+    /// <item><term>ctrl+], ctrl+[ (cmd+], cmd+[)</term><description><see cref="CodeEditorCommands.IndentLines"/>, <see cref="CodeEditorCommands.OutdentLines"/></description></item>
+    /// <item><term>ctrl+l (cmd+l)</term><description><see cref="CodeEditorCommands.ExpandLineSelection"/></description></item>
+    /// <item><term>shift+alt+a (Linux: ctrl+shift+a)</term><description><see cref="CodeEditorCommands.BlockComment"/></description></item>
+    /// <item><term>ctrl+shift+\ (shift+cmd+\)</term><description><see cref="CodeEditorCommands.JumpToBracket"/></description></item>
+    /// <item><term>ctrl+u (cmd+u)</term><description><see cref="CodeEditorCommands.CursorUndo"/></description></item>
+    /// <item><term>shift+alt+right, shift+alt+left (ctrl+cmd+shift+right and ctrl+shift+right, ctrl+cmd+shift+left and ctrl+shift+left)</term><description><see cref="CodeEditorCommands.SmartSelectExpand"/>, <see cref="CodeEditorCommands.SmartSelectShrink"/></description></item>
+    /// <item><term>ctrl+shift+alt with left, right, up, down, pageup, pagedown (cmd+shift+alt with them; none on Linux)</term><description><see cref="CodeEditorCommands.CursorColumnSelectLeft"/>, <see cref="CodeEditorCommands.CursorColumnSelectRight"/>, <see cref="CodeEditorCommands.CursorColumnSelectUp"/>, <see cref="CodeEditorCommands.CursorColumnSelectDown"/>, <see cref="CodeEditorCommands.CursorColumnSelectPageUp"/>, <see cref="CodeEditorCommands.CursorColumnSelectPageDown"/></description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default => s_default.Value;
@@ -215,6 +226,56 @@ public sealed class CodeEditorKeymap
         if (!mac)
             yield return new("ctrl+y", CodeEditorCommands.Redo);
         yield return new($"{command}+shift+z", CodeEditorCommands.Redo);
+        // Lines and selections.
+        foreach (
+            CodeEditorKeyBinding binding in LineAndSelectionBindings(mac, linux: !mac && OperatingSystem.IsLinux())
+        )
+            yield return binding;
+    }
+
+    /// <summary>
+    /// The keys of the commands on lines and selections, VS Code's on each operating system: Linux has keys of its
+    /// own for some of them, where its desktops take VS Code's other ones.
+    /// </summary>
+    internal static IEnumerable<CodeEditorKeyBinding> LineAndSelectionBindings(bool mac, bool linux)
+    {
+        string copy = linux ? "ctrl+shift+alt" : "shift+alt";
+        yield return new("alt+up", CodeEditorCommands.MoveLinesUp);
+        yield return new("alt+down", CodeEditorCommands.MoveLinesDown);
+        yield return new($"{copy}+up", CodeEditorCommands.CopyLinesUp);
+        yield return new($"{copy}+down", CodeEditorCommands.CopyLinesDown);
+        string command = mac ? "cmd" : "ctrl";
+        yield return new($"{command}+shift+k", CodeEditorCommands.DeleteLines);
+        yield return new($"{command}+enter", CodeEditorCommands.InsertLineAfter);
+        yield return new($"{command}+shift+enter", CodeEditorCommands.InsertLineBefore);
+        yield return new($"{command}+]", CodeEditorCommands.IndentLines);
+        yield return new($"{command}+[", CodeEditorCommands.OutdentLines);
+        yield return new($"{command}+l", CodeEditorCommands.ExpandLineSelection);
+        yield return new(linux ? "ctrl+shift+a" : "shift+alt+a", CodeEditorCommands.BlockComment);
+        yield return new($"{command}+shift+\\", CodeEditorCommands.JumpToBracket);
+        yield return new($"{command}+u", CodeEditorCommands.CursorUndo);
+        if (mac)
+        {
+            yield return new("ctrl+cmd+shift+right", CodeEditorCommands.SmartSelectExpand);
+            yield return new("ctrl+shift+right", CodeEditorCommands.SmartSelectExpand);
+            yield return new("ctrl+cmd+shift+left", CodeEditorCommands.SmartSelectShrink);
+            yield return new("ctrl+shift+left", CodeEditorCommands.SmartSelectShrink);
+        }
+        else
+        {
+            yield return new("shift+alt+right", CodeEditorCommands.SmartSelectExpand);
+            yield return new("shift+alt+left", CodeEditorCommands.SmartSelectShrink);
+        }
+        if (!linux)
+        {
+            string columns = $"{command}+shift+alt";
+            yield return new($"{columns}+left", CodeEditorCommands.CursorColumnSelectLeft);
+            yield return new($"{columns}+right", CodeEditorCommands.CursorColumnSelectRight);
+            yield return new($"{columns}+up", CodeEditorCommands.CursorColumnSelectUp);
+            yield return new($"{columns}+down", CodeEditorCommands.CursorColumnSelectDown);
+            yield return new($"{columns}+pageup", CodeEditorCommands.CursorColumnSelectPageUp);
+            yield return new($"{columns}+pagedown", CodeEditorCommands.CursorColumnSelectPageDown);
+        }
     }
 
     /// <summary>The keys that go to the next and previous diagnostic, VS Code's on every operating system.</summary>
@@ -389,4 +450,109 @@ public static class CodeEditorCommands
 
     /// <summary>Redoes the last undone step, as <see cref="Undo"/> undoes it.</summary>
     public const string Redo = "redo";
+
+    // Lines and selections.
+
+    /// <summary>
+    /// Moves the selected lines, or the caret's, above the line before them. With the language's indentation rules and
+    /// its <see cref="CodeLanguage.AutoIndent"/> at <see cref="AutoIndent.Full"/>, they take the indentation that their
+    /// new place gives them, as in VS Code. The selection moves with them.
+    /// </summary>
+    public const string MoveLinesUp = "editor.action.moveLinesUpAction";
+
+    /// <summary>Moves the selected lines, or the caret's, below the line after them, as <see cref="MoveLinesUp"/> moves.</summary>
+    public const string MoveLinesDown = "editor.action.moveLinesDownAction";
+
+    /// <summary>Copies the selected lines, or the caret's, above them; the selection stays on the lines above.</summary>
+    public const string CopyLinesUp = "editor.action.copyLinesUpAction";
+
+    /// <summary>Copies the selected lines, or the caret's, below them; the selection goes down with the copy.</summary>
+    public const string CopyLinesDown = "editor.action.copyLinesDownAction";
+
+    /// <summary>
+    /// Deletes the selected lines, or the caret's; the caret keeps its column on the line that comes up in their place.
+    /// </summary>
+    public const string DeleteLines = "editor.action.deleteLines";
+
+    /// <summary>
+    /// Inserts a line below the caret's, indented as Enter at the end of the caret's line indents, and puts the caret on
+    /// it.
+    /// </summary>
+    public const string InsertLineAfter = "editor.action.insertLineAfter";
+
+    /// <summary>Inserts a line above the caret's, as <see cref="InsertLineAfter"/> inserts one below.</summary>
+    public const string InsertLineBefore = "editor.action.insertLineBefore";
+
+    /// <summary>Indents the selected lines, or the caret's, as Tab indents whole lines.</summary>
+    public const string IndentLines = "editor.action.indentLines";
+
+    /// <summary>Outdents the selected lines, or the caret's, as Shift+Tab does.</summary>
+    public const string OutdentLines = "editor.action.outdentLines";
+
+    /// <summary>
+    /// Selects the selected lines, or the caret's, whole, up to the start of the next line; again, it takes the next line
+    /// too.
+    /// </summary>
+    public const string ExpandLineSelection = "expandLineSelection";
+
+    /// <summary>
+    /// Removes the block comment that the selection is in, or puts one around it, with the language's block comment;
+    /// without a selection, an empty comment goes in at the caret.
+    /// </summary>
+    public const string BlockComment = "editor.action.blockComment";
+
+    /// <summary>
+    /// Moves the caret to the bracket that matches the one next to it; elsewhere to the closing bracket of the pair
+    /// around it, or to the next bracket.
+    /// </summary>
+    public const string JumpToBracket = "editor.action.jumpToBracket";
+
+    /// <summary>
+    /// Selects the pair of brackets next to the caret, or else around it, or else the next one, with the text between;
+    /// unbound by default, as in VS Code.
+    /// </summary>
+    public const string SelectToBracket = "editor.action.selectToBracket";
+
+    /// <summary>
+    /// Puts back the selection that the caret's last move left, with the scroll position: of the last 50, and none from
+    /// before the last change of the text.
+    /// </summary>
+    public const string CursorUndo = "cursorUndo";
+
+    /// <summary>Puts back the selection that <see cref="CursorUndo"/> left; unbound by default, as in VS Code.</summary>
+    public const string CursorRedo = "cursorRedo";
+
+    /// <summary>
+    /// Selects the next range around the selection: by the language server's selection ranges where it has them, and
+    /// by words, and without them by brackets, as <see cref="CodeEditor.SmartSelect"/> says. The ranges hold until the
+    /// caret moves otherwise.
+    /// </summary>
+    public const string SmartSelectExpand = "editor.action.smartSelect.expand";
+
+    /// <summary>Selects the range that <see cref="SmartSelectExpand"/> selected before the current one.</summary>
+    public const string SmartSelectShrink = "editor.action.smartSelect.shrink";
+
+    /// <summary>
+    /// Selects columns: moves the corner at the caret of a rectangle from the selection's anchor one column left. As in
+    /// VS Code, the column selection commands have no keys on Linux.
+    /// </summary>
+    public const string CursorColumnSelectLeft = "cursorColumnSelectLeft";
+
+    /// <summary>
+    /// Selects columns one column further right, at most to the end of the rectangle's longest line, as
+    /// <see cref="CursorColumnSelectLeft"/> does left.
+    /// </summary>
+    public const string CursorColumnSelectRight = "cursorColumnSelectRight";
+
+    /// <summary>Selects columns one line further up, as <see cref="CursorColumnSelectLeft"/> does left.</summary>
+    public const string CursorColumnSelectUp = "cursorColumnSelectUp";
+
+    /// <summary>Selects columns one line further down, as <see cref="CursorColumnSelectLeft"/> does left.</summary>
+    public const string CursorColumnSelectDown = "cursorColumnSelectDown";
+
+    /// <summary>Selects columns a page further up, as <see cref="CursorColumnSelectLeft"/> does left.</summary>
+    public const string CursorColumnSelectPageUp = "cursorColumnSelectPageUp";
+
+    /// <summary>Selects columns a page further down, as <see cref="CursorColumnSelectLeft"/> does left.</summary>
+    public const string CursorColumnSelectPageDown = "cursorColumnSelectPageDown";
 }
