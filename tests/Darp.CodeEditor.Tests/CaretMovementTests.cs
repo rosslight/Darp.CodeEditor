@@ -154,4 +154,35 @@ public sealed class CaretMovementTests(UiFixture ui)
             window.Press(Key.Down);
             window.Editor.Selection.Caret.ShouldBeInRange(6, line.Length - 1);
         });
+
+    [Theory]
+    [InlineData("  |  \nabc", "|    \nabc")]
+    [InlineData("    |\nabc", "|    \nabc")]
+    [InlineData("|    \nabc", "|    \nabc")]
+    [InlineData("  ab|c", "  |abc")]
+    [InlineData("  |abc", "|  abc")]
+    [InlineData("a|bc", "|abc")]
+    public Task Home_goes_to_the_first_character_and_then_to_the_lines_start_and_on_a_blank_line_to_its_start(
+        string marked,
+        string expected
+    ) =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show(marked, CodeLanguage.PlainText);
+
+            window.Press(Key.Home);
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
+    [Fact]
+    public Task Shift_Home_on_a_blank_line_selects_to_its_start() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("abc\n  |  ", CodeLanguage.PlainText);
+
+            window.Press(Key.Home, KeyModifiers.Shift);
+
+            window.Editor.Selection.ShouldBe(new TextSelection(6, 4));
+        });
 }

@@ -111,10 +111,10 @@ internal sealed class EditingHelpers : IDisposable
     }
 
     /// <summary>
-    /// Enter, Backspace, Delete, deleting by words, Tab and Shift+Tab, the arrow keys with a selection and Up and Down
-    /// at the document's ends, from the editor's key handler, while the text area has the keyboard, after the keys of
-    /// its popups. Words go with Ctrl+Backspace and Ctrl+Delete, or Alt on macOS, the platform's key for moving by
-    /// words. Shift+Enter and Shift+Backspace do as Enter and Backspace.
+    /// Enter, Backspace, Delete, deleting by words, Tab and Shift+Tab, the arrow keys with a selection, Up and Down at
+    /// the document's ends and Home on a blank line, from the editor's key handler, while the text area has the
+    /// keyboard, after the keys of its popups. Words go with Ctrl+Backspace and Ctrl+Delete, or Alt on macOS, the
+    /// platform's key for moving by words. Shift+Enter and Shift+Backspace do as Enter and Backspace.
     /// </summary>
     public void OnKeyDown(KeyEventArgs e)
     {
@@ -138,6 +138,8 @@ internal sealed class EditingHelpers : IDisposable
             e.Handled = MoveVertically(e.Key, select: e.KeyModifiers == KeyModifiers.Shift);
         else if (e.Key is Key.Left or Key.Right && e.KeyModifiers == KeyModifiers.None)
             e.Handled = CollapseSelection(e.Key);
+        else if (LineStartKey(e) is { } select)
+            e.Handled = MoveToBlankLineStart(select);
     }
 
     /// <summary>
@@ -510,6 +512,49 @@ internal sealed class EditingHelpers : IDisposable
         VisualLine line = _textArea.TextView.GetOrConstructVisualLine(Buffer.GetLineByNumber(caret.Line));
         int row = line.TextLines.IndexOf(line.GetTextLine(caret.VisualColumn, caret.Position.IsAtEndOfLine));
         return up ? row <= 0 : row < 0 || row == line.TextLines.Count - 1;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="e"/> is the platform's key for going to the line's start: false for Home, true for
+    /// Shift+Home, which selects; null for another key.
+    /// </summary>
+    private static bool? LineStartKey(KeyEventArgs e)
+    {
+        PlatformHotkeyConfiguration? keys = Application.Current?.PlatformSettings?.HotkeyConfiguration;
+        if (keys is null)
+            return null;
+        if (keys.MoveCursorToTheStartOfLine.Exists(gesture => gesture.Matches(e)))
+            return false;
+        if (keys.MoveCursorToTheStartOfLineWithSelection.Exists(gesture => gesture.Matches(e)))
+            return true;
+        return null;
+    }
+
+    /// <summary>
+    /// Home on a line of whitespace only, with Shift to select, as VS Code's <c>cursorHome</c>: to the line's start, and
+    /// there it stays, where AvaloniaEdit goes to the line's end, as after the whitespace that indents text. On other lines,
+    /// and in a rectangle selection, AvaloniaEdit moves: to the first character that is not whitespace, and from there
+    /// to the line's start.
+    /// </summary>
+    /// <returns>Whether it handled the key.</returns>
+    private bool MoveToBlankLineStart(bool select)
+    {
+        Caret caret = _textArea.Caret;
+        DocumentLine line = Buffer.GetLineByNumber(caret.Line);
+        if (
+            _textArea.Selection is RectangleSelection
+            || line.Length == 0
+            || LeadingWhitespace(Buffer.GetText(line)) < line.Length
+        )
+            return false;
+        TextViewPosition from = caret.Position;
+        if (!select)
+            _textArea.ClearSelection();
+        caret.Offset = line.Offset;
+        if (select)
+            _textArea.Selection = _textArea.Selection.StartSelectionOrSetEndpoint(from, caret.Position);
+        caret.BringCaretToView();
+        return true;
     }
 
     /// <summary>
