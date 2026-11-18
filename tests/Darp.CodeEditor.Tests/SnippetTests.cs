@@ -316,10 +316,11 @@ public sealed class SnippetTests
         AsWritten("a\n\t$1", lineIndentation: new string('\t', 20), indentation: Indentation.Spaces(1_000));
         Render("a\n\t$1", lineIndentation: "\t", indentation: Indentation.Spaces(100)).Text.Length.ShouldBe(202);
 
-        // Variables' values.
-        string line = new('a', 1_000);
-        AsWritten(string.Concat(Enumerable.Repeat("$TM_CURRENT_LINE", 6)) + "$1", _ => line);
-        Render(string.Concat(Enumerable.Repeat("$TM_CURRENT_LINE", 4)) + "$1", _ => line).Text.Length.ShouldBe(4_000);
+        // Variables' values do not count: they are the user's text, which goes in whatever its length.
+        string selected = new('a', 10_000);
+        RenderedSnippet values = Render("${1:$TM_SELECTED_TEXT} $1 $TM_SELECTED_TEXT", _ => selected);
+        values.Text.Length.ShouldBe(30_002);
+        Stops(values).ShouldBe($"1:{selected}|1:{selected}|0:");
 
         // Parts count too: variables without a value are asked for at most that often.
         int asked = 0;
@@ -332,6 +333,47 @@ public sealed class SnippetTests
             }
         );
         asked.ShouldBeLessThanOrEqualTo(Snippet.MaxText);
+    }
+
+    [Fact]
+    public void Selected_text_that_spans_lines_takes_the_indentation_that_the_snippet_adds_where_it_goes_in()
+    {
+        Func<string, string?> values = name => name is "TM_SELECTED_TEXT" or "SELECTION" ? "a\n    b" : null;
+
+        // The selection's line is indented by four spaces, as is the snippet's: the snippet adds a level.
+        RenderedSnippet rendered = Snippet
+            .Parse("if (x) {\n\t$TM_SELECTED_TEXT\n}\n$SELECTION")
+            .Render(
+                new SnippetContext("    ", Indentation.Spaces(4), "\n", values)
+                {
+                    MultilineSelectionIndentation = "    ",
+                }
+            );
+
+        rendered.Text.ShouldBe("if (x) {\n        a\n        b\n    }\n    a\n    b");
+        // On one line, or without the selection's line, it goes in as it is.
+        Render("{\n\t$TM_SELECTED_TEXT", values, lineIndentation: "    ").Text.ShouldBe("{\n        a\n    b");
+        SnippetVariables.IndentSelection("a\r\nb\rc\n", "\t\t", "\t").ShouldBe("a\r\n\tb\r\tc\n\t");
+    }
+
+    [Theory]
+    [InlineData("text", "text")]
+    [InlineData("line\n", "line")]
+    [InlineData("\r\n  line  \r\n\r\n", "  line  ")]
+    [InlineData("one\ntwo", "one\ntwo")]
+    [InlineData(" \n", " \n")]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void The_clipboard_variable_is_its_only_line_that_is_not_blank_or_else_the_whole_text(
+        string? clipboard,
+        string? value
+    ) => SnippetVariables.Clipboard(clipboard).ShouldBe(value);
+
+    [Fact]
+    public void A_snippet_needs_the_clipboard_when_it_has_the_variable()
+    {
+        Snippet.Parse("${1:${CLIPBOARD:x}}").NeedsClipboard.ShouldBeTrue();
+        Snippet.Parse("$CLIPBOARDS \\$CLIPBOARD").NeedsClipboard.ShouldBeFalse();
     }
 
     [Fact]

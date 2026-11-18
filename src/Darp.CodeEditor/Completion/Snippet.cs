@@ -24,8 +24,9 @@ namespace Darp.CodeEditor.Completion;
 /// few lines, so that the UI thread's work with a snippet is bounded by small constants, whatever the server sends.
 /// Parsing runs where the server's answer is read, off the UI thread, and reads the characters at most four times over.
 /// A snippet that parsing would read more often, nested deeper than <see cref="MaxNesting"/> levels, or whose text would
-/// be longer than <see cref="MaxText"/> characters with its mirrors, its variables' values and its indentation goes in
-/// as written, without stops, as a plain item goes in.
+/// be longer than <see cref="MaxText"/> characters with its mirrors and its indentation goes in as written, without
+/// stops, as a plain item goes in. Its variables' values do not count, as they are the user's text, such as the
+/// selection, which VS Code puts in whatever its length.
 /// </para>
 /// </remarks>
 internal sealed class Snippet
@@ -49,7 +50,11 @@ internal sealed class Snippet
     {
         _source = source;
         _nodes = nodes;
+        NeedsClipboard = nodes is not null && Uses(nodes, "CLIPBOARD");
     }
+
+    /// <summary>Whether it has the variable <c>CLIPBOARD</c>: completion reads the clipboard for it.</summary>
+    public bool NeedsClipboard { get; }
 
     /// <summary>Parses <paramref name="text"/>, in the snippet syntax.</summary>
     public static Snippet Parse(string text)
@@ -74,8 +79,9 @@ internal sealed class Snippet
     /// <summary>
     /// The text that goes in, and its stops, as VS Code adjusts and resolves them: lines after the first are indented
     /// by the line it goes in, the indentation is that of the document, line breaks are the line's, and variables have
-    /// their values. A text that would be longer than <see cref="MaxText"/> goes in as written, without stops: rendering
-    /// stops there, so it costs the UI thread at most that many characters and parts, and a variable is asked for once.
+    /// their values. A text that would be longer than <see cref="MaxText"/> without its variables' values goes in as
+    /// written, without stops: rendering stops there, so it costs the UI thread at most that many characters and parts
+    /// besides the values, and a variable is asked for once.
     /// </summary>
     public RenderedSnippet Render(SnippetContext context)
     {
@@ -89,6 +95,13 @@ internal sealed class Snippet
 
     /// <summary>A snippet that goes in as written, without stops.</summary>
     private static Snippet AsWritten(string text) => new(text, null);
+
+    /// <summary>Whether the nodes have the variable <paramref name="name"/>, also in a default.</summary>
+    private static bool Uses(List<Node> nodes, string name) =>
+        nodes.Exists(node =>
+            (node is VariableNode variable && variable.Name == name)
+            || (node.Children is { } children && Uses(children, name))
+        );
 
     /// <summary>The placeholders, also in variables' defaults, in the order of the text: parents before children.</summary>
     private static List<PlaceholderNode> Placeholders(List<Node> nodes)
@@ -748,8 +761,14 @@ internal sealed class Snippet
         /// <summary>The variables' values: each is asked for once, and a mirror's copy has its source's.</summary>
         private readonly Dictionary<VariableNode, string?> _values = [];
 
-        /// <summary>The characters and parts that the text may still take.</summary>
+        /// <summary>The characters and parts that the text may still take, besides variables' values.</summary>
         private int _budget = MaxText;
+
+        /// <summary>
+        /// The whitespace at the start of the last line of the last text written, of the snippet or of a variable's
+        /// value, as VS Code finds it for selected text that spans lines; null before any.
+        /// </summary>
+        private string? _lastIndentation;
 
         public Renderer(SnippetContext context)
         {
@@ -783,11 +802,31 @@ internal sealed class Snippet
                         VariableNode source = variable.Source ?? variable;
                         if (!_values.TryGetValue(source, out string? value))
                             _values[source] = value = _context.Variable(variable.Name);
+                        if (
+                            value is not null
+                            && variable.Name is "SELECTION" or "TM_SELECTED_TEXT"
+                            && _context.MultilineSelectionIndentation is { } lineIndentation
+                        )
+                        {
+                            value = SnippetVariables.IndentSelection(
+                                value,
+                                _lastIndentation ?? lineIndentation,
+                                lineIndentation
+                            );
+                        }
                         // Transformed, a variable without a value is empty text, as in VS Code.
                         if (variable.Transform is { } transform)
                             value = transform.Resolve(value ?? "");
-                        if (value is null ? !Write(variable.Children, parent) : !Append(value))
-                            return false;
+                        if (value is null)
+                        {
+                            if (!Write(variable.Children, parent))
+                                return false;
+                        }
+                        else
+                        {
+                            Text.Append(value);
+                            _lastIndentation = LeadingWhitespace(LastLine(value));
+                        }
                         break;
                     case PlaceholderNode placeholder:
                         int index = Stops.Count;
@@ -821,6 +860,7 @@ internal sealed class Snippet
             {
                 int length = value.AsSpan(start).IndexOfAny('\r', '\n');
                 ReadOnlySpan<char> line = length < 0 ? value.AsSpan(start) : value.AsSpan(start, length);
+                int lineStart = Text.Length;
                 bool written =
                     Text.Length == 0 ? WriteIndented(line, column: 0)
                     : Text[^1] is '\r' or '\n' ? WriteIndented(line, _lineColumns)
@@ -828,7 +868,11 @@ internal sealed class Snippet
                 if (!written)
                     return false;
                 if (length < 0)
+                {
+                    // The line as it went in: indented, at a line's start, or as written.
+                    _lastIndentation = LeadingWhitespace(Text.ToString(lineStart, Text.Length - lineStart));
                     return true;
+                }
                 int lineBreak = start + length;
                 bool crlf = value[lineBreak] == '\r' && lineBreak + 1 < value.Length && value[lineBreak + 1] == '\n';
                 start = lineBreak + (crlf ? 2 : 1);
@@ -848,6 +892,18 @@ internal sealed class Snippet
             if (_indenting.Length(columns) > _budget)
                 return false;
             return Append(_indenting.Whitespace(columns)) && Append(line[whitespace..]);
+        }
+
+        /// <summary>The last line of <paramref name="text"/>, after its last line break.</summary>
+        private static string LastLine(string text) => text[(text.LastIndexOfAny(['\r', '\n']) + 1)..];
+
+        /// <summary>The spaces and tabs that <paramref name="line"/> starts with.</summary>
+        private static string LeadingWhitespace(string line)
+        {
+            int length = 0;
+            while (length < line.Length && line[length] is ' ' or '\t')
+                length++;
+            return line[..length];
         }
 
         private bool Append(ReadOnlySpan<char> text)
@@ -871,7 +927,15 @@ internal sealed record SnippetContext(
     Indentation Indentation,
     string LineBreak,
     Func<string, string?> Variable
-);
+)
+{
+    /// <summary>
+    /// For selected text that spans lines, the whitespace at the start of the selection's line up to where it starts:
+    /// <c>SELECTION</c> and <c>TM_SELECTED_TEXT</c> go in with <see cref="SnippetVariables.IndentSelection"/>. Null for
+    /// selected text on one line, and without any.
+    /// </summary>
+    public string? MultilineSelectionIndentation { get; init; }
+}
 
 /// <summary>A snippet's text and its stops, ready to go in.</summary>
 /// <param name="Text">The text.</param>

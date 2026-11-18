@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using Darp.CodeEditor.Completion;
@@ -600,6 +601,7 @@ public sealed class SnippetSessionTests(UiFixture ui)
             document.FilePath = Path.Combine(Path.GetTempPath(), "settings.json");
             await document.Language.Loaded;
             using var window = new EditorWindow(new CodeEditor { Document = document });
+            await Clipboard(window).SetTextAsync("copied" + Environment.NewLine);
             using CodeDocument answer = await SetCompletionAsync(
                 server,
                 fake,
@@ -614,7 +616,80 @@ public sealed class SnippetSessionTests(UiFixture ui)
             window.Press(Key.Enter);
 
             // Before the commit, at the caret: the word that the item replaces.
-            document.Text.ShouldBe("{\n  [wo|  wo|2|settings|none|//*/|1767225600|]\n}");
+            document.Text.ShouldBe("{\n  [wo|  wo|2|settings|none|//*/|1767225600|copied]\n}");
+        });
+
+    [Fact]
+    public Task The_selected_text_is_the_selection_that_typing_replaced_before_completion_committed_the_snippet() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "    foo\n    bar\nbaz");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Item("try {\n\t${1:$TM_SELECTED_TEXT}\n}$0", "try")
+            );
+
+            // Typing over the two lines opens completion; typing on in it keeps what the first key replaced.
+            editor.Selection = new TextSelection(4, 15);
+            window.Type("t");
+            await WaitForLabelsAsync(window, ["try"]);
+            window.Type("r");
+            window.Press(Key.Enter);
+
+            // Its lines after the first take the level that the snippet adds.
+            const string text = "    try {\n        foo\n        bar\n    }\nbaz";
+            document.Text.ShouldBe(text);
+            editor.Selection.ShouldBe(Selected(text, "foo\n        bar"));
+
+            // Typing that replaces no selection forgets it.
+            window.Press(Key.Escape);
+            document.Text = "t";
+            editor.Selection = new TextSelection(1);
+            window.Type("r");
+            await WaitForLabelsAsync(window, ["try"]);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("try {\n    \n}");
+        });
+
+    [Fact]
+    public Task The_clipboard_variable_is_the_clipboards_text_read_as_the_list_shows() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Item("[$CLIPBOARD|${CLIPBOARD/(.*)/${1:/upcase}/}|${CLIPBOARD:none}]")
+            );
+
+            // One line, without its line break.
+            await Clipboard(window).SetTextAsync("clipped\r\n");
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("[clipped|CLIPPED|clipped]");
+
+            // Lines, in the document's line breaks.
+            document.Text = "";
+            await Clipboard(window).SetTextAsync("one\r\ntwo");
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("[one\ntwo|ONE\ntwo|one\ntwo]");
+
+            // None.
+            document.Text = "";
+            await Clipboard(window).SetTextAsync("");
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("[||none]");
         });
 
     [Fact]
@@ -670,6 +745,9 @@ public sealed class SnippetSessionTests(UiFixture ui)
         int start = text.IndexOf(word, StringComparison.Ordinal);
         return new TextSelection(start, start + word.Length);
     }
+
+    private static IClipboard Clipboard(EditorWindow window) =>
+        window.Window.Clipboard ?? throw new InvalidOperationException("The window has no clipboard.");
 
     /// <summary>Signature help's popup; null while it is closed.</summary>
     /// <summary>Signature help's popup or the hover's; null while neither shows.</summary>

@@ -138,6 +138,7 @@ internal sealed class CompletionController : IDisposable
         _textArea.Caret.PositionChanged += OnCaretPositionChanged;
         _document.LanguageFeaturesChanged += OnClosingChange;
         _view.LeftView += OnClosingChange;
+        snippets.IsCompleting = () => _session is not null;
     }
 
     /// <summary>The colors of the color theme, for code in the details, once it is loaded. New colors end completion.</summary>
@@ -317,6 +318,8 @@ internal sealed class CompletionController : IDisposable
                 trigger,
                 request.Cancellation.Token
             );
+            // As VS Code, the clipboard is read before the list shows, for the snippets that have it.
+            string? clipboard = list is { NeedsClipboard: true } ? await _snippets.ReadClipboardAsync() : null;
             if (_session != session || session.Pending != request)
                 return;
             session.Pending = null;
@@ -344,7 +347,7 @@ internal sealed class CompletionController : IDisposable
                 }
                 list ??= new CompletionList([], isIncomplete: false, resolve: null);
             }
-            session.Answer = new Answer(list, request);
+            session.Answer = new Answer(list, request) { Clipboard = clipboard };
             Update();
         }
         catch (Exception e)
@@ -855,7 +858,9 @@ internal sealed class CompletionController : IDisposable
             item.Edit.Range.Start,
             Math.Min(_buffer.GetLineByOffset(caret).EndOffset, caret + (end - request.Offset))
         );
-        RenderedSnippet? snippet = item.Snippet is { } source ? _snippets.Render(source, range.Start) : null;
+        RenderedSnippet? snippet = item.Snippet is { } source
+            ? _snippets.Render(source, range.Start, answer.Clipboard)
+            : null;
         var main = new CompletionEdit(range, snippet?.Text ?? item.Edit.NewText);
         Resolve? late = null;
         if (item.AdditionalEdits is null && answer.List.Resolves)
@@ -1156,7 +1161,11 @@ internal sealed class CompletionController : IDisposable
     }
 
     /// <summary>A server's list, with the request it answered.</summary>
-    private sealed record Answer(CompletionList List, Request Request);
+    private sealed record Answer(CompletionList List, Request Request)
+    {
+        /// <summary>The clipboard's text, read for the list's snippets that have <c>CLIPBOARD</c>; null for none.</summary>
+        public string? Clipboard { get; init; }
+    }
 
     /// <summary>An item's resolve, under way or done.</summary>
     private sealed record Resolve(Task<CompletionItem?> Task, CancellationTokenSource Cancellation);

@@ -1,6 +1,9 @@
 using System.Globalization;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
+using Avalonia.Logging;
 using Avalonia.Media;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
@@ -52,6 +55,9 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     /// <summary>The width of the box of an empty stop, as VS Code's.</summary>
     private const double EmptyStopWidth = 2;
 
+    /// <summary>The longest selection that typing over keeps for <c>TM_SELECTED_TEXT</c>, VS Code's limit.</summary>
+    private const int MaxOvertyped = 51_200;
+
     private readonly TextArea _textArea;
     private readonly TextDocument _buffer;
     private readonly CodeDocument _document;
@@ -73,6 +79,12 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     /// </summary>
     private readonly List<Stop> _adjusted = [];
 
+    /// <summary>
+    /// The selection that typing replaced last, and whether it spanned lines, as VS Code's overtyping capturer keeps it
+    /// for <c>TM_SELECTED_TEXT</c>; null once typing replaced none.
+    /// </summary>
+    private (string Text, bool IsMultiline)? _overtyped;
+
     public SnippetController(TextArea textArea, CodeDocument document)
     {
         _textArea = textArea;
@@ -82,8 +94,15 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         _buffer.TextChanged += OnBufferTextChanged;
         _textArea.Caret.PositionChanged += OnSelectionChanged;
         _textArea.SelectionChanged += OnSelectionChanged;
+        _textArea.TextEntering += OnTextEntering;
         _textArea.TextView.BackgroundRenderers.Add(this);
     }
+
+    /// <summary>
+    /// Whether completion is open, from its first request until it ends: typing then keeps what typing replaced before
+    /// for <c>TM_SELECTED_TEXT</c>, as in VS Code. Null for never.
+    /// </summary>
+    public Func<bool>? IsCompleting { get; set; }
 
     /// <summary>Behind the selection, in the layer that the text view draws itself whenever a layer changes.</summary>
     public KnownLayer Layer => KnownLayer.Background;
@@ -101,31 +120,46 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     /// <summary>
     /// <paramref name="snippet"/> as it goes in at <paramref name="start"/>: indented by the whitespace before it on
     /// its line, and with the values of its variables for the caret and the text as they are now, before it goes in.
-    /// The UI thread reads at most the shown part of the caret's line, and of the line it goes in.
+    /// <c>SELECTION</c> and <c>TM_SELECTED_TEXT</c> are the selection, or else the selection that typing replaced last,
+    /// and <c>CLIPBOARD</c> is <paramref name="clipboard"/>, as in VS Code. The UI thread reads at most the shown part of
+    /// the caret's line, and of the line it goes in, besides the selected text.
     /// </summary>
-    public RenderedSnippet Render(Snippet snippet, int start)
+    /// <param name="snippet">The snippet.</param>
+    /// <param name="start">Where it goes in.</param>
+    /// <param name="clipboard">The clipboard's text, read for the snippet; null for none.</param>
+    public RenderedSnippet Render(Snippet snippet, int start, string? clipboard = null)
     {
         DocumentLine line = _buffer.GetLineByOffset(start);
         int caret = _textArea.Caret.Offset;
         DocumentLine caretLine = _buffer.GetLineByOffset(caret);
+        (string? selected, bool multiline, int selectedAt) = Selected();
         // One time for all of the snippet's variables, as in VS Code.
         DateTimeOffset now = _document.TimeProvider.GetLocalNow();
         // Each name is resolved once, except the random ones, which VS Code draws for each variable.
         var values = new Dictionary<string, string?>(StringComparer.Ordinal);
+        string lineBreak = TextUtilities.GetNewLineFromDocument(_buffer, line.LineNumber);
         return snippet.Render(
             new SnippetContext(
                 LineIndentation(start),
                 _document.Indentation,
-                TextUtilities.GetNewLineFromDocument(_buffer, line.LineNumber),
+                lineBreak,
                 name =>
                     SnippetVariables.Random(name)
                     ?? (values.TryGetValue(name, out string? value) ? value : values[name] = Variable(name))
             )
+            {
+                MultilineSelectionIndentation = multiline ? LineIndentation(selectedAt) : null,
+            }
         );
 
         string? Variable(string name) =>
             name switch
             {
+                "SELECTION" or "TM_SELECTED_TEXT" => selected,
+                // As pasted: in the line's line breaks.
+                "CLIPBOARD" => SnippetVariables.Clipboard(clipboard) is { } text
+                    ? TextUtilities.NormalizeNewLines(text, lineBreak)
+                    : null,
                 "TM_CURRENT_LINE" => _buffer.GetText(caretLine.Offset, VisibleText.End(caretLine) - caretLine.Offset),
                 "TM_CURRENT_WORD" => WordAt(caretLine, caret) is { Length: > 0 } word ? word : null,
                 "TM_LINE_INDEX" => (caretLine.LineNumber - 1).ToString(CultureInfo.InvariantCulture),
@@ -139,6 +173,27 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
                 _ => SnippetVariables.OfFile(name, _document.FilePath)
                     ?? SnippetVariables.OfTime(name, now, _document.TimeProvider.LocalTimeZone),
             };
+    }
+
+    /// <summary>
+    /// The clipboard's text, as completion reads it for a snippet with <c>CLIPBOARD</c> before its list shows, as VS
+    /// Code does; null for none, and when the platform's clipboard fails.
+    /// </summary>
+    public async Task<string?> ReadClipboardAsync()
+    {
+        if (TopLevel.GetTopLevel(_textArea)?.Clipboard is not IClipboard clipboard)
+            return null;
+        try
+        {
+            return await clipboard.TryGetTextAsync();
+        }
+        catch (Exception e)
+        {
+            Logger
+                .TryGet(LogEventLevel.Warning, AssetFiles.LogArea)
+                ?.Log(this, "Reading the clipboard failed: {Exception}", e);
+            return null;
+        }
     }
 
     /// <summary>
@@ -250,6 +305,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         _buffer.TextChanged -= OnBufferTextChanged;
         _textArea.Caret.PositionChanged -= OnSelectionChanged;
         _textArea.SelectionChanged -= OnSelectionChanged;
+        _textArea.TextEntering -= OnTextEntering;
         _textArea.TextView.BackgroundRenderers.Remove(this);
     }
 
@@ -458,6 +514,43 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         while (end < last && WordCharacters.IsWordCharacter(_buffer.GetCharAt(end)))
             end++;
         return _buffer.GetText(start, end - start);
+    }
+
+    /// <summary>
+    /// The selected text for <c>SELECTION</c> and <c>TM_SELECTED_TEXT</c>, as VS Code finds it: the selection, or else
+    /// the selection that typing replaced last; whether it spans lines, and where it starts, or the caret for the one
+    /// typing replaced. Null text without either.
+    /// </summary>
+    private (string? Text, bool IsMultiline, int At) Selected()
+    {
+        Selection selection = _textArea.Selection;
+        if (!selection.IsEmpty)
+        {
+            return (
+                selection.GetText(),
+                selection.StartPosition.Line != selection.EndPosition.Line,
+                selection.SurroundingSegment.Offset
+            );
+        }
+        return _overtyped is { } overtyped
+            ? (overtyped.Text, overtyped.IsMultiline, _textArea.Caret.Offset)
+            : (null, false, _textArea.Caret.Offset);
+    }
+
+    /// <summary>
+    /// Before typed text goes in, while completion is not open: keeps the selection it replaces, up to
+    /// <see cref="MaxOvertyped"/> characters, or forgets the one kept when it replaces none, as VS Code's overtyping
+    /// capturer does.
+    /// </summary>
+    private void OnTextEntering(object? sender, TextInputEventArgs e)
+    {
+        if (IsCompleting?.Invoke() == true)
+            return;
+        Selection selection = _textArea.Selection;
+        _overtyped = null;
+        if (selection.IsEmpty || selection.Length > MaxOvertyped)
+            return;
+        _overtyped = (selection.GetText(), selection.StartPosition.Line != selection.EndPosition.Line);
     }
 
     /// <summary>The language's comments; null while they load.</summary>
