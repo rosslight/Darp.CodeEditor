@@ -124,4 +124,98 @@ internal static class BracketMatcher
     /// <summary>Whether a bracket at <paramref name="column"/> is in a string, comment or regular expression.</summary>
     private static bool IsIgnored(int[]? tokens, int column) =>
         tokens is not null && TokenTypes.At(tokens, column) != TokenType.Other;
+
+    /// <summary>
+    /// The innermost pair of brackets around <paramref name="offset"/>, by their offsets, of any of the language's
+    /// brackets: the first closing bracket after it without its opening one after it, and its match, as VS Code's
+    /// <c>findEnclosingBrackets</c> finds them. Null when there is none within <see cref="MaxDistance"/>.
+    /// </summary>
+    public static (int Open, int Close)? FindEnclosing(
+        TextDocument document,
+        int offset,
+        IReadOnlyList<CharacterPair> brackets,
+        Func<int, int[]?> tokensOf
+    )
+    {
+        // Per kind of bracket, how many opened after the offset are still open.
+        var open = new int[brackets.Count];
+        foreach ((int at, int pair, bool isOpen) in Scan(document, offset, forward: true, brackets, tokensOf))
+        {
+            if (isOpen)
+                open[pair]++;
+            else if (--open[pair] == -1)
+            {
+                (string opening, string closing) = brackets[pair];
+                if (Find(document, at, opening[0], closing[0], forward: false, tokensOf) is { } match)
+                    return (match, at);
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The first of the language's brackets at <paramref name="offset"/> or after it, opening or closing, as VS Code's
+    /// <c>findNextBracket</c> finds it; null when there is none within <see cref="MaxDistance"/>.
+    /// </summary>
+    public static int? FindNext(
+        TextDocument document,
+        int offset,
+        IReadOnlyList<CharacterPair> brackets,
+        Func<int, int[]?> tokensOf
+    ) => Scan(document, offset, forward: true, brackets, tokensOf).Select(found => (int?)found.Offset).FirstOrDefault();
+
+    /// <summary>
+    /// The language's brackets from <paramref name="from"/> on, going forward, or before it, going backward, that are
+    /// code, within <see cref="MaxDistance"/> characters: each one's offset, the index of its pair, and whether it opens.
+    /// </summary>
+    public static IEnumerable<(int Offset, int Pair, bool IsOpen)> Scan(
+        TextDocument document,
+        int from,
+        bool forward,
+        IReadOnlyList<CharacterPair> brackets,
+        Func<int, int[]?> tokensOf
+    )
+    {
+        const int BlockLength = 4096;
+        int start = forward ? Math.Clamp(from, 0, document.TextLength) : Math.Max(0, from - MaxDistance);
+        int end = forward
+            ? Math.Min(document.TextLength, start + MaxDistance)
+            : Math.Clamp(from, 0, document.TextLength);
+        // The line of the last bracket: its bounds and its tokens.
+        (int Start, int End) line = (-1, -1);
+        int[]? tokens = null;
+        for (int done = 0; done < end - start; )
+        {
+            int length = Math.Min(BlockLength, end - start - done);
+            int blockStart = forward ? start + done : end - done - length;
+            string text = document.GetText(blockStart, length);
+            for (int i = 0; i < length; i++)
+            {
+                int index = forward ? i : length - 1 - i;
+                if (PairOf(text[index], brackets) is not (int pair, bool isOpen))
+                    continue;
+                int offset = blockStart + index;
+                if (offset < line.Start || offset > line.End)
+                {
+                    DocumentLine found = document.GetLineByOffset(offset);
+                    line = (found.Offset, found.EndOffset);
+                    tokens = tokensOf(found.LineNumber);
+                }
+                if (!IsIgnored(tokens, offset - line.Start))
+                    yield return (offset, pair, isOpen);
+            }
+            done += length;
+        }
+    }
+
+    /// <summary>The pair of brackets of one character each that <paramref name="c"/> opens or closes; null for none.</summary>
+    private static (int Pair, bool IsOpen)? PairOf(char c, IReadOnlyList<CharacterPair> brackets)
+    {
+        for (int i = 0; i < brackets.Count; i++)
+        {
+            if (brackets[i] is { Open: [char open], Close: [char close] } && open != close && (c == open || c == close))
+                return (i, c == open);
+        }
+        return null;
+    }
 }

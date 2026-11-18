@@ -1135,6 +1135,12 @@ public class CodeEditor : TemplatedControl
             case CodeEditorCommands.BlockComment when inText && !IsReadOnly:
                 _helpers?.BlockComment();
                 return true;
+            case CodeEditorCommands.JumpToBracket when inText:
+                _helpers?.JumpToBracket();
+                return true;
+            case CodeEditorCommands.SelectToBracket when inText:
+                _helpers?.SelectToBracket();
+                return true;
             default:
                 return false;
         }

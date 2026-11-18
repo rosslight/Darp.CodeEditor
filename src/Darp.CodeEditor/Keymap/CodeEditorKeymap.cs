@@ -93,6 +93,7 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+], ctrl+[ (cmd+], cmd+[)</term><description><see cref="CodeEditorCommands.IndentLines"/>, <see cref="CodeEditorCommands.OutdentLines"/></description></item>
     /// <item><term>ctrl+l (cmd+l)</term><description><see cref="CodeEditorCommands.ExpandLineSelection"/></description></item>
     /// <item><term>shift+alt+a (Linux: ctrl+shift+a)</term><description><see cref="CodeEditorCommands.BlockComment"/></description></item>
+    /// <item><term>ctrl+shift+\ (shift+cmd+\)</term><description><see cref="CodeEditorCommands.JumpToBracket"/></description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default => s_default.Value;
@@ -236,6 +237,7 @@ public sealed class CodeEditorKeymap
         yield return new($"{command}+[", CodeEditorCommands.OutdentLines);
         yield return new($"{command}+l", CodeEditorCommands.ExpandLineSelection);
         yield return new(linux ? "ctrl+shift+a" : "shift+alt+a", CodeEditorCommands.BlockComment);
+        yield return new($"{command}+shift+\\", CodeEditorCommands.JumpToBracket);
     }
 
     /// <summary>The keys that go to the next and previous diagnostic, VS Code's on every operating system.</summary>
@@ -449,4 +451,16 @@ public static class CodeEditorCommands
     /// without a selection, an empty comment goes in at the caret.
     /// </summary>
     public const string BlockComment = "editor.action.blockComment";
+
+    /// <summary>
+    /// Moves the caret to the bracket that matches the one next to it; elsewhere to the closing bracket of the pair
+    /// around it, or to the next bracket.
+    /// </summary>
+    public const string JumpToBracket = "editor.action.jumpToBracket";
+
+    /// <summary>
+    /// Selects the pair of brackets next to the caret, or else around it, or else the next one, with the text between;
+    /// unbound by default, as in VS Code.
+    /// </summary>
+    public const string SelectToBracket = "editor.action.selectToBracket";
 }
