@@ -4,6 +4,7 @@ using Avalonia.Controls.Documents;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using Avalonia.Media.Immutable;
 
 namespace Darp.CodeEditor.Popups;
 
@@ -13,9 +14,16 @@ namespace Darp.CodeEditor.Popups;
 /// app's styles for borders, flyouts or tooltips never reach it.
 /// </summary>
 /// <remarks>
+/// <para>
+/// While the keyboard is in the popup, as in a hover that the user put it into, a 1-pixel outline in the theme's
+/// <c>focusBorder</c> shows inside its border, as VS Code draws its focused widgets: <c>outline: 1px solid</c> with
+/// <c>outline-offset: -1px</c>.
+/// </para>
+/// <para>
 /// A popup whose owner names <see cref="ResizableEdges"/> resizes by dragging those edges, and the corners between
 /// them, within a few pixels inside its border: it reports the size dragged to, within the window, through
 /// <see cref="Resized"/>, and its owner applies it.
+/// </para>
 /// </remarks>
 internal class PopupFrame : Border
 {
@@ -41,6 +49,9 @@ internal class PopupFrame : Border
     {
         BorderThickness = new Thickness(1);
         CornerRadius = new CornerRadius(Radius);
+        // Before the child, which the frame adds after it: over the frame's background, under its content.
+        _outline.IsVisible = false;
+        VisualChildren.Add(_outline);
         // Ahead of the content, which selects text or items where the pointer presses.
         AddHandler(PointerPressedEvent, OnPointerPressedTunnel, RoutingStrategies.Tunnel);
         AddHandler(PointerMovedEvent, OnPointerMovedTunnel, RoutingStrategies.Tunnel);
@@ -59,13 +70,42 @@ internal class PopupFrame : Border
     /// </summary>
     public event Action<Size, double>? Resized;
 
-    /// <summary>Paints the frame, and sets the foreground that its text inherits.</summary>
-    public void Paint(IBrush background, IBrush border, IBrush foreground, BoxShadows shadow)
+    /// <summary>The outline while the keyboard is in the popup, over the frame: a visual child besides its child.</summary>
+    private readonly FocusOutline _outline = new();
+
+    /// <summary>
+    /// Paints the frame, and sets the foreground that its text inherits; <paramref name="focus"/> outlines it while the
+    /// keyboard is in it.
+    /// </summary>
+    public void Paint(IBrush background, IBrush border, IBrush foreground, BoxShadows shadow, IBrush? focus = null)
     {
         Background = background;
         BorderBrush = border;
         BoxShadow = shadow;
         TextElement.SetForeground(this, foreground);
+        _outline.Pen = focus is null ? null : new ImmutablePen(focus.ToImmutable());
+    }
+
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        _outline.Measure(availableSize);
+        return base.MeasureOverride(availableSize);
+    }
+
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        // Inside the border, a pixel wide, with the corners' radius less the border's.
+        Thickness border = BorderThickness;
+        _outline.Radius = Math.Max(0, Radius - border.Left);
+        _outline.Arrange(new Rect(finalSize).Deflate(border));
+        return base.ArrangeOverride(finalSize);
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property == IsKeyboardFocusWithinProperty)
+            _outline.IsVisible = change.GetNewValue<bool>();
     }
 
     private void OnPointerPressedTunnel(object? sender, PointerPressedEventArgs e)
@@ -161,5 +201,30 @@ internal class PopupFrame : Border
         Top = 2,
         Right = 4,
         Bottom = 8,
+    }
+
+    /// <summary>A 1-pixel outline at the edge of its bounds, which takes no pointer.</summary>
+    private sealed class FocusOutline : Control
+    {
+        public FocusOutline() => IsHitTestVisible = false;
+
+        public IPen? Pen
+        {
+            get;
+            set
+            {
+                field = value;
+                InvalidateVisual();
+            }
+        }
+
+        public double Radius { get; set; }
+
+        public override void Render(DrawingContext context)
+        {
+            Rect inside = new Rect(Bounds.Size).Deflate(0.5);
+            if (Pen is { } pen && inside.Width > 0 && inside.Height > 0)
+                context.DrawRectangle(null, pen, inside, Radius, Radius);
+        }
     }
 }

@@ -422,7 +422,13 @@ internal sealed class HoverController : IDisposable
     private void Show(Hovered hovered, IReadOnlyList<HoverBlock> blocks)
     {
         PopupColors colors = _colors?.Popups ?? PopupColors.Default;
-        _frame.Paint(colors.HoverBackground, colors.HoverBorder, colors.HoverForeground, colors.Shadow);
+        _frame.Paint(
+            colors.HoverBackground,
+            colors.HoverBorder,
+            colors.HoverForeground,
+            colors.Shadow,
+            colors.FocusBorder
+        );
         _content.SliderBrushes = (colors.Slider, colors.SliderHover, colors.SliderActive);
         // VS Code's limits: up to 66% of the editor's width and a quarter of its height, at least 750 by 250 pixels,
         // and as large as the user resized a hover to last. The content scrolls beyond them.

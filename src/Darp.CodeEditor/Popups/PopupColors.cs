@@ -91,6 +91,9 @@ internal sealed record PopupColors
     /// <summary><c>textCodeBlock.background</c>: behind code spans in text.</summary>
     public required IBrush CodeSpanBackground { get; init; }
 
+    /// <summary><c>focusBorder</c>: the outline of a popup that has the keyboard.</summary>
+    public required IBrush FocusBorder { get; init; }
+
     /// <summary><c>scrollbarSlider.background</c>.</summary>
     public required IBrush Slider { get; init; }
 
@@ -263,6 +266,7 @@ internal sealed record PopupColors
                         : Transparent(Colors.Black, 0.6)
                     )
             ),
+            FocusBorder = Brush(focusBorder),
             CodeForeground = codeForeground,
             Selection = selection,
         };

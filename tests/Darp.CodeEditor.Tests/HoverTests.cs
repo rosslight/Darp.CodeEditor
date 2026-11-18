@@ -388,6 +388,40 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_hover_with_the_keyboard_in_it_shows_the_themes_focus_outline_inside_its_border() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer("--no-diagnostics");
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            await server.StartAsync();
+            editor.Selection = new TextSelection(1);
+            // Light+'s focusBorder, as VS Code's light themes default it.
+            Color focusBorder = Color.Parse("#0090F1");
+
+            window.Press(Key.K, EditorWindow.Command);
+            window.Press(Key.I, EditorWindow.Command);
+            PopupFrame popup = await WaitForPopupAsync(window, "one is a word in");
+            Rect bounds = BoundsInWindow(popup);
+            window.RenderAndCountPixels(focusBorder, bounds, tolerance: 2).ShouldBe(0);
+
+            window.Press(Key.K, EditorWindow.Command);
+            window.Press(Key.I, EditorWindow.Command);
+            popup.IsKeyboardFocusWithin.ShouldBeTrue();
+            // A pixel inside the border, all around.
+            Rect inside = bounds.Deflate(1);
+            int outline = window.RenderAndCountPixels(focusBorder, bounds, tolerance: 2);
+            outline.ShouldBeGreaterThan((int)(inside.Width + inside.Height));
+            window.RenderAndCountPixels(focusBorder, inside.Deflate(1), tolerance: 2).ShouldBe(0);
+
+            window.Press(Key.Escape);
+            popup = await HoverAsync(window, 4, "two is a word in");
+            window.RenderAndCountPixels(focusBorder, BoundsInWindow(popup), tolerance: 2).ShouldBe(0);
+        });
+
+    [Fact]
     public Task Ctrl_K_Ctrl_I_puts_the_keyboard_into_a_hover_the_mouse_opened_which_then_stays_where_the_pointer_goes() =>
         _ui.Run(async () =>
         {
