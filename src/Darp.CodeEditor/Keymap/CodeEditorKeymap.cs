@@ -86,6 +86,7 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+d (cmd+d)</term><description><see cref="CodeEditorCommands.AddSelectionToNextFindMatch"/></description></item>
     /// <item><term>ctrl+left, ctrl+shift+left (alt+left, alt+shift+left)</term><description><see cref="CodeEditorCommands.CursorWordLeft"/>, <see cref="CodeEditorCommands.CursorWordLeftSelect"/></description></item>
     /// <item><term>ctrl+right, ctrl+shift+right (alt+right, alt+shift+right)</term><description><see cref="CodeEditorCommands.CursorWordEndRight"/>, <see cref="CodeEditorCommands.CursorWordEndRightSelect"/></description></item>
+    /// <item><term>alt+p (alt+cmd+p)</term><description><see cref="CodeEditorCommands.TogglePreserveCase"/>, from the text or the search bar</description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default => s_default.Value;
@@ -202,6 +203,15 @@ public sealed class CodeEditorKeymap
         yield return new($"{words}+shift+right", CodeEditorCommands.CursorWordEndRightSelect);
         foreach (CodeEditorKeyBinding binding in DiagnosticBindings())
             yield return binding;
+        foreach (CodeEditorKeyBinding binding in FindBindings(mac))
+            yield return binding;
+    }
+
+    /// <summary>The keys of find, replace and the highlights, VS Code's: Cmd joins Alt on macOS, as for the toggles.</summary>
+    private static IEnumerable<CodeEditorKeyBinding> FindBindings(bool mac)
+    {
+        string toggle = mac ? "alt+cmd" : "alt";
+        yield return new($"{toggle}+p", CodeEditorCommands.TogglePreserveCase);
     }
 
     /// <summary>The keys that go to the next and previous diagnostic, VS Code's on every operating system.</summary>
@@ -365,4 +375,13 @@ public static class CodeEditorCommands
 
     /// <summary>Selects to the end of the word after the caret, as <see cref="CursorWordEndRight"/> moves.</summary>
     public const string CursorWordEndRightSelect = "cursorWordEndRightSelect";
+
+    // Find, replace and highlights.
+
+    /// <summary>
+    /// Turns the replace row's Preserve Case on or off, also while the bar or the row is hidden: a replacement without
+    /// groups then takes the case of each match, so that replacing <c>Foo</c> and <c>FOO</c> with <c>bar</c> gives
+    /// <c>Bar</c> and <c>BAR</c>.
+    /// </summary>
+    public const string TogglePreserveCase = "togglePreserveCase";
 }

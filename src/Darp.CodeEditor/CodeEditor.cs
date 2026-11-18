@@ -1117,12 +1117,16 @@ public class CodeEditor : TemplatedControl
                             or CodeEditorCommands.CursorWordEndRightSelect
                 );
                 return true;
+
+            // Find, replace and highlights: from the text or the search bar.
+            case CodeEditorCommands.TogglePreserveCase:
+                return ToggleSearchOption(command);
             default:
                 return false;
         }
     }
 
-    /// <summary>Turns one of the search bar's options on or off, as Alt+C, Alt+W and Alt+R do.</summary>
+    /// <summary>Turns one of the search bar's options on or off, as Alt+C, Alt+W, Alt+R and Alt+P do.</summary>
     /// <returns>Whether there is a document to search.</returns>
     private bool ToggleSearchOption(string command)
     {
@@ -1132,6 +1136,8 @@ public class CodeEditor : TemplatedControl
             bar.ToggleMatchCase();
         else if (command == CodeEditorCommands.ToggleFindWholeWord)
             bar.ToggleWholeWord();
+        else if (command == CodeEditorCommands.TogglePreserveCase)
+            bar.TogglePreserveCase();
         else
             bar.ToggleRegex();
         return true;

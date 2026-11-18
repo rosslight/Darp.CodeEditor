@@ -13,6 +13,15 @@ namespace Darp.CodeEditor.Search;
 /// <param name="UseRegex">Whether <paramref name="Text"/> is a regular expression.</param>
 internal sealed record SearchQuery(string Text, bool MatchCase, bool WholeWord, bool UseRegex);
 
+/// <summary>What replaces the matches of a search.</summary>
+/// <param name="Text">
+/// The replacement: for a regular expression in VS Code's syntax (<see cref="ReplacePattern"/>), otherwise as it is.
+/// </param>
+/// <param name="PreserveCase">
+/// Whether a replacement without groups takes the case of each match, as VS Code's Preserve Case does.
+/// </param>
+internal sealed record SearchReplacement(string Text, bool PreserveCase);
+
 /// <summary>How a search ended.</summary>
 internal enum SearchOutcome
 {
@@ -38,7 +47,7 @@ internal sealed class SearchMatch(string replacement) : TextSegment
 /// <summary>The matches of a search in one version of the text.</summary>
 /// <param name="Version">The version of the text searched.</param>
 /// <param name="Query">What was searched for.</param>
-/// <param name="Replacement">What replaces each match, or null when the search was not for replacing.</param>
+/// <param name="Replacement">What replaces the matches, or null when the search was not for replacing.</param>
 /// <param name="Matches">
 /// The matches, which follow the edits made since once the editor keeps them up to date, as AvaloniaEdit's search
 /// does.
@@ -48,7 +57,7 @@ internal sealed class SearchMatch(string replacement) : TextSegment
 internal sealed record SearchResult(
     int Version,
     SearchQuery Query,
-    string? Replacement,
+    SearchReplacement? Replacement,
     TextSegmentCollection<SearchMatch> Matches,
     SearchOutcome Outcome,
     string? Error
@@ -106,14 +115,14 @@ internal static class TextSearch
     /// <summary>
     /// Finds the matches of <paramref name="query"/> in <paramref name="snapshot"/>, with the text that replaces each
     /// one when <paramref name="replacement"/> is given: itself, or for a regular expression with its substitutions in
-    /// VS Code's syntax (<see cref="ReplacePattern"/>), such as <c>$1</c> or <c>\U$1</c>. Its line breaks are those of
-    /// the match's line, as VS Code makes them its text's.
+    /// VS Code's syntax (<see cref="ReplacePattern"/>), such as <c>$1</c> or <c>\U$1</c>, in the case of the match
+    /// with Preserve Case. Its line breaks are those of the match's line, as VS Code makes them its text's.
     /// </summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
     public static SearchResult Find(
         TextSnapshot snapshot,
         SearchQuery query,
-        string? replacement,
+        SearchReplacement? replacement,
         CancellationToken cancellationToken
     )
     {
@@ -147,8 +156,9 @@ internal static class TextSearch
                 query,
                 regex,
                 replacement is null ? null
-                    : query.UseRegex ? ReplacePattern.Parse(replacement)
-                    : ReplacePattern.Static(replacement),
+                    : query.UseRegex ? ReplacePattern.Parse(replacement.Text)
+                    : ReplacePattern.Static(replacement.Text),
+                replacement?.PreserveCase == true,
                 matches,
                 cancellationToken
             ),
@@ -161,6 +171,7 @@ internal static class TextSearch
         SearchQuery query,
         Regex regex,
         ReplacePattern? replacement,
+        bool preserveCase,
         TextSegmentCollection<SearchMatch> matches,
         CancellationToken cancellationToken
     )
@@ -197,7 +208,7 @@ internal static class TextSearch
                         new SearchMatch(
                             replacement is null
                                 ? ""
-                                : TextUtilities.NormalizeNewLines(replacement.Build(match), lineBreak)
+                                : TextUtilities.NormalizeNewLines(replacement.Build(match, preserveCase), lineBreak)
                         )
                         {
                             StartOffset = match.Index,

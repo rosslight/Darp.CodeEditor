@@ -49,6 +49,7 @@ internal sealed class SearchBar : UserControl
     private readonly Button _next;
     private readonly Button _close;
     private readonly TextBox _replace = new() { Width = 220 };
+    private readonly ToggleButton _preserveCase = new() { Content = "AB" };
     private readonly Button _replaceOne = new();
     private readonly Button _replaceAll = new();
     private readonly StackPanel _replaceRow;
@@ -91,7 +92,7 @@ internal sealed class SearchBar : UserControl
         _next = IconButton(s_next, FindNext);
         _close = IconButton(s_close, Close);
         ShowTexts();
-        _replaceRow = Row(_replace, _replaceOne, _replaceAll);
+        _replaceRow = Row(_replace, _preserveCase, _replaceOne, _replaceAll);
         _replaceRow.IsVisible = false;
         // About the width of the rows, which a longer message wraps to.
         _message.MaxWidth = 520;
@@ -116,6 +117,7 @@ internal sealed class SearchBar : UserControl
         _wholeWord.IsCheckedChanged += (_, _) => OnQueryChanged();
         _regex.IsCheckedChanged += (_, _) => OnQueryChanged();
         _replace.TextChanging += (_, _) => Search(Move.None);
+        _preserveCase.IsCheckedChanged += (_, _) => Search(Move.None);
         _replaceOne.Click += (_, _) => ReplaceOne();
         _replaceAll.Click += (_, _) => ReplaceAll();
         _find.KeyDown += OnFindKeyDown;
@@ -167,6 +169,8 @@ internal sealed class SearchBar : UserControl
     internal ToggleButton MatchCaseToggle => _matchCase;
 
     internal ToggleButton RegexToggle => _regex;
+
+    internal ToggleButton PreserveCaseToggle => _preserveCase;
 
     internal Button ReplaceAllButton => _replaceAll;
 
@@ -242,6 +246,9 @@ internal sealed class SearchBar : UserControl
 
     /// <summary>Turns Use Regular Expression on or off, as <see cref="ToggleMatchCase"/> does Match Case.</summary>
     public void ToggleRegex() => Toggle(_regex);
+
+    /// <summary>Turns Preserve Case on or off, also while the replace row is hidden, as in VS Code.</summary>
+    public void TogglePreserveCase() => Toggle(_preserveCase);
 
     /// <summary>Closes the bar, and gives the keyboard back to the text.</summary>
     public void Close()
@@ -377,7 +384,7 @@ internal sealed class SearchBar : UserControl
             _wholeWord.IsChecked == true,
             _regex.IsChecked == true
         );
-        string? replacement = _replaceRow.IsVisible ? _replace.Text ?? "" : null;
+        SearchReplacement? replacement = _replaceRow.IsVisible ? Replacement() : null;
         TextSnapshot snapshot = shown.Document.CurrentSnapshot;
         var searching = new CancellationTokenSource();
         _searching = searching;
@@ -509,7 +516,7 @@ internal sealed class SearchBar : UserControl
         return
             _shown is { Editor.IsReadOnly: false } shown
             && result.Version == shown.Document.CurrentSnapshot.Version
-            && replacement == (_replace.Text ?? "")
+            && replacement == Replacement()
             ? result
             : null;
     }
@@ -529,6 +536,9 @@ internal sealed class SearchBar : UserControl
     }
 
     private int SelectionStart() => _shown?.Editor.Selection.Range.Start ?? 0;
+
+    /// <summary>What replaces the matches, by the replace row as it is.</summary>
+    private SearchReplacement Replacement() => new(_replace.Text ?? "", _preserveCase.IsChecked == true);
 
     /// <summary>Shows how many matches there are and which one is selected, and why a result is partial.</summary>
     private void UpdateStatus()
@@ -653,6 +663,7 @@ internal sealed class SearchBar : UserControl
         ToolTip.SetTip(_matchCase, WithKeys(Strings.Default.MatchCase, CodeEditorCommands.ToggleFindCaseSensitive));
         ToolTip.SetTip(_wholeWord, WithKeys(Strings.Default.MatchWholeWord, CodeEditorCommands.ToggleFindWholeWord));
         ToolTip.SetTip(_regex, WithKeys(Strings.Default.UseRegularExpression, CodeEditorCommands.ToggleFindRegex));
+        ToolTip.SetTip(_preserveCase, WithKeys(Strings.Default.PreserveCase, CodeEditorCommands.TogglePreserveCase));
         ToolTip.SetTip(_previous, Strings.Default.PreviousMatch);
         ToolTip.SetTip(_next, Strings.Default.NextMatch);
         ToolTip.SetTip(_close, Strings.Default.CloseSearch);

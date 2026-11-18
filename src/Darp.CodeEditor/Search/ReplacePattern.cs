@@ -98,11 +98,18 @@ internal sealed class ReplacePattern
         }
     }
 
-    /// <summary>The text that replaces <paramref name="match"/>.</summary>
-    public string Build(Match match)
+    /// <summary>
+    /// The text that replaces <paramref name="match"/>. With <paramref name="preserveCase"/>, a replacement without
+    /// groups takes the case of the match, as VS Code's Preserve Case does (<see cref="WithCaseOf"/>); one with groups
+    /// stays as it is, as in VS Code.
+    /// </summary>
+    public string Build(Match match, bool preserveCase = false)
     {
-        if (_pieces is [{ Text: { } text }])
-            return text;
+        if (_pieces is [] or [{ Text: not null }])
+        {
+            string text = _pieces is [{ Text: { } value }] ? value : "";
+            return preserveCase ? WithCaseOf(match.Value, text) : text;
+        }
         var result = new StringBuilder();
         foreach (Piece piece in _pieces)
         {
@@ -151,6 +158,45 @@ internal sealed class ReplacePattern
             if (c is 'u' or 'l')
                 op++;
         }
+    }
+
+    /// <summary>
+    /// <paramref name="replacement"/> in the case of <paramref name="match"/>, a port of VS Code's
+    /// <c>buildReplaceStringWithCasePreserved</c>: in upper case for a match in upper case, in lower case for one in
+    /// lower case, otherwise with its first character in the case of the match's first character. Where both have as
+    /// many parts between hyphens, or else between underscores, each part takes the case of the match's part.
+    /// </summary>
+    internal static string WithCaseOf(string match, string replacement)
+    {
+        if (match.Length == 0)
+            return replacement;
+        bool hyphens = HaveSameParts(match, replacement, '-');
+        bool underscores = HaveSameParts(match, replacement, '_');
+        if (hyphens != underscores)
+        {
+            char separator = hyphens ? '-' : '_';
+            string[] matchParts = match.Split(separator);
+            return string.Join(
+                separator,
+                replacement.Split(separator).Select((part, i) => WithCaseOf(matchParts[i], part))
+            );
+        }
+        if (match.ToUpperInvariant() == match)
+            return replacement.ToUpperInvariant();
+        if (match.ToLowerInvariant() == match)
+            return replacement.ToLowerInvariant();
+        if (replacement.Length == 0)
+            return replacement;
+        if (char.ToLowerInvariant(match[0]) != match[0])
+            return char.ToUpperInvariant(replacement[0]) + replacement[1..];
+        if (char.ToUpperInvariant(match[0]) != match[0])
+            return char.ToLowerInvariant(replacement[0]) + replacement[1..];
+        return replacement;
+
+        static bool HaveSameParts(string match, string replacement, char separator) =>
+            match.Contains(separator)
+            && replacement.Contains(separator)
+            && match.Split(separator).Length == replacement.Split(separator).Length;
     }
 
     /// <summary>Text, or a group with the case changes before it.</summary>

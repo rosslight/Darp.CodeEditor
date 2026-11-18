@@ -51,4 +51,46 @@ public sealed class ReplacePatternTests
         string replacement,
         string expected
     ) => ReplacePattern.Parse(replacement).Build(Regex.Match(text, pattern)).ShouldBe(expected);
+
+    /// <summary>Preserve Case: a replacement without groups takes the case of the match, by VS Code's own tests.</summary>
+    [Theory]
+    [InlineData("abc", "Def", "def")]
+    [InlineData("Abc", "Def", "Def")]
+    [InlineData("ABC", "Def", "DEF")]
+    [InlineData("aBc", "Def", "def")]
+    [InlineData("AbC", "Def", "Def")]
+    [InlineData("aBC", "Def", "def")]
+    [InlineData("aBc", "DeF", "deF")]
+    // Parts between hyphens or underscores, as many in both, each take the case of theirs.
+    [InlineData("Foo-Bar", "newfoo-newbar", "Newfoo-Newbar")]
+    [InlineData("Foo-Bar-Abc", "newfoo-newbar-newabc", "Newfoo-Newbar-Newabc")]
+    [InlineData("Foo-Bar-abc", "newfoo-newbar", "Newfoo-newbar")]
+    [InlineData("foo-Bar", "newfoo-newbar", "newfoo-Newbar")]
+    [InlineData("foo-BAR", "newfoo-newbar", "newfoo-NEWBAR")]
+    [InlineData("foO-BAR", "NewFoo-NewBar", "newFoo-NEWBAR")]
+    [InlineData("Foo_Bar", "newfoo_newbar", "Newfoo_Newbar")]
+    [InlineData("Foo_Bar_Abc", "newfoo_newbar_newabc", "Newfoo_Newbar_Newabc")]
+    [InlineData("Foo_Bar_abc", "newfoo_newbar", "Newfoo_newbar")]
+    [InlineData("Foo_Bar-abc", "newfoo_newbar-abc", "Newfoo_newbar-abc")]
+    [InlineData("foo_Bar", "newfoo_newbar", "newfoo_Newbar")]
+    [InlineData("foo_BAR", "newfoo_newbar", "newfoo_NEWBAR")]
+    public void With_Preserve_Case_a_replacement_takes_the_case_of_the_match(
+        string match,
+        string replacement,
+        string expected
+    )
+    {
+        Match matched = Regex.Match(match, Regex.Escape(match));
+
+        ReplacePattern.Parse(replacement).Build(matched, preserveCase: true).ShouldBe(expected);
+        ReplacePattern.Static(replacement).Build(matched, preserveCase: true).ShouldBe(expected);
+    }
+
+    [Fact]
+    public void With_Preserve_Case_a_replacement_with_a_group_keeps_its_case()
+    {
+        Match matched = Regex.Match("FOO", "(FOO)");
+
+        ReplacePattern.Parse("bar$1").Build(matched, preserveCase: true).ShouldBe("barFOO");
+    }
 }

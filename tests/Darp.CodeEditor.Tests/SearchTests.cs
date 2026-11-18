@@ -501,6 +501,32 @@ public sealed class SearchTests(UiFixture ui)
             bar.FindBox.Text.ShouldBe("a");
         });
 
+    [Fact]
+    public Task Alt_P_preserves_the_case_of_each_match_that_it_replaces() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("|Foo FOO foo", CodeLanguage.PlainText);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            window.Editor.OpenSearch(replace: true);
+            SearchBar bar = BarOf(window);
+            window.Type("foo");
+            bar.ReplaceBox.Text = "bar";
+
+            window.Press(Key.P, Toggle);
+
+            bar.PreserveCaseToggle.IsChecked.ShouldBe(true);
+            ToolTip
+                .GetTip(bar.PreserveCaseToggle)
+                .ShouldBe($"Preserve Case ({new KeyGesture(Key.P, Toggle).ToString("p", null)})");
+            await Wait.UntilAsync(() => bar.ReplaceAllButton.IsEnabled);
+            Click(bar, "Replace All");
+            document.Text.ShouldBe("Bar BAR bar");
+        });
+
+    /// <summary>The modifiers of the search bar's toggles: Alt, and Alt+Cmd on macOS.</summary>
+    private static KeyModifiers Toggle =>
+        OperatingSystem.IsMacOS() ? KeyModifiers.Alt | KeyModifiers.Meta : KeyModifiers.Alt;
+
     private static SearchBar BarOf(EditorWindow window) =>
         window.Editor.GetVisualDescendants().OfType<SearchBar>().Single();
 

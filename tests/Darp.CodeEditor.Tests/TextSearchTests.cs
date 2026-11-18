@@ -28,17 +28,18 @@ public sealed class TextSearchTests
     {
         TextSnapshot snapshot = TextSnapshot.FromString("foo\r\nfoo");
         const string replacement = @"\U$1\n";
+        var replace = new SearchReplacement(replacement, PreserveCase: false);
 
         SearchResult regex = TextSearch.Find(
             snapshot,
             new SearchQuery("(foo)", MatchCase: false, WholeWord: false, UseRegex: true),
-            replacement,
+            replace,
             CancellationToken.None
         );
         SearchResult text = TextSearch.Find(
             snapshot,
             new SearchQuery("foo", MatchCase: false, WholeWord: false, UseRegex: false),
-            replacement,
+            replace,
             CancellationToken.None
         );
 
