@@ -13,6 +13,7 @@ using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.LanguageClient;
 using Darp.CodeEditor.Loading;
+using Darp.CodeEditor.Localization;
 
 namespace Darp.CodeEditor.Popups;
 
@@ -22,9 +23,12 @@ namespace Darp.CodeEditor.Popups;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The pointer rests for AvaloniaEdit's hover time, 400 ms, as long as Avalonia's tooltips wait. The diagnostics show
-/// at once, and the server's hover joins them when it answers; its Markdown is read, and its code blocks highlighted,
-/// off the UI thread.
+/// The hover's timing is VS Code's: the pointer rests on a character for <see cref="CodeEditor.HoverDelay"/>, 300 ms by
+/// default; moving to another character starts the wait again. Halfway through, the server is asked for its hover; once
+/// the delay is over, the diagnostics there show, with the server's hover if it answered by then, and otherwise it
+/// joins them when it answers. While it has not answered by three times the delay, "Loading…" shows below them. Its
+/// Markdown is read, and its code blocks highlighted, off the UI thread. Asked for by key, the hover starts at once,
+/// without "Loading…".
 /// </para>
 /// <para>
 /// The hovered text is the word under the pointer, and the range that the server's hover names. The popup stays while
@@ -38,10 +42,11 @@ namespace Darp.CodeEditor.Popups;
 /// the same diagnostic, unless the user clicked into the popup; then a click outside it, or the window losing the
 /// focus; a click in the editor, and a key in the text, as the editor decides (<see cref="CloseOnKey"/>), unless the
 /// user clicked into the popup; typing, scrolling and Escape; the editor losing the keyboard focus; a server that
-/// starts or stops serving the document, whose information the hover showed; new colors, which its code was drawn in;
-/// and the editor no longer showing the document. Ending it cancels the server's request and the reading of its answer
-/// if they are still under way, and drops what they would show, also before any popup opened. After a click in the
-/// editor, also one that drags a selection, no hover starts until the pointer moves on, as in VS Code.
+/// starts or stops serving the document, whose information the hover showed, while a hover that waits starts again;
+/// new colors, which its code was drawn in; and the editor no longer showing the document. Ending it cancels the
+/// server's request and the reading of its answer if they are still under way, and drops what they would show, also
+/// before any popup opened. While a button is down, as when a drag selects, and after a click in the editor until the
+/// pointer moves on, no hover starts, as in VS Code.
 /// </para>
 /// </remarks>
 internal sealed class HoverController : IDisposable
@@ -75,8 +80,17 @@ internal sealed class HoverController : IDisposable
     /// <summary>Whether the user resized the hover that shows.</summary>
     private bool _resized;
 
-    /// <summary>The text hovered now, from the pointer's rest until the popup closes; null for none.</summary>
+    /// <summary>
+    /// The text hovered now, from the pointer's arrival on a character, or the key that asked for it, until the hover
+    /// ends; null for none. Until the popup opens, it waits: for its delay, or for something to show.
+    /// </summary>
     private Hovered? _hovered;
+
+    /// <summary>
+    /// Where the pointer moved last over the text view, without a button down; null while it is elsewhere or a button
+    /// is down.
+    /// </summary>
+    private Point? _pointer;
 
     /// <summary>The delay before the hover closes, once the pointer left it; null while none runs.</summary>
     private ITimer? _hiding;
@@ -127,12 +141,11 @@ internal sealed class HoverController : IDisposable
             _frame.Width = _frame.MaxWidth = Math.Max(MinResizedWidth, size.Width);
             _frame.MaxHeight = Math.Max(MinResizedHeight, maxHeight);
         };
-        _textView.PointerHover += OnPointerHover;
         _textView.PointerMoved += OnPointerMoved;
         _textView.PointerExited += OnPointerExited;
         _textView.ScrollOffsetChanged += OnClosingChange;
         _buffer.Changed += OnClosingChange;
-        _document.LanguageFeaturesChanged += OnClosingChange;
+        _document.LanguageFeaturesChanged += OnLanguageFeaturesChanged;
         _popup.Root.PointerExited += OnPointerExited;
         _popup.Root.PointerEntered += OnPointerEnteredPopup;
         // Also when its text handles the press, to select.
@@ -181,7 +194,7 @@ internal sealed class HoverController : IDisposable
         StayOpen();
         Unwatch();
         bool wasOpen = _popup.IsOpen;
-        _hovered?.Cancellation.Cancel();
+        _hovered?.Stop();
         _hovered = null;
         if (_popup.IsFocusWithin)
             _editor.FocusText();
@@ -206,12 +219,11 @@ internal sealed class HoverController : IDisposable
     public void Dispose()
     {
         Close();
-        _textView.PointerHover -= OnPointerHover;
         _textView.PointerMoved -= OnPointerMoved;
         _textView.PointerExited -= OnPointerExited;
         _textView.ScrollOffsetChanged -= OnClosingChange;
         _buffer.Changed -= OnClosingChange;
-        _document.LanguageFeaturesChanged -= OnClosingChange;
+        _document.LanguageFeaturesChanged -= OnLanguageFeaturesChanged;
         _popup.Root.PointerExited -= OnPointerExited;
         _popup.Root.PointerEntered -= OnPointerEnteredPopup;
         _popup.Root.RemoveHandler(InputElement.PointerPressedEvent, OnPointerPressedInPopup);
@@ -250,24 +262,35 @@ internal sealed class HoverController : IDisposable
     }
 
     /// <summary>
-    /// The pointer rests: over the text already hovered, nothing changes; over other text, its diagnostics show, and
-    /// the server is asked for its hover, unless the user clicked into the popup that shows, or clicked in the editor
-    /// and the pointer has not moved on since.
+    /// Starts the hover at <paramref name="offset"/> at once, as the user asks for it by key: the server is asked, and
+    /// the diagnostics show, with the server's hover once it answers.
     /// </summary>
-    private void OnPointerHover(object? sender, PointerEventArgs e)
+    private void Start(int offset, bool fromKeyboard)
     {
-        if (
-            _clickedAt is not null
-            || _hovered is { IsHeld: true }
-            || OffsetAt(e.GetPosition(_textView)) is not { } offset
-            || (_hovered is { } current && IsHovered(current, offset))
-        )
-            return;
-        Start(offset, fromKeyboard: false);
+        Hovered hovered = Begin(offset, fromKeyboard);
+        Ask(hovered);
+        Due(hovered);
     }
 
-    /// <summary>Shows the diagnostics at <paramref name="offset"/> at once, and asks the server for its hover.</summary>
-    private void Start(int offset, bool fromKeyboard)
+    /// <summary>
+    /// Starts the hover of the pointer at <paramref name="offset"/>, as VS Code's hover operation starts: the server is
+    /// asked halfway through <see cref="CodeEditor.HoverDelay"/>, what is known shows once the delay is over, and
+    /// "Loading…" joins it when the server has not answered by three times the delay.
+    /// </summary>
+    private void StartDelayed(int offset)
+    {
+        Hovered hovered = Begin(offset, fromKeyboard: false);
+        TimeSpan delay = _editor.HoverDelay;
+        hovered.Timers =
+        [
+            After(hovered, delay / 2, Ask),
+            After(hovered, delay, Due),
+            After(hovered, 3 * delay, ShowLoading),
+        ];
+    }
+
+    /// <summary>Ends the hover there is, and makes the hover of <paramref name="offset"/> the current one.</summary>
+    private Hovered Begin(int offset, bool fromKeyboard)
     {
         Close();
         // A new hover forgets the size the user gave the last one.
@@ -288,16 +311,44 @@ internal sealed class HoverController : IDisposable
             FromKeyboard = fromKeyboard,
         };
         _hovered = hovered;
-        if (hovered.Messages.Count > 0)
-            Show(hovered, hovered.Messages);
-        ShowServerHover(hovered);
+        return hovered;
+    }
+
+    /// <summary>A timer that runs <paramref name="action"/> on the UI thread after <paramref name="time"/>, while <paramref name="hovered"/> is the current hover.</summary>
+    private ITimer After(Hovered hovered, TimeSpan time, Action<Hovered> action) =>
+        _document.TimeProvider.CreateTimer(
+            _ =>
+                _editor.Dispatcher.Post(() =>
+                {
+                    if (_hovered == hovered)
+                        action(hovered);
+                }),
+            null,
+            time,
+            Timeout.InfiniteTimeSpan
+        );
+
+    /// <summary>The delay is over: what is known shows.</summary>
+    private void Due(Hovered hovered)
+    {
+        hovered.IsDue = true;
+        Render(hovered);
+    }
+
+    /// <summary>The server has not answered by three times the delay: "Loading…" shows until it does.</summary>
+    private void ShowLoading(Hovered hovered)
+    {
+        if (hovered.IsAnswered)
+            return;
+        hovered.IsLoading = true;
+        Render(hovered);
     }
 
     /// <summary>
-    /// Shows the server's hover below the messages, once it answered and its Markdown is read, unless the hover ended
-    /// meanwhile. Failures of reading it go to the log.
+    /// Asks the server for its hover, and reads its Markdown, off the UI thread; it shows once the delay is over, unless
+    /// the hover ended meanwhile. Failures of reading it go to the log.
     /// </summary>
-    private async void ShowServerHover(Hovered hovered)
+    private async void Ask(Hovered hovered)
     {
         CancellationToken cancellation = hovered.Cancellation.Token;
         try
@@ -308,18 +359,23 @@ internal sealed class HoverController : IDisposable
                 new TextPosition(location.Line, location.Column),
                 cancellation
             );
-            if (hover is null || _hovered != hovered)
-                return;
-            TextMateGrammar? grammar = _highlighter.Grammar;
-            IReadOnlyList<HoverBlock> blocks = await Task.Run(
-                () => HoverBlocks.Of(hover, grammar, hovered.Budget, cancellation),
-                cancellation
-            );
             if (_hovered != hovered)
                 return;
-            if (hover.Range is { } range)
-                hovered.Range = Union(hovered.Range, range);
-            Show(hovered, hovered.Messages.Count > 0 ? [.. hovered.Messages, new HoverRule(), .. blocks] : blocks);
+            if (hover is not null)
+            {
+                TextMateGrammar? grammar = _highlighter.Grammar;
+                IReadOnlyList<HoverBlock> blocks = await Task.Run(
+                    () => HoverBlocks.Of(hover, grammar, hovered.Budget, cancellation),
+                    cancellation
+                );
+                if (_hovered != hovered)
+                    return;
+                if (hover.Range is { } range)
+                    hovered.Range = Union(hovered.Range, range);
+                hovered.Answer = blocks;
+            }
+            hovered.IsAnswered = true;
+            Render(hovered);
         }
         // The hover ended while its answer was read.
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
@@ -328,7 +384,40 @@ internal sealed class HoverController : IDisposable
             Logger
                 .TryGet(LogEventLevel.Error, AssetFiles.LogArea)
                 ?.Log(this, "Showing the hover failed: {Exception}", e);
+            if (_hovered == hovered)
+            {
+                hovered.IsAnswered = true;
+                Render(hovered);
+            }
         }
+    }
+
+    /// <summary>
+    /// Shows what is known of <paramref name="hovered"/> once its delay is over: the diagnostics' messages, and below
+    /// them the server's hover, or "Loading…" while it is late. With nothing to show, no popup shows.
+    /// </summary>
+    private void Render(Hovered hovered)
+    {
+        if (!hovered.IsDue)
+            return;
+        IReadOnlyList<HoverBlock> below =
+            hovered.Answer
+            ?? (
+                hovered.IsLoading && !hovered.IsAnswered
+                    ? [new HoverParagraph([new HoverSpan(Strings.Default.HoverLoading)])]
+                    : []
+            );
+        IReadOnlyList<HoverBlock> blocks =
+            hovered.Messages.Count == 0 ? below
+            : below.Count == 0 ? hovered.Messages
+            : [.. hovered.Messages, new HoverRule(), .. below];
+        if (blocks.Count == 0)
+        {
+            StayOpen();
+            _popup.Hide();
+            return;
+        }
+        Show(hovered, blocks);
     }
 
     private void Show(Hovered hovered, IReadOnlyList<HoverBlock> blocks)
@@ -349,32 +438,69 @@ internal sealed class HoverController : IDisposable
     }
 
     /// <summary>
-    /// Over other text, the popup closes after <see cref="s_hidingDelay"/>, unless the pointer reaches it or comes back
-    /// meanwhile: it may cross other text on its way into the popup.
+    /// While a hover shows, the pointer over other text closes it after <see cref="s_hidingDelay"/>, unless the pointer
+    /// reaches it or comes back meanwhile: it may cross other text on its way into the popup. While none shows, the
+    /// pointer on a character starts its hover, and on another character starts again, as in VS Code; not while a
+    /// button is down, as when a drag selects, nor after a click until the pointer moves on.
     /// </summary>
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
-        if (_clickedAt is { } clicked && e.GetPosition(_textView) != clicked)
+        Point point = e.GetPosition(_textView);
+        PointerPointProperties buttons = e.GetCurrentPoint(_textView).Properties;
+        bool pressed = buttons.IsLeftButtonPressed || buttons.IsRightButtonPressed || buttons.IsMiddleButtonPressed;
+        _pointer = pressed ? null : point;
+        if (_clickedAt is { } clicked && point != clicked)
             _clickedAt = null;
-        if (_hovered is not { FromKeyboard: false, IsHeld: false } hovered)
+        // A hover the user clicked or put the keyboard into stays, as does one asked for by key, as in VS Code.
+        if (_hovered is { IsHeld: true } || (_hovered is { FromKeyboard: true } && _popup.IsOpen))
             return;
-        if (OffsetAt(e.GetPosition(_textView)) is not { } offset || !IsHovered(hovered, offset))
-            HideSoon();
-        else
-            StayOpen();
+        if (_popup.IsOpen && _hovered is { } shown)
+        {
+            if (!pressed && OffsetAt(point) is { } offset && IsHovered(shown, offset))
+                StayOpen();
+            else
+                HideSoon();
+            return;
+        }
+        RestAt(_pointer);
     }
 
     /// <summary>
-    /// The pointer left the text or the popup: the popup closes after <see cref="s_hidingDelay"/> unless the pointer is
-    /// over it by then. Posted, as the pointer enters the other only after it left the one. A drag that selects the
-    /// popup's text leaves it too, when it crosses its edge.
+    /// The pointer is at <paramref name="point"/> of the text view while no hover shows: on the character of the hover
+    /// that waits, the wait goes on; on another character, its hover starts; elsewhere, or for null, none waits.
     /// </summary>
-    private void OnPointerExited(object? sender, PointerEventArgs e) =>
+    private void RestAt(Point? point)
+    {
+        if (_clickedAt is not null || point is not { } at || OffsetAt(at) is not { } offset)
+        {
+            if (_hovered is not null && !_popup.IsOpen)
+                Close();
+            return;
+        }
+        if (_hovered is { FromKeyboard: false } waiting && waiting.Offset == offset)
+            return;
+        StartDelayed(offset);
+    }
+
+    /// <summary>
+    /// The pointer left the text or the popup: a hover that shows closes after <see cref="s_hidingDelay"/> unless the
+    /// pointer is over it by then, and one that waits ends. Posted, as the pointer enters the other only after it left
+    /// the one. A drag that selects the popup's text leaves it too, when it crosses its edge.
+    /// </summary>
+    private void OnPointerExited(object? sender, PointerEventArgs e)
+    {
+        if (sender == _textView)
+            _pointer = null;
         _editor.Dispatcher.Post(() =>
         {
-            if (_hovered is { FromKeyboard: false, IsHeld: false } && !_popup.Root.IsPointerOver)
+            if (_hovered is not { FromKeyboard: false, IsHeld: false } || _popup.Root.IsPointerOver)
+                return;
+            if (_popup.IsOpen)
                 HideSoon();
+            else
+                Close();
         });
+    }
 
     private void OnPointerEnteredPopup(object? sender, PointerEventArgs e) => StayOpen();
 
@@ -455,7 +581,11 @@ internal sealed class HoverController : IDisposable
                     if (_popup.Root.IsPointerOver || _frame.IsResizing)
                         StayOpen();
                     else
+                    {
+                        // As VS Code reacts to where the pointer went once the delay is over.
                         Close();
+                        RestAt(_textView.IsPointerOver ? _pointer : null);
+                    }
                 }),
             null,
             s_hidingDelay,
@@ -478,6 +608,20 @@ internal sealed class HoverController : IDisposable
     }
 
     private void OnClosingChange(object? sender, EventArgs e) => Close();
+
+    /// <summary>
+    /// A server started or stopped serving the document: a hover that shows its information ends, and one that waits
+    /// starts again, to ask the server that serves it now.
+    /// </summary>
+    private void OnLanguageFeaturesChanged(object? sender, EventArgs e)
+    {
+        if (_hovered is not { } waiting || _popup.IsOpen)
+            Close();
+        else if (waiting.FromKeyboard)
+            Start(waiting.Offset, fromKeyboard: true);
+        else
+            StartDelayed(waiting.Offset);
+    }
 
     /// <summary>
     /// The offset of the character under <paramref name="point"/>, in the shown part of its line, or of a line's end
@@ -600,6 +744,29 @@ internal sealed class HoverController : IDisposable
         /// <summary>Cancels the server's request and the reading of its answer.</summary>
         public CancellationTokenSource Cancellation { get; } = new();
 
+        /// <summary>The timers of the wait for the pointer's hover: for asking, showing and "Loading…".</summary>
+        public ITimer[] Timers { get; set; } = [];
+
+        /// <summary>Whether its delay is over, so that what is known shows.</summary>
+        public bool IsDue { get; set; }
+
+        /// <summary>Whether the server answered, also with nothing, or failed.</summary>
+        public bool IsAnswered { get; set; }
+
+        /// <summary>The server's hover, once it answered with one and its Markdown was read; null before.</summary>
+        public IReadOnlyList<HoverBlock>? Answer { get; set; }
+
+        /// <summary>Whether the server is late: "Loading…" shows until it answers.</summary>
+        public bool IsLoading { get; set; }
+
         public bool Contains(int offset) => offset >= Range.Start && offset < Math.Max(Range.End, Range.Start + 1);
+
+        /// <summary>Stops the timers, the server's request and the reading of its answer.</summary>
+        public void Stop()
+        {
+            foreach (ITimer timer in Timers)
+                timer.Dispose();
+            Cancellation.Cancel();
+        }
     }
 }

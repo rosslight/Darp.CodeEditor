@@ -182,6 +182,12 @@ public class CodeEditor : TemplatedControl
         defaultValue: true
     );
 
+    /// <summary>Defines the <see cref="HoverDelay"/> property.</summary>
+    public static readonly StyledProperty<TimeSpan> HoverDelayProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        TimeSpan
+    >(nameof(HoverDelay), defaultValue: TimeSpan.FromMilliseconds(300), coerce: CoerceHoverDelay);
+
     /// <summary>AvaloniaEdit's editor, from the template. The editor wraps it, so that its API stays out of ours.</summary>
     private TextEditor? _part;
 
@@ -487,6 +493,18 @@ public class CodeEditor : TemplatedControl
     {
         get => GetValue(EmptySelectionClipboardProperty);
         set => SetValue(EmptySelectionClipboardProperty, value);
+    }
+
+    /// <summary>
+    /// How long the pointer rests on a character before its hover shows, VS Code's <c>editor.hover.delay</c>. The
+    /// server is asked halfway through, so that its answer can show with the diagnostics once the delay is over; while
+    /// it has not answered by three times the delay, the hover says "Loading…". Between 0 and 10 seconds, as in VS
+    /// Code. Default: 300 ms, as in VS Code.
+    /// </summary>
+    public TimeSpan HoverDelay
+    {
+        get => GetValue(HoverDelayProperty);
+        set => SetValue(HoverDelayProperty, value);
     }
 
     /// <summary>The semantic colors of the shown document, for benchmarks; null while it shows none.</summary>
@@ -802,6 +820,12 @@ public class CodeEditor : TemplatedControl
             area.Caret.Position = clicked;
         }
     }
+
+    /// <summary>A hover delay between 0 and 10 seconds, as VS Code takes it.</summary>
+    private static TimeSpan CoerceHoverDelay(AvaloniaObject editor, TimeSpan delay) =>
+        delay < TimeSpan.Zero ? TimeSpan.Zero
+        : delay > TimeSpan.FromSeconds(10) ? TimeSpan.FromSeconds(10)
+        : delay;
 
     /// <summary>Whether a theme variant is dark: Dark, or one that inherits from it.</summary>
     private static bool IsDark(ThemeVariant variant)

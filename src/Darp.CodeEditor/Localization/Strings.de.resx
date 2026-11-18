@@ -69,4 +69,8 @@
   <data name="SearchTimedOut" xml:space="preserve">
     <value>Die Suche hat nach {0:0.#} s angehalten: Treffer können fehlen, und „Alle ersetzen“ ist aus.</value>
   </data>
+  <!-- Hover, diagnostics, completion and signature help. -->
+  <data name="HoverLoading" xml:space="preserve">
+    <value>Wird geladen…</value>
+  </data>
 </root>

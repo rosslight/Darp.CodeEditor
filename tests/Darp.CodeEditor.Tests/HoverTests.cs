@@ -452,17 +452,98 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task The_server_is_asked_halfway_through_the_hover_delay_and_its_hover_shows_once_the_delay_is_over() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            const string text = "one two";
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+            editor.HoverDelay.ShouldBe(TimeSpan.FromMilliseconds(300));
+
+            window.MoveMouse(window.PointAt(1));
+            time.Advance(TimeSpan.FromMilliseconds(149));
+            window.Layout();
+            fake.LinesStartingWith("hover ").ShouldBeEmpty();
+            time.Advance(TimeSpan.FromMilliseconds(1));
+            await fake.WaitForAsync("hover ");
+            // Answered, but the delay is not over: nothing shows yet.
+            await Task.Delay(TimeSpan.FromMilliseconds(300), TestContext.Current.CancellationToken);
+            window.Render();
+            Popup(window).ShouldBeNull();
+
+            time.Advance(TimeSpan.FromMilliseconds(150));
+
+            PopupFrame popup = await WaitForPopupAsync(window, "one is a word in");
+            Texts(popup).ShouldContain($"{text} (echo)");
+        });
+
+    [Fact]
+    public Task The_wait_starts_again_on_another_character_and_Loading_shows_while_the_server_is_late() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer("--no-diagnostics");
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "slow");
+            var editor = new CodeEditor { Document = document, HoverDelay = TimeSpan.FromSeconds(1) };
+            using var window = new EditorWindow(editor);
+            await server.StartAsync();
+
+            // Within a character, the wait goes on; on another one, it starts again.
+            window.MoveMouse(window.PointAt(1));
+            time.Advance(TimeSpan.FromMilliseconds(300));
+            window.MoveMouse(window.PointAt(1) + new Point(1, 0));
+            time.Advance(TimeSpan.FromMilliseconds(100));
+            window.MoveMouse(window.PointAt(2));
+            time.Advance(TimeSpan.FromMilliseconds(499));
+            window.Layout();
+            fake.LinesStartingWith("hover ").ShouldBeEmpty();
+            time.Advance(TimeSpan.FromMilliseconds(1));
+            string id = (await fake.WaitForAsync("hover "))["hover ".Length..].Split(' ')[0];
+
+            // The server never answers for "slow": at three times the delay, the hover says so.
+            time.Advance(TimeSpan.FromMilliseconds(2499));
+            window.Render();
+            Popup(window).ShouldBeNull();
+            time.Advance(TimeSpan.FromMilliseconds(1));
+            PopupFrame popup = await WaitForPopupAsync(window, "Loading…");
+            Texts(popup).ShouldBe(["Loading…"]);
+
+            window.Press(Key.Escape);
+            Popup(window).ShouldBeNull();
+            await fake.WaitForAsync($"cancel {id}");
+            fake.LinesStartingWith("hover ").Count.ShouldBe(1);
+        });
+
+    [Fact]
+    public Task The_hover_delay_is_between_0_and_10_seconds() =>
+        _ui.Run(() =>
+        {
+            var editor = new CodeEditor { HoverDelay = TimeSpan.FromMilliseconds(-5) };
+            editor.HoverDelay.ShouldBe(TimeSpan.Zero);
+            editor.HoverDelay = TimeSpan.FromMinutes(1);
+            editor.HoverDelay.ShouldBe(TimeSpan.FromSeconds(10));
+        });
+
+    [Fact]
     public Task Escape_ends_a_hover_that_still_waits_for_its_server() =>
         _ui.Run(async () =>
         {
             // Without diagnostics, nothing shows until the server answers, and it never answers for "slow". The clock
             // stands still, so that no hang limit cancels the request instead.
             var fake = new FakeServer("--no-diagnostics");
-            await using var server = new LanguageServer(fake.Options with { TimeProvider = new ManualTime() });
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "slow");
             using var window = new EditorWindow(new CodeEditor { Document = document });
             await server.StartAsync();
             window.MoveMouse(window.PointAt(1));
+            time.Advance(TimeSpan.FromMilliseconds(300));
             string id = (await fake.WaitForAsync("hover "))["hover ".Length..].Split(' ')[0];
             Popup(window).ShouldBeNull();
 
@@ -478,11 +559,12 @@ public sealed class HoverTests(UiFixture ui)
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
-            await using var server = new LanguageServer(fake.Options with { TimeProvider = new ManualTime() });
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "word");
             using var window = new EditorWindow(new CodeEditor { Document = document });
             await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
-            await HoverAsync(window, 1, "word is a word in");
+            await HoverAsync(window, 1, "word is a word in", time);
 
             // The process crashes: its information and its diagnostics' messages are outdated.
             using CodeDocument crash = server.CreateDocument(FakeServer.Commands, "exit 3");
@@ -686,12 +768,13 @@ public sealed class HoverTests(UiFixture ui)
 
     /// <summary>
     /// Moves the pointer away, then rests it on the character at <paramref name="offset"/>, and waits for the popup
-    /// with <paramref name="text"/>.
+    /// with <paramref name="text"/>; on the clock of <paramref name="time"/>, when given, for the hover's delay.
     /// </summary>
-    private static Task<PopupFrame> HoverAsync(EditorWindow window, int offset, string text)
+    private static Task<PopupFrame> HoverAsync(EditorWindow window, int offset, string text, ManualTime? time = null)
     {
         window.MoveMouse(window.PointAt(offset) + new Point(0, 200));
         window.MoveMouse(window.PointAt(offset));
+        time?.Advance(window.Editor.HoverDelay);
         return WaitForPopupAsync(window, text);
     }
 

@@ -69,4 +69,8 @@
   <data name="SearchTimedOut" xml:space="preserve">
     <value>The search stopped after {0:0.#} s: matches may be missing, and Replace All is off.</value>
   </data>
+  <!-- Hover, diagnostics, completion and signature help. -->
+  <data name="HoverLoading" xml:space="preserve">
+    <value>Loading…</value>
+  </data>
 </root>
