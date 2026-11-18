@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
@@ -474,10 +475,11 @@ public sealed class CompletionTests(UiFixture ui)
             using var window = new EditorWindow(new CodeEditor { Document = document });
             await OpenAsync(window, length);
 
-            // The caret moves on in the line's collapsed tail, where only code puts it, and the list filters again;
-            // Enter, while that filter runs, checks the item against the text typed.
+            // End moves the caret on in the line's collapsed tail, and the list filters again; Enter, while that filter
+            // runs, checks the item against the text typed.
             long before = GC.GetAllocatedBytesForCurrentThread();
-            window.Editor.Selection = new TextSelection(length + 1);
+            PressAlone(window, Key.End);
+            window.Editor.Selection.ShouldBe(new TextSelection(length + 1));
             long moving = GC.GetAllocatedBytesForCurrentThread() - before;
             before = GC.GetAllocatedBytesForCurrentThread();
             PressAlone(window, Key.Enter);
@@ -745,17 +747,59 @@ public sealed class CompletionTests(UiFixture ui)
             var fake = new FakeServer();
             await using var server = new LanguageServer(fake.Options);
             using CodeDocument answer = await SetCompletionAsync(server, fake, Items("Console"));
-            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, " Co");
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "\n Co");
             using var window = new EditorWindow(new CodeEditor { Document = document });
-            await OpenAsync(window, 3);
+            await OpenAsync(window, 4);
 
-            // As another editor of the document types at the line's start: the caret moves with the text.
+            // As another editor of the document types on the line before: the caret stays on its line and column.
             document.Replace(new TextRange(0, 0), "x");
 
-            (await fake.WaitForAsync("completion ", 2)).ShouldEndWith(" 1 - 4");
+            (await fake.WaitForAsync("completion ", 2)).ShouldEndWith(" 1 - 5");
             (await WaitForLabelsAsync(window)).ShouldBe(["Console"]);
             window.Press(Key.Enter);
-            document.Text.ShouldBe("x Console");
+            document.Text.ShouldBe("x\n Console");
+        });
+
+    [Fact]
+    public Task A_caret_move_that_is_not_the_keyboards_ends_completion_as_in_VS_Code() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("Console", "Convert"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, " Co");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+
+            // A cursor key filters again; the app's code moving the caret ends completion.
+            await OpenAsync(window, 3);
+            window.Press(Key.Left);
+            (await WaitForLabelsAsync(window)).ShouldBe(["Console", "Convert"]);
+            editor.Selection = new TextSelection(3);
+            List(window).ShouldBeNull();
+
+            // Another editor of the document types at the line's start: the caret moves with the text.
+            await OpenAsync(window, 3);
+            document.Replace(new TextRange(0, 0), "x");
+            List(window).ShouldBeNull();
+
+            // An undo.
+            await OpenAsync(window, 4);
+            window.Type("n");
+            await WaitForLabelsAsync(window);
+            window.Press(Key.Z, EditorWindow.Command);
+            document.Text.ShouldBe("x Co");
+            List(window).ShouldBeNull();
+
+            // A paste, which asks nothing either.
+            await window.Window.Clipboard.ShouldNotBeNull().SetTextAsync("n");
+            await OpenAsync(window, 4);
+            int asked = fake.LinesStartingWith("completion ").Count;
+            window.Press(Key.V, EditorWindow.Command);
+            await Wait.UntilAsync(() => document.Text == "x Con");
+            List(window).ShouldBeNull();
+            await BarrierAsync(server, fake);
+            fake.LinesStartingWith("completion ").Count.ShouldBe(asked);
         });
 
     [Fact]

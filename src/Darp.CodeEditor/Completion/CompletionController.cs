@@ -56,7 +56,8 @@ namespace Darp.CodeEditor.Completion;
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends completion, for every reason it ends: Escape, the caret leaving the line or moving back
-/// past the word, a click or drag that moves the caret, a selection, the editor becoming read-only, the list scrolling
+/// past the word, a caret move that is not the keyboard's, as by a click or drag, an undo, a paste, the app's code or
+/// another editor's edit before it, a selection, the editor becoming read-only, the list scrolling
 /// out of view, the editor losing the keyboard focus, a server that starts or stops serving the document, new colors,
 /// the list running out of matches as above, and the editor no longer showing the document. Ending it cancels the
 /// request still under way with <c>$/cancelRequest</c>, and so does a newer request; a late answer is dropped.
@@ -1069,17 +1070,18 @@ internal sealed class CompletionController : IDisposable
     }
 
     /// <summary>
-    /// A caret moved by the keyboard filters, asks again or ends completion; one moved by the pointer, as by a click,
-    /// ends it, as in VS Code.
+    /// A caret moved by the keyboard, by typing or a cursor key, filters, asks again or ends completion; any other move
+    /// ends it, as VS Code's <c>SuggestModel</c> ends it for a caret move that is not the keyboard's: by the pointer, as
+    /// by a click, by an undo or a paste, by the app's code, or with the text that another editor changed before it.
     /// </summary>
     private void OnCaretPositionChanged(object? sender, EventArgs e)
     {
         if (_quiet is { } quiet && _textArea.Caret.Offset != quiet.End)
             _quiet = null;
-        if (_editor.PointerMovesCaret)
-            Close();
-        else
+        if (_editor.KeyboardMovesCaret)
             Update();
+        else
+            Close();
     }
 
     /// <summary>
@@ -1088,6 +1090,9 @@ internal sealed class CompletionController : IDisposable
     /// </summary>
     private void OnBufferChanging(object? sender, DocumentChangeEventArgs e)
     {
+        // An undo or a redo, which moves the caret once the text is back, as VS Code's cursor change for them.
+        if (!_buffer.UndoStack.AcceptChanges)
+            Close();
         if (_quiet is { } quiet)
         {
             _quiet =

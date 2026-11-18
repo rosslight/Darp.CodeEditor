@@ -329,7 +329,15 @@ public class CodeEditor : TemplatedControl
         [
             new(ApplicationCommands.Copy, (_, _) => _helpers?.Copy()),
             new(ApplicationCommands.Cut, (_, _) => _helpers?.Cut()),
-            new(ApplicationCommands.Paste, (_, _) => _helpers?.Paste()),
+            // A paste moves the caret as code does, not as the keyboard, as in VS Code.
+            new(
+                ApplicationCommands.Paste,
+                (_, _) =>
+                {
+                    KeyboardMovesCaret = false;
+                    _helpers?.Paste();
+                }
+            ),
         ];
         // Ahead of AvaloniaEdit's own keys, which its text area handles as they bubble, and of its typed text.
         AddHandler(KeyDownEvent, OnKeyDownTunnel, RoutingStrategies.Tunnel);
@@ -339,6 +347,20 @@ public class CodeEditor : TemplatedControl
         TrackPointer(PointerPressedEvent);
         TrackPointer(PointerMovedEvent);
         TrackPointer(PointerReleasedEvent);
+        // The keyboard moves the caret until the key or the typed text has bubbled back up through the editor, as the
+        // text area handles them on their way.
+        AddHandler(
+            KeyDownEvent,
+            (_, _) => KeyboardMovesCaret = false,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true
+        );
+        AddHandler(
+            TextInputEvent,
+            (_, _) => KeyboardMovesCaret = false,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true
+        );
 
         // The caret that the text area moves while it handles a pointer event moves by the pointer: tunneling, the
         // event reaches the editor before the text area, and bubbling after it.
@@ -515,6 +537,13 @@ public class CodeEditor : TemplatedControl
     /// event. Completion and signature help end then, as in VS Code.
     /// </summary>
     internal bool PointerMovesCaret { get; private set; }
+
+    /// <summary>
+    /// Whether the caret moves by the keyboard now, as VS Code's cursor source <c>keyboard</c>: while the editor routes
+    /// typed text, or a key in the text that no command of the keymap takes, other than a cursor move by words; not
+    /// while it pastes. Completion ends on any other caret move, as in VS Code.
+    /// </summary>
+    internal bool KeyboardMovesCaret { get; private set; }
 
     /// <summary>
     /// Scrolls <paramref name="range"/> into view: not at all when it is visible, centered when it is not. A range
@@ -994,13 +1023,25 @@ public class CodeEditor : TemplatedControl
         )
             return;
         bool closedHover = CloseHoverOnKey(e);
+        KeyboardMovesCaret = false;
         if (RunKeymap(e))
             e.Handled = true;
         else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && (Dismiss() || closedHover))
             e.Handled = true;
         else if (_part is not { TextArea.IsFocused: true })
             return;
-        else if (
+        else
+            OnTextKeyDown(e);
+    }
+
+    /// <summary>
+    /// A key in the text that the keymap left: the keys of completion's list, of signature help, of a snippet's stops
+    /// and of the editing helpers, and then AvaloniaEdit's. They move the caret by the keyboard.
+    /// </summary>
+    private void OnTextKeyDown(KeyEventArgs e)
+    {
+        KeyboardMovesCaret = true;
+        if (
             _completion?.OnKeyDown(e) == true
             || _signatureHelp?.OnKeyDown(e) == true
             || _snippets?.OnKeyDown(e) == true
@@ -1130,6 +1171,8 @@ public class CodeEditor : TemplatedControl
             or CodeEditorCommands.CursorWordLeftSelect
             or CodeEditorCommands.CursorWordEndRight
             or CodeEditorCommands.CursorWordEndRightSelect when inText:
+                // A cursor move by the keyboard, as VS Code's word moves are.
+                KeyboardMovesCaret = true;
                 _helpers?.MoveWord(
                     left: command is CodeEditorCommands.CursorWordLeft or CodeEditorCommands.CursorWordLeftSelect,
                     select: command
@@ -1183,6 +1226,7 @@ public class CodeEditor : TemplatedControl
     {
         if (_part is not { TextArea.IsFocused: true })
             return;
+        KeyboardMovesCaret = true;
         _completion?.OnTextInput(e);
         if (!e.Handled)
             _helpers?.Type(e);
