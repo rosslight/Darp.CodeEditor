@@ -4,7 +4,7 @@ namespace Darp.CodeEditor;
 
 /// <summary>
 /// What kind of text a document holds: its TextMate grammar for colors and its editing rules (comments, brackets,
-/// auto-closing pairs, indentation rules). Language servers are not part of it: a server creates the documents it
+/// auto-closing pairs, indentation rules, rules for Enter). Language servers are not part of it: a server creates the documents it
 /// serves, see <see cref="LanguageServer.CreateDocument"/>.
 /// </summary>
 /// <remarks>
@@ -37,7 +37,13 @@ public sealed class CodeLanguage
 
     private static readonly Lazy<CodeLanguage> s_xml = new(() => BuiltIn("xml", QuickSuggestions.Default));
 
-    private static readonly Lazy<CodeLanguage> s_yaml = new(() => BuiltIn("yaml", s_alsoInStrings));
+    /// <summary>
+    /// YAML indents by brackets and the rules for Enter, not by its indentation rules, as VS Code's YAML extension sets
+    /// <c>editor.autoIndent</c> to <c>advanced</c> for the language.
+    /// </summary>
+    private static readonly Lazy<CodeLanguage> s_yaml = new(() =>
+        BuiltIn("yaml", s_alsoInStrings, AutoIndent.Advanced)
+    );
 
     /// <summary>Creates a language from the files of a VS Code extension, and starts loading them.</summary>
     /// <param name="id">The language identifier that the language server receives, such as <c>toml</c>.</param>
@@ -88,10 +94,23 @@ public sealed class CodeLanguage
     /// </summary>
     public QuickSuggestions QuickSuggestions { get; init; } = QuickSuggestions.Default;
 
+    /// <summary>
+    /// How far the editor indents by itself in the language's documents, as VS Code's <c>editor.autoIndent</c> for the
+    /// language. Default: <see cref="AutoIndent.Full"/>, VS Code's. <see cref="Yaml"/> takes
+    /// <see cref="AutoIndent.Advanced"/>, as VS Code's YAML extension sets it: its indentation rules don't apply. To
+    /// override a built-in language's, create the language from its files with another value, as for
+    /// <see cref="QuickSuggestions"/>.
+    /// </summary>
+    public AutoIndent AutoIndent { get; init; } = AutoIndent.Full;
+
     /// <summary>The grammar and editing rules, once read; <see cref="LoadedLanguage.None"/> when a file failed.</summary>
     internal Task<LoadedLanguage> Loaded { get; }
 
-    private static CodeLanguage BuiltIn(string id, QuickSuggestions quickSuggestions) =>
+    private static CodeLanguage BuiltIn(
+        string id,
+        QuickSuggestions quickSuggestions,
+        AutoIndent autoIndent = AutoIndent.Full
+    ) =>
         new(
             id,
             new Uri($"avares://Darp.CodeEditor/Languages/{id}.tmLanguage.json"),
@@ -99,6 +118,7 @@ public sealed class CodeLanguage
         )
         {
             QuickSuggestions = quickSuggestions,
+            AutoIndent = autoIndent,
         };
 
     private LoadedLanguage Load()

@@ -16,9 +16,10 @@ namespace Darp.CodeEditor.Editing;
 
 /// <summary>
 /// The editing helpers of one editor's view of a document, from the language's editing rules, as VS Code applies
-/// them: Enter indents the new line, typing outdents a line that comes to match the decrease pattern, opening
-/// characters bring their closing ones, which are typed over and deleted with them, and opening characters surround a
-/// selection. Ctrl+/ toggles comments. Tab and Shift+Tab indent and outdent as VS Code's do, with the document's
+/// them, as far as the language's <see cref="CodeLanguage.AutoIndent"/> goes: Enter indents the new line by the rules
+/// for Enter, the brackets and the indentation rules, typing outdents a line that comes to match the decrease pattern,
+/// opening characters bring their closing ones, which are typed over and deleted with them, and opening characters
+/// surround a selection. Ctrl+/ toggles comments. Tab and Shift+Tab indent and outdent as VS Code's do, with the document's
 /// indentation; Tab without a selection is AvaloniaEdit's.
 /// </summary>
 /// <remarks>
@@ -1090,33 +1091,33 @@ internal sealed class EditingHelpers : IDisposable
     }
 
     /// <summary>
-    /// What Enter inserts at <paramref name="column"/> of a line, as VS Code decides it from the brackets and the
-    /// indentation rules. Between a pair of brackets, the caret goes on a line indented one level more, and the
-    /// closing bracket on the next line; after an opening bracket, the new line is indented one level more. Otherwise
-    /// the indentation rules decide; without them, the new line keeps the line's indentation.
+    /// What Enter inserts at <paramref name="column"/> of a line, as VS Code's <c>_enter</c> decides it, as far as the
+    /// language's <see cref="CodeLanguage.AutoIndent"/> goes: the language's rules for Enter (<see cref="EnterAction"/>),
+    /// then its brackets, then its indentation rules. Without any of them, the new line keeps the line's indentation up
+    /// to the caret.
     /// </summary>
     private NewLine NewLineAt(DocumentLine line, string text, int column, string lineBreak)
     {
+        AutoIndent autoIndent = _document.Language.AutoIndent;
+        if (autoIndent == AutoIndent.None)
+            return new NewLine(lineBreak, lineBreak.Length, 0);
         LanguageConfiguration configuration = Configuration;
         Indenting indenting = new(_document.Indentation);
+        // VS Code's getIndentationAtPosition: the line's indentation, up to the caret.
+        string indentation = text[..Math.Min(column, LeadingWhitespace(text))];
         string before = text[..column];
         string after = text[column..];
-        string indentation = before[..LeadingWhitespace(before)];
+        if (autoIndent >= AutoIndent.Brackets)
+        {
+            string previous = line.PreviousLine is { } above ? Buffer.GetText(above) : "";
+            if (EnterActionAt(configuration, autoIndent, previous, before, after) is { } action)
+                return NewLineFor(action, indentation, indenting, lineBreak);
+        }
         if (
-            before.Length > 0
-            && after.Length > 0
-            && configuration.Brackets.Any(b => EndsWithOpening(before, b.Open) && StartsWithClosing(after, b.Close))
+            autoIndent == AutoIndent.Full
+            && configuration.IndentationRules is { } rules
+            && IndentByRules(rules, line, before, after) is { } byRules
         )
-        {
-            string inner = lineBreak + indenting.Shift(indentation);
-            return new NewLine(inner + lineBreak + indenting.Normalize(indentation), inner.Length, 0);
-        }
-        if (before.Length > 0 && configuration.Brackets.Any(b => EndsWithOpening(before, b.Open)))
-        {
-            string inner = lineBreak + indenting.Shift(indentation);
-            return new NewLine(inner, inner.Length, 0);
-        }
-        if (configuration.IndentationRules is { } rules && IndentByRules(rules, line, before, after) is { } byRules)
         {
             // The new line replaces the indentation of the text it takes along; on a line of whitespace only, all of
             // the rest.
@@ -1127,6 +1128,66 @@ internal sealed class EditingHelpers : IDisposable
         }
         string kept = lineBreak + indenting.Normalize(indentation);
         return new NewLine(kept, kept.Length, 0);
+    }
+
+    /// <summary>
+    /// What Enter does by the language's rules for Enter and its brackets, VS Code's <c>OnEnterSupport.onEnter</c>: the
+    /// first rule whose expressions match the texts, with <see cref="AutoIndent.Advanced"/>; between an opening and a
+    /// closing bracket, indent and outdent; after an opening bracket, indent. Null when none applies.
+    /// </summary>
+    private static EnterAction? EnterActionAt(
+        LanguageConfiguration configuration,
+        AutoIndent autoIndent,
+        string previous,
+        string before,
+        string after
+    )
+    {
+        if (autoIndent >= AutoIndent.Advanced)
+        {
+            foreach (OnEnterRule rule in configuration.OnEnterRules)
+            {
+                if (rule.Matches(previous, before, after))
+                    return rule.Action;
+            }
+        }
+        if (
+            before.Length > 0
+            && after.Length > 0
+            && configuration.Brackets.Any(b => EndsWithOpening(before, b.Open) && StartsWithClosing(after, b.Close))
+        )
+            return new EnterAction(IndentAction.IndentOutdent, "", 0);
+        if (before.Length > 0 && configuration.Brackets.Any(b => EndsWithOpening(before, b.Open)))
+            return new EnterAction(IndentAction.Indent, "", 0);
+        return null;
+    }
+
+    /// <summary>
+    /// The new line for <paramref name="action"/> after a line indented by <paramref name="indentation"/> up to the
+    /// caret, as VS Code's <c>getEnterAction</c> and <c>_enter</c> make it: the indentation without the characters the
+    /// action removes, one level more or less as it says, and the text it appends. Between brackets, the text after
+    /// the caret goes on a line of its own, at the indentation.
+    /// </summary>
+    private static NewLine NewLineFor(EnterAction action, string indentation, Indenting indenting, string lineBreak)
+    {
+        if (action.RemoveText > 0)
+            indentation = indentation[..Math.Max(0, indentation.Length - action.RemoveText)];
+        // VS Code indents by a tab before the appended text, which the document's indentation then turns into its own.
+        string append = action.Indent switch
+        {
+            IndentAction.Indent => "\t" + action.AppendText,
+            IndentAction.IndentOutdent when action.AppendText.Length == 0 => "\t",
+            _ => action.AppendText,
+        };
+        if (action.Indent == IndentAction.IndentOutdent)
+        {
+            string inner = lineBreak + indenting.Normalize(indentation + append);
+            return new NewLine(inner + lineBreak + indenting.Normalize(indentation), inner.Length, 0);
+        }
+        if (action.Indent == IndentAction.Outdent)
+            indentation = indenting.Unshift(indentation);
+        string inserted = lineBreak + indenting.Normalize(indentation + append);
+        return new NewLine(inserted, inserted.Length, 0);
     }
 
     /// <summary>
@@ -1159,13 +1220,13 @@ internal sealed class EditingHelpers : IDisposable
 
     /// <summary>
     /// Outdents the caret's line when the character just typed made it match the language's decrease pattern, as VS
-    /// Code does: to the indentation that the lines above give it, in the undo step of the character. When matching
-    /// runs out of time, the line stays as typed.
+    /// Code does with <see cref="AutoIndent.Full"/>: to the indentation that the lines above give it, in the undo step
+    /// of the character. When matching runs out of time, the line stays as typed.
     /// </summary>
     /// <returns>Whether the line's indentation changed.</returns>
     private bool Outdent()
     {
-        if (Configuration.IndentationRules is not { } rules)
+        if (_document.Language.AutoIndent < AutoIndent.Full || Configuration.IndentationRules is not { } rules)
             return false;
         int caret = _textArea.Caret.Offset;
         DocumentLine line = Buffer.GetLineByOffset(caret);
@@ -1188,7 +1249,11 @@ internal sealed class EditingHelpers : IDisposable
     /// </summary>
     private bool WouldOutdent(char typed)
     {
-        if (Configuration.IndentationRules is not { } rules || _textArea.Selection is RectangleSelection)
+        if (
+            _document.Language.AutoIndent < AutoIndent.Full
+            || Configuration.IndentationRules is not { } rules
+            || _textArea.Selection is RectangleSelection
+        )
             return false;
         int caret = _textArea.Caret.Offset;
         DocumentLine line = Buffer.GetLineByOffset(caret);

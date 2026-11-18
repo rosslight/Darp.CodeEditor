@@ -60,8 +60,9 @@ namespace Darp.CodeEditor;
 /// 3,000 characters and collapses the rest into "...", which can't be edited. Editing follows the language's rules, as
 /// VS Code applies them: the bracket next to the caret and its match are boxed, pairs close as you type, typing their
 /// closing character steps over it and Backspace deletes an empty pair, opening characters surround the selection, new
-/// lines are indented by the brackets and the indentation rules, a line that comes to match the decrease rule outdents,
-/// and comments toggle with the line comment, or else the block comment. Brackets in strings and comments don't match,
+/// lines are indented by the language's rules for Enter, the brackets and the indentation rules, and a line that comes
+/// to match the decrease rule outdents, as far as the language's <see cref="CodeLanguage.AutoIndent"/> goes, and
+/// comments toggle with the line comment, or else the block comment. Brackets in strings and comments don't match,
 /// and pairs that the language excludes there don't close. In a rectangle selection, pairs close, step over and delete,
 /// and opening characters surround, on every line; Enter breaks only the caret's line and ends the rectangle. Tab and
 /// new lines indent by the document's <see cref="CodeDocument.Indentation"/>. Undo takes back typing in VS Code's
