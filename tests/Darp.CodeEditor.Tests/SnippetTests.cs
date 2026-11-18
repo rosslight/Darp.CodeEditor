@@ -102,7 +102,7 @@ public sealed class SnippetTests
         Stops(Render("${1:bar${2:foobar}")).ShouldBe("2:foobar|0:");
 
     [Fact]
-    public void Variables_take_their_value_or_else_their_default_and_unknown_ones_become_placeholders()
+    public void Variables_take_their_value_or_else_their_default_or_else_nothing_also_unknown_ones()
     {
         Func<string, string?> values = name => name == "TM_FILENAME" ? "a.txt" : null;
 
@@ -113,13 +113,11 @@ public sealed class SnippetTests
         Stops(unset).ShouldBe("1:default|0:");
         // A placeholder in a default that a value replaces is no stop.
         Stops(Render("${TM_FILENAME:${1:x}}", values)).ShouldBe("0:");
-        // Unknown without a default: a placeholder with its name, after the highest stop, one number per name; level
-        // by level, as VS Code finds them. With a default: the default.
-        RenderedSnippet unknown = Render("${1:$FOO} $BAR ${FOO} ${UNKNOWN:default}", values);
-        unknown.Text.ShouldBe("FOO BAR FOO default");
-        Stops(unknown).ShouldBe("1:FOO|3:FOO|2:BAR|3:FOO|0:");
-        // Also in a default, as the protocol says, where VS Code's own snippets leave it.
-        Stops(Render("${TM_SELECTED_TEXT:$FOO}", values)).ShouldBe("1:FOO|0:");
+        // Unknown: the same, as VS Code's completion inserts them.
+        RenderedSnippet unknown = Render("before-$UNRECOGNIZED-after ${1:$FOO} ${UNKNOWN:default}$0", values);
+        unknown.Text.ShouldBe("before--after  default");
+        Stops(unknown).ShouldBe("1:|0:");
+        Stops(Render("${TM_SELECTED_TEXT:$FOO}", values)).ShouldBeEmpty();
     }
 
     [Fact]
