@@ -7,7 +7,14 @@ using TextMateSharp.Grammars;
 namespace Darp.CodeEditor.Popups;
 
 /// <summary>A block of a hover: a paragraph, a code block or a line between parts.</summary>
-internal abstract record HoverBlock;
+internal abstract record HoverBlock
+{
+    /// <summary>
+    /// Whether it goes on from the block before, as a piece of a long paragraph or code block does: no space between
+    /// them.
+    /// </summary>
+    public bool Continues { get; init; }
+}
 
 /// <summary>A paragraph, a heading or a list item: text with inline styles.</summary>
 /// <param name="Spans">The text.</param>
@@ -22,6 +29,56 @@ internal sealed record HoverCode(IReadOnlyList<CodeRun> Runs) : HoverBlock;
 
 /// <summary>A line between two parts.</summary>
 internal sealed record HoverRule : HoverBlock;
+
+/// <summary>
+/// A diagnostic, as VS Code's hover shows it, in the editor's font: the icon of its severity beside its message, which
+/// keeps its line breaks, then its source and code, dimmed, the code as a link to its web page where it has one, and
+/// below them the other places it concerns, each as a link to the place where the editor can go there.
+/// </summary>
+/// <param name="Severity">Its severity, for its icon.</param>
+/// <param name="Message">Its message, or a piece of it.</param>
+/// <param name="Source">What reported it; null for none, as in a piece that more pieces follow.</param>
+/// <param name="Code">Its code; null for none.</param>
+/// <param name="CodeLink">The web page of its code; null for none.</param>
+/// <param name="Related">The other places it concerns.</param>
+/// <param name="Icon">Whether its severity's icon shows beside it, or only the room of one, beside a piece after the first.</param>
+internal sealed record HoverDiagnostic(
+    DiagnosticSeverity Severity,
+    string Message,
+    string? Source,
+    string? Code,
+    Uri? CodeLink,
+    IReadOnlyList<HoverRelated> Related,
+    HoverIcon Icon = HoverIcon.Shown
+) : HoverBlock;
+
+/// <summary>Whether a diagnostic's icon shows beside it.</summary>
+internal enum HoverIcon
+{
+    /// <summary>No icon, and no room for one, as below a heading that shows it.</summary>
+    None,
+
+    /// <summary>The icon.</summary>
+    Shown,
+
+    /// <summary>The room of the icon, beside a piece of a message after the first.</summary>
+    Room,
+}
+
+/// <summary>A place that a diagnostic concerns.</summary>
+/// <param name="Place">Where it is, as VS Code writes it: <c>file.py(3, 5): </c>.</param>
+/// <param name="Message">What it has to do with the problem.</param>
+/// <param name="Open">Goes there; null where the editor cannot, as in another document.</param>
+internal sealed record HoverRelated(string Place, string Message, Action? Open);
+
+/// <summary>
+/// The heading of the problem that a key went to, as VS Code's widget for it shows it: the icon of its severity, the
+/// document's name and which problem it is of how many.
+/// </summary>
+/// <param name="Severity">The problem's severity.</param>
+/// <param name="Name">The document's name; null for none.</param>
+/// <param name="Count">Which problem it is of how many, such as "2 of 5 problems".</param>
+internal sealed record HoverHeading(DiagnosticSeverity Severity, string? Name, string Count) : HoverBlock;
 
 /// <summary>Text with one style.</summary>
 /// <param name="Text">The text; a line break in it breaks the line.</param>
@@ -50,56 +107,68 @@ internal static class HoverBlocks
     private static readonly TimeSpan s_lineTimeLimit = TimeSpan.FromMilliseconds(50);
 
     /// <summary>
-    /// The messages of <paramref name="diagnostics"/>, each with its code, as plain text, as much of them as
-    /// <paramref name="budget"/> leaves.
+    /// <paramref name="diagnostics"/>, as VS Code's hover shows them (<see cref="HoverDiagnostic"/>):
+    /// <paramref name="open"/> makes what goes to a related place, or null where the editor cannot go there. A code's
+    /// web page is a link only when it is one, an <c>http</c> or <c>https</c> URI.
     /// </summary>
-    public static IReadOnlyList<HoverBlock> Of(IEnumerable<Diagnostic> diagnostics, HoverBudget budget)
+    public static IReadOnlyList<HoverBlock> Of(
+        IEnumerable<Diagnostic> diagnostics,
+        Func<Diagnostic, DiagnosticRelatedInformation, Action?>? open = null,
+        HoverIcon icon = HoverIcon.Shown
+    ) =>
+        [
+            .. diagnostics.Select(diagnostic => new HoverDiagnostic(
+                diagnostic.Severity,
+                diagnostic.Message,
+                diagnostic.Source,
+                diagnostic.Code,
+                diagnostic.CodeDescription is { Scheme: "http" or "https" } page ? page : null,
+                [
+                    .. diagnostic.RelatedInformation.Select(related => new HoverRelated(
+                        $"{Name(related.Uri)}({related.Start.Line}, {related.Start.Column}): ",
+                        related.Message,
+                        open?.Invoke(diagnostic, related)
+                    )),
+                ],
+                icon
+            )),
+        ];
+
+    /// <summary>The name of a document by its URI, as VS Code's <c>basename</c> takes it: the last part of its path.</summary>
+    public static string Name(Uri uri)
     {
-        var blocks = new List<HoverBlock>();
-        foreach (Diagnostic diagnostic in diagnostics)
-        {
-            // Cut before it is put together: the work is bounded by the budget, not by the server's message.
-            string? text = diagnostic.Code is { } code
-                ? budget.Take(diagnostic.Message, " (", code, ")")
-                : budget.Take(diagnostic.Message);
-            if (text is null)
-                break;
-            blocks.Add(new HoverParagraph([new HoverSpan(text)]));
-        }
-        return budget.Fit(blocks);
+        string path = uri.IsFile ? uri.LocalPath : Uri.UnescapeDataString(uri.AbsolutePath);
+        return Path.GetFileName(path.TrimEnd('/', '\\')) is { Length: > 0 } name ? name : path;
     }
 
     /// <summary>
-    /// The server's hover, its parts apart, as much of it as <paramref name="budget"/> leaves: Markdown with its code
-    /// blocks highlighted by <paramref name="grammar"/>, and plain text as it is. Off the UI thread: tokenizing a code
-    /// block takes the grammar from the background highlighter for a line at a time. Reading stops between lines and
-    /// paragraphs once <paramref name="cancellationToken"/> is cancelled, as the hover is no longer needed.
+    /// The server's hover, its parts apart, all of it: Markdown with its code blocks highlighted by
+    /// <paramref name="grammar"/>, and plain text as it is. Off the UI thread: tokenizing a code block takes the grammar
+    /// from the background highlighter for a line at a time. Reading stops between lines and paragraphs once
+    /// <paramref name="cancellationToken"/> is cancelled, as the hover is no longer needed.
     /// </summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public static IReadOnlyList<HoverBlock> Of(
         HoverInfo hover,
         TextMateGrammar? grammar,
-        HoverBudget budget,
         CancellationToken cancellationToken
     )
     {
         var blocks = new List<HoverBlock>();
         foreach (HoverText part in hover.Contents)
         {
-            if (budget.Take(part.Text) is not { } text)
-                break;
             if (blocks.Count > 0)
                 blocks.Add(new HoverRule());
             if (part.IsMarkdown)
             {
                 blocks.AddRange(
-                    Markdown.Parse(text, code => Highlight(code, grammar, cancellationToken), cancellationToken)
+                    Markdown.Parse(part.Text, code => Highlight(code, grammar, cancellationToken), cancellationToken)
                 );
             }
             else
-                blocks.Add(new HoverParagraph([new HoverSpan(text.Trim())]));
+                blocks.Add(new HoverParagraph([new HoverSpan(part.Text.Trim())]));
         }
-        return budget.Fit(blocks);
+        return blocks;
     }
 
     /// <summary>
@@ -154,18 +223,18 @@ internal static class HoverBlocks
 }
 
 /// <summary>
-/// How much a hover shows, so that the UI thread builds and lays it out within a frame: at most
-/// <see cref="MaxCharacters"/> characters on <see cref="MaxLines"/> lines, in <see cref="MaxRuns"/> runs, its parts in
-/// order. The text is cut where any of them runs out, and "…" marks the cut. The hover scrolls; the limits let a long
-/// signature, such as Python's <c>subprocess.run</c> with about 35 lines and 250 runs, show with its documentation.
+/// How much of a hover's content the UI thread builds and lays out at a time, so that each part takes a frame at most:
+/// <see cref="MaxCharacters"/> characters on <see cref="MaxLines"/> lines, in <see cref="MaxRuns"/> runs. A hover shows
+/// all of its content, as VS Code's does: the first part as it opens, the next parts in the frames after it, and a block
+/// larger than a part in pieces, each going on from the one before. A long signature, such as Python's
+/// <c>subprocess.run</c> with about 35 lines and 250 runs, fits a part with its documentation.
 /// </summary>
 /// <remarks>
 /// The UI thread's cost follows the runs, the pieces of text of one style or one color that it builds and shapes one by
-/// one, more than the characters: about 10 µs a run and 1 µs a character. The hover benchmark's largest hover, its frame
-/// included, took 12.3 ms with these limits and 7.8 ms with the earlier 2,000 characters, 50 lines and 250 runs. The text
-/// is cut before it is read, which bounds the work in the background too, and what is read is cut by its runs.
+/// one, more than the characters: about 10 µs a run and 1 µs a character. The hover benchmark's largest part, its frame
+/// included, takes about 13 ms with these limits.
 /// </remarks>
-internal sealed class HoverBudget
+internal static class HoverParts
 {
     public const int MaxCharacters = 5_000;
 
@@ -173,95 +242,203 @@ internal sealed class HoverBudget
 
     public const int MaxRuns = 500;
 
-    private int _characters = MaxCharacters;
-    private int _lines = MaxLines;
-    private int _runs = MaxRuns;
+    /// <summary>
+    /// <paramref name="block"/> in pieces of at most a part each: a code block between its lines, a paragraph that is
+    /// no list item between its lines, or within a line too long for a part, after a space where there is one. Each
+    /// piece after the first goes on from the one before. Other blocks, and blocks that fit, stay whole.
+    /// </summary>
+    public static IEnumerable<HoverBlock> Split(HoverBlock block)
+    {
+        switch (block)
+        {
+            case HoverCode code when !Fits(Size(code)):
+                return Pieces(
+                    code.Runs.Select(run => (run.Text, run)),
+                    (runs, first) =>
+                        new HoverCode([.. runs.Select(r => r.Run with { Text = r.Text })])
+                        {
+                            Continues = !first || code.Continues,
+                        }
+                );
+            case HoverDiagnostic diagnostic when !Fits(Size(diagnostic)):
+                // The message in pieces, the icon beside the first, its source, code and places after the last.
+                List<HoverBlock> pieces =
+                [
+                    .. Pieces(
+                        [(diagnostic.Message, 0)],
+                        (texts, first) =>
+                            new HoverDiagnostic(
+                                diagnostic.Severity,
+                                string.Concat(texts.Select(t => t.Text)),
+                                null,
+                                null,
+                                null,
+                                [],
+                                first || diagnostic.Icon == HoverIcon.None ? diagnostic.Icon : HoverIcon.Room
+                            )
+                            {
+                                Continues = !first || diagnostic.Continues,
+                            }
+                    ),
+                ];
+                pieces[^1] = (HoverDiagnostic)pieces[^1] with
+                {
+                    Source = diagnostic.Source,
+                    Code = diagnostic.Code,
+                    CodeLink = diagnostic.CodeLink,
+                    Related = diagnostic.Related,
+                };
+                return pieces;
+            case HoverParagraph { Marker: null } paragraph when !Fits(Size(paragraph)):
+                return Pieces(
+                    paragraph.Spans.Select(span => (span.Text, span)),
+                    (spans, first) =>
+                        new HoverParagraph([.. spans.Select(s => s.Run with { Text = s.Text })], paragraph.Level)
+                        {
+                            Continues = !first || paragraph.Continues,
+                        }
+                );
+            default:
+                return [block];
+        }
+    }
 
     /// <summary>
-    /// The start of a part of a hover, on lines of its own, that the characters and lines left allow, with "…" at its
-    /// end when it was cut; null when nothing is left. The part is <paramref name="pieces"/> one after another, and each
-    /// is read only as far as it is kept, so the work is bounded by the budget, not by the text. Every piece of a
-    /// hover's text passes here before anything else reads it.
+    /// The size of <paramref name="block"/> as a part counts it: its characters, lines and runs, a list item's marker
+    /// as a run.
     /// </summary>
-    /// <remarks>
-    /// Lines break at <c>\r\n</c>, <c>\n</c> and <c>\r</c>, as everywhere in the library, and also where the layout of
-    /// text breaks them: at a vertical tab, a form feed, and the Unicode line and paragraph separators. A cut never
-    /// splits a surrogate pair.
-    /// </remarks>
-    public string? Take(params ReadOnlySpan<string> pieces)
+    public static (int Characters, int Lines, int Runs) Size(HoverBlock block)
     {
-        if (_characters <= 0 || _lines <= 0)
-            return null;
-        var kept = new StringBuilder();
+        switch (block)
+        {
+            case HoverParagraph paragraph:
+                (int characters, int lines) = Count(paragraph.Spans.Select(span => span.Text));
+                return (characters, lines, paragraph.Spans.Count + (paragraph.Marker is null ? 0 : 1));
+            case HoverCode code:
+                (characters, lines) = Count(code.Runs.Select(run => run.Text));
+                return (characters, lines, code.Runs.Count);
+            case HoverDiagnostic diagnostic:
+                (characters, lines) = Count([
+                    diagnostic.Message,
+                    diagnostic.Source ?? "",
+                    diagnostic.Code ?? "",
+                    .. diagnostic.Related.SelectMany(related => (string[])[related.Place, related.Message]),
+                ]);
+                return (characters, lines + diagnostic.Related.Count, 5 + 2 * diagnostic.Related.Count);
+            default:
+                return (0, 1, 1);
+        }
+    }
+
+    /// <summary>Whether something of <paramref name="size"/> fits a part.</summary>
+    public static bool Fits((int Characters, int Lines, int Runs) size) =>
+        size.Characters <= MaxCharacters && size.Lines <= MaxLines && size.Runs <= MaxRuns;
+
+    /// <summary>
+    /// The runs of a block in pieces of at most a part each: cut at a line break, which goes with neither piece, as the
+    /// next piece starts on a line of its own; within a line too long for a part, after its last space in the run that
+    /// fills the part, or where the part is full, but never inside a surrogate pair; and after the most runs.
+    /// </summary>
+    private static IEnumerable<HoverBlock> Pieces<T>(
+        IEnumerable<(string Text, T Run)> runs,
+        Func<List<(string Text, T Run)>, bool, HoverBlock> piece
+    )
+    {
+        var current = new List<(string Text, T Run)>();
+        int characters = 0;
+        int lines = 1;
+        bool first = true;
+        foreach ((string text, T run) in runs)
+        {
+            int start = 0;
+            int i = 0;
+            while (i < text.Length)
+            {
+                char c = text[i];
+                if (IsLineBreak(c))
+                {
+                    int length = c == '\r' && i + 1 < text.Length && text[i + 1] == '\n' ? 2 : 1;
+                    if (lines < MaxLines)
+                    {
+                        lines++;
+                        i += length;
+                        continue;
+                    }
+                    // The next line starts the next piece.
+                    Add(start, i);
+                    foreach (HoverBlock done in Flush())
+                        yield return done;
+                    start = i += length;
+                    continue;
+                }
+                if (characters + i - start < MaxCharacters)
+                {
+                    i++;
+                    continue;
+                }
+                int space = i > start ? text.LastIndexOf(' ', i - 1, i - start) : -1;
+                int cut = space >= start ? space + 1 : i;
+                if (cut > start && char.IsHighSurrogate(text[cut - 1]))
+                    cut--;
+                Add(start, cut);
+                foreach (HoverBlock done in Flush())
+                    yield return done;
+                start = i = cut;
+            }
+            Add(start, text.Length);
+            if (current.Count >= MaxRuns)
+            {
+                foreach (HoverBlock done in Flush())
+                    yield return done;
+            }
+
+            void Add(int from, int to)
+            {
+                if (to <= from)
+                    return;
+                current.Add((text[from..to], run));
+                characters += to - from;
+            }
+        }
+        foreach (HoverBlock done in Flush())
+            yield return done;
+
+        IEnumerable<HoverBlock> Flush()
+        {
+            List<(string Text, T Run)> done = current;
+            current = [];
+            characters = 0;
+            lines = 1;
+            if (done.Count == 0)
+                yield break;
+            yield return piece(done, first);
+            first = false;
+        }
+    }
+
+    /// <summary>The characters of <paramref name="texts"/>, and the lines they take.</summary>
+    private static (int Characters, int Lines) Count(IEnumerable<string> texts)
+    {
+        int characters = 0;
         int lines = 1;
         bool afterCarriageReturn = false;
-        foreach (string piece in pieces)
+        foreach (string text in texts)
         {
-            int end = 0;
-            for (; end < piece.Length; end++)
+            characters += text.Length;
+            foreach (char c in text)
             {
-                char c = piece[end];
-                bool lineBreak = IsLineBreak(c) && !(c == '\n' && afterCarriageReturn);
+                if (IsLineBreak(c) && !(c == '\n' && afterCarriageReturn))
+                    lines++;
                 afterCarriageReturn = c == '\r';
-                if (kept.Length + end == _characters || (lineBreak && ++lines > _lines))
-                {
-                    // Nothing follows a cut.
-                    if (end > 0 && char.IsHighSurrogate(piece[end - 1]) && char.IsLowSurrogate(c))
-                        end--;
-                    kept.Append(piece, 0, end).Append('…');
-                    (_characters, _lines) = (0, 0);
-                    return kept.ToString();
-                }
             }
-            kept.Append(piece);
         }
-        _characters -= kept.Length;
-        _lines -= lines;
-        return kept.ToString();
+        return (characters, lines);
     }
-
-    private static bool IsLineBreak(char c) => c is '\n' or '\r' or '\v' or '\f' or '\u0085' or '\u2028' or '\u2029';
 
     /// <summary>
-    /// The blocks that the runs left allow: those that fit, and as much of the next as fits, ending with "…". Nothing
-    /// follows a cut.
+    /// Whether <paramref name="c"/> breaks a line: at <c>\r\n</c>, <c>\n</c> and <c>\r</c>, as everywhere in the
+    /// library, and also where the layout of text breaks them: at a vertical tab, a form feed, and the Unicode line and
+    /// paragraph separators.
     /// </summary>
-    public IReadOnlyList<HoverBlock> Fit(IReadOnlyList<HoverBlock> blocks)
-    {
-        var fitted = new List<HoverBlock>(blocks.Count);
-        foreach (HoverBlock block in blocks)
-        {
-            int runs = Runs(block);
-            if (runs <= _runs)
-            {
-                fitted.Add(block);
-                _runs -= runs;
-                continue;
-            }
-            int kept = Math.Max(0, _runs - 1);
-            fitted.Add(
-                block switch
-                {
-                    HoverParagraph paragraph => paragraph with
-                    {
-                        Spans = [.. paragraph.Spans.Take(kept), new HoverSpan("…")],
-                    },
-                    HoverCode code => new HoverCode([.. code.Runs.Take(kept), new CodeRun("…", null)]),
-                    _ => new HoverParagraph([new HoverSpan("…")]),
-                }
-            );
-            (_characters, _lines, _runs) = (0, 0, 0);
-            break;
-        }
-        return fitted;
-    }
-
-    /// <summary>The runs a block takes: its spans or tokens, and a list item's marker.</summary>
-    private static int Runs(HoverBlock block) =>
-        block switch
-        {
-            HoverParagraph paragraph => paragraph.Spans.Count + (paragraph.Marker is null ? 0 : 1),
-            HoverCode code => code.Runs.Count,
-            _ => 1,
-        };
+    private static bool IsLineBreak(char c) => c is '\n' or '\r' or '\v' or '\f' or '\u0085' or '\u2028' or '\u2029';
 }

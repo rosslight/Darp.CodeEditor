@@ -78,4 +78,14 @@
   <data name="HistoryHint" xml:space="preserve">
     <value>{0} ({1} für Verlauf)</value>
   </data>
+  <!-- Hover, diagnostics, completion and signature help. -->
+  <data name="HoverLoading" xml:space="preserve">
+    <value>Wird geladen…</value>
+  </data>
+  <data name="ProblemOfProblems" xml:space="preserve">
+    <value>{0} von {1} Problemen</value>
+  </data>
+  <data name="ProblemOfProblem" xml:space="preserve">
+    <value>{0} von {1} Problem</value>
+  </data>
 </root>

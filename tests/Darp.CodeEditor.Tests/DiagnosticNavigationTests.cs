@@ -26,7 +26,11 @@ public sealed class DiagnosticNavigationTests(UiFixture ui)
 
             // VS Code's order: the most severe first, then by position; hints are left out.
             (await GoAsync(window, Key.F8)).ShouldBe((17, "delta is wrong"));
+            // As VS Code's widget: which problem it is of how many, without the server's hover.
+            Texts(Hover(window)!).ShouldBe(["1 of 3 problems", "delta is wrong"]);
+            Hover(window)!.GetVisualDescendants().OfType<SeverityIcon>().ShouldHaveSingleItem();
             (await GoAsync(window, Key.F8)).ShouldBe((6, "beta looks odd"));
+            Texts(Hover(window)!).ShouldContain("2 of 3 problems");
             (await GoAsync(window, Key.F8)).ShouldBe((0, "alpha is noted"));
             (await GoAsync(window, Key.F8)).ShouldBe((17, "delta is wrong"));
             (await GoAsync(window, Key.F8, KeyModifiers.Shift)).ShouldBe((0, "alpha is noted"));
@@ -78,6 +82,7 @@ public sealed class DiagnosticNavigationTests(UiFixture ui)
             (await GoAsync(window, Key.F8)).ShouldBe((end, "':' expected"));
 
             window.Editor.CaretPosition.Line.ShouldBe(251);
+            Texts(Hover(window)!).First().ShouldBe("1 of 1 problem");
         });
 
     [Fact]

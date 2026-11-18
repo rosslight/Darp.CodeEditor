@@ -340,7 +340,7 @@ public sealed class ServerRequestsTests(UiFixture ui)
                 document.SignatureHelpAsync(
                     document.CurrentSnapshot,
                     5,
-                    new SignatureHelpTrigger(SignatureHelpTriggerKind.Invoked, null, null),
+                    new SignatureHelpTrigger(SignatureHelpTriggerKind.Invoked, null, IsRetrigger: false, null),
                     CancellationToken.None
                 );
         });

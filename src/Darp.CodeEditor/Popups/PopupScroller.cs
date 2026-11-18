@@ -51,6 +51,7 @@ internal sealed class PopupScroller : Control
             }
             _child = value;
             _offset = 0;
+            _gutter = false;
             if (value is not null)
             {
                 LogicalChildren.Add(value);
@@ -86,26 +87,44 @@ internal sealed class PopupScroller : Control
     /// <summary>Scrolls by <paramref name="delta"/> pixels, down when positive, within the content.</summary>
     public void ScrollBy(double delta) => ScrollTo(_offset + delta);
 
+    /// <summary>
+    /// Whether the content was taller than the room at the last measure, so that the slider took its gutter: the next
+    /// measure starts from there, as the content of a popup that grows stays taller, so that its text is laid out at
+    /// one width only.
+    /// </summary>
+    private bool _gutter;
+
     protected override Size MeasureOverride(Size availableSize)
     {
         if (_child is not { } child)
             return default;
-        child.Measure(new Size(availableSize.Width, double.PositiveInfinity));
-        Size size = child.DesiredSize;
-        if (size.Height > availableSize.Height && availableSize.Width > SliderWidth)
+        bool fits = availableSize.Width > SliderWidth;
+        bool gutter = _gutter && fits;
+        child.Measure(new Size(availableSize.Width - (gutter ? SliderWidth : 0), double.PositiveInfinity));
+        if (!gutter && fits && child.DesiredSize.Height > availableSize.Height)
         {
             // Taller than the room: the slider takes its gutter, and the content wraps to what is left.
+            gutter = true;
             child.Measure(new Size(availableSize.Width - SliderWidth, double.PositiveInfinity));
-            size = child.DesiredSize.WithWidth(child.DesiredSize.Width + SliderWidth);
         }
-        return new Size(size.Width, Math.Min(size.Height, availableSize.Height));
+        else if (gutter && child.DesiredSize.Height <= availableSize.Height)
+        {
+            // No longer taller than the room, unless the room the gutter took makes it so.
+            child.Measure(new Size(availableSize.Width, double.PositiveInfinity));
+            gutter = child.DesiredSize.Height > availableSize.Height;
+            if (gutter)
+                child.Measure(new Size(availableSize.Width - SliderWidth, double.PositiveInfinity));
+        }
+        _gutter = gutter;
+        Size size = child.DesiredSize;
+        return new Size(size.Width + (gutter ? SliderWidth : 0), Math.Min(size.Height, availableSize.Height));
     }
 
     protected override Size ArrangeOverride(Size finalSize)
     {
         if (_child is not { } child)
             return finalSize;
-        double width = child.DesiredSize.Height > finalSize.Height ? finalSize.Width - SliderWidth : finalSize.Width;
+        double width = _gutter ? finalSize.Width - SliderWidth : finalSize.Width;
         // Measured again for the final width, as a parent may arrange it narrower or wider than it measured.
         _extent = child.DesiredSize.Height;
         _offset = Math.Clamp(_offset, 0, Math.Max(0, _extent - finalSize.Height));

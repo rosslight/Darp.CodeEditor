@@ -43,19 +43,21 @@ namespace Darp.CodeEditor.Completion;
 /// <para>
 /// Up, Down, Page Up and Page Down select, and the keymap's accept commands, a click or one of the selected item's
 /// commit characters commit it: its edit, or its text over the word, and its additional edits, such as an import, in
-/// one step that the user undoes. <see cref="Accept"/> inserts, over the word up to the caret, or replaces, over the
-/// rest of the word too; a click and a commit character insert. While the filter of the current text still runs, they
-/// commit the item that shows if it matches the current text, checked on the UI thread for that item alone; otherwise
-/// accepting commits what that filter selects once it has run, unless the text, by any editor or code, or the caret
-/// changes before, and a commit character goes in as text, as it does when nothing matches: deciding later would hold
-/// back or reorder what the user types. A read-only
-/// editor neither completes nor commits. The server resolves the selected item, so that its detail and documentation
-/// show beside the list. An item whose additional edits are still to come when it is committed gets them when they
-/// come, in its step, if that step is still the last one: otherwise they are dropped, as the user moved on.
+/// one step that the user undoes, and then its command runs, if it is one of the editor's. <see cref="Accept"/>
+/// inserts, over the word up to the caret, or replaces, over the rest of the word too; a click and a commit character
+/// insert. While the filter of the current text still runs, they commit the item that shows if it matches the current
+/// text, checked on the UI thread for that item alone; otherwise accepting commits what that filter selects once it has
+/// run, unless the text, by any editor or code, or the caret changes before, and a commit character goes in as text, as
+/// it does when nothing matches: deciding later would hold back or reorder what the user types. A read-only editor
+/// neither completes nor commits. The server resolves the selected item, so that its detail and documentation show
+/// beside the list. An item whose additional edits are still to come when it is committed gets them when they come, as
+/// in VS Code, unless the text changed before where they start since: in its step while that is the last one, and
+/// otherwise in a step of their own.
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends completion, for every reason it ends: Escape, the caret leaving the line or moving back
-/// past the word, a click or drag that moves the caret, a selection, the editor becoming read-only, the list scrolling
+/// past the word, a caret move that is not the keyboard's, as by a click or drag, an undo, a paste, the app's code or
+/// another editor's edit before it, a selection, the editor becoming read-only, the list scrolling
 /// out of view, the editor losing the keyboard focus, a server that starts or stops serving the document, new colors,
 /// the list running out of matches as above, and the editor no longer showing the document. Ending it cancels the
 /// request still under way with <c>$/cancelRequest</c>, and so does a newer request; a late answer is dropped.
@@ -837,9 +839,8 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>
     /// The detail, as plain text in the editor's font, dimmed, as VS Code shows it: a server's detail is any text, such as
-    /// "Auto-import", not always code. Then the documentation. As much of both as a hover shows: one budget for both,
-    /// cut before anything reads them, so that a server's long detail or documentation costs the UI thread no more than
-    /// the largest hover.
+    /// "Auto-import", not always code. Then the documentation. All of both, as in VS Code: the details build in parts, as
+    /// a long hover does.
     /// </summary>
     private static IReadOnlyList<HoverBlock> DetailBlocks(
         CompletionItem item,
@@ -848,17 +849,12 @@ internal sealed class CompletionController : IDisposable
         CancellationToken cancellationToken
     )
     {
-        var budget = new HoverBudget();
         var blocks = new List<HoverBlock>();
-        if (item.Detail is { } detail && budget.Take(detail) is { } kept)
-        {
-            // Lines end at \r\n, \n or \r, as everywhere in the library.
-            blocks.AddRange(
-                budget.Fit([new HoverCode([new CodeRun(kept.Replace("\r\n", "\n").Replace('\r', '\n'), dimmed)])])
-            );
-        }
+        // Lines end at \r\n, \n or \r, as everywhere in the library.
+        if (item.Detail is { } detail)
+            blocks.Add(new HoverCode([new CodeRun(detail.Replace("\r\n", "\n").Replace('\r', '\n'), dimmed)]));
         if (item.Documentation is { } documentation)
-            blocks.AddRange(HoverBlocks.Of(new HoverInfo([documentation], null), grammar, budget, cancellationToken));
+            blocks.AddRange(HoverBlocks.Of(new HoverInfo([documentation], null), grammar, cancellationToken));
         return blocks;
     }
 
@@ -902,6 +898,7 @@ internal sealed class CompletionController : IDisposable
             }
         }
         Close();
+        TextSnapshot before = _document.CurrentSnapshot;
         var step = new object();
         var mark = new SnippetMark();
         List<CompletionEdit> edits = WithoutOverlaps([main], Mapped(request.Snapshot, item.AdditionalEdits ?? []));
@@ -916,17 +913,39 @@ internal sealed class CompletionController : IDisposable
         if (snippet is not null)
             _snippets.Start(snippet, start, mark);
         if (late is not null)
-            ApplyLateEdits(late, step, request.Snapshot);
+            ApplyLateEdits(late, step, request.Snapshot, before);
         // As VS Code's choice items go on to the next placeholder.
         if (answer.IsChoice)
             _snippets.Next();
+        if (item.Command is { } command)
+            RunCommand(command);
     }
 
     /// <summary>
-    /// Applies the additional edits that a committed item's resolve brings, in the commit's undo step, if that step is
-    /// still the last one; drops them otherwise.
+    /// Runs a committed item's command, as VS Code does after the commit: completion asks again for
+    /// <see cref="CodeEditorCommands.TriggerSuggest"/>, as if typing opened it, such as for the values after a property's
+    /// name; the editor's other commands run as their keys run them, such as
+    /// <see cref="CodeEditorCommands.TriggerParameterHints"/>. Other commands, such as a server's own, do not run: the
+    /// editor has nowhere to send them.
     /// </summary>
-    private async void ApplyLateEdits(Resolve late, object step, TextSnapshot snapshot)
+    private void RunCommand(string command)
+    {
+        if (command == CodeEditorCommands.TriggerSuggest)
+            Ask(new CompletionTrigger(CompletionTriggerKind.Invoked));
+        else
+            _editor.RunItemCommand(command);
+    }
+
+    /// <summary>
+    /// Applies the additional edits that a committed item's resolve brings, as VS Code does: unless the text changed
+    /// before where one of them starts since the commit, the commit's own edit included, as by typing above an import.
+    /// They go in the commit's undo step while it is the last one, and otherwise in a step of their own.
+    /// </summary>
+    /// <param name="late">The resolve.</param>
+    /// <param name="step">The commit's undo step.</param>
+    /// <param name="snapshot">The text that the item's list was asked for, which its edits are in.</param>
+    /// <param name="before">The text before the commit.</param>
+    private async void ApplyLateEdits(Resolve late, object step, TextSnapshot snapshot, TextSnapshot before)
     {
         _lateEdits?.Cancel();
         _lateEdits = late.Cancellation;
@@ -936,13 +955,26 @@ internal sealed class CompletionController : IDisposable
             if (
                 late.Cancellation.IsCancellationRequested
                 || item?.AdditionalEdits is not { Count: > 0 } additional
-                || _buffer.UndoStack.LastGroupDescriptor != step
                 || !_textArea.ReadOnlySectionProvider.CanInsert(_textArea.Caret.Offset)
             )
             {
                 return;
             }
-            Apply(step, continued: true, WithoutOverlaps([], Mapped(snapshot, additional)), mark: null);
+            // Where the commit and the changes after it start, against where the edits start before the commit.
+            var asked = new SnapshotEdits(snapshot, before);
+            if (
+                new SnapshotEdits(before, _document.CurrentSnapshot).EarliestEnd is { } changed
+                && additional.Any(edit => changed < asked.Map(edit.Range).Start)
+            )
+            {
+                return;
+            }
+            Apply(
+                _buffer.UndoStack.LastGroupDescriptor == step ? step : new object(),
+                continued: _buffer.UndoStack.LastGroupDescriptor == step,
+                WithoutOverlaps([], Mapped(snapshot, additional)),
+                mark: null
+            );
         }
         catch (Exception e)
         {
@@ -1092,17 +1124,18 @@ internal sealed class CompletionController : IDisposable
     }
 
     /// <summary>
-    /// A caret moved by the keyboard filters, asks again or ends completion; one moved by the pointer, as by a click,
-    /// ends it, as in VS Code.
+    /// A caret moved by the keyboard, by typing or a cursor key, filters, asks again or ends completion; any other move
+    /// ends it, as VS Code's <c>SuggestModel</c> ends it for a caret move that is not the keyboard's: by the pointer, as
+    /// by a click, by an undo or a paste, by the app's code, or with the text that another editor changed before it.
     /// </summary>
     private void OnCaretPositionChanged(object? sender, EventArgs e)
     {
         if (_quiet is { } quiet && _textArea.Caret.Offset != quiet.End)
             _quiet = null;
-        if (_editor.PointerMovesCaret)
-            Close();
-        else
+        if (_editor.KeyboardMovesCaret)
             Update();
+        else
+            Close();
     }
 
     /// <summary>
@@ -1111,6 +1144,9 @@ internal sealed class CompletionController : IDisposable
     /// </summary>
     private void OnBufferChanging(object? sender, DocumentChangeEventArgs e)
     {
+        // An undo or a redo, which moves the caret once the text is back, as VS Code's cursor change for them.
+        if (!_buffer.UndoStack.AcceptChanges)
+            Close();
         if (_quiet is { } quiet)
         {
             _quiet =

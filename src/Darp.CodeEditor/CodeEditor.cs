@@ -248,6 +248,12 @@ public class CodeEditor : TemplatedControl
         TimeSpan
     >(nameof(OccurrencesHighlightDelay));
 
+    /// <summary>Defines the <see cref="HoverDelay"/> property.</summary>
+    public static readonly StyledProperty<TimeSpan> HoverDelayProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        TimeSpan
+    >(nameof(HoverDelay), defaultValue: TimeSpan.FromMilliseconds(300), coerce: CoerceHoverDelay);
+
     /// <summary>AvaloniaEdit's editor, from the template. The editor wraps it, so that its API stays out of ours.</summary>
     private TextEditor? _part;
 
@@ -404,7 +410,15 @@ public class CodeEditor : TemplatedControl
         [
             new(ApplicationCommands.Copy, (_, _) => _helpers?.Copy()),
             new(ApplicationCommands.Cut, (_, _) => _helpers?.Cut()),
-            new(ApplicationCommands.Paste, (_, _) => _helpers?.Paste()),
+            // A paste moves the caret as code does, not as the keyboard, as in VS Code.
+            new(
+                ApplicationCommands.Paste,
+                (_, _) =>
+                {
+                    KeyboardMovesCaret = false;
+                    _helpers?.Paste();
+                }
+            ),
         ];
         // Ahead of AvaloniaEdit's own keys, which its text area handles as they bubble, and of its typed text.
         AddHandler(KeyDownEvent, OnKeyDownTunnel, RoutingStrategies.Tunnel);
@@ -414,6 +428,20 @@ public class CodeEditor : TemplatedControl
         TrackPointer(PointerPressedEvent);
         TrackPointer(PointerMovedEvent);
         TrackPointer(PointerReleasedEvent);
+        // The keyboard moves the caret until the key or the typed text has bubbled back up through the editor, as the
+        // text area handles them on their way.
+        AddHandler(
+            KeyDownEvent,
+            (_, _) => KeyboardMovesCaret = false,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true
+        );
+        AddHandler(
+            TextInputEvent,
+            (_, _) => KeyboardMovesCaret = false,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true
+        );
 
         // The caret that the text area moves while it handles a pointer event moves by the pointer: tunneling, the
         // event reaches the editor before the text area, and bubbling after it.
@@ -688,6 +716,18 @@ public class CodeEditor : TemplatedControl
     /// <summary>The other occurrences of the selection that the editor highlights, for tests.</summary>
     internal IReadOnlyList<TextRange> SelectionHighlights => _selectionHighlights?.Highlights ?? [];
 
+    /// <summary>
+    /// How long the pointer rests on a character before its hover shows, VS Code's <c>editor.hover.delay</c>. The
+    /// server is asked halfway through, so that its answer can show with the diagnostics once the delay is over; while
+    /// it has not answered by three times the delay, the hover says "Loading…". Between 0 and 10 seconds, as in VS
+    /// Code. Default: 300 ms, as in VS Code.
+    /// </summary>
+    public TimeSpan HoverDelay
+    {
+        get => GetValue(HoverDelayProperty);
+        set => SetValue(HoverDelayProperty, value);
+    }
+
     /// <summary>The semantic colors of the shown document, for benchmarks; null while it shows none.</summary>
     internal SemanticHighlighter? SemanticHighlighter => _semantic;
 
@@ -696,6 +736,13 @@ public class CodeEditor : TemplatedControl
     /// event. Completion and signature help end then, as in VS Code.
     /// </summary>
     internal bool PointerMovesCaret { get; private set; }
+
+    /// <summary>
+    /// Whether the caret moves by the keyboard now, as VS Code's cursor source <c>keyboard</c>: while the editor routes
+    /// typed text, or a key in the text that no command of the keymap takes, other than a cursor move by words; not
+    /// while it pastes. Completion ends on any other caret move, as in VS Code.
+    /// </summary>
+    internal bool KeyboardMovesCaret { get; private set; }
 
     /// <summary>
     /// Scrolls <paramref name="range"/> into view: not at all when it is visible, centered when it is not. A range
@@ -1036,6 +1083,12 @@ public class CodeEditor : TemplatedControl
         }
     }
 
+    /// <summary>A hover delay between 0 and 10 seconds, as VS Code takes it.</summary>
+    private static TimeSpan CoerceHoverDelay(AvaloniaObject editor, TimeSpan delay) =>
+        delay < TimeSpan.Zero ? TimeSpan.Zero
+        : delay > TimeSpan.FromSeconds(10) ? TimeSpan.FromSeconds(10)
+        : delay;
+
     /// <summary>Whether a theme variant is dark: Dark, or one that inherits from it.</summary>
     private static bool IsDark(ThemeVariant variant)
     {
@@ -1222,13 +1275,25 @@ public class CodeEditor : TemplatedControl
         )
             return;
         bool closedHover = CloseHoverOnKey(e);
+        KeyboardMovesCaret = false;
         if (RunKeymap(e))
             e.Handled = true;
         else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && (Dismiss() || closedHover))
             e.Handled = true;
         else if (_part is not { TextArea.IsFocused: true })
             return;
-        else if (
+        else
+            OnTextKeyDown(e);
+    }
+
+    /// <summary>
+    /// A key in the text that the keymap left: the keys of completion's list, of signature help, of a snippet's stops
+    /// and of the editing helpers, and then AvaloniaEdit's. They move the caret by the keyboard.
+    /// </summary>
+    private void OnTextKeyDown(KeyEventArgs e)
+    {
+        KeyboardMovesCaret = true;
+        if (
             _completion?.OnKeyDown(e) == true
             || _signatureHelp?.OnKeyDown(e) == true
             || _snippets?.OnKeyDown(e) == true
@@ -1307,6 +1372,12 @@ public class CodeEditor : TemplatedControl
         Run(command, inText: _shown is not null);
     }
 
+    /// <summary>
+    /// Runs one of <see cref="CodeEditorCommands"/> that a completion item names, after it is committed, as its keys
+    /// run it in the text; another command does nothing.
+    /// </summary>
+    internal void RunItemCommand(string command) => Run(command, inText: _shown is not null);
+
     /// <summary>Runs one of <see cref="CodeEditorCommands"/> by key, where it applies.</summary>
     /// <returns>Whether it applied: otherwise the key goes on, to another binding or as an ordinary key.</returns>
     private bool Run(string command) =>
@@ -1360,6 +1431,8 @@ public class CodeEditor : TemplatedControl
             or CodeEditorCommands.CursorWordLeftSelect
             or CodeEditorCommands.CursorWordEndRight
             or CodeEditorCommands.CursorWordEndRightSelect when inText:
+                // A cursor move by the keyboard, as VS Code's word moves are.
+                KeyboardMovesCaret = true;
                 _helpers?.MoveWord(
                     left: command is CodeEditorCommands.CursorWordLeft or CodeEditorCommands.CursorWordLeftSelect,
                     select: command
@@ -1478,16 +1551,20 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>
     /// Goes to the next or previous diagnostic, as VS Code's F8 and Shift+F8 do: the caret goes to where it starts, or
-    /// stays inside it, the line scrolls into view, centered when it was out of view, and the diagnostic's message
-    /// shows in the hover there, where VS Code shows it in a widget between the lines.
+    /// stays inside it, the line scrolls into view, centered when it was out of view, and the hover there shows what
+    /// VS Code shows in a widget between the lines: which problem it is of how many, its message, source, code and
+    /// related places.
     /// </summary>
     private void GoToDiagnostic(bool next)
     {
-        if (_part is not { } part || _diagnosticNavigation?.Move(next, DiagnosticOrder) is not { } caret)
+        if (
+            _part is not { } part
+            || _diagnosticNavigation?.Move(next, DiagnosticOrder) is not var (caret, diagnostic, index, count)
+        )
             return;
         Select(part, new TextSelection(caret));
         ScrollTo(new TextRange(caret, 0));
-        _hover?.ShowAt(caret);
+        _hover?.ShowProblem(caret, diagnostic, index, count);
     }
 
     /// <summary>
@@ -1498,6 +1575,7 @@ public class CodeEditor : TemplatedControl
     {
         if (_part is not { TextArea.IsFocused: true })
             return;
+        KeyboardMovesCaret = true;
         _completion?.OnTextInput(e);
         if (!e.Handled)
             _helpers?.Type(e);

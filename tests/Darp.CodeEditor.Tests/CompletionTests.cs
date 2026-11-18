@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
@@ -474,10 +475,11 @@ public sealed class CompletionTests(UiFixture ui)
             using var window = new EditorWindow(new CodeEditor { Document = document });
             await OpenAsync(window, length);
 
-            // The caret moves on in the line's collapsed tail, where only code puts it, and the list filters again;
-            // Enter, while that filter runs, checks the item against the text typed.
+            // End moves the caret on in the line's collapsed tail, and the list filters again; Enter, while that filter
+            // runs, checks the item against the text typed.
             long before = GC.GetAllocatedBytesForCurrentThread();
-            window.Editor.Selection = new TextSelection(length + 1);
+            PressAlone(window, Key.End);
+            window.Editor.Selection.ShouldBe(new TextSelection(length + 1));
             long moving = GC.GetAllocatedBytesForCurrentThread() - before;
             before = GC.GetAllocatedBytesForCurrentThread();
             PressAlone(window, Key.Enter);
@@ -745,17 +747,59 @@ public sealed class CompletionTests(UiFixture ui)
             var fake = new FakeServer();
             await using var server = new LanguageServer(fake.Options);
             using CodeDocument answer = await SetCompletionAsync(server, fake, Items("Console"));
-            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, " Co");
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "\n Co");
             using var window = new EditorWindow(new CodeEditor { Document = document });
-            await OpenAsync(window, 3);
+            await OpenAsync(window, 4);
 
-            // As another editor of the document types at the line's start: the caret moves with the text.
+            // As another editor of the document types on the line before: the caret stays on its line and column.
             document.Replace(new TextRange(0, 0), "x");
 
-            (await fake.WaitForAsync("completion ", 2)).ShouldEndWith(" 1 - 4");
+            (await fake.WaitForAsync("completion ", 2)).ShouldEndWith(" 1 - 5");
             (await WaitForLabelsAsync(window)).ShouldBe(["Console"]);
             window.Press(Key.Enter);
-            document.Text.ShouldBe("x Console");
+            document.Text.ShouldBe("x\n Console");
+        });
+
+    [Fact]
+    public Task A_caret_move_that_is_not_the_keyboards_ends_completion_as_in_VS_Code() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("Console", "Convert"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, " Co");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+
+            // A cursor key filters again; the app's code moving the caret ends completion.
+            await OpenAsync(window, 3);
+            window.Press(Key.Left);
+            (await WaitForLabelsAsync(window)).ShouldBe(["Console", "Convert"]);
+            editor.Selection = new TextSelection(3);
+            List(window).ShouldBeNull();
+
+            // Another editor of the document types at the line's start: the caret moves with the text.
+            await OpenAsync(window, 3);
+            document.Replace(new TextRange(0, 0), "x");
+            List(window).ShouldBeNull();
+
+            // An undo.
+            await OpenAsync(window, 4);
+            window.Type("n");
+            await WaitForLabelsAsync(window);
+            window.Press(Key.Z, EditorWindow.Command);
+            document.Text.ShouldBe("x Co");
+            List(window).ShouldBeNull();
+
+            // A paste, which asks nothing either.
+            await window.Window.Clipboard.ShouldNotBeNull().SetTextAsync("n");
+            await OpenAsync(window, 4);
+            int asked = fake.LinesStartingWith("completion ").Count;
+            window.Press(Key.V, EditorWindow.Command);
+            await Wait.UntilAsync(() => document.Text == "x Con");
+            List(window).ShouldBeNull();
+            await BarrierAsync(server, fake);
+            fake.LinesStartingWith("completion ").Count.ShouldBe(asked);
         });
 
     [Fact]
@@ -895,12 +939,13 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
-    public Task A_long_detail_documentation_and_label_show_only_as_much_as_a_hover() =>
+    public Task A_long_detail_and_documentation_show_in_full_and_a_row_the_start_of_a_long_label() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
             await using var server = new LanguageServer(fake.Options);
             string label = "Long" + new string('x', 5_000);
+            string detail = string.Join("\n", Enumerable.Range(0, 2_000).Select(i => $"line {i}"));
             using CodeDocument answer = await SetCompletionAsync(
                 server,
                 fake,
@@ -912,7 +957,7 @@ public sealed class CompletionTests(UiFixture ui)
                             ["label"] = label,
                             ["data"] = new JsonObject
                             {
-                                ["detail"] = string.Join("\n", Enumerable.Range(0, 2_000).Select(i => $"line {i}")),
+                                ["detail"] = detail,
                                 ["documentation"] = new JsonObject
                                 {
                                     ["kind"] = "markdown",
@@ -927,13 +972,18 @@ public sealed class CompletionTests(UiFixture ui)
             using var window = new EditorWindow(new CodeEditor { Document = document });
 
             await OpenAsync(window, 0);
-            await Wait.UntilAsync(() => DetailTexts(window).Count > 0);
 
-            // The detail and the documentation share a hover's budget: the detail alone uses up its lines.
-            IReadOnlyList<string> details = DetailTexts(window);
-            details.Sum(text => text.Length).ShouldBeLessThanOrEqualTo(HoverBudget.MaxCharacters + 1);
-            details[0].Split('\n').Length.ShouldBe(HoverBudget.MaxLines);
-            details[^1].ShouldEndWith("…");
+            // All of both, in parts, over the frames after the first.
+            string documentation = string.Concat(Enumerable.Repeat("word ", 2_000)).TrimEnd();
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                IReadOnlyList<string> details = DetailTexts(window);
+                return string.Join('\n', details.TakeWhile(text => text.StartsWith("line", StringComparison.Ordinal)))
+                        == detail
+                    && string.Concat(details.SkipWhile(text => text.StartsWith("line", StringComparison.Ordinal)))
+                        == documentation;
+            });
             // A row shows the start of a long label.
             string shown = LabelOf(window, label).Inlines.ShouldNotBeNull().Text ?? "";
             shown.Length.ShouldBe(257);
@@ -962,7 +1012,7 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
-    public Task Additional_edits_that_come_after_the_commit_join_its_step_while_it_is_the_last_one() =>
+    public Task Additional_edits_that_come_after_the_commit_join_its_step_while_it_is_the_last_one_or_take_their_own() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
@@ -986,7 +1036,8 @@ public sealed class CompletionTests(UiFixture ui)
                 document.Text.ShouldBe(text);
             }
 
-            // The user typed on before they came: they are dropped.
+            // The user typed on after the item, below where they go, before they came: they go in a step of their own,
+            // as in VS Code.
             using (await CommandAsync(server, fake, "hold-resolve", "holding resolve", 2))
             {
                 await OpenAsync(window, 5);
@@ -996,10 +1047,100 @@ public sealed class CompletionTests(UiFixture ui)
             }
             using (await CommandAsync(server, fake, "release-resolve", "released resolve", 2))
             {
-                // A list shows after the late answer: the client has read it by then.
-                await OpenAsync(window, document.Text.Length);
+                await Wait.UntilAsync(() => document.Text == "using System;\nx\nConsole!");
+                document.Undo();
                 document.Text.ShouldBe("x\nConsole!");
             }
+        });
+
+    [Fact]
+    public Task Additional_edits_that_come_late_are_dropped_after_a_change_before_where_they_go() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            // The import goes on the second line, above the item.
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [ { "label": "Console", "data": { "additionalTextEdits": [
+                      { "range": { "start": { "line": 1, "character": 0 }, "end": { "line": 1, "character": 0 } },
+                        "newText": "using System;\n" } ] } } ] }
+                    """
+                )
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "x\ny\nCon");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+
+            using (await CommandAsync(server, fake, "hold-resolve", "holding resolve"))
+            {
+                await OpenAsync(window, 7);
+                await fake.WaitForAsync("resolve ");
+                window.Press(Key.Enter);
+                // On the first line, before where the import goes.
+                editor.Selection = new TextSelection(1);
+                window.Type("!");
+            }
+            using (await CommandAsync(server, fake, "release-resolve", "released resolve"))
+            {
+                // A list shows after the late answer: the client has read it by then.
+                await OpenAsync(window, document.Text.Length);
+                document.Text.ShouldBe("x!\ny\nConsole");
+            }
+        });
+
+    [Fact]
+    public Task An_items_command_runs_after_the_commit_when_it_is_one_of_the_editors() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            // As VS Code's JSON server writes a property: its value comes next, so completion asks again.
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [
+                      { "label": "key", "insertText": "\"key\": $1", "insertTextFormat": 2,
+                        "command": { "title": "Suggest", "command": "editor.action.triggerSuggest" } },
+                      { "label": "call", "insertText": "call(",
+                        "command": { "title": "Hints", "command": "editor.action.triggerParameterHints" } },
+                      { "label": "other", "command": { "title": "Other", "command": "fake.command" } } ] }
+                    """
+                )
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            await OpenAsync(window, 0);
+            window.Press(Key.Down);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("\"key\": ");
+            // Asked again as typing asks, not by key: nothing says "No suggestions."
+            (await fake.WaitForAsync("completion ", 2)).ShouldEndWith(" 1 - 7");
+            (await WaitForLabelsAsync(window)).ShouldBe(["call", "key", "other"]);
+            window.Press(Key.Escape);
+
+            document.Text = "";
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("call(");
+            (await fake.WaitForAsync("signatureHelp ")).ShouldEndWith(" 1 - False - 5");
+
+            // A command that is not the editor's runs nowhere.
+            document.Text = "";
+            await OpenAsync(window, 0);
+            int asked = fake.LinesStartingWith("completion ").Count;
+            window.Press(Key.Up);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("other");
+            await BarrierAsync(server, fake);
+            fake.LinesStartingWith("completion ").Count.ShouldBe(asked);
+            fake.LinesStartingWith("signatureHelp ").Count.ShouldBe(1);
         });
 
     [Fact]

@@ -154,5 +154,14 @@ internal sealed record ParameterInfo(int Start, int Length, HoverText? Documenta
 /// <summary>How signature help was asked for.</summary>
 /// <param name="Kind">One of <c>SignatureHelpTriggerKind</c>.</param>
 /// <param name="Character">The character typed, for a trigger character.</param>
-/// <param name="Showing">The signature help that showed, with the signature the user chose; null when none did.</param>
-internal readonly record struct SignatureHelpTrigger(int Kind, char? Character, SignatureHelpInfo? Showing);
+/// <param name="IsRetrigger">Whether signature help showed, or was asked for, when it was asked for again.</param>
+/// <param name="Showing">
+/// The signature help that showed, or showed before the request under way, with the signature the user chose; null when
+/// none did.
+/// </param>
+internal readonly record struct SignatureHelpTrigger(
+    int Kind,
+    char? Character,
+    bool IsRetrigger,
+    SignatureHelpInfo? Showing
+);

@@ -23,11 +23,14 @@ namespace Darp.CodeEditor.Completion;
 /// </summary>
 /// <remarks>
 /// <para>
-/// It opens when the user types one of the server's trigger characters, such as <c>(</c>, and asks again at once on a
-/// retrigger character, such as <c>,</c>, while it is open. While it is open, each edit and each caret move by the
-/// keyboard restarts a pause of 120 ms, VS Code's; once it passes, it asks again, telling the server the signature that
-/// shows. A newer request, and every edit, cancels the request under way, and an answer about older text is dropped. Up
-/// and Down show the other signatures, while completion's list is closed.
+/// Its triggers are VS Code's (<c>ParameterHintsModel</c>): one of the server's trigger characters, such as <c>(</c>,
+/// and while it is active, one of its retrigger characters, such as <c>,</c>, each edit and each caret move by the
+/// keyboard. Each restarts a pause of 120 ms, VS Code's; once it passes, it asks, for the triggers since the last
+/// request: the last character typed, or an edit. Asking by key asks at once. It is active while it shows, while a
+/// request is under way and while it waits to ask: asking then is asking again, which the server learns, with the
+/// signature that shows, or showed before the request under way. A newer request cancels the one under way, and the
+/// answer to a request that a trigger came after is dropped. Up and Down show the other signatures, while completion's
+/// list is closed.
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends it, for every reason it ends: Escape, leaving the call, a click or drag that moves the caret,
@@ -69,6 +72,12 @@ internal sealed class SignatureHelpController : IDisposable
 
     /// <summary>Cancels the reading of the documentation that is about to show.</summary>
     private CancellationTokenSource? _reading;
+
+    /// <summary>The triggers since the last request, for the next one.</summary>
+    private readonly List<(int Kind, char? Character)> _triggers = [];
+
+    /// <summary>Counts the triggers: an answer to a request that a trigger came after is outdated.</summary>
+    private int _triggerCount;
 
     public SignatureHelpController(
         CodeEditor editor,
@@ -129,11 +138,11 @@ internal sealed class SignatureHelpController : IDisposable
         return true;
     }
 
-    /// <summary>Asks for signature help at the caret, as the user asks for it by key.</summary>
+    /// <summary>Asks for signature help at the caret at once, as the user asks for it by key.</summary>
     public void Trigger()
     {
         if (_document.Features?.SignatureHelp is not null)
-            Ask(SignatureHelpTriggerKind.Invoked, null);
+            Schedule(SignatureHelpTriggerKind.Invoked, null, TimeSpan.Zero);
     }
 
     /// <summary>Ends signature help: closes the popup, and cancels what is under way.</summary>
@@ -142,7 +151,11 @@ internal sealed class SignatureHelpController : IDisposable
     {
         bool wasOpen = _shown is not null;
         _shown = null;
-        StopWaiting();
+        _pause?.Dispose();
+        _pause = null;
+        _request?.Cancel();
+        _request = null;
+        _triggers.Clear();
         _reading?.Cancel();
         _reading = null;
         _popup.Hide();
@@ -159,24 +172,24 @@ internal sealed class SignatureHelpController : IDisposable
         _popup.LeftView -= OnClosingChange;
     }
 
-    /// <summary>Asks on the server's trigger characters, and on its retrigger characters while active.</summary>
+    /// <summary>Asks on the server's trigger characters, and on its retrigger characters while active, after the pause.</summary>
     private void OnTextEntered(object? sender, TextInputEventArgs e)
     {
         if (e.Text is not { Length: > 0 } text || _document.Features?.SignatureHelp is not { } provider)
             return;
         char typed = text[^1];
         if (provider.TriggerCharacters.Contains(typed) || (IsActive && provider.RetriggerCharacters.Contains(typed)))
-            Ask(SignatureHelpTriggerKind.TriggerCharacter, typed);
+            Schedule(SignatureHelpTriggerKind.TriggerCharacter, typed, s_pause);
     }
 
     /// <summary>
     /// While active, an edit, also one that leaves the caret where it was, or a caret move outdates what is asked, and
-    /// restarts the pause.
+    /// asks again after the pause.
     /// </summary>
     private void OnEditOrCaretMove(object? sender, EventArgs e)
     {
         if (IsActive)
-            Wait();
+            Schedule(SignatureHelpTriggerKind.ContentChange, null, s_pause);
     }
 
     /// <summary>A caret moved by the pointer, as by a click, ends signature help, as in VS Code.</summary>
@@ -188,36 +201,54 @@ internal sealed class SignatureHelpController : IDisposable
             OnEditOrCaretMove(sender, e);
     }
 
-    /// <summary>Cancels the request under way, and asks again once the pause has passed.</summary>
-    private void Wait()
+    /// <summary>
+    /// Adds a trigger, and asks once <paramref name="delay"/> has passed without another one, as VS Code's throttled
+    /// delayer does; at once without a delay.
+    /// </summary>
+    private void Schedule(int kind, char? character, TimeSpan delay)
     {
-        StopWaiting();
+        _triggerCount++;
+        _triggers.Add((kind, character));
+        _pause?.Dispose();
+        _pause = null;
+        if (delay <= TimeSpan.Zero)
+        {
+            Ask();
+            return;
+        }
         ITimer? pause = null;
         pause = _document.TimeProvider.CreateTimer(
             _ =>
                 _editor.Dispatcher.Post(() =>
                 {
                     if (_pause == pause)
-                        Ask(SignatureHelpTriggerKind.ContentChange, null);
+                        Ask();
                 }),
             null,
-            s_pause,
+            delay,
             Timeout.InfiniteTimeSpan
         );
         _pause = pause;
     }
 
-    private void StopWaiting()
+    /// <summary>
+    /// Asks for the triggers since the last request, as VS Code's <c>doTrigger</c>: asking by key wins over what came
+    /// before it, a character typed over an edit; it asks again while signature help shows or a request is under way,
+    /// with the signature that shows, or showed before that request.
+    /// </summary>
+    private void Ask()
     {
         _pause?.Dispose();
         _pause = null;
+        bool isRetrigger = _shown is not null || _request is not null;
         _request?.Cancel();
         _request = null;
-    }
-
-    private void Ask(int kind, char? character)
-    {
-        StopWaiting();
+        if (_triggers.Count == 0)
+            return;
+        (int kind, char? character) = _triggers.Aggregate(
+            (previous, current) => current.Kind == SignatureHelpTriggerKind.ContentChange ? previous : current
+        );
+        _triggers.Clear();
         // Nothing to help with where the user cannot type.
         if (!_textArea.ReadOnlySectionProvider.CanInsert(_textArea.Caret.Offset))
         {
@@ -229,29 +260,35 @@ internal sealed class SignatureHelpController : IDisposable
         AskAsync(
             _document.CurrentSnapshot,
             _textArea.Caret.Offset,
-            new SignatureHelpTrigger(kind, character, _shown),
-            cancellation
+            new SignatureHelpTrigger(kind, character, isRetrigger, _shown),
+            cancellation,
+            _triggerCount
         );
     }
 
-    /// <summary>Shows the server's answer, unless it is outdated; closes when the server has none there.</summary>
+    /// <summary>
+    /// Shows the server's answer, unless signature help ended, a newer request replaced it, or a trigger came after it;
+    /// closes when the server has none there.
+    /// </summary>
     private async void AskAsync(
         TextSnapshot snapshot,
         int caret,
         SignatureHelpTrigger trigger,
-        CancellationTokenSource cancellation
+        CancellationTokenSource cancellation,
+        int triggerCount
     )
     {
         try
         {
             SignatureHelpInfo? help = await _document.SignatureHelpAsync(snapshot, caret, trigger, cancellation.Token);
-            if (_request != cancellation)
+            // Outdated: the request stays under way, as VS Code's does, until the next one replaces it.
+            if (_request != cancellation || _triggerCount != triggerCount)
                 return;
             _request = null;
             // Changed elsewhere meanwhile, as in another editor: the answer is about older text.
             if (snapshot != _document.CurrentSnapshot)
             {
-                Wait();
+                Schedule(SignatureHelpTriggerKind.ContentChange, null, s_pause);
                 return;
             }
             if (help is null)
@@ -285,23 +322,13 @@ internal sealed class SignatureHelpController : IDisposable
             }.OfType<HoverText>(),
         ];
         TextMateGrammar? grammar = _highlighter.Grammar;
-        // As much as a hover shows, the signatures first: a server's long signatures or documentation cost the UI thread
-        // no more than the largest hover.
-        var budget = new HoverBudget();
-        var labels = new List<string>();
-        foreach (SignatureInfo each in help.Signatures)
-        {
-            if (budget.Take(each.Label) is not { } label)
-                break;
-            labels.Add(label);
-        }
         try
         {
             IReadOnlyList<HoverBlock> blocks =
                 documentation.Length == 0
                     ? []
                     : await Task.Run(
-                        () => HoverBlocks.Of(new HoverInfo(documentation, null), grammar, budget, reading.Token),
+                        () => HoverBlocks.Of(new HoverInfo(documentation, null), grammar, reading.Token),
                         reading.Token
                     );
             if (_reading != reading)
@@ -318,7 +345,6 @@ internal sealed class SignatureHelpController : IDisposable
             int columns = Math.Max(20, (int)(room / Math.Max(1, _textView.WideSpaceWidth)));
             _content.Child = SignatureView.Create(
                 help,
-                labels,
                 blocks,
                 new PopupLook(_editor.FontFamily, _editor.FontSize, colors),
                 columns,

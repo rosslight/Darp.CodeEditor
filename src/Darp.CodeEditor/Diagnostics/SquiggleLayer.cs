@@ -59,7 +59,7 @@ internal sealed class SquiggleLayer : SelectionOverlay
     /// when it is empty: at most <paramref name="count"/> of them, the most severe first, then in the server's order.
     /// </summary>
     /// <remarks>
-    /// A server may put thousands on one character, and a hover shows a few: only the diagnostics that could be kept
+    /// A server may put thousands on one character: when fewer are asked for, only the diagnostics that could be kept
     /// are looked at further, and only those kept are put in order. AvaloniaEdit's search for them grows with their
     /// number, but cheaply, 0.65 ms for 100,000; reading a diagnostic's offsets walks its tree, so it is left to the
     /// few that could be kept.
@@ -69,7 +69,7 @@ internal sealed class SquiggleLayer : SelectionOverlay
         if (count <= 0)
             return [];
         // By their rank negated: the worst kept is the first to give way.
-        var kept = new PriorityQueue<DiagnosticMarker, int>(count + 1);
+        var kept = new PriorityQueue<DiagnosticMarker, int>(Math.Min(count, 64) + 1);
         foreach (DiagnosticMarker marker in _document.ShownDiagnostics.FindSegmentsContaining(offset))
         {
             if (kept.Count == count && kept.TryPeek(out _, out int worst) && -marker.Rank <= worst)

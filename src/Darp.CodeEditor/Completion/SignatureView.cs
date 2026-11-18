@@ -24,14 +24,12 @@ internal static class SignatureView
     private const double Dimmed = 0.5;
 
     /// <param name="help">The signature help.</param>
-    /// <param name="labels">Each signature's label, as much of it as the budget left, with "…" where it was cut.</param>
     /// <param name="documentation">The documentation of the active parameter and signature.</param>
     /// <param name="look">How the popup looks.</param>
     /// <param name="columns">How many characters of the editor's font fit on a line of the popup.</param>
     /// <param name="active">The active signature's control, to scroll into view.</param>
     public static Control Create(
         SignatureHelpInfo help,
-        IReadOnlyList<string> labels,
         IReadOnlyList<HoverBlock> documentation,
         PopupLook look,
         int columns,
@@ -40,11 +38,11 @@ internal static class SignatureView
     {
         var panel = new StackPanel { Spacing = 2 };
         active = panel;
-        for (int i = 0; i < labels.Count; i++)
+        for (int i = 0; i < help.Signatures.Count; i++)
         {
             SignatureInfo signature = help.Signatures[i];
             SelectableTextBlock code = HoverView.Text(look);
-            code.Inlines = Label(signature, labels[i], look, columns);
+            code.Inlines = Label(signature, look, columns);
             code.FontFamily = look.CodeFont;
             code.FontSize = look.CodeSize;
             code.Foreground = look.Colors.CodeForeground;
@@ -54,7 +52,7 @@ internal static class SignatureView
                 Child = code,
                 Padding = new Thickness(4, 1),
                 CornerRadius = new CornerRadius(2),
-                Background = isActive && labels.Count > 1 ? look.Colors.ListInactiveSelectionBackground : null,
+                Background = isActive && help.Signatures.Count > 1 ? look.Colors.ListInactiveSelectionBackground : null,
                 Opacity = signature.CannotMatch && !isActive ? Dimmed : 1,
             };
             if (isActive)
@@ -75,13 +73,12 @@ internal static class SignatureView
     /// A signature's label, with its active parameter in bold in the highlight color, broken after the commas between
     /// its parameters when it is longer than <paramref name="columns"/>.
     /// </summary>
-    private static InlineCollection Label(SignatureInfo signature, string label, PopupLook look, int columns)
+    private static InlineCollection Label(SignatureInfo signature, PopupLook look, int columns)
     {
-        // The active parameter, in what is left of the label.
-        int kept = label.Length == signature.Label.Length ? label.Length : label.Length - 1;
+        string label = signature.Label;
         (int start, int end) =
             signature.ActiveParameter >= 0 && signature.Parameters[signature.ActiveParameter] is var parameter
-                ? (Math.Min(parameter.Start, kept), Math.Min(parameter.Start + parameter.Length, kept))
+                ? (parameter.Start, parameter.Start + parameter.Length)
                 : (0, 0);
         IReadOnlyList<int> breaks = label.Length > columns ? Breaks(label) : [];
         var inlines = new InlineCollection();
