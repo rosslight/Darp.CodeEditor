@@ -86,7 +86,8 @@ namespace Darp.CodeEditor;
 /// <para>
 /// The editor's commands run by <see cref="Keymap"/>, VS Code's keys by default: completion (Ctrl+Space), the hover at
 /// the caret (Ctrl+K Ctrl+I), signature help (Ctrl+Shift+Space), search (Ctrl+F, Ctrl+H, F3, Shift+F3), the search
-/// bar's options (Alt+C, Alt+W, Alt+R, also from the text), comments (Ctrl+/) and the next and previous diagnostic
+/// bar's options (Alt+C, Alt+W, Alt+R, Alt+P, and Alt+L for Find in Selection, also from the text), comments (Ctrl+/)
+/// and the next and previous diagnostic
 /// (F8, Shift+F8; also with Alt). Ctrl+D selects the word at the caret, the first step of VS Code's Ctrl+D, which goes
 /// on to add carets at the next matches. Ctrl+Left and Ctrl+Right, Alt on macOS, move by VS Code's words, and select
 /// with Shift. AvaloniaEdit's keys edit, navigate and use the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), as VS Code's
@@ -183,6 +184,12 @@ public class CodeEditor : TemplatedControl
         nameof(UseTabStops),
         defaultValue: true
     );
+
+    /// <summary>Defines the <see cref="AutoFindInSelection"/> property.</summary>
+    public static readonly StyledProperty<AutoFindInSelection> AutoFindInSelectionProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        AutoFindInSelection
+    >(nameof(AutoFindInSelection), defaultValue: AutoFindInSelection.Never);
 
     /// <summary>AvaloniaEdit's editor, from the template. The editor wraps it, so that its API stays out of ours.</summary>
     private TextEditor? _part;
@@ -491,6 +498,18 @@ public class CodeEditor : TemplatedControl
         set => SetValue(EmptySelectionClipboardProperty, value);
     }
 
+    /// <summary>
+    /// When the search bar turns Find in Selection on by itself, as VS Code's <c>editor.find.autoFindInSelection</c>:
+    /// as Ctrl+F or Ctrl+H opens it, or F3 while it is closed, it then searches only the selection. Find in Selection
+    /// also turns on and off with its toggle on the bar, and with Alt+L. Default: <see cref="AutoFindInSelection.Never"/>,
+    /// as in VS Code.
+    /// </summary>
+    public AutoFindInSelection AutoFindInSelection
+    {
+        get => GetValue(AutoFindInSelectionProperty);
+        set => SetValue(AutoFindInSelectionProperty, value);
+    }
+
     /// <summary>The semantic colors of the shown document, for benchmarks; null while it shows none.</summary>
     internal SemanticHighlighter? SemanticHighlighter => _semantic;
 
@@ -573,6 +592,7 @@ public class CodeEditor : TemplatedControl
         if (_part is not { } part || CreatedSearchBar() is not { } bar)
             return;
         SeedSearchString seed = SeedSearchStringFromSelection;
+        FindInSelectionAsItOpens(part.TextArea, bar);
         if (!replace)
         {
             bar.Open(replace: false, seed == SeedSearchString.Never ? null : SearchString(part.TextArea, seed));
@@ -1121,14 +1141,15 @@ public class CodeEditor : TemplatedControl
                 return true;
 
             // Find, replace and highlights: from the text or the search bar.
-            case CodeEditorCommands.TogglePreserveCase:
+            case CodeEditorCommands.TogglePreserveCase
+            or CodeEditorCommands.ToggleFindInSelection:
                 return ToggleSearchOption(command);
             default:
                 return false;
         }
     }
 
-    /// <summary>Turns one of the search bar's options on or off, as Alt+C, Alt+W, Alt+R and Alt+P do.</summary>
+    /// <summary>Turns one of the search bar's options on or off, as Alt+C, Alt+W, Alt+R, Alt+P and Alt+L do.</summary>
     /// <returns>Whether there is a document to search.</returns>
     private bool ToggleSearchOption(string command)
     {
@@ -1140,6 +1161,8 @@ public class CodeEditor : TemplatedControl
             bar.ToggleWholeWord();
         else if (command == CodeEditorCommands.TogglePreserveCase)
             bar.TogglePreserveCase();
+        else if (command == CodeEditorCommands.ToggleFindInSelection)
+            bar.ToggleFindInSelection();
         else
             bar.ToggleRegex();
         return true;
@@ -1206,11 +1229,29 @@ public class CodeEditor : TemplatedControl
         SeedSearchString seed = SeedSearchStringFromSelection;
         string? text =
             bar.Query.Length == 0 && seed != SeedSearchString.Never ? SearchString(part.TextArea, seed) : null;
+        if (!bar.IsOpen)
+            FindInSelectionAsItOpens(part.TextArea, bar);
         if (previous)
             bar.FindPrevious(text);
         else
             bar.FindNext(text);
         return true;
+    }
+
+    /// <summary>
+    /// Turns Find in Selection on as the search bar opens, as <see cref="AutoFindInSelection"/> says: as VS Code does
+    /// whenever its search starts, by Ctrl+F, Ctrl+H, or F3 while the bar is closed.
+    /// </summary>
+    private void FindInSelectionAsItOpens(TextArea textArea, SearchBar bar)
+    {
+        bool scoped = AutoFindInSelection switch
+        {
+            AutoFindInSelection.Always => true,
+            AutoFindInSelection.Multiline => textArea.Selection.IsMultiline,
+            _ => false,
+        };
+        if (scoped)
+            bar.FindInSelection();
     }
 
     /// <summary>

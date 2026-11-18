@@ -72,4 +72,7 @@
   <data name="PreserveCase" xml:space="preserve">
     <value>Preserve Case</value>
   </data>
+  <data name="FindInSelection" xml:space="preserve">
+    <value>Find in Selection</value>
+  </data>
 </root>

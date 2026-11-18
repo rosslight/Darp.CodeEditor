@@ -40,6 +40,12 @@ internal sealed class SearchBar : UserControl
         "M3,2 L8,7 L13,2 L14,3 L9,8 L14,13 L13,14 L8,9 L3,14 L2,13 L7,8 L2,3 Z"
     );
 
+    /// <summary>Lines in a box, as VS Code's icon of Find in Selection.</summary>
+    private static readonly Geometry s_selection = Geometry.Parse(
+        "F0 M2,2 L14,2 L14,14 L2,14 Z M3,3 L3,13 L13,13 L13,3 Z M5,5 L11,5 L11,6 L5,6 Z M5,7.5 L11,7.5 L11,8.5 L5,8.5 Z "
+            + "M5,10 L9,10 L9,11 L5,11 Z"
+    );
+
     private readonly TextBox _find = QueryBox();
     private readonly ToggleButton _matchCase = new() { Content = "Aa" };
     private readonly ToggleButton _wholeWord = new() { Content = "ab" };
@@ -47,6 +53,7 @@ internal sealed class SearchBar : UserControl
     private readonly TextBlock _count = new() { MinWidth = 80, VerticalAlignment = VerticalAlignment.Center };
     private readonly Button _previous;
     private readonly Button _next;
+    private readonly ToggleButton _findInSelection = new() { Content = Icon(s_selection) };
     private readonly Button _close;
     private readonly TextBox _replace = QueryBox();
     private readonly ToggleButton _preserveCase = new() { Content = "AB" };
@@ -75,8 +82,20 @@ internal sealed class SearchBar : UserControl
     /// </summary>
     private Move _move;
 
-    /// <summary>Where a search for a new query looks for its first match.</summary>
+    /// <summary>
+    /// Where a search moves from as the query, its options or the scope change, as VS Code's start position: the caret
+    /// as the bar opened, as the user last moved it, or after the text last changed; not where the bar selected a match.
+    /// </summary>
     private int _from;
+
+    /// <summary>Whether the bar selects a match, which leaves <see cref="_from"/> where it is.</summary>
+    private bool _selecting;
+
+    /// <summary>
+    /// The ranges that Find in Selection searches, which follow the edits; null while it is off. It is on for the
+    /// document shown until the bar closes, as in VS Code.
+    /// </summary>
+    private TextSegmentCollection<TextSegment>? _scope;
 
     /// <summary>The bindings to the app's font where the editor is, while the bar is in the visual tree.</summary>
     private IDisposable[] _font = [];
@@ -105,7 +124,7 @@ internal sealed class SearchBar : UserControl
                 Spacing = 4,
                 Children =
                 {
-                    Row(_find, _matchCase, _wholeWord, _regex, _count, _previous, _next, _close),
+                    Row(_find, _matchCase, _wholeWord, _regex, _count, _previous, _next, _findInSelection, _close),
                     _replaceRow,
                     _message,
                 },
@@ -120,6 +139,9 @@ internal sealed class SearchBar : UserControl
         _preserveCase.IsCheckedChanged += (_, _) => Search(Move.None);
         _replaceOne.Click += (_, _) => ReplaceOne();
         _replaceAll.Click += (_, _) => ReplaceAll();
+        _findInSelection.Click += (_, _) => OnFindInSelectionClicked();
+        _find.GotFocus += (_, _) => FollowTheSelection();
+        _replace.GotFocus += (_, _) => FollowTheSelection();
         // Ahead of the text boxes' own keys: Enter goes to the next match rather than into the text.
         _find.AddHandler(KeyDownEvent, OnFindKeyDown, RoutingStrategies.Tunnel);
         _replace.AddHandler(KeyDownEvent, OnReplaceKeyDown, RoutingStrategies.Tunnel);
@@ -160,6 +182,7 @@ internal sealed class SearchBar : UserControl
         {
             _colors = value;
             _shown?.Layer.Colors = value;
+            _shown?.ScopeLayer.Colors = value?.Highlights;
         }
     }
 
@@ -172,6 +195,8 @@ internal sealed class SearchBar : UserControl
     internal ToggleButton RegexToggle => _regex;
 
     internal ToggleButton PreserveCaseToggle => _preserveCase;
+
+    internal ToggleButton FindInSelectionToggle => _findInSelection;
 
     internal Button ReplaceAllButton => _replaceAll;
 
@@ -192,12 +217,15 @@ internal sealed class SearchBar : UserControl
             textArea,
             document,
             textArea.Document,
-            new SearchMatchLayer(textArea) { Colors = _colors }
+            new SearchMatchLayer(textArea) { Colors = _colors },
+            new SearchScopeLayer(textArea.TextView) { Colors = _colors?.Highlights }
         );
         _shown = shown;
         shown.Buffer.Changed += OnBufferChanged;
         shown.Buffer.TextChanged += OnTextChanged;
         textArea.SelectionChanged += OnSelectionChanged;
+        textArea.Caret.PositionChanged += OnCaretPositionChanged;
+        _from = Caret();
         ShowReplaceRow();
         Search(Move.None);
     }
@@ -212,9 +240,14 @@ internal sealed class SearchBar : UserControl
         shown.Buffer.Changed -= OnBufferChanged;
         shown.Buffer.TextChanged -= OnTextChanged;
         shown.TextArea.SelectionChanged -= OnSelectionChanged;
+        shown.TextArea.Caret.PositionChanged -= OnCaretPositionChanged;
         shown.Layer.Dispose();
+        shown.ScopeLayer.Dispose();
         _shown = null;
         _result = null;
+        // As in VS Code, Find in Selection ends with the document.
+        _scope = null;
+        _findInSelection.IsChecked = false;
         UpdateStatus();
     }
 
@@ -254,14 +287,40 @@ internal sealed class SearchBar : UserControl
     /// <summary>Turns Preserve Case on or off, also while the replace row is hidden, as in VS Code.</summary>
     public void TogglePreserveCase() => Toggle(_preserveCase);
 
-    /// <summary>Closes the bar, and gives the keyboard back to the text.</summary>
+    /// <summary>
+    /// Turns Find in Selection on for the selection, as its key does, or off, and selects the first match from the
+    /// selection's start; also while the bar is closed, for the next search, as in VS Code. Without a selection, it
+    /// stays off.
+    /// </summary>
+    public void ToggleFindInSelection()
+    {
+        if (_scope is not null)
+            SetScope(null, Move.First);
+        else if (SelectionScope(trimEnd: true) is { } scope)
+            SetScope(scope, Move.First);
+    }
+
+    /// <summary>
+    /// Searches only the selection, as VS Code's automatic Find in Selection does when the bar opens, without moving
+    /// the selection; nothing changes without a selection.
+    /// </summary>
+    public void FindInSelection()
+    {
+        if (SelectionScope(trimEnd: false) is { } scope)
+            SetScope(scope, Move.None);
+    }
+
+    /// <summary>Closes the bar, ends Find in Selection, as in VS Code, and gives the keyboard back to the text.</summary>
     public void Close()
     {
         IsVisible = false;
         CancelSearch();
         _move = Move.None;
         _result = null;
+        _scope = null;
+        _findInSelection.IsChecked = false;
         _shown?.Layer.Matches = null;
+        _shown?.ScopeLayer.Scope = null;
         UpdateStatus();
         _shown?.TextArea.Focus();
     }
@@ -307,9 +366,12 @@ internal sealed class SearchBar : UserControl
         bool wasOpen = IsOpen;
         if (!wasOpen)
             ShowTexts();
+        // As VS Code starts its search again, also in an open bar.
+        _from = Caret();
         _replaceMode = replace || (wasOpen && _replaceMode);
         bool rowChanged = ShowReplaceRow();
         IsVisible = true;
+        _shown?.ScopeLayer.Scope = _scope;
         string? query = text is not null && _regex.IsChecked == true ? TextSearch.Escape(text) : text;
         if (query is not null && query != _find.Text)
         {
@@ -358,11 +420,7 @@ internal sealed class SearchBar : UserControl
             _move = move;
     }
 
-    private void OnQueryChanged()
-    {
-        _from = SelectionStart();
-        Search(Move.First);
-    }
+    private void OnQueryChanged() => Search(Move.First);
 
     /// <summary>
     /// Starts a search of the current text in the background, in place of the one under way, if the bar is open and
@@ -390,12 +448,13 @@ internal sealed class SearchBar : UserControl
             _regex.IsChecked == true
         );
         SearchReplacement? replacement = _replaceRow.IsVisible ? Replacement() : null;
+        IReadOnlyList<TextRange>? scopes = Scopes();
         TextSnapshot snapshot = shown.Document.CurrentSnapshot;
         var searching = new CancellationTokenSource();
         _searching = searching;
         // Cancelled, the task ends as cancelled, not as failed.
         Task<SearchResult> search = Task.Run(
-            () => TextSearch.Find(snapshot, query, replacement, null, searching.Token),
+            () => TextSearch.Find(snapshot, query, replacement, scopes, searching.Token),
             searching.Token
         );
         search.ContinueWith(
@@ -472,7 +531,15 @@ internal sealed class SearchBar : UserControl
     {
         if (_shown is not { } shown)
             return;
-        shown.Editor.Selection = new TextSelection(match.StartOffset, match.EndOffset);
+        _selecting = true;
+        try
+        {
+            shown.Editor.Selection = new TextSelection(match.StartOffset, match.EndOffset);
+        }
+        finally
+        {
+            _selecting = false;
+        }
         shown.Editor.ScrollTo(new TextRange(match.StartOffset, match.Length));
     }
 
@@ -532,7 +599,7 @@ internal sealed class SearchBar : UserControl
             shown.Document.CurrentSnapshot,
             query,
             replacement,
-            null,
+            Scopes(),
             CancellationToken.None
         );
         if (edit is not null)
@@ -571,7 +638,64 @@ internal sealed class SearchBar : UserControl
             : null;
     }
 
-    private int SelectionStart() => _shown?.Editor.Selection.Range.Start ?? 0;
+    private int Caret() => _shown?.Editor.Selection.Caret ?? 0;
+
+    /// <summary>The ranges that Find in Selection searches, as they are now; null while it is off.</summary>
+    private List<TextRange>? Scopes() =>
+        _scope?.Select(range => new TextRange(range.StartOffset, range.Length)).ToList();
+
+    /// <summary>The scope of the selection, as Find in Selection takes it; null without a selection.</summary>
+    private List<TextRange>? SelectionScope(bool trimEnd) =>
+        _shown is { } shown ? FindScope.OfSelection(shown.Buffer, shown.TextArea.Selection.Segments, trimEnd) : null;
+
+    /// <summary>
+    /// Searches only <paramref name="ranges"/> from now on, or everywhere for null, and searches again, moving as
+    /// <paramref name="move"/> says.
+    /// </summary>
+    private void SetScope(List<TextRange>? ranges, Move move)
+    {
+        _scope = null;
+        if (ranges is not null)
+        {
+            _scope = new TextSegmentCollection<TextSegment>();
+            foreach (TextRange range in ranges)
+                _scope.Add(new TextSegment { StartOffset = range.Start, Length = range.Length });
+        }
+        _findInSelection.IsChecked = _scope is not null;
+        if (IsOpen)
+            _shown?.ScopeLayer.Scope = _scope;
+        Search(move);
+    }
+
+    /// <summary>A click on the toggle turns Find in Selection on for the selection, or off.</summary>
+    private void OnFindInSelectionClicked()
+    {
+        if (_findInSelection.IsChecked != true)
+            SetScope(null, Move.First);
+        else if (SelectionScope(trimEnd: true) is { } scope)
+            SetScope(scope, Move.First);
+        else
+            _findInSelection.IsChecked = false;
+    }
+
+    /// <summary>
+    /// As the query or the replacement takes the keyboard while Find in Selection is on, a selection over several
+    /// lines that is not the selected match becomes the scope, as VS Code means to do: its code drops that filter and
+    /// takes any selection.
+    /// </summary>
+    private void FollowTheSelection()
+    {
+        if (_scope is null || _shown is not { } shown || _result is { } result && CurrentMatch(result) is not null)
+            return;
+        TextRange selection = shown.Editor.Selection.Range;
+        DocumentLine first = shown.Buffer.GetLineByOffset(selection.Start);
+        DocumentLine last = shown.Buffer.GetLineByOffset(selection.End);
+        // A selection to the start of the next line is within its first line.
+        if (first == last || (last.Offset == selection.End && last.PreviousLine == first))
+            return;
+        if (SelectionScope(trimEnd: true) is { } scope)
+            SetScope(scope, Move.First);
+    }
 
     /// <summary>What replaces the matches, by the replace row as it is.</summary>
     private SearchReplacement Replacement() => new(_replace.Text ?? "", _preserveCase.IsChecked == true);
@@ -602,6 +726,8 @@ internal sealed class SearchBar : UserControl
                 : null
         );
         ShowMessage(result?.Outcome, result?.Error);
+        // As in VS Code: to turn it on, there must be a selection.
+        _findInSelection.IsEnabled = _scope is not null || _shown?.TextArea.Selection.IsEmpty == false;
         _replaceAll.IsEnabled =
             CurrentResult() is { Outcome: SearchOutcome.Complete or SearchOutcome.TooManyMatches, Matches.Count: > 0 };
 
@@ -636,19 +762,32 @@ internal sealed class SearchBar : UserControl
         _message.IsVisible = _message.Text is not null;
     }
 
-    /// <summary>Keeps the matches on their text while the text changes.</summary>
-    private void OnBufferChanged(object? sender, DocumentChangeEventArgs e) => _result?.Matches.UpdateOffsets(e);
+    /// <summary>Keeps the matches and the scope on their text while the text changes.</summary>
+    private void OnBufferChanged(object? sender, DocumentChangeEventArgs e)
+    {
+        _result?.Matches.UpdateOffsets(e);
+        _scope?.UpdateOffsets(e);
+    }
 
     private void OnTextChanged(object? sender, EventArgs e)
     {
+        _from = Caret();
         if (IsOpen)
             Search(Move.None);
     }
 
     private void OnSelectionChanged(object? sender, EventArgs e)
     {
+        if (!_selecting)
+            _from = Caret();
         if (IsOpen)
             UpdateStatus();
+    }
+
+    private void OnCaretPositionChanged(object? sender, EventArgs e)
+    {
+        if (!_selecting)
+            _from = Caret();
     }
 
     /// <summary>
@@ -731,6 +870,10 @@ internal sealed class SearchBar : UserControl
         ToolTip.SetTip(_wholeWord, WithKeys(Strings.Default.MatchWholeWord, CodeEditorCommands.ToggleFindWholeWord));
         ToolTip.SetTip(_regex, WithKeys(Strings.Default.UseRegularExpression, CodeEditorCommands.ToggleFindRegex));
         ToolTip.SetTip(_preserveCase, WithKeys(Strings.Default.PreserveCase, CodeEditorCommands.TogglePreserveCase));
+        ToolTip.SetTip(
+            _findInSelection,
+            WithKeys(Strings.Default.FindInSelection, CodeEditorCommands.ToggleFindInSelection)
+        );
         ToolTip.SetTip(_previous, Strings.Default.PreviousMatch);
         ToolTip.SetTip(_next, Strings.Default.NextMatch);
         ToolTip.SetTip(_close, Strings.Default.CloseSearch);
@@ -746,28 +889,29 @@ internal sealed class SearchBar : UserControl
 
     private static Button IconButton(Geometry icon, Action action)
     {
-        var button = new Button
-        {
-            Content = new PathIcon
-            {
-                Data = icon,
-                Width = 12,
-                Height = 12,
-            },
-        };
+        var button = new Button { Content = Icon(icon) };
         button.Click += (_, _) => action();
         return button;
     }
 
+    private static PathIcon Icon(Geometry icon) =>
+        new()
+        {
+            Data = icon,
+            Width = 12,
+            Height = 12,
+        };
+
     /// <summary>
-    /// The editor, its text area, the document it shows, the document's buffer, and the layer that highlights the
-    /// matches.
+    /// The editor, its text area, the document it shows, the document's buffer, the layer that highlights the matches,
+    /// and the one that highlights the lines that Find in Selection searches.
     /// </summary>
     private sealed record Shown(
         CodeEditor Editor,
         TextArea TextArea,
         CodeDocument Document,
         TextDocument Buffer,
-        SearchMatchLayer Layer
+        SearchMatchLayer Layer,
+        SearchScopeLayer ScopeLayer
     );
 }

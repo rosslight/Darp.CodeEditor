@@ -72,4 +72,7 @@
   <data name="PreserveCase" xml:space="preserve">
     <value>Groß-/Kleinschreibung beibehalten</value>
   </data>
+  <data name="FindInSelection" xml:space="preserve">
+    <value>In Auswahl suchen</value>
+  </data>
 </root>

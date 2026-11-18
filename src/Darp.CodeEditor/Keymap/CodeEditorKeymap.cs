@@ -86,7 +86,7 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+d (cmd+d)</term><description><see cref="CodeEditorCommands.AddSelectionToNextFindMatch"/></description></item>
     /// <item><term>ctrl+left, ctrl+shift+left (alt+left, alt+shift+left)</term><description><see cref="CodeEditorCommands.CursorWordLeft"/>, <see cref="CodeEditorCommands.CursorWordLeftSelect"/></description></item>
     /// <item><term>ctrl+right, ctrl+shift+right (alt+right, alt+shift+right)</term><description><see cref="CodeEditorCommands.CursorWordEndRight"/>, <see cref="CodeEditorCommands.CursorWordEndRightSelect"/></description></item>
-    /// <item><term>alt+p (alt+cmd+p)</term><description><see cref="CodeEditorCommands.TogglePreserveCase"/>, from the text or the search bar</description></item>
+    /// <item><term>alt+p, alt+l (alt+cmd+p, alt+cmd+l)</term><description><see cref="CodeEditorCommands.TogglePreserveCase"/>, <see cref="CodeEditorCommands.ToggleFindInSelection"/>, from the text or the search bar</description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default => s_default.Value;
@@ -212,6 +212,7 @@ public sealed class CodeEditorKeymap
     {
         string toggle = mac ? "alt+cmd" : "alt";
         yield return new($"{toggle}+p", CodeEditorCommands.TogglePreserveCase);
+        yield return new($"{toggle}+l", CodeEditorCommands.ToggleFindInSelection);
     }
 
     /// <summary>The keys that go to the next and previous diagnostic, VS Code's on every operating system.</summary>
@@ -384,4 +385,11 @@ public static class CodeEditorCommands
     /// <c>Bar</c> and <c>BAR</c>.
     /// </summary>
     public const string TogglePreserveCase = "togglePreserveCase";
+
+    /// <summary>
+    /// Turns Find in Selection on for the selection, or off, also while the bar is closed, for the next search: the bar
+    /// then searches only the selected lines, whole, or the selection within a line, which stay highlighted while the
+    /// bar is open; closing the bar turns it off, as in VS Code. Without a selection, it stays off.
+    /// </summary>
+    public const string ToggleFindInSelection = "toggleFindInSelection";
 }
