@@ -18,22 +18,16 @@ namespace Darp.CodeEditor.Completion;
 /// mirror of its number. A snippet with stops gets a final stop at its end, unless it has one.
 /// </para>
 /// <para>
-/// The limits are sized for real snippets, which have a few lines and fewer than about 20 stops, so that the UI thread's
-/// work with a snippet is bounded by small constants, whatever the server sends. Parsing runs where the server's answer
-/// is read, off the UI thread, and reads the characters at most four times over. A snippet that parsing would read more
-/// often, nested deeper than <see cref="MaxNesting"/> levels, with more than <see cref="MaxStops"/> stops, mirrors
-/// included, or whose text would be longer than <see cref="MaxText"/> characters with its mirrors, its variables'
-/// values and its indentation goes in as written, without stops, as a plain item goes in.
+/// A snippet may have as many stops as it likes, as in VS Code. The limits are sized for real snippets, which have a
+/// few lines, so that the UI thread's work with a snippet is bounded by small constants, whatever the server sends.
+/// Parsing runs where the server's answer is read, off the UI thread, and reads the characters at most four times over.
+/// A snippet that parsing would read more often, nested deeper than <see cref="MaxNesting"/> levels, or whose text would
+/// be longer than <see cref="MaxText"/> characters with its mirrors, its variables' values and its indentation goes in
+/// as written, without stops, as a plain item goes in.
 /// </para>
 /// </remarks>
 internal sealed class Snippet
 {
-    /// <summary>
-    /// The most stops that a snippet tracks, mirrors included: half again as many as a real snippet has, and few enough
-    /// that each edit and caret move can look at all of them.
-    /// </summary>
-    public const int MaxStops = 30;
-
     /// <summary>How deep placeholders and variables may nest.</summary>
     public const int MaxNesting = 100;
 
@@ -69,7 +63,7 @@ internal sealed class Snippet
             nodes.Add(final);
             placeholders.Add(final);
         }
-        if (placeholders.Count > MaxStops || !FillMirrors(placeholders))
+        if (!FillMirrors(placeholders))
             return AsWritten(text);
         JoinTexts(nodes);
         return new Snippet(text, nodes);

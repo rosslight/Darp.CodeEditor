@@ -148,13 +148,19 @@ public sealed class SnippetTests
     }
 
     [Fact]
+    public void A_snippet_has_as_many_stops_as_it_likes()
+    {
+        string snippet = string.Concat(Enumerable.Range(1, 100).Select(i => $"${{{i}:{i}}} $1 "));
+
+        RenderedSnippet rendered = Render(snippet);
+
+        rendered.Stops.Count.ShouldBe(201);
+        rendered.Stops.Select(stop => stop.Index).Distinct().Count().ShouldBe(101);
+    }
+
+    [Fact]
     public void A_snippet_beyond_the_parsing_limits_goes_in_as_written()
     {
-        // As many stops as tracked, the final one included.
-        string most = string.Concat(Enumerable.Repeat("$1", Snippet.MaxStops - 1));
-        Render(most).Stops.Count.ShouldBe(Snippet.MaxStops);
-        AsWritten(most + "$1");
-
         // As deep as placeholders and variables nest.
         string nested =
             string.Concat(Enumerable.Repeat("${TM_SELECTED_TEXT:", Snippet.MaxNesting - 1))

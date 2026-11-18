@@ -252,7 +252,7 @@ public sealed class SnippetSessionTests(UiFixture ui)
         });
 
     [Fact]
-    public Task A_change_that_would_copy_more_than_1000_characters_into_mirrors_ends_the_session() =>
+    public Task A_snippet_has_as_many_stops_as_it_likes_and_mirrors_copy_whatever_goes_in() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
@@ -260,21 +260,34 @@ public sealed class SnippetSessionTests(UiFixture ui)
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
             var editor = new CodeEditor { Document = document };
             using var window = new EditorWindow(editor);
-            string mirrors = string.Concat(Enumerable.Repeat("$1", Snippet.MaxStops - 2));
-            using CodeDocument answer = await SetCompletionAsync(server, fake, Item("${1:a}" + mirrors));
+            // 40 numbers, the first with 30 mirrors.
+            string snippet =
+                "${1:a}"
+                + string.Concat(Enumerable.Repeat(" $1", 30))
+                + string.Concat(Enumerable.Range(2, 39).Select(i => $" ${{{i}:s{i}}}"));
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Item(snippet));
             await OpenAsync(window, 0);
             window.Press(Key.Enter);
-            string text = new('a', Snippet.MaxStops - 1);
-            document.Text.ShouldBe(text);
+            editor.Selection.ShouldBe(new TextSelection(0, 1));
 
-            // 35 characters in each of the 29 stops would pass 1,000: the mirrors keep their text.
-            string pasted = new('b', SnippetController.MaxMirrorText / (Snippet.MaxStops - 1) + 1);
+            // 2,000 characters that go in over the first stop, as a paste, go into each of its mirrors.
+            string pasted = new('b', 2_000);
             document.Replace(new TextRange(0, 1), pasted);
 
-            document.Text.ShouldBe(pasted + text[1..]);
-            editor.Selection = new TextSelection(0);
+            string mirrored = pasted + string.Concat(Enumerable.Repeat(" " + pasted, 30));
+            string rest = string.Concat(Enumerable.Range(2, 39).Select(i => $" s{i}"));
+            document.Text.ShouldBe(mirrored + rest);
+            // Tab selects each of the other stops, and then the final one.
+            int start = mirrored.Length + 1;
+            for (int i = 2; i <= 40; i++)
+            {
+                window.Press(Key.Tab);
+                int length = $"s{i}".Length;
+                editor.Selection.ShouldBe(new TextSelection(start, start + length));
+                start += length + 1;
+            }
             window.Press(Key.Tab);
-            document.Text.ShouldBe("    " + pasted + text[1..]);
+            editor.Selection.ShouldBe(new TextSelection(document.Text.Length));
         });
 
     [Fact]

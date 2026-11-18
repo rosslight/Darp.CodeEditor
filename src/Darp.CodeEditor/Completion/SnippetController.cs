@@ -27,15 +27,14 @@ namespace Darp.CodeEditor.Completion;
 /// <para>
 /// The session ends at the final stop, on <see cref="End"/>, as for Escape, when the selection leaves the stops, when
 /// the step that inserted the snippet is undone, when a change removes all of its text, such as setting the document's
-/// text, when one change would copy more than <see cref="MaxMirrorText"/> characters into mirrors, and when the editor
-/// stops showing the document. A snippet that goes in inside a stop while a session runs, as completion inside a
-/// placeholder commits one, joins it: its stops come right after the selected stop, as in VS Code.
+/// text, and when the editor stops showing the document. A snippet that goes in inside a stop while a session runs, as
+/// completion inside a placeholder commits one, joins it: its stops come right after the selected stop, as in VS Code.
 /// </para>
 /// <para>
-/// The UI thread's work is bounded by small constants: a session has at most <see cref="Snippet.MaxStops"/> stops, each
-/// change and caret move looks at each of them, and one change copies at most <see cref="MaxMirrorText"/> characters
-/// into mirrors, each copy a change of that mirror alone, prepared with one look at each stop, and all of them with the
-/// change they follow one update and one undo step.
+/// As in VS Code, a session has as many stops as its snippets, and mirrors copy whatever the stop they follow holds.
+/// The UI thread's work grows with them, and no faster: each change and caret move looks at each stop, and the copies
+/// that follow a change are each a change of that mirror alone, prepared with a look at the stops that it touches, and
+/// all of them with the change they follow one update and one undo step.
 /// </para>
 /// <para>
 /// The stops show as boxes in the theme's <c>editor.snippetTabstopHighlightBackground</c>, and the final stop as a
@@ -44,13 +43,6 @@ namespace Darp.CodeEditor.Completion;
 /// </remarks>
 internal sealed class SnippetController : IBackgroundRenderer, IDisposable
 {
-    /// <summary>
-    /// The most characters that one change may copy into mirrors, and compare with them, before the session ends: many
-    /// times what a real snippet's mirrors hold, as names of a few words in a few mirrors. Each copy is a change of its
-    /// own, so the work is that of the mirrors and never that of the text between them.
-    /// </summary>
-    public const int MaxMirrorText = 1_000;
-
     /// <summary>The width of the box of an empty stop, as VS Code's.</summary>
     private const double EmptyStopWidth = 2;
 
@@ -68,6 +60,12 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
 
     /// <summary>Whether the controller selects a stop: it does not follow its own selection.</summary>
     private bool _selecting;
+
+    /// <summary>
+    /// The stops that the copy into a mirror under way made other than <see cref="Stop.Keep"/>: they keep again once it
+    /// is done, so that each copy looks only at the stops that it touches.
+    /// </summary>
+    private readonly List<Stop> _adjusted = [];
 
     public SnippetController(TextArea textArea, CodeDocument document)
     {
@@ -144,8 +142,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     /// <summary>
     /// Starts the session of a snippet that went in at <paramref name="start"/>, in the undo step of
     /// <paramref name="mark"/>, and selects its first stop; without stops, the caret stays where it is. Inside a stop of
-    /// the session that runs, the snippet joins it, unless they would have more than <see cref="Snippet.MaxStops"/>
-    /// stops together.
+    /// the session that runs, the snippet joins it.
     /// </summary>
     public void Start(RenderedSnippet snippet, int start, SnippetMark mark)
     {
@@ -154,7 +151,6 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         int end = start + snippet.Text.Length;
         if (
             _session is { } session
-            && session.Stops.Count + snippet.Stops.Count <= Snippet.MaxStops
             // The innermost: placeholders come before those inside them.
             && session.Stops.LastOrDefault(stop =>
                 !stop.IsFinal && !stop.IsGone && stop.StartOffset <= start && end <= stop.EndOffset
@@ -165,13 +161,15 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
             // VS Code's merge: the snippet's stops, its final one too, come right after the selected stop, and in the
             // order of the text right after the stop they are in.
             List<Stop> joining = CreateStops(snippet, start, enclosing, isFinal: false);
-            session.Stops.InsertRange(session.Stops.IndexOf(enclosing) + 1, joining);
+            session.Stops.InsertRange(enclosing.Order + 1, joining);
+            Number(session.Stops);
             session.Groups.InsertRange(session.Current + 1, Groups(snippet, joining));
             Move(session, forward: true);
             return;
         }
         End();
         List<Stop> stops = CreateStops(snippet, start, parent: null, isFinal: true);
+        Number(stops);
         var started = new Session(stops, Groups(snippet, stops), mark);
         _session = started;
         Move(started, forward: true);
@@ -322,6 +320,13 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         return stops;
     }
 
+    /// <summary>Gives each stop its place in <paramref name="stops"/>, the session's.</summary>
+    private static void Number(List<Stop> stops)
+    {
+        for (int i = 0; i < stops.Count; i++)
+            stops[i].Order = i;
+    }
+
     /// <summary>
     /// The stops by number, in the order Tab selects them: by number, the final stop last, and those of one number in
     /// the order of the text. Each stop knows its group, for its mirrors.
@@ -437,8 +442,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     /// undone, and gives the mirrors of the stops that the change was inside their text. The innermost stops' mirrors
     /// follow first, and a mirror inside a stop of another number has that stop's mirrors follow in turn, as VS Code's
     /// cursors in nested mirrors do; each number once. A mirror around or inside its own stop keeps its text, as copying
-    /// would grow it forever. A change that would copy more than <see cref="MaxMirrorText"/> characters ends the
-    /// session instead.
+    /// would grow it forever.
     /// </summary>
     private void OnBufferTextChanged(object? sender, EventArgs e)
     {
@@ -455,8 +459,9 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         var queue = new PriorityQueue<Stop, int>(_edited.Select(stop => (stop, -stop.Depth)));
         _edited.Clear();
         var followed = new HashSet<List<Stop>>(ReferenceEqualityComparer.Instance);
-        int budget = MaxMirrorText;
         _following = true;
+        foreach (Stop stop in session.Stops)
+            stop.Keep();
         // The copies, with the change they follow, are one update: one undo step, and one end of an update for the
         // editor's work that waits for it.
         IDisposable update = _buffer.RunUpdate();
@@ -467,16 +472,21 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
                 if (stop.IsGone || !followed.Add(stop.Group))
                     continue;
                 int length = stop.EndOffset - stop.StartOffset;
-                List<Stop> mirrors = stop.Group.FindAll(mirror =>
-                    mirror != stop && !mirror.IsGone && !mirror.Overlaps(stop)
-                );
-                budget -= length * (mirrors.Count + 1);
-                if (budget < 0)
-                {
-                    End();
-                    return;
-                }
+                // From the last in the text to the first: a copy moves only the text after it, so that where the
+                // empty stops were before the copies holds for each mirror still to come.
+                List<Stop> mirrors =
+                [
+                    .. stop
+                        .Group.Where(mirror => mirror != stop && !mirror.IsGone && !mirror.Overlaps(stop))
+                        .OrderByDescending(mirror => mirror.StartOffset)
+                        .ThenByDescending(mirror => mirror.Order),
+                ];
+                if (mirrors.Count == 0)
+                    continue;
                 string text = _buffer.GetText(stop.StartOffset, length);
+                ILookup<int, Stop> empty = session
+                    .Stops.Where(other => other.StartOffset == other.EndOffset)
+                    .ToLookup(other => other.StartOffset);
                 foreach (Stop mirror in mirrors)
                 {
                     if (
@@ -486,7 +496,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
                     {
                         continue;
                     }
-                    Replace(session, mirror, text);
+                    Replace(mirror, text, empty[mirror.StartOffset]);
                     for (Stop? around = mirror.Parent; around is not null; around = around.Parent)
                     {
                         if (around.Group.Count > 1)
@@ -502,40 +512,48 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
             foreach (Stop stop in session.Stops)
                 stop.FollowEdits();
         }
+        OnSelectionChanged(this, EventArgs.Empty);
     }
 
     /// <summary>
-    /// Gives a mirror the text, as a change of its own: the work is that of its text, never of the text between mirrors.
-    /// The mirror and the placeholders around it take the new text; the other stops don't, also those that touch it,
-    /// such as its placeholder right before it: an empty one keeps its place before or after it, as in the order of the
-    /// text, so that empty mirrors side by side stay apart. The caret stays before the text, as before a mirror right
-    /// after the stop typed in.
+    /// Gives a mirror the text, as a change of its own: the work is that of its text and of the stops it touches, never
+    /// of the text between mirrors nor of the other stops. The mirror and the placeholders around it take the new text;
+    /// the other stops don't, also those that touch it, such as its placeholder right before it: an empty one of
+    /// <paramref name="empty"/>, those that were empty where the mirror starts, keeps its place before or after it, as
+    /// in the order of the text, so that empty mirrors side by side stay apart. The caret stays before the text, as
+    /// before a mirror right after the stop typed in. All stops but those it changes <see cref="Stop.Keep"/>.
     /// </summary>
-    private void Replace(Session session, Stop mirror, string text)
+    private void Replace(Stop mirror, string text, IEnumerable<Stop> empty)
     {
         int at = mirror.StartOffset;
-        int order = session.Stops.IndexOf(mirror);
-        foreach (Stop stop in session.Stops)
-            stop.Keep();
         for (Stop? around = mirror; around is not null; around = around.Parent)
-            around.Grow();
-        for (int i = 0; i < session.Stops.Count; i++)
         {
-            Stop stop = session.Stops[i];
+            around.Grow();
+            _adjusted.Add(around);
+        }
+        foreach (Stop stop in empty)
+        {
             if (stop != mirror && stop.StartOffset == at && stop.EndOffset == at && !stop.Encloses(mirror))
-                stop.Stay(after: i > order);
+            {
+                stop.Stay(after: stop.Order > mirror.Order);
+                _adjusted.Add(stop);
+            }
         }
         // Text that goes in where the caret is, into an empty mirror, would carry the caret along.
         bool caretStays = mirror.EndOffset == at && _textArea.Caret.Offset == at;
         _buffer.Replace(at, mirror.EndOffset - at, text);
         if (caretStays)
             _textArea.Caret.Offset = at;
+        foreach (Stop stop in _adjusted)
+            stop.Keep();
+        _adjusted.Clear();
     }
 
     /// <summary>Ends the session once the selection is outside its stops, or the step that inserted it was undone.</summary>
     private void OnSelectionChanged(object? sender, EventArgs e)
     {
-        if (_selecting || _session is not { } session)
+        // The copies into mirrors leave the selection in the stop typed in: it is looked at once they are done.
+        if (_selecting || _following || _session is not { } session)
             return;
         ISegment selected = _textArea.Selection.IsEmpty
             ? Segment(_textArea.Caret.Offset, _textArea.Caret.Offset)
@@ -591,6 +609,9 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         public int Depth { get; } = parent is null ? 0 : parent.Depth + 1;
 
         public bool IsFinal { get; } = isFinal;
+
+        /// <summary>Its place among the session's stops, in the order of the text as they went in.</summary>
+        public int Order { get; set; }
 
         /// <summary>The stops of its number, itself included: its mirrors.</summary>
         public List<Stop> Group { get; set; } = [];
