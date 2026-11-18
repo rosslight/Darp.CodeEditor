@@ -17,7 +17,7 @@
 // signature help. Resolving an item answers the item with the properties of its "data"
 // added. Signature help answers inside parentheses, "(" asks for it and "," asks again: the signatures that the command
 // "signatures" set, or two of "call", with the parameter at the position active, and the signature that the client
-// says it shows, or the first. Completion in a document with the word "slow" is never answered. A request about a
+// says it shows, or the first. Completion and signature help in a document with the word "slow" are never answered. A request about a
 // document that is not open is answered with an error.
 //
 // Arguments:
@@ -654,6 +654,8 @@ internal sealed class FakeServer
             $"signatureHelp {id?.ToJsonString()} {(int?)context?["triggerKind"]} {(string?)context?["triggerCharacter"] ?? "-"} "
                 + $"{(bool?)context?["isRetrigger"]} {showing?["activeSignature"]?.ToJsonString() ?? "-"} {offset}"
         );
+        if (document.Text.Contains("slow", StringComparison.Ordinal))
+            return;
         // The innermost parenthesis still open before the position, and the commas in it.
         int depth = 0;
         int commas = 0;

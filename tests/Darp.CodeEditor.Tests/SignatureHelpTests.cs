@@ -81,7 +81,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
             .CannotMatch.ShouldBe(cannotMatch);
 
     [Fact]
-    public Task A_retrigger_character_moves_the_active_parameter_at_once() =>
+    public Task A_retrigger_character_moves_the_active_parameter() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
@@ -100,6 +100,34 @@ public sealed class SignatureHelpTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_trigger_character_asks_after_the_pause_and_one_typed_while_a_request_is_under_way_asks_again() =>
+        _ui.Run(async () =>
+        {
+            var time = new ManualTime();
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            // The server never answers signature help in a document with "slow".
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "slow");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await CompletionTests.StartServingAsync(server, document);
+            window.Editor.Selection = new TextSelection(4);
+
+            window.Type("(");
+            time.Advance(TimeSpan.FromMilliseconds(119));
+            await CompletionTests.BarrierAsync(server, fake);
+            fake.LinesStartingWith("signatureHelp ").ShouldBeEmpty();
+            time.Advance(TimeSpan.FromMilliseconds(1));
+            string first = (await fake.WaitForAsync("signatureHelp ")).Split(' ')[1];
+            fake.LinesStartingWith("signatureHelp ")[0].ShouldEndWith(" 2 ( False - 5");
+
+            // Nothing shows yet, but a request is under way: as in VS Code, it is active, and asks again.
+            window.Type(",");
+            time.Advance(TimeSpan.FromMilliseconds(120));
+            (await fake.WaitForAsync("signatureHelp ", 2)).ShouldEndWith(" 2 , True - 6");
+            await fake.WaitForAsync($"cancel {first}");
+        });
+
+    [Fact]
     public Task Typing_inside_the_call_asks_again_after_a_pause_that_each_edit_restarts() =>
         _ui.Run(async () =>
         {
@@ -111,6 +139,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
             await CompletionTests.StartServingAsync(server, document);
             window.Editor.Selection = new TextSelection(4);
             window.Type("(");
+            time.Advance(TimeSpan.FromMilliseconds(120));
             await WaitForSignatureAsync(window, "first", "Calls with two.");
 
             window.Type("+");
@@ -137,6 +166,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
             await CompletionTests.StartServingAsync(server, document);
             window.Editor.Selection = new TextSelection(4);
             window.Type("(");
+            time.Advance(TimeSpan.FromMilliseconds(120));
             await WaitForSignatureAsync(window, "first", "Calls with two.");
 
             // As another editor of the document renames the call: same length, so the caret stays.
@@ -255,15 +285,16 @@ public sealed class SignatureHelpTests(UiFixture ui)
             using var window = new EditorWindow(new CodeEditor { Document = document });
             await CompletionTests.StartServingAsync(server, document);
             window.Editor.Selection = new TextSelection(4);
+            // The "(" and what follows it within the pause ask once, for the "(".
             window.Type("(xy");
-            await WaitForSignatureAsync(window, "first", "Calls with two.");
             time.Advance(TimeSpan.FromMilliseconds(120));
-            await fake.WaitForAsync("signatureHelp ", 2);
+            await WaitForSignatureAsync(window, "first", "Calls with two.");
+            (await fake.WaitForAsync("signatureHelp ")).ShouldEndWith(" 2 ( False - 7");
 
             // As in VS Code: a key that moves the caret asks again after the pause, a click ends it.
             window.Press(Key.Left);
             time.Advance(TimeSpan.FromMilliseconds(120));
-            await fake.WaitForAsync("signatureHelp ", 3);
+            await fake.WaitForAsync("signatureHelp ", 2);
             Popup(window).ShouldNotBeNull();
             // Between "(" and "x": a quarter of a character right of their boundary.
             window.Click(window.PointAt(5) - new Point(window.TextView.WideSpaceWidth / 4, 0), MouseButton.Left);
@@ -272,7 +303,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
             Popup(window).ShouldBeNull();
             time.Advance(TimeSpan.FromMilliseconds(120));
             await CompletionTests.BarrierAsync(server, fake);
-            fake.LinesStartingWith("signatureHelp ").Count.ShouldBe(3);
+            fake.LinesStartingWith("signatureHelp ").Count.ShouldBe(2);
         });
 
     [Fact]
