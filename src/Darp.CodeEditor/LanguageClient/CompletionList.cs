@@ -109,6 +109,7 @@ internal sealed class CompletionList
                 Detail = ServerJson.String(result, "detail") ?? item.Detail,
                 Documentation = ServerJson.Documentation(result) ?? item.Documentation,
                 AdditionalEdits = AdditionalEdits(result, snapshot) ?? item.AdditionalEdits,
+                Command = Command(result) ?? item.Command,
             };
 
     /// <summary>
@@ -182,8 +183,15 @@ internal sealed class CompletionList
         {
             LabelDetail = labelDetails is { } d ? OneLine(ServerJson.String(d, "detail")) : null,
             LabelDescription = labelDetails is { } e ? OneLine(ServerJson.String(e, "description")) : null,
+            Command = Command(item),
         };
     }
+
+    /// <summary>An item's <c>command</c>: the identifier of the command to run after it is committed; null for none.</summary>
+    private static string? Command(JsonElement item) =>
+        item.TryGetProperty("command", out JsonElement command) && command.ValueKind == JsonValueKind.Object
+            ? ServerJson.String(command, "command")
+            : null;
 
     /// <summary>
     /// An item's <c>textEdit</c>, with the range it inserts over and the one it replaces: an <c>InsertReplaceEdit</c>'s
@@ -325,6 +333,12 @@ internal sealed record CompletionItem(
 
     /// <summary>The <c>labelDetails.description</c>, such as a module, right-aligned in the row; null for none.</summary>
     public string? LabelDescription { get; init; }
+
+    /// <summary>
+    /// The identifier of the command to run after the item is committed, such as
+    /// <c>editor.action.triggerSuggest</c>; null for none.
+    /// </summary>
+    public string? Command { get; init; }
 }
 
 /// <summary>A change of the text: <paramref name="Range"/> becomes <paramref name="NewText"/>.</summary>

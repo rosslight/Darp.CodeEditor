@@ -43,16 +43,16 @@ namespace Darp.CodeEditor.Completion;
 /// <para>
 /// Up, Down, Page Up and Page Down select, and the keymap's accept commands, a click or one of the selected item's
 /// commit characters commit it: its edit, or its text over the word, and its additional edits, such as an import, in
-/// one step that the user undoes. <see cref="Accept"/> inserts, over the word up to the caret, or replaces, over the
-/// rest of the word too; a click and a commit character insert. While the filter of the current text still runs, they
-/// commit the item that shows if it matches the current text, checked on the UI thread for that item alone; otherwise
-/// accepting commits what that filter selects once it has run, unless the text, by any editor or code, or the caret
-/// changes before, and a commit character goes in as text, as it does when nothing matches: deciding later would hold
-/// back or reorder what the user types. A read-only
-/// editor neither completes nor commits. The server resolves the selected item, so that its detail and documentation
-/// show beside the list. An item whose additional edits are still to come when it is committed gets them when they
-/// come, as in VS Code, unless the text changed before where they start since: in its step while that is the last one,
-/// and otherwise in a step of their own.
+/// one step that the user undoes, and then its command runs, if it is one of the editor's. <see cref="Accept"/>
+/// inserts, over the word up to the caret, or replaces, over the rest of the word too; a click and a commit character
+/// insert. While the filter of the current text still runs, they commit the item that shows if it matches the current
+/// text, checked on the UI thread for that item alone; otherwise accepting commits what that filter selects once it has
+/// run, unless the text, by any editor or code, or the caret changes before, and a commit character goes in as text, as
+/// it does when nothing matches: deciding later would hold back or reorder what the user types. A read-only editor
+/// neither completes nor commits. The server resolves the selected item, so that its detail and documentation show
+/// beside the list. An item whose additional edits are still to come when it is committed gets them when they come, as
+/// in VS Code, unless the text changed before where they start since: in its step while that is the last one, and
+/// otherwise in a step of their own.
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends completion, for every reason it ends: Escape, the caret leaving the line or moving back
@@ -880,6 +880,23 @@ internal sealed class CompletionController : IDisposable
             _snippets.Start(snippet, start, mark);
         if (late is not null)
             ApplyLateEdits(late, step, request.Snapshot, before);
+        if (item.Command is { } command)
+            RunCommand(command);
+    }
+
+    /// <summary>
+    /// Runs a committed item's command, as VS Code does after the commit: completion asks again for
+    /// <see cref="CodeEditorCommands.TriggerSuggest"/>, as if typing opened it, such as for the values after a property's
+    /// name; the editor's other commands run as their keys run them, such as
+    /// <see cref="CodeEditorCommands.TriggerParameterHints"/>. Other commands, such as a server's own, do not run: the
+    /// editor has nowhere to send them.
+    /// </summary>
+    private void RunCommand(string command)
+    {
+        if (command == CodeEditorCommands.TriggerSuggest)
+            Ask(new CompletionTrigger(CompletionTriggerKind.Invoked));
+        else
+            _editor.RunItemCommand(command);
     }
 
     /// <summary>

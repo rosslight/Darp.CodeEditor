@@ -1120,6 +1120,12 @@ public class CodeEditor : TemplatedControl
         Run(command, inText: _shown is not null);
     }
 
+    /// <summary>
+    /// Runs one of <see cref="CodeEditorCommands"/> that a completion item names, after it is committed, as its keys
+    /// run it in the text; another command does nothing.
+    /// </summary>
+    internal void RunItemCommand(string command) => Run(command, inText: _shown is not null);
+
     /// <summary>Runs one of <see cref="CodeEditorCommands"/> by key, where it applies.</summary>
     /// <returns>Whether it applied: otherwise the key goes on, to another binding or as an ordinary key.</returns>
     private bool Run(string command) =>
