@@ -15,6 +15,13 @@ internal static class Positions
     /// <summary>A line and column of the editor, which count from 1.</summary>
     public static LspPosition ToLsp(TextPosition position) => new(position.Line - 1, position.Column - 1);
 
+    /// <summary>A server's position as the editor's line and column; one outside the numbers they take is clamped.</summary>
+    public static TextPosition FromLsp(LspPosition position) =>
+        new(
+            Math.Clamp(position.Line, 0, int.MaxValue - 1) + 1,
+            Math.Clamp(position.Character, 0, int.MaxValue - 1) + 1
+        );
+
     /// <summary>
     /// The offset of a server's position in <paramref name="snapshot"/>. A position outside the text is clamped to it,
     /// and no value overflows.

@@ -46,8 +46,9 @@ public sealed class HoverTests(UiFixture ui)
 
             PopupFrame popup = await WaitForPopupAsync(window, "is a word in");
             Control[] parts = [.. ((Panel)Content(popup)).Children];
-            // The diagnostic's message and code, a line, the server's paragraph, and its code block.
-            TextOf(parts[0]).ShouldBe($"{text} (echo)");
+            // The diagnostic's icon, message and code, a line, the server's paragraph, and its code block.
+            parts[0].GetVisualDescendants().OfType<SeverityIcon>().ShouldHaveSingleItem();
+            parts[0].GetVisualDescendants().OfType<TextBlock>().Select(TextOf).ShouldBe([$"{text} (echo)"]);
             parts[1].ShouldBeOfType<Border>().Height.ShouldBe(1);
             TextOf(parts[2]).ShouldBe("key is a word in json.");
             ((TextBlock)parts[2]).Inlines.ShouldNotBeNull().OfType<Run>().First().FontWeight.ShouldBe(FontWeight.Bold);
@@ -61,6 +62,48 @@ public sealed class HoverTests(UiFixture ui)
             runs.ShouldContain(run => run.Text == "1" && (run.Foreground as ISolidColorBrush)!.Color == s_number);
             Rect bounds = BoundsInWindow(popup);
             new Rect(window.Window.ClientSize).Contains(bounds).ShouldBeTrue(bounds.ToString());
+        });
+
+    [Fact]
+    public Task A_diagnostic_shows_its_icon_message_source_code_link_and_related_places_as_in_VS_Code() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer("--diagnostic-details");
+            await using var server = new LanguageServer(fake.Options);
+            const string text = "one two";
+            string path = Path.Combine(AppContext.BaseDirectory, "details.txt");
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text, path);
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+            Diagnostic diagnostic = document.Diagnostics[0];
+            diagnostic.Source.ShouldBe("fake");
+            diagnostic.CodeDescription.ShouldBe(new Uri("https://example.com/echo"));
+            diagnostic
+                .RelatedInformation.Select(r => (r.Start, r.Message))
+                .ShouldBe([(new TextPosition(1, 2), "related here"), (new TextPosition(3, 4), "elsewhere")]);
+
+            PopupFrame popup = await HoverAsync(window, 4, "two is a word in");
+
+            Control part = ((Panel)Content(popup)).Children[0];
+            part.GetVisualDescendants().OfType<SeverityIcon>().ShouldHaveSingleItem();
+            TextBlock[] texts = [.. part.GetVisualDescendants().OfType<TextBlock>()];
+            texts
+                .Select(TextOf)
+                .ShouldBe([$"{text} fake(echo)", "details.txt(1, 2): related here", "other.txt(3, 4): elsewhere"]);
+            texts.ShouldAllBe(block => block.FontFamily == editor.FontFamily);
+            // The code, underlined in the link color, at the 60% of its source.
+            Run code = texts[0].Inlines.ShouldNotBeNull().OfType<Run>().Single(run => run.Text == "echo");
+            code.TextDecorations.ShouldBe(TextDecorations.Underline);
+            code.Foreground.ShouldBeAssignableTo<ISolidColorBrush>().ShouldNotBeNull().Opacity.ShouldBe(0.6);
+            texts[0].Inlines!.OfType<Run>().Single(run => run.Text == " fake").Foreground!.Opacity.ShouldBe(0.6);
+
+            // A place in the document is a link there; one elsewhere, which the editor cannot show, is not.
+            window.Click(TextPointAt(texts[2], 2), MouseButton.Left);
+            Popup(window).ShouldNotBeNull();
+            window.Click(TextPointAt(texts[1], 2), MouseButton.Left);
+            Popup(window).ShouldBeNull();
+            editor.Selection.ShouldBe(new TextSelection(1));
         });
 
     [Fact]
@@ -109,10 +152,11 @@ public sealed class HoverTests(UiFixture ui)
             PopupFrame popup = await HoverAsync(window, 1, "some is a word in");
 
             // In Light+'s black text, on its white background.
+            // The code block, after the diagnostic, whose message is in the editor's font too.
             TextBlock code = popup
                 .GetVisualDescendants()
                 .OfType<TextBlock>()
-                .First(text => text.FontFamily == window.Editor.FontFamily);
+                .Last(text => text.FontFamily == window.Editor.FontFamily);
             code.Inlines.ShouldNotBeNull().OfType<Run>().Single().IsSet(TextElement.ForegroundProperty).ShouldBeFalse();
             window.RenderAndCountPixels(Colors.Black, BoundsInWindow(code)).ShouldBeGreaterThan(0);
         });
@@ -925,6 +969,13 @@ public sealed class HoverTests(UiFixture ui)
         });
         return popup ?? throw new InvalidOperationException();
     }
+
+    /// <summary>Where the window shows the character at <paramref name="index"/> of a text block's text.</summary>
+    private static Point TextPointAt(TextBlock text, int index) =>
+        text.TranslatePoint(
+            text.TextLayout.HitTestTextPosition(index).Center,
+            TopLevel.GetTopLevel(text) ?? throw new InvalidOperationException("Not shown.")
+        ) ?? throw new InvalidOperationException("Not shown.");
 
     /// <summary>The paragraph of the server's hover, "… is a word in …".</summary>
     private static SelectableTextBlock Paragraph(PopupFrame popup) =>

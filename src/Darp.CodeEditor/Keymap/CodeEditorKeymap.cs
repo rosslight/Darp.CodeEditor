@@ -321,7 +321,8 @@ public static class CodeEditorCommands
 
     /// <summary>
     /// Goes to the next diagnostic of the document, in <see cref="CodeEditor.DiagnosticOrder"/>, after the last one to
-    /// the first: the caret goes to where it starts, and its message shows in the hover at the caret.
+    /// the first: the caret goes to where it starts, and the hover at the caret shows it as VS Code's widget does: which
+    /// problem it is of how many, its message, source and code, and the places it concerns.
     /// </summary>
     public const string NextMarker = "editor.action.marker.next";
 

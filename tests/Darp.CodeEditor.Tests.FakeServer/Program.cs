@@ -26,6 +26,8 @@
 //   --exit-at-start <code>  exit at start, before reading anything
 //   --unversioned           publish diagnostics without a version
 //   --no-diagnostics        publish no diagnostics for echoed documents
+//   --diagnostic-details    give the echoed diagnostic the source "fake", a code description and two related places:
+//                           its document's second character, and a third line elsewhere
 //   --full-sync             ask for the full text with every change
 //   --text-document-sync <json>  answer initialize with this textDocumentSync capability
 //   --vscode-uris           publish diagnostics with file URIs written as VS Code's URI library writes them
@@ -66,6 +68,7 @@ internal sealed class FakeServer
     private readonly bool _neverInitialize;
     private readonly bool _unversioned;
     private readonly bool _noDiagnostics;
+    private readonly bool _diagnosticDetails;
     private readonly bool _fullSync;
     private readonly bool _ignoreShutdown;
     private readonly JsonNode? _textDocumentSync;
@@ -142,6 +145,9 @@ internal sealed class FakeServer
                     break;
                 case "--unversioned":
                     _unversioned = true;
+                    break;
+                case "--diagnostic-details":
+                    _diagnosticDetails = true;
                     break;
                 case "--no-diagnostics":
                     _noDiagnostics = true;
@@ -329,7 +335,17 @@ internal sealed class FakeServer
             if (_noDiagnostics)
                 return;
             (int line, int character) = End(document.Text);
-            Publish(document, !_unversioned, Diagnostic(0, 0, line, character, document.Text));
+            JsonObject echo = Diagnostic(0, 0, line, character, document.Text);
+            if (_diagnosticDetails)
+            {
+                echo["source"] = "fake";
+                echo["codeDescription"] = new JsonObject { ["href"] = "https://example.com/echo" };
+                echo["relatedInformation"] = new JsonArray(
+                    Related(document.Uri, 0, 1, "related here"),
+                    Related("file:///elsewhere/other.txt", 2, 3, "elsewhere")
+                );
+            }
+            Publish(document, !_unversioned, echo);
             return;
         }
         foreach (string command in document.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries))
@@ -745,6 +761,21 @@ internal sealed class FakeServer
             },
             ["severity"] = 1,
             ["code"] = "echo",
+            ["message"] = message,
+        };
+
+    private static JsonObject Related(string uri, int line, int character, string message) =>
+        new()
+        {
+            ["location"] = new JsonObject
+            {
+                ["uri"] = uri,
+                ["range"] = new JsonObject
+                {
+                    ["start"] = new JsonObject { ["line"] = line, ["character"] = character },
+                    ["end"] = new JsonObject { ["line"] = line, ["character"] = character + 1 },
+                },
+            },
             ["message"] = message,
         };
 

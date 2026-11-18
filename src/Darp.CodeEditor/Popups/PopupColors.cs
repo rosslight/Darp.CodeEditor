@@ -91,6 +91,15 @@ internal sealed record PopupColors
     /// <summary><c>textCodeBlock.background</c>: behind code spans in text.</summary>
     public required IBrush CodeSpanBackground { get; init; }
 
+    /// <summary><c>problemsErrorIcon.foreground</c>: the icon of an error in a hover.</summary>
+    public required IBrush ErrorIcon { get; init; }
+
+    /// <summary><c>problemsWarningIcon.foreground</c>: the icon of a warning in a hover.</summary>
+    public required IBrush WarningIcon { get; init; }
+
+    /// <summary><c>problemsInfoIcon.foreground</c>: the icon of information or a hint in a hover.</summary>
+    public required IBrush InfoIcon { get; init; }
+
     /// <summary><c>focusBorder</c>: the outline of a popup that has the keyboard.</summary>
     public required IBrush FocusBorder { get; init; }
 
@@ -265,6 +274,21 @@ internal sealed record PopupColors
                         : kind == ThemeKind.Dark ? Transparent(Hex(0xFFBFBFBF), 0.4)
                         : Transparent(Colors.Black, 0.6)
                     )
+            ),
+            ErrorIcon = Brush(
+                Own("problemsErrorIcon.foreground")
+                    ?? Own("editorError.foreground")
+                    ?? Pick(0xFFF14C4C, 0xFFE51400, 0xFFF48771, 0xFFB5200D)
+            ),
+            WarningIcon = Brush(
+                Own("problemsWarningIcon.foreground")
+                    ?? Own("editorWarning.foreground")
+                    ?? Pick(0xFFCCA700, 0xFFBF8803, 0xFFFFD370, 0xFF895503)
+            ),
+            InfoIcon = Brush(
+                Own("problemsInfoIcon.foreground")
+                    ?? Own("editorInfo.foreground")
+                    ?? Pick(0xFF3794FF, 0xFF1A85FF, 0xFF3794FF, 0xFF1A85FF)
             ),
             FocusBorder = Brush(focusBorder),
             CodeForeground = codeForeground,

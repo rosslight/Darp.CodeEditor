@@ -42,10 +42,10 @@ internal sealed class DiagnosticNavigation : IDisposable
     }
 
     /// <summary>
-    /// Moves to the next diagnostic, or the previous one, in <paramref name="order"/>: returns where the caret goes; null
-    /// without diagnostics.
+    /// Moves to the next diagnostic, or the previous one, in <paramref name="order"/>: returns where the caret goes, the
+    /// diagnostic, and which it is, from 1, of how many; null without diagnostics.
     /// </summary>
-    public int? Move(bool next, DiagnosticOrder order)
+    public (int Caret, Diagnostic Diagnostic, int Index, int Count)? Move(bool next, DiagnosticOrder order)
     {
         if (_order != order)
         {
@@ -60,7 +60,7 @@ internal sealed class DiagnosticNavigation : IDisposable
         _index = _index == -1 ? First(caret, next) : (_index + (next ? 1 : count - 1)) % count;
         DiagnosticMarker marker = _markers[_index];
         var range = new TextRange(marker.StartOffset, marker.Length);
-        return Holds(range, caret) ? caret : range.Start;
+        return (Holds(range, caret) ? caret : range.Start, marker.Diagnostic, _index + 1, count);
     }
 
     public void Dispose()

@@ -356,7 +356,7 @@ public sealed class LanguageServerTests(UiFixture ui)
                           "workspace": { "configuration": true, "didChangeConfiguration": { "dynamicRegistration": false } },
                           "textDocument": {
                             "synchronization": { "dynamicRegistration": false },
-                            "publishDiagnostics": { "versionSupport": true },
+                            "publishDiagnostics": { "versionSupport": true, "relatedInformation": true, "codeDescriptionSupport": true },
                             "hover": { "contentFormat": ["markdown", "plaintext"] },
                             "completion": {
                               "completionItem": {

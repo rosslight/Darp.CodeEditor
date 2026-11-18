@@ -1159,16 +1159,20 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>
     /// Goes to the next or previous diagnostic, as VS Code's F8 and Shift+F8 do: the caret goes to where it starts, or
-    /// stays inside it, the line scrolls into view, centered when it was out of view, and the diagnostic's message
-    /// shows in the hover there, where VS Code shows it in a widget between the lines.
+    /// stays inside it, the line scrolls into view, centered when it was out of view, and the hover there shows what
+    /// VS Code shows in a widget between the lines: which problem it is of how many, its message, source, code and
+    /// related places.
     /// </summary>
     private void GoToDiagnostic(bool next)
     {
-        if (_part is not { } part || _diagnosticNavigation?.Move(next, DiagnosticOrder) is not { } caret)
+        if (
+            _part is not { } part
+            || _diagnosticNavigation?.Move(next, DiagnosticOrder) is not var (caret, diagnostic, index, count)
+        )
             return;
         Select(part, new TextSelection(caret));
         ScrollTo(new TextRange(caret, 0));
-        _hover?.ShowAt(caret);
+        _hover?.ShowProblem(caret, diagnostic, index, count);
     }
 
     /// <summary>

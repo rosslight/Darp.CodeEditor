@@ -283,6 +283,12 @@ public sealed class MarkdownTests
                 {
                     HoverParagraph paragraph => string.Concat(paragraph.Spans.Select(span => span.Text)),
                     HoverCode code => string.Concat(code.Runs.Select(run => run.Text)),
+                    HoverDiagnostic diagnostic => diagnostic.Message
+                        + (
+                            diagnostic.Source is null && diagnostic.Code is null ? ""
+                            : diagnostic.Code is null ? $" {diagnostic.Source}"
+                            : $" {diagnostic.Source}({diagnostic.Code})"
+                        ),
                     _ => "",
                 }
             )

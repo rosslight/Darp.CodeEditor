@@ -1,3 +1,4 @@
+using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -218,10 +219,33 @@ internal sealed class HoverController : IDisposable
     public bool CloseOnKey() => _hovered is not { IsHeld: true } && Close();
 
     /// <summary>
-    /// Shows the hover at <paramref name="offset"/> as <see cref="ShowAtCaret"/> does at the caret, at the offset as it
-    /// is, also right after a word: where a diagnostic starts, for going to it.
+    /// Shows the problem that a key went to at <paramref name="offset"/>, where it starts or the caret is inside it, as
+    /// VS Code's widget for it shows it: a heading with the icon of its severity, the document's name and which problem
+    /// it is of how many, then its message, source, code and related places. It closes as a hover asked for by key does.
     /// </summary>
-    public void ShowAt(int offset) => Start(offset, fromKeyboard: true);
+    /// <param name="offset">Where the caret went.</param>
+    /// <param name="diagnostic">The problem.</param>
+    /// <param name="index">Which problem it is, from 1.</param>
+    /// <param name="count">How many problems there are.</param>
+    public void ShowProblem(int offset, Diagnostic diagnostic, int index, int count)
+    {
+        Hovered hovered = Begin(offset, fromKeyboard: true);
+        hovered.IsProblem = true;
+        hovered.IsAnswered = true;
+        string of = string.Format(
+            CultureInfo.CurrentCulture,
+            count > 1 ? Strings.Default.ProblemOfProblems : Strings.Default.ProblemOfProblem,
+            index,
+            count
+        );
+        hovered.Messages =
+        [
+            new HoverHeading(diagnostic.Severity, DocumentName(), of),
+            new HoverRule(),
+            .. HoverBlocks.Of([diagnostic], Opener, HoverIcon.None),
+        ];
+        Due(hovered);
+    }
 
     public void Dispose()
     {
@@ -330,7 +354,8 @@ internal sealed class HoverController : IDisposable
     private void Due(Hovered hovered)
     {
         hovered.IsDue = true;
-        hovered.Messages = HoverBlocks.Of(_squiggles.At(hovered.Offset, int.MaxValue));
+        if (!hovered.IsProblem)
+            hovered.Messages = HoverBlocks.Of(_squiggles.At(hovered.Offset, int.MaxValue), Opener);
         Render(hovered);
     }
 
@@ -616,6 +641,36 @@ internal sealed class HoverController : IDisposable
 
     private void OnClosingChange(object? sender, EventArgs e) => Close();
 
+    /// <summary>The name of the document, as a heading shows it: its file's, or its URI's; null without either.</summary>
+    private string? DocumentName() =>
+        _document.FilePath is { } path ? Path.GetFileName(path)
+        : _document is ServerDocument { Uri: var uri } && Uri.TryCreate(uri, UriKind.Absolute, out Uri? parsed)
+            ? HoverBlocks.Name(parsed)
+        : null;
+
+    /// <summary>
+    /// What goes to a place that <paramref name="diagnostic"/> concerns, in the document: the caret goes there, where
+    /// it is now in the text, and the hover ends. Null for a place in another document, which an editor cannot show.
+    /// </summary>
+    private Action? Opener(Diagnostic diagnostic, DiagnosticRelatedInformation related)
+    {
+        string place = DocumentUris.Identity(related.Uri.OriginalString);
+        bool here =
+            (_document is ServerDocument { Uri: var uri } && DocumentUris.Identity(uri) == place)
+            || (_document.FilePath is { } path && DocumentUris.Identity(DocumentUris.File(path)) == place);
+        if (!here)
+            return null;
+        return () =>
+        {
+            TextSnapshot snapshot = diagnostic.Snapshot;
+            int offset = _document.MapToCurrent(snapshot, new TextRange(snapshot.GetOffset(related.Start), 0)).Start;
+            Close();
+            _editor.FocusText();
+            _editor.Selection = new TextSelection(offset);
+            _editor.ScrollTo(new TextRange(offset, 0));
+        };
+    }
+
     /// <summary>
     /// A server started or stopped serving the document: a hover that shows its information ends, and one that waits
     /// starts again, to ask the server that serves it now.
@@ -623,6 +678,8 @@ internal sealed class HoverController : IDisposable
     private void OnLanguageFeaturesChanged(object? sender, EventArgs e)
     {
         if (_hovered is not { } waiting || _popup.IsOpen)
+            Close();
+        else if (waiting.IsProblem)
             Close();
         else if (waiting.FromKeyboard)
             Start(waiting.Offset, fromKeyboard: true);
@@ -755,6 +812,9 @@ internal sealed class HoverController : IDisposable
 
         /// <summary>Whether the server is late: "Loading…" shows until it answers.</summary>
         public bool IsLoading { get; set; }
+
+        /// <summary>Whether it shows the problem that a key went to: no more than that, and no server's hover.</summary>
+        public bool IsProblem { get; set; }
 
         public bool Contains(int offset) => offset >= Range.Start && offset < Math.Max(Range.End, Range.Start + 1);
 

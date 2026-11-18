@@ -724,7 +724,23 @@ internal sealed class ServerConnection
             severity,
             diagnostic.Code,
             diagnostic.Message
-        );
+        )
+        {
+            Source = diagnostic.Source,
+            CodeDescription = Uri.TryCreate(diagnostic.CodeDescription?.Href, UriKind.Absolute, out Uri? href)
+                ? href
+                : null,
+            RelatedInformation =
+            [
+                .. (diagnostic.RelatedInformation ?? [])
+                    .Where(related => Uri.IsWellFormedUriString(related.Location.Uri, UriKind.Absolute))
+                    .Select(related => new DiagnosticRelatedInformation(
+                        new Uri(related.Location.Uri),
+                        Positions.FromLsp(related.Location.Range.Start),
+                        related.Message
+                    )),
+            ],
+        };
     }
 
     /// <summary>
@@ -815,7 +831,12 @@ internal sealed class ServerConnection
             ["textDocument"] = new JsonObject
             {
                 ["synchronization"] = new JsonObject { ["dynamicRegistration"] = false },
-                ["publishDiagnostics"] = new JsonObject { ["versionSupport"] = true },
+                ["publishDiagnostics"] = new JsonObject
+                {
+                    ["versionSupport"] = true,
+                    ["relatedInformation"] = true,
+                    ["codeDescriptionSupport"] = true,
+                },
                 ["hover"] = new JsonObject { ["contentFormat"] = new JsonArray("markdown", "plaintext") },
                 ["completion"] = new JsonObject
                 {

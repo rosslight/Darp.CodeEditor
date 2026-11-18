@@ -30,6 +30,56 @@ internal sealed record HoverCode(IReadOnlyList<CodeRun> Runs) : HoverBlock;
 /// <summary>A line between two parts.</summary>
 internal sealed record HoverRule : HoverBlock;
 
+/// <summary>
+/// A diagnostic, as VS Code's hover shows it, in the editor's font: the icon of its severity beside its message, which
+/// keeps its line breaks, then its source and code, dimmed, the code as a link to its web page where it has one, and
+/// below them the other places it concerns, each as a link to the place where the editor can go there.
+/// </summary>
+/// <param name="Severity">Its severity, for its icon.</param>
+/// <param name="Message">Its message, or a piece of it.</param>
+/// <param name="Source">What reported it; null for none, as in a piece that more pieces follow.</param>
+/// <param name="Code">Its code; null for none.</param>
+/// <param name="CodeLink">The web page of its code; null for none.</param>
+/// <param name="Related">The other places it concerns.</param>
+/// <param name="Icon">Whether its severity's icon shows beside it, or only the room of one, beside a piece after the first.</param>
+internal sealed record HoverDiagnostic(
+    DiagnosticSeverity Severity,
+    string Message,
+    string? Source,
+    string? Code,
+    Uri? CodeLink,
+    IReadOnlyList<HoverRelated> Related,
+    HoverIcon Icon = HoverIcon.Shown
+) : HoverBlock;
+
+/// <summary>Whether a diagnostic's icon shows beside it.</summary>
+internal enum HoverIcon
+{
+    /// <summary>No icon, and no room for one, as below a heading that shows it.</summary>
+    None,
+
+    /// <summary>The icon.</summary>
+    Shown,
+
+    /// <summary>The room of the icon, beside a piece of a message after the first.</summary>
+    Room,
+}
+
+/// <summary>A place that a diagnostic concerns.</summary>
+/// <param name="Place">Where it is, as VS Code writes it: <c>file.py(3, 5): </c>.</param>
+/// <param name="Message">What it has to do with the problem.</param>
+/// <param name="Open">Goes there; null where the editor cannot, as in another document.</param>
+internal sealed record HoverRelated(string Place, string Message, Action? Open);
+
+/// <summary>
+/// The heading of the problem that a key went to, as VS Code's widget for it shows it: the icon of its severity, the
+/// document's name and which problem it is of how many.
+/// </summary>
+/// <param name="Severity">The problem's severity.</param>
+/// <param name="Name">The document's name; null for none.</param>
+/// <param name="Count">Which problem it is of how many, such as "2 of 5 problems".</param>
+internal sealed record HoverHeading(DiagnosticSeverity Severity, string? Name, string Count) : HoverBlock;
+
 /// <summary>Text with one style.</summary>
 /// <param name="Text">The text; a line break in it breaks the line.</param>
 /// <param name="Style">Its emphasis, or code.</param>
@@ -56,13 +106,40 @@ internal static class HoverBlocks
     /// <summary>How long a line of a code block may take to tokenize, as the background highlighter allows.</summary>
     private static readonly TimeSpan s_lineTimeLimit = TimeSpan.FromMilliseconds(50);
 
-    /// <summary>The messages of <paramref name="diagnostics"/>, each with its code, as plain text.</summary>
-    public static IReadOnlyList<HoverBlock> Of(IEnumerable<Diagnostic> diagnostics) =>
+    /// <summary>
+    /// <paramref name="diagnostics"/>, as VS Code's hover shows them (<see cref="HoverDiagnostic"/>):
+    /// <paramref name="open"/> makes what goes to a related place, or null where the editor cannot go there. A code's
+    /// web page is a link only when it is one, an <c>http</c> or <c>https</c> URI.
+    /// </summary>
+    public static IReadOnlyList<HoverBlock> Of(
+        IEnumerable<Diagnostic> diagnostics,
+        Func<Diagnostic, DiagnosticRelatedInformation, Action?>? open = null,
+        HoverIcon icon = HoverIcon.Shown
+    ) =>
         [
-            .. diagnostics.Select(diagnostic => new HoverParagraph([
-                new HoverSpan(diagnostic.Code is { } code ? $"{diagnostic.Message} ({code})" : diagnostic.Message),
-            ])),
+            .. diagnostics.Select(diagnostic => new HoverDiagnostic(
+                diagnostic.Severity,
+                diagnostic.Message,
+                diagnostic.Source,
+                diagnostic.Code,
+                diagnostic.CodeDescription is { Scheme: "http" or "https" } page ? page : null,
+                [
+                    .. diagnostic.RelatedInformation.Select(related => new HoverRelated(
+                        $"{Name(related.Uri)}({related.Start.Line}, {related.Start.Column}): ",
+                        related.Message,
+                        open?.Invoke(diagnostic, related)
+                    )),
+                ],
+                icon
+            )),
         ];
+
+    /// <summary>The name of a document by its URI, as VS Code's <c>basename</c> takes it: the last part of its path.</summary>
+    public static string Name(Uri uri)
+    {
+        string path = uri.IsFile ? uri.LocalPath : Uri.UnescapeDataString(uri.AbsolutePath);
+        return Path.GetFileName(path.TrimEnd('/', '\\')) is { Length: > 0 } name ? name : path;
+    }
 
     /// <summary>
     /// The server's hover, its parts apart, all of it: Markdown with its code blocks highlighted by
@@ -183,6 +260,35 @@ internal static class HoverParts
                             Continues = !first || code.Continues,
                         }
                 );
+            case HoverDiagnostic diagnostic when !Fits(Size(diagnostic)):
+                // The message in pieces, the icon beside the first, its source, code and places after the last.
+                List<HoverBlock> pieces =
+                [
+                    .. Pieces(
+                        [(diagnostic.Message, 0)],
+                        (texts, first) =>
+                            new HoverDiagnostic(
+                                diagnostic.Severity,
+                                string.Concat(texts.Select(t => t.Text)),
+                                null,
+                                null,
+                                null,
+                                [],
+                                first || diagnostic.Icon == HoverIcon.None ? diagnostic.Icon : HoverIcon.Room
+                            )
+                            {
+                                Continues = !first || diagnostic.Continues,
+                            }
+                    ),
+                ];
+                pieces[^1] = (HoverDiagnostic)pieces[^1] with
+                {
+                    Source = diagnostic.Source,
+                    Code = diagnostic.Code,
+                    CodeLink = diagnostic.CodeLink,
+                    Related = diagnostic.Related,
+                };
+                return pieces;
             case HoverParagraph { Marker: null } paragraph when !Fits(Size(paragraph)):
                 return Pieces(
                     paragraph.Spans.Select(span => (span.Text, span)),
@@ -211,6 +317,14 @@ internal static class HoverParts
             case HoverCode code:
                 (characters, lines) = Count(code.Runs.Select(run => run.Text));
                 return (characters, lines, code.Runs.Count);
+            case HoverDiagnostic diagnostic:
+                (characters, lines) = Count([
+                    diagnostic.Message,
+                    diagnostic.Source ?? "",
+                    diagnostic.Code ?? "",
+                    .. diagnostic.Related.SelectMany(related => (string[])[related.Place, related.Message]),
+                ]);
+                return (characters, lines + diagnostic.Related.Count, 5 + 2 * diagnostic.Related.Count);
             default:
                 return (0, 1, 1);
         }
