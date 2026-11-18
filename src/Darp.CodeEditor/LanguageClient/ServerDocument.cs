@@ -88,6 +88,12 @@ internal sealed class ServerDocument : CodeDocument
         CancellationToken cancellationToken
     ) => _server.SignatureHelpAsync(this, snapshot, offset, trigger, cancellationToken);
 
+    internal override Task<IReadOnlyList<TextRange>?> SelectionRangesAsync(
+        TextSnapshot snapshot,
+        int offset,
+        CancellationToken cancellationToken
+    ) => _server.SelectionRangesAsync(this, snapshot, offset, cancellationToken);
+
     internal override ServerFeatures? Features => _server.FeaturesOf(this);
 
     internal override TimeProvider TimeProvider => _server.TimeProvider;
