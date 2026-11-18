@@ -478,6 +478,18 @@ internal sealed partial class EditingHelpers
     }
 
     /// <summary>
+    /// Selects the selection's lines whole, from the start of its first line to the start of the line after its last,
+    /// or to the end of the last line: VS Code's <c>expandLineSelection</c>. Again, it takes the next line too.
+    /// </summary>
+    public void ExpandLineSelection()
+    {
+        (int anchor, int caret) = SelectionEnds();
+        DocumentLine first = Buffer.GetLineByOffset(Math.Min(anchor, caret));
+        DocumentLine last = Buffer.GetLineByOffset(Math.Max(anchor, caret));
+        Select(first.Offset, last.NextLine?.Offset ?? last.EndOffset);
+    }
+
+    /// <summary>
     /// The selection's anchor and caret, as offsets; for a rectangle selection, its corners. VS Code's line commands
     /// take the lines between them.
     /// </summary>

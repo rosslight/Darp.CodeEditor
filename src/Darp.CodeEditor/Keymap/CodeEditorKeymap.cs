@@ -91,6 +91,7 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+shift+k (shift+cmd+k)</term><description><see cref="CodeEditorCommands.DeleteLines"/></description></item>
     /// <item><term>ctrl+enter, ctrl+shift+enter (cmd+enter, shift+cmd+enter)</term><description><see cref="CodeEditorCommands.InsertLineAfter"/>, <see cref="CodeEditorCommands.InsertLineBefore"/></description></item>
     /// <item><term>ctrl+], ctrl+[ (cmd+], cmd+[)</term><description><see cref="CodeEditorCommands.IndentLines"/>, <see cref="CodeEditorCommands.OutdentLines"/></description></item>
+    /// <item><term>ctrl+l (cmd+l)</term><description><see cref="CodeEditorCommands.ExpandLineSelection"/></description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default => s_default.Value;
@@ -232,6 +233,7 @@ public sealed class CodeEditorKeymap
         yield return new($"{command}+shift+enter", CodeEditorCommands.InsertLineBefore);
         yield return new($"{command}+]", CodeEditorCommands.IndentLines);
         yield return new($"{command}+[", CodeEditorCommands.OutdentLines);
+        yield return new($"{command}+l", CodeEditorCommands.ExpandLineSelection);
     }
 
     /// <summary>The keys that go to the next and previous diagnostic, VS Code's on every operating system.</summary>
@@ -433,4 +435,10 @@ public static class CodeEditorCommands
 
     /// <summary>Outdents the selected lines, or the caret's, as Shift+Tab does.</summary>
     public const string OutdentLines = "editor.action.outdentLines";
+
+    /// <summary>
+    /// Selects the selected lines, or the caret's, whole, up to the start of the next line; again, it takes the next line
+    /// too.
+    /// </summary>
+    public const string ExpandLineSelection = "expandLineSelection";
 }

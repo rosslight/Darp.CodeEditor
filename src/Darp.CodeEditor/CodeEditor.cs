@@ -1129,6 +1129,9 @@ public class CodeEditor : TemplatedControl
             case CodeEditorCommands.IndentLines or CodeEditorCommands.OutdentLines when inText && !IsReadOnly:
                 _helpers?.IndentLines(outdent: command == CodeEditorCommands.OutdentLines);
                 return true;
+            case CodeEditorCommands.ExpandLineSelection when inText:
+                _helpers?.ExpandLineSelection();
+                return true;
             default:
                 return false;
         }
