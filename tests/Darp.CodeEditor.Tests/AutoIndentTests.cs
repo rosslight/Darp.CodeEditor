@@ -73,22 +73,26 @@ public sealed class AutoIndentTests(UiFixture ui)
         });
 
     [Theory]
-    [InlineData(AutoIndent.Full, "{\n    \"a\": 1,\n}|")]
-    [InlineData(AutoIndent.Advanced, "{\n    \"a\": 1,\n    }|")]
+    [InlineData(AutoIndent.Full, "begin\n    x\nEnd|")]
+    [InlineData(AutoIndent.Advanced, "begin\n    x\n    End|")]
     public Task Typing_outdents_a_line_by_the_decrease_pattern_only_with_full_auto_indent(
         AutoIndent autoIndent,
         string expected
     ) =>
         _ui.Run(async () =>
         {
-            var language = new CodeLanguage("json", CodeLanguage.Json.Grammar, CodeLanguage.Json.Configuration)
+            // Word brackets, which only the decrease pattern outdents.
+            var language = new CodeLanguage(
+                "pascal",
+                configuration: new Uri("avares://Darp.CodeEditor.Tests/Languages/pascal.language-configuration.json")
+            )
             {
                 AutoIndent = autoIndent,
             };
             await language.Loaded;
-            using EditorWindow window = Show("{\n    \"a\": 1,\n    |", language);
+            using EditorWindow window = Show("begin\n    x\n    En|", language);
 
-            window.Type("}");
+            window.Type("d");
 
             MarkedText.Of(window).ShouldBe(expected);
         });
@@ -190,6 +194,68 @@ public sealed class AutoIndentTests(UiFixture ui)
 
             document.Undo();
             document.Text.ShouldBe("{\n  \"a\": {\n    \"b\": 1,\n");
+        });
+
+    [Theory]
+    // A closing bracket typed first on its line goes to the indentation of its opening bracket's line.
+    [InlineData("x = (\n    |", ")", "x = (\n)|")]
+    [InlineData("    f(a,\n        b\n        |", ")", "    f(a,\n        b\n    )|")]
+    [InlineData("{\n    f(a,\n        |", "}", "{\n    f(a,\n}|")]
+    // Not after other text on its line, nor when the opening bracket is on its line.
+    [InlineData("x = (\n    a|", ")", "x = (\n    a)|")]
+    [InlineData("    (a|", ")", "    (a)|")]
+    // Not without an opening bracket to match.
+    [InlineData("x\n    |", ")", "x\n    )|")]
+    public Task A_closing_bracket_typed_first_on_its_line_lines_up_with_its_opening_one(
+        string marked,
+        string typed,
+        string expected
+    ) =>
+        _ui.Run(async () =>
+        {
+            await Rules.Loaded;
+            using EditorWindow window = Show(marked, Rules);
+
+            window.Type(typed);
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
+    [Fact]
+    public Task A_closing_bracket_that_lines_up_ends_the_undo_step() =>
+        _ui.Run(async () =>
+        {
+            await Rules.Loaded;
+            using EditorWindow window = Show("x = (\n|", Rules);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+
+            window.Type("    )a");
+            MarkedText.Of(window).ShouldBe("x = (\n)a|");
+
+            document.Undo();
+            MarkedText.Of(window).ShouldBe("x = (\n)|");
+            document.Undo();
+            document.Text.ShouldBe("x = (\n");
+        });
+
+    [Fact]
+    public Task A_closing_bracket_in_a_comment_stays_where_it_is_typed() =>
+        _ui.Run(async () =>
+        {
+            // JSON without its indentation rules, which would outdent the brace before the brackets do.
+            var json = new CodeLanguage("json", CodeLanguage.Json.Grammar, CodeLanguage.Json.Configuration)
+            {
+                AutoIndent = AutoIndent.Advanced,
+            };
+            using EditorWindow window = await ShowColored("{\n  /*\n  |\n  */\n}", json, indentation: 2);
+
+            window.Type("}");
+            MarkedText.Of(window).ShouldBe("{\n  /*\n  }|\n  */\n}");
+
+            window.Editor.Selection = new TextSelection(window.Editor.Document!.Text.Length - 1);
+            window.Press(Key.Enter);
+            window.Type("  }");
+            MarkedText.Of(window).ShouldBe("{\n  /*\n  }\n  */\n\n}|}");
         });
 
     /// <summary>The rules for Enter of <c>enter.language-configuration.json</c>, with the editor's default auto-indent.</summary>

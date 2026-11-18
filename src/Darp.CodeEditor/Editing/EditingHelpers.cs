@@ -18,10 +18,10 @@ namespace Darp.CodeEditor.Editing;
 /// The editing helpers of one editor's view of a document, from the language's editing rules, as VS Code applies
 /// them, as far as the language's <see cref="CodeLanguage.AutoIndent"/> goes: Enter indents the new line by the rules
 /// for Enter, the brackets and the indentation rules, typing outdents a line that comes to match the decrease pattern,
-/// opening characters bring their closing ones, which are typed over and deleted with them, and opening characters
-/// surround a selection. Ctrl+/ toggles comments. Tab and Shift+Tab indent and outdent as VS Code's do, with the
-/// document's indentation; Tab without a selection is AvaloniaEdit's, except on a blank line, which goes to its
-/// indentation by the rules.
+/// a closing bracket typed first on its line lines up with its opening one, opening characters bring their closing
+/// ones, which are typed over and deleted with them, and opening characters surround a selection. Ctrl+/ toggles
+/// comments. Tab and Shift+Tab indent and outdent as VS Code's do, with the document's indentation; Tab without a
+/// selection is AvaloniaEdit's, except on a blank line, which goes to its indentation by the rules.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -63,6 +63,12 @@ internal sealed class EditingHelpers : IDisposable
     /// holds; not found, when it was not looked for.
     /// </summary>
     private (bool Found, AutoClosingPair? Pair) _planned;
+
+    /// <summary>
+    /// The indentation that the closing bracket that <see cref="Type"/> types takes, from its opening bracket's line,
+    /// found before it goes in; null for none.
+    /// </summary>
+    private string? _electric;
 
     /// <summary>Whether <see cref="Type"/> types: the closing text of a long opening then waits for its own step.</summary>
     private bool _typing;
@@ -164,6 +170,7 @@ internal sealed class EditingHelpers : IDisposable
         {
             _typing = false;
             _planned = default;
+            _electric = null;
         }
         e.Handled = true;
         if (_closeAfter is { } close)
@@ -176,7 +183,8 @@ internal sealed class EditingHelpers : IDisposable
     /// <summary>
     /// The kind of typing <paramref name="text"/>, and whether it starts or ends an undo step, in the order in which
     /// VS Code's <c>typeWithInterceptors</c> picks how to type a character: Enter, an outdented line, a closing
-    /// character typed over, a pair that closes, a surrounded selection, or else plain typing.
+    /// character typed over, a pair that closes, a surrounded selection, a closing bracket that lines up with its
+    /// opening one, or else plain typing.
     /// </summary>
     private (EditKind Kind, bool StopBefore, bool StopAfter) TypingStep(string text)
     {
@@ -201,6 +209,12 @@ internal sealed class EditingHelpers : IDisposable
                 _planned = (true, pair);
                 if (pair is { } closing)
                     return (EditKind.TypingOther, true, closing.Open.Length > 1);
+                // As VS Code, it goes on in the step before it, and ends that step.
+                if (_textArea.Selection is not RectangleSelection && ElectricIndentation(typed) is { } indentation)
+                {
+                    _electric = indentation;
+                    return (EditKind.TypingOther, false, true);
+                }
             }
         }
         EditKind kind = UndoStops.Typing(text, previous);
@@ -877,6 +891,77 @@ internal sealed class EditingHelpers : IDisposable
             _closeAfter = (longPair, offsets);
         else if (closing is { } pair)
             Close(pair, offsets);
+        else if (_electric is { } indentation)
+            Reindent(indentation);
+    }
+
+    /// <summary>
+    /// The indentation of the caret's line when <paramref name="typed"/> goes in at the caret and completes a closing
+    /// bracket that is first on the line, as VS Code's electric characters do (its
+    /// <c>_typeInterceptorElectricChar</c>): the indentation of the line of the opening bracket that it matches, if that
+    /// is on a line above. Null otherwise, and in a string, comment or regular expression, or while the tokens there
+    /// are unknown. Only brackets of one character each are matched.
+    /// </summary>
+    private string? ElectricIndentation(char typed)
+    {
+        LanguageConfiguration configuration = Configuration;
+        if (
+            configuration.BracketPattern is not { } brackets
+            || !configuration.Brackets.Any(b => b.Close.EndsWith(typed))
+        )
+            return null;
+        int caret = _textArea.Caret.Offset;
+        DocumentLine line = Buffer.GetLineByOffset(caret);
+        string text = Buffer.GetText(line);
+        int column = caret - line.Offset;
+        if (_document.Language.Loaded.Result.Grammar is not null)
+        {
+            if (_highlighter.ExactTokensOf(line.LineNumber, tokenizeNow: true) is not { } tokens)
+                return null;
+            if (TokenTypes.At(tokens, column) != TokenType.Other)
+                return null;
+        }
+        // The last bracket up to the caret, with the typed character: a closing one, first on the line.
+        string before = text[..column] + typed;
+        Match last = Match.Empty;
+        for (Match next = brackets.Match(before); next.Success; next = next.NextMatch())
+            last = next;
+        if (
+            !last.Success
+            || configuration.Brackets.Any(b => string.Equals(b.Open, last.Value, StringComparison.OrdinalIgnoreCase))
+            || LeadingWhitespace(before) < last.Index
+        )
+            return null;
+        foreach (CharacterPair pair in configuration.Brackets)
+        {
+            if (
+                pair is not { Open: [char open], Close: [char close] }
+                || !string.Equals(pair.Close, last.Value, StringComparison.OrdinalIgnoreCase)
+                || BracketMatcher.FindOpening(Buffer, caret, open, close, _highlighter.TokensOf) is not { } opening
+            )
+                continue;
+            DocumentLine openingLine = Buffer.GetLineByOffset(opening);
+            if (openingLine == line)
+                return null;
+            string openingText = Buffer.GetText(openingLine);
+            string indentation = new Indenting(_document.Indentation).Normalize(
+                openingText[..LeadingWhitespace(openingText)]
+            );
+            return indentation == text[..LeadingWhitespace(text)] ? null : indentation;
+        }
+        return null;
+    }
+
+    /// <summary>Gives the caret's line <paramref name="indentation"/>, in the undo step of the character just typed.</summary>
+    private void Reindent(string indentation)
+    {
+        int caret = _textArea.Caret.Offset;
+        DocumentLine line = Buffer.GetLineByOffset(caret);
+        int current = LeadingWhitespace(Buffer.GetText(line));
+        if (!CanChange(line.Offset, current))
+            return;
+        InTypedUndoStep(() => Buffer.Replace(line.Offset, current, indentation));
+        _textArea.Caret.Offset = caret + indentation.Length - current;
     }
 
     /// <summary>
