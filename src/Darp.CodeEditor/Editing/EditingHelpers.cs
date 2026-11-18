@@ -8,6 +8,7 @@ using Avalonia.Logging;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
+using AvaloniaEdit.Rendering;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.Loading;
 
@@ -110,10 +111,10 @@ internal sealed class EditingHelpers : IDisposable
     }
 
     /// <summary>
-    /// Enter, Backspace, Delete, deleting by words, Tab and Shift+Tab, and the arrow keys with a selection, from the
-    /// editor's key handler, while the text area has the keyboard, after the keys of its popups. Words go with
-    /// Ctrl+Backspace and Ctrl+Delete, or Alt on macOS, the platform's key for moving by words. Shift+Enter and
-    /// Shift+Backspace do as Enter and Backspace.
+    /// Enter, Backspace, Delete, deleting by words, Tab and Shift+Tab, the arrow keys with a selection and Up and Down
+    /// at the document's ends, from the editor's key handler, while the text area has the keyboard, after the keys of
+    /// its popups. Words go with Ctrl+Backspace and Ctrl+Delete, or Alt on macOS, the platform's key for moving by
+    /// words. Shift+Enter and Shift+Backspace do as Enter and Backspace.
     /// </summary>
     public void OnKeyDown(KeyEventArgs e)
     {
@@ -133,7 +134,9 @@ internal sealed class EditingHelpers : IDisposable
             e.Handled = DeleteWord(left: e.Key == Key.Back);
         else if (e.Key == Key.Tab && e.KeyModifiers is KeyModifiers.None or KeyModifiers.Shift)
             e.Handled = Tab(outdent: e.KeyModifiers == KeyModifiers.Shift);
-        else if (e.Key is Key.Left or Key.Right or Key.Up or Key.Down && e.KeyModifiers == KeyModifiers.None)
+        else if (e.Key is Key.Up or Key.Down && e.KeyModifiers is KeyModifiers.None or KeyModifiers.Shift)
+            e.Handled = MoveVertically(e.Key, select: e.KeyModifiers == KeyModifiers.Shift);
+        else if (e.Key is Key.Left or Key.Right && e.KeyModifiers == KeyModifiers.None)
             e.Handled = CollapseSelection(e.Key);
     }
 
@@ -460,6 +463,53 @@ internal sealed class EditingHelpers : IDisposable
             return false;
         _textArea.Caret.BringCaretToView();
         return true;
+    }
+
+    /// <summary>
+    /// Up and Down, with Shift to select, as VS Code's <c>cursorUp</c> and <c>cursorDown</c>: on the document's first
+    /// row, Up goes to the document's start, and on its last row, Down to its end, where AvaloniaEdit leaves the caret.
+    /// The column the caret came from stays the one to go back to, as VS Code keeps the columns it left over, unless the
+    /// caret was at the start or the end already. Elsewhere, and in a rectangle selection, AvaloniaEdit moves.
+    /// </summary>
+    /// <returns>Whether it handled the key.</returns>
+    private bool MoveVertically(Key key, bool select)
+    {
+        if (_textArea.Selection is RectangleSelection)
+            return false;
+        if (!select)
+            CollapseSelection(key);
+        bool up = key == Key.Up;
+        if (!IsOnEdgeRow(up))
+            return false;
+        Caret caret = _textArea.Caret;
+        TextViewPosition from = caret.Position;
+        int target = up ? 0 : Buffer.TextLength;
+        double column =
+            caret.Offset == target ? double.NaN
+            : double.IsNaN(caret.DesiredXPos) ? _textArea.TextView.GetVisualPosition(from, VisualYPosition.LineTop).X
+            : caret.DesiredXPos;
+        if (!select)
+            _textArea.ClearSelection();
+        caret.Offset = target;
+        caret.DesiredXPos = column;
+        if (select)
+            _textArea.Selection = _textArea.Selection.StartSelectionOrSetEndpoint(from, caret.Position);
+        caret.BringCaretToView();
+        return true;
+    }
+
+    /// <summary>
+    /// Whether the caret is on the document's first row, going <paramref name="up"/>, or on its last: the first or the
+    /// last row of a line that wraps.
+    /// </summary>
+    private bool IsOnEdgeRow(bool up)
+    {
+        Caret caret = _textArea.Caret;
+        if (caret.Line != (up ? 1 : Buffer.LineCount))
+            return false;
+        VisualLine line = _textArea.TextView.GetOrConstructVisualLine(Buffer.GetLineByNumber(caret.Line));
+        int row = line.TextLines.IndexOf(line.GetTextLine(caret.VisualColumn, caret.Position.IsAtEndOfLine));
+        return up ? row <= 0 : row < 0 || row == line.TextLines.Count - 1;
     }
 
     /// <summary>
