@@ -356,6 +356,59 @@ public sealed class SnippetSessionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_choice_offers_its_options_in_the_list_and_committing_one_goes_on_to_the_next_stop() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Item("${1|red,green,blue|} ${2|x,y|} $1$0", "color")
+            );
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            int asked = fake.LinesStartingWith("completion ").Count;
+
+            // Its options, in their order, the first selected, while the choice's text is selected.
+            document.Text.ShouldBe("red x red");
+            editor.Selection.ShouldBe(new TextSelection(0, 3));
+            await WaitForLabelsAsync(window, ["red", "green", "blue"]);
+            List(window).ShouldNotBeNull().SelectedIndex.ShouldBe(0);
+
+            // Committing one puts it in, with its mirrors, and selects the next stop, a choice too.
+            window.Press(Key.Down);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("green x green");
+            editor.Selection.ShouldBe(new TextSelection(6, 7));
+            await WaitForLabelsAsync(window, ["x", "y"]);
+
+            // Shift+Tab goes back, and shows the first choice's options again; typing filters them.
+            window.Press(Key.Tab, KeyModifiers.Shift);
+            editor.Selection.ShouldBe(new TextSelection(0, 5));
+            await WaitForLabelsAsync(window, ["red", "green", "blue"]);
+            window.Type("b");
+            await WaitForLabelsAsync(window, ["blue"]);
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("blue x blue");
+            editor.Selection.ShouldBe(new TextSelection(5, 6));
+
+            // Escape closes the list and keeps the session: Tab goes on to the final stop.
+            await WaitForLabelsAsync(window, ["x", "y"]);
+            window.Press(Key.Escape);
+            List(window).ShouldBeNull();
+            window.Press(Key.Tab);
+            editor.Selection.ShouldBe(new TextSelection(document.Text.Length));
+
+            // The server was not asked while a choice was selected.
+            await BarrierAsync(server, fake);
+            fake.LinesStartingWith("completion ").Count.ShouldBe(asked);
+        });
+
+    [Fact]
     public Task Typing_over_a_placeholder_drops_the_stops_inside_it() =>
         _ui.Run(async () =>
         {

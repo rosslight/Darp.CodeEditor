@@ -50,19 +50,30 @@ public sealed class SnippetTests
         Render(snippet).Text.ShouldBe(text);
 
     [Theory]
-    [InlineData("${1|one,two,three|}", "one")]
-    [InlineData("${1|one|}", "one")]
-    [InlineData(@"${1|one1\,two2|}", "one1,two2")]
-    [InlineData(@"${1|one1\|two2|}", "one1|two2")]
-    [InlineData(@"${1|one1\atwo2|}", @"one1\atwo2")]
-    [InlineData(@"console.log(${1|not\, not, five, 5, 1   23|});", "console.log(not, not);")]
-    [InlineData(@"${1|aaa$aaa|}bbb\$bbb", "aaa$aaabbb$bbb")]
-    public void Choices_insert_their_first_option_as_a_placeholder(string snippet, string text)
+    [InlineData("${1|one,two,three|}", "one", new[] { "one", "two", "three" })]
+    [InlineData("${1|one|}", "one", new[] { "one" })]
+    [InlineData(@"${1|one1\,two2|}", "one1,two2", new[] { "one1,two2" })]
+    [InlineData(@"${1|one1\|two2|}", "one1|two2", new[] { "one1|two2" })]
+    [InlineData(@"${1|one1\atwo2|}", @"one1\atwo2", new[] { @"one1\atwo2" })]
+    [InlineData(
+        @"console.log(${1|not\, not, five, 5, 1   23|});",
+        "console.log(not, not);",
+        new[] { "not, not", " five", " 5", " 1   23" }
+    )]
+    [InlineData(@"${1|aaa$aaa|}bbb\$bbb", "aaa$aaabbb$bbb", new[] { "aaa$aaa" })]
+    public void Choices_insert_their_first_option_as_a_placeholder_that_keeps_all_of_them(
+        string snippet,
+        string text,
+        string[] options
+    )
     {
         RenderedSnippet rendered = Render(snippet);
 
         rendered.Text.ShouldBe(text);
         rendered.Stops[0].Index.ShouldBe(1);
+        rendered.Stops[0].Choice.ShouldBe(options);
+        // A mirror of a choice is one too.
+        Render(snippet + " $1").Stops[1].Choice.ShouldBe(options);
     }
 
     [Theory]

@@ -10,7 +10,9 @@ using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
+using Darp.CodeEditor.LanguageClient;
 using Darp.CodeEditor.Loading;
+using Darp.CodeEditor.Lsp;
 using Darp.CodeEditor.Popups;
 
 namespace Darp.CodeEditor.Completion;
@@ -32,6 +34,12 @@ namespace Darp.CodeEditor.Completion;
 /// the step that inserted the snippet is undone, when a change removes all of its text, such as setting the document's
 /// text, and when the editor stops showing the document. A snippet that goes in inside a stop while a session runs, as
 /// completion inside a placeholder commits one, joins it: its stops come right after the selected stop, as in VS Code.
+/// </para>
+/// <para>
+/// When the selected stop is a choice, such as <c>${1|red,green,blue|}</c>, completion's list offers its options, as in
+/// VS Code: <see cref="ChoiceSelected"/> asks for it each time another choice is selected, and while it is selected,
+/// <see cref="ChoiceCompletion"/> is the list that completion shows instead of the server's. Committing an option
+/// selects the next stop, with <see cref="Next"/>.
 /// </para>
 /// <para>
 /// When Tab or Shift+Tab leaves a number, the stops of that number with a transformation, such as
@@ -79,6 +87,9 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     /// </summary>
     private readonly List<Stop> _adjusted = [];
 
+    /// <summary>The selected stop whose choice <see cref="ChoiceSelected"/> told of last; null while none is selected.</summary>
+    private Stop? _choice;
+
     /// <summary>
     /// The selection that typing replaced last, and whether it spanned lines, as VS Code's overtyping capturer keeps it
     /// for <c>TM_SELECTED_TEXT</c>; null once typing replaced none.
@@ -97,6 +108,12 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         _textArea.TextEntering += OnTextEntering;
         _textArea.TextView.BackgroundRenderers.Add(this);
     }
+
+    /// <summary>
+    /// Another choice is selected: completion should show its options, as VS Code asks for them once the selection is
+    /// set. Not again while the same choice stays selected.
+    /// </summary>
+    public event EventHandler? ChoiceSelected;
 
     /// <summary>
     /// Whether completion is open, from its first request until it ends: typing then keeps what typing replaced before
@@ -252,6 +269,56 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         return false;
     }
 
+    /// <summary>
+    /// The options of the selected choice as completion's list, as VS Code's choice provider gives them: each over the
+    /// choice's text, in their order, as values; while that text is one of them, each matches it, so that all show.
+    /// Null while no choice is selected, or the caret is outside it. Committing one should go on to <see cref="Next"/>.
+    /// </summary>
+    public CompletionList? ChoiceCompletion()
+    {
+        if (_session is null || _choice is not { Choice: { } options } stop)
+            return null;
+        var range = TextRange.FromBounds(stop.StartOffset, stop.EndOffset);
+        int caret = _textArea.Caret.Offset;
+        if (caret < range.Start || caret > range.End)
+            return null;
+        string word = _buffer.GetText(range.Start, range.Length);
+        bool isAnyOption = options.Contains(word);
+        var items = new List<CompletionItem>(options.Count);
+        for (int i = 0; i < options.Count; i++)
+        {
+            string option = options[i];
+            string filterText = isAnyOption ? word + "_" + option : option;
+            items.Add(
+                new CompletionItem(
+                    option,
+                    CompletionItemKinds.Value,
+                    Detail: null,
+                    Documentation: null,
+                    IsDeprecated: false,
+                    IsPreselected: false,
+                    filterText,
+                    string.Equals(filterText, option, StringComparison.OrdinalIgnoreCase),
+                    new CompletionSortKey(new string('a', i + 1), option, CompletionItemKinds.Value),
+                    new CompletionEdit(range, option),
+                    range,
+                    Snippet: null,
+                    AdditionalEdits: null,
+                    CommitCharacters: "",
+                    Source: default
+                )
+            );
+        }
+        return new CompletionList(items, isIncomplete: false, resolve: null);
+    }
+
+    /// <summary>Selects the next stop, as Tab does, while a session runs.</summary>
+    public void Next()
+    {
+        if (_session is { } session)
+            Move(session, forward: true);
+    }
+
     /// <summary>Ends the session; the text and the selection stay as they are.</summary>
     /// <returns>Whether a session ran.</returns>
     public bool End()
@@ -259,6 +326,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         if (_session is null)
             return false;
         _session = null;
+        _choice = null;
         _edited.Clear();
         _textArea.TextView.InvalidateLayer(Layer);
         return true;
@@ -337,7 +405,18 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
             stop.FollowEdits();
         Select(selected);
         if (current == session.Groups.Count - 1)
+        {
             End();
+        }
+        else if (selected.Choice is null)
+        {
+            _choice = null;
+        }
+        else if (selected != _choice)
+        {
+            _choice = selected;
+            ChoiceSelected?.Invoke(this, EventArgs.Empty);
+        }
         _textArea.TextView.InvalidateLayer(Layer);
     }
 
@@ -455,6 +534,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
                 )
                 {
                     Transform = stop.Transform,
+                    Choice = stop.Choice,
                 }
             );
         }
@@ -796,6 +876,9 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
 
         /// <summary>What its text becomes as Tab or Shift+Tab leaves its number; null for none.</summary>
         public SnippetTransform? Transform { get; init; }
+
+        /// <summary>The options of a choice; null for a stop that is no choice.</summary>
+        public IReadOnlyList<string>? Choice { get; init; }
 
         /// <summary>The stops of its number, itself included: its mirrors.</summary>
         public List<Stop> Group { get; set; } = [];

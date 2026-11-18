@@ -5,8 +5,8 @@ namespace Darp.CodeEditor.Completion;
 
 /// <summary>
 /// A completion item's text in the LSP snippet syntax, parsed as VS Code parses it: tab stops <c>$1</c> and
-/// <c>${1}</c>, placeholders <c>${1:text}</c>, also nested, choices <c>${1|a,b|}</c>, of which the first goes in, the
-/// final stop <c>$0</c>, variables <c>$NAME</c> and <c>${NAME:default}</c>, and the escapes <c>\$</c>, <c>\}</c> and
+/// <c>${1}</c>, placeholders <c>${1:text}</c>, also nested, choices <c>${1|a,b|}</c>, of which the first goes in and
+/// the session offers the others in completion's list, the final stop <c>$0</c>, variables <c>$NAME</c> and <c>${NAME:default}</c>, and the escapes <c>\$</c>, <c>\}</c> and
 /// <c>\\</c>, and <c>\,</c> and <c>\|</c> in choices. What does not parse is text, as in VS Code.
 /// </summary>
 /// <remarks>
@@ -257,10 +257,12 @@ internal sealed class Snippet
         public string Value { get; } = value;
     }
 
-    /// <summary>The first option of a choice, which goes in as it is, as VS Code inserts a choice.</summary>
-    private sealed class ChoiceNode(string value) : Node
+    /// <summary>A choice: its first option goes in as it is, as VS Code inserts a choice.</summary>
+    private sealed class ChoiceNode(IReadOnlyList<string> options) : Node
     {
-        public string Value { get; } = value;
+        public IReadOnlyList<string> Options { get; } = options;
+
+        public string Value => Options[0];
     }
 
     /// <summary>A variable, with its default.</summary>
@@ -388,7 +390,7 @@ internal sealed class Snippet
                         continue;
                     if (Accept(TokenType.Pipe) && Accept(TokenType.CurlyClose))
                     {
-                        placeholder.Children.Add(new ChoiceNode(options[0]));
+                        placeholder.Children.Add(new ChoiceNode(options));
                         parent.Add(placeholder);
                         return true;
                     }
@@ -835,6 +837,7 @@ internal sealed class Snippet
                             new SnippetStop(placeholder.Index, start, start, parent)
                             {
                                 Transform = placeholder.Transform,
+                                Choice = placeholder.Children is [ChoiceNode { Options: var options }] ? options : null,
                             }
                         );
                         if (!Write(placeholder.Children, index))
@@ -951,4 +954,7 @@ internal readonly record struct SnippetStop(int Index, int Start, int End, int P
 {
     /// <summary>What its text becomes as Tab or Shift+Tab leaves its number; null for none.</summary>
     public SnippetTransform? Transform { get; init; }
+
+    /// <summary>The options of a choice, the first of which it has; null for a stop that is no choice.</summary>
+    public IReadOnlyList<string>? Choice { get; init; }
 }

@@ -351,4 +351,6 @@ internal static class InsertTextFormat
 internal static class CompletionItemKinds
 {
     public const int Property = 10;
+
+    public const int Value = 12;
 }

@@ -139,6 +139,7 @@ internal sealed class CompletionController : IDisposable
         _document.LanguageFeaturesChanged += OnClosingChange;
         _view.LeftView += OnClosingChange;
         snippets.IsCompleting = () => _session is not null;
+        _snippets.ChoiceSelected += OnChoiceSelected;
     }
 
     /// <summary>The colors of the color theme, for code in the details, once it is loaded. New colors end completion.</summary>
@@ -284,7 +285,19 @@ internal sealed class CompletionController : IDisposable
         _textArea.Caret.PositionChanged -= OnCaretPositionChanged;
         _document.LanguageFeaturesChanged -= OnClosingChange;
         _view.LeftView -= OnClosingChange;
+        _snippets.ChoiceSelected -= OnChoiceSelected;
     }
+
+    /// <summary>
+    /// A snippet's choice is selected: its options show, as VS Code asks for them once the selection is set, if the
+    /// choice is still selected then.
+    /// </summary>
+    private void OnChoiceSelected(object? sender, EventArgs e) =>
+        _editor.Dispatcher.Post(() =>
+        {
+            if (_snippets.ChoiceCompletion() is not null)
+                Trigger();
+        });
 
     /// <summary>
     /// Asks the server for completion at the caret. While completion is open, the request replaces the one under way,
@@ -304,7 +317,23 @@ internal sealed class CompletionController : IDisposable
             StartLoading(session, request);
         session.Pending?.Cancellation.Cancel();
         session.Pending = request;
-        AskAsync(session, request, trigger);
+        // A snippet's choice that is selected has its options, and no other items, as in VS Code; its text may stay
+        // selected while they show.
+        CompletionList? choice = _snippets.ChoiceCompletion();
+        session.ChoiceSelection = choice is null ? null : SelectionRange();
+        if (choice is not null)
+            ShowChoice(session, request, choice);
+        else
+            AskAsync(session, request, trigger);
+    }
+
+    /// <summary>Shows the options of a snippet's choice as the answer to <paramref name="request"/>.</summary>
+    private void ShowChoice(Session session, Request request, CompletionList choice)
+    {
+        session.Pending = null;
+        StopLoading();
+        session.Answer = new Answer(choice, request) { IsChoice = true };
+        Update();
     }
 
     /// <summary>Shows the server's answer, unless completion ended or asked again meanwhile.</summary>
@@ -368,7 +397,7 @@ internal sealed class CompletionController : IDisposable
         int caret = _textArea.Caret.Offset;
         Request latest = session.Latest;
         if (
-            !_textArea.Selection.IsEmpty
+            (!_textArea.Selection.IsEmpty && SelectionRange() != session.ChoiceSelection)
             || (!latest.IsStale && _buffer.GetLineByOffset(caret) != _buffer.GetLineByOffset(latest.Offset))
         )
         {
@@ -888,6 +917,9 @@ internal sealed class CompletionController : IDisposable
             _snippets.Start(snippet, start, mark);
         if (late is not null)
             ApplyLateEdits(late, step, request.Snapshot);
+        // As VS Code's choice items go on to the next placeholder.
+        if (answer.IsChoice)
+            _snippets.Next();
     }
 
     /// <summary>
@@ -1136,6 +1168,15 @@ internal sealed class CompletionController : IDisposable
 
     private PopupLook Look() => new(_editor.FontFamily, _editor.FontSize, _colors?.Popups ?? PopupColors.Default);
 
+    /// <summary>What the selection covers, or the caret.</summary>
+    private TextRange SelectionRange() =>
+        _textArea.Selection.IsEmpty
+            ? new TextRange(_textArea.Caret.Offset, 0)
+            : TextRange.FromBounds(
+                _textArea.Selection.SurroundingSegment.Offset,
+                _textArea.Selection.SurroundingSegment.EndOffset
+            );
+
     /// <summary>A request for completion.</summary>
     /// <param name="snapshot">The text it was asked for.</param>
     /// <param name="word">The word before the caret then: what items without an edit replace.</param>
@@ -1165,6 +1206,9 @@ internal sealed class CompletionController : IDisposable
     {
         /// <summary>The clipboard's text, read for the list's snippets that have <c>CLIPBOARD</c>; null for none.</summary>
         public string? Clipboard { get; init; }
+
+        /// <summary>Whether it is a snippet's choice's options: committing one goes on to the snippet's next stop.</summary>
+        public bool IsChoice { get; init; }
     }
 
     /// <summary>An item's resolve, under way or done.</summary>
@@ -1187,6 +1231,12 @@ internal sealed class CompletionController : IDisposable
     {
         /// <summary>Whether the user asked for completion by key, rather than typing opening it.</summary>
         public bool IsExplicit { get; set; }
+
+        /// <summary>
+        /// The selection when a snippet's choice was asked for last, which may stay while its options show; null when
+        /// the last request was not a choice's.
+        /// </summary>
+        public TextRange? ChoiceSelection { get; set; }
 
         /// <summary>Whether the list shows that nothing matches what is typed.</summary>
         public bool ShowsNoMatch { get; set; }
