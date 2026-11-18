@@ -19,8 +19,9 @@ namespace Darp.CodeEditor.Editing;
 /// them, as far as the language's <see cref="CodeLanguage.AutoIndent"/> goes: Enter indents the new line by the rules
 /// for Enter, the brackets and the indentation rules, typing outdents a line that comes to match the decrease pattern,
 /// opening characters bring their closing ones, which are typed over and deleted with them, and opening characters
-/// surround a selection. Ctrl+/ toggles comments. Tab and Shift+Tab indent and outdent as VS Code's do, with the document's
-/// indentation; Tab without a selection is AvaloniaEdit's.
+/// surround a selection. Ctrl+/ toggles comments. Tab and Shift+Tab indent and outdent as VS Code's do, with the
+/// document's indentation; Tab without a selection is AvaloniaEdit's, except on a blank line, which goes to its
+/// indentation by the rules.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -249,17 +250,20 @@ internal sealed class EditingHelpers : IDisposable
     }
 
     /// <summary>
-    /// Tab with a selection, VS Code's <c>tab</c>: a selection inside one line, short of the whole line, gives way to
-    /// whitespace up to the next tab stop from its start; whole lines, one or more, are indented. Shift+Tab, VS Code's
-    /// <c>outdent</c>, outdents the selected lines or the caret's. Each is a step of its own. Tab without a selection,
-    /// and both keys in a rectangle selection, are AvaloniaEdit's.
+    /// Tab, VS Code's <c>tab</c>: a selection inside one line, short of the whole line, gives way to whitespace up to the
+    /// next tab stop from its start; whole lines, one or more, are indented; without a selection, a blank line goes to
+    /// its indentation (<see cref="TabInBlankLine"/>). Shift+Tab, VS Code's <c>outdent</c>, outdents the selected lines
+    /// or the caret's. Each is a step of its own. Tab without a selection elsewhere, and both keys in a rectangle
+    /// selection, are AvaloniaEdit's.
     /// </summary>
     /// <returns>Whether it handled the key.</returns>
     private bool Tab(bool outdent)
     {
         Selection selection = _textArea.Selection;
-        if (selection is RectangleSelection || (selection.IsEmpty && !outdent))
+        if (selection is RectangleSelection)
             return false;
+        if (selection.IsEmpty && !outdent)
+            return TabInBlankLine();
         int from = selection.IsEmpty ? _textArea.Caret.Offset : selection.SurroundingSegment.Offset;
         int to = selection.IsEmpty ? from : selection.SurroundingSegment.EndOffset;
         DocumentLine line = Buffer.GetLineByOffset(from);
@@ -279,6 +283,83 @@ internal sealed class EditingHelpers : IDisposable
             stopAfter: true
         );
         return true;
+    }
+
+    /// <summary>
+    /// Tab without a selection on a line of whitespace only, as VS Code's <c>tab</c> does: the line takes the
+    /// indentation that the language's rules give it (<see cref="GoodIndentation"/>), or one level, in a step of its
+    /// own, unless it starts with that indentation already. Then, as elsewhere, AvaloniaEdit's Tab puts whitespace up
+    /// to the next tab stop at the caret.
+    /// </summary>
+    /// <returns>Whether it handled the key.</returns>
+    private bool TabInBlankLine()
+    {
+        int caret = _textArea.Caret.Offset;
+        DocumentLine line = Buffer.GetLineByOffset(caret);
+        string text = Buffer.GetText(line);
+        if (LeadingWhitespace(text) < text.Length || !CanChange(line.Offset, line.Length))
+            return false;
+        string good = new Indenting(_document.Indentation).Normalize(GoodIndentation(line.LineNumber) ?? "\t");
+        if (text.StartsWith(good, StringComparison.Ordinal))
+            return false;
+        _undo.Edit(
+            EditKind.Other,
+            stopBefore: true,
+            () =>
+            {
+                Buffer.Replace(line.Offset, line.Length, good);
+                _textArea.Caret.Offset = line.Offset + good.Length;
+                _textArea.Caret.BringCaretToView();
+            },
+            stopAfter: true
+        );
+        return true;
+    }
+
+    /// <summary>
+    /// The indentation that line <paramref name="lineNumber"/> should have, VS Code's <c>_goodIndentForLine</c>: by the
+    /// indentation rules from the lines above, with <see cref="AutoIndent.Full"/>; otherwise by what Enter would do at
+    /// the end of the closest line above with text. Null for none, or no indentation.
+    /// </summary>
+    private string? GoodIndentation(int lineNumber)
+    {
+        AutoIndent autoIndent = _document.Language.AutoIndent;
+        LanguageConfiguration configuration = Configuration;
+        var indenting = new Indenting(_document.Indentation);
+        if (autoIndent == AutoIndent.Full && configuration.IndentationRules is { } rules)
+        {
+            try
+            {
+                Inherited? inherited = InheritedIndentation(
+                    rules.StartMatching(),
+                    lineNumber,
+                    honorIntentional: false,
+                    LineText,
+                    RuleLine
+                );
+                if (inherited is { } action)
+                {
+                    string indentation = action.Increases ? indenting.Shift(action.Indentation) : action.Indentation;
+                    return indentation.Length > 0 ? indenting.Normalize(indentation) : null;
+                }
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                return null;
+            }
+        }
+        int above = lineNumber - 1;
+        while (above >= 1 && string.IsNullOrWhiteSpace(LineText(above)))
+            above--;
+        if (above < 1)
+            return null;
+        string text = LineText(above);
+        string previous = above > 1 ? RuleLine(above - 1) : "";
+        if (EnterActionAt(configuration, autoIndent, previous, RuleLine(above), "") is not { } enter)
+            return null;
+        (string own, string append) = Resolved(enter, text[..LeadingWhitespace(text)]);
+        string good = own + append;
+        return good.Length > 0 ? good : null;
     }
 
     /// <summary>
@@ -1172,15 +1253,7 @@ internal sealed class EditingHelpers : IDisposable
     /// </summary>
     private static NewLine NewLineFor(EnterAction action, string indentation, Indenting indenting, string lineBreak)
     {
-        if (action.RemoveText > 0)
-            indentation = indentation[..Math.Max(0, indentation.Length - action.RemoveText)];
-        // VS Code indents by a tab before the appended text, which the document's indentation then turns into its own.
-        string append = action.Indent switch
-        {
-            IndentAction.Indent => "\t" + action.AppendText,
-            IndentAction.IndentOutdent when action.AppendText.Length == 0 => "\t",
-            _ => action.AppendText,
-        };
+        (indentation, string append) = Resolved(action, indentation);
         if (action.Indent == IndentAction.IndentOutdent)
         {
             string inner = lineBreak + indenting.Normalize(indentation + append);
@@ -1190,6 +1263,24 @@ internal sealed class EditingHelpers : IDisposable
             indentation = indenting.Unshift(indentation);
         string inserted = lineBreak + indenting.Normalize(indentation + append);
         return new NewLine(inserted, inserted.Length, 0);
+    }
+
+    /// <summary>
+    /// The indentation for <paramref name="action"/> after a line indented by <paramref name="indentation"/>, without
+    /// the characters it removes, and the text to append, as VS Code's <c>getEnterAction</c> gives them: a tab first to
+    /// indent, which the document's indentation turns into its own.
+    /// </summary>
+    private static (string Indentation, string Append) Resolved(EnterAction action, string indentation)
+    {
+        if (action.RemoveText > 0)
+            indentation = indentation[..Math.Max(0, indentation.Length - action.RemoveText)];
+        string append = action.Indent switch
+        {
+            IndentAction.Indent => "\t" + action.AppendText,
+            IndentAction.IndentOutdent when action.AppendText.Length == 0 => "\t",
+            _ => action.AppendText,
+        };
+        return (indentation, append);
     }
 
     /// <summary>

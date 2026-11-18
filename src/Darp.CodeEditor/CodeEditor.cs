@@ -89,8 +89,9 @@ namespace Darp.CodeEditor;
 /// (F8, Shift+F8; also with Alt). Ctrl+D selects the word at the caret, the first step of VS Code's Ctrl+D, which goes
 /// on to add carets at the next matches. Ctrl+Left and Ctrl+Right, Alt on macOS, move by VS Code's words, and select
 /// with Shift. AvaloniaEdit's keys edit, navigate and use the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), as VS Code's
-/// do: Tab replaces a selection inside a line and indents whole lines, Shift+Tab outdents, and without a selection
-/// Ctrl+C and Ctrl+X take the caret's whole line, which Ctrl+V pastes above the caret's line
+/// do: Tab replaces a selection inside a line and indents whole lines, and on a blank line goes to the indentation that
+/// the language's rules give it, Shift+Tab outdents, and without a selection Ctrl+C and Ctrl+X take the caret's whole
+/// line, which Ctrl+V pastes above the caret's line
 /// (<see cref="EmptySelectionClipboard"/>). Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A
 /// right click opens the
 /// editor's context menu, with the keys of its items and in the UI culture's language: Show Hover, Cut, Copy, Paste,

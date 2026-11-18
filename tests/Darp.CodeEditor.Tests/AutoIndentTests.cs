@@ -139,6 +139,59 @@ public sealed class AutoIndentTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe("{\n  \"a\": [\n    1 // {\n  ]|");
         });
 
+    [Theory]
+    // Two levels in, by the indentation rules from the lines above, where Tab alone indents one.
+    [InlineData("{\n  \"a\": {\n    \"b\": 1,\n|", "{\n  \"a\": {\n    \"b\": 1,\n    |")]
+    // A line of whitespace that is short of it.
+    [InlineData("{\n  \"a\": {\n    \"b\": 1,\n | ", "{\n  \"a\": {\n    \"b\": 1,\n    |")]
+    // A line that has it already takes whitespace to the next tab stop at the caret, as elsewhere.
+    [InlineData("{\n  \"a\": 1,\n   |", "{\n  \"a\": 1,\n    |")]
+    // Without rules that indent it, one level.
+    [InlineData("{\n  \"a\": 1\n}\n|", "{\n  \"a\": 1\n}\n  |")]
+    public Task Tab_on_a_blank_line_goes_to_its_indentation_by_the_indentation_rules(string marked, string expected) =>
+        _ui.Run(async () =>
+        {
+            await CodeLanguage.Json.Loaded;
+            using EditorWindow window = Show(marked, CodeLanguage.Json, indentation: 2);
+
+            window.Press(Key.Tab);
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
+    [Theory]
+    // By what Enter would do after the closest line above with text: here, the rule for Enter after a case.
+    [InlineData("    case 1:\n\n|", "    case 1:\n\n        |")]
+    [InlineData("    f(\n  |", "    f(\n        |")]
+    [InlineData("    x\n|", "    x\n    |")]
+    public Task Tab_on_a_blank_line_goes_to_its_indentation_by_the_rules_for_Enter(string marked, string expected) =>
+        _ui.Run(async () =>
+        {
+            await Rules.Loaded;
+            using EditorWindow window = Show(marked, Rules);
+
+            window.Press(Key.Tab);
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
+    [Fact]
+    public Task Tab_on_a_blank_line_is_an_undo_step_of_its_own() =>
+        _ui.Run(async () =>
+        {
+            await CodeLanguage.Json.Loaded;
+            using EditorWindow window = Show("{\n  \"a\": {\n    \"b\": 1,\n|", CodeLanguage.Json, indentation: 2);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+
+            window.Press(Key.Tab);
+            window.Type("x");
+            document.Undo();
+            MarkedText.Of(window).ShouldBe("{\n  \"a\": {\n    \"b\": 1,\n    |");
+
+            document.Undo();
+            document.Text.ShouldBe("{\n  \"a\": {\n    \"b\": 1,\n");
+        });
+
     /// <summary>The rules for Enter of <c>enter.language-configuration.json</c>, with the editor's default auto-indent.</summary>
     private static CodeLanguage Rules { get; } =
         new(
