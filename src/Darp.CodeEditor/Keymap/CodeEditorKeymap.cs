@@ -94,6 +94,7 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+l (cmd+l)</term><description><see cref="CodeEditorCommands.ExpandLineSelection"/></description></item>
     /// <item><term>shift+alt+a (Linux: ctrl+shift+a)</term><description><see cref="CodeEditorCommands.BlockComment"/></description></item>
     /// <item><term>ctrl+shift+\ (shift+cmd+\)</term><description><see cref="CodeEditorCommands.JumpToBracket"/></description></item>
+    /// <item><term>ctrl+u (cmd+u)</term><description><see cref="CodeEditorCommands.CursorUndo"/></description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default => s_default.Value;
@@ -238,6 +239,7 @@ public sealed class CodeEditorKeymap
         yield return new($"{command}+l", CodeEditorCommands.ExpandLineSelection);
         yield return new(linux ? "ctrl+shift+a" : "shift+alt+a", CodeEditorCommands.BlockComment);
         yield return new($"{command}+shift+\\", CodeEditorCommands.JumpToBracket);
+        yield return new($"{command}+u", CodeEditorCommands.CursorUndo);
     }
 
     /// <summary>The keys that go to the next and previous diagnostic, VS Code's on every operating system.</summary>
@@ -463,4 +465,13 @@ public static class CodeEditorCommands
     /// unbound by default, as in VS Code.
     /// </summary>
     public const string SelectToBracket = "editor.action.selectToBracket";
+
+    /// <summary>
+    /// Puts back the selection that the caret's last move left, with the scroll position: of the last 50, and none from
+    /// before the last change of the text.
+    /// </summary>
+    public const string CursorUndo = "cursorUndo";
+
+    /// <summary>Puts back the selection that <see cref="CursorUndo"/> left; unbound by default, as in VS Code.</summary>
+    public const string CursorRedo = "cursorRedo";
 }

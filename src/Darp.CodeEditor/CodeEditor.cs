@@ -233,6 +233,9 @@ public class CodeEditor : TemplatedControl
     /// <summary>Goes through the shown document's diagnostics, as F8 does.</summary>
     private DiagnosticNavigation? _diagnosticNavigation;
 
+    /// <summary>The selections that the caret left in the shown document, for cursor undo.</summary>
+    private CursorHistory? _cursorHistory;
+
     /// <summary>The template's panel, which the search bar goes into, over the text.</summary>
     private Panel? _root;
 
@@ -885,6 +888,7 @@ public class CodeEditor : TemplatedControl
         };
         _signatureHelp = new SignatureHelpController(this, part.TextArea, document, _highlighter) { Colors = _colors };
         _diagnosticNavigation = new DiagnosticNavigation(part.TextArea, document);
+        _cursorHistory = new CursorHistory(part.TextArea, Dispatcher);
         _searchBar?.Attach(this, part.TextArea, document);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
         _waitingForLayout = true;
@@ -914,6 +918,8 @@ public class CodeEditor : TemplatedControl
         _signatureHelp = null;
         _diagnosticNavigation?.Dispose();
         _diagnosticNavigation = null;
+        _cursorHistory?.Dispose();
+        _cursorHistory = null;
         _squiggles?.Dispose();
         _squiggles = null;
         _semantic?.Dispose();
@@ -1140,6 +1146,12 @@ public class CodeEditor : TemplatedControl
                 return true;
             case CodeEditorCommands.SelectToBracket when inText:
                 _helpers?.SelectToBracket();
+                return true;
+            case CodeEditorCommands.CursorUndo or CodeEditorCommands.CursorRedo when inText:
+                if (command == CodeEditorCommands.CursorUndo)
+                    _cursorHistory?.Undo();
+                else
+                    _cursorHistory?.Redo();
                 return true;
             default:
                 return false;
