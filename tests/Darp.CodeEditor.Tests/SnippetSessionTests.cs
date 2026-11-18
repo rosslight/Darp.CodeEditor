@@ -231,6 +231,129 @@ public sealed class SnippetSessionTests(UiFixture ui)
             largest.ShouldBe(1);
         });
 
+    [Theory]
+    [InlineData("${1/foo/bar/}$0", "foo", "bar")]
+    [InlineData("$1 baz ${1/foo/bar/}$0", "foo", "foo baz bar")]
+    [InlineData("${1:foo} ${1/(.*)/${1:/upcase}/}$0", "bar", "bar BAR")]
+    public Task Tab_transforms_the_stops_of_the_number_it_leaves(string snippet, string typed, string text) =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Item(snippet));
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+
+            window.Type(typed);
+            window.Press(Key.Tab);
+
+            document.Text.ShouldBe(text);
+            editor.Selection.ShouldBe(new TextSelection(text.Length));
+        });
+
+    [Fact]
+    public Task A_transformation_applies_as_Tab_or_Shift_Tab_leaves_its_number_and_not_on_Escape() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Item(@"${1:name} : ${2:type}${3/\s:=(.*)/${1:+ :=}${1}/};" + "\n$0")
+            );
+
+            // An empty stop with a transformation is a stop like any other; its text is transformed as Tab leaves it.
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            window.Type("clk");
+            window.Press(Key.Tab);
+            window.Type("std_logic");
+            window.Press(Key.Tab);
+            editor.Selection.ShouldBe(new TextSelection(15));
+            window.Type(" := '1'");
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("clk : std_logic := '1';\n");
+            editor.Selection.ShouldBe(new TextSelection(document.Text.Length));
+
+            // Shift+Tab transforms too; Escape does not.
+            document.Text = "";
+            using CodeDocument mirrored = await SetCompletionAsync(
+                server,
+                fake,
+                Item("${1:a} ${2:b} ${2/(.*)/${1:/upcase}/}")
+            );
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            window.Press(Key.Tab);
+            window.Type("x");
+            document.Text.ShouldBe("a x x");
+            window.Press(Key.Tab, KeyModifiers.Shift);
+            document.Text.ShouldBe("a x X");
+            editor.Selection.ShouldBe(new TextSelection(0, 1));
+            window.Press(Key.Tab);
+            window.Type("y");
+            window.Press(Key.Escape);
+            document.Text.ShouldBe("a y y");
+        });
+
+    [Fact]
+    public Task A_transformed_stop_next_to_another_keeps_apart_from_it() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Item("${1:{}${2:fff}${1/{/}/}"));
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("{fff{");
+
+            window.Press(Key.Tab);
+
+            document.Text.ShouldBe("{fff}");
+            editor.Selection.ShouldBe(new TextSelection(1, 4));
+            window.Type("ggg");
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("{ggg}");
+            editor.Selection.ShouldBe(new TextSelection(5));
+        });
+
+    [Fact]
+    public Task A_transformations_lines_take_the_indentation_of_the_snippets_line_in_the_documents_indentation() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "{\n  \n}");
+            document.Indentation = Indentation.Spaces(2);
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Item("function animate () {\n\tvar ${1:a} = 12;\n\tconsole.log(${1/(.*)/\n\t\t$1\n\t/})\n}")
+            );
+            await OpenAsync(window, 4);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("{\n  function animate () {\n    var a = 12;\n    console.log(a)\n  }\n}");
+
+            window.Type("bbb");
+            window.Press(Key.Tab);
+
+            document.Text.ShouldBe(
+                "{\n  function animate () {\n    var bbb = 12;\n    console.log(\n      bbb\n    )\n  }\n}"
+            );
+        });
+
     [Fact]
     public Task Typing_over_a_placeholder_drops_the_stops_inside_it() =>
         _ui.Run(async () =>

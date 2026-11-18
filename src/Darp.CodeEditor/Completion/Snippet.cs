@@ -13,9 +13,11 @@ namespace Darp.CodeEditor.Completion;
 /// <para>
 /// Stops of one number are mirrors: the first one with text gives every other one its text, as in VS Code, and a
 /// mirror's variables have that text's values. A variable without a value, whether VS Code knows it or not, goes in as
-/// its default, or as nothing, as VS Code's completion inserts it. Transformations, such as
-/// <c>${1/(.*)/${1:/upcase}/}</c>, are read and not applied: a variable goes in as its value, and a stop with one is a
-/// mirror of its number. A snippet with stops gets a final stop at its end, unless it has one.
+/// its default, or as nothing, as VS Code's completion inserts it. A transformation, such as
+/// <c>${1/(.*)/${1:/upcase}/}</c>, applies to a variable's value, or to nothing when it has none, as it goes in; a stop
+/// with one is a mirror of its number, and the session applies it to the stop's text when Tab or Shift+Tab leaves the
+/// number, as in VS Code: see <see cref="SnippetTransform"/>. A snippet with stops gets a final stop at its end, unless
+/// it has one.
 /// </para>
 /// <para>
 /// A snippet may have as many stops as it likes, as in VS Code. The limits are sized for real snippets, which have a
@@ -168,7 +170,11 @@ internal sealed class Snippet
                         into.Add(node);
                         break;
                     case VariableNode variable:
-                        var copy = new VariableNode(variable.Name) { Source = variable.Source ?? variable };
+                        var copy = new VariableNode(variable.Name)
+                        {
+                            Source = variable.Source ?? variable,
+                            Transform = variable.Transform,
+                        };
                         if (!Flatten(variable.Children, copy.Children, filling, depth + 1))
                             return false;
                         into.Add(copy);
@@ -249,6 +255,9 @@ internal sealed class Snippet
     {
         public string Name { get; } = name;
 
+        /// <summary>What its value goes in as; null for the value itself.</summary>
+        public SnippetTransform? Transform { get; set; }
+
         /// <summary>For a mirror's copy, the variable it copies, whose value it has; null otherwise.</summary>
         public VariableNode? Source { get; init; }
 
@@ -259,6 +268,9 @@ internal sealed class Snippet
     private sealed class PlaceholderNode(int index) : Node
     {
         public int Index { get; } = index;
+
+        /// <summary>What its text becomes as Tab or Shift+Tab leaves its number; null for none.</summary>
+        public SnippetTransform? Transform { get; set; }
 
         public override List<Node> Children { get; } = [];
     }
@@ -373,8 +385,9 @@ internal sealed class Snippet
             }
             if (Accept(TokenType.Forwardslash))
             {
-                if (!SkipTransform())
+                if (ParseTransform() is not { } transform)
                     return BackTo(start);
+                placeholder.Transform = transform;
                 parent.Add(placeholder);
                 return true;
             }
@@ -403,8 +416,9 @@ internal sealed class Snippet
                 return ParseChildren(parent, variable, variable.Children, "${" + name + ":", depth);
             if (Accept(TokenType.Forwardslash))
             {
-                if (!SkipTransform())
+                if (ParseTransform() is not { } transform)
                     return BackTo(start);
+                variable.Transform = transform;
                 parent.Add(variable);
                 return true;
             }
@@ -466,94 +480,135 @@ internal sealed class Snippet
         }
 
         /// <summary>
-        /// A transformation after its first <c>/</c>, read as VS Code reads it, and dropped: the regular expression,
-        /// the format, and JavaScript's options up to <c>}</c>. The regular expression is not checked.
+        /// A transformation after its first <c>/</c>, read as VS Code reads it: the regular expression, the format, and
+        /// JavaScript's options up to <c>}</c>; null when it does not parse, or its regular expression or its options
+        /// are invalid.
         /// </summary>
-        private bool SkipTransform()
+        private SnippetTransform? ParseTransform()
         {
+            var pattern = new StringBuilder();
             while (!Accept(TokenType.Forwardslash))
             {
-                if (Accept(TokenType.Backslash))
-                    Accept(TokenType.Forwardslash);
+                if (AcceptText(TokenType.Backslash) is { } backslash)
+                    pattern.Append(AcceptText(TokenType.Forwardslash) ?? backslash);
                 else if (_token.Type == TokenType.End)
-                    return false;
+                    return null;
                 else
-                    AcceptAnyText();
+                    pattern.Append(AcceptAnyText());
             }
+            var format = new List<SnippetFormatPart>();
             while (!Accept(TokenType.Forwardslash))
             {
-                if (Accept(TokenType.Backslash))
+                if (AcceptText(TokenType.Backslash) is { } backslash)
                 {
-                    if (!Accept(TokenType.Backslash))
-                        Accept(TokenType.Forwardslash);
+                    format.Add(
+                        new SnippetFormatText(
+                            AcceptText(TokenType.Backslash) ?? AcceptText(TokenType.Forwardslash) ?? backslash
+                        )
+                    );
                 }
-                else if (!SkipFormatString() && AcceptAnyText().Length == 0)
+                else if (!ParseFormatString(format))
                 {
-                    return false;
+                    if (_token.Type == TokenType.End)
+                        return null;
+                    format.Add(new SnippetFormatText(AcceptAnyText()));
                 }
             }
             var options = new StringBuilder();
             while (!Accept(TokenType.CurlyClose))
             {
-                if (AcceptAnyText() is not { Length: > 0 } text)
-                    return false;
-                options.Append(text);
+                if (_token.Type == TokenType.End)
+                    return null;
+                options.Append(AcceptAnyText());
             }
-            string flags = options.ToString();
-            return flags.All("dgimsuvy".Contains) && flags.Distinct().Count() == flags.Length;
+            return SnippetTransform.Create(pattern.ToString(), options.ToString(), format);
         }
 
         /// <summary>
         /// A group reference of a format: <c>$1</c>, <c>${1}</c>, <c>${1:/upcase}</c>, <c>${1:+if}</c>,
         /// <c>${1:-else}</c>, <c>${1:?if:else}</c> or <c>${1:else}</c>.
         /// </summary>
-        private bool SkipFormatString()
+        private bool ParseFormatString(List<SnippetFormatPart> format)
         {
             Token start = _token;
             if (!Accept(TokenType.Dollar))
                 return false;
             bool complex = Accept(TokenType.CurlyOpen);
-            if (!Accept(TokenType.Int))
+            if (AcceptText(TokenType.Int) is not { } digits)
                 return BackTo(start);
+            // A number too large for a group is a group that never matches.
+            int index = int.TryParse(digits, out int parsed) ? parsed : int.MaxValue;
             if (!complex || Accept(TokenType.CurlyClose))
+            {
+                format.Add(new SnippetFormatGroup(index, null, null, null));
                 return true;
+            }
             if (!Accept(TokenType.Colon))
                 return BackTo(start);
-            bool read;
+            SnippetFormatGroup? group = null;
             if (Accept(TokenType.Forwardslash))
-                read = Accept(TokenType.VariableName) && Accept(TokenType.CurlyClose);
-            else if (Accept(TokenType.Plus) || Accept(TokenType.Dash))
-                read = Until(TokenType.CurlyClose);
+            {
+                if (AcceptText(TokenType.VariableName) is { } shorthand && Accept(TokenType.CurlyClose))
+                    group = new SnippetFormatGroup(index, shorthand, null, null);
+            }
+            else if (Accept(TokenType.Plus))
+            {
+                if (Until(TokenType.CurlyClose) is { } ifValue)
+                    group = new SnippetFormatGroup(index, null, ifValue, null);
+            }
+            else if (Accept(TokenType.Dash))
+            {
+                if (Until(TokenType.CurlyClose) is { } elseValue)
+                    group = new SnippetFormatGroup(index, null, null, elseValue);
+            }
             else if (Accept(TokenType.QuestionMark))
-                read = Until(TokenType.Colon) && Until(TokenType.CurlyClose);
-            else
-                read = Until(TokenType.CurlyClose);
-            return read || BackTo(start);
+            {
+                if (Until(TokenType.Colon) is { } ifValue && Until(TokenType.CurlyClose) is { } elseValue)
+                    group = new SnippetFormatGroup(index, null, ifValue, elseValue);
+            }
+            else if (Until(TokenType.CurlyClose) is { } elseValue)
+            {
+                group = new SnippetFormatGroup(index, null, null, elseValue);
+            }
+            if (group is null)
+                return BackTo(start);
+            format.Add(group);
+            return true;
         }
 
         /// <summary>
-        /// Reads up to <paramref name="type"/> and past it, with <c>\$</c>, <c>\}</c> and <c>\\</c> as text; false
-        /// when nothing comes before it, or when the text ends or another escape comes first.
+        /// Reads up to <paramref name="type"/> and past it, with <c>\$</c>, <c>\}</c> and <c>\\</c> as text: what
+        /// came before it, unescaped. Null when nothing comes before it, or when the text ends or another escape comes
+        /// first.
         /// </summary>
-        private bool Until(TokenType type)
+        private string? Until(TokenType type)
         {
             Token start = _token;
             while (_token.Type != type)
             {
                 if (_token.Type == TokenType.End)
-                    return false;
+                    return null;
                 if (
                     _token.Type == TokenType.Backslash
                     && Next().Type is not (TokenType.Dollar or TokenType.CurlyClose or TokenType.Backslash)
                 )
                 {
-                    return false;
+                    return null;
                 }
                 _token = Next();
             }
-            bool empty = _token.Position == start.Position;
+            ReadOnlySpan<char> read = _text.AsSpan(start.Position, _token.Position - start.Position);
             _token = Next();
-            return !empty;
+            if (read.IsEmpty)
+                return null;
+            var value = new StringBuilder(read.Length);
+            for (int i = 0; i < read.Length; i++)
+            {
+                if (read[i] == '\\' && i + 1 < read.Length && read[i + 1] is '$' or '}' or '\\')
+                    i++;
+                value.Append(read[i]);
+            }
+            return value.ToString();
         }
 
         /// <summary>Any token as text.</summary>
@@ -728,13 +783,21 @@ internal sealed class Snippet
                         VariableNode source = variable.Source ?? variable;
                         if (!_values.TryGetValue(source, out string? value))
                             _values[source] = value = _context.Variable(variable.Name);
+                        // Transformed, a variable without a value is empty text, as in VS Code.
+                        if (variable.Transform is { } transform)
+                            value = transform.Resolve(value ?? "");
                         if (value is null ? !Write(variable.Children, parent) : !Append(value))
                             return false;
                         break;
                     case PlaceholderNode placeholder:
                         int index = Stops.Count;
                         int start = Text.Length;
-                        Stops.Add(new SnippetStop(placeholder.Index, start, start, parent));
+                        Stops.Add(
+                            new SnippetStop(placeholder.Index, start, start, parent)
+                            {
+                                Transform = placeholder.Transform,
+                            }
+                        );
                         if (!Write(placeholder.Children, index))
                             return false;
                         Stops[index] = Stops[index] with { End = Text.Length };
@@ -820,4 +883,8 @@ internal sealed record RenderedSnippet(string Text, IReadOnlyList<SnippetStop> S
 /// <param name="Start">Where its text starts in the snippet's text.</param>
 /// <param name="End">Where its text ends.</param>
 /// <param name="Parent">The position of the placeholder it is inside in the list of stops; -1 for none.</param>
-internal readonly record struct SnippetStop(int Index, int Start, int End, int Parent);
+internal readonly record struct SnippetStop(int Index, int Start, int End, int Parent)
+{
+    /// <summary>What its text becomes as Tab or Shift+Tab leaves its number; null for none.</summary>
+    public SnippetTransform? Transform { get; init; }
+}

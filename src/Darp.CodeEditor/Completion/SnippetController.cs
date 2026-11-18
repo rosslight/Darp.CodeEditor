@@ -31,6 +31,12 @@ namespace Darp.CodeEditor.Completion;
 /// completion inside a placeholder commits one, joins it: its stops come right after the selected stop, as in VS Code.
 /// </para>
 /// <para>
+/// When Tab or Shift+Tab leaves a number, the stops of that number with a transformation, such as
+/// <c>${1/(.*)/${1:/upcase}/}</c>, take their text transformed, as in VS Code: its lines after the first indented by the
+/// line the snippet went in, in the document's indentation. These changes are an undo step of their own, and mirrors do
+/// not follow them.
+/// </para>
+/// <para>
 /// As in VS Code, a session has as many stops as its snippets, and mirrors copy whatever the stop they follow holds.
 /// The UI thread's work grows with them, and no faster: each change and caret move looks at each stop, and the copies
 /// that follow a change are each a change of that mirror alone, prepared with a look at the stops that it touches, and
@@ -100,10 +106,6 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     public RenderedSnippet Render(Snippet snippet, int start)
     {
         DocumentLine line = _buffer.GetLineByOffset(start);
-        int indentationEnd = line.Offset;
-        int limit = Math.Min(start, VisibleText.End(line));
-        while (indentationEnd < limit && _buffer.GetCharAt(indentationEnd) is ' ' or '\t')
-            indentationEnd++;
         int caret = _textArea.Caret.Offset;
         DocumentLine caretLine = _buffer.GetLineByOffset(caret);
         // One time for all of the snippet's variables, as in VS Code.
@@ -112,7 +114,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         var values = new Dictionary<string, string?>(StringComparer.Ordinal);
         return snippet.Render(
             new SnippetContext(
-                _buffer.GetText(line.Offset, indentationEnd - line.Offset),
+                LineIndentation(start),
                 _document.Indentation,
                 TextUtilities.GetNewLineFromDocument(_buffer, line.LineNumber),
                 name =>
@@ -170,7 +172,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         End();
         List<Stop> stops = CreateStops(snippet, start, parent: null, isFinal: true);
         Number(stops);
-        var started = new Session(stops, Groups(snippet, stops), mark);
+        var started = new Session(stops, Groups(snippet, stops), mark, LineIndentation(start));
         _session = started;
         Move(started, forward: true);
     }
@@ -258,6 +260,8 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     /// </summary>
     private void Move(Session session, bool forward)
     {
+        if (session.Current >= 0)
+            Transform(session, session.Groups[session.Current]);
         int current = session.Current;
         int next = forward ? current + 1 : current - 1;
         while (next >= 0 && next < session.Groups.Count)
@@ -279,6 +283,84 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         if (current == session.Groups.Count - 1)
             End();
         _textArea.TextView.InvalidateLayer(Layer);
+    }
+
+    /// <summary>
+    /// Gives the stops of <paramref name="group"/> with a transformation their text transformed, as changes of their
+    /// own in one undo step, which mirrors do not follow; not those that are gone.
+    /// </summary>
+    private void Transform(Session session, List<Stop> group)
+    {
+        List<(Stop Stop, string Text)> transformed = [];
+        // From the last in the text to the first, as mirrors are copied.
+        foreach (Stop stop in group.OrderByDescending(stop => stop.StartOffset).ThenByDescending(stop => stop.Order))
+        {
+            if (stop.Transform is not { } transform || stop.IsGone)
+                continue;
+            string text = _buffer.GetText(stop.StartOffset, stop.EndOffset - stop.StartOffset);
+            string result = Indented(transform.Resolve(text), session.LineIndentation, stop.StartOffset);
+            if (result != text)
+                transformed.Add((stop, result));
+        }
+        if (transformed.Count == 0)
+            return;
+        ILookup<int, Stop> empty = session
+            .Stops.Where(other => other.StartOffset == other.EndOffset)
+            .ToLookup(other => other.StartOffset);
+        foreach (Stop stop in session.Stops)
+            stop.Keep();
+        _following = true;
+        UndoStack undo = _buffer.UndoStack;
+        undo.StartUndoGroup();
+        try
+        {
+            using (_buffer.RunUpdate())
+            {
+                foreach ((Stop stop, string text) in transformed)
+                    Replace(stop, text, empty[stop.StartOffset]);
+            }
+        }
+        finally
+        {
+            undo.EndUndoGroup();
+            _following = false;
+        }
+    }
+
+    /// <summary>
+    /// A transformation's <paramref name="text"/> as VS Code puts it in at <paramref name="offset"/>: each line after
+    /// the first starts with <paramref name="lineIndentation"/>, the indentation of the line the snippet went in, the
+    /// whole indentation in the document's; line breaks are those of the line.
+    /// </summary>
+    private string Indented(string text, string lineIndentation, int offset)
+    {
+        if (text.AsSpan().IndexOfAny('\r', '\n') < 0)
+            return text;
+        var indenting = new Indenting(_document.Indentation);
+        string lineBreak = TextUtilities.GetNewLineFromDocument(_buffer, _buffer.GetLineByOffset(offset).LineNumber);
+        string[] lines = text.Split(["\r\n", "\r", "\n"], StringSplitOptions.None);
+        for (int i = 1; i < lines.Length; i++)
+        {
+            string line = lineIndentation + lines[i];
+            int whitespace = 0;
+            while (whitespace < line.Length && line[whitespace] is ' ' or '\t')
+                whitespace++;
+            lines[i] = indenting.Normalize(line[..whitespace]) + line[whitespace..];
+        }
+        return string.Join(lineBreak, lines);
+    }
+
+    /// <summary>
+    /// The whitespace at the start of the line of <paramref name="offset"/>, up to it, in the shown part of the line.
+    /// </summary>
+    private string LineIndentation(int offset)
+    {
+        DocumentLine line = _buffer.GetLineByOffset(offset);
+        int end = line.Offset;
+        int limit = Math.Min(offset, VisibleText.End(line));
+        while (end < limit && _buffer.GetCharAt(end) is ' ' or '\t')
+            end++;
+        return _buffer.GetText(line.Offset, end - line.Offset);
     }
 
     /// <summary>Selects a stop's text, with the caret at its end; an empty stop puts the caret there.</summary>
@@ -315,6 +397,9 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
                     hadText: stop.End > stop.Start,
                     isFinal && stop.Index == 0
                 )
+                {
+                    Transform = stop.Transform,
+                }
             );
         }
         return stops;
@@ -573,7 +658,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     }
 
     /// <summary>A snippet's session: its stops, the order Tab selects them in, and the selected group.</summary>
-    private sealed class Session(List<Stop> stops, List<List<Stop>> groups, SnippetMark mark)
+    private sealed class Session(List<Stop> stops, List<List<Stop>> groups, SnippetMark mark, string lineIndentation)
     {
         /// <summary>
         /// The stops, mirrors included, of the snippet and of those that joined it, in the order of the text:
@@ -589,6 +674,9 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
 
         /// <summary>The selected group in <see cref="Groups"/>; -1 before the first.</summary>
         public int Current { get; set; } = -1;
+
+        /// <summary>The whitespace before the snippet on its line, which a transformation's lines start with.</summary>
+        public string LineIndentation { get; } = lineIndentation;
     }
 
     /// <summary>A stop in the text: a placeholder, a mirror, or the final stop.</summary>
@@ -612,6 +700,9 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
 
         /// <summary>Its place among the session's stops, in the order of the text as they went in.</summary>
         public int Order { get; set; }
+
+        /// <summary>What its text becomes as Tab or Shift+Tab leaves its number; null for none.</summary>
+        public SnippetTransform? Transform { get; init; }
 
         /// <summary>The stops of its number, itself included: its mirrors.</summary>
         public List<Stop> Group { get; set; } = [];

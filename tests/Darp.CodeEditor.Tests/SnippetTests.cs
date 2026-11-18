@@ -121,12 +121,140 @@ public sealed class SnippetTests
     }
 
     [Fact]
-    public void Transformations_are_read_and_not_applied()
+    public void Transformations_apply_to_variables_as_they_go_in_and_wait_on_stops_for_the_session()
     {
-        Render(@"${TM_FILENAME/(.*)\..+$/$1/}", name => name == "TM_FILENAME" ? "a.txt" : null).Text.ShouldBe("a.txt");
+        Func<string, string?> values = name => name == "TM_FILENAME" ? "a.txt" : null;
+
+        Render(@"const fileName = ""${TM_FILENAME/(.*)\..+$/$1/}""", values).Text.ShouldBe(@"const fileName = ""a""");
+        // A variable without a value is transformed as empty text: here, its else branch.
+        Render("${TM_SELECTED_TEXT/^$/${0:?some:none}/}", values).Text.ShouldBe("none");
+        // A stop's goes in as its mirror's text: the session applies it.
         RenderedSnippet mirror = Render("${1:foo} ${1/(.*)/${1:/upcase}/} ${1/(.)/${1:?yes:no}/gi}");
         mirror.Text.ShouldBe("foo foo foo");
         Stops(mirror).ShouldBe("1:foo|1:foo|1:foo|0:");
+        mirror.Stops[0].Transform.ShouldBeNull();
+        mirror.Stops[1].Transform.ShouldNotBeNull().Resolve("bar").ShouldBe("BAR");
+        mirror.Stops[2].Transform.ShouldNotBeNull().Resolve("bar").ShouldBe("yesyesyes");
+    }
+
+    [Theory]
+    [InlineData(@"${1/foo/bar/}", "foo", "bar")]
+    // The first match, or each one with g; the rest of the text stays.
+    [InlineData(@"${1/o/0/}", "foo", "f0o")]
+    [InlineData(@"${1/o/0/g}", "foo", "f00")]
+    [InlineData(@"${1/O/0/gi}", "foo", "f00")]
+    [InlineData(@"${1/^(.)|-(.)/${1:/upcase}${2:/upcase}/g}", "my-file-name", "MyFileName")]
+    [InlineData(@"${1/\s:=(.*)/${1:+ :=}${1}/}", " := '1'", " := '1'")]
+    // An else branch is the result when nothing matches.
+    [InlineData(@"${1/(x)/${1:?yes:no}/}", "abc", "no")]
+    [InlineData(@"${1/(x)/${1:-none}/}", "abc", "none")]
+    [InlineData(@"${1/(x)/${1:none}/}", "abc", "none")]
+    [InlineData(@"${1/(x)/${1:+some}/}", "abc", "abc")]
+    // Groups that did not take part, or that the regular expression does not have, are empty.
+    [InlineData(@"${1/(a)|(b)/[$1|$2|$3]/}", "b", "[|b|]")]
+    [InlineData(@"${1/.*/[$0]/}", "abc", "[abc]")]
+    [InlineData(@"${1/.*/[$0]/g}", "abc", "[abc][]")]
+    // Escapes in the format: \/ and \\ are text, as is a backslash before anything else.
+    [InlineData(@"${1/[\/]/\\/g}", "a/b", @"a\b")]
+    [InlineData(@"${1/a/\//}", "a", "/")]
+    [InlineData(@"${1/a/\n/}", "a", @"\n")]
+    [InlineData(@"${1/(.+)/${1:+import { hello \} from world}/}", "x", "import { hello } from world")]
+    [InlineData(@"${1/(.+)/${1:+\\}/}", "x", @"\")]
+    // Options: m for lines, s for line breaks, y where the text starts; d, u and v change nothing.
+    [InlineData(@"${1/^b/B/gm}", "a\nb", "a\nB")]
+    [InlineData(@"${1/a.b/x/s}", "a\nb", "x")]
+    [InlineData(@"${1/a.b/x/}", "a\nb", "a\nb")]
+    [InlineData(@"${1/b/x/y}", "ab", "ab")]
+    [InlineData(@"${1/a/x/gy}", "aab", "xxb")]
+    [InlineData(@"${1/a/x/duv}", "a", "${1/a/x/duv}")]
+    [InlineData(@"${1/a/x/du}", "a", "x")]
+    public void A_transformation_replaces_its_matches_with_its_format(string snippet, string value, string result)
+    {
+        RenderedSnippet rendered = Render(snippet);
+
+        if (rendered.Stops.FirstOrDefault().Transform is { } transform)
+            transform.Resolve(value).ShouldBe(result);
+        else
+            rendered.Text.ShouldBe(result);
+    }
+
+    [Theory]
+    [InlineData("upcase", "foo", "FOO")]
+    [InlineData("downcase", "FOO", "foo")]
+    [InlineData("capitalize", "bar", "Bar")]
+    [InlineData("capitalize", "bar no repeat", "Bar no repeat")]
+    [InlineData("pascalcase", "bar-foo", "BarFoo")]
+    [InlineData("pascalcase", "bar-42-foo", "Bar42Foo")]
+    [InlineData("pascalcase", "snake_AndPascalCase", "SnakeAndPascalCase")]
+    [InlineData("pascalcase", "kebab-AndPascalCase", "KebabAndPascalCase")]
+    [InlineData("pascalcase", "_justPascalCase", "JustPascalCase")]
+    [InlineData("camelcase", "bar-foo", "barFoo")]
+    [InlineData("camelcase", "bar-42-foo", "bar42Foo")]
+    [InlineData("camelcase", "snake_AndCamelCase", "snakeAndCamelCase")]
+    [InlineData("camelcase", "kebab-AndCamelCase", "kebabAndCamelCase")]
+    [InlineData("camelcase", "_JustCamelCase", "justCamelCase")]
+    [InlineData("kebabcase", "barFoo", "bar-foo")]
+    [InlineData("kebabcase", "BarFoo", "bar-foo")]
+    [InlineData("kebabcase", "ABarFoo", "a-bar-foo")]
+    [InlineData("kebabcase", "bar42Foo", "bar42-foo")]
+    [InlineData("kebabcase", "snake_AndPascalCase", "snake-and-pascal-case")]
+    [InlineData("kebabcase", "kebab-AndCamelCase", "kebab-and-camel-case")]
+    [InlineData("kebabcase", "_justPascalCase", "just-pascal-case")]
+    [InlineData("kebabcase", "__UPCASE__", "upcase")]
+    [InlineData("kebabcase", "__BAR_FOO__", "bar-foo")]
+    [InlineData("snakecase", "bar-foo", "bar_foo")]
+    [InlineData("snakecase", "bar-42-foo", "bar_42_foo")]
+    [InlineData("snakecase", "snake_AndPascalCase", "snake_and_pascal_case")]
+    [InlineData("snakecase", "kebab-AndPascalCase", "kebab_and_pascal_case")]
+    [InlineData("snakecase", "_justPascalCase", "_just_pascal_case")]
+    [InlineData("notKnown", "input", "input")]
+    [InlineData("kebabcase", "одинДва", "один-два")]
+    [InlineData("kebabcase", "έναςΔύο", "ένας-δύο")]
+    [InlineData("snakecase", "одинДва", "один_два")]
+    [InlineData("snakecase", "έναςΔύο", "ένας_δύο")]
+    [InlineData("camelcase", "одинДва", "одинДва")]
+    [InlineData("camelcase", "έναςΔύο", "έναςΔύο")]
+    [InlineData("pascalcase", "одинДва", "ОдинДва")]
+    [InlineData("pascalcase", "έναςΔύο", "ΈναςΔύο")]
+    [InlineData("upcase", "одинДва", "ОДИНДВА")]
+    [InlineData("downcase", "одинДва", "одиндва")]
+    [InlineData("kebabcase", "istanbulLı", "istanbul-lı")]
+    [InlineData("pascalcase", "istanbulLı", "IstanbulLı")]
+    [InlineData("upcase", "こんにちは", "こんにちは")]
+    [InlineData("kebabcase", "こんにちは", "こんにちは")]
+    public void Format_references_change_the_case_of_their_group_as_in_VS_Code(
+        string shorthand,
+        string value,
+        string result
+    ) => Render($"${{VALUE/(.*)/${{1:/{shorthand}}}/}}", _ => value).Text.ShouldBe(result);
+
+    [Theory]
+    [InlineData("+foo", "", "")]
+    [InlineData("+foo", "bar", "foo")]
+    [InlineData("-foo", "", "foo")]
+    [InlineData("-foo", "bar", "bar")]
+    [InlineData("foo", "", "foo")]
+    [InlineData("foo", "bar", "bar")]
+    [InlineData("?bar:foo", "", "foo")]
+    [InlineData("?bar:foo", "baz", "bar")]
+    public void Format_references_go_in_as_their_if_or_else_branch_as_in_VS_Code(
+        string branch,
+        string value,
+        string result
+    ) => Render($"${{VALUE/(.*)/${{1:{branch}}}/}}", _ => value).Text.ShouldBe(result);
+
+    [Theory]
+    // Options that JavaScript rejects, and a regular expression that .NET rejects: the snippet as written.
+    [InlineData("${TM_FILENAME/a/b/x}")]
+    [InlineData("${TM_FILENAME/a/b/gg}")]
+    [InlineData("${TM_FILENAME/(a/b/}")]
+    [InlineData("${1/a/b/uv}")]
+    public void A_transformation_that_is_invalid_is_text(string snippet)
+    {
+        RenderedSnippet rendered = Render(snippet);
+
+        rendered.Text.ShouldBe(snippet);
+        rendered.Stops.ShouldBeEmpty();
     }
 
     [Fact]
