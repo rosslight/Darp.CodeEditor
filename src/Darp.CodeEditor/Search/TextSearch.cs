@@ -94,6 +94,18 @@ internal sealed record SearchResult(
 }
 
 /// <summary>
+/// The edit that replaces every match of a search in one change: <see cref="Text"/> in place of the text from the first
+/// match to the end of the last, with <see cref="Map"/> saying where each match was, so that anchors, markers and the
+/// selection follow each replacement as they do separate ones.
+/// </summary>
+/// <param name="Start">Where the first match starts.</param>
+/// <param name="Length">The length of the text from the first match to the end of the last one.</param>
+/// <param name="Text">What replaces that text.</param>
+/// <param name="Map">The replacements, one after the other.</param>
+/// <param name="Count">The number of matches.</param>
+internal sealed record SearchEdit(int Start, int Length, string Text, OffsetChangeMap Map, int Count);
+
+/// <summary>
 /// Finds the matches of a query in a snapshot, as VS Code's <c>TextModelSearch</c> does. A query that can't match a
 /// line break is searched line by line, so that <c>^</c> and <c>$</c> match at every line's start and end, whatever its
 /// line break. One that can (<see cref="SearchQuery.IsMultiline"/>) is searched across lines, in the text with its
@@ -103,16 +115,16 @@ internal sealed record SearchResult(
 /// A search has limits, so that a pathological regular expression such as <c>(a+)+$</c>, or a query that matches
 /// everywhere, can't keep a thread busy or fill the memory: <see cref="TimeLimit"/> and <see cref="MaxMatches"/>.
 /// Measured on 5,000 lines of JSON (SearchBenchmarks and ReplaceAllBenchmarks, i7-13700): a word on every line, 5,000
-/// matches, takes 1.2 ms; a regular expression with 10,000 matches 2.3 ms, and 0.2 ms with none. Each match kept takes
-/// about 140 bytes while searching. Replacing 10,000 matches takes the UI thread about 0.1 s, with the frame after it.
+/// matches, takes 1.3 ms; a regular expression with 10,000 matches 2.4 ms, and 0.3 ms with none. Each match kept takes
+/// about 140 bytes while searching. Replacing 10,000 matches takes the UI thread about 80 ms, with the frame after it.
 /// </remarks>
 internal static class TextSearch
 {
     /// <summary>
-    /// The most matches a search keeps: twice those of a word on every line of 5,000 lines, and as many as Replace All
-    /// changes in about 0.1 s.
+    /// The most matches a search keeps, and the editor highlights, as VS Code's <c>MATCHES_LIMIT</c>: about 2.8 MB
+    /// while searching. Replace All replaces all matches, also beyond it (<see cref="ReplaceAll"/>).
     /// </summary>
-    public const int MaxMatches = 10_000;
+    public const int MaxMatches = 19_999;
 
     /// <summary>
     /// How long a search may take: about 400 times what 10,000 matches in 5,000 lines take, so that a slower machine
@@ -191,6 +203,56 @@ internal static class TextSearch
             cancellationToken
         );
         return new SearchResult(snapshot.Version, query, replacement, matches, outcome, null);
+    }
+
+    /// <summary>
+    /// The edit that replaces every match of <paramref name="query"/> in <paramref name="snapshot"/>, however many
+    /// there are, in one change, as VS Code's Replace All does beyond the matches it highlights. Null when there is no
+    /// match.
+    /// </summary>
+    /// <returns>
+    /// The edit, unless the search ran out of time or the regular expression is invalid: then null, with the outcome.
+    /// </returns>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
+    public static (SearchEdit? Edit, SearchOutcome Outcome) ReplaceAll(
+        TextSnapshot snapshot,
+        SearchQuery query,
+        SearchReplacement replacement,
+        IReadOnlyList<TextRange>? scopes,
+        CancellationToken cancellationToken
+    )
+    {
+        if (!TryCreateRegex(query, out Regex? regex, out _))
+            return (null, SearchOutcome.InvalidPattern);
+        string text = snapshot.GetText();
+        var replacing = new Replacing(text, query, replacement);
+        var replaced = new StringBuilder();
+        var map = new OffsetChangeMap();
+        int first = -1;
+        int copied = 0;
+        int count = 0;
+        SearchOutcome outcome = Scan(
+            text,
+            query,
+            regex,
+            scopes,
+            (start, length, match, lineBreak) =>
+            {
+                if (first < 0)
+                    first = copied = start;
+                string value = replacing.Build(start, match, lineBreak);
+                // Where the match is once the replacements before it are made.
+                map.Add(new OffsetChangeMapEntry(first + replaced.Length + start - copied, length, value.Length));
+                replaced.Append(text, copied, start - copied).Append(value);
+                copied = start + length;
+                count++;
+                return true;
+            },
+            cancellationToken
+        );
+        if (outcome != SearchOutcome.Complete || first < 0)
+            return (null, outcome);
+        return (new SearchEdit(first, copied - first, replaced.ToString(), map, count), outcome);
     }
 
     /// <summary>The query as a regular expression, across lines when it can match a line break.</summary>

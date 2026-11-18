@@ -1,3 +1,4 @@
+using AvaloniaEdit.Document;
 using Darp.CodeEditor.Search;
 
 namespace Darp.CodeEditor.Tests;
@@ -165,5 +166,36 @@ public sealed class TextSearchTests
         );
 
         result.Matches.Select(match => (match.StartOffset, match.Length, match.Replacement)).ShouldBe([(2, 3, "\r\n")]);
+    }
+
+    /// <summary>
+    /// Replace All beyond the matches that a search keeps: one change, which moves what follows the text as separate
+    /// replacements do.
+    /// </summary>
+    [Fact]
+    public void Replace_All_is_one_change_that_moves_anchors_as_each_replacement_does()
+    {
+        string text = "x " + string.Concat(Enumerable.Repeat("ab ", TextSearch.MaxMatches + 1)) + "y";
+        var document = new TextDocument(text);
+        TextAnchor y = document.CreateAnchor(text.Length - 1);
+        TextAnchor second = document.CreateAnchor(5);
+
+        (SearchEdit? edit, SearchOutcome outcome) = TextSearch.ReplaceAll(
+            TextSnapshot.FromString(text),
+            new SearchQuery("ab", MatchCase: true, WholeWord: false, UseRegex: false),
+            new SearchReplacement("c", PreserveCase: false),
+            null,
+            CancellationToken.None
+        );
+        outcome.ShouldBe(SearchOutcome.Complete);
+        edit.ShouldNotBeNull().Count.ShouldBe(TextSearch.MaxMatches + 1);
+        document.Replace(edit.Start, edit.Length, edit.Text, edit.Map);
+
+        document.Text.ShouldBe("x " + string.Concat(Enumerable.Repeat("c ", TextSearch.MaxMatches + 1)) + "y");
+        y.Offset.ShouldBe(document.TextLength - 1);
+        second.Offset.ShouldBe(4);
+        document.UndoStack.Undo();
+        document.Text.ShouldBe(text);
+        second.Offset.ShouldBe(5);
     }
 }

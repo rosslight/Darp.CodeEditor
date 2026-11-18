@@ -239,24 +239,33 @@ public sealed class SearchTests(UiFixture ui)
             window.RenderAndCountPixels(Color.Parse("#0000FF"), new TextRange(4, 3)).ShouldBe(0);
         });
 
+    /// <summary>
+    /// As VS Code, the bar highlights only so many matches, and says so in the tip of the count, but Replace All replaces
+    /// all of them, in one undo step.
+    /// </summary>
     [Fact]
-    public Task A_search_that_finds_more_matches_than_it_keeps_says_so_and_refuses_Replace_All() =>
+    public Task Replace_All_replaces_also_the_matches_beyond_those_highlighted() =>
         _ui.Run(async () =>
         {
-            string text = string.Concat(Enumerable.Repeat("a\n", TextSearch.MaxMatches + 1));
+            string text = string.Concat(Enumerable.Repeat("a\n", TextSearch.MaxMatches + 2));
             using EditorWindow window = MarkedText.Show("|" + text, CodeLanguage.PlainText);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
 
             window.Editor.OpenSearch(replace: true);
             SearchBar bar = BarOf(window);
             bar.ReplaceBox.Text = "b";
             window.Type("a");
-            await Wait.UntilAsync(() => bar.Message is not null);
+            await Wait.UntilAsync(() => bar.ReplaceAllButton.IsEnabled);
 
-            bar.Message.ShouldNotBeNull().ShouldContain("Replace All is off");
-            bar.Count.ShouldNotBeNull().ShouldEndWith("+");
-            bar.ReplaceAllButton.IsEnabled.ShouldBeFalse();
+            bar.Count.ShouldBe("1 of 19,999+");
+            bar.CountTip.ShouldBe(
+                "Only the first 19,999 matches are highlighted, but Replace All replaces all of them."
+            );
+            bar.Message.ShouldBeNull();
             Click(bar, "Replace All");
-            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(text);
+            document.Text.ShouldBe(string.Concat(Enumerable.Repeat("b\n", TextSearch.MaxMatches + 2)));
+            document.Undo();
+            document.Text.ShouldBe(text);
         });
 
     /// <summary>

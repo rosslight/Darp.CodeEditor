@@ -64,7 +64,7 @@
     <value>{0} von {1:N0}{2}</value>
   </data>
   <data name="TooManyMatches" xml:space="preserve">
-    <value>Mehr als {0:N0} Treffer: Nur die ersten {0:N0} werden angezeigt, und „Alle ersetzen“ ist aus.</value>
+    <value>Nur die ersten {0:N0} Treffer werden hervorgehoben, „Alle ersetzen“ ersetzt aber alle.</value>
   </data>
   <data name="SearchTimedOut" xml:space="preserve">
     <value>Die Suche hat nach {0:0.#} s angehalten: Treffer können fehlen, und „Alle ersetzen“ ist aus.</value>

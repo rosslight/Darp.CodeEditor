@@ -178,6 +178,9 @@ internal sealed class SearchBar : UserControl
     /// <summary>The number of matches, and which one is selected.</summary>
     internal string? Count => _count.Text;
 
+    /// <summary>The tip of the number of matches.</summary>
+    internal object? CountTip => ToolTip.GetTip(_count);
+
     /// <summary>Why the result is partial, or the regular expression is invalid; null for neither.</summary>
     internal string? Message => _message.IsVisible ? _message.Text : null;
 
@@ -493,10 +496,21 @@ internal sealed class SearchBar : UserControl
             Select(next);
     }
 
-    /// <summary>Replaces every match in one step, if the result has them all: never a partial result.</summary>
+    /// <summary>
+    /// Replaces every match in one step: those of a complete result, or beyond the matches that a result keeps, all of
+    /// them found again, as VS Code does beyond those it highlights. Never only some: a search that ran out of time
+    /// replaces nothing.
+    /// </summary>
     private void ReplaceAll()
     {
-        if (_shown is not { } shown || CurrentResult() is not { IsComplete: true } result)
+        if (_shown is not { } shown || CurrentResult() is not { Replacement: { } replacement } result)
+            return;
+        if (result.Outcome == SearchOutcome.TooManyMatches)
+        {
+            ReplaceAllBeyondTheResult(shown, result.Query, replacement);
+            return;
+        }
+        if (!result.IsComplete)
             return;
         SearchMatch[] matches = [.. result.Matches];
         using (shown.Buffer.RunUpdate())
@@ -505,6 +519,26 @@ internal sealed class SearchBar : UserControl
             for (int i = matches.Length - 1; i >= 0; i--)
                 shown.Buffer.Replace(matches[i].StartOffset, matches[i].Length, matches[i].Replacement);
         }
+    }
+
+    /// <summary>
+    /// Replaces every match of the text as it is, however many, as VS Code's Replace All does beyond the matches it
+    /// highlights: found on the UI thread, within the search's time limit, and replaced in one change of the text from
+    /// the first match to the last, which moves anchors, markers and the selection as separate replacements would.
+    /// </summary>
+    private void ReplaceAllBeyondTheResult(Shown shown, SearchQuery query, SearchReplacement replacement)
+    {
+        (SearchEdit? edit, SearchOutcome outcome) = TextSearch.ReplaceAll(
+            shown.Document.CurrentSnapshot,
+            query,
+            replacement,
+            null,
+            CancellationToken.None
+        );
+        if (edit is not null)
+            shown.Buffer.Replace(edit.Start, edit.Length, edit.Text, edit.Map);
+        else if (outcome == SearchOutcome.OutOfTime)
+            ShowMessage(SearchOutcome.OutOfTime, null);
     }
 
     /// <summary>
@@ -560,23 +594,16 @@ internal sealed class SearchBar : UserControl
                 result.Outcome == SearchOutcome.TooManyMatches ? "+" : ""
             ),
         };
-        _message.Text = result?.Outcome switch
-        {
-            SearchOutcome.TooManyMatches => string.Format(
-                culture,
-                Strings.Default.TooManyMatches,
-                TextSearch.MaxMatches
-            ),
-            SearchOutcome.OutOfTime => string.Format(
-                culture,
-                Strings.Default.SearchTimedOut,
-                TextSearch.TimeLimit.TotalSeconds
-            ),
-            SearchOutcome.InvalidPattern => result.Error,
-            _ => null,
-        };
-        _message.IsVisible = _message.Text is not null;
-        _replaceAll.IsEnabled = CurrentResult() is { IsComplete: true, Matches.Count: > 0 };
+        // As in VS Code, the tip of the count says that only some matches are highlighted.
+        ToolTip.SetTip(
+            _count,
+            result?.Outcome == SearchOutcome.TooManyMatches
+                ? string.Format(culture, Strings.Default.TooManyMatches, TextSearch.MaxMatches)
+                : null
+        );
+        ShowMessage(result?.Outcome, result?.Error);
+        _replaceAll.IsEnabled =
+            CurrentResult() is { Outcome: SearchOutcome.Complete or SearchOutcome.TooManyMatches, Matches.Count: > 0 };
 
         int? Index(SearchResult searched)
         {
@@ -591,6 +618,22 @@ internal sealed class SearchBar : UserControl
                 index++;
             return index;
         }
+    }
+
+    /// <summary>Says why a search stopped early, or why its regular expression is invalid; nothing otherwise.</summary>
+    private void ShowMessage(SearchOutcome? outcome, string? error)
+    {
+        _message.Text = outcome switch
+        {
+            SearchOutcome.OutOfTime => string.Format(
+                CultureInfo.CurrentCulture,
+                Strings.Default.SearchTimedOut,
+                TextSearch.TimeLimit.TotalSeconds
+            ),
+            SearchOutcome.InvalidPattern => error,
+            _ => null,
+        };
+        _message.IsVisible = _message.Text is not null;
     }
 
     /// <summary>Keeps the matches on their text while the text changes.</summary>
