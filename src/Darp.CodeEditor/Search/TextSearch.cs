@@ -166,13 +166,15 @@ internal static class TextSearch
     /// range, which counts as its whole text: <c>^</c> matches at its start, as in VS Code.
     /// </param>
     /// <param name="cancellationToken">Stops the search.</param>
+    /// <param name="maxMatches">The most matches to keep: <see cref="MaxMatches"/>, or fewer.</param>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
     public static SearchResult Find(
         TextSnapshot snapshot,
         SearchQuery query,
         SearchReplacement? replacement,
         IReadOnlyList<TextRange>? scopes,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        int maxMatches = MaxMatches
     )
     {
         var matches = new TextSegmentCollection<SearchMatch>();
@@ -189,7 +191,7 @@ internal static class TextSearch
             scopes,
             (start, length, match, lineBreak) =>
             {
-                if (matches.Count == MaxMatches)
+                if (matches.Count == maxMatches)
                     return false;
                 matches.Add(
                     new SearchMatch(replacing?.Build(start, match, lineBreak) ?? "")

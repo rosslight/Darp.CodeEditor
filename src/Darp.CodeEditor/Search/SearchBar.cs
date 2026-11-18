@@ -196,6 +196,18 @@ internal sealed class SearchBar : UserControl
     /// <summary>Whether the query has the keyboard.</summary>
     public bool IsQueryFocused => _find.IsKeyboardFocusWithin;
 
+    /// <summary>Whether Match Case is on, also while the bar is closed.</summary>
+    public bool MatchCase => _matchCase.IsChecked == true;
+
+    /// <summary>Whether Match Whole Word is on, also while the bar is closed.</summary>
+    public bool WholeWord => _wholeWord.IsChecked == true;
+
+    /// <summary>Whether Use Regular Expression is on, also while the bar is closed.</summary>
+    public bool UseRegex => _regex.IsChecked == true;
+
+    /// <summary>Raised when the bar opens or closes, or its query or options change, as VS Code's find state.</summary>
+    public event EventHandler? StateChanged;
+
     /// <summary>The colors of the color theme, once it is loaded.</summary>
     public TextAreaColors? Colors
     {
@@ -338,6 +350,7 @@ internal sealed class SearchBar : UserControl
     {
         PauseForHistory();
         IsVisible = false;
+        StateChanged?.Invoke(this, EventArgs.Empty);
         CancelSearch();
         _move = Move.None;
         _result = null;
@@ -399,6 +412,8 @@ internal sealed class SearchBar : UserControl
         bool rowChanged = ShowReplaceRow();
         IsVisible = true;
         _shown?.ScopeLayer.Scope = _scope;
+        if (!wasOpen)
+            StateChanged?.Invoke(this, EventArgs.Empty);
         string? query = text is not null && _regex.IsChecked == true ? TextSearch.Escape(text) : text;
         if (query is not null && query != _find.Text)
         {
@@ -451,6 +466,7 @@ internal sealed class SearchBar : UserControl
     {
         PauseForHistory();
         Search(Move.First);
+        StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnReplacementChanged()

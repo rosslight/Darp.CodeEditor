@@ -203,6 +203,28 @@ public class CodeEditor : TemplatedControl
         SearchHistory?
     >(nameof(ReplaceHistory), defaultValue: new SearchHistory());
 
+    /// <summary>Defines the <see cref="SelectionHighlight"/> property.</summary>
+    public static readonly StyledProperty<bool> SelectionHighlightProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        bool
+    >(nameof(SelectionHighlight), defaultValue: true);
+
+    /// <summary>Defines the <see cref="SelectionHighlightMaxLength"/> property.</summary>
+    public static readonly StyledProperty<int> SelectionHighlightMaxLengthProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        int
+    >(nameof(SelectionHighlightMaxLength), defaultValue: 200);
+
+    /// <summary>Defines the <see cref="SelectionHighlightMultiline"/> property.</summary>
+    public static readonly StyledProperty<bool> SelectionHighlightMultilineProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        bool
+    >(nameof(SelectionHighlightMultiline));
+
+    /// <summary>Defines the <see cref="SelectedTextMatchMode"/> property.</summary>
+    public static readonly StyledProperty<SelectedTextMatchMode> SelectedTextMatchModeProperty =
+        AvaloniaProperty.Register<CodeEditor, SelectedTextMatchMode>(nameof(SelectedTextMatchMode));
+
     /// <summary>AvaloniaEdit's editor, from the template. The editor wraps it, so that its API stays out of ours.</summary>
     private TextEditor? _part;
 
@@ -253,6 +275,9 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>Goes through the shown document's diagnostics, as F8 does.</summary>
     private DiagnosticNavigation? _diagnosticNavigation;
+
+    /// <summary>Highlights the other occurrences of the selection in the shown document.</summary>
+    private SelectionHighlighter? _selectionHighlights;
 
     /// <summary>The template's panel, which the search bar goes into, over the text.</summary>
     private Panel? _root;
@@ -545,6 +570,52 @@ public class CodeEditor : TemplatedControl
         set => SetValue(ReplaceHistoryProperty, value);
     }
 
+    /// <summary>
+    /// Whether selecting text highlights its other occurrences, as VS Code's <c>editor.selectionHighlight</c>, in the
+    /// color theme's <c>editor.selectionHighlightBackground</c>: within a line, unless
+    /// <see cref="SelectionHighlightMultiline"/>, and up to <see cref="SelectionHighlightMaxLength"/> characters, as
+    /// <see cref="SelectedTextMatchMode"/> matches them. Default: true, as in VS Code.
+    /// </summary>
+    public bool SelectionHighlight
+    {
+        get => GetValue(SelectionHighlightProperty);
+        set => SetValue(SelectionHighlightProperty, value);
+    }
+
+    /// <summary>
+    /// How many characters a selection can have and still highlight its occurrences, as VS Code's
+    /// <c>editor.selectionHighlightMaxLength</c>; 0 for any number. Default: 200, as in VS Code.
+    /// </summary>
+    public int SelectionHighlightMaxLength
+    {
+        get => GetValue(SelectionHighlightMaxLengthProperty);
+        set => SetValue(SelectionHighlightMaxLengthProperty, value);
+    }
+
+    /// <summary>
+    /// Whether a selection over several lines highlights its occurrences too, as VS Code's
+    /// <c>editor.selectionHighlightMultiline</c>. Default: false, as in VS Code.
+    /// </summary>
+    public bool SelectionHighlightMultiline
+    {
+        get => GetValue(SelectionHighlightMultilineProperty);
+        set => SetValue(SelectionHighlightMultilineProperty, value);
+    }
+
+    /// <summary>
+    /// How the occurrences of the selected text match it, as VS Code's <c>editor.selectedTextMatchMode</c>. Default:
+    /// <see cref="SelectedTextMatchMode.FindOptions"/>, with the search bar's Match Case and Match Whole Word, as in VS
+    /// Code.
+    /// </summary>
+    public SelectedTextMatchMode SelectedTextMatchMode
+    {
+        get => GetValue(SelectedTextMatchModeProperty);
+        set => SetValue(SelectedTextMatchModeProperty, value);
+    }
+
+    /// <summary>The other occurrences of the selection that the editor highlights, for tests.</summary>
+    internal IReadOnlyList<TextRange> SelectionHighlights => _selectionHighlights?.Highlights ?? [];
+
     /// <summary>The semantic colors of the shown document, for benchmarks; null while it shows none.</summary>
     internal SemanticHighlighter? SemanticHighlighter => _semantic;
 
@@ -829,6 +900,13 @@ public class CodeEditor : TemplatedControl
             || change.Property == ThemeVariantScope.ActualThemeVariantProperty
         )
             UpdateHighlighting();
+        else if (
+            change.Property == SelectionHighlightProperty
+            || change.Property == SelectionHighlightMaxLengthProperty
+            || change.Property == SelectionHighlightMultilineProperty
+            || change.Property == SelectedTextMatchModeProperty
+        )
+            _selectionHighlights?.Update();
     }
 
     /// <summary>
@@ -944,6 +1022,11 @@ public class CodeEditor : TemplatedControl
         };
         _signatureHelp = new SignatureHelpController(this, part.TextArea, document, _highlighter) { Colors = _colors };
         _diagnosticNavigation = new DiagnosticNavigation(part.TextArea, document);
+        _selectionHighlights = new SelectionHighlighter(this, part.TextArea, document)
+        {
+            Colors = _colors?.Highlights,
+            SearchBar = _searchBar,
+        };
         _searchBar?.Attach(this, part.TextArea, document);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
         _waitingForLayout = true;
@@ -973,6 +1056,8 @@ public class CodeEditor : TemplatedControl
         _signatureHelp = null;
         _diagnosticNavigation?.Dispose();
         _diagnosticNavigation = null;
+        _selectionHighlights?.Dispose();
+        _selectionHighlights = null;
         _squiggles?.Dispose();
         _squiggles = null;
         _semantic?.Dispose();
@@ -1303,10 +1388,15 @@ public class CodeEditor : TemplatedControl
             var bar = new SearchBar { Colors = _colors };
             root.Children.Add(bar);
             bar.Attach(this, part.TextArea, shown);
+            bar.StateChanged += OnSearchStateChanged;
             _searchBar = bar;
+            _selectionHighlights?.SearchBar = bar;
         }
         return _shown is null ? null : _searchBar;
     }
+
+    /// <summary>The search bar's query or options changed, or it opened or closed: the highlights follow.</summary>
+    private void OnSearchStateChanged(object? sender, EventArgs e) => _selectionHighlights?.Update();
 
     /// <summary>
     /// Removes the search panel that AvaloniaEdit's editor installs with each template, its input handler and its
@@ -1603,6 +1693,7 @@ public class CodeEditor : TemplatedControl
             _snippets?.Colors = colors;
             _signatureHelp?.Colors = colors;
             _brackets?.Colors = colors;
+            _selectionHighlights?.Colors = colors.Highlights;
             _whitespace?.Colors = colors;
             _squiggles?.Colors = colors;
             _hover?.Colors = colors;
