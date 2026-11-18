@@ -561,15 +561,17 @@ public class CodeEditor : TemplatedControl
     /// takes its query from the text as <see cref="SeedSearchStringFromSelection"/> says, by default the selection
     /// within one line or else the word at the caret, puts the keyboard into it, and leaves the replace row of an open
     /// bar as it is. The replace bar takes only a selection within one line, and then puts the keyboard into the
-    /// replacement, as it does when the query has the keyboard; otherwise into the query. A read-only editor opens the
-    /// search bar either way.
+    /// replacement, as it does when the query has the keyboard; otherwise into the query. A read-only editor opens no
+    /// replace bar, as in VS Code.
     /// </summary>
     public void OpenSearch(bool replace = false)
     {
+        if (replace && IsReadOnly)
+            return;
         if (_part is not { } part || CreatedSearchBar() is not { } bar)
             return;
         SeedSearchString seed = SeedSearchStringFromSelection;
-        if (!replace || IsReadOnly)
+        if (!replace)
         {
             bar.Open(replace: false, seed == SeedSearchString.Never ? null : SearchString(part.TextArea, seed));
             return;
@@ -1064,8 +1066,10 @@ public class CodeEditor : TemplatedControl
     {
         switch (command)
         {
-            case CodeEditorCommands.Find or CodeEditorCommands.Replace:
-                // Also without a document, so that AvaloniaEdit's own search panel never opens.
+            // Also without a document, so that AvaloniaEdit's own search panel never opens; as in VS Code, the replace
+            // bar not in a read-only editor.
+            case CodeEditorCommands.Find:
+            case CodeEditorCommands.Replace when !IsReadOnly:
                 OpenSearch(replace: command == CodeEditorCommands.Replace);
                 return true;
             case CodeEditorCommands.FindNext or CodeEditorCommands.FindPrevious:

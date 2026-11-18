@@ -187,17 +187,31 @@ public sealed class SearchTests(UiFixture ui)
             window.Editor.Selection.ShouldBe(new TextSelection(2, 3));
         });
 
+    /// <summary>
+    /// As in VS Code, the replace bar doesn't open in a read-only editor, and an editor that becomes read-only hides
+    /// the replace row, which stays hidden once the editor can be edited again.
+    /// </summary>
     [Fact]
-    public Task A_read_only_editor_opens_the_search_bar_without_replacing() =>
+    public Task A_read_only_editor_never_shows_the_replace_row() =>
         _ui.Run(() =>
         {
             using EditorWindow window = MarkedText.Show("|one", CodeLanguage.PlainText);
+            KeyGesture replace = ApplicationCommands.Replace.Gesture;
             window.Editor.IsReadOnly = true;
 
+            window.Press(replace.Key, replace.KeyModifiers);
             window.Editor.OpenSearch(replace: true);
+            window.Editor.GetVisualDescendants().OfType<SearchBar>().ShouldBeEmpty();
 
-            BarOf(window).IsOpen.ShouldBeTrue();
-            BarOf(window).ReplaceBox.IsEffectivelyVisible.ShouldBeFalse();
+            window.Editor.IsReadOnly = false;
+            window.Press(replace.Key, replace.KeyModifiers);
+            SearchBar bar = BarOf(window);
+            bar.ReplaceBox.IsEffectivelyVisible.ShouldBeTrue();
+            window.Editor.IsReadOnly = true;
+            bar.IsOpen.ShouldBeTrue();
+            bar.ReplaceBox.IsEffectivelyVisible.ShouldBeFalse();
+            window.Editor.IsReadOnly = false;
+            bar.ReplaceBox.IsEffectivelyVisible.ShouldBeFalse();
         });
 
     [Fact]

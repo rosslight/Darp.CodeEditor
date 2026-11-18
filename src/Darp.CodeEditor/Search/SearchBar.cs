@@ -256,11 +256,13 @@ internal sealed class SearchBar : UserControl
     }
 
     /// <summary>
-    /// Shows the replace row in replace mode, unless the editor is read-only, and searches again for what replaces
-    /// the matches.
+    /// Shows the replace row in replace mode, and searches again for what replaces the matches. An editor that became
+    /// read-only ends replace mode, as in VS Code: the row stays hidden once the editor can be edited again.
     /// </summary>
     public void UpdateReplaceRow()
     {
+        if (_shown?.Editor.IsReadOnly == true)
+            _replaceMode = false;
         if (ShowReplaceRow())
             Search(Move.None);
     }

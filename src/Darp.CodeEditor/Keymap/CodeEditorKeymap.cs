@@ -290,7 +290,7 @@ public static class CodeEditorCommands
     /// <summary>Opens the search bar.</summary>
     public const string Find = "actions.find";
 
-    /// <summary>Opens the replace bar.</summary>
+    /// <summary>Opens the replace bar; in a read-only editor it does not apply, as in VS Code.</summary>
     public const string Replace = "editor.action.startFindReplaceAction";
 
     /// <summary>Selects the next match.</summary>
