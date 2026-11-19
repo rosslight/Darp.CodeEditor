@@ -1,5 +1,3 @@
-using Avalonia.Input;
-
 namespace Darp.CodeEditor.Commands;
 
 /// <summary>
@@ -7,16 +5,19 @@ namespace Darp.CodeEditor.Commands;
 /// stroke of a sequence. The editor runs the first command that applies (<see cref="CommandTable.TryRun"/>).
 /// </summary>
 /// <param name="Commands">
-/// The commands to try: those that a waiting first stroke and the key complete, the latest binding first, then those of
-/// the key alone, the latest first, down to the latest sequence that starts with it.
+/// The commands to try: those of the sequences that the waiting key and this one complete, the latest binding first,
+/// then those of this key alone, the latest first, down to the latest sequence that starts with it.
 /// </param>
-/// <param name="Sequence">The first stroke of that sequence, to wait in once no command applied; null for none.</param>
-internal readonly record struct KeyResolution(IReadOnlyList<string> Commands, KeyStroke? Sequence)
+/// <param name="Waits">
+/// Whether the key starts a sequence, and so waits for a second stroke once none of the commands applied.
+/// </param>
+internal readonly record struct KeyResolution(IReadOnlyList<string> Commands, bool Waits)
 {
     /// <summary>
-    /// Resolves <paramref name="key"/> by <paramref name="keymap"/>, after <paramref name="pending"/> if given.
+    /// Resolves <paramref name="key"/> by <paramref name="keymap"/>, after the key that waits, <paramref name="pending"/>,
+    /// if any: the second stroke of every sequence that starts with it counts.
     /// </summary>
-    public static KeyResolution Of(CodeEditorKeymap keymap, KeyStroke? pending, KeyEventArgs key)
+    public static KeyResolution Of(CodeEditorKeymap keymap, PressedKey? pending, PressedKey key)
     {
         IReadOnlyList<CodeEditorKeyBinding> bindings = keymap.Effective;
         List<string>? commands = null;
@@ -24,7 +25,11 @@ internal readonly record struct KeyResolution(IReadOnlyList<string> Commands, Ke
         {
             for (int i = bindings.Count - 1; i >= 0; i--)
             {
-                if (bindings[i] is { First: { } first, Second: { } second } && first == waiting && second.Matches(key))
+                if (
+                    bindings[i] is { First: { } first, Second: { } second }
+                    && first.Matches(waiting)
+                    && second.Matches(key)
+                )
                     (commands ??= []).Add(bindings[i].Command);
             }
         }
@@ -35,9 +40,9 @@ internal readonly record struct KeyResolution(IReadOnlyList<string> Commands, Ke
             if (binding.First is not { } first || !first.Matches(key))
                 continue;
             if (binding.Second is not null)
-                return new KeyResolution(commands ?? [], first);
+                return new KeyResolution(commands ?? [], Waits: true);
             (commands ??= []).Add(binding.Command);
         }
-        return new KeyResolution(commands ?? [], null);
+        return new KeyResolution(commands ?? [], Waits: false);
     }
 }

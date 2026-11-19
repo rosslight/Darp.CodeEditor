@@ -48,8 +48,8 @@ internal sealed class EditorView : IDisposable
     private readonly SignatureHelpController _signatureHelp;
     private readonly FindCommands _search;
 
-    /// <summary>The first stroke of a sequence while the view waits for its second; null otherwise.</summary>
-    private KeyStroke? _pending;
+    /// <summary>The key that started a sequence while the view waits for its second stroke; null otherwise.</summary>
+    private PressedKey? _pending;
 
     public EditorView(EditorContext context)
     {
@@ -104,16 +104,17 @@ internal sealed class EditorView : IDisposable
                 or Key.RWin
         )
             return false;
-        KeyResolution resolution = KeyResolution.Of(_context.Keymap(), _pending, e);
+        var key = PressedKey.Of(e);
+        KeyResolution resolution = KeyResolution.Of(_context.Keymap(), _pending, key);
         _pending = null;
         foreach (string command in resolution.Commands)
         {
             if (_commands.TryRun(command))
                 return true;
         }
-        if (resolution.Sequence is { } first)
+        if (resolution.Waits)
         {
-            _pending = first;
+            _pending = key;
             return true;
         }
         if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && Dismiss())
