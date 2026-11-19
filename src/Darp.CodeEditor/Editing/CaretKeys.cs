@@ -13,7 +13,8 @@ namespace Darp.CodeEditor.Editing;
 /// and <c>cursorHome</c> move the caret otherwise than AvaloniaEdit: Left and Right end a selection at
 /// its start or end; Up and Down end it and go on from its start or end; Up on the text's first row goes to its start
 /// and Down on its last row to its end; Home on a line of whitespace only goes to the line's start. Shift selects with
-/// Up, Down and Home. Elsewhere, and in a rectangle selection, AvaloniaEdit moves the caret.
+/// Up, Down and Home. On macOS, Ctrl+P and Ctrl+N are Up and Down too. Elsewhere, and in a rectangle selection,
+/// AvaloniaEdit moves the caret.
 /// </summary>
 internal static class CaretKeys
 {
@@ -31,6 +32,12 @@ internal static class CaretKeys
                 up: e.Key == Key.Up,
                 select: e.KeyModifiers == KeyModifiers.Shift
             ),
+            // AvaloniaEdit has no move of its own on these.
+            (Key.P or Key.N, KeyModifiers.Control) when OperatingSystem.IsMacOS() => MoveVertically(
+                area,
+                up: e.Key == Key.P,
+                select: false
+            ) || MoveByRow(area, up: e.Key == Key.P),
             _ => LineStartKey(e) is { } select && ToBlankLineStart(area, select),
         };
     }
@@ -70,6 +77,13 @@ internal static class CaretKeys
             : caret.DesiredXPos;
         MoveCaret(area, target, select);
         caret.DesiredXPos = column;
+        return true;
+    }
+
+    /// <summary>A row up or down, as AvaloniaEdit's Up and Down move, keeping the column.</summary>
+    private static bool MoveByRow(TextArea area, bool up)
+    {
+        (up ? EditingCommands.MoveUpByLine : EditingCommands.MoveDownByLine).Execute(null, area);
         return true;
     }
 

@@ -140,13 +140,13 @@ indentation by tab stops; undo in VS Code's steps, which puts back the selection
 it; VS Code's words for double-click, which also selects past a line's end and grows by words as the pointer drags, for
 moving by words and for deleting them: runs of word characters and runs of separators, by its default word separators,
 not the language's word pattern; Left and Right that end a selection at its start or end, and Up and Down that go on
-from them; Up on the first row to the text's start and Down on the last to its end, coming back to the column they left;
-Home on a line of whitespace only to its start; the commands on whole lines below, which take the selected lines,
-without a last line that the selection only touches, each in a step of its own: moved lines at `AutoIndent.Full` take
-the indentation of their new place by the language's rules for Enter and indentation rules, a closing bracket the
-indentation of the block it closes, and inserted lines Enter's; whitespace shown inside the selection, scrolling past
-the last line, a context menu with Cut, Copy, Paste and Select All, completion's snippets with their stops (section 6),
-and the look of errors, hover and completion below.
+from them; Up on the first row to the text's start and Down on the last to its end, coming back to the column they left,
+also with Ctrl+P and Ctrl+N on macOS; Home on a line of whitespace only to its start; the commands on whole lines below,
+which take the selected lines, without a last line that the selection only touches, each in a step of its own: moved
+lines at `AutoIndent.Full` take the indentation of their new place by the language's rules for Enter and indentation
+rules, a closing bracket the indentation of the block it closes, and inserted lines Enter's; whitespace shown inside the
+selection, scrolling past the last line, a context menu with Cut, Copy, Paste and Select All, completion's snippets with
+their stops (section 6), and the look of errors, hover and completion below.
 
 **Caret and scroll position** belong to the editor, as in Monaco, and last as long as it does, like a list's scroll
 position. Setting `Document` shows the other document from its start, and a tab control may create a new editor each
