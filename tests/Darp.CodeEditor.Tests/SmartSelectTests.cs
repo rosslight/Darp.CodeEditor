@@ -253,6 +253,47 @@ public sealed class SmartSelectTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe("alpha «beta»");
         });
 
+    /// <summary>
+    /// Keys that come while the ranges are asked for wait for them, and go through them in their order, with the one
+    /// request: Expand, then Shrink, ends where it started.
+    /// </summary>
+    [Fact]
+    public Task Keys_while_the_ranges_are_asked_for_go_through_them_in_order_with_one_request() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "alpha beta");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await CompletionTests.StartServingAsync(server, document);
+            using (
+                await CompletionTests.CommandAsync(server, fake, "hold-selection-ranges", "holding selection ranges")
+            )
+            {
+                window.Editor.Selection = new TextSelection(8);
+                window.Press(Keys.Right, SmartSelect);
+                window.Press(Keys.Left, SmartSelect);
+                await CompletionTests.BarrierAsync(server, fake);
+                fake.LinesStartingWith("selection ranges ").Count.ShouldBe(1);
+            }
+
+            using (
+                await CompletionTests.CommandAsync(
+                    server,
+                    fake,
+                    "release-selection-ranges",
+                    "released selection ranges"
+                )
+            ) { }
+            // The answer is in once a later one is: the editor reads them in order.
+            await document.HoverAsync(document.CurrentSnapshot, new TextPosition(1, 1), CancellationToken.None);
+            MarkedText.Of(window).ShouldBe("alpha be|ta");
+
+            window.Press(Keys.Right, SmartSelect);
+            MarkedText.Of(window).ShouldBe("alpha «beta»");
+            fake.LinesStartingWith("selection ranges ").Count.ShouldBe(1);
+        });
+
     /// <summary>A selection whose anchor alone moves is another selection: shrinking starts from it.</summary>
     [Fact]
     public Task Moving_only_the_anchor_ends_the_ranges() =>
