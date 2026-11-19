@@ -1541,8 +1541,11 @@ public sealed class CompletionTests(UiFixture ui)
             BoundsInWindow(Flyout(window).ShouldNotBeNull()).Width.ShouldBe(frame.Width + 100, tolerance: 1);
         });
 
-    [Fact]
-    public Task App_styles_for_text_and_panels_reach_neither_the_list_nor_its_details() =>
+    [Theory]
+    // Styles of the types, and of the types and those derived from them, as :is(TextBlock).
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task App_styles_for_text_and_panels_reach_neither_the_list_nor_its_details(bool derived) =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
@@ -1560,7 +1563,7 @@ public sealed class CompletionTests(UiFixture ui)
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "Co");
             using var window = new EditorWindow(new CodeEditor { Document = document });
             window.Window.Styles.Add(
-                new Style(x => x.OfType<TextBlock>())
+                new Style(x => derived ? x.Is<TextBlock>() : x.OfType<TextBlock>())
                 {
                     Setters =
                     {
@@ -1570,7 +1573,14 @@ public sealed class CompletionTests(UiFixture ui)
                 }
             );
             window.Window.Styles.Add(
-                new Style(x => x.OfType<StackPanel>()) { Setters = { new Setter(StackPanel.SpacingProperty, 40.0) } }
+                new Style(x => derived ? x.Is<StackPanel>() : x.OfType<StackPanel>())
+                {
+                    Setters =
+                    {
+                        new Setter(StackPanel.SpacingProperty, 40.0),
+                        new Setter(Layoutable.MarginProperty, new Thickness(20)),
+                    },
+                }
             );
 
             await OpenAsync(window, 2);
@@ -1583,7 +1593,10 @@ public sealed class CompletionTests(UiFixture ui)
                 text.FontWeight.ShouldBe(FontWeight.Normal);
                 text.Margin.ShouldBe(default);
             }
-            details.GetVisualDescendants().OfType<StackPanel>().ShouldAllBe(panel => panel.Spacing == 6);
+            details
+                .GetVisualDescendants()
+                .OfType<StackPanel>()
+                .ShouldAllBe(panel => panel.Spacing == 6 && panel.Margin == default);
             // As VS Code's details: in editorSuggestWidget.foreground, Light+'s editor foreground.
             details
                 .GetValue(TextElement.ForegroundProperty)
