@@ -6,9 +6,10 @@ using Darp.CodeEditor.Loading;
 namespace Darp.CodeEditor.Editing;
 
 /// <summary>
-/// The comment command of one editor's view, from the language's editing rules, as VS Code's
-/// <c>lineCommentCommand.ts</c> toggles comments, in a step of its own: Ctrl+/ toggles line comments on the selected
-/// lines, or else the block comment around them.
+/// The comment commands of one editor's view, from the language's editing rules, as VS Code's
+/// <c>lineCommentCommand.ts</c> and <c>blockCommentCommand.ts</c> toggle them, each in a step of its own: Ctrl+/ toggles
+/// line comments on the selected lines, or else the block comment around them, and Shift+Alt+A toggles the block
+/// comment around the selection.
 /// </summary>
 internal sealed class Comments : IEditorFeature
 {
@@ -33,6 +34,7 @@ internal sealed class Comments : IEditorFeature
     {
         const CommandNeeds needs = CommandNeeds.TextFocus | CommandNeeds.Writable;
         commands.Add(CodeEditorCommands.CommentLine, ToggleComment, needs);
+        commands.Add(CodeEditorCommands.BlockComment, ToggleBlockComment, needs);
     }
 
     /// <summary>
@@ -131,6 +133,83 @@ internal sealed class Comments : IEditorFeature
         return _changes.Apply([new TextEdit(start, 0, open + " "), new TextEdit(end, 0, " " + close)]);
     }
 
+    /// <summary>
+    /// Shift+Alt+A: removes the block comment that the selection is in, from the start token before its start, by the
+    /// token's length after it at most, to the end token after its end, with the spaces inside them; or, when another
+    /// end token is between them, or there are none, puts the block comment around the selection, with a space inside
+    /// each token, and keeps the commented text selected. Without a selection, an empty comment goes in at the caret,
+    /// and the caret inside it.
+    /// </summary>
+    /// <returns>Whether the language has a block comment.</returns>
+    private bool ToggleBlockComment()
+    {
+        if (Configuration.BlockComment is not (var open, var close))
+            return false;
+        TextRange selected = _changes.Selection.Range;
+        DocumentLine startLine = Buffer.GetLineByOffset(selected.Start);
+        DocumentLine endLine = Buffer.GetLineByOffset(selected.End);
+        string startText = Buffer.GetText(startLine);
+        string endText = Buffer.GetText(endLine);
+        int openAt = LastIndexOf(startText, open, selected.Start - startLine.Offset + open.Length);
+        int closeAt = endText.IndexOf(
+            close,
+            Math.Clamp(selected.End - endLine.Offset - close.Length, 0, endText.Length),
+            StringComparison.Ordinal
+        );
+        if (
+            openAt >= 0
+            && closeAt >= 0
+            && (
+                startLine == endLine
+                    ? Between(startText, openAt + open.Length, closeAt).Contains(close, StringComparison.Ordinal)
+                    : startText[(openAt + open.Length)..].Contains(close, StringComparison.Ordinal)
+                        || endText[..closeAt].Contains(close, StringComparison.Ordinal)
+            )
+        )
+            openAt = closeAt = -1;
+        List<TextEdit> edits;
+        TextSelection after;
+        if (openAt >= 0 && closeAt >= 0)
+        {
+            int openLength =
+                openAt + open.Length < startText.Length && startText[openAt + open.Length] == ' '
+                    ? open.Length + 1
+                    : open.Length;
+            int closeLength = close.Length;
+            if (closeAt > 0 && endText[closeAt - 1] == ' ')
+            {
+                closeAt--;
+                closeLength++;
+            }
+            int openStart = startLine.Offset + openAt;
+            int closeStart = endLine.Offset + closeAt;
+            // Tokens that meet or overlap, as in an empty comment whose one space both take, go as one.
+            if (closeStart > openStart + openLength)
+            {
+                edits = [new TextEdit(openStart, openLength, ""), new TextEdit(closeStart, closeLength, "")];
+                after = new TextSelection(openStart, closeStart - openLength);
+            }
+            else
+            {
+                int end = Math.Max(openStart + openLength, closeStart + closeLength);
+                edits = [new TextEdit(Math.Min(openStart, closeStart), end - Math.Min(openStart, closeStart), "")];
+                after = new TextSelection(Math.Min(openStart, closeStart));
+            }
+        }
+        else if (selected.Length == 0)
+        {
+            edits = [new TextEdit(selected.Start, 0, open + "  " + close)];
+            after = new TextSelection(selected.Start + open.Length + 1);
+        }
+        else
+        {
+            edits = [new TextEdit(selected.Start, 0, open + " "), new TextEdit(selected.End, 0, " " + close)];
+            after = new TextSelection(selected.Start + open.Length + 1, selected.End + open.Length + 1);
+        }
+        _changes.Run(EditStep.Own, () => _changes.Apply(edits, after));
+        return true;
+    }
+
     /// <summary>The lines of the selection, without a last line it only touches at its start; or the caret's line.</summary>
     private (int First, int Last) SelectedLines()
     {
@@ -143,4 +222,19 @@ internal sealed class Comments : IEditorFeature
             last = last.PreviousLine;
         return (first.LineNumber, last.LineNumber);
     }
+
+    /// <summary>The last <paramref name="value"/> in <paramref name="text"/> that starts at <paramref name="from"/> or before; -1 for none.</summary>
+    private static int LastIndexOf(string text, string value, int from)
+    {
+        for (int index = Math.Min(from, text.Length - value.Length); index >= 0; index--)
+        {
+            if (string.CompareOrdinal(text, index, value, 0, value.Length) == 0)
+                return index;
+        }
+        return -1;
+    }
+
+    /// <summary>The text between two indexes in either order, within <paramref name="text"/>.</summary>
+    private static string Between(string text, int from, int to) =>
+        text[Math.Clamp(Math.Min(from, to), 0, text.Length)..Math.Clamp(Math.Max(from, to), 0, text.Length)];
 }

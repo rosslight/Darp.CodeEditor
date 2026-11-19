@@ -75,6 +75,7 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+enter, ctrl+shift+enter (cmd+enter, shift+cmd+enter)</term><description><see cref="CodeEditorCommands.InsertLineAfter"/>, <see cref="CodeEditorCommands.InsertLineBefore"/></description></item>
     /// <item><term>ctrl+], ctrl+[ (cmd+], cmd+[)</term><description><see cref="CodeEditorCommands.IndentLines"/>, <see cref="CodeEditorCommands.OutdentLines"/></description></item>
     /// <item><term>ctrl+l (cmd+l)</term><description><see cref="CodeEditorCommands.ExpandLineSelection"/></description></item>
+    /// <item><term>shift+alt+a (Linux: ctrl+shift+a)</term><description><see cref="CodeEditorCommands.BlockComment"/></description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default { get; } = new(DefaultBindings(OperatingSystem.IsMacOS()));
@@ -164,7 +165,8 @@ public sealed class CodeEditorKeymap
     }
 
     /// <summary>
-    /// The keys of the commands on whole lines: Linux has keys of its own where its desktops take the others.
+    /// The keys of the commands on whole lines and of the block comment: Linux has keys of its own where its desktops
+    /// take the others.
     /// </summary>
     internal static IEnumerable<CodeEditorKeyBinding> LineBindings(bool mac, bool linux)
     {
@@ -178,5 +180,6 @@ public sealed class CodeEditorKeymap
         yield return new($"{command}+]", CodeEditorCommands.IndentLines);
         yield return new($"{command}+[", CodeEditorCommands.OutdentLines);
         yield return new($"{command}+l", CodeEditorCommands.ExpandLineSelection);
+        yield return new(linux ? "ctrl+shift+a" : "shift+alt+a", CodeEditorCommands.BlockComment);
     }
 }
