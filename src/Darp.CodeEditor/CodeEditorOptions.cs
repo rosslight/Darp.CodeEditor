@@ -12,6 +12,13 @@ public sealed record CodeEditorOptions
 
     /// <summary>Which opening characters bring their closing ones: <c>editor.autoClosing*</c>.</summary>
     public AutoClosingOptions AutoClosing { get; init; } = new();
+
+    /// <summary>
+    /// Whether copy and cut without a selection take the caret's whole line, which then pastes as a whole line above
+    /// the caret's: <c>editor.emptySelectionClipboard</c>. Off, they need a selection, so that a stray Ctrl+C keeps the
+    /// clipboard.
+    /// </summary>
+    public bool EmptySelectionClipboard { get; init; } = true;
 }
 
 /// <summary>

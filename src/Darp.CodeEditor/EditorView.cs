@@ -91,6 +91,8 @@ internal sealed class EditorView : IDisposable
             _pairs,
             _typing,
             _clipboard,
+            // After the clipboard: its commands run first.
+            new LineClipboard(area, document, _changes, context.Options),
             new WordEditing(area, _changes),
             _brackets,
             _whitespace,
