@@ -904,7 +904,7 @@ public sealed class CompletionTests(UiFixture ui)
                 }
             );
             foreach (int i in Enumerable.Range(1, 29))
-                items.Add(new JsonObject { ["label"] = $"item{i:D2}" });
+                items.Add((JsonNode)new JsonObject { ["label"] = $"item{i:D2}" });
             using CodeDocument answer = await SetCompletionAsync(server, fake, new JsonObject { ["items"] = items });
             string text = string.Concat(Enumerable.Repeat("\n", 5));
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
