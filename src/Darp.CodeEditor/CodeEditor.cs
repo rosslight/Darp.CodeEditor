@@ -57,7 +57,7 @@ namespace Darp.CodeEditor;
 /// Built in, with no settings: the current line is highlighted, whitespace shows inside the selection, and the view
 /// scrolls past the last line. Lines of up to 3,000 characters show and edit in full; a longer line shows its first
 /// 3,000 characters and collapses the rest into "...", which can't be edited. Editing follows the language's rules, as
-/// VS Code applies them: the bracket next to the caret and its match are boxed, pairs close as you type, as far as
+/// VS Code applies them: the brackets at the caret are boxed and pairs close as you type, as far as
 /// <see cref="Options"/> lets them, typing their closing character steps over it and Backspace deletes an empty pair,
 /// opening characters surround the selection, new lines are indented by the rules for Enter, the brackets and the
 /// indentation rules, as far as the language's <see cref="CodeLanguage.AutoIndent"/> goes, a line that comes to match
@@ -92,7 +92,8 @@ namespace Darp.CodeEditor;
 /// (Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z), moving and deleting by words (Ctrl+Left, Ctrl+Right, Ctrl+Backspace, Ctrl+Delete,
 /// with Alt on macOS), the word at the caret (Ctrl+D), the block comment (Shift+Alt+A), and whole lines: moving them
 /// (Alt+Up, Alt+Down), copying them (Shift+Alt+Up, Shift+Alt+Down), deleting them (Ctrl+Shift+K), inserting one
-/// (Ctrl+Enter, Ctrl+Shift+Enter), indenting them (Ctrl+], Ctrl+[) and selecting them (Ctrl+L), with Cmd for Ctrl on
+/// (Ctrl+Enter, Ctrl+Shift+Enter), indenting them (Ctrl+], Ctrl+[) and selecting them (Ctrl+L), the matching bracket
+/// (Ctrl+Shift+\) and expanding and shrinking the selection (Shift+Alt+Right, Shift+Alt+Left), with Cmd for Ctrl on
 /// macOS but for Ctrl+Space, and Linux's own keys where its desktops take these. Open popups have keys of their own,
 /// and editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation and indentation (Tab, Shift+Tab) are
 /// AvaloniaEdit's. Other keys, such as F5 or Ctrl+S, go on to the app's key bindings, and so does a key of the keymap
