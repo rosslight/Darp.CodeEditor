@@ -77,10 +77,12 @@ internal sealed class LineClipboard : IDisposable
     private bool IsLineCopy() =>
         _options().EmptySelectionClipboard && _area.Selection is { IsEmpty: true } and not RectangleSelection;
 
-    private bool IsLineCut() => IsLineCopy() && !_area.IsReadOnly;
+    /// <summary>Whether the caret's line can go, also its hidden tail if it is long.</summary>
+    private bool IsLineCut() =>
+        IsLineCopy() && !_area.IsReadOnly && CutRange() is var cut && _changes.CanChange(cut.Start, cut.Length);
 
     private bool MayPasteLine() =>
-        s_copiedLine is not null && IsLineCut() && (CanInsert(LineStart) || CanInsert(Caret));
+        s_copiedLine is not null && IsLineCopy() && !_area.IsReadOnly && (CanInsert(LineStart) || CanInsert(Caret));
 
     private int Caret => _area.Caret.Offset;
 
@@ -96,13 +98,8 @@ internal sealed class LineClipboard : IDisposable
     /// </summary>
     private void Cut()
     {
-        string line = CaretLine();
-        DocumentLine caretLine = Buffer.GetLineByOffset(Caret);
-        TextRange cut =
-            caretLine.NextLine is { } next ? TextRange.FromBounds(caretLine.Offset, next.Offset)
-            : caretLine.PreviousLine is { } previous ? TextRange.FromBounds(previous.EndOffset, caretLine.EndOffset)
-            : TextRange.FromBounds(caretLine.Offset, caretLine.EndOffset);
-        SetClipboard(line);
+        TextRange cut = CutRange();
+        SetClipboard(CaretLine());
         _changes.Run(
             EditStep.Own,
             () => _changes.Apply([new TextEdit(cut.Start, cut.Length, "")], new TextSelection(cut.Start))
@@ -133,7 +130,7 @@ internal sealed class LineClipboard : IDisposable
         if (text != line)
             s_copiedLine = null;
         int lineStart = LineStart;
-        if (text == line && IsLineCut() && CanInsert(lineStart))
+        if (text == line && MayPasteLine() && CanInsert(lineStart))
         {
             string pasted = TextUtilities.NormalizeNewLines(text, _document.LineBreak);
             _changes.Run(EditStep.Own, () => _changes.Apply([new TextEdit(lineStart, 0, pasted)]));
@@ -141,6 +138,14 @@ internal sealed class LineClipboard : IDisposable
         }
         else
             _clipboard.Paste(text);
+    }
+
+    private TextRange CutRange()
+    {
+        DocumentLine line = Buffer.GetLineByOffset(Caret);
+        return line.NextLine is { } next ? TextRange.FromBounds(line.Offset, next.Offset)
+            : line.PreviousLine is { } previous ? TextRange.FromBounds(previous.EndOffset, line.EndOffset)
+            : TextRange.FromBounds(line.Offset, line.EndOffset);
     }
 
     /// <summary>The caret's line and a line break after it, in the clipboard's line breaks.</summary>
