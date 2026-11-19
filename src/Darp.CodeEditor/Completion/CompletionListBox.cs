@@ -244,6 +244,8 @@ internal sealed class CompletionListBox : Control
     private void Refresh()
     {
         int visible = VisibleRows;
+        // More rows than before, as the user made the list taller at its last row, start further up.
+        FirstRow = Math.Clamp(FirstRow, 0, Math.Max(0, Items.Count - visible));
         while (_rows.Count < visible)
         {
             var row = new Row(this);
