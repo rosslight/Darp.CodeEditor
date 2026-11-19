@@ -75,8 +75,10 @@ internal sealed class CompletionFilter
         if (session.Filtering?.Key == key || (session.Shown == key && session.Filtering is null))
             return;
         session.Filtering?.Cancellation.Cancel();
-        if (session.CommitAt != key)
-            session.CommitAt = null;
+        // An accept that waits goes on waiting for a newer list's filter of the same text and caret, as for a list
+        // asked for again while it waited; a change of either drops it.
+        if (session.CommitAt is { } waiting && waiting != key)
+            session.CommitAt = (waiting.Version, waiting.Caret) == (key.Version, key.Caret) ? key : null;
         var filtering = new FilterRun(key, new CancellationTokenSource());
         session.Filtering = filtering;
         // The UI thread reads no text: each item's typed text is read off it, from the snapshot of the key's version.

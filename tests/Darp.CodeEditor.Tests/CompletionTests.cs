@@ -281,6 +281,38 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Enter_that_waits_for_a_filter_commits_from_a_newer_list_of_the_same_text() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            // Incomplete: typing on asks again.
+            using CodeDocument first = await SetCompletionAsync(
+                server,
+                fake,
+                Parse("""{ "isIncomplete": true, "items": [ { "label": "print" } ] }""")
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "pri");
+            var ranking = new HeldScheduler();
+            using var window = new EditorWindow(new CodeEditor { Document = document, BackgroundScheduler = ranking });
+            await OpenAsync(window, 3);
+            using CodeDocument hold = await CommandAsync(server, fake, "hold-completion", "holding completion");
+            using CodeDocument second = await SetCompletionAsync(server, fake, Items("prize"));
+
+            // Typed, and Enter pressed, while the filter of "priz" is held: "print" does not match it.
+            ranking.Hold();
+            window.Type("z");
+            window.Press(Key.Enter);
+            // The list asked for again for "priz" comes while Enter waits, and its filter is held too.
+            using CodeDocument release = await CommandAsync(server, fake, "release-completion", "released completion");
+            await Wait.UntilAsync(() => ranking.Held == 2);
+            document.Text.ShouldBe("priz");
+            ranking.Release();
+
+            await Wait.UntilAsync(() => document.Text == "prize");
+        });
+
+    [Fact]
     public Task An_edit_that_leaves_the_caret_drops_the_commit_that_waits_for_a_filter() =>
         _ui.Run(async () =>
         {
