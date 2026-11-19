@@ -2,7 +2,6 @@ using System.Text.Json.Nodes;
 using Avalonia;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
-using Avalonia.Media;
 using static Darp.CodeEditor.Tests.CompletionTests;
 
 namespace Darp.CodeEditor.Tests;
@@ -26,13 +25,8 @@ public sealed class CompletionBehaviorTests(UiFixture ui)
             const string text = "[\n  ,\n  ab,\n  cd,\n  \n]\n// note\n";
             using CodeDocument document = server.CreateDocument(CodeLanguage.Json, text);
             using var window = new EditorWindow(new CodeEditor { Document = document });
-            // JSON's comment color: the grammar knows the comment.
-            int comment = text.IndexOf("note", StringComparison.Ordinal);
-            await Wait.UntilAsync(() =>
-            {
-                window.Render();
-                return window.ColorAt(comment) == Color.Parse("#008000");
-            });
+            // The grammar knows the comment.
+            await window.TokensKnownAsync();
 
             window.Editor.Selection = new TextSelection(4);
             window.Type("x");
@@ -99,12 +93,8 @@ public sealed class CompletionBehaviorTests(UiFixture ui)
             const string text = "[\n  \"\",\n  \n]\n// \n";
             using CodeDocument document = server.CreateDocument(codeLanguage, text);
             using var window = new EditorWindow(new CodeEditor { Document = document });
-            // JSON's comment color: the grammar knows the comment.
-            await Wait.UntilAsync(() =>
-            {
-                window.Render();
-                return window.ColorAt(text.IndexOf("//", StringComparison.Ordinal)) == Color.Parse("#008000");
-            });
+            // The grammar knows the comment and the string.
+            await window.TokensKnownAsync();
 
             (await OpensAsync(document.Text.IndexOf("\"\"", StringComparison.Ordinal) + 1)).ShouldBe(inStrings);
             (await OpensAsync(document.Text.IndexOf("  \n]", StringComparison.Ordinal) + 2)).ShouldBe(inCode);
