@@ -63,11 +63,15 @@ internal sealed class WordEditing : IEditorFeature
     /// Moves the caret to where <paramref name="rule"/> puts it from the caret, ending the selection, or with
     /// <paramref name="select"/> extending it from its anchor.
     /// </summary>
-    private void Move(Func<TextDocument, int, int> rule, bool select)
+    /// <returns>Whether it moved: not to extend a rectangle selection, which AvaloniaEdit's keys extend.</returns>
+    private bool Move(Func<TextDocument, int, int> rule, bool select)
     {
+        if (select && _area.Selection is RectangleSelection)
+            return false;
         TextSelection selection = _changes.Selection;
         int caret = rule(Buffer, selection.Caret);
         _changes.Select(new TextSelection(select ? selection.Anchor : caret, caret));
+        return true;
     }
 
     /// <summary>
