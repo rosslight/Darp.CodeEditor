@@ -91,6 +91,7 @@ internal sealed class EditorView : IDisposable
             _pairs,
             _typing,
             _clipboard,
+            new WordEditing(area, _changes),
             _brackets,
             _whitespace,
             _squiggles,

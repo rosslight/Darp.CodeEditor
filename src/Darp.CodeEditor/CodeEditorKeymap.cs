@@ -66,6 +66,10 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+/ (cmd+/)</term><description><see cref="CodeEditorCommands.CommentLine"/></description></item>
     /// <item><term>ctrl+z (cmd+z)</term><description><see cref="CodeEditorCommands.Undo"/></description></item>
     /// <item><term>ctrl+y, ctrl+shift+z (shift+cmd+z)</term><description><see cref="CodeEditorCommands.Redo"/></description></item>
+    /// <item><term>ctrl+left, ctrl+shift+left (alt+left, shift+alt+left)</term><description><see cref="CodeEditorCommands.CursorWordLeft"/>, <see cref="CodeEditorCommands.CursorWordLeftSelect"/></description></item>
+    /// <item><term>ctrl+right, ctrl+shift+right (alt+right, shift+alt+right)</term><description><see cref="CodeEditorCommands.CursorWordEndRight"/>, <see cref="CodeEditorCommands.CursorWordEndRightSelect"/></description></item>
+    /// <item><term>ctrl+backspace, ctrl+delete (alt+backspace, alt+delete)</term><description><see cref="CodeEditorCommands.DeleteWordLeft"/>, <see cref="CodeEditorCommands.DeleteWordRight"/></description></item>
+    /// <item><term>ctrl+d (cmd+d)</term><description><see cref="CodeEditorCommands.AddSelectionToNextFindMatch"/></description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default { get; } = new(DefaultBindings(OperatingSystem.IsMacOS()));
@@ -142,5 +146,13 @@ public sealed class CodeEditorKeymap
         if (!mac)
             yield return new("ctrl+y", CodeEditorCommands.Redo);
         yield return new($"{command}+shift+z", CodeEditorCommands.Redo);
+        string words = mac ? "alt" : "ctrl";
+        yield return new($"{words}+left", CodeEditorCommands.CursorWordLeft);
+        yield return new($"{words}+shift+left", CodeEditorCommands.CursorWordLeftSelect);
+        yield return new($"{words}+right", CodeEditorCommands.CursorWordEndRight);
+        yield return new($"{words}+shift+right", CodeEditorCommands.CursorWordEndRightSelect);
+        yield return new($"{words}+backspace", CodeEditorCommands.DeleteWordLeft);
+        yield return new($"{words}+delete", CodeEditorCommands.DeleteWordRight);
+        yield return new($"{command}+d", CodeEditorCommands.AddSelectionToNextFindMatch);
     }
 }
