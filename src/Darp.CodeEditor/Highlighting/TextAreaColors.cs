@@ -22,6 +22,8 @@ namespace Darp.CodeEditor.Highlighting;
 /// <param name="FindMatchBorder">Its border, if the theme has one.</param>
 /// <param name="FindMatchHighlight">The background of the other search matches.</param>
 /// <param name="FindMatchHighlightBorder">Their border, if the theme has one.</param>
+/// <param name="FindRange">The background of the lines that Find in Selection searches.</param>
+/// <param name="FindRangeBorder">Their border, if the theme has one.</param>
 /// <param name="Error">The squiggles under errors.</param>
 /// <param name="Warning">The squiggles under warnings.</param>
 /// <param name="Information">The squiggles under information.</param>
@@ -45,6 +47,8 @@ internal sealed record TextAreaColors(
     IPen? FindMatchBorder,
     IBrush FindMatchHighlight,
     IPen? FindMatchHighlightBorder,
+    IBrush FindRange,
+    IPen? FindRangeBorder,
     IBrush Error,
     IBrush Warning,
     IBrush Information,
@@ -81,6 +85,8 @@ internal sealed record TextAreaColors(
             Pen("editor.findMatchBorder"),
             Brush("editor.findMatchHighlightBackground") ?? Solid(0x55EA5C00u),
             Pen("editor.findMatchHighlightBorder"),
+            Brush("editor.findRangeHighlightBackground") ?? Solid(dark ? 0x663A3D41u : 0x4DB4B4B4u),
+            Pen("editor.findRangeHighlightBorder"),
             Brush("editorError.foreground") ?? Solid(dark ? 0xFFF14C4C : 0xFFE51400),
             Brush("editorWarning.foreground") ?? Solid(dark ? 0xFFCCA700 : 0xFFBF8803),
             Brush("editorInfo.foreground") ?? Solid(dark ? 0xFF3794FF : 0xFF1A85FF),
