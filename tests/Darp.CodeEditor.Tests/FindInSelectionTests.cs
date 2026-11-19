@@ -122,6 +122,24 @@ public sealed class FindInSelectionTests(UiFixture ui)
             document.Text.ShouldBe("a\na\nb\nb\na");
         });
 
+    /// <summary>
+    /// As in VS Code, a selection from inside a line to the start of the next spans lines, and searches the first one
+    /// whole.
+    /// </summary>
+    [Fact]
+    public Task A_selection_from_inside_a_line_to_the_start_of_the_next_searches_that_line_whole() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = Show("a a\na «a\n»a a");
+            window.Press(Key.L, Toggle);
+            window.Editor.OpenSearch();
+            SearchBar bar = BarOf(window);
+            bar.FindBox.Text = "a";
+            await SearchedAsync(bar);
+
+            bar.Count.ShouldNotBeNull().ShouldEndWith("of 2");
+        });
+
     /// <summary>As VS Code's scope, the scope grows with text typed at either of its edges.</summary>
     [Fact]
     public Task The_scope_grows_with_text_typed_at_its_edges() =>
