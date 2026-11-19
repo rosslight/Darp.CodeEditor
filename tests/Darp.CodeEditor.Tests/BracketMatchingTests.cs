@@ -233,6 +233,47 @@ public sealed class BracketMatchingTests(UiFixture ui)
         });
 
     /// <summary>
+    /// The search reads a bounded stretch before the caret: a caret that moves so that it reads an earlier opening
+    /// bracket finds the pair that this bracket opens, not the pair found before.
+    /// </summary>
+    [Fact]
+    public Task A_bracket_that_comes_into_what_the_search_reads_changes_the_pair_around_the_caret() =>
+        _ui.Run(async () =>
+        {
+            // "[" first, and on the last line a stray "]" inside braces, with the caret between "a" and "b" just past
+            // where the search reads the "[".
+            string text =
+                "[\n"
+                + string.Concat(Enumerable.Repeat(new string(' ', 999) + "\n", 99))
+                + new string(' ', 995)
+                + "\n{ ab ] } [2]";
+            int caret = text.IndexOf("ab", StringComparison.Ordinal) + 1;
+            caret.ShouldBe(BracketMatcher.MaxDistance + 1);
+            var editor = new CodeEditor
+            {
+                Document = CodeDocument.Create(CodeLanguage.Json, text),
+                ColorTheme = new CodeEditorColorTheme
+                {
+                    Source = new Uri("avares://Darp.CodeEditor.Tests/Themes/marks.json"),
+                },
+            };
+            using var window = new EditorWindow(editor);
+            editor.Selection = new TextSelection(caret);
+            editor.ScrollTo(new TextRange(caret, 0));
+            await Wait.UntilAsync(() => window.RenderAndCountPixels(Color.Parse("#098658")) > 0);
+            (int brace, int square, int closingBrace) = (caret - 3, caret + 2, caret + 4);
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(brace, 1)).ShouldBeGreaterThan(0);
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(closingBrace, 1)).ShouldBeGreaterThan(0);
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(square, 1)).ShouldBe(0);
+
+            window.Press(Key.Left);
+
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(square, 1)).ShouldBeGreaterThan(0);
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(brace, 1)).ShouldBe(0);
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(closingBrace, 1)).ShouldBe(0);
+        });
+
+    /// <summary>
     /// Brackets pair as VS Code's parser nests them: a closing bracket that closes no open bracket of its kind is no
     /// bracket, and one that closes an outer pair leaves the brackets opened inside it unclosed. The array after them
     /// holds a number, whose color says that the lines are tokenized.
