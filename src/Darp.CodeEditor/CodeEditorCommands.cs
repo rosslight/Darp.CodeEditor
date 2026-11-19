@@ -36,8 +36,8 @@ public static class CodeEditorCommands
     public const string CommentLine = "editor.action.commentLine";
 
     /// <summary>
-    /// Moves the caret to the start of the word before it; a single separator right after a word, such as the dot of
-    /// <c>foo.bar</c>, goes with the word. At a line's start, it goes on from the end of the line before.
+    /// Moves the caret to the start of the word before it, past a single separator that a word character follows, such
+    /// as the dot of <c>.bar</c>. At a line's start, it goes on from the end of the line before.
     /// </summary>
     public const string CursorWordLeft = "cursorWordLeft";
 
