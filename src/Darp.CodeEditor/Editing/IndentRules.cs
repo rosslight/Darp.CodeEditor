@@ -104,12 +104,12 @@ internal sealed class IndentRules
                 return indentation.Length > 0 ? _indenting.Normalize(indentation) : null;
             }
             int above = lineNumber - 1;
-            while (above >= 1 && string.IsNullOrWhiteSpace(matching.Read(lines.Text, above)))
+            string text = "";
+            while (above >= 1 && string.IsNullOrWhiteSpace(text = matching.Read(lines.Text, above)))
                 above--;
             string previous = above > 1 ? matching.Read(lines.Masked, above - 1) : "";
             if (above < 1 || ActionFor(matching, previous, matching.Read(lines.Masked, above), "") is not { } action)
                 return null;
-            string text = lines.Text(above);
             (string kept, string append) = Resolved(action, text[..Leading(text)]);
             return kept.Length + append.Length > 0 ? kept + append : null;
         }

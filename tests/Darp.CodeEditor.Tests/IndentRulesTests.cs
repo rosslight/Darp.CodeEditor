@@ -105,6 +105,32 @@ public sealed class IndentRulesTests
     }
 
     [Fact]
+    public void A_blank_lines_indentation_comes_from_the_lines_read_within_its_time()
+    {
+        // The line above matches a rule for Enter; a read of it once the rule matched would be out of time.
+        var time = new ManualTime();
+        LanguageConfiguration configuration = LanguageConfiguration.None with
+        {
+            OnEnterRules = [new OnEnterRule(new Regex("x"), null, null, new EnterAction(IndentAction.Indent, "", 0))],
+        };
+        int reads = 0;
+        var lines = new RuleLines(
+            _ =>
+            {
+                if (++reads <= 2)
+                    return "x";
+                time.Advance(IndentationRules.TimeLimit);
+                return "    x";
+            },
+            (_, _) => null,
+            brackets: null
+        );
+        var rules = new IndentRules(configuration, AutoIndent.Advanced, Indentation.Spaces(4), "\n", time);
+
+        rules.GoodIndentation(lines, 2).ShouldBe("\t");
+    }
+
+    [Fact]
     public void Enter_tokenizes_the_carets_line_once()
     {
         var configuration = new LanguageConfiguration(null, null, [new CharacterPair("(", ")")], [], [], null);
