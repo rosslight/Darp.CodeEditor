@@ -1,5 +1,6 @@
 using System.Globalization;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
@@ -385,26 +386,35 @@ internal sealed class SearchBar : UserControl
         e.Handled = true;
     }
 
-    /// <summary>The bar's texts in the UI culture, as it opens, and the keymap's keys in the tips.</summary>
+    /// <summary>
+    /// The bar's texts in the UI culture, as it opens: the names of its icons and toggles for screen readers, and in
+    /// their tips with the keymap's keys.
+    /// </summary>
     private void ShowTexts(CodeEditorKeymap keymap)
     {
         _find.PlaceholderText = Strings.Find;
         _replace.PlaceholderText = Strings.Replace;
         _replaceOne.Content = Strings.Replace;
         _replaceAll.Content = Strings.ReplaceAll;
-        ToolTip.SetTip(_matchCase, WithKeys(Strings.MatchCase, CodeEditorCommands.ToggleFindCaseSensitive));
-        ToolTip.SetTip(_wholeWord, WithKeys(Strings.MatchWholeWord, CodeEditorCommands.ToggleFindWholeWord));
-        ToolTip.SetTip(_regex, WithKeys(Strings.UseRegularExpression, CodeEditorCommands.ToggleFindRegex));
-        ToolTip.SetTip(_preserveCase, WithKeys(Strings.PreserveCase, CodeEditorCommands.TogglePreserveCase));
-        ToolTip.SetTip(_findInSelection, WithKeys(Strings.FindInSelection, CodeEditorCommands.ToggleFindInSelection));
-        ToolTip.SetTip(_previous, WithKeys(Strings.PreviousMatch, CodeEditorCommands.FindPrevious));
-        ToolTip.SetTip(_next, WithKeys(Strings.NextMatch, CodeEditorCommands.FindNext));
-        ToolTip.SetTip(_close, Strings.CloseSearch);
+        Describe(_matchCase, Strings.MatchCase, CodeEditorCommands.ToggleFindCaseSensitive);
+        Describe(_wholeWord, Strings.MatchWholeWord, CodeEditorCommands.ToggleFindWholeWord);
+        Describe(_regex, Strings.UseRegularExpression, CodeEditorCommands.ToggleFindRegex);
+        Describe(_preserveCase, Strings.PreserveCase, CodeEditorCommands.TogglePreserveCase);
+        Describe(_findInSelection, Strings.FindInSelection, CodeEditorCommands.ToggleFindInSelection);
+        Describe(_previous, Strings.PreviousMatch, CodeEditorCommands.FindPrevious);
+        Describe(_next, Strings.NextMatch, CodeEditorCommands.FindNext);
+        Describe(_close, Strings.CloseSearch, null);
 
-        string WithKeys(string text, string command) =>
-            keymap.GesturesOf(command) is { Count: > 0 } keys
-                ? $"{text} ({string.Join(' ', keys.Select(key => key.ToString("p", null)))})"
-                : text;
+        void Describe(Button button, string name, string? command)
+        {
+            AutomationProperties.SetName(button, name);
+            ToolTip.SetTip(
+                button,
+                command is not null && keymap.GesturesOf(command) is { Count: > 0 } keys
+                    ? $"{name} ({string.Join(' ', keys.Select(key => key.ToString("p", null)))})"
+                    : name
+            );
+        }
     }
 
     /// <summary>
