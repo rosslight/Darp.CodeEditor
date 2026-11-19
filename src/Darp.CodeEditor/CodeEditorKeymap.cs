@@ -70,6 +70,7 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+right, ctrl+shift+right (alt+right, shift+alt+right)</term><description><see cref="CodeEditorCommands.CursorWordEndRight"/>, <see cref="CodeEditorCommands.CursorWordEndRightSelect"/></description></item>
     /// <item><term>ctrl+backspace, ctrl+delete (alt+backspace, alt+delete)</term><description><see cref="CodeEditorCommands.DeleteWordLeft"/>, <see cref="CodeEditorCommands.DeleteWordRight"/></description></item>
     /// <item><term>ctrl+d (cmd+d)</term><description><see cref="CodeEditorCommands.AddSelectionToNextFindMatch"/></description></item>
+    /// <item><term>alt+up, alt+down</term><description><see cref="CodeEditorCommands.MoveLinesUp"/>, <see cref="CodeEditorCommands.MoveLinesDown"/></description></item>
     /// <item><term>shift+alt+up, shift+alt+down (Linux: ctrl+shift+alt+up, ctrl+shift+alt+down)</term><description><see cref="CodeEditorCommands.CopyLinesUp"/>, <see cref="CodeEditorCommands.CopyLinesDown"/></description></item>
     /// <item><term>ctrl+shift+k (shift+cmd+k)</term><description><see cref="CodeEditorCommands.DeleteLines"/></description></item>
     /// <item><term>ctrl+enter, ctrl+shift+enter (cmd+enter, shift+cmd+enter)</term><description><see cref="CodeEditorCommands.InsertLineAfter"/>, <see cref="CodeEditorCommands.InsertLineBefore"/></description></item>
@@ -172,6 +173,8 @@ public sealed class CodeEditorKeymap
     {
         string command = mac ? "cmd" : "ctrl";
         string copy = linux ? "ctrl+shift+alt" : "shift+alt";
+        yield return new("alt+up", CodeEditorCommands.MoveLinesUp);
+        yield return new("alt+down", CodeEditorCommands.MoveLinesDown);
         yield return new($"{copy}+up", CodeEditorCommands.CopyLinesUp);
         yield return new($"{copy}+down", CodeEditorCommands.CopyLinesDown);
         yield return new($"{command}+shift+k", CodeEditorCommands.DeleteLines);

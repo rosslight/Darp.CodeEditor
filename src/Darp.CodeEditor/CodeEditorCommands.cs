@@ -78,6 +78,16 @@ public static class CodeEditorCommands
     /// </summary>
     public const string BlockComment = "editor.action.blockComment";
 
+    /// <summary>
+    /// Moves the selected lines, or the caret's, above the line before them, with the selection. With the language's
+    /// indentation rules and its <see cref="CodeLanguage.AutoIndent"/> at <see cref="AutoIndent.Full"/>, they take the
+    /// indentation of their new place.
+    /// </summary>
+    public const string MoveLinesUp = "editor.action.moveLinesUpAction";
+
+    /// <summary>Moves the selected lines, or the caret's, below the line after them, as <see cref="MoveLinesUp"/>.</summary>
+    public const string MoveLinesDown = "editor.action.moveLinesDownAction";
+
     /// <summary>Copies the selected lines, or the caret's, above them; the selection stays on the lines above.</summary>
     public const string CopyLinesUp = "editor.action.copyLinesUpAction";
 
