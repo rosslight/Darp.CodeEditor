@@ -27,7 +27,10 @@ internal sealed record LanguageConfiguration(
     /// <summary>The rules for Enter, <c>onEnterRules</c>, in their order: the first that matches applies.</summary>
     public IReadOnlyList<OnEnterRule> OnEnterRules { get; init; } = [];
 
-    /// <summary>The characters before which a pair closes, <c>autoCloseBefore</c>; null for the defaults.</summary>
+    /// <summary>
+    /// The characters before which a pair closes, <c>autoCloseBefore</c>, also none; null without one in the file, for
+    /// the defaults.
+    /// </summary>
     public string? AutoCloseBefore { get; init; }
 
     /// <summary>
@@ -96,12 +99,10 @@ internal sealed record LanguageConfiguration(
             OnEnterRules = Property(root, "onEnterRules") is { ValueKind: JsonValueKind.Array } onEnterRules
                 ? [.. onEnterRules.EnumerateArray().Select(OnEnter).OfType<OnEnterRule>()]
                 : [],
-            // An empty one counts as none.
-            AutoCloseBefore =
-                Property(root, "autoCloseBefore") is { ValueKind: JsonValueKind.String } closeBefore
-                && closeBefore.GetString() is { Length: > 0 } characters
-                    ? characters
-                    : null,
+            // An empty one closes before no character.
+            AutoCloseBefore = Property(root, "autoCloseBefore") is { ValueKind: JsonValueKind.String } closeBefore
+                ? closeBefore.GetString()
+                : null,
         };
     }
 

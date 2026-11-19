@@ -86,6 +86,7 @@ internal sealed class AutoClosingPairs : IDisposable
     /// <returns>Whether it stepped over.</returns>
     public bool TypeOver(char typed)
     {
+        ForgetPairsThatNoLongerClose();
         if (TypingOffsets() is not { } offsets || !Array.TrueForAll(offsets, IsClosedBefore))
             return false;
         _changes.Run(_changes.Typing(typed.ToString()), () => _changes.Apply([], moved: 1));
@@ -142,7 +143,7 @@ internal sealed class AutoClosingPairs : IDisposable
             // Text typed right before either one goes before it.
             open.MovementType = AnchorMovementType.AfterInsertion;
             close.MovementType = AnchorMovementType.AfterInsertion;
-            _autoClosed.Add(new AutoClosed(open, close, pair.Close));
+            _autoClosed.Add(new AutoClosed(open, close, pair.Close, pair));
         }
     }
 
@@ -153,6 +154,7 @@ internal sealed class AutoClosingPairs : IDisposable
     /// <returns>Whether it deleted them.</returns>
     public bool DeletePair()
     {
+        ForgetPairsThatNoLongerClose();
         if (TypingOffsets() is not { } offsets || !Array.TrueForAll(offsets, IsInEmptyPair))
             return false;
         bool deleted = false;
@@ -168,12 +170,9 @@ internal sealed class AutoClosingPairs : IDisposable
                 return false;
             char open = Buffer.GetCharAt(offset - 1);
             char close = Buffer.GetCharAt(offset);
-            AutoClosingOptions options = _options().AutoClosing;
-            return (IsQuote(open) ? options.Quotes : options.Brackets) != AutoClosingMode.Never
-                && Configuration.AutoClosingPairs.Any(pair =>
+            return Configuration.AutoClosingPairs.Any(pair =>
                     pair is { Open: [char o], Close: [char c] } && o == open && c == close
-                )
-                && _autoClosed.Exists(pair => pair.Close.Offset == offset);
+                ) && _autoClosed.Exists(pair => pair.Close.Offset == offset);
         }
     }
 
@@ -214,15 +213,8 @@ internal sealed class AutoClosingPairs : IDisposable
         }
         if (found is not { } candidate)
             return null;
-        LanguageConfiguration configuration = Configuration;
-        AutoClosingOptions options = _options().AutoClosing;
         bool quote = IsQuote(typed);
-        AutoClosingMode mode =
-            quote ? options.Quotes
-            // Pairs that open a block comment close by the language's rules alone: comments have no option.
-            : configuration.BlockComment is { } block && candidate.Open.Contains(block.Open, StringComparison.Ordinal)
-                ? AutoClosingMode.LanguageDefined
-            : options.Brackets;
+        AutoClosingMode mode = Mode(candidate);
         if (mode == AutoClosingMode.Never)
             return null;
         string after = Buffer.GetText(caret, line.EndOffset - caret);
@@ -292,6 +284,23 @@ internal sealed class AutoClosingPairs : IDisposable
         return found;
     }
 
+    /// <summary>
+    /// Where pairs of the kind of <paramref name="pair"/> close: quotes and brackets as the options say, and pairs that
+    /// open a block comment by the language's rules alone, as comments have no option.
+    /// </summary>
+    private AutoClosingMode Mode(AutoClosingPair pair)
+    {
+        AutoClosingOptions options = _options().AutoClosing;
+        return IsQuote(pair.Open[^1]) ? options.Quotes
+            : Configuration.BlockComment is { } block && pair.Open.Contains(block.Open, StringComparison.Ordinal)
+                ? AutoClosingMode.LanguageDefined
+            : options.Brackets;
+    }
+
+    /// <summary>Forgets the closing texts of the kinds of pairs that the options no longer close, as if typed by the user.</summary>
+    private void ForgetPairsThatNoLongerClose() =>
+        _autoClosed.RemoveAll(closed => Mode(closed.Pair) == AutoClosingMode.Never);
+
     /// <summary>Whether a quote, or else a bracket, closes before <paramref name="next"/> by <paramref name="mode"/>.</summary>
     private bool ClosesBefore(AutoClosingMode mode, bool quote, char next) =>
         mode switch
@@ -339,8 +348,8 @@ internal sealed class AutoClosingPairs : IDisposable
 
     private static bool IsQuote(char c) => c is '\'' or '"' or '`';
 
-    /// <summary>A closing text that the editor typed, and where its pair starts.</summary>
-    private sealed record AutoClosed(TextAnchor Open, TextAnchor Close, string CloseText)
+    /// <summary>A closing text that the editor typed, where its pair starts, and the pair.</summary>
+    private sealed record AutoClosed(TextAnchor Open, TextAnchor Close, string CloseText, AutoClosingPair Pair)
     {
         /// <summary>
         /// Whether the closing text is still there, and <paramref name="caret"/> inside the pair: from before its
