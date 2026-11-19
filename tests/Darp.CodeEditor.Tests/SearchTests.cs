@@ -348,6 +348,19 @@ public sealed class SearchTests(UiFixture ui)
             bar.Message.ShouldBeNull();
         });
 
+    [Fact]
+    public Task An_open_search_bar_closes_once_the_editor_has_no_document() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("|one", CodeLanguage.PlainText);
+            window.Editor.OpenSearch();
+
+            window.Editor.Document = null;
+            window.Press(Key.Escape);
+
+            BarOf(window).IsOpen.ShouldBeFalse();
+        });
+
     private static SearchBar BarOf(EditorWindow window) =>
         window.Editor.GetVisualDescendants().OfType<SearchBar>().Single();
 
