@@ -608,18 +608,14 @@ internal sealed class EditingHelpers : IEditorFeature
     /// Ctrl+/: toggles line comments on the selected lines, or the caret's, with the language's line comment, or else
     /// with its block comment around them.
     /// </summary>
-    /// <returns>Whether the language has a comment to toggle.</returns>
+    /// <returns>Whether it toggled: the language has a comment, and the lines can change.</returns>
     private bool ToggleComment()
     {
         LanguageConfiguration configuration = Configuration;
         (int first, int last) = SelectedLines();
         if (configuration.LineComment is { } token)
-            ToggleLineComment(token, first, last);
-        else if (configuration.BlockComment is { } block)
-            ToggleBlockComment(block, first, last);
-        else
-            return false;
-        return true;
+            return ToggleLineComment(token, first, last);
+        return configuration.BlockComment is { } block && ToggleBlockComment(block, first, last);
     }
 
     /// <summary>
@@ -627,7 +623,7 @@ internal sealed class EditingHelpers : IEditorFeature
     /// uncomments them when every line is commented, as in VS Code. Lines of whitespace only take no part, unless all
     /// lines are.
     /// </summary>
-    private void ToggleLineComment(string token, int first, int last)
+    private bool ToggleLineComment(string token, int first, int last)
     {
         var lines = new List<(DocumentLine Line, string Text, int Indent)>();
         for (int number = first; number <= last; number++)
@@ -642,7 +638,7 @@ internal sealed class EditingHelpers : IEditorFeature
         bool uncomment =
             !blank && withText.TrueForAll(l => string.CompareOrdinal(l.Text, l.Indent, token, 0, token.Length) == 0);
         if (!changed.TrueForAll(l => CanChange(l.Line.Offset, l.Line.Length)))
-            return;
+            return false;
         // The smallest indentation by its width, so that tabs and spaces line up.
         var indenting = new Indenting(_document.Indentation);
         int column = changed.Min(l => indenting.Width(l.Text.AsSpan(0, l.Indent)));
@@ -660,6 +656,7 @@ internal sealed class EditingHelpers : IEditorFeature
             );
         }
         ReplaceInOneChange(edits);
+        return true;
     }
 
     /// <summary>
@@ -692,13 +689,13 @@ internal sealed class EditingHelpers : IEditorFeature
     /// each token, or removes it when it is around them already, as VS Code does for languages without a line
     /// comment. On a line of whitespace only, the caret goes inside an empty comment.
     /// </summary>
-    private void ToggleBlockComment(CharacterPair block, int first, int last)
+    private bool ToggleBlockComment(CharacterPair block, int first, int last)
     {
         DocumentLine firstLine = Buffer.GetLineByNumber(first);
         int start = firstLine.Offset + LeadingWhitespace(Buffer.GetText(firstLine));
         int end = Buffer.GetLineByNumber(last).EndOffset;
         if (!CanChange(start, end - start))
-            return;
+            return false;
         string content = Buffer.GetText(start, end - start).TrimEnd();
         (string open, string close) = block;
         if (
@@ -731,6 +728,7 @@ internal sealed class EditingHelpers : IEditorFeature
                 Buffer.Insert(start, open + " ");
             }
         }
+        return true;
     }
 
     /// <summary>The lines of the selection, without a last line it only touches at its start; or the caret's line.</summary>
