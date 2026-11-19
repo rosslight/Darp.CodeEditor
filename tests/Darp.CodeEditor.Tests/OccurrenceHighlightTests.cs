@@ -105,10 +105,17 @@ public sealed class OccurrenceHighlightTests(UiFixture ui)
     public Task Without_an_answer_from_a_server_the_words_occurrences_show() =>
         _ui.Run(async () =>
         {
-            // Without a server: whole words, with case.
-            using EditorWindow plain = Show(CodeDocument.Create(CodeLanguage.PlainText, "word wordy word Word"));
-            plain.Editor.Selection = new TextSelection(1);
-            await Wait.UntilAsync(() => plain.Editor.Occurrences.Count > 0);
+            // Without a server, as one that never answers initialize serves none: whole words, with case.
+            var silentTime = new ManualTime();
+            using var silent = new LanguageServer(
+                new FakeServer("--initialize", "never").Options with
+                {
+                    TimeProvider = silentTime,
+                }
+            );
+            using CodeDocument words = silent.CreateDocument(CodeLanguage.PlainText, "word wordy word Word");
+            using EditorWindow plain = Show(words);
+            await ShowAtAsync(plain, silentTime, 1, 2);
             plain.Editor.Occurrences.ShouldBe([
                 new Occurrence(new TextRange(0, 4), OccurrenceKind.Text),
                 new Occurrence(new TextRange(11, 4), OccurrenceKind.Text),
@@ -127,7 +134,9 @@ public sealed class OccurrenceHighlightTests(UiFixture ui)
             window.Editor.Selection = new TextSelection(11);
             Advance(time, s_pause);
             await fake.WaitForAsync("documentHighlight", 2);
-            await Wait.UntilAsync(() => window.Editor.Occurrences.Count == 0);
+            // Starting the request cleared the words already: the empty answer must be in.
+            await Wait.UntilAsync(() => !window.Editor.IsAskingForOccurrences);
+            window.Editor.Occurrences.ShouldBeEmpty();
         });
 
     /// <summary>
