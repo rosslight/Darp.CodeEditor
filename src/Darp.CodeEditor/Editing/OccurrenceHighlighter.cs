@@ -182,7 +182,7 @@ internal sealed class OccurrenceHighlighter : IBackgroundRenderer, IEditorFeatur
 
     /// <summary>
     /// Shows the server's occurrences of the symbol in <paramref name="word"/>, or without its answer those of the word,
-    /// unless the request ended meanwhile, as an edit, a caret move and the view's end end it. Failures go to the log.
+    /// unless an edit, a newer request or the view's end cancelled the request meanwhile. Failures go to the log.
     /// </summary>
     private async void Ask(TextRange word)
     {
