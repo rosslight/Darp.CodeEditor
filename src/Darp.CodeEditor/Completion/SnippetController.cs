@@ -7,6 +7,7 @@ using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
+using Darp.CodeEditor.LanguageClient;
 using Darp.CodeEditor.Loading;
 using Darp.CodeEditor.Popups;
 
@@ -24,7 +25,9 @@ namespace Darp.CodeEditor.Completion;
 /// Code. Mirrors follow the stop the user types in, in the same undo step, the innermost stops first, so that a mirror
 /// inside another stop changes that stop's mirrors too; an undo or a redo changes them itself. When Tab or Shift+Tab
 /// leaves a number, its stops with a transformation, such as <c>${1/(.*)/${1:/upcase}/}</c>, take their text
-/// transformed, as in VS Code, in an undo step of their own that mirrors do not follow.
+/// transformed, as in VS Code, in an undo step of their own that mirrors do not follow. When the selected stop is a
+/// choice, such as <c>${1|red,green,blue|}</c>, completion's list offers its options (<see cref="Choices"/>), asked for
+/// each time another choice is selected (<see cref="ChoiceSelected"/>); committing one goes on to the next stop.
 /// </para>
 /// <para>
 /// The session ends at the final stop, on <see cref="End"/>, as for Escape, when the selection leaves the stops, when
@@ -64,6 +67,9 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     /// <summary>Whether the controller selects a stop: it does not follow its own selection.</summary>
     private bool _selecting;
 
+    /// <summary>The selected choice that <see cref="ChoiceSelected"/> told of last; null while none is selected.</summary>
+    private TabStop? _choice;
+
     public SnippetController(TextArea textArea, CodeDocument document, TextChanges changes)
     {
         _textArea = textArea;
@@ -76,6 +82,12 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         _textArea.SelectionChanged += OnSelectionChanged;
         _textArea.TextView.BackgroundRenderers.Add(this);
     }
+
+    /// <summary>
+    /// Another choice is selected: completion should show its options, as VS Code asks for them once the selection is
+    /// set. Not again while the same choice stays selected.
+    /// </summary>
+    public event EventHandler? ChoiceSelected;
 
     /// <summary>Behind the selection, in the layer that the text view draws itself whenever a layer changes.</summary>
     public KnownLayer Layer => KnownLayer.Background;
@@ -95,7 +107,11 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     /// its line, and with the values of its variables for the caret and the text as they are now, before it goes in.
     /// The UI thread reads at most the shown part of the caret's line, and of the line it goes in.
     /// </summary>
-    public RenderedSnippet Render(Snippet snippet, int start)
+    /// <param name="snippet">The snippet.</param>
+    /// <param name="start">Where it goes in.</param>
+    /// <param name="selected">The text for <c>SELECTION</c> and <c>TM_SELECTED_TEXT</c>; null for none.</param>
+    /// <param name="clipboard">The clipboard's text, read for <c>CLIPBOARD</c>; null for none.</param>
+    public RenderedSnippet Render(Snippet snippet, int start, SelectedText? selected, string? clipboard)
     {
         int caret = _textArea.Caret.Offset;
         DocumentLine caretLine = _buffer.GetLineByOffset(caret);
@@ -112,11 +128,17 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
                     SnippetVariables.Random(name)
                     ?? (values.TryGetValue(name, out string? value) ? value : values[name] = Variable(name))
             )
+            {
+                // The selection that typing replaced was on the caret's line.
+                MultilineSelectionIndentation = selected is { IsMultiline: true } ? LineIndentation(caret) : null,
+            }
         );
 
         string? Variable(string name) =>
             name switch
             {
+                "SELECTION" or "TM_SELECTED_TEXT" => selected?.Text,
+                "CLIPBOARD" => SnippetVariables.Clipboard(clipboard),
                 "TM_CURRENT_LINE" => _buffer.GetText(caretLine.Offset, VisibleText.End(caretLine) - caretLine.Offset),
                 "TM_CURRENT_WORD" => WordAt(caretLine, caret) is { Length: > 0 } word ? word : null,
                 "TM_LINE_INDEX" => (caretLine.LineNumber - 1).ToString(CultureInfo.InvariantCulture),
@@ -188,6 +210,28 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         return false;
     }
 
+    /// <summary>
+    /// The options of the selected choice as completion's list, while the caret is in its text; null otherwise.
+    /// Committing one should go on to <see cref="Next"/>.
+    /// </summary>
+    public CompletionList? Choices()
+    {
+        if (_session is null || _choice is not { Choice: { } options } choice)
+            return null;
+        var range = TextRange.FromBounds(choice.StartOffset, choice.EndOffset);
+        int caret = _textArea.Caret.Offset;
+        return caret < range.Start || caret > range.End
+            ? null
+            : CompletionList.OfChoice(options, range, _buffer.GetText(range.Start, range.Length));
+    }
+
+    /// <summary>Selects the next stop, as Tab does, while a session runs.</summary>
+    public void Next()
+    {
+        if (_session is { } session)
+            Move(session, forward: true);
+    }
+
     /// <summary>Ends the session; the text and the selection stay as they are.</summary>
     /// <returns>Whether a session ran.</returns>
     public bool End()
@@ -195,6 +239,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         if (_session is null)
             return false;
         _session = null;
+        _choice = null;
         _edited.Clear();
         _textArea.TextView.InvalidateLayer(Layer);
         return true;
@@ -273,6 +318,13 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         Select(selected);
         if (current == session.Groups.Count - 1)
             End();
+        else if (selected.Choice is null)
+            _choice = null;
+        else if (selected != _choice)
+        {
+            _choice = selected;
+            ChoiceSelected?.Invoke(this, EventArgs.Empty);
+        }
         _textArea.TextView.InvalidateLayer(Layer);
     }
 

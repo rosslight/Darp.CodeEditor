@@ -36,7 +36,8 @@ namespace Darp.CodeEditor.Completion;
 /// characters commit it (<see cref="CompletionCommit"/>): accepting inserts or replaces, a click and a commit character
 /// insert, and a commit character then goes in. Then the item's command runs, if it is one of the editor's. A frozen
 /// list commits by accepting and by a click, but not by commit characters. A read-only editor neither completes nor
-/// commits.
+/// commits. A snippet's choice that is selected shows its options instead of the server's items, read before the list
+/// shows, as is the clipboard's text for snippets that have it.
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends completion, for every reason it ends: Escape, the caret leaving the line or moving back
@@ -71,6 +72,11 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
     private readonly Func<string, bool> _runCommand;
 
     private readonly CaretMoves _caretMoves;
+    private readonly SnippetController _snippets;
+    private readonly Overtyping _overtyping;
+
+    /// <summary>Reads the clipboard's text.</summary>
+    private readonly Func<Task<string?>> _readClipboard;
 
     public CompletionController(
         TemplatedControl editor,
@@ -81,11 +87,15 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         TextChanges changes,
         CaretMoves caretMoves,
         TaskScheduler background,
-        Func<string, bool> runCommand
+        Func<string, bool> runCommand,
+        Func<Task<string?>> readClipboard
     )
     {
         _runCommand = runCommand;
         _caretMoves = caretMoves;
+        _snippets = snippets;
+        _readClipboard = readClipboard;
+        _overtyping = new Overtyping(textArea, () => _session is not null);
         _textArea = textArea;
         _buffer = textArea.Document;
         _document = document;
@@ -110,30 +120,19 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         _textArea.LostFocus += OnClosingChange;
         _document.LanguageFeaturesChanged += OnClosingChange;
         _view.LeftView += OnClosingChange;
+        _snippets.ChoiceSelected += OnChoiceSelected;
     }
 
-    /// <summary>The popups' colors, from the color theme once it is loaded. New colors end completion.</summary>
-    public PopupColors Colors
+    /// <summary>
+    /// The popups' and the icons' colors, from the color theme once it is loaded. New colors end completion.
+    /// </summary>
+    public void SetColors(PopupColors colors, SymbolIconColors? icons)
     {
-        set
-        {
-            if (value == _view.Colors)
-                return;
-            _view.Colors = value;
-            Close();
-        }
-    }
-
-    /// <summary>The colors of the icons, once the color theme is loaded. New colors end completion.</summary>
-    public SymbolIconColors? Icons
-    {
-        set
-        {
-            if (value == _view.Icons)
-                return;
-            _view.Icons = value;
-            Close();
-        }
+        if (colors == _view.Colors && icons == _view.Icons)
+            return;
+        _view.Colors = colors;
+        _view.Icons = icons;
+        Close();
     }
 
     public void AddCommands(CommandTable commands)
@@ -249,6 +248,8 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         Close();
         _commit.Dispose();
         _quickSuggest.Dispose();
+        _overtyping.Dispose();
+        _snippets.ChoiceSelected -= OnChoiceSelected;
         _view.Clicked -= OnClicked;
         _buffer.Changing -= OnBufferChanging;
         _buffer.TextChanged -= OnBufferTextChanged;
@@ -274,7 +275,17 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         session.ByKey |= byKey;
         session.Pending?.Cancellation.Cancel();
         session.Pending = request;
-        AskAsync(session, request, trigger);
+        // A snippet's selected choice has its options, and no other items; its text may stay selected while they show.
+        CompletionList? choices = _snippets.Choices();
+        session.ChoiceSelection = choices is null ? null : Selected();
+        if (choices is null)
+        {
+            AskAsync(session, request, trigger);
+            return;
+        }
+        session.Pending = null;
+        session.Answer = new CompletionAnswer(choices, request) { IsChoice = true };
+        Update();
     }
 
     /// <summary>Shows the server's answer, unless completion ended or asked again meanwhile.</summary>
@@ -288,6 +299,8 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
                 trigger,
                 request.Cancellation.Token
             );
+            // As in VS Code, the clipboard is read before the list shows, for the snippets that have it.
+            string? clipboard = list is { NeedsClipboard: true } ? await _readClipboard() : null;
             if (_session != session || session.Pending != request)
                 return;
             session.Pending = null;
@@ -315,7 +328,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
                 }
                 list ??= new CompletionList([], isIncomplete: false, resolve: null);
             }
-            session.Answer = new CompletionAnswer(list, request);
+            session.Answer = new CompletionAnswer(list, request, clipboard);
             Update();
         }
         catch (Exception e)
@@ -336,7 +349,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         int caret = _textArea.Caret.Offset;
         CompletionRequest latest = session.Latest;
         if (
-            !_textArea.Selection.IsEmpty
+            (!_textArea.Selection.IsEmpty && Selected() != session.ChoiceSelection)
             || (!latest.IsStale && _buffer.GetLineByOffset(caret) != _buffer.GetLineByOffset(latest.Offset))
         )
         {
@@ -388,7 +401,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         ItemResolve? late =
             item.AdditionalEdits is null && answer.List.Resolves ? _resolver.Take(selected, answer.List) : null;
         Close();
-        if (!_commit.Commit(item, answer.Request, replace, late))
+        if (!_commit.Commit(item, answer, replace, late, _overtyping.Last))
             return false;
         if (item.Command is { } command)
             RunCommand(command);
@@ -478,18 +491,17 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
 
     private void OnClosingChange(object? sender, EventArgs e) => Close();
 
-    /// <summary>
-    /// The word before <paramref name="caret"/>, by VS Code's word characters, which ends at the caret. It reaches
-    /// back at most <see cref="HoverController.MaxWordReach"/> characters, as a hovered word does: a line of millions
-    /// of word characters costs no more.
-    /// </summary>
-    private TextRange WordBefore(int caret)
-    {
-        DocumentLine line = _buffer.GetLineByOffset(caret);
-        int first = Math.Max(line.Offset, caret - HoverController.MaxWordReach);
-        int start = caret;
-        while (start > first && WordCharacters.IsWordCharacter(_buffer.GetCharAt(start - 1)))
-            start--;
-        return TextRange.FromBounds(start, caret);
-    }
+    /// <summary>A snippet's choice is selected: its options show, once the selection is set, if it is still selected.</summary>
+    private void OnChoiceSelected(object? sender, EventArgs e) =>
+        _textArea.Dispatcher.Post(() =>
+        {
+            if (_snippets.Choices() is not null)
+                Ask(new CompletionTrigger(CompletionTriggerKind.Invoked), byKey: true);
+        });
+
+    /// <summary>What the selection covers.</summary>
+    private TextRange Selected() =>
+        new(_textArea.Selection.SurroundingSegment?.Offset ?? 0, _textArea.Selection.Length);
+
+    private TextRange WordBefore(int caret) => CompletionRequest.WordBefore(_buffer, caret);
 }
