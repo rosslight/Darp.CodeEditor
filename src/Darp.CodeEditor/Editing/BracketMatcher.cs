@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Text;
 using AvaloniaEdit.Document;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.Loading;
@@ -84,25 +86,17 @@ internal static class BracketMatcher
     {
         int start = forward ? from + 1 : Math.Max(0, from - MaxDistance);
         int end = forward ? Math.Min(document.TextLength, from + 1 + MaxDistance) : from;
-        Span<char> block = stackalloc char[4096];
+        using var buffer = new SearchBuffer();
         int depth = 0;
         // The line of the last bracket: its bounds, as DocumentLine computes them anew each time, and its tokens.
         (int Start, int End) line = (-1, -1);
         int[]? tokens = null;
-        // Going forward, one reader through the window; going backward, one for each block, from the end.
-        using TextReader? ahead = forward ? document.CreateReader(start, end - start) : null;
         for (int done = 0; done < end - start; )
         {
-            int length = Math.Min(block.Length, end - start - done);
+            int length = Math.Min(SearchBuffer.BlockLength, end - start - done);
             int blockStart = forward ? start + done : end - done - length;
-            if (ahead is not null)
-                ahead.ReadBlock(block[..length]);
-            else
-            {
-                using TextReader behind = document.CreateReader(blockStart, length);
-                behind.ReadBlock(block[..length]);
-            }
-            ReadOnlySpan<char> text = block[..length];
+            buffer.Read(document, blockStart, length);
+            ReadOnlySpan<char> text = buffer.Text;
             for (int index = Next(text, forward ? -1 : length); index >= 0; index = Next(text, index))
             {
                 char c = text[index];
@@ -188,23 +182,25 @@ internal static class BracketMatcher
         Func<int, int[]?> tokensOf
     )
     {
-        const int BlockLength = 4096;
         int start = forward ? Math.Clamp(from, 0, document.TextLength) : Math.Max(0, from - MaxDistance);
         int end = forward
             ? Math.Min(document.TextLength, start + MaxDistance)
             : Math.Clamp(from, 0, document.TextLength);
+        if (start >= end || SearchCharacters(brackets) is not { } characters)
+            yield break;
+        using var buffer = new SearchBuffer();
         // The line of the last bracket: its bounds and its tokens.
         (int Start, int End) line = (-1, -1);
         int[]? tokens = null;
         for (int done = 0; done < end - start; )
         {
-            int length = Math.Min(BlockLength, end - start - done);
+            int length = Math.Min(SearchBuffer.BlockLength, end - start - done);
             int blockStart = forward ? start + done : end - done - length;
-            string text = document.GetText(blockStart, length);
-            for (int i = 0; i < length; i++)
+            buffer.Read(document, blockStart, length);
+            int index = forward ? -1 : length;
+            while ((index = Next(index)) >= 0)
             {
-                int index = forward ? i : length - 1 - i;
-                if (PairOf(text[index], brackets) is not (int pair, bool isOpen))
+                if (PairOf(buffer.Text[index], brackets) is not (int pair, bool isOpen))
                     continue;
                 int offset = blockStart + index;
                 if (offset < line.Start || offset > line.End)
@@ -217,6 +213,61 @@ internal static class BracketMatcher
                     yield return (offset, pair, isOpen);
             }
             done += length;
+        }
+
+        int Next(int index) =>
+            forward
+                ? buffer.Text[(index + 1)..].IndexOfAny(characters) is var found and >= 0
+                    ? index + 1 + found
+                    : -1
+                : buffer.Text[..index].LastIndexOfAny(characters);
+    }
+
+    private static SearchValues<char>? SearchCharacters(IReadOnlyList<CharacterPair> brackets)
+    {
+        Span<char> characters =
+            brackets.Count <= 64 ? stackalloc char[brackets.Count * 2] : new char[brackets.Count * 2];
+        int length = 0;
+        foreach (CharacterPair pair in brackets)
+        {
+            if (pair is { Open: [char open], Close: [char close] } && open != close)
+            {
+                characters[length++] = open;
+                characters[length++] = close;
+            }
+        }
+        return length == 0 ? null : SearchValues.Create(characters[..length]);
+    }
+
+    /// <summary>Copies a block directly from the rope, without creating a string or a sliced rope for each block.</summary>
+    private sealed class SearchBuffer : TextWriter
+    {
+        public const int BlockLength = 4096;
+
+        private readonly char[] _buffer = ArrayPool<char>.Shared.Rent(BlockLength);
+        private int _length;
+
+        public override Encoding Encoding => Encoding.Unicode;
+
+        public ReadOnlySpan<char> Text => _buffer.AsSpan(0, _length);
+
+        public void Read(TextDocument document, int offset, int length)
+        {
+            _length = 0;
+            document.WriteTextTo(this, offset, length);
+        }
+
+        public override void Write(char[] buffer, int index, int count)
+        {
+            buffer.AsSpan(index, count).CopyTo(_buffer.AsSpan(_length));
+            _length += count;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+                ArrayPool<char>.Shared.Return(_buffer);
+            base.Dispose(disposing);
         }
     }
 
