@@ -14,6 +14,11 @@ internal static class WordRules
     private const string Separators = "`~!@#$%^&*()-=+[{]}\\|;:'\",.<>/?";
 
     /// <summary>
+    /// How far around the caret <see cref="WordAt(TextDocument, int)"/> reads, as VS Code reads the word on a long line.
+    /// </summary>
+    private const int WordReach = 500;
+
+    /// <summary>
     /// What a double-click at <paramref name="column"/> selects: the word it touches, the one on the left first, then
     /// the one on the right; a run of separators that it is inside of; otherwise what lies between the words on either
     /// side, up to the line's ends.
@@ -79,6 +84,18 @@ internal static class WordRules
             start += length - kept;
             length = kept + text.ReadBlock(block, kept, block.Length - kept);
         }
+    }
+
+    /// <summary>
+    /// The word at <paramref name="caret"/>, by its offsets, as <see cref="WordAt(string, int)"/> finds it within
+    /// <see cref="WordReach"/> characters on either side on its line; null at separators and spaces.
+    /// </summary>
+    public static TextRange? WordAt(TextDocument text, int caret)
+    {
+        DocumentLine line = text.GetLineByOffset(caret);
+        int start = Math.Max(line.Offset, caret - WordReach);
+        string around = text.GetText(start, Math.Min(line.EndOffset, caret + WordReach) - start);
+        return WordAt(around, caret - start) is { } word ? new TextRange(start + word.Start, word.Length) : null;
     }
 
     /// <summary>
