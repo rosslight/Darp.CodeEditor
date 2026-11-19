@@ -389,6 +389,9 @@ public class CodeEditor : TemplatedControl
     /// <summary>Whether the editor asks for the occurrences at the caret, for tests.</summary>
     internal bool IsAskingForOccurrences => _view?.IsAskingForOccurrences ?? false;
 
+    /// <summary>Where the editor's work off the UI thread runs, such as ranking completion's items; tests hold it.</summary>
+    internal TaskScheduler BackgroundScheduler { get; init; } = TaskScheduler.Default;
+
     /// <summary>
     /// Scrolls <paramref name="range"/> into view: not at all when it is visible, centered when it is not. A range
     /// taller or wider than the view shows from its start.
@@ -676,7 +679,8 @@ public class CodeEditor : TemplatedControl
                 () => Options,
                 () => _searchBar,
                 CreatedSearchBar,
-                ScrollTo
+                ScrollTo,
+                BackgroundScheduler
             )
         );
         _view.SetColors(_theme, _colors, _iconColors);

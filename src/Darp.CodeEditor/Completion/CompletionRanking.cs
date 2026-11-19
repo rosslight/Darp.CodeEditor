@@ -10,6 +10,9 @@ namespace Darp.CodeEditor.Completion;
 /// </summary>
 internal sealed class CompletionRanking
 {
+    /// <summary>Where lists are ranked: the thread pool, or what a test holds.</summary>
+    private readonly TaskScheduler _scheduler;
+
     /// <summary>Ranks lists off the UI thread; made the first time a list is ranked, as it takes about 150 KB.</summary>
     private CompletionMatcher? _listMatcher;
 
@@ -20,6 +23,8 @@ internal sealed class CompletionRanking
     /// The ranking started last: the next one runs after it, so that the list matcher serves one thread at a time.
     /// </summary>
     private Task _ranking = Task.CompletedTask;
+
+    public CompletionRanking(TaskScheduler scheduler) => _scheduler = scheduler;
 
     /// <summary>
     /// Ranks <paramref name="items"/> off the UI thread, after the ranking before, for the text of
@@ -36,7 +41,7 @@ internal sealed class CompletionRanking
             _ => Rank(items, snapshot, caret, cancellationToken),
             CancellationToken.None,
             TaskContinuationOptions.DenyChildAttach,
-            TaskScheduler.Default
+            _scheduler
         );
         _ranking = ranking;
         return ranking;

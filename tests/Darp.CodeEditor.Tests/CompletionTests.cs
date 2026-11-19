@@ -260,15 +260,22 @@ public sealed class CompletionTests(UiFixture ui)
             await using var server = new LanguageServer(fake.Options);
             using CodeDocument answer = await SetCompletionAsync(server, fake, Items("println"));
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
-            using var window = new EditorWindow(new CodeEditor { Document = document });
+            var ranking = new HeldScheduler();
+            using var window = new EditorWindow(new CodeEditor { Document = document, BackgroundScheduler = ranking });
             window.Type("pri");
             await WaitForLabelsAsync(window, ["println"]);
 
-            // Typed, and Enter pressed, before the filter of "prizzz" shows: "println" does not match it.
-            TypeAlone(window, "zzz");
-            PressAlone(window, Key.Enter);
+            // Typed, and Enter pressed, while the filter of "prizzz" is held: "println" does not match it.
+            ranking.Hold();
+            window.Type("zzz");
+            window.Press(Key.Enter);
+            await EditorWindow.RunPostedJobsAsync();
 
+            // Enter waits for that filter: the list still shows, and no line is made yet.
+            Labels(window).ShouldBe(["println"]);
+            document.Text.ShouldBe("prizzz");
             // Opened by typing, the list ends once that filter has run, and Enter makes its new line then.
+            ranking.Release();
             await Wait.UntilAsync(() => List(window) is null);
             document.Text.ShouldBe(NewLines.In("prizzz\n", start: ""));
         });
