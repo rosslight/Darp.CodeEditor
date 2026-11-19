@@ -876,6 +876,39 @@ public sealed class CompletionTests(UiFixture ui)
             document.Text.ShouldBe(head + "println" + text[caret..]);
         });
 
+    [Theory]
+    [InlineData("pair", "a\nb\n\n\npair|")]
+    [InlineData("${1:pair}", "a\nb\n\n\n«pair»")]
+    public Task An_item_whose_text_starts_with_a_line_break_keeps_a_lone_carriage_return_before_it_a_line_of_its_own(
+        string text,
+        string expected
+    ) =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            var item = new JsonObject
+            {
+                ["label"] = "pair",
+                ["insertText"] = "\n" + text,
+                ["insertTextFormat"] = text.StartsWith('$') ? 2 : 1,
+            };
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                new JsonObject { ["items"] = new JsonArray(item) }
+            );
+            // A document of LF line breaks, with a lone CR right before the word.
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "a\nb\n\rpa");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            await OpenAsync(window, document.Text.Length);
+            window.Press(Key.Enter);
+
+            // The CR goes along with the item's text as the document's line break, rather than join its LF.
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
     [Fact]
     public Task A_commit_that_does_not_go_in_cancels_the_resolve_that_would_bring_its_additional_edits() =>
         _ui.Run(async () =>

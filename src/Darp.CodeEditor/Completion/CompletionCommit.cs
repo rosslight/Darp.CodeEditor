@@ -13,7 +13,8 @@ namespace Darp.CodeEditor.Completion;
 /// range, or the word up to the caret; replacing, over its replace range, or the whole word, as far as the edits since
 /// completion was asked left it. Additional edits that a resolve still under way brings come later. The edits go in
 /// through <see cref="TextChanges"/>: an item whose text would touch read-only text, such as protected text or a long
-/// line's hidden tail, does not go in, and additional edits that would are left out.
+/// line's hidden tail, does not go in, and additional edits that would are left out. They go in apart from a lone
+/// carriage return next to them, which would join a line break of theirs (<see cref="LineBreaks.Apart"/>).
 /// </summary>
 internal sealed class CompletionCommit : IDisposable
 {
@@ -60,7 +61,17 @@ internal sealed class CompletionCommit : IDisposable
         );
         RenderedSnippet? snippet = item.Snippet is { } source ? _snippets.Render(source, range.Start) : null;
         var main = new CompletionEdit(range, snippet?.Text ?? InLineBreaks(item.Edit.NewText));
-        if (!CanChange(main))
+        // In order, the item's edit marked; an additional edit at the item's start goes before its text.
+        (CompletionEdit Edit, bool IsMain)[] ordered =
+        [
+            .. WithoutOverlaps([main], Mapped(request.Snapshot, item.AdditionalEdits ?? []))
+                .Select((edit, i) => (edit, i == 0))
+                .OrderBy(e => e.Item1.Range.Start)
+                .ThenBy(e => e.Item2),
+        ];
+        TextEdit[] edits = Apart(ordered.Select(e => e.Edit));
+        // A lone carriage return that goes along with an edit may be read-only too.
+        if (!CanChange(main) || !edits.All(e => _changes.CanChange(e.Offset, e.Length)))
         {
             // Taken out of the resolver for the edits it brings, the resolve is now nobody's: it ends here.
             late?.Cancellation.Cancel();
@@ -68,14 +79,14 @@ internal sealed class CompletionCommit : IDisposable
         }
         var step = new object();
         var mark = new SnippetMark();
-        List<CompletionEdit> edits = WithoutOverlaps([main], Mapped(request.Snapshot, item.AdditionalEdits ?? []));
         Apply(step, continued: false, edits, snippet is null ? null : mark);
-        // The item's text moved by the additional edits before it.
-        int start =
-            main.Range.Start
-            + edits.Skip(1).Where(e => e.Range.End <= main.Range.Start).Sum(e => e.NewText.Length - e.Range.Length);
+        // Where the item's text went: moved by the edits before it, and after a line break that went along with it.
+        int index = Array.FindIndex(ordered, e => e.IsMain);
+        TextEdit placed = edits[index];
+        int at = placed.Offset + edits.Take(index).Sum(e => e.Text.Length - e.Length);
+        int start = at + (placed.Offset < main.Range.Start ? _document.LineBreak.Length : 0);
         _textArea.ClearSelection();
-        _textArea.Caret.Offset = start + main.NewText.Length;
+        _textArea.Caret.Offset = at + placed.Text.Length;
         _textArea.Caret.BringCaretToView();
         if (snippet is not null)
             _snippets.Start(snippet, start, mark);
@@ -102,7 +113,8 @@ internal sealed class CompletionCommit : IDisposable
             {
                 return;
             }
-            Apply(step, continued: true, WithoutOverlaps([], Mapped(snapshot, additional)), mark: null);
+            TextEdit[] edits = Apart(WithoutOverlaps([], Mapped(snapshot, additional)).OrderBy(e => e.Range.Start));
+            Apply(step, continued: true, [.. edits.Where(e => _changes.CanChange(e.Offset, e.Length))], mark: null);
         }
         catch (Exception e)
         {
@@ -118,12 +130,12 @@ internal sealed class CompletionCommit : IDisposable
     }
 
     /// <summary>
-    /// Applies edits through <see cref="TextChanges"/>, from the last to the first, each a change of its own, in the undo
-    /// step <paramref name="step"/>: a new one, or the last one continued. One change from an import at the top to an
-    /// item far below would replace all the text between them. A snippet's <paramref name="mark"/> goes in first, so
-    /// that undoing the step reaches it last, once the text is back.
+    /// Applies edits, in order, through <see cref="TextChanges"/>, from the last to the first, each a change of its own,
+    /// in the undo step <paramref name="step"/>: a new one, or the last one continued. One change from an import at the
+    /// top to an item far below would replace all the text between them. A snippet's <paramref name="mark"/> goes in
+    /// first, so that undoing the step reaches it last, once the text is back.
     /// </summary>
-    private void Apply(object step, bool continued, List<CompletionEdit> edits, SnippetMark? mark)
+    private void Apply(object step, bool continued, TextEdit[] edits, SnippetMark? mark)
     {
         UndoStack undo = _buffer.UndoStack;
         if (continued)
@@ -136,8 +148,8 @@ internal sealed class CompletionCommit : IDisposable
                 undo.Push(mark);
             using (_buffer.RunUpdate())
             {
-                foreach (CompletionEdit edit in edits.OrderByDescending(e => e.Range.Start))
-                    _changes.Apply([new TextEdit(edit.Range.Start, edit.Range.Length, edit.NewText)]);
+                for (int i = edits.Length - 1; i >= 0; i--)
+                    _changes.Apply([edits[i]]);
             }
         }
         finally
@@ -145,6 +157,18 @@ internal sealed class CompletionCommit : IDisposable
             undo.EndUndoGroup();
         }
     }
+
+    /// <summary>
+    /// <paramref name="edits"/>, in order, apart from a lone carriage return next to them (<see cref="LineBreaks.Apart"/>).
+    /// </summary>
+    private TextEdit[] Apart(IEnumerable<CompletionEdit> edits) =>
+        [
+            .. LineBreaks.Apart(
+                _buffer,
+                [.. edits.Select(e => new TextEdit(e.Range.Start, e.Range.Length, e.NewText))],
+                _document.LineBreak
+            ),
+        ];
 
     /// <summary>
     /// Edits in the text of <paramref name="snapshot"/>, moved to the current text, with the document's line breaks.
