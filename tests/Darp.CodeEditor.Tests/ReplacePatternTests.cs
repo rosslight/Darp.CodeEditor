@@ -90,6 +90,8 @@ public sealed class ReplacePatternTests
     [InlineData("Foo", "ßar", "SSar")]
     // A capital sigma at the end of a word is ς in lower case.
     [InlineData("ab", "ΟΣ ΣΑ ΟΣ.", "ος σα ος.")]
+    // After a character that is cased but not a letter, as a Roman numeral.
+    [InlineData("ab", "\u2163\u03A3", "\u2173\u03C2")]
     public void With_Preserve_Case_a_replacement_takes_the_case_of_the_match(
         string match,
         string replacement,

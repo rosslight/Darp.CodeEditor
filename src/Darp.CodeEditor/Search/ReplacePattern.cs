@@ -25,6 +25,22 @@ internal sealed class ReplacePattern
     private const string WordPunctuation =
         "'.:\u00B7\u0387\u05F4\u2018\u2019\u2024\u2027\uFE13\uFE52\uFE55\uFF07\uFF0E\uFF1A";
 
+    /// <summary>
+    /// The cased characters other than letters in upper, lower or title case, by Unicode's Other_Lowercase and
+    /// Other_Uppercase: ª, º, Roman numerals, and circled and squared Latin letters. Its modifier letters and marks are
+    /// left out, as case-ignorable characters count as such first.
+    /// </summary>
+    private static readonly (int First, int Last)[] s_otherCased =
+    [
+        (0x00AA, 0x00AA),
+        (0x00BA, 0x00BA),
+        (0x2160, 0x217F),
+        (0x24B6, 0x24E9),
+        (0x1F130, 0x1F149),
+        (0x1F150, 0x1F169),
+        (0x1F170, 0x1F189),
+    ];
+
     private static readonly FrozenDictionary<char, string> s_upperExpansions = UpperExpansions();
 
     private readonly IReadOnlyList<Piece> _pieces;
@@ -239,7 +255,7 @@ internal sealed class ReplacePattern
     }
 
     /// <summary>
-    /// Whether the capital sigma at <paramref name="index"/> ends a word, by Unicode's Final_Sigma: a cased letter
+    /// Whether the capital sigma at <paramref name="index"/> ends a word, by Unicode's Final_Sigma: a cased character
     /// before it and none after it, apart from case-ignorable characters such as marks and apostrophes between.
     /// </summary>
     private static bool IsFinalSigma(string text, int index)
@@ -267,7 +283,8 @@ internal sealed class ReplacePattern
             Rune.GetUnicodeCategory(rune)
                 is UnicodeCategory.UppercaseLetter
                     or UnicodeCategory.LowercaseLetter
-                    or UnicodeCategory.TitlecaseLetter;
+                    or UnicodeCategory.TitlecaseLetter
+            || s_otherCased.Any(range => rune.Value >= range.First && rune.Value <= range.Last);
 
         static bool IsCaseIgnorable(Rune rune) =>
             Rune.GetUnicodeCategory(rune)
