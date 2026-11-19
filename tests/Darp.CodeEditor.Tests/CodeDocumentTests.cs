@@ -32,6 +32,38 @@ public sealed class CodeDocumentTests(UiFixture ui)
     public void New_lines_take_the_line_break_that_most_lines_of_the_text_end_with(string text, string? expected) =>
         LineBreaks.Detect(text).ShouldBe(expected ?? NewLines.OfNewDocuments);
 
+    /// <summary>
+    /// An LF that an edit puts right after a lone CR, or a CR right before a lone LF, would make one line break of two:
+    /// the CR goes too, as the document's line break, here <c>\n</c>. Edits that each start where the one before ends
+    /// count as one.
+    /// </summary>
+    [Theory]
+    [InlineData("a\rb", "2,0,\n", "a\n\nb")]
+    [InlineData("a\rx\nb", "2,1,", "a\n\nb")]
+    [InlineData("a\rxy\nb", "2,1,;3,1,", "a\n\nb")]
+    [InlineData("a\nb", "1,0,\r", "a\n\nb")]
+    [InlineData("ax\nb", "1,0,\r;1,1,", "a\n\nb")]
+    // Next to a CR LF, or to text, they stay as they are.
+    [InlineData("a\r\nb", "3,0,\n", "a\r\n\nb")]
+    [InlineData("a\rb", "1,1,\r\n", "a\r\nb")]
+    [InlineData("a\rb", "2,0,x\n", "a\rx\nb")]
+    public void Edits_keep_a_lone_CR_and_an_LF_apart(string text, string edits, string expected)
+    {
+        var document = new AvaloniaEdit.Document.TextDocument(text);
+        Editing.TextEdit[] parsed =
+        [
+            .. edits
+                .Split(';')
+                .Select(edit => edit.Split(',', 3))
+                .Select(parts => new Editing.TextEdit(int.Parse(parts[0]), int.Parse(parts[1]), parts[2])),
+        ];
+
+        foreach (Editing.TextEdit edit in LineBreaks.Apart(document, parsed, "\n").Reverse())
+            document.Replace(edit.Offset, edit.Length, edit.Text);
+
+        document.Text.ShouldBe(expected);
+    }
+
     /// <summary>Edits keep it, also those that remove every line break.</summary>
     [Fact]
     public Task The_line_break_is_found_when_the_text_is_created_or_set() =>

@@ -132,8 +132,9 @@ internal sealed class LineClipboard : IDisposable
         int lineStart = LineStart;
         if (text == line && MayPasteLine() && CanInsert(lineStart))
         {
-            string pasted = TextUtilities.NormalizeNewLines(text, _document.LineBreak);
-            _changes.Run(EditStep.Own, () => _changes.Apply([new TextEdit(lineStart, 0, pasted)]));
+            string lineBreak = _document.LineBreak;
+            TextEdit pasted = new(lineStart, 0, TextUtilities.NormalizeNewLines(text, lineBreak));
+            _changes.Run(EditStep.Own, () => _changes.Apply(LineBreaks.Apart(Buffer, [pasted], lineBreak)));
             _area.Caret.BringCaretToView();
         }
         else

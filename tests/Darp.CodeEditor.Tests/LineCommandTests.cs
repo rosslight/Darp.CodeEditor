@@ -50,6 +50,8 @@ public sealed class LineCommandTests(UiFixture ui)
     [InlineData("a\n|\nb", Keys.Down, "a\nb\n|")]
     [InlineData("a\n|\nb", Keys.Up, "|\na\nb")]
     [InlineData("a\n|\n\nb", Keys.Down, "a\n\n|\nb")]
+    // After a lone CR, the line that comes up stays a line of its own.
+    [InlineData("a\nb\r|x\n", Keys.Down, "a\nb\n\n|x")]
     public Task Alt_Up_and_Alt_Down_move_the_lines_past_the_line_next_to_them_with_the_selection(
         string marked,
         Keys key,
