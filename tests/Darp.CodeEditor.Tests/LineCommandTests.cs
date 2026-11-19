@@ -329,6 +329,28 @@ public sealed class LineCommandTests(UiFixture ui)
             textArea.Selection.ShouldBeOfType<RectangleSelection>().EndPosition.Line.ShouldBe(3);
         });
 
+    [Theory]
+    [InlineData("move")]
+    [InlineData("copy")]
+    [InlineData("delete")]
+    public Task Lines_whose_change_switches_the_document_leave_the_other_one_alone(string command) =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("a\nb|\nc", CodeLanguage.PlainText);
+            CodeDocument other = CodeDocument.Create(CodeLanguage.PlainText, "z");
+            DocumentOf(window).TextChanged += (_, _) => window.Editor.Document = other;
+
+            if (command == "move")
+                window.Press(Keys.Down, KeyModifiers.Alt);
+            else if (command == "copy")
+                window.Press(Keys.Down, CopyLines);
+            else
+                window.Press(Keys.K, EditorWindow.Command | KeyModifiers.Shift);
+
+            window.Editor.Document.ShouldBe(other);
+            MarkedText.Of(window).ShouldBe("|z");
+        });
+
     /// <summary>The keys go on: on Windows, Shift+Alt+Down then starts AvaloniaEdit's rectangle.</summary>
     [Fact]
     public Task A_read_only_editor_moves_and_copies_no_lines() =>

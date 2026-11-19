@@ -101,8 +101,10 @@ internal sealed class LineCommands : IEditorFeature
                 EditStep.Own,
                 () =>
                 {
-                    if (swapped = _changes.Apply(other.Length > 0 ? swap : []))
-                        Select(selection, new Place(otherLine, 0), new Place(otherLine, 0), endMovesDown, false);
+                    swapped = Apply(
+                        other.Length > 0 ? swap : [],
+                        () => Moved(selection, new Place(otherLine, 0), new Place(otherLine, 0), endMovesDown, false)
+                    );
                 }
             );
             return swapped;
@@ -127,8 +129,7 @@ internal sealed class LineCommands : IEditorFeature
             EditStep.Own,
             () =>
             {
-                if (moved = _changes.Apply(edits))
-                    Select(selection, newStart, newEnd, endMovesDown, shrinks);
+                moved = Apply(edits, () => Moved(selection, newStart, newEnd, endMovesDown, shrinks));
             }
         );
         return moved;
@@ -205,15 +206,14 @@ internal sealed class LineCommands : IEditorFeature
             EditStep.Own,
             () =>
             {
-                if (copied = _changes.Apply([copy]))
-                {
-                    _changes.Select(
+                copied = Apply(
+                    [copy],
+                    () =>
                         new TextSelection(
                             OffsetOf(anchor with { Line = anchor.Line + moved }),
                             OffsetOf(caret with { Line = caret.Line + moved })
                         )
-                    );
-                }
+                );
             }
         );
         return copied;
@@ -247,8 +247,10 @@ internal sealed class LineCommands : IEditorFeature
             EditStep.Own,
             () =>
             {
-                if (applied = _changes.Apply([new TextEdit(deleted.Start, deleted.Length, "")]))
-                    _changes.Select(new TextSelection(OffsetOf(new Place(lineNumber, column))));
+                applied = Apply(
+                    [new TextEdit(deleted.Start, deleted.Length, "")],
+                    () => new TextSelection(OffsetOf(new Place(lineNumber, column)))
+                );
             }
         );
         return applied;
@@ -327,22 +329,35 @@ internal sealed class LineCommands : IEditorFeature
     }
 
     /// <summary>
-    /// Selects the moved selection's ends, <paramref name="start"/> and <paramref name="end"/>, in the direction of
+    /// The moved selection, from its ends <paramref name="start"/> and <paramref name="end"/>, in the direction of
     /// <paramref name="before"/>: the end at the start of the line after its own if it <paramref name="movesDown"/>, and
     /// in the second column of its line if it <paramref name="shrinks"/> and the selection spans lines.
     /// </summary>
-    private void Select(TextSelection before, Place start, Place end, bool movesDown, bool shrinks)
+    private TextSelection Moved(TextSelection before, Place start, Place end, bool movesDown, bool shrinks)
     {
         int startOffset = OffsetOf(start);
         DocumentLine endLine = Buffer.GetLineByNumber(end.Line + (movesDown ? 1 : 0));
         int endOffset = movesDown ? endLine.Offset : OffsetOf(end);
         if (shrinks && endLine.LineNumber > start.Line)
             endOffset = Math.Min(endLine.Offset + 1, endLine.EndOffset);
-        _changes.Select(
-            before.Anchor <= before.Caret
-                ? new TextSelection(startOffset, endOffset)
-                : new TextSelection(endOffset, startOffset)
-        );
+        return before.Anchor <= before.Caret
+            ? new TextSelection(startOffset, endOffset)
+            : new TextSelection(endOffset, startOffset);
+    }
+
+    /// <summary>
+    /// Makes <paramref name="edits"/>, then selects what <paramref name="selection"/> finds in the new text, unless a
+    /// handler of the change showed another document.
+    /// </summary>
+    /// <returns>Whether the edits went in.</returns>
+    private bool Apply(IReadOnlyList<TextEdit> edits, Func<TextSelection> selection)
+    {
+        TextDocument edited = Buffer;
+        if (!_changes.Apply(edits))
+            return false;
+        if (Buffer == edited)
+            _changes.Select(selection());
+        return true;
     }
 
     private Place PlaceOf(int offset)
