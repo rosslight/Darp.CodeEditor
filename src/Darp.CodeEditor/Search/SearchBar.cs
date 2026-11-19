@@ -21,6 +21,18 @@ internal enum BarFocus
     Replacement,
 }
 
+/// <summary>Where the selection goes once a search has its result.</summary>
+internal enum SearchMove
+{
+    None,
+
+    /// <summary>To the first match from where the search started.</summary>
+    First,
+
+    Next,
+    Previous,
+}
+
 /// <summary>One of the search bar's toggles that its keys turn on and off.</summary>
 internal enum SearchOption
 {
@@ -157,7 +169,9 @@ internal sealed class SearchBar : UserControl
         set => _findInSelection.IsChecked = value;
     }
 
-    /// <summary>The search's latest work in the background, also for a document shown before; tests wait for it.</summary>
+    /// <summary>
+    /// The search's latest work in the background, also for a document shown before; tests wait for it.
+    /// </summary>
     internal Task LatestSearch => Search?.LatestSearch ?? Task.CompletedTask;
 
     internal TextBox FindBox => _find;

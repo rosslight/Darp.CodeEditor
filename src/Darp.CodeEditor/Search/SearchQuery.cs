@@ -115,7 +115,9 @@ internal sealed record SearchQuery(string Text, bool MatchCase, bool WholeWord, 
         return $@"(?:(?={Pair}){atom}[\uDC00-\uDFFF]|(?!{Pair}){atom})";
     }
 
-    /// <summary>The end of the atom that can match half of a surrogate pair at <paramref name="i"/>; i for none.</summary>
+    /// <summary>
+    /// The end of the atom that can match half of a surrogate pair at <paramref name="i"/>; i for none.
+    /// </summary>
     private static int AtomEnd(string pattern, int i) =>
         pattern[i] switch
         {
