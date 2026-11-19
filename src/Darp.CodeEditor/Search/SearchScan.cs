@@ -25,6 +25,9 @@ internal sealed class SearchScan
     private readonly CancellationToken _cancellationToken;
     private readonly long _start = Stopwatch.GetTimestamp();
 
+    /// <summary>Whether the regular expression has groups, whose bounds a match must not put inside a pair.</summary>
+    private readonly bool _hasGroups;
+
     public SearchScan(
         string text,
         SearchQuery query,
@@ -38,6 +41,7 @@ internal sealed class SearchScan
         _regex = regex;
         _found = found;
         _cancellationToken = cancellationToken;
+        _hasGroups = regex.GetGroupNumbers().Length > 1;
     }
 
     /// <summary>
@@ -171,7 +175,7 @@ internal sealed class SearchScan
                 continue;
             }
             if (
-                !IsInsideSurrogatePair(input, matchEnd)
+                !SplitsAPair(input, shift, match)
                 && (!_query.WholeWord || IsWholeWord(input, start, end, index, match.Length))
             )
             {
@@ -206,6 +210,28 @@ internal sealed class SearchScan
     /// <summary>Whether <paramref name="offset"/> is between a <c>\r</c> and its <c>\n</c>.</summary>
     public static bool IsInsideLineBreak(string text, int offset) =>
         offset > 0 && offset < text.Length && text[offset - 1] == '\r' && text[offset] == '\n';
+
+    /// <summary>
+    /// Whether the match ends, or one of its groups starts or ends, between the two halves of a surrogate pair, where a
+    /// replacement would split it.
+    /// </summary>
+    private bool SplitsAPair(string input, int shift, Match match)
+    {
+        if (IsInsideSurrogatePair(input, shift + match.Index + match.Length))
+            return true;
+        if (!_hasGroups)
+            return false;
+        foreach (Group group in match.Groups)
+        {
+            int groupStart = shift + group.Index;
+            if (
+                group.Success
+                && (IsInsideSurrogatePair(input, groupStart) || IsInsideSurrogatePair(input, groupStart + group.Length))
+            )
+                return true;
+        }
+        return false;
+    }
 
     /// <summary>Whether <paramref name="offset"/> is between the two halves of a surrogate pair.</summary>
     private static bool IsInsideSurrogatePair(string text, int offset) =>

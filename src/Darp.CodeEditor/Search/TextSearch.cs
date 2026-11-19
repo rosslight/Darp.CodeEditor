@@ -101,11 +101,12 @@ internal static class TextSearch
     )
     {
         var matches = new TextSegmentCollection<SearchMatch>();
-        if (!query.TryCreateRegex(out Regex? regex, out string? error))
+        string text = snapshot.GetText();
+        if (!query.TryCreateRegex(HasSurrogates(text), out Regex? regex, out string? error))
             return new SearchResult(snapshot.Version, query, replacement, matches, SearchOutcome.InvalidPattern, error);
         Replacing? replacing = replacement is null ? null : new Replacing(query, replacement, snapshot.LineBreak);
         SearchOutcome outcome = new SearchScan(
-            snapshot.GetText(),
+            text,
             query,
             regex,
             (start, length, match) =>
@@ -137,12 +138,13 @@ internal static class TextSearch
         CancellationToken cancellationToken
     )
     {
-        if (!query.TryCreateRegex(out Regex? regex, out _))
+        string text = snapshot.GetText();
+        if (!query.TryCreateRegex(HasSurrogates(text), out Regex? regex, out _))
             return (null, SearchOutcome.InvalidPattern);
         var replacing = new Replacing(query, replacement, snapshot.LineBreak);
         var edits = new List<TextEdit>();
         SearchOutcome outcome = new SearchScan(
-            snapshot.GetText(),
+            text,
             query,
             regex,
             (start, length, match) =>
@@ -178,9 +180,9 @@ internal static class TextSearch
         CancellationToken cancellationToken
     )
     {
-        if (!query.TryCreateRegex(out Regex? regex, out _))
-            return (null, SearchOutcome.InvalidPattern);
         string text = snapshot.GetText();
+        if (!query.TryCreateRegex(HasSurrogates(text), out Regex? regex, out _))
+            return (null, SearchOutcome.InvalidPattern);
         from = Math.Clamp(from, 0, text.Length);
         if (SearchScan.IsInsideLineBreak(text, from))
             from++;
@@ -217,9 +219,9 @@ internal static class TextSearch
         CancellationToken cancellationToken
     )
     {
-        if (!query.TryCreateRegex(out Regex? regex, out _))
-            return (null, SearchOutcome.InvalidPattern);
         string text = snapshot.GetText();
+        if (!query.TryCreateRegex(HasSurrogates(text), out Regex? regex, out _))
+            return (null, SearchOutcome.InvalidPattern);
         TextRange? last = null;
         SearchOutcome outcome = new SearchScan(
             text,
@@ -236,6 +238,9 @@ internal static class TextSearch
         ).Scan(scope, Math.Clamp(from, 0, text.Length));
         return (last, outcome == SearchOutcome.OutOfTime ? outcome : SearchOutcome.Complete);
     }
+
+    /// <summary>Whether the text has surrogates, which a regular expression's atoms must not split.</summary>
+    private static bool HasSurrogates(string text) => text.AsSpan().IndexOfAnyInRange('\uD800', '\uDFFF') >= 0;
 
     /// <summary>
     /// Builds the text that replaces each match: the replacement itself, or for a regular expression with its

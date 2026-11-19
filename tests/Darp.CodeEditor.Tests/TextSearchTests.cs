@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using AvaloniaEdit.Document;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Search;
@@ -201,16 +202,20 @@ public sealed class TextSearchTests
     }
 
     /// <summary>
-    /// As VS Code searches, by code points: no match starts or ends inside a surrogate pair, an empty match steps past
-    /// a pair whole, and <c>.</c> matches a pair whole. A character class such as <c>[^b]</c> matches half of one,
-    /// which the search rejects: VS Code's would match the pair.
+    /// As VS Code searches, by code points: no match or group starts or ends inside a surrogate pair, an empty match
+    /// steps past a pair whole, and <c>.</c>, character classes and escapes such as <c>\W</c> match a pair whole, so
+    /// that a replacement never writes half of one.
     /// </summary>
     [Theory]
     [InlineData("\U0001F600", "(?=.)", "X", "X\U0001F600")]
     [InlineData("\U0001F600", "(?:)", "X", "X\U0001F600X")]
     [InlineData("a\U0001F600b", ".", "<$0>", "<a><\U0001F600><b>")]
     [InlineData("\U0001F600\U0001F601", "(?<=.)", "|", "\U0001F600|\U0001F601|")]
-    [InlineData("\U0001F600", "[^b]", "X", "\U0001F600")]
+    [InlineData("\U0001F600", "[^b]", "X", "X")]
+    [InlineData("a\U0001F600b", @"\W", "<$0>", "a<\U0001F600>b")]
+    [InlineData("\U0001F600", "(.)", "[$1]", "[\U0001F600]")]
+    [InlineData("\U0001F600", "(.)(.)", "$2$1", "\U0001F600")]
+    [InlineData("\U0001F600", @"(\uD83D)(\uDE00)", "$2$1", "\U0001F600")]
     public void No_match_splits_a_surrogate_pair(string text, string query, string replacement, string expected)
     {
         var snapshot = TextSnapshot.FromString(text);
@@ -255,19 +260,21 @@ public sealed class TextSearchTests
         string.Join(' ', result.Matches.Select(match => $"{match.StartOffset}-{match.EndOffset}")).ShouldBe(expected);
     }
 
+    /// <summary>The atoms that can match half of a pair, outside classes and comments: each ⟨atom⟩ takes a pair whole.</summary>
     [Theory]
-    [InlineData("a.b", "a~b")]
-    [InlineData(@"\.\\.", @"\.\\~")]
-    [InlineData("[.].", "[.]~")]
-    [InlineData("[].].", "[].]~")]
-    [InlineData("[^].].", "[^].]~")]
-    [InlineData(@"[\].].", @"[\].]~")]
-    [InlineData("[a-z-[.]].", "[a-z-[.]]~")]
-    [InlineData("(?#a.b).", "(?#a.b)~")]
-    public void Only_a_dot_outside_a_character_class_matches_a_code_point(string pattern, string expected) =>
+    [InlineData("a.b", "a⟨.⟩b")]
+    [InlineData(@"\.\\.", @"\.\\⟨.⟩")]
+    [InlineData("[.].", "⟨[.]⟩⟨.⟩")]
+    [InlineData("[].].", "⟨[].]⟩⟨.⟩")]
+    [InlineData("[^].].", "⟨[^].]⟩⟨.⟩")]
+    [InlineData(@"[\].].", @"⟨[\].]⟩⟨.⟩")]
+    [InlineData("[a-z-[.]].", "⟨[a-z-[.]]⟩⟨.⟩")]
+    [InlineData("(?#a.b).", "(?#a.b)⟨.⟩")]
+    [InlineData(@"\W\w\p{L}\d\S", @"⟨\W⟩\w⟨\p{L}⟩\d⟨\S⟩")]
+    public void Atoms_that_can_match_half_of_a_surrogate_pair_take_it_whole(string pattern, string expected) =>
         SearchQuery
-            .DotsMatchCodePoints(pattern)
-            .ShouldBe(expected.Replace("~", @"(?:[\uD800-\uDBFF][\uDC00-\uDFFF]|.)", StringComparison.Ordinal));
+            .AtomsMatchCodePoints(pattern)
+            .ShouldBe(Regex.Replace(expected, "⟨(.+?)⟩", atom => SearchQuery.CodePoint(atom.Groups[1].Value)));
 
     [Theory]
     [InlineData("foo", false)]
