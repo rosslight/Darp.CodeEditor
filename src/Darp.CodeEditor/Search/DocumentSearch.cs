@@ -81,7 +81,6 @@ internal sealed class DocumentSearch : IDisposable
     /// </summary>
     public Task LatestSearch { get; private set; } = Task.CompletedTask;
 
-    /// <summary>The colors of the color theme, once it is loaded.</summary>
     public TextAreaColors? Colors
     {
         set
@@ -91,7 +90,6 @@ internal sealed class DocumentSearch : IDisposable
         }
     }
 
-    /// <summary>Whether Find in Selection is on.</summary>
     public bool IsInSelection => _scope is not null;
 
     private TextArea Area => _context.Area;
@@ -457,7 +455,6 @@ internal sealed class DocumentSearch : IDisposable
             ? result
             : null;
 
-    /// <summary>The match that is selected; null for none.</summary>
     private SearchMatch? CurrentMatch(SearchResult result)
     {
         TextRange selection = _changes.Selection.Range;

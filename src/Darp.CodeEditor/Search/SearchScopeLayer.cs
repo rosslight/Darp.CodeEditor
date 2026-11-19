@@ -24,7 +24,6 @@ internal sealed class SearchScopeLayer : IBackgroundRenderer, IDisposable
     /// <summary>Behind the selection, in the layer that the text view draws itself whenever a layer changes.</summary>
     public KnownLayer Layer => KnownLayer.Background;
 
-    /// <summary>The colors of the color theme, once it is loaded.</summary>
     public TextAreaColors? Colors
     {
         set

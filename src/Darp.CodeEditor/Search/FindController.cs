@@ -35,7 +35,6 @@ internal sealed class FindController : IEditorFeature
             _search = new DocumentSearch(context, changes, bar, null);
     }
 
-    /// <summary>The colors of the color theme, once it is loaded.</summary>
     public TextAreaColors? Colors
     {
         set
