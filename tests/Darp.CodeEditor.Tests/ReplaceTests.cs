@@ -248,6 +248,33 @@ public sealed class ReplaceTests(UiFixture ui)
             document.Text.ShouldBe("a\nb\nc");
         });
 
+    /// <summary>
+    /// As every edit, Replace and Replace All put no line feed right after a lone carriage return, which would make one
+    /// line break of the two and lose a line: the carriage return becomes the document's line break.
+    /// </summary>
+    [Theory]
+    [InlineData("Replace")]
+    [InlineData("Replace All")]
+    public Task Replace_puts_no_line_feed_after_a_lone_carriage_return(string button) =>
+        _ui.Run(async () =>
+        {
+            // Three line breaks, one a lone carriage return: the document's is a line feed.
+            using EditorWindow window = MarkedText.Show("|a\nb\nc\rd", CodeLanguage.PlainText);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            window.Editor.OpenSearch(replace: true);
+            SearchBar bar = BarOf(window);
+            bar.RegexToggle.IsChecked = true;
+            bar.ReplaceBox.Text = @"\nd";
+            bar.FindBox.Text = "d";
+            await SearchedAsync(bar);
+            window.Editor.Selection.ShouldBe(new TextSelection(6, 7));
+
+            Click(bar, button);
+            await SearchedAsync(bar);
+
+            document.Text.ShouldBe("a\nb\nc\n\nd");
+        });
+
     [Fact]
     public Task Empty_matches_are_found_gone_through_and_replaced() =>
         _ui.Run(async () =>

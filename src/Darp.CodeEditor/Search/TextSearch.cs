@@ -123,7 +123,8 @@ internal static class TextSearch
     /// <summary>
     /// The edit that replaces every match of <paramref name="query"/> in <paramref name="snapshot"/>, however many
     /// there are, also beyond the matches that a search keeps: one change of the text, combined here, off the UI
-    /// thread, for <see cref="TextChanges.Apply(CombinedEdit)"/>.
+    /// thread, for <see cref="TextChanges.Apply(CombinedEdit)"/>, with its edits apart from a lone carriage return
+    /// (<see cref="LineBreaks.Apart"/>).
     /// </summary>
     /// <returns>
     /// The edit, null without a match; null also where the search ran out of time or the regular expression is
@@ -156,9 +157,10 @@ internal static class TextSearch
             clock ?? TimeProvider.System,
             cancellationToken
         ).Scan(scope);
+        var source = new StringTextSource(text);
         CombinedEdit? edit =
             outcome == SearchOutcome.Complete && edits.Count > 0
-                ? CombinedEdit.Of(new StringTextSource(text), edits, cancellationToken)
+                ? CombinedEdit.Of(source, LineBreaks.Apart(source, edits, snapshot.LineBreak), cancellationToken)
                 : null;
         return (edit, outcome);
     }
