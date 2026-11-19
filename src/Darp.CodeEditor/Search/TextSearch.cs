@@ -274,7 +274,6 @@ internal static class TextSearch
         {
             regex = new Regex(query.UseRegex ? query.Text : Regex.Escape(query.Text), options, TimeLimit);
             error = null;
-            return true;
         }
         catch (ArgumentException e)
         {
@@ -282,6 +281,74 @@ internal static class TextSearch
             error = e.Message;
             return false;
         }
+        if (query.UseRegex && DotsMatchCodePoints(query.Text) is var rewritten && rewritten != query.Text)
+        {
+            // The query as the user wrote it is valid, and its errors read as written: the rewritten one should be.
+            try
+            {
+                regex = new Regex(rewritten, options, TimeLimit);
+            }
+            catch (ArgumentException) { }
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// The pattern with each <c>.</c> outside a character class matching a code point, not half of a surrogate pair,
+    /// as with VS Code's <c>u</c> flag: an emoji is one match of <c>.</c>, not two. Character classes, such as
+    /// <c>[^a]</c> or <c>\W</c>, still match half of a pair, which the search then rejects.
+    /// </summary>
+    internal static string DotsMatchCodePoints(string pattern)
+    {
+        const string CodePoint = @"(?:[\uD800-\uDBFF][\uDC00-\uDFFF]|.)";
+        if (!pattern.Contains('.', StringComparison.Ordinal))
+            return pattern;
+        var rewritten = new StringBuilder(pattern.Length + CodePoint.Length);
+        // How deep in character classes, with .NET's subtractions, such as [a-z-[aeiou]], inside.
+        int depth = 0;
+        bool dash = false;
+        for (int i = 0; i < pattern.Length; i++)
+        {
+            char c = pattern[i];
+            if (c == '\\')
+            {
+                rewritten.Append(pattern.AsSpan(i, Math.Min(2, pattern.Length - i)));
+                i++;
+                dash = false;
+                continue;
+            }
+            if (depth > 0)
+            {
+                if (c == '[' && dash)
+                    depth++;
+                else if (c == ']')
+                    depth--;
+                dash = c == '-';
+                rewritten.Append(c);
+            }
+            else if (c == '[')
+            {
+                depth = 1;
+                rewritten.Append(c);
+                // A ] first in the class, also after ^, is one of its characters.
+                if (i + 1 < pattern.Length && pattern[i + 1] == '^')
+                    rewritten.Append(pattern[++i]);
+                if (i + 1 < pattern.Length && pattern[i + 1] == ']')
+                    rewritten.Append(pattern[++i]);
+            }
+            else if (pattern.AsSpan(i).StartsWith("(?#", StringComparison.Ordinal))
+            {
+                // A comment, to its first ).
+                int end = pattern.IndexOf(')', i) is var close and >= 0 ? close + 1 : pattern.Length;
+                rewritten.Append(pattern, i, end - i);
+                i = end - 1;
+            }
+            else if (c == '.')
+                rewritten.Append(CodePoint);
+            else
+                rewritten.Append(c);
+        }
+        return rewritten.ToString();
     }
 
     /// <summary>
@@ -424,31 +491,54 @@ internal static class TextSearch
         Clock clock
     )
     {
-        for (Match match = regex.Match(input, start, end - start); match.Success; match = match.NextMatch())
+        // The text that the regular expression searches, and where it starts in the input: the input, or once a search
+        // must go on after a surrogate pair, the text searched alone, as a search from an offset of its own needs.
+        string searched = input;
+        int shift = 0;
+        Match match = regex.Match(input, start, end - start);
+        while (match.Success)
         {
             // Every match counts, also one that Match Whole Word rejects: each may have taken long to find.
             if (clock.IsOutOfTime())
                 return SearchOutcome.OutOfTime;
-            int matchEnd = match.Index + match.Length;
-            if (!query.WholeWord || IsWholeWord(input, start, end, match.Index, match.Length))
+            int index = shift + match.Index;
+            int matchEnd = index + match.Length;
+            // As VS Code's search, by code points: no match starts inside a surrogate pair, and the next try starts
+            // after it, as VS Code steps past an empty match.
+            if (IsInsideSurrogatePair(input, index))
+            {
+                if (index >= end)
+                    break;
+                if (ReferenceEquals(searched, input) && (start > 0 || end < input.Length))
+                    (searched, shift) = (input[start..end], start);
+                match = regex.Match(searched, index + 1 - shift);
+                continue;
+            }
+            if (
+                !IsInsideSurrogatePair(input, matchEnd)
+                && (!query.WholeWord || IsWholeWord(input, start, end, index, match.Length))
+            )
             {
                 bool goesOn = joined is null
-                    ? found(match.Index, match.Length, match, lineBreak)
-                    : found(
-                        joined.ToText(match.Index),
-                        joined.ToText(matchEnd) - joined.ToText(match.Index),
-                        match,
-                        lineBreak
-                    );
+                    ? found(index, match.Length, match, lineBreak)
+                    : found(joined.ToText(index), joined.ToText(matchEnd) - joined.ToText(index), match, lineBreak);
                 if (!goesOn)
                     return SearchOutcome.TooManyMatches;
             }
             // As VS Code's search: a match that ends at the end of the text is the last, also before an empty match.
             if (matchEnd == end)
                 break;
+            match = match.NextMatch();
         }
         return SearchOutcome.Complete;
     }
+
+    /// <summary>Whether <paramref name="offset"/> is between the two halves of a surrogate pair.</summary>
+    private static bool IsInsideSurrogatePair(string text, int offset) =>
+        offset > 0
+        && offset < text.Length
+        && char.IsHighSurrogate(text[offset - 1])
+        && char.IsLowSurrogate(text[offset]);
 
     /// <summary>Where the first line break at or after <paramref name="offset"/> starts; -1 for none.</summary>
     private static int IndexOfLineBreak(string text, int offset) =>
