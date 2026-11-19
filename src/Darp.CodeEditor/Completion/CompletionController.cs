@@ -57,8 +57,8 @@ namespace Darp.CodeEditor.Completion;
 /// <see cref="Close"/> ends completion, for every reason it ends: Escape, the caret leaving the line or moving back
 /// past the word, a selection, the editor becoming read-only, the list scrolling out of view, the editor losing the
 /// keyboard focus, a server that starts or stops serving the document, new colors, the list running out of matches, and
-/// the editor no longer showing the document. Ending it hides "No suggestions." too, and cancels the request still under way with
-/// <c>$/cancelRequest</c>, and so does a newer request; a late answer is dropped.
+/// the editor no longer showing the document. Ending it hides "No suggestions." too, and cancels the request still
+/// under way with <c>$/cancelRequest</c>, and so does a newer request; a late answer is dropped.
 /// </para>
 /// </remarks>
 internal sealed class CompletionController : IEditorFeature
