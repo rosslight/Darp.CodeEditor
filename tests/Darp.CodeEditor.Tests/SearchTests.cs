@@ -43,6 +43,46 @@ public sealed class SearchTests(UiFixture ui)
             await Wait.UntilAsync(() => bar.Count == "3 of 4");
         });
 
+    /// <summary>
+    /// VS Code's <c>editor.find.loop</c>, <c>cursorMoveOnType</c> and <c>closeOnResult</c>: without the loop, going on
+    /// stops at the last match and going back at the first; without moving on type, the selection stays as the query
+    /// changes; and closing on the result closes the bar once going on from the query selects another match.
+    /// </summary>
+    [Fact]
+    public Task The_find_options_go_round_move_on_type_and_close_as_they_say() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("|a b a b a", CodeLanguage.PlainText);
+            CodeEditor editor = window.Editor;
+            editor.FindLoop.ShouldBeTrue();
+            editor.FindCursorMoveOnType.ShouldBeTrue();
+            editor.FindCloseOnResult.ShouldBeFalse();
+            editor.FindLoop = false;
+            editor.FindCursorMoveOnType = false;
+
+            editor.OpenSearch();
+            SearchBar bar = BarOf(window);
+            window.Type("b");
+            await Wait.UntilAsync(() => bar.Count == "? of 2");
+            editor.Selection.ShouldBe(new TextSelection(0));
+
+            window.Press(Key.Enter);
+            window.Press(Key.Enter);
+            window.Press(Key.Enter);
+            editor.Selection.ShouldBe(new TextSelection(6, 7));
+            window.Press(Key.Enter, KeyModifiers.Shift);
+            window.Press(Key.Enter, KeyModifiers.Shift);
+            editor.Selection.ShouldBe(new TextSelection(2, 3));
+
+            editor.FindCloseOnResult = true;
+            window.Press(Key.Enter, KeyModifiers.Shift);
+            bar.IsOpen.ShouldBeTrue();
+            window.Press(Key.Enter);
+            editor.Selection.ShouldBe(new TextSelection(6, 7));
+            bar.IsOpen.ShouldBeFalse();
+            EditorWindow.PartOf(editor).TextArea.IsFocused.ShouldBeTrue();
+        });
+
     [Fact]
     public Task Tab_goes_between_the_query_and_the_replacement_as_in_VS_Code() =>
         _ui.Run(() =>

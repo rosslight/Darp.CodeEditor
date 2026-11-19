@@ -583,6 +583,9 @@ internal sealed class SearchBar : UserControl
     private void Search(Move move)
     {
         CancelSearch();
+        // As VS Code's editor.find.cursorMoveOnType: the query, its options and the scope may leave the selection.
+        if (move == Move.First && _shown?.Editor.FindCursorMoveOnType == false)
+            move = Move.None;
         if (move != Move.None)
             _move = move;
         if (!IsOpen || _shown is not { } shown || _find.Text is not { Length: > 0 } text)
@@ -669,26 +672,26 @@ internal sealed class SearchBar : UserControl
         switch (move)
         {
             case Move.First when matches.FindFirstSegmentWithStartAfter(_from) is { } first:
-                Select(first);
+                Land(move, first);
                 break;
             case Move.First when capped:
                 int from = _from;
                 Seek(
+                    move,
                     result,
                     selection,
-                    wrapToFirst: true,
                     (snapshot, scopes, cancellation) =>
                         TextSearch.FindNext(snapshot, result.Query, scopes, from, skipEmpty: false, cancellation)
                 );
                 break;
             case Move.Next when After(selection) is { } next:
-                Select(next);
+                Land(move, next);
                 break;
             case Move.Next when capped:
                 Seek(
+                    move,
                     result,
                     selection,
-                    wrapToFirst: true,
                     (snapshot, scopes, cancellation) =>
                         TextSearch.FindNext(
                             snapshot,
@@ -703,7 +706,7 @@ internal sealed class SearchBar : UserControl
             case Move.Previous
                 when matches.FindFirstSegmentWithStartAfter(selection.Start) is { } after
                     && matches.GetPreviousSegment(after) is { } previous:
-                Select(previous);
+                Land(move, previous);
                 break;
             case Move.Previous when capped:
                 // The last match before the selection, which may be beyond the last kept, or the last of all.
@@ -712,18 +715,27 @@ internal sealed class SearchBar : UserControl
                     : int.MaxValue;
                 int known = last.StartOffset;
                 Seek(
+                    move,
                     result,
                     selection,
-                    wrapToFirst: false,
                     (snapshot, scopes, cancellation) =>
                         TextSearch.FindPrevious(snapshot, result.Query, scopes, known, before, cancellation)
                 );
                 break;
+            // Past the last match, round to the first, and before the first to the last; as VS Code without
+            // editor.find.loop, the last match before, or the first after, again. Beyond the matches a result keeps,
+            // it goes round either way, as VS Code does.
+            case Move.First or Move.Next when shown.Editor.FindLoop:
+                Land(move, matches.FirstSegment ?? last);
+                break;
             case Move.First or Move.Next:
-                Select(matches.FirstSegment ?? last);
+                Land(move, Before(move == Move.First ? _from : selection.End) ?? last);
+                break;
+            case Move.Previous when shown.Editor.FindLoop:
+                Land(move, last);
                 break;
             case Move.Previous:
-                Select(last);
+                Land(move, matches.FindFirstSegmentWithStartAfter(selection.Start) ?? matches.FirstSegment ?? last);
                 break;
         }
 
@@ -735,17 +747,25 @@ internal sealed class SearchBar : UserControl
                 next = matches.GetNextSegment(next);
             return next;
         }
+
+        // The last match that ends at the offset or before it.
+        SearchMatch? Before(int offset)
+        {
+            SearchMatch? match = last;
+            while (match is not null && match.EndOffset > offset)
+                match = matches.GetPreviousSegment(match);
+            return match;
+        }
     }
 
     /// <summary>
     /// Searches the text in the background for the match that <paramref name="find"/> finds, and selects it unless
-    /// the result, the text or the selection changed meanwhile; without one, the result's first match if
-    /// <paramref name="wrapToFirst"/>.
+    /// the result, the text or the selection changed meanwhile; without one, going forward, the result's first match.
     /// </summary>
     private void Seek(
+        Move move,
         SearchResult result,
         TextRange selection,
-        bool wrapToFirst,
         Func<TextSnapshot, IReadOnlyList<TextRange>?, CancellationToken, (TextRange? Match, SearchOutcome Outcome)> find
     )
     {
@@ -762,7 +782,7 @@ internal sealed class SearchBar : UserControl
             seeking.Token
         );
         seek.ContinueWith(
-            _ => Dispatcher.Post(() => OnSought(seek, seeking, result, selection, wrapToFirst)),
+            _ => Dispatcher.Post(() => OnSought(seek, seeking, move, result, selection)),
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default
@@ -772,9 +792,9 @@ internal sealed class SearchBar : UserControl
     private void OnSought(
         Task<(TextRange? Match, SearchOutcome Outcome)> seek,
         CancellationTokenSource seeking,
+        Move move,
         SearchResult result,
-        TextRange selection,
-        bool wrapToFirst
+        TextRange selection
     )
     {
         if (seek.Exception is { } exception)
@@ -796,11 +816,28 @@ internal sealed class SearchBar : UserControl
             return;
         (TextRange? match, SearchOutcome outcome) = seek.Result;
         if (match is { } found)
-            Select(found);
+            Land(move, found);
         else if (outcome == SearchOutcome.OutOfTime)
             ShowMessage(outcome, null);
-        else if (wrapToFirst && result.Matches.FirstSegment is { } first)
-            Select(first);
+        else if (move != Move.Previous && result.Matches.FirstSegment is { } first)
+            Land(move, first);
+    }
+
+    private void Land(Move move, SearchMatch match) => Land(move, new TextRange(match.StartOffset, match.Length));
+
+    /// <summary>
+    /// Selects the match that <paramref name="move"/> went to; going to the next or the previous one from the query
+    /// closes the bar once it selects another match, if the editor says so, as VS Code's
+    /// <c>editor.find.closeOnResult</c>.
+    /// </summary>
+    private void Land(Move move, TextRange match)
+    {
+        if (_shown is not { } shown)
+            return;
+        bool moved = shown.Editor.Selection.Range != match;
+        Select(match);
+        if (moved && move is Move.Next or Move.Previous && shown.Editor.FindCloseOnResult && IsOpen && IsQueryFocused)
+            Close();
     }
 
     private void Select(SearchMatch match) => Select(new TextRange(match.StartOffset, match.Length));
