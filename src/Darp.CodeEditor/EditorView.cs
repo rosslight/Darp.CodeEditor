@@ -6,6 +6,7 @@ using Darp.CodeEditor.Completion;
 using Darp.CodeEditor.Diagnostics;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
+using Darp.CodeEditor.LanguageClient;
 using Darp.CodeEditor.Loading;
 using Darp.CodeEditor.Popups;
 using Darp.CodeEditor.Search;
@@ -54,6 +55,7 @@ internal sealed class EditorView : IDisposable
     private readonly Typing _typing;
     private readonly Clipboard _clipboard;
     private readonly BracketMatching _brackets;
+    private readonly OccurrenceHighlighter _occurrences;
     private readonly WhitespaceLayer _whitespace;
     private readonly SquiggleLayer _squiggles;
     private readonly HoverController _hover;
@@ -76,6 +78,7 @@ internal sealed class EditorView : IDisposable
         _typing = new Typing(area, document, Highlighter, _changes, _pairs);
         _clipboard = new Clipboard(area, document);
         _brackets = new BracketMatching(area, document, Highlighter, _changes, context.Options);
+        _occurrences = new OccurrenceHighlighter(area, document, _changes, context.Options);
         _whitespace = new WhitespaceLayer(area);
         _squiggles = new SquiggleLayer(area, document);
         SemanticHighlighter = new SemanticHighlighter(area.TextView, document, context.Editor.Dispatcher);
@@ -100,6 +103,7 @@ internal sealed class EditorView : IDisposable
             new WordEditing(area, _changes, _pairs),
             _brackets,
             new SmartSelect(area, document, Highlighter, _changes),
+            _occurrences,
             _whitespace,
             _squiggles,
             SemanticHighlighter,
@@ -186,6 +190,7 @@ internal sealed class EditorView : IDisposable
     {
         _pairs.OnOptionsChanged(old.AutoClosing, now.AutoClosing);
         _brackets.OnOptionsChanged(old.MatchBrackets, now.MatchBrackets);
+        _occurrences.OnOptionsChanged(old.OccurrencesHighlight, now.OccurrencesHighlight);
     }
 
     /// <summary>Runs a command, as its key does, where it applies.</summary>
@@ -217,9 +222,13 @@ internal sealed class EditorView : IDisposable
         || _hover.Close()
         || _search.Close();
 
-    /// <summary>Closes the popups, once the keyboard has left the editor.</summary>
+    /// <summary>The occurrences of the symbol at the caret, for tests.</summary>
+    internal IReadOnlyList<Occurrence> Occurrences => _occurrences.Highlights;
+
+    /// <summary>Closes the popups, and clears the occurrences, once the keyboard has left the editor.</summary>
     public void OnFocusLeft()
     {
+        _occurrences.Clear();
         _hover.Close();
         _completion.Close();
         _signatureHelp.Close();
@@ -245,6 +254,7 @@ internal sealed class EditorView : IDisposable
         _snippets.Colors = colors;
         _signatureHelp.Colors = colors;
         _brackets.Colors = colors;
+        _occurrences.Colors = colors;
         _whitespace.Colors = colors;
         _squiggles.Colors = colors;
         _hover.Colors = colors;

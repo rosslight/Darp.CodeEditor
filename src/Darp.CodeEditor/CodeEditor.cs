@@ -15,6 +15,7 @@ using Darp.CodeEditor.Completion;
 using Darp.CodeEditor.Diagnostics;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
+using Darp.CodeEditor.LanguageClient;
 using Darp.CodeEditor.Loading;
 using Darp.CodeEditor.Popups;
 using Darp.CodeEditor.Search;
@@ -378,6 +379,9 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>The clock of the time limit in the background, in the grammars the editor loads: the system's.</summary>
     internal TimeProvider GrammarClock { get; init; } = TimeProvider.System;
+
+    /// <summary>The occurrences of the symbol at the caret that the editor highlights, for tests.</summary>
+    internal IReadOnlyList<Occurrence> Occurrences => _view?.Occurrences ?? [];
 
     /// <summary>
     /// Scrolls <paramref name="range"/> into view: not at all when it is visible, centered when it is not. A range
