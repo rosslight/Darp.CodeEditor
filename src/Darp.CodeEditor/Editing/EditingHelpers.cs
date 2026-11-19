@@ -24,7 +24,6 @@ internal sealed class EditingHelpers : IEditorFeature
 
     private TextDocument Buffer => _textArea.Document;
 
-    /// <summary>The language's editing rules; none while they load.</summary>
     private LanguageConfiguration Configuration => LanguageConfiguration.Of(_document.Language);
 
     public void Dispose() { }

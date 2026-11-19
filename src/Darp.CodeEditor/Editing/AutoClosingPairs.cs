@@ -6,18 +6,13 @@ using Darp.CodeEditor.Loading;
 namespace Darp.CodeEditor.Editing;
 
 /// <summary>
-/// The auto-closing and surrounding pairs of one editor's view, from the language's <c>autoClosingPairs</c> and
-/// <c>surroundingPairs</c>, as VS Code types them: an opening character brings its closing one, which typing steps over
-/// and Backspace deletes with it while the caret stays inside the pair; an opening character typed over a selection
-/// surrounds it. In a rectangle selection, each acts on every line or on none. <see cref="CodeEditorOptions.AutoClosing"/>
-/// says where brackets and quotes close; typing over and deleting act only on pairs that the editor closed, and
-/// surrounding on every pair, as VS Code's defaults for <c>editor.autoClosingOvertype</c>, <c>autoClosingDelete</c> and
-/// <c>autoSurround</c>. Surrounding and deleting a pair are each a step of their own.
+/// The language's <c>autoClosingPairs</c> and <c>surroundingPairs</c> in one editor's view, as VS Code types them, on
+/// every line of a rectangle selection or none: an opening character brings its closing one where
+/// <see cref="CodeEditorOptions.AutoClosing"/> lets it; typing steps over, and Backspace deletes, only what the editor
+/// closed, while the caret stays inside, as VS Code's default <c>editor.autoClosingOvertype</c> and
+/// <c>autoClosingDelete</c>; an opening character typed over a selection surrounds it. A pair kept out of strings or
+/// comments closes only where the tokens, found within a short time on the UI thread, say neither.
 /// </summary>
-/// <remarks>
-/// A pair that the language does not close in strings or comments asks the highlighter for the tokens where the user
-/// types, found on the UI thread within a short time limit. While they are unknown, such a pair does not close.
-/// </remarks>
 internal sealed class AutoClosingPairs : IDisposable
 {
     private readonly TextArea _area;
@@ -26,7 +21,7 @@ internal sealed class AutoClosingPairs : IDisposable
     private readonly TextChanges _changes;
     private readonly Func<CodeEditorOptions> _options;
 
-    /// <summary>The closing texts that the editor typed, while the caret stays inside their pair.</summary>
+    /// <summary>The closing texts that the editor typed, kept while the caret stays inside their pair.</summary>
     private readonly List<AutoClosed> _autoClosed = [];
 
     public AutoClosingPairs(
@@ -47,20 +42,14 @@ internal sealed class AutoClosingPairs : IDisposable
 
     private TextDocument Buffer => _area.Document;
 
-    /// <summary>The language's editing rules; none while they load.</summary>
     private LanguageConfiguration Configuration => LanguageConfiguration.Of(_document.Language);
 
-    public void Dispose()
-    {
-        _area.Caret.PositionChanged -= OnCaretPositionChanged;
-        _autoClosed.Clear();
-    }
+    public void Dispose() => _area.Caret.PositionChanged -= OnCaretPositionChanged;
 
     /// <summary>
-    /// Typing <paramref name="typed"/> over a selection with text: the pair it opens goes around the selection, which
-    /// keeps the text inside selected. Not around whitespace only, and a quote typed over a single quote replaces it.
+    /// Typing <paramref name="typed"/> over a selection puts the pair it opens around it, in a step of its own, the text
+    /// inside still selected: not around whitespace only, and a quote typed over a single quote replaces it.
     /// </summary>
-    /// <returns>Whether it surrounded the selection.</returns>
     public bool Surround(char typed)
     {
         if (TypingOffsets() is not null || SurroundingPair(typed) is not { } pair)
@@ -90,7 +79,6 @@ internal sealed class AutoClosingPairs : IDisposable
     /// Typing <paramref name="typed"/> right before the same closing character that the editor typed steps over it:
     /// only a single character, and not a quote that a backslash escapes.
     /// </summary>
-    /// <returns>Whether it stepped over.</returns>
     public bool TypeOver(char typed)
     {
         if (TypingOffsets() is not { } offsets || !Array.TrueForAll(offsets, IsClosedBefore))
@@ -154,10 +142,9 @@ internal sealed class AutoClosingPairs : IDisposable
     }
 
     /// <summary>
-    /// Backspace between an opening character and the closing one that the editor typed deletes both: for pairs of
-    /// single characters.
+    /// Backspace between an opening character and the closing one that the editor typed deletes both, in a step of its
+    /// own: for pairs of single characters.
     /// </summary>
-    /// <returns>Whether it deleted them.</returns>
     public bool DeletePair()
     {
         if (TypingOffsets() is not { } offsets || !Array.TrueForAll(offsets, IsInEmptyPair))
@@ -218,12 +205,11 @@ internal sealed class AutoClosingPairs : IDisposable
         }
         if (found is not { } candidate)
             return null;
-        bool quote = IsQuote(typed);
         AutoClosingMode mode = Mode(candidate, _options().AutoClosing);
         if (mode == AutoClosingMode.Never)
             return null;
         string after = Buffer.GetText(caret, line.EndOffset - caret);
-        if (after.Length > 0 && !ClosesBefore(mode, quote, after[0]) && !StartsWithClosingOnly(after))
+        if (after.Length > 0 && !ClosesBefore(mode, IsQuote(typed), after[0]) && !StartsWithClosingOnly(after))
             return null;
         if (
             candidate.Open is ['\'' or '"']
@@ -310,10 +296,7 @@ internal sealed class AutoClosingPairs : IDisposable
             _ => false,
         };
 
-    /// <summary>
-    /// Whether <paramref name="after"/> starts with the closing text of a pair, and not with the opening text of
-    /// another, as a quote does.
-    /// </summary>
+    /// <summary>Whether <paramref name="after"/> starts with a closing text, and not an opening one, as a quote is both.</summary>
     private bool StartsWithClosingOnly(string after)
     {
         IReadOnlyList<AutoClosingPair> pairs = Configuration.AutoClosingPairs;
@@ -333,10 +316,7 @@ internal sealed class AutoClosingPairs : IDisposable
         return found;
     }
 
-    /// <summary>
-    /// Whether text typed at <paramref name="offset"/> is escaped: after an odd number of backslashes, as two of them
-    /// are an escaped backslash.
-    /// </summary>
+    /// <summary>Whether text typed at <paramref name="offset"/> follows an odd number of backslashes.</summary>
     private bool IsEscaped(int offset)
     {
         int backslashes = 0;

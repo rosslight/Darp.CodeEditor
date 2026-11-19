@@ -182,10 +182,7 @@ internal enum EditKind
     TypingConsecutiveSpace,
 }
 
-/// <summary>
-/// How an edit goes among the undo steps: of <paramref name="Kind"/>, in the step before it or, if it
-/// <paramref name="StartsStep"/>, in a new one, which ends after it if it <paramref name="EndsStep"/>.
-/// </summary>
+/// <summary>An edit of <paramref name="Kind"/>, in the step before it or a new one, which may end after it.</summary>
 internal readonly record struct EditStep(EditKind Kind, bool StartsStep, bool EndsStep = false)
 {
     /// <summary>An edit in a step of its own, such as a Tab or a surrounded selection.</summary>

@@ -127,9 +127,8 @@ internal static class TabStops
     }
 
     /// <summary>
-    /// Where <paramref name="offset"/> goes through <paramref name="edits"/>, in order and apart: text that goes in where
-    /// it is goes after it if it <paramref name="sticksBefore"/>, and a replaced text keeps it where the old and the new
-    /// text overlap.
+    /// Where <paramref name="offset"/> goes through <paramref name="edits"/>: text inserted at it goes after it if it
+    /// <paramref name="sticksBefore"/>, and a replacement keeps it where old and new text overlap.
     /// </summary>
     private static int MapThrough(List<TextEdit> edits, int offset, bool sticksBefore)
     {

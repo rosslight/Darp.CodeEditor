@@ -23,16 +23,10 @@ internal sealed class RuleLines
     /// <summary>The tokens of the line asked for last, and whether it was tokenized now if need be; 0 for none.</summary>
     private (int Number, int[]? Tokens, bool Now) _tokens;
 
-    /// <param name="text">The text of a line by its number.</param>
-    /// <param name="exactTokens">
-    /// The tokens of a line by its number as its text is now, TextMate's binary tokens, tokenized now if the flag says
-    /// so; null when unknown.
-    /// </param>
-    /// <param name="brackets">Finds the language's brackets; null for none.</param>
-    /// <param name="typesCode">
-    /// Whether text typed at a column of a line, by their numbers, goes in as code, and not into a string, comment or
-    /// regular expression; null for always.
-    /// </param>
+    /// <summary>
+    /// Lines by their number: their text, their exact TextMate tokens, tokenized now if asked, or null, and whether text
+    /// typed at a column of one goes in as code, and not into a string, comment or regular expression, by default yes.
+    /// </summary>
     public RuleLines(
         Func<int, string> text,
         Func<int, bool, int[]?> exactTokens,
@@ -63,19 +57,14 @@ internal sealed class RuleLines
     /// <summary>The text of line <paramref name="number"/>, as it is.</summary>
     public string Text(int number) => _text(number);
 
-    /// <summary>
-    /// Line <paramref name="number"/> as the rules see it, by its tokens as last tokenized, while they are exact.
-    /// </summary>
+    /// <summary>Line <paramref name="number"/> as the rules see it, by its tokens as last tokenized, if exact.</summary>
     public string Masked(int number)
     {
         string text = _text(number);
         return Masked(number, text, 0, text.Length, tokenizeNow: false);
     }
 
-    /// <summary>
-    /// The part of line <paramref name="number"/> from <paramref name="from"/> to <paramref name="to"/> as the rules see
-    /// it, tokenized now if need be: the line where the user types.
-    /// </summary>
+    /// <summary>The line's part from <paramref name="from"/> to <paramref name="to"/>, tokenized now if need be.</summary>
     public string Masked(int number, int from, int to) => Masked(number, _text(number), from, to, tokenizeNow: true);
 
     /// <summary>

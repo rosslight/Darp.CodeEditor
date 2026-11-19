@@ -50,7 +50,6 @@ internal sealed class Typing : IDisposable
 
     private TextDocument Buffer => _area.Document;
 
-    /// <summary>The language's editing rules; none while they load.</summary>
     private LanguageConfiguration Configuration => LanguageConfiguration.Of(_document.Language);
 
     private IndentRules Rules =>

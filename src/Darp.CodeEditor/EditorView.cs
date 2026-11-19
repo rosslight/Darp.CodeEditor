@@ -173,7 +173,6 @@ internal sealed class EditorView : IDisposable
             _typing.OnTextInput(e);
     }
 
-    /// <summary>The editor's settings changed.</summary>
     public void OnOptionsChanged(CodeEditorOptions old, CodeEditorOptions now) =>
         _pairs.OnOptionsChanged(old.AutoClosing, now.AutoClosing);
 
