@@ -25,6 +25,14 @@ internal sealed class HeldScheduler : TaskScheduler
             Run(task);
     }
 
+    /// <summary>Runs the work kept, as <see cref="Release"/> does, and completes once it ran.</summary>
+    public Task ReleaseAndWaitAsync()
+    {
+        Task[] kept = [.. _held];
+        Release();
+        return Task.WhenAll(kept.Select(task => task.ContinueWith(_ => { }, TaskScheduler.Default)));
+    }
+
     protected override void QueueTask(Task task)
     {
         if (_holding)
