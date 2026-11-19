@@ -227,6 +227,21 @@ public sealed class IndentationTests(UiFixture ui)
         });
 
     [Theory]
+    // A wide character counts two columns, and a character with its combining mark one.
+    [InlineData("\u754c|", "\u754c  |")]
+    [InlineData("e\u0301|", "e\u0301   |")]
+    public Task Tab_goes_to_the_next_tab_stop_by_the_columns_that_the_text_shows(string marked, string expected) =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show(marked, CodeLanguage.PlainText);
+            window.Editor.Document.ShouldNotBeNull().Indentation = Indentation.Spaces(4);
+
+            window.Press(Key.Tab);
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
+    [Theory]
     // To the next or the previous stop.
     [InlineData("«   a»", "«    a»", "«  a»")]
     // The selection follows the text, and its start stays where it was in the indentation.
