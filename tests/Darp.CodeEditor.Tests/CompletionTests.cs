@@ -124,42 +124,6 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
-    public Task Typing_that_starts_a_word_opens_the_list_but_not_inside_a_word_or_a_comment() =>
-        _ui.Run(async () =>
-        {
-            var fake = new FakeServer();
-            await using var server = new LanguageServer(fake.Options);
-            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("xenon", "xylophone"));
-            const string text = "[\n  ,\n  ab\n]\n// note\n";
-            using CodeDocument document = server.CreateDocument(CodeLanguage.Json, text);
-            using var window = new EditorWindow(new CodeEditor { Document = document });
-            // JSON's comment color: the grammar knows the comment.
-            int comment = text.IndexOf("note", StringComparison.Ordinal);
-            await Wait.UntilAsync(() =>
-            {
-                window.Render();
-                return window.ColorAt(comment) == Color.Parse("#008000");
-            });
-
-            window.Editor.Selection = new TextSelection(4);
-            window.Type("x");
-            (await WaitForLabelsAsync(window)).ShouldBe(["xenon", "xylophone"]);
-            window.Type("y");
-            await WaitForLabelsAsync(window, ["xylophone"]);
-            window.Press(Key.Escape);
-
-            // On in the same word, before a word, and in a comment: no request.
-            window.Type("z");
-            window.Editor.Selection = new TextSelection(document.Text.IndexOf("ab", StringComparison.Ordinal));
-            window.Type("q");
-            window.Editor.Selection = new TextSelection(document.Text.IndexOf("note", StringComparison.Ordinal) + 4);
-            window.Type(" w");
-            await BarrierAsync(server, fake);
-            fake.LinesStartingWith("completion ").Count.ShouldBe(1);
-            document.Text.ShouldBe("[\n  xyz,\n  qab\n]\n// note w\n");
-        });
-
-    [Fact]
     public Task Typing_filters_and_ranks_the_list_on_the_client_with_the_matched_characters_in_bold() =>
         _ui.Run(async () =>
         {
@@ -666,11 +630,12 @@ public sealed class CompletionTests(UiFixture ui)
             using var window = new EditorWindow(new CodeEditor { Document = document });
             await OpenAsync(window, length);
 
-            // The caret moves on in the line's collapsed tail, where only code puts it, and the list filters again;
-            // Enter, while that filter runs, checks the item against the text typed.
+            // End moves the caret on in the line's collapsed tail, and the list filters again; Enter, while that filter
+            // runs, checks the item against the text typed.
             long before = GC.GetAllocatedBytesForCurrentThread();
-            window.Editor.Selection = new TextSelection(length + 1);
+            PressAlone(window, Key.End);
             long moving = GC.GetAllocatedBytesForCurrentThread() - before;
+            window.Editor.Selection.ShouldBe(new TextSelection(length + 1));
             before = GC.GetAllocatedBytesForCurrentThread();
             PressAlone(window, Key.Enter);
             long committing = GC.GetAllocatedBytesForCurrentThread() - before;
@@ -1200,17 +1165,17 @@ public sealed class CompletionTests(UiFixture ui)
             var fake = new FakeServer();
             await using var server = new LanguageServer(fake.Options);
             using CodeDocument answer = await SetCompletionAsync(server, fake, Items("Console"));
-            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, " Co");
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "\n Co");
             using var window = new EditorWindow(new CodeEditor { Document = document });
-            await OpenAsync(window, 3);
+            await OpenAsync(window, 4);
 
-            // As another editor of the document types at the line's start: the caret moves with the text.
+            // As another editor of the document types on the line before: the caret stays on its line and column.
             document.Replace(new TextRange(0, 0), "x");
 
-            (await fake.WaitForAsync("completion ", 2)).ShouldEndWith(" 1 - 4");
+            (await fake.WaitForAsync("completion ", 2)).ShouldEndWith(" 1 - 5");
             (await WaitForLabelsAsync(window)).ShouldBe(["Console"]);
             window.Press(Key.Enter);
-            document.Text.ShouldBe("x Console");
+            document.Text.ShouldBe("x\n Console");
         });
 
     [Fact]
@@ -1517,47 +1482,6 @@ public sealed class CompletionTests(UiFixture ui)
             window.Press(Key.Enter);
 
             MarkedText.Of(window).ShouldBe("x\r\ny\r\n«a\r\nb»\nz");
-        });
-
-    [Fact]
-    public Task Additional_edits_that_come_after_the_commit_join_its_step_while_it_is_the_last_one() =>
-        _ui.Run(async () =>
-        {
-            var fake = new FakeServer();
-            await using var server = new LanguageServer(fake.Options);
-            using CodeDocument answer = await SetCompletionAsync(server, fake, ItemWithImport());
-            const string text = "x\nCon";
-            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
-            using var window = new EditorWindow(new CodeEditor { Document = document });
-
-            using (await CommandAsync(server, fake, "hold-resolve", "holding resolve"))
-            {
-                await OpenAsync(window, 5);
-                await fake.WaitForAsync("resolve ");
-                window.Press(Key.Enter);
-                document.Text.ShouldBe("x\nConsole");
-            }
-            using (await CommandAsync(server, fake, "release-resolve", "released resolve"))
-            {
-                await Wait.UntilAsync(() => document.Text == "using System;\nx\nConsole");
-                document.Undo();
-                document.Text.ShouldBe(text);
-            }
-
-            // The user typed on before they came: they are dropped.
-            using (await CommandAsync(server, fake, "hold-resolve", "holding resolve", 2))
-            {
-                await OpenAsync(window, 5);
-                await fake.WaitForAsync("resolve ", 2);
-                window.Press(Key.Enter);
-                window.Type("!");
-            }
-            using (await CommandAsync(server, fake, "release-resolve", "released resolve", 2))
-            {
-                // A list shows after the late answer: the client has read it by then.
-                await OpenAsync(window, document.Text.Length);
-                document.Text.ShouldBe("x\nConsole!");
-            }
         });
 
     [Fact]
@@ -2497,7 +2421,7 @@ public sealed class CompletionTests(UiFixture ui)
     /// Presses <paramref name="key"/> in the editor without running the UI thread's other work, as
     /// <see cref="TypeAlone"/> types.
     /// </summary>
-    private static void PressAlone(EditorWindow window, Key key)
+    internal static void PressAlone(EditorWindow window, Key key)
     {
         TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
         textArea.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = key });
@@ -2507,7 +2431,7 @@ public sealed class CompletionTests(UiFixture ui)
     /// Types <paramref name="text"/> into the editor without running the UI thread's other work, as the headless
     /// window's input does before each event: a filter's result that is due cannot show before the next check.
     /// </summary>
-    private static void TypeAlone(EditorWindow window, string text)
+    internal static void TypeAlone(EditorWindow window, string text)
     {
         TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
         textArea.RaiseEvent(new TextInputEventArgs { RoutedEvent = InputElement.TextInputEvent, Text = text });
@@ -2523,7 +2447,7 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     /// <summary>An item that adds an import at the top, once resolved.</summary>
-    private static JsonNode ItemWithImport() =>
+    internal static JsonNode ItemWithImport() =>
         Parse(
             """
             { "items": [ { "label": "Console", "data": { "detail": "class System.Console", "additionalTextEdits": [
@@ -2544,7 +2468,7 @@ public sealed class CompletionTests(UiFixture ui)
         ?? [];
 
     /// <summary>The runs of the label of the row of <paramref name="label"/>, each with whether it is bold.</summary>
-    private static IReadOnlyList<(string Text, bool Bold)> RowRuns(EditorWindow window, string label) =>
+    internal static IReadOnlyList<(string Text, bool Bold)> RowRuns(EditorWindow window, string label) =>
         [
             .. LabelOf(window, label)
                 .Inlines.ShouldNotBeNull()
