@@ -8,6 +8,7 @@ the tests and the fixture processes they start into one folder, for any runtime 
 ```sh
 dotnet publish tests/Darp.CodeEditor.Tests.BeforeSetup -c Release -r linux-x64 -o artifacts/aot-tests
 dotnet publish tests/Darp.CodeEditor.Tests.FakeServer -c Release -r linux-x64 -o artifacts/aot-tests
+dotnet publish tests/Darp.CodeEditor.Tests.SimpleTheme -c Release -r linux-x64 -o artifacts/aot-tests
 dotnet publish tests/Darp.CodeEditor.Tests -c Release -r linux-x64 -o artifacts/aot-tests
 artifacts/aot-tests/Darp.CodeEditor.Tests
 ```

@@ -53,6 +53,7 @@ jobs:
         run: |
           dotnet publish tests/Darp.CodeEditor.Tests.BeforeSetup -c Release -r linux-x64 -o ./artifacts/aot-tests /warnaserror
           dotnet publish tests/Darp.CodeEditor.Tests.FakeServer -c Release -r linux-x64 -o ./artifacts/aot-tests /warnaserror
+          dotnet publish tests/Darp.CodeEditor.Tests.SimpleTheme -c Release -r linux-x64 -o ./artifacts/aot-tests /warnaserror
       - name: Publish the tests with Native AOT
         run: dotnet publish tests/Darp.CodeEditor.Tests -c Release -r linux-x64 -o ./artifacts/aot-tests /warnaserror
       - name: Test Native AOT
@@ -117,6 +118,7 @@ jobs:
         run: |
           dotnet publish tests/Darp.CodeEditor.Tests.BeforeSetup -c Release -r ${{ matrix.rid }} -o ./artifacts/aot-tests /warnaserror
           dotnet publish tests/Darp.CodeEditor.Tests.FakeServer -c Release -r ${{ matrix.rid }} -o ./artifacts/aot-tests /warnaserror
+          dotnet publish tests/Darp.CodeEditor.Tests.SimpleTheme -c Release -r ${{ matrix.rid }} -o ./artifacts/aot-tests /warnaserror
       - name: Publish the tests with Native AOT
         run: dotnet publish tests/Darp.CodeEditor.Tests -c Release -r ${{ matrix.rid }} -o ./artifacts/aot-tests /warnaserror
       - name: Test Native AOT
