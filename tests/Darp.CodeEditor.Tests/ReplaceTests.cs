@@ -4,6 +4,7 @@ using Avalonia.VisualTree;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
+using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Search;
 using static Darp.CodeEditor.Tests.SearchBars;
 
@@ -273,6 +274,35 @@ public sealed class ReplaceTests(UiFixture ui)
             await SearchedAsync(bar);
 
             document.Text.ShouldBe("a\nb\nc\n\nd");
+        });
+
+    /// <summary>
+    /// Replace and Replace All leave a long line's hidden tail as it is, as every edit does. Replace All, never only
+    /// some, replaces nothing where a match lies there, and every match where none does, also across the tail.
+    /// </summary>
+    [Theory]
+    [InlineData("Replace", "a", false)]
+    [InlineData("Replace All", "a", false)]
+    [InlineData("Replace All", "x", true)]
+    public Task Replace_leaves_a_long_lines_hidden_tail_as_it_is(string button, string tailEnd, bool replaced) =>
+        _ui.Run(async () =>
+        {
+            // A line with its last character in the hidden tail, and a line after it.
+            string text = "a" + new string('x', VisibleText.LineLimit) + tailEnd + "\na";
+            using EditorWindow window = MarkedText.Show("|" + text, CodeLanguage.PlainText);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            window.Editor.OpenSearch(replace: true);
+            SearchBar bar = BarOf(window);
+            bar.ReplaceBox.Text = "b";
+            bar.FindBox.Text = "a";
+            await SearchedAsync(bar);
+            // The match in the tail, where there is one.
+            window.Editor.Selection = new TextSelection(VisibleText.LineLimit + 1, VisibleText.LineLimit + 2);
+
+            Click(bar, button);
+            await SearchedAsync(bar);
+
+            document.Text.ShouldBe(replaced ? text.Replace('a', 'b') : text);
         });
 
     [Fact]
