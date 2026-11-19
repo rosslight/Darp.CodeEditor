@@ -27,7 +27,7 @@ public class DocumentBenchmarks
 
     public DocumentBenchmarks()
     {
-        _warm = new TextSnapshot(_rope, 1);
+        _warm = Snapshot(_rope);
         _ = _warm.GetPosition(s_middle);
     }
 
@@ -75,7 +75,7 @@ public class DocumentBenchmarks
 
     /// <summary>The first position in a snapshot, which reads its line breaks.</summary>
     [Benchmark]
-    public TextPosition GetPositionInNewSnapshot() => new TextSnapshot(_rope, 1).GetPosition(s_middle);
+    public TextPosition GetPositionInNewSnapshot() => Snapshot(_rope).GetPosition(s_middle);
 
     /// <summary>A position in a snapshot that knows its lines.</summary>
     [Benchmark]
@@ -84,4 +84,12 @@ public class DocumentBenchmarks
     /// <summary>An offset in a snapshot that knows its lines.</summary>
     [Benchmark]
     public int GetOffsetInWarmSnapshot() => _warm.GetOffset(new TextPosition(Lines / 2, 10));
+
+    /// <summary>A snapshot of <paramref name="rope"/>, as a document makes one; the baseline's takes no line break.</summary>
+    private static TextSnapshot Snapshot(ITextSource rope) =>
+#if BENCHMARK_BASELINE
+        new(rope, 1);
+#else
+        new(rope, 1, "\n");
+#endif
 }
