@@ -70,6 +70,9 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     /// <summary>Diagnostics on their way to the UI thread. Only the latest is applied; null when none is on its way.</summary>
     private DiagnosticsBatch? _pendingDiagnostics;
 
+    /// <summary>Set on the UI thread, before the change whose snapshot takes it.</summary>
+    private string _lineBreak;
+
     private protected CodeDocument(CodeLanguage language, string text, string? filePath = null)
     {
         Language = language;
@@ -78,8 +81,9 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
             text,
             language.Id == "yaml" ? Indentation.Spaces(2) : Indentation.Spaces(4)
         );
+        _lineBreak = LineBreaks.Detect(text);
         _document = new TextDocument(text);
-        _currentSnapshot = new TextSnapshot(_document.CreateSnapshot(), 0);
+        _currentSnapshot = new TextSnapshot(_document.CreateSnapshot(), 0, _lineBreak);
         _diagnostics = new DiagnosticsBatch([], _currentSnapshot);
         // Application.Current is null before setup, so reading it ties no dispatcher to this thread.
         _owner = Application.Current?.Dispatcher;
@@ -130,13 +134,28 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
 
     /// <summary>
     /// The whole text, as <c>CurrentSnapshot.GetText()</c>. Setting it replaces the text in one step that the user can
-    /// undo.
+    /// undo, and detects anew the line break that editors give new lines.
     /// </summary>
     public string Text
     {
         get => _currentSnapshot.GetText();
-        set => Change(document => document.Text = value);
+        set
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            Change(document =>
+            {
+                _lineBreak = LineBreaks.Detect(value);
+                document.Text = value;
+            });
+        }
     }
+
+    /// <summary>
+    /// The line break that editors give new text (<see cref="LineBreaks.Detect"/>): detected from the text when the
+    /// document is created and when <see cref="Text"/> is set, and kept through the edits between, also those that
+    /// remove every line break. On the UI thread; other threads read <see cref="TextSnapshot.LineBreak"/>.
+    /// </summary>
+    internal string LineBreak => _lineBreak;
 
     /// <summary>The text as it is now, with its version.</summary>
     public TextSnapshot CurrentSnapshot => _currentSnapshot;
@@ -451,7 +470,7 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
         // With every edit before it, for threads that follow the edits up to it.
         Volatile.Write(
             ref _currentSnapshot,
-            new TextSnapshot(_document.CreateSnapshot(), _currentSnapshot.Version + 1)
+            new TextSnapshot(_document.CreateSnapshot(), _currentSnapshot.Version + 1, _lineBreak)
         );
         OnChanged(_currentSnapshot);
         TextChanged?.Invoke(this, EventArgs.Empty);
