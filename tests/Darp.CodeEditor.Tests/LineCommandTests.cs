@@ -139,6 +139,52 @@ public sealed class LineCommandTests(UiFixture ui)
         });
 
     [Theory]
+    // After a case, by the rule for Enter.
+    [InlineData("case 1:\nx();\n|y();", Key.Up, "case 1:\n    |y();\nx();")]
+    // After a doc comment's start, a line with its star keeps the space before it.
+    [InlineData("/**\n|x\n * a", Key.Down, "/**\n * a\n |x")]
+    public Task Moved_lines_take_the_indentation_that_the_rules_for_Enter_give_their_new_place(
+        string marked,
+        Key key,
+        string expected
+    ) =>
+        _ui.Run(async () =>
+        {
+            var language = new CodeLanguage(
+                "move-enter",
+                configuration: new Uri(
+                    "avares://Darp.CodeEditor.Tests/Languages/move-enter.language-configuration.json"
+                )
+            );
+            await language.Loaded;
+            using EditorWindow window = MarkedText.Show(marked, language);
+            DocumentOf(window).Indentation = Indentation.Spaces(4);
+
+            window.Press(key, KeyModifiers.Alt);
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
+    [Fact]
+    public Task A_bracket_in_a_comment_gives_lines_moved_below_it_no_indentation() =>
+        _ui.Run(async () =>
+        {
+            await CodeLanguage.Json.Loaded;
+            using EditorWindow window = MarkedText.Show("{\n    |\"a\": 1,\n    \"b\": 2 // {\n}", CodeLanguage.Json);
+            DocumentOf(window).Indentation = Indentation.Spaces(4);
+            // The comment is known by its tokens.
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return window.RenderedColors().Count > 1;
+            });
+
+            window.Press(Key.Down, KeyModifiers.Alt);
+
+            MarkedText.Of(window).ShouldBe("{\n    \"b\": 2 // {\n    |\"a\": 1,\n}");
+        });
+
+    [Theory]
     [InlineData("first\nsec|ond\nthird", false, "first\nsec|ond\nsecond\nthird")]
     [InlineData("first\nsec|ond\nthird", true, "first\nsecond\nsec|ond\nthird")]
     [InlineData("«a\nb»\nc", true, "a\nb\n«a\nb»\nc")]

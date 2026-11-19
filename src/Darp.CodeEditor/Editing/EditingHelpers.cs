@@ -365,15 +365,29 @@ internal sealed partial class EditingHelpers : IDisposable
         int above = lineNumber - 1;
         while (above >= 1 && string.IsNullOrWhiteSpace(LineText(above)))
             above--;
-        if (above < 1)
+        if (above < 1 || EnterAtLineEnd(above) is not { } enter)
             return null;
-        string text = LineText(above);
-        string previous = above > 1 ? RuleLine(above - 1) : "";
-        if (EnterActionAt(configuration, autoIndent, previous, RuleLine(above), "") is not { } enter)
-            return null;
-        (string own, string append) = Resolved(enter, text[..LeadingWhitespace(text)]);
-        string good = own + append;
+        string good = enter.Indentation + enter.Append;
         return good.Length > 0 ? good : null;
+    }
+
+    /// <summary>
+    /// What Enter at the end of line <paramref name="lineNumber"/> does by the language's rules for Enter and its
+    /// brackets, as VS Code's <c>getEnterAction</c> finds it there, with the line and the one above as the rules see
+    /// them (<see cref="RuleText"/>): the action, the line's indentation without what the action removes, and the text
+    /// to append (<see cref="Resolved"/>). Null when Enter there does nothing special.
+    /// </summary>
+    private (EnterAction Action, string Indentation, string Append)? EnterAtLineEnd(int lineNumber)
+    {
+        string previous = lineNumber > 1 ? RuleLine(lineNumber - 1) : "";
+        if (
+            EnterActionAt(Configuration, _document.Language.AutoIndent, previous, RuleLine(lineNumber), "")
+            is not { } action
+        )
+            return null;
+        string text = LineText(lineNumber);
+        (string indentation, string append) = Resolved(action, text[..LeadingWhitespace(text)]);
+        return (action, indentation, append);
     }
 
     /// <summary>
