@@ -61,7 +61,11 @@ internal sealed class CompletionCommit : IDisposable
         RenderedSnippet? snippet = item.Snippet is { } source ? _snippets.Render(source, range.Start) : null;
         var main = new CompletionEdit(range, snippet?.Text ?? InLineBreaks(item.Edit.NewText));
         if (!CanChange(main))
+        {
+            // Taken out of the resolver for the edits it brings, the resolve is now nobody's: it ends here.
+            late?.Cancellation.Cancel();
             return;
+        }
         var step = new object();
         var mark = new SnippetMark();
         List<CompletionEdit> edits = WithoutOverlaps([main], Mapped(request.Snapshot, item.AdditionalEdits ?? []));

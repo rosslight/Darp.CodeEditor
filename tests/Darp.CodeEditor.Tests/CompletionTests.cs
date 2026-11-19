@@ -813,6 +813,33 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_commit_that_does_not_go_in_cancels_the_resolve_that_would_bring_its_additional_edits() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, ItemWithImport());
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "x\nConXYZ");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+            var protectedText = new TextSegmentReadOnlySectionProvider<TextSegment>(textArea.Document);
+            protectedText.Segments.Add(new TextSegment { StartOffset = 5, Length = 3 });
+            textArea.ReadOnlySectionProvider = protectedText;
+            using CodeDocument hold = await CommandAsync(server, fake, "hold-resolve", "holding resolve");
+
+            await OpenAsync(window, 5);
+            string resolve = Id(await fake.WaitForAsync("resolve "));
+            // Replacing goes over the protected "XYZ": nothing goes in, and the resolve ends.
+            window.Press(Key.Tab);
+
+            document.Text.ShouldBe("x\nConXYZ");
+            // Before what the client sends next: the client itself would cancel it only at its hang limit.
+            window.Press(Key.Space, KeyModifiers.Control);
+            await fake.WaitForAsync("completion ", 2);
+            fake.Lines.ShouldContain($"cancel {resolve}");
+        });
+
+    [Fact]
     public Task Tab_bound_to_accepting_the_selected_item_inserts_as_in_VS_Code() =>
         _ui.Run(async () =>
         {
