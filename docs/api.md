@@ -110,7 +110,7 @@ rather than its view belong to the document, as in Monaco and CodeMirror.
 | `Options` | the settings that apps set differently for different editors or users, as VS Code's settings (below) |
 | `PendingKeys` | the first stroke of a two-stroke sequence while the editor waits for the second, such as Ctrl+K of Ctrl+K Ctrl+I; null otherwise. Read-only and bindable, for status bars |
 | `OpenSearch(replace)` | the search or replace bar, for a Find button; Ctrl+F and Ctrl+H open them too |
-| `Cut()`, `Copy()`, `Paste()`, `SelectAll()` | for an app's Edit menu; the keys and the editor's context menu do the same, and the document's `Undo` and `Redo` the rest |
+| `Cut()`, `Copy()`, `Paste()`, `SelectAll()` | for an app's Edit menu; the keys and the editor's context menu do the same, and the document's `Undo` and `Redo` the rest. Without a selection, Cut and Copy take the caret's line (`EmptySelectionClipboard`) |
 | `SaveViewState()`, `RestoreViewState(state)` | the caret, the selection and the scroll position, for an app that switches one editor between documents |
 
 **Options.** One immutable record, `CodeEditorOptions`, holds the editor's settings, each at the path of its VS Code
@@ -128,6 +128,7 @@ editor.Options = CodeEditorOptions.Default with
 | Option | VS Code's setting | Default |
 |---|---|---|
 | `AutoClosing.Brackets`, `AutoClosing.Quotes` | `editor.autoClosingBrackets`, `editor.autoClosingQuotes` | `LanguageDefined`: a typed opening bracket or quote gets its closing one before whitespace, the line's end, another closing character, or a character of the language's `autoCloseBefore`, by default one that can't start an expression; a quote not right after a word. `Always`, `BeforeWhitespace` and `Never` as in VS Code |
+| `EmptySelectionClipboard` | `editor.emptySelectionClipboard` | true: without a selection, Copy and Cut take the caret's line with a line break, the last line too, and Paste puts that line above the caret's line while nothing is selected. Off, they need a selection, so that a stray Ctrl+C keeps the clipboard |
 
 A setting needs a use case to become an option; VS Code having it is not enough (design.md #124).
 
@@ -135,7 +136,11 @@ A setting needs a use case to become an option; VS Code having it is not enough 
 character, and Backspace deleting an empty pair, only where the editor closed the pair; opening characters surrounding
 the selection; auto-indent as far as the language's `AutoIndent` goes (section 1); Tab, Shift+Tab and Backspace in
 indentation by tab stops; undo in VS Code's steps, which puts back the selection before the step and redo the one after
-it; whitespace shown inside the selection, scrolling past the last line, a context menu with Cut, Copy, Paste
+it; VS Code's words for double-click, which also selects past a line's end and grows by words as the pointer drags, for
+moving by words and for deleting them: runs of word characters and runs of separators, by its default word separators,
+not the language's word pattern; Left and Right that end a selection at its start or end, and Up and Down that go on
+from them; Up on the first row to the text's start and Down on the last to its end, coming back to the column they left;
+Home on a line of whitespace only to its start; whitespace shown inside the selection, scrolling past the last line, a context menu with Cut, Copy, Paste
 and Select All, completion's snippets with their stops (section 6), and the look of errors, hover and completion
 below.
 
@@ -187,6 +192,9 @@ The default keys on Windows and Linux; macOS in brackets where it differs beyond
 | F3, Shift+F3 (macOS also Cmd+G, Shift+Cmd+G) | `editor.action.nextMatchFindAction`, `editor.action.previousMatchFindAction` | the next and the previous match |
 | Ctrl+/ | `editor.action.commentLine` | toggles line comments, or block comments in a language without line comments |
 | Ctrl+Z; Ctrl+Y, Ctrl+Shift+Z (macOS: Cmd+Shift+Z only) | `undo`; `redo` | the document's `Undo` and `Redo`; nothing in a read-only editor |
+| Ctrl+Left, Ctrl+Right, with Shift to select (macOS: Alt) | `cursorWordLeft`, `cursorWordEndRight`, `cursorWordLeftSelect`, `cursorWordEndRightSelect` | to the start of the word before the caret and the end of the word after it |
+| Ctrl+Backspace, Ctrl+Delete (macOS: Alt) | `deleteWordLeft`, `deleteWordRight` | deletes the selection, or by words; two or more spaces before the caret, or spaces after it, go alone |
+| Ctrl+D | `editor.action.addSelectionToNextFindMatch` | selects the word at the caret; with a selection it does not apply, as the editor has one caret (design.md #119) |
 
 **Indentation** belongs to the document (`CodeDocument.Indentation`), so all editors of one document agree. It starts
 as VS Code's `editor.detectIndentation` guesses it from the initial text; where the text gives no answer, VS Code's
