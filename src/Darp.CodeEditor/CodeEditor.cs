@@ -590,6 +590,9 @@ public class CodeEditor : TemplatedControl
                 }
             }
         }
+        // Without a document, nothing is left to search, and no key reaches the bar's view.
+        if (Document is null or { IsDisposed: true } && _searchBar is { IsOpen: true } bar)
+            bar.Close();
         UpdateHighlighting();
         // Last, once the part, the view and the subscriptions agree: a handler may switch the document again.
         UpdatePendingKeys();
