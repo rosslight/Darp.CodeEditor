@@ -1407,6 +1407,39 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Growing_the_list_at_its_last_row_shows_more_of_its_items_before_it() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Items([.. Enumerable.Range(0, 30).Select(i => $"item{i:D2}")])
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await OpenAsync(window, 0);
+            // Up wraps to the last item, at the list's last row.
+            window.Press(Key.Up);
+            CompletionListBox list = List(window).ShouldNotBeNull();
+            Rect frame = BoundsInWindow(Flyout(window).ShouldNotBeNull());
+
+            // The bottom edge, three rows further.
+            var edge = new Point(frame.Center.X, frame.Bottom - 2);
+            Point to = edge + new Point(0, 3 * list.RowHeight);
+            window.Window.MouseDown(edge, MouseButton.Left);
+            window.Window.MouseMove(to);
+            window.Window.MouseUp(to, MouseButton.Left);
+            window.Layout();
+
+            list.VisibleRows.ShouldBe(15);
+            list.SelectedIndex.ShouldBe(29);
+            list.FirstRow.ShouldBe(15);
+            list.RowOf(29).ShouldNotBeNull().Item.ShouldNotBeNull().Item.Label.ShouldBe("item29");
+        });
+
+    [Fact]
     public Task Dragging_only_the_lists_side_keeps_its_rows() =>
         _ui.Run(async () =>
         {
