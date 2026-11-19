@@ -71,6 +71,13 @@ public static class CodeEditorCommands
     /// </summary>
     public const string AddSelectionToNextFindMatch = "editor.action.addSelectionToNextFindMatch";
 
+    /// <summary>
+    /// Toggles the language's block comment: removes the one that the selection is in, or else puts one around the
+    /// selection, which stays on the commented text; without a selection, an empty comment goes in, with the caret in
+    /// it.
+    /// </summary>
+    public const string BlockComment = "editor.action.blockComment";
+
     /// <summary>Copies the selected lines, or the caret's, above them; the selection stays on the lines above.</summary>
     public const string CopyLinesUp = "editor.action.copyLinesUpAction";
 
