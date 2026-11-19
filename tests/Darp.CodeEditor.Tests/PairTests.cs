@@ -230,6 +230,43 @@ public sealed class PairTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe("(*|*)");
         });
 
+    [Theory]
+    [InlineData("|;", "(|;")]
+    [InlineData("|", "(|)")]
+    public Task An_empty_autoCloseBefore_closes_pairs_before_no_character(string marked, string expected) =>
+        _ui.Run(async () =>
+        {
+            var language = new CodeLanguage(
+                "close-before-nothing",
+                configuration: new Uri(
+                    "avares://Darp.CodeEditor.Tests/Languages/close-before-nothing.language-configuration.json"
+                )
+            );
+            await language.Loaded;
+            using EditorWindow window = MarkedText.Show(marked, language);
+
+            window.Type("(");
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
+    [Fact]
+    public Task Typing_steps_over_a_closing_bracket_only_while_brackets_close() =>
+        _ui.Run(async () =>
+        {
+            await Pairs.Loaded;
+            using EditorWindow window = MarkedText.Show("|", Pairs);
+            window.Type("(");
+
+            window.Editor.Options = new CodeEditorOptions
+            {
+                AutoClosing = new AutoClosingOptions { Brackets = AutoClosingMode.Never },
+            };
+            window.Type(")");
+
+            MarkedText.Of(window).ShouldBe("()|)");
+        });
+
     [Fact]
     public Task A_pair_of_several_characters_closes_when_its_last_character_is_typed() =>
         _ui.Run(async () =>

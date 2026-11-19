@@ -1,0 +1,5 @@
+{
+  "comment": "Editing rules for tests: a bracket that closes before no character, only at a line's end.",
+  "brackets": [["(", ")"]],
+  "autoCloseBefore": ""
+}
