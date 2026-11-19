@@ -83,21 +83,23 @@ internal sealed class WordEditing : IEditorFeature
     }
 
     /// <summary>Deletes the selection, or else what <paramref name="rule"/> gives at the caret, in a step of its own.</summary>
-    /// <returns>Whether there was something to delete.</returns>
+    /// <returns>Whether there was something to delete, and it went.</returns>
     private bool Delete(Func<TextDocument, int, TextRange?> rule)
     {
         if (!_area.Selection.IsEmpty)
-            _changes.Run(EditStep.Own, () => _area.Selection.ReplaceSelectionWithText(""));
-        else if (rule(Buffer, _area.Caret.Offset) is { } range)
         {
-            _changes.Run(
-                EditStep.Own,
-                () => _changes.Apply([new TextEdit(range.Start, range.Length, "")], new TextSelection(range.Start))
-            );
+            _changes.Run(EditStep.Own, () => _area.Selection.ReplaceSelectionWithText(""));
+            return true;
         }
-        else
+        if (rule(Buffer, _area.Caret.Offset) is not { } range)
             return false;
-        return true;
+        bool deleted = false;
+        _changes.Run(
+            EditStep.Own,
+            () =>
+                deleted = _changes.Apply([new TextEdit(range.Start, range.Length, "")], new TextSelection(range.Start))
+        );
+        return deleted;
     }
 
     private void OnPressed(object? sender, PointerPressedEventArgs e)

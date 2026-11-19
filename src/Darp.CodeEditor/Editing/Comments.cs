@@ -41,7 +41,7 @@ internal sealed class Comments : IEditorFeature
     /// Ctrl+/: toggles line comments on the selected lines, or the caret's, with the language's line comment, or else
     /// with its block comment around them.
     /// </summary>
-    /// <returns>Whether it toggled: the language has a comment, and the lines can change.</returns>
+    /// <returns>Whether the language has a comment to toggle, and the toggle went in.</returns>
     private bool ToggleComment()
     {
         LanguageConfiguration configuration = Configuration;
@@ -58,6 +58,7 @@ internal sealed class Comments : IEditorFeature
     /// Comments the lines at their smallest indentation, by its width in columns, with a space after the token, or
     /// uncomments them when every line is commented. Lines of whitespace only take no part, unless all lines are.
     /// </summary>
+    /// <returns>Whether the edits went in.</returns>
     private bool ToggleLineComment(string token, int first, int last)
     {
         var lines = new List<(DocumentLine Line, string Text, int Indent)>();
@@ -102,6 +103,7 @@ internal sealed class Comments : IEditorFeature
     /// each token, or removes it when it is around them already, for languages without a line comment. On a line of
     /// whitespace only, the caret goes inside an empty comment.
     /// </summary>
+    /// <returns>Whether the edits went in.</returns>
     private bool ToggleBlockCommentOnLines(CharacterPair block, int first, int last)
     {
         DocumentLine firstLine = Buffer.GetLineByNumber(first);
@@ -140,7 +142,7 @@ internal sealed class Comments : IEditorFeature
     /// each token, and keeps the commented text selected. Without a selection, an empty comment goes in at the caret,
     /// and the caret inside it.
     /// </summary>
-    /// <returns>Whether the language has a block comment.</returns>
+    /// <returns>Whether the language has a block comment, and the toggle went in.</returns>
     private bool ToggleBlockComment()
     {
         if (Configuration.BlockComment is not (var open, var close))
@@ -206,8 +208,9 @@ internal sealed class Comments : IEditorFeature
             edits = [new TextEdit(selected.Start, 0, open + " "), new TextEdit(selected.End, 0, " " + close)];
             after = new TextSelection(selected.Start + open.Length + 1, selected.End + open.Length + 1);
         }
-        _changes.Run(EditStep.Own, () => _changes.Apply(edits, after));
-        return true;
+        bool toggled = false;
+        _changes.Run(EditStep.Own, () => toggled = _changes.Apply(edits, after));
+        return toggled;
     }
 
     /// <summary>The lines of the selection, without a last line it only touches at its start; or the caret's line.</summary>
