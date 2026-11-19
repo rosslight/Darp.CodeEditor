@@ -64,6 +64,8 @@ internal sealed class SearchScan
         bool acrossLines = _query.IsMultiline;
         try
         {
+            // Before the first match, which can run out of time on its own and would hide the cancellation.
+            _cancellationToken.ThrowIfCancellationRequested();
             foreach ((int start, int end) in Ranges(scope))
             {
                 if (end < from)
@@ -77,6 +79,7 @@ internal sealed class SearchScan
         }
         catch (RegexMatchTimeoutException)
         {
+            _cancellationToken.ThrowIfCancellationRequested();
             return SearchOutcome.OutOfTime;
         }
     }
