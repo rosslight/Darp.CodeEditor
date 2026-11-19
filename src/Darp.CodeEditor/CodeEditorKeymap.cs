@@ -65,6 +65,7 @@ public sealed class CodeEditorKeymap
     /// <item><term>enter</term><description><see cref="CodeEditorCommands.AcceptSelectedSuggestion"/> while the list shows</description></item>
     /// <item><term>tab, shift+enter</term><description><see cref="CodeEditorCommands.AcceptAlternativeSelectedSuggestion"/> while the list shows; VS Code binds Tab to <see cref="CodeEditorCommands.AcceptSelectedSuggestion"/></description></item>
     /// <item><term>ctrl+shift+space (shift+cmd+space)</term><description><see cref="CodeEditorCommands.TriggerParameterHints"/></description></item>
+    /// <item><term>alt+up, alt+down (also ctrl+p, ctrl+n)</term><description><see cref="CodeEditorCommands.ShowPrevParameterHint"/>, <see cref="CodeEditorCommands.ShowNextParameterHint"/> while signature help shows several signatures, before the other bindings of those keys, but completion's list's ctrl+n and ctrl+p</description></item>
     /// <item><term>ctrl+f (cmd+f)</term><description><see cref="CodeEditorCommands.Find"/></description></item>
     /// <item><term>ctrl+h (alt+cmd+f)</term><description><see cref="CodeEditorCommands.Replace"/></description></item>
     /// <item><term>f3, shift+f3 (also cmd+g, shift+cmd+g)</term><description><see cref="CodeEditorCommands.FindNext"/>, <see cref="CodeEditorCommands.FindPrevious"/></description></item>
@@ -163,11 +164,7 @@ public sealed class CodeEditorKeymap
         yield return new("tab", CodeEditorCommands.AcceptAlternativeSelectedSuggestion);
         yield return new("shift+enter", CodeEditorCommands.AcceptAlternativeSelectedSuggestion);
         if (mac)
-        {
             yield return new("alt+escape", CodeEditorCommands.TriggerSuggest);
-            yield return new("ctrl+n", CodeEditorCommands.SelectNextSuggestion);
-            yield return new("ctrl+p", CodeEditorCommands.SelectPrevSuggestion);
-        }
         yield return new($"{command}+shift+space", CodeEditorCommands.TriggerParameterHints);
         yield return new($"{command}+f", CodeEditorCommands.Find);
         yield return new(mac ? "alt+cmd+f" : "ctrl+h", CodeEditorCommands.Replace);
@@ -207,6 +204,18 @@ public sealed class CodeEditorKeymap
         yield return new($"{smartSelect}+left", CodeEditorCommands.SmartSelectShrink);
         yield return new("f7", CodeEditorCommands.WordHighlightNext);
         yield return new("shift+f7", CodeEditorCommands.WordHighlightPrevious);
+        // Last, as VS Code weighs them above the other commands of their keys, such as Alt+Up's line move: they apply
+        // only while signature help shows several signatures, and the key goes on to the binding before otherwise.
+        yield return new("alt+up", CodeEditorCommands.ShowPrevParameterHint);
+        yield return new("alt+down", CodeEditorCommands.ShowNextParameterHint);
+        if (mac)
+        {
+            yield return new("ctrl+p", CodeEditorCommands.ShowPrevParameterHint);
+            yield return new("ctrl+n", CodeEditorCommands.ShowNextParameterHint);
+            // Completion's list weighs more still: while it shows, Ctrl+N and Ctrl+P select in it.
+            yield return new("ctrl+n", CodeEditorCommands.SelectNextSuggestion);
+            yield return new("ctrl+p", CodeEditorCommands.SelectPrevSuggestion);
+        }
     }
 
     /// <summary>

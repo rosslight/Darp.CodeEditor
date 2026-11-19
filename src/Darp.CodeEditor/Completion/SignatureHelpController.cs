@@ -118,8 +118,12 @@ internal sealed class SignatureHelpController : IEditorFeature
     /// <summary>Whether signature help shows, waits for an answer, or waits to ask again.</summary>
     private bool IsActive => _shown is not null || _request is not null || _pause is not null;
 
-    public void AddCommands(CommandTable commands) =>
+    public void AddCommands(CommandTable commands)
+    {
         commands.Add(CodeEditorCommands.TriggerParameterHints, Trigger, CommandNeeds.TextFocus | CommandNeeds.Writable);
+        commands.Add(CodeEditorCommands.ShowPrevParameterHint, () => Cycle(forward: false));
+        commands.Add(CodeEditorCommands.ShowNextParameterHint, () => Cycle(forward: true));
+    }
 
     /// <summary>Asks for signature help, where the server has it and the user can type.</summary>
     private bool Trigger()
@@ -133,20 +137,25 @@ internal sealed class SignatureHelpController : IEditorFeature
         return true;
     }
 
-    /// <summary>Up and Down, from the editor's key handler, while more than one signature shows: the others.</summary>
+    /// <summary>
+    /// Up and Down, from the editor's key handler after completion's list had them: the signature before or after the
+    /// active one.
+    /// </summary>
     /// <returns>Whether the key was signature help's.</returns>
-    public bool OnKeyDown(KeyEventArgs e)
+    public bool OnKeyDown(KeyEventArgs e) =>
+        e.KeyModifiers == KeyModifiers.None && e.Key is (Key.Up or Key.Down) && Cycle(forward: e.Key == Key.Down);
+
+    /// <summary>
+    /// Makes the signature after or before the active one active, around the ends, which the server learns when it is
+    /// asked again.
+    /// </summary>
+    /// <returns>Whether more than one signature shows: otherwise the key goes on.</returns>
+    private bool Cycle(bool forward)
     {
-        if (
-            _shown is not { Signatures.Count: > 1 } shown
-            || e.KeyModifiers != KeyModifiers.None
-            || e.Key is not (Key.Up or Key.Down)
-        )
-        {
+        if (_shown is not { Signatures.Count: > 1 } shown)
             return false;
-        }
         int count = shown.Signatures.Count;
-        Show(shown with { ActiveSignature = (shown.ActiveSignature + (e.Key == Key.Down ? 1 : count - 1)) % count });
+        Show(shown with { ActiveSignature = (shown.ActiveSignature + (forward ? 1 : count - 1)) % count });
         return true;
     }
 

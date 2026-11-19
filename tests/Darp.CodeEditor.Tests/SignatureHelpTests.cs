@@ -237,6 +237,60 @@ public sealed class SignatureHelpTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Alt_Up_and_Alt_Down_choose_the_signature_while_several_show_and_otherwise_go_on_to_their_other_binding() =>
+        _ui.Run(async () =>
+        {
+            var time = new ManualTime();
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            using CodeDocument document = server.CreateDocument(CodeLanguage.Json, "call");
+            await document.Language.Loaded;
+            // Commenting the line stands in for Alt+Up's and Alt+Down's line moves, bound before the defaults.
+            var keymap = new CodeEditorKeymap([
+                new("alt+up", CodeEditorCommands.CommentLine),
+                new("alt+down", CodeEditorCommands.CommentLine),
+                .. CodeEditorKeymap.Default.Bindings,
+            ]);
+            using var window = new EditorWindow(new CodeEditor { Document = document, Keymap = keymap });
+            await CompletionTests.StartServingAsync(server, document);
+
+            // Closed: the other binding.
+            window.Editor.Selection = new TextSelection(4);
+            window.Press(Key.Up, KeyModifiers.Alt);
+            document.Text.ShouldBe("// call");
+
+            // Two signatures: around them, and the text stays.
+            await OpenAsync(window, document, time);
+            string open = document.Text;
+            window.Press(Key.Down, KeyModifiers.Alt);
+            await WaitForSignatureAsync(window, "first", "Calls with three.");
+            window.Press(Key.Down, KeyModifiers.Alt);
+            await WaitForSignatureAsync(window, "first", "Calls with two.");
+            window.Press(Key.Up, KeyModifiers.Alt);
+            await WaitForSignatureAsync(window, "first", "Calls with three.");
+            document.Text.ShouldBe(open);
+
+            // One signature: the other binding.
+            var one = new JsonArray(
+                new JsonObject
+                {
+                    ["label"] = "call(first)",
+                    ["documentation"] = "Calls with one.",
+                    ["parameters"] = new JsonArray(new JsonObject { ["label"] = "first" }),
+                }
+            );
+            using CodeDocument command = server.CreateDocument(FakeServer.Commands, $"signatures {one.ToJsonString()}");
+            await fake.WaitForAsync("set signatures");
+            document.Text = "call";
+            window.Editor.Selection = new TextSelection(4);
+            window.Type("(");
+            time.Advance(s_pause);
+            await WaitForSignatureAsync(window, "first", "Calls with one.");
+            window.Press(Key.Down, KeyModifiers.Alt);
+            document.Text.ShouldStartWith("// call(");
+        });
+
+    [Fact]
     public Task Without_parameter_hints_typing_opens_nothing_asking_by_key_still_does_and_turning_them_off_closes_it() =>
         _ui.Run(async () =>
         {
