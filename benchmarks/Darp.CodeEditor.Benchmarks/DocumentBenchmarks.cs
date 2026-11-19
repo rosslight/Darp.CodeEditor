@@ -85,11 +85,6 @@ public class DocumentBenchmarks
     [Benchmark]
     public int GetOffsetInWarmSnapshot() => _warm.GetOffset(new TextPosition(Lines / 2, 10));
 
-    /// <summary>A snapshot of <paramref name="rope"/>, as a document makes one; the baseline's takes no line break.</summary>
-    private static TextSnapshot Snapshot(ITextSource rope) =>
-#if BENCHMARK_BASELINE
-        new(rope, 1);
-#else
-        new(rope, 1, "\n");
-#endif
+    /// <summary>A snapshot of <paramref name="rope"/>, as a document makes one.</summary>
+    private static TextSnapshot Snapshot(ITextSource rope) => new(rope, 1, "\n");
 }
