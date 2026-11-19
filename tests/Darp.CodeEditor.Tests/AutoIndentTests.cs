@@ -250,6 +250,23 @@ public sealed class AutoIndentTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_closing_bracket_that_lines_up_ends_the_undo_step() =>
+        _ui.Run(async () =>
+        {
+            await Rules.Loaded;
+            using EditorWindow window = Show("x = (\n|", Rules);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+
+            window.Type("    )a");
+            MarkedText.Of(window).ShouldBe("x = (\n)a|");
+
+            document.Undo();
+            MarkedText.Of(window).ShouldBe("x = (\n)|");
+            document.Undo();
+            document.Text.ShouldBe("x = (\n");
+        });
+
+    [Fact]
     public Task A_closing_bracket_in_a_comment_stays_where_it_is_typed() =>
         _ui.Run(async () =>
         {
