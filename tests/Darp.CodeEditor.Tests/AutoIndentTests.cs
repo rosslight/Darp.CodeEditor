@@ -65,6 +65,7 @@ public sealed class AutoIndentTests(UiFixture ui)
         {
             await CodeLanguage.Json.Loaded;
             using EditorWindow window = Show("{\n|    \"a\": 1\n}", CodeLanguage.Json);
+            await window.TokensKnownAsync();
 
             window.Press(Key.Enter);
 
@@ -80,6 +81,7 @@ public sealed class AutoIndentTests(UiFixture ui)
         {
             await CodeLanguage.Json.Loaded;
             using EditorWindow window = Show(marked, CodeLanguage.Json);
+            await window.TokensKnownAsync();
 
             window.Press(Key.Enter);
 
@@ -141,6 +143,7 @@ public sealed class AutoIndentTests(UiFixture ui)
             CodeLanguage.Yaml.AutoIndent.ShouldBe(AutoIndent.Advanced);
             await CodeLanguage.Yaml.Loaded;
             using EditorWindow window = Show("key:|\n", CodeLanguage.Yaml);
+            await window.TokensKnownAsync();
 
             window.Press(Key.Enter);
 
@@ -193,6 +196,7 @@ public sealed class AutoIndentTests(UiFixture ui)
         {
             await CodeLanguage.Json.Loaded;
             using EditorWindow window = Show(marked, CodeLanguage.Json, indentation: 2);
+            await window.TokensKnownAsync();
 
             window.Press(Key.Tab);
 
@@ -270,6 +274,7 @@ public sealed class AutoIndentTests(UiFixture ui)
         {
             await CodeLanguage.Json.Loaded;
             using EditorWindow window = Show("{\n  \"a\": {\n    \"b\": 1,\n|", CodeLanguage.Json, indentation: 2);
+            await window.TokensKnownAsync();
             CodeDocument document = window.Editor.Document.ShouldNotBeNull();
 
             window.Press(Key.Tab);
@@ -381,6 +386,7 @@ public sealed class AutoIndentTests(UiFixture ui)
             window.Render();
             return window.RenderedColors().Count > 1;
         });
+        await window.TokensKnownAsync();
         return window;
     }
 }
