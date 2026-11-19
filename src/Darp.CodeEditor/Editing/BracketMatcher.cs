@@ -115,6 +115,95 @@ internal static class BracketMatcher
     }
 
     /// <summary>
+    /// The innermost pair of brackets around <paramref name="offset"/>, by their offsets, as VS Code's
+    /// <c>findEnclosingBrackets</c> finds it: the first closing bracket from the offset on that closes none of its kind
+    /// after the offset, and its opening one, each within <see cref="MaxDistance"/> characters. Null for none.
+    /// </summary>
+    public static (int Open, int Close)? FindEnclosing(
+        TextDocument document,
+        int offset,
+        IReadOnlyList<CharacterPair> brackets,
+        Func<int, int[]?> tokensOf
+    )
+    {
+        (string opens, string closes) = Characters(brackets);
+        if (opens.Length == 0)
+            return null;
+        // Per kind, the brackets opened from the offset on that are still open.
+        int[] open = new int[opens.Length];
+        (int Kind, int Offset)? closing = null;
+        Scan(
+            document,
+            offset,
+            Math.Min(document.TextLength, offset + MaxDistance),
+            forward: true,
+            opens + closes,
+            tokensOf,
+            (c, at) =>
+            {
+                if (opens.IndexOf(c) is var kind and >= 0)
+                    open[kind]++;
+                else if (open[kind = closes.IndexOf(c)]-- == 0)
+                    closing = (kind, at);
+                return closing is not null;
+            }
+        );
+        return
+            closing is (int found, int close)
+            && Find(document, offset, opens[found], closes[found], forward: false, tokensOf) is { } match
+            ? (match, close)
+            : null;
+    }
+
+    /// <summary>
+    /// The first bracket from <paramref name="offset"/> on, opening or closing, as VS Code's <c>findNextBracket</c> finds
+    /// it, within <see cref="MaxDistance"/> characters; null for none.
+    /// </summary>
+    public static int? FindNext(
+        TextDocument document,
+        int offset,
+        IReadOnlyList<CharacterPair> brackets,
+        Func<int, int[]?> tokensOf
+    )
+    {
+        (string opens, string closes) = Characters(brackets);
+        int? next = null;
+        if (opens.Length > 0)
+        {
+            Scan(
+                document,
+                offset,
+                Math.Min(document.TextLength, offset + MaxDistance),
+                forward: true,
+                opens + closes,
+                tokensOf,
+                (_, at) =>
+                {
+                    next = at;
+                    return true;
+                }
+            );
+        }
+        return next;
+    }
+
+    /// <summary>The opening and the closing characters of the brackets of one character each, by kind.</summary>
+    private static (string Opens, string Closes) Characters(IReadOnlyList<CharacterPair> brackets)
+    {
+        string opens = "";
+        string closes = "";
+        foreach (CharacterPair pair in brackets)
+        {
+            if (pair is { Open: [char open], Close: [char close] } && open != close)
+            {
+                opens += open;
+                closes += close;
+            }
+        }
+        return (opens, closes);
+    }
+
+    /// <summary>
     /// The bracket that matches the one at <paramref name="from"/>: the next closing bracket at the same depth going
     /// forward, or the opening one going backward, within <see cref="MaxDistance"/> characters.
     /// </summary>
