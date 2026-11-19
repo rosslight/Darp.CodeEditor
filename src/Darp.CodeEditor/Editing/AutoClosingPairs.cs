@@ -97,6 +97,9 @@ internal sealed class AutoClosingPairs : IDisposable
         bool IsClosedBefore(int offset) =>
             offset < Buffer.TextLength
             && Buffer.GetCharAt(offset) == typed
+            && Configuration.AutoClosingPairs.Any(pair =>
+                pair is { Open.Length: 1, Close: [char close] } && close == typed
+            )
             && !(IsQuote(typed) && IsEscaped(offset))
             && _autoClosed.Exists(pair => pair.Close.Offset == offset && pair.CloseText.Length == 1);
     }
@@ -104,8 +107,11 @@ internal sealed class AutoClosingPairs : IDisposable
     /// <summary>
     /// The pair that <paramref name="typed"/> closes where it goes in, the same one at each place, or none: the one with
     /// the longest opening that the character completes. It closes where the options let it, or before another closing
-    /// character; a quote not right after a word, unless quotes always close; and a pair not closed in strings or
-    /// comments only where the tokens before the caret and of the typed text are neither.
+    /// character; a quote not right after a word, unless quotes always close; a bracket not before a closing one that
+    /// no opening one matches, unless brackets always close; and a pair not closed in strings or comments only where the
+    /// tokens before the caret and of the typed text are neither. A longer pair that contains a shorter one, as
+    /// <c>(*</c> contains <c>(</c>, closes with the shorter one's closing text that is already after the caret: its
+    /// <see cref="AutoClosingPair.Close"/> is what goes in.
     /// </summary>
     public AutoClosingPair? PairToClose(char typed)
     {
@@ -232,17 +238,61 @@ internal sealed class AutoClosingPairs : IDisposable
             && WordCharacters.IsWordCharacter(Buffer.GetCharAt(caret - 1))
         )
             return null;
-        if (!candidate.NotInString && !candidate.NotInComment)
-            return candidate;
-        // Without a grammar, there are no strings or comments.
-        if (_document.Language.Loaded.Result.Grammar is null)
-            return candidate;
-        if (_highlighter.ContextAt(caret) is not { } context)
+        if (
+            (mode != AutoClosingMode.Always && UnmatchedClosingAhead(candidate, caret)) || !ClosesHere(candidate, caret)
+        )
             return null;
-        return Excludes(candidate, context.Before) || Excludes(candidate, context.At) ? null : candidate;
+        return Contained(candidate) is { } contained && after.StartsWith(contained.Close, StringComparison.Ordinal)
+            ? candidate with
+            {
+                Close = candidate.Close[..^contained.Close.Length],
+            }
+            : candidate;
+    }
 
-        static bool Excludes(AutoClosingPair pair, TokenType type) =>
+    /// <summary>
+    /// Whether a closing bracket of <paramref name="pair"/> after <paramref name="caret"/> has no opening one before
+    /// it, so that the bracket typed at the caret is its match.
+    /// </summary>
+    private bool UnmatchedClosingAhead(AutoClosingPair pair, int caret)
+    {
+        if (pair is not { Open: [char open], Close: [char close] } || open == close)
+            return false;
+        var brackets = new CharacterPair(pair.Open, pair.Close);
+        return BracketMatcher.FindClosing(Buffer, caret, brackets, _highlighter.TokensOf) is not null
+            && BracketMatcher.FindOpening(Buffer, caret, brackets, _highlighter.TokensOf) is null;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="pair"/> closes at <paramref name="caret"/> by its tokens: anywhere, unless the language
+    /// keeps it out of strings or comments and the tokens before the caret or of the typed text are one, or unknown.
+    /// </summary>
+    private bool ClosesHere(AutoClosingPair pair, int caret)
+    {
+        // Without a grammar, there are no strings or comments.
+        if ((!pair.NotInString && !pair.NotInComment) || _document.Language.Loaded.Result.Grammar is null)
+            return true;
+        return _highlighter.ContextAt(caret) is { } context && !Excludes(context.Before) && !Excludes(context.At);
+
+        bool Excludes(TokenType type) =>
             (pair.NotInString && type == TokenType.String) || (pair.NotInComment && type == TokenType.Comment);
+    }
+
+    /// <summary>The longest shorter pair inside <paramref name="pair"/> that ends its closing text; null for none.</summary>
+    private AutoClosingPair? Contained(AutoClosingPair pair)
+    {
+        AutoClosingPair? found = null;
+        foreach (AutoClosingPair other in Configuration.AutoClosingPairs)
+        {
+            if (
+                other.Open.Length < pair.Open.Length
+                && other.Open.Length > (found?.Open.Length ?? 0)
+                && pair.Open.Contains(other.Open, StringComparison.Ordinal)
+                && pair.Close.EndsWith(other.Close, StringComparison.Ordinal)
+            )
+                found = other;
+        }
+        return found;
     }
 
     /// <summary>Whether a quote, or else a bracket, closes before <paramref name="next"/> by <paramref name="mode"/>.</summary>
