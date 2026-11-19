@@ -87,14 +87,33 @@ public sealed class TextSearchTests
         result.Matches.Single().Replacement.ShouldBe("x\ny");
     }
 
-    [Fact]
-    public void A_cancelled_search_stops()
+    /// <summary>
+    /// A cancelled search throws, each way of searching, also where its first match runs out of time, which would
+    /// otherwise end it as out of time: the search, the one for a match beyond those kept, and Replace All's.
+    /// </summary>
+    [Theory]
+    [InlineData("Find")]
+    [InlineData("FindNext")]
+    [InlineData("FindPrevious")]
+    [InlineData("ReplaceAll")]
+    public void A_cancelled_search_stops(string search)
     {
+        // A pattern that backtracks for longer than a match may take.
+        TextSnapshot snapshot = TextSnapshot.FromString(new string('a', 40) + "b");
+        var query = new SearchQuery("(a+)+$", MatchCase: true, WholeWord: false, UseRegex: true);
+        var replacement = new SearchReplacement("x", PreserveCase: false);
         using var cancelled = new CancellationTokenSource();
         cancelled.Cancel();
+        CancellationToken token = cancelled.Token;
 
         Should.Throw<OperationCanceledException>(() =>
-            TextSearch.Find(s_rejectedOnOneLine, s_wholeWordA, null, null, cancelled.Token)
+            search switch
+            {
+                "Find" => TextSearch.Find(snapshot, query, null, null, token).Outcome,
+                "FindNext" => TextSearch.FindNext(snapshot, query, null, null, 0, false, token).Outcome,
+                "FindPrevious" => TextSearch.FindPrevious(snapshot, query, null, 0, int.MaxValue, token).Outcome,
+                _ => TextSearch.ReplaceAll(snapshot, query, replacement, null, token).Outcome,
+            }
         );
     }
 
