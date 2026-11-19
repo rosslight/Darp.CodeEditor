@@ -64,6 +64,12 @@ internal sealed class EditorPopup
     /// <summary>Raised while the user drags an edge, with the size the popup would have.</summary>
     public event Action<Size, Edges>? Resized;
 
+    /// <summary>
+    /// How far left of its place's left edge the popup's left edge goes, as completion's list lines its labels up with
+    /// the word; none by default.
+    /// </summary>
+    public double Inset { get; init; }
+
     /// <summary>Whether its edges away from what it is next to resize it, from its next placing on; false by default.</summary>
     public bool IsResizable { get; set; }
 
@@ -173,20 +179,23 @@ internal sealed class EditorPopup
                 anchor.Bottom <= 0
                 || anchor.Top >= relativeTo.Bounds.Height
                 || relativeTo.TranslatePoint(anchor.TopLeft, layer) is not { } top
+                || relativeTo.TranslatePoint(default, layer) is not { } view
             )
             {
                 LeaveView();
                 return;
             }
-            var line = new Rect(top, anchor.Size);
+            // The line as its view shows it; the place itself may be scrolled out of it sideways.
+            var line = new Rect(view.X, top.Y, relativeTo.Bounds.Width, anchor.Height);
+            double left = top.X - Inset;
             // Placing changes the layout, and the next layout pass finds nothing moved.
-            if (Equals(_placedBy, (space, line)))
+            if (Equals(_placedBy, (space, line, left)))
                 return;
-            _placedBy = (space, line);
+            _placedBy = (space, line, left);
             _root.MaxHeight = double.PositiveInfinity;
             _root.Measure(new Size(space.Width, double.PositiveInfinity));
-            // Out of the window, as with the text view out of it, the line shows nowhere for the popup to point at.
-            if (PopupPlacement.Place(line, _root.DesiredSize, window, _side) is not { } next)
+            // Out of the window, as in an editor beyond its edge, the line shows nowhere for the popup to point at.
+            if (PopupPlacement.Place(line, left, _root.DesiredSize, window, _side) is not { } next)
             {
                 LeaveView();
                 return;

@@ -26,15 +26,23 @@ internal static class PopupPlacement
     public const double MinBesideWidth = 200;
 
     /// <summary>
-    /// Places a popup of <paramref name="size"/> next to <paramref name="line"/>, whose left edge is where the popup's
-    /// left edge goes: on the <paramref name="preferred"/> side, or on the other side when only that has room. When
-    /// neither has room, it takes the larger side, limited to its height. It moves left at the window's right edge, and
-    /// is at most as wide as the window.
+    /// Places a popup of <paramref name="size"/> next to <paramref name="line"/>, its left edge at
+    /// <paramref name="left"/>: on the <paramref name="preferred"/> side, or on the other side when only that has room.
+    /// When neither has room, it takes the larger side, limited to its height. It moves left at the window's right
+    /// edge, and right at its left edge, and is at most as wide as the window.
     /// </summary>
-    /// <returns>Where it goes; null when the window does not show the line, as the popup would point at nothing.</returns>
-    public static PopupBounds? Place(Rect line, Size size, Rect window, PopupSide preferred)
+    /// <param name="line">The line, as its view shows it: as wide as the view, as high as the line.</param>
+    /// <param name="left">Where the popup's left edge goes, as at the start of a word.</param>
+    /// <param name="size">The popup's size.</param>
+    /// <param name="window">The window.</param>
+    /// <param name="preferred">The side it opens on where both have room.</param>
+    /// <returns>
+    /// Where it goes; null when the window does not show the line, as of an editor beyond its edge: the popup would
+    /// point at nothing.
+    /// </returns>
+    public static PopupBounds? Place(Rect line, double left, Size size, Rect window, PopupSide preferred)
     {
-        if (line.Bottom <= window.Top || line.Top >= window.Bottom)
+        if (!line.Intersects(window))
             return null;
         double above = line.Top - window.Top;
         double below = window.Bottom - line.Bottom;
@@ -46,9 +54,9 @@ internal static class PopupPlacement
         double room = Math.Max(0, Math.Floor(placeAbove ? above : below));
         double width = Math.Min(size.Width, window.Width);
         double height = Math.Min(size.Height, room);
-        double left = Math.Clamp(line.Left, window.Left, window.Right - width);
+        double x = Math.Clamp(left, window.Left, window.Right - width);
         return new PopupBounds(
-            new Rect(left, placeAbove ? line.Top - height : line.Bottom, width, height),
+            new Rect(x, placeAbove ? line.Top - height : line.Bottom, width, height),
             placeAbove,
             room,
             line
