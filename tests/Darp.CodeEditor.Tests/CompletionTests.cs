@@ -9,6 +9,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
@@ -397,6 +398,60 @@ public sealed class CompletionTests(UiFixture ui)
             await Wait.UntilAsync(() => List(window) is null);
             editor.GetVisualDescendants().OfType<SearchBar>().ShouldNotContain(bar => bar.IsOpen);
             document.Text.ShouldBe("prizzz");
+        });
+
+    [Theory]
+    // F7 to the next occurrence, a jump to the bracket, smart select, moving the line and selecting it.
+    [InlineData("f7")]
+    [InlineData("jumpToBracket")]
+    [InlineData("smartSelect")]
+    [InlineData("moveLines")]
+    [InlineData("expandLineSelection")]
+    public Task A_command_that_moves_the_caret_ends_completion(string command) =>
+        _ui.Run(async () =>
+        {
+            var time = new ManualTime();
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            // An item that still matches the text up to where F7 goes.
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("foo.fooBar"));
+            // Brackets in a language that has them; F7 between the words of plain text.
+            await CodeLanguage.Json.Loaded;
+            bool f7 = command == "f7";
+            using CodeDocument document = f7
+                ? server.CreateDocument(CodeLanguage.PlainText, "foo.foo")
+                : server.CreateDocument(CodeLanguage.Json, "[foo.foo]\nx");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await StartServingAsync(server, document);
+            await window.TokensKnownAsync();
+            // At the end of the first "foo", where its occurrences show.
+            int caret = f7 ? 3 : 4;
+            window.Editor.Selection = new TextSelection(caret);
+            time.Advance(TimeSpan.FromSeconds(1));
+            await Wait.UntilAsync(() =>
+            {
+                Dispatcher.UIThread.RunJobs();
+                return window.Editor.Occurrences.Count == 2;
+            });
+            await OpenAsync(window, caret);
+
+            (Key key, KeyModifiers modifiers) = command switch
+            {
+                "f7" => (Key.F7, KeyModifiers.None),
+                "jumpToBracket" => (Key.OemPipe, EditorWindow.Command | KeyModifiers.Shift),
+                "smartSelect" => (Key.Right, KeyModifiers.Shift | KeyModifiers.Alt),
+                "moveLines" => (Key.Down, KeyModifiers.Alt),
+                _ => (Key.L, EditorWindow.Command),
+            };
+            TextSelection before = window.Editor.Selection;
+            window.Press(key, modifiers);
+
+            // Smart select asks the server first.
+            await Wait.UntilAsync(() => window.Editor.Selection != before);
+            List(window).ShouldBeNull();
+            // Enter goes on to the text: the list's item does not go in where the caret went.
+            window.Press(Key.Enter);
+            document.Text.ShouldNotContain("Bar");
         });
 
     [Fact]
