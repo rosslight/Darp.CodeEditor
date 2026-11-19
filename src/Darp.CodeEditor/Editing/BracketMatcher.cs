@@ -77,31 +77,36 @@ internal static class BracketMatcher
         Func<int, int[]?> tokensOf
     )
     {
-        var open = new List<char>();
+        // The open brackets by their kind, each with the open one of its kind before it, and the last of each kind: a
+        // closing bracket finds its own at once, whatever other kinds are open, so that the scan stays linear.
+        var open = new List<(int Kind, int Before)>();
+        int[] last = [.. brackets.Select(_ => -1)];
         bool unmatched = false;
-        int start = Math.Max(0, offset - MaxDistance);
-        int end = Math.Min(document.TextLength, offset + MaxDistance);
-        // The kinds by their index, so that the scan's work per bracket allocates nothing.
         string opens = string.Concat(brackets.Select(b => b.Open));
         string closes = string.Concat(brackets.Select(b => b.Close));
         Scan(
             document,
-            start,
-            end,
+            Math.Max(0, offset - MaxDistance),
+            Math.Min(document.TextLength, offset + MaxDistance),
             forward: true,
             opens + closes,
             tokensOf,
             (c, at) =>
             {
-                if (opens.Contains(c))
+                if (opens.IndexOf(c) is var kind and >= 0)
                 {
-                    open.Add(c);
+                    open.Add((kind, last[kind]));
+                    last[kind] = open.Count - 1;
                     return false;
                 }
-                int opening = open.LastIndexOf(opens[closes.IndexOf(c)]);
-                if (opening >= 0)
-                    open.RemoveRange(opening, open.Count - opening);
-                return unmatched = opening < 0 && at >= offset && c == pair.Close[0];
+                int opening = last[closes.IndexOf(c)];
+                if (opening < 0)
+                    return unmatched = at >= offset && c == pair.Close[0];
+                // The brackets opened inside it stay unclosed.
+                for (int top = open.Count - 1; top >= opening; top--)
+                    last[open[top].Kind] = open[top].Before;
+                open.RemoveRange(opening, open.Count - opening);
+                return false;
             }
         );
         return unmatched;
