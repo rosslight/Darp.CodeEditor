@@ -45,13 +45,13 @@ internal sealed class Clipboard : IDisposable
 
     /// <summary>
     /// Pastes the clipboard's text over the selection in one undo step, once the clipboard has given it, and only into
-    /// the document it was asked for in, while the editor still shows it and is not read-only. As in AvaloniaEdit, a
-    /// document that indents with spaces gets spaces for tabs, and a rectangle takes a line of the text on each of its
-    /// rows; the line breaks become the document's before that.
+    /// the document it was asked for in, while the editor still shows it and text can go in at the caret, as AvaloniaEdit
+    /// checks. As in AvaloniaEdit, a document that indents with spaces gets spaces for tabs, and a rectangle takes a line
+    /// of the text on each of its rows; the line breaks become the document's before that.
     /// </summary>
     public async void Paste()
     {
-        if (_textArea.IsReadOnly || TopLevel.GetTopLevel(_textArea)?.Clipboard is not { } clipboard)
+        if (!CanPaste() || TopLevel.GetTopLevel(_textArea)?.Clipboard is not { } clipboard)
             return;
         string? text;
         try
@@ -65,7 +65,7 @@ internal sealed class Clipboard : IDisposable
                 ?.Log(this, "Reading the clipboard failed: {Exception}", e);
             return;
         }
-        if (_disposed || _textArea.IsReadOnly || string.IsNullOrEmpty(text))
+        if (_disposed || !CanPaste() || string.IsNullOrEmpty(text))
             return;
         text = TextUtilities.NormalizeNewLines(text, _document.LineBreak);
         TextEditorOptions options = _textArea.Options;
@@ -75,6 +75,8 @@ internal sealed class Clipboard : IDisposable
             _textArea.Selection.ReplaceSelectionWithText(text);
         _textArea.Caret.BringCaretToView();
     }
+
+    private bool CanPaste() => _textArea.ReadOnlySectionProvider.CanInsert(_textArea.Caret.Offset);
 
     public void Dispose()
     {
