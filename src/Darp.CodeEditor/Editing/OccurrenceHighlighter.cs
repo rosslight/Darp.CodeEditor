@@ -231,16 +231,12 @@ internal sealed class OccurrenceHighlighter : IBackgroundRenderer, IEditorFeatur
         ];
     }
 
-    /// <summary>The word at the caret, in the shown part of its line, when the selection is inside it; null otherwise.</summary>
+    /// <summary>The word at the caret, when the selection is inside it; null otherwise.</summary>
     private TextRange? WordAtSelection()
     {
-        int caret = _area.Caret.Offset;
         TextRange selected = _changes.Selection.Range;
-        DocumentLine line = _buffer.GetLineByOffset(caret);
-        string text = _buffer.GetText(line.Offset, VisibleText.End(line) - line.Offset);
         return
-            WordRules.WordAt(text, Math.Min(caret - line.Offset, text.Length)) is { } found
-            && new TextRange(line.Offset + found.Start, found.Length) is var word
+            WordRules.WordAt(_buffer, _area.Caret.Offset) is { } word
             && word.Start <= selected.Start
             && selected.End <= word.End
             ? word

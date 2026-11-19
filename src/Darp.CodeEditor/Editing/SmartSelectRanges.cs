@@ -17,11 +17,10 @@ internal static class SmartSelectRanges
     /// </summary>
     public static IEnumerable<TextRange> Words(TextDocument document, int caret)
     {
+        if (WordRules.WordAt(document, caret) is { } word)
+            yield return word;
         DocumentLine line = document.GetLineByOffset(caret);
-        string text = document.GetText(line.Offset, VisibleText.End(line) - line.Offset);
-        if (WordRules.WordAt(text, Math.Min(caret - line.Offset, text.Length)) is { } word)
-            yield return new TextRange(line.Offset + word.Start, word.Length);
-        if (text.Length > 0 && text.AsSpan().TrimStart(" \t").IsEmpty)
+        if (line.Length > 0 && TextUtilities.GetLeadingWhitespace(document, line).Length == line.Length)
             yield return TextRange.FromBounds(line.Offset, line.EndOffset);
         yield return new TextRange(0, document.TextLength);
     }
