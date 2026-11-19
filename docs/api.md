@@ -272,7 +272,8 @@ handler closes the group on the document it opened it on. Text that the app sets
   the menu takes one from `CodeEditorStyles`, built from the Fluent themes' menu resources.
 - **Popups stay inside the window**, as in the prototype (#19).
 
-Apps add one line to `App.axaml`, after their theme. It brings AvaloniaEdit's styles along:
+Apps add one line to `App.axaml`, after their theme, Fluent, Simple or any other. It brings AvaloniaEdit's control
+templates along, and none of its theme styles, which would need the resources of one app theme:
 
 ```xml
 <Application.Styles>

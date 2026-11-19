@@ -32,6 +32,8 @@
     <ProjectReference Include="..\..\src\Darp.CodeEditor.Lsp\Darp.CodeEditor.Lsp.csproj" />
     <!-- Runs in its own process: it checks what the library does before Avalonia is set up. -->
     <ProjectReference Include="..\Darp.CodeEditor.Tests.BeforeSetup\Darp.CodeEditor.Tests.BeforeSetup.csproj" />
+    <!-- Runs in its own process: it starts an app whose only theme is Avalonia's Simple theme. -->
+    <ProjectReference Include="..\Darp.CodeEditor.Tests.SimpleTheme\Darp.CodeEditor.Tests.SimpleTheme.csproj" />
     <!-- The language server that the tests start. -->
     <ProjectReference Include="..\Darp.CodeEditor.Tests.FakeServer\Darp.CodeEditor.Tests.FakeServer.csproj" />
   </ItemGroup>
