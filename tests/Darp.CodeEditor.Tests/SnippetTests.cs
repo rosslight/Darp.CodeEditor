@@ -218,6 +218,20 @@ public sealed class SnippetTests
         Render(snippet + " $1").Stops[1].Choice.ShouldBe(options);
     }
 
+    [Fact]
+    public void A_snippet_that_goes_in_as_written_and_a_choices_options_take_the_documents_line_breaks()
+    {
+        string lines = "${1:a}" + string.Concat(Enumerable.Repeat("\nb", 10_000));
+        Render(lines, lineIndentation: new string(' ', 3_000), lineBreak: "\r\n")
+            .Text.ShouldBe(lines.Replace("\n", "\r\n", StringComparison.Ordinal));
+
+        RenderedSnippet choice = Render("${1|one\ntwo,three\r\nfour|} $1", lineBreak: "\r\n");
+
+        choice.Text.ShouldBe("one\r\ntwo one\r\ntwo");
+        choice.Stops[0].Choice.ShouldBe(["one\r\ntwo", "three\r\nfour"]);
+        choice.Stops[1].Choice.ShouldBe(["one\r\ntwo", "three\r\nfour"]);
+    }
+
     [Theory]
     [InlineData("upcase", "foo", "FOO")]
     [InlineData("downcase", "FOO", "foo")]

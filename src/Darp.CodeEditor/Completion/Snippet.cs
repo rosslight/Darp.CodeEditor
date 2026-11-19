@@ -78,17 +78,16 @@ internal sealed class Snippet
     /// <summary>
     /// The text that goes in, and its stops, as VS Code adjusts and resolves them: lines after the first are indented
     /// by the line it goes in, the indentation is that of the document, line breaks are the line's, and variables have
-    /// their values. A text that would be longer than <see cref="MaxText"/> goes in as written, without stops: rendering
-    /// stops there, so it costs the UI thread at most that many characters and parts, and a variable is asked for once.
+    /// their values. A text that would be longer than <see cref="MaxText"/> goes in as written, without stops, in the
+    /// document's line breaks: rendering stops there, so it costs the UI thread at most that many characters and parts,
+    /// and a variable is asked for once.
     /// </summary>
     public RenderedSnippet Render(SnippetContext context)
     {
-        if (_nodes is null)
-            return new RenderedSnippet(_source, []);
         var renderer = new Renderer(context);
-        return renderer.Write(_nodes, parent: -1)
+        return _nodes is not null && renderer.Write(_nodes, parent: -1)
             ? new RenderedSnippet(renderer.Text.ToString(), renderer.Stops)
-            : new RenderedSnippet(_source, []);
+            : new RenderedSnippet(TextUtilities.NormalizeNewLines(_source, context.LineBreak), []);
     }
 
     /// <summary>A snippet that goes in as written, without stops.</summary>
@@ -820,7 +819,15 @@ internal sealed class Snippet
                             new SnippetStop(placeholder.Index, start, start, parent)
                             {
                                 Transform = placeholder.Transform,
-                                Choice = placeholder.Children is [ChoiceNode { Options: var options }] ? options : null,
+                                // In the document's line breaks, as its text: the text is one of them.
+                                Choice = placeholder.Children is [ChoiceNode { Options: var options }]
+                                    ?
+                                    [
+                                        .. options.Select(option =>
+                                            TextUtilities.NormalizeNewLines(option, _context.LineBreak)
+                                        ),
+                                    ]
+                                    : null,
                             }
                         );
                         if (!Write(placeholder.Children, index))
