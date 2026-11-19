@@ -39,8 +39,8 @@ internal sealed class OccurrenceHighlighter : IBackgroundRenderer, IEditorFeatur
     /// <summary>The occurrences highlighted, in order, in the current text.</summary>
     private Occurrence[] _highlights = [];
 
-    /// <summary>The request under way; null for none.</summary>
-    private CancellationTokenSource? _request;
+    /// <summary>The request under way, and the word it asks about; null for none.</summary>
+    private (CancellationTokenSource Cancellation, TextRange Word)? _request;
 
     /// <summary>The pause after the last caret move; null for none.</summary>
     private ITimer? _pause;
@@ -88,6 +88,9 @@ internal sealed class OccurrenceHighlighter : IBackgroundRenderer, IEditorFeatur
 
     /// <summary>The occurrences highlighted, for tests.</summary>
     internal IReadOnlyList<Occurrence> Highlights => _highlights;
+
+    /// <summary>Whether a request is under way, for tests.</summary>
+    internal bool IsAsking => _request is not null;
 
     public void AddCommands(CommandTable commands)
     {
@@ -137,7 +140,7 @@ internal sealed class OccurrenceHighlighter : IBackgroundRenderer, IEditorFeatur
     /// <summary>Clears the occurrences and ends the request under way: the keyboard left the editor.</summary>
     public void Clear()
     {
-        _request?.Cancel();
+        _request?.Cancellation.Cancel();
         _request = null;
         if (_highlights.Length == 0)
             return;
@@ -182,12 +185,13 @@ internal sealed class OccurrenceHighlighter : IBackgroundRenderer, IEditorFeatur
 
     /// <summary>
     /// Shows the server's occurrences of the symbol in <paramref name="word"/>, or without its answer those of the word,
-    /// unless an edit, a newer request or the view's end cancelled the request meanwhile. Failures go to the log.
+    /// unless an edit, a newer request, the selection leaving the word or the view's end ended the request meanwhile.
+    /// Failures go to the log.
     /// </summary>
     private async void Ask(TextRange word)
     {
         var request = new CancellationTokenSource();
-        _request = request;
+        _request = (request, word);
         CancellationToken cancellation = request.Token;
         TextSnapshot snapshot = _document.CurrentSnapshot;
         try
@@ -196,7 +200,7 @@ internal sealed class OccurrenceHighlighter : IBackgroundRenderer, IEditorFeatur
             IReadOnlyList<Occurrence> found =
                 await _document.DocumentHighlightsAsync(snapshot, _area.Caret.Offset, cancellation)
                 ?? await Task.Run(() => Words(snapshot, text), cancellation);
-            if (_request != request || _document.CurrentSnapshot != snapshot)
+            if (_request?.Cancellation != request || _document.CurrentSnapshot != snapshot || WordAtSelection() != word)
                 return;
             _request = null;
             _highlights = [.. found.OrderBy(occurrence => occurrence.Range.Start)];
@@ -272,14 +276,33 @@ internal sealed class OccurrenceHighlighter : IBackgroundRenderer, IEditorFeatur
         if (_editing)
             Clear();
         else
+        {
+            EndLeftRequest();
             Pause();
+        }
     }
 
-    /// <summary>A selection that changes without the caret, as when its anchor moves, may no longer be inside a word.</summary>
+    /// <summary>
+    /// A selection that changes without the caret, as when its anchor moves, may leave the word that the request under
+    /// way asks about, or every word.
+    /// </summary>
     private void OnSelectionChanged(object? sender, EventArgs e)
     {
-        if ((_highlights.Length > 0 || _request is not null) && WordAtSelection() is null)
+        EndLeftRequest();
+        if (_highlights.Length > 0 && WordAtSelection() is null)
             Clear();
+    }
+
+    /// <summary>
+    /// Ends the request under way once the selection has left the word it asks about: its answer is about another
+    /// symbol, and the pause asks again for this one.
+    /// </summary>
+    private void EndLeftRequest()
+    {
+        if (_request is not var (cancellation, word) || WordAtSelection() == word)
+            return;
+        cancellation.Cancel();
+        _request = null;
     }
 
     /// <summary>As the text takes the keyboard, it asks, unless a request is under way, as in VS Code.</summary>

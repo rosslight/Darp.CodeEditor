@@ -386,6 +386,9 @@ public class CodeEditor : TemplatedControl
     /// <summary>The occurrences of the symbol at the caret that the editor highlights, for tests.</summary>
     internal IReadOnlyList<Occurrence> Occurrences => _view?.Occurrences ?? [];
 
+    /// <summary>Whether the editor asks for the occurrences at the caret, for tests.</summary>
+    internal bool IsAskingForOccurrences => _view?.IsAskingForOccurrences ?? false;
+
     /// <summary>
     /// Scrolls <paramref name="range"/> into view: not at all when it is visible, centered when it is not. A range
     /// taller or wider than the view shows from its start.
