@@ -10,7 +10,7 @@ namespace Darp.CodeEditor.Editing;
 
 /// <summary>
 /// The arrow keys and Home where VS Code's <c>cursorLeft</c>, <c>cursorRight</c>, <c>cursorUp</c>, <c>cursorDown</c>
-/// and <c>cursorHome</c> move the caret otherwise than AvaloniaEdit (design.md #118): Left and Right end a selection at
+/// and <c>cursorHome</c> move the caret otherwise than AvaloniaEdit: Left and Right end a selection at
 /// its start or end; Up and Down end it and go on from its start or end; Up on the text's first row goes to its start
 /// and Down on its last row to its end; Home on a line of whitespace only goes to the line's start. Shift selects with
 /// Up, Down and Home. Elsewhere, and in a rectangle selection, AvaloniaEdit moves the caret.
