@@ -67,7 +67,8 @@ internal sealed class CompletionController : IEditorFeature
         TextArea textArea,
         CodeDocument document,
         BackgroundTextMateHighlighter highlighter,
-        SnippetController snippets
+        SnippetController snippets,
+        TaskScheduler background
     )
     {
         _textArea = textArea;
@@ -79,7 +80,7 @@ internal sealed class CompletionController : IEditorFeature
         _resolver = new CompletionResolver(_view, highlighter);
         _filter = new CompletionFilter(
             _view,
-            new CompletionRanking(),
+            new CompletionRanking(background),
             _resolver,
             textArea,
             document,

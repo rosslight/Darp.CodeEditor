@@ -27,6 +27,7 @@ namespace Darp.CodeEditor;
 /// <param name="Reveal">
 /// Brings a range into view as <see cref="CodeEditor.ScrollTo"/> does: centered unless visible.
 /// </param>
+/// <param name="Background">Where work off the UI thread runs: the thread pool, or what a test holds.</param>
 internal sealed record EditorContext(
     TemplatedControl Editor,
     TextArea Area,
@@ -35,7 +36,8 @@ internal sealed record EditorContext(
     Func<CodeEditorOptions> Options,
     Func<SearchBar?> SearchBar,
     Func<SearchBar?> CreateSearchBar,
-    Action<TextRange> Reveal
+    Action<TextRange> Reveal,
+    TaskScheduler Background
 );
 
 /// <summary>
@@ -85,7 +87,14 @@ internal sealed class EditorView : IDisposable
         _hover = new HoverController(context.Editor, area, document, _squiggles, Highlighter);
         _snippets = new SnippetController(area, document);
         // After typing: it sees typed text first, so that a typed "(" has its ")" when completion asks.
-        _completion = new CompletionController(context.Editor, area, document, Highlighter, _snippets);
+        _completion = new CompletionController(
+            context.Editor,
+            area,
+            document,
+            Highlighter,
+            _snippets,
+            context.Background
+        );
         _signatureHelp = new SignatureHelpController(context.Editor, area, document, Highlighter);
         _search = new FindController(context, _changes);
         _features =
