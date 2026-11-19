@@ -16,7 +16,8 @@ internal enum PopupSide
 /// content grows, so that it stays next to the line.
 /// </param>
 /// <param name="MaxHeight">The most it may grow to where it is, in whole pixels.</param>
-internal readonly record struct PopupBounds(Rect Bounds, bool Above, double MaxHeight);
+/// <param name="Line">The line it is next to, or the line of the popup it is beside.</param>
+internal readonly record struct PopupBounds(Rect Bounds, bool Above, double MaxHeight, Rect Line);
 
 /// <summary>Where the editor's popups go: next to a line of the text, or beside another popup, inside the window.</summary>
 internal static class PopupPlacement
@@ -30,8 +31,11 @@ internal static class PopupPlacement
     /// neither has room, it takes the larger side, limited to its height. It moves left at the window's right edge, and
     /// is at most as wide as the window.
     /// </summary>
-    public static PopupBounds Place(Rect line, Size size, Rect window, PopupSide preferred)
+    /// <returns>Where it goes; null when the window does not show the line, as the popup would point at nothing.</returns>
+    public static PopupBounds? Place(Rect line, Size size, Rect window, PopupSide preferred)
     {
+        if (line.Bottom <= window.Top || line.Top >= window.Bottom)
+            return null;
         double above = line.Top - window.Top;
         double below = window.Bottom - line.Bottom;
         bool placeAbove =
@@ -46,17 +50,19 @@ internal static class PopupPlacement
         return new PopupBounds(
             new Rect(left, placeAbove ? line.Top - height : line.Bottom, width, height),
             placeAbove,
-            room
+            room,
+            line
         );
     }
 
     /// <summary>
     /// Places a popup <paramref name="width"/> wide beside <paramref name="owner"/>, as completion's details beside its
     /// list: right of it, else left of it, else narrower on the side with more room, down to
-    /// <see cref="MinBesideWidth"/>, else below it, or above it when it is above its line. Beside it, its top lines up
-    /// with the owner's below the line, and its bottom above it, so that neither moves away from the line.
+    /// <see cref="MinBesideWidth"/>, else below it, or above it when it is above its line; and when that side has less
+    /// room than it needs and the line's other side more, on the line's other side. Beside it, its top lines up with
+    /// the owner's below the line, and its bottom above it, so that neither moves away from the line.
     /// </summary>
-    /// <param name="owner">Where the other popup is.</param>
+    /// <param name="owner">Where the other popup is, as it is laid out.</param>
     /// <param name="width">The width it would like.</param>
     /// <param name="heightAt">Its height at a width: text that wraps is taller when narrower.</param>
     /// <param name="window">The window.</param>
@@ -79,16 +85,21 @@ internal static class PopupPlacement
         {
             width = Math.Min(width, window.Width);
             x = Math.Clamp(other.Left, window.Left, window.Right - width);
-            double room = Math.Max(0, Math.Floor(owner.Above ? other.Top - window.Top : window.Bottom - other.Bottom));
-            double stacked = Math.Min(heightAt(width), room);
-            return new PopupBounds(
-                new Rect(x, owner.Above ? other.Top - stacked : other.Bottom, width, stacked),
-                owner.Above,
-                room
-            );
+            Rect line = owner.Line;
+            double wanted = heightAt(width);
+            double far = owner.Above ? other.Top - window.Top : window.Bottom - other.Bottom;
+            double near = owner.Above ? window.Bottom - line.Bottom : line.Top - window.Top;
+            bool above = wanted > far && near > far ? !owner.Above : owner.Above;
+            double room = Math.Max(0, Math.Floor(above == owner.Above ? far : near));
+            double stacked = Math.Min(wanted, room);
+            double y =
+                above == owner.Above ? (above ? other.Top - stacked : other.Bottom)
+                : above ? line.Top - stacked
+                : line.Bottom;
+            return new PopupBounds(new Rect(x, y, width, stacked), above, room, line);
         }
         double height = Math.Min(heightAt(width), window.Height);
-        double y = Math.Clamp(owner.Above ? other.Bottom - height : other.Top, window.Top, window.Bottom - height);
-        return new PopupBounds(new Rect(x, y, width, height), owner.Above, height);
+        double top = Math.Clamp(owner.Above ? other.Bottom - height : other.Top, window.Top, window.Bottom - height);
+        return new PopupBounds(new Rect(x, top, width, height), owner.Above, height, owner.Line);
     }
 }

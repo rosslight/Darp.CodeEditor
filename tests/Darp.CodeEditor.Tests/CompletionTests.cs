@@ -889,6 +889,44 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Details_with_no_room_below_a_list_that_fills_the_window_below_its_line_go_above_the_line() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            var items = new JsonArray(
+                new JsonObject
+                {
+                    ["label"] = "item00",
+                    ["detail"] = "the first item",
+                    ["documentation"] = "Its documentation, a few words long.",
+                }
+            );
+            foreach (int i in Enumerable.Range(1, 29))
+                items.Add(new JsonObject { ["label"] = $"item{i:D2}" });
+            using CodeDocument answer = await SetCompletionAsync(server, fake, new JsonObject { ["items"] = items });
+            string text = string.Concat(Enumerable.Repeat("\n", 5));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            // Too narrow for the details beside the list, and too low for the list's twelve rows below the sixth line.
+            using var window = new EditorWindow(new CodeEditor { Document = document }, width: 500, height: 230);
+
+            await OpenAsync(window, text.Length);
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return DetailTexts(window).Contains("the first item");
+            });
+
+            Rect list = BoundsInWindow(Flyout(window).ShouldNotBeNull());
+            Rect details = BoundsInWindow(Details(window).ShouldNotBeNull());
+            double row = List(window).ShouldNotBeNull().RowHeight;
+            new Rect(window.Window.ClientSize).Contains(details).ShouldBeTrue(details.ToString());
+            details.Height.ShouldBeGreaterThan(2 * row);
+            // Above the line, as the list fills the window below it.
+            details.Bottom.ShouldBeLessThanOrEqualTo(list.Top - row + 1);
+        });
+
+    [Fact]
     public Task A_long_detail_documentation_and_label_show_only_as_much_as_a_hover() =>
         _ui.Run(async () =>
         {
