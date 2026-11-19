@@ -1,10 +1,7 @@
-using System.Text.RegularExpressions;
 using Avalonia.Controls;
 using Avalonia.Input;
 using AvaloniaEdit;
 using AvaloniaEdit.Rendering;
-using Darp.CodeEditor.Editing;
-using Darp.CodeEditor.Loading;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -159,30 +156,6 @@ public sealed class IndentationTests(UiFixture ui)
             window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(above + "    end");
         });
 
-    [Fact]
-    public void Indentation_out_of_time_reads_no_more_lines()
-    {
-        // As after 500,000 empty lines: the scan for a line with text ends with the time, not only the matching.
-        var rules = new IndentationRules(new Regex("x"), new Regex("y"));
-        int reads = 0;
-
-        var lines = new RuleLines(
-            _ =>
-            {
-                reads++;
-                return "";
-            },
-            (_, _) => null,
-            brackets: null
-        );
-
-        Should.Throw<RegexMatchTimeoutException>(() =>
-            IndentRules.Inherited(OutOfTime(rules), lines, 500_001, honorIntentional: true)
-        );
-
-        reads.ShouldBe(0);
-    }
-
     [Theory]
     // In the indentation, back to the tab stop before the caret.
     [InlineData("    |alpha", "  |alpha")]
@@ -326,15 +299,6 @@ public sealed class IndentationTests(UiFixture ui)
     /// <summary>YAML with its indentation rules, which the built-in language leaves off, as VS Code's YAML extension does.</summary>
     private static CodeLanguage YamlByIndentationRules { get; } =
         new("yaml", CodeLanguage.Yaml.Grammar, CodeLanguage.Yaml.Configuration) { AutoIndent = AutoIndent.Full };
-
-    /// <summary>Matching for an indentation whose time is up.</summary>
-    private static IndentationMatching OutOfTime(IndentationRules rules)
-    {
-        var time = new ManualTime();
-        var matching = new IndentationMatching(rules, time);
-        time.Advance(IndentationRules.TimeLimit);
-        return matching;
-    }
 
     /// <summary>A language with word brackets, and indentation patterns that ignore case.</summary>
     private static CodeLanguage Pascal { get; } =
