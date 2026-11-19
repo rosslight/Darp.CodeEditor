@@ -1,6 +1,7 @@
 using Avalonia.Logging;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
+using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.LanguageClient;
 using Darp.CodeEditor.Loading;
 
@@ -10,7 +11,9 @@ namespace Darp.CodeEditor.Completion;
 /// Commits completion's items into the text: an item's edit and its additional edits, such as an import, in one step
 /// that the user undoes, with the caret after its text. Inserting, the item's text goes over its edit's range, its insert
 /// range, or the word up to the caret; replacing, over its replace range, or the whole word, as far as the edits since
-/// completion was asked left it. Additional edits that a resolve still under way brings come later.
+/// completion was asked left it. Additional edits that a resolve still under way brings come later. The edits go in
+/// through <see cref="TextChanges"/>: an item whose text would touch read-only text, such as protected text or a long
+/// line's hidden tail, does not go in, and additional edits that would are left out.
 /// </summary>
 internal sealed class CompletionCommit : IDisposable
 {
@@ -18,16 +21,18 @@ internal sealed class CompletionCommit : IDisposable
     private readonly TextDocument _buffer;
     private readonly CodeDocument _document;
     private readonly SnippetController _snippets;
+    private readonly TextChanges _changes;
 
     /// <summary>Cancels the resolve of the item committed last, whose additional edits are still to come.</summary>
     private CancellationTokenSource? _lateEdits;
 
-    public CompletionCommit(TextArea textArea, CodeDocument document, SnippetController snippets)
+    public CompletionCommit(TextArea textArea, CodeDocument document, SnippetController snippets, TextChanges changes)
     {
         _textArea = textArea;
         _buffer = textArea.Document;
         _document = document;
         _snippets = snippets;
+        _changes = changes;
     }
 
     /// <summary>
@@ -55,6 +60,8 @@ internal sealed class CompletionCommit : IDisposable
         );
         RenderedSnippet? snippet = item.Snippet is { } source ? _snippets.Render(source, range.Start) : null;
         var main = new CompletionEdit(range, snippet?.Text ?? InLineBreaks(item.Edit.NewText));
+        if (!CanChange(main))
+            return;
         var step = new object();
         var mark = new SnippetMark();
         List<CompletionEdit> edits = WithoutOverlaps([main], Mapped(request.Snapshot, item.AdditionalEdits ?? []));
@@ -87,7 +94,6 @@ internal sealed class CompletionCommit : IDisposable
                 late.Cancellation.IsCancellationRequested
                 || item?.AdditionalEdits is not { Count: > 0 } additional
                 || _buffer.UndoStack.LastGroupDescriptor != step
-                || !_textArea.ReadOnlySectionProvider.CanInsert(_textArea.Caret.Offset)
             )
             {
                 return;
@@ -108,9 +114,10 @@ internal sealed class CompletionCommit : IDisposable
     }
 
     /// <summary>
-    /// Applies edits, from the last to the first, in the undo step <paramref name="step"/>: a new one, or the last one
-    /// continued. A snippet's <paramref name="mark"/> goes in first, so that undoing the step reaches it last, once
-    /// the text is back.
+    /// Applies edits through <see cref="TextChanges"/>, from the last to the first, each a change of its own, in the undo
+    /// step <paramref name="step"/>: a new one, or the last one continued. One change from an import at the top to an
+    /// item far below would replace all the text between them. A snippet's <paramref name="mark"/> goes in first, so
+    /// that undoing the step reaches it last, once the text is back.
     /// </summary>
     private void Apply(object step, bool continued, List<CompletionEdit> edits, SnippetMark? mark)
     {
@@ -126,7 +133,7 @@ internal sealed class CompletionCommit : IDisposable
             using (_buffer.RunUpdate())
             {
                 foreach (CompletionEdit edit in edits.OrderByDescending(e => e.Range.Start))
-                    _buffer.Replace(edit.Range.Start, edit.Range.Length, edit.NewText);
+                    _changes.Apply([new TextEdit(edit.Range.Start, edit.Range.Length, edit.NewText)]);
             }
         }
         finally
@@ -146,16 +153,23 @@ internal sealed class CompletionCommit : IDisposable
 
     private string InLineBreaks(string text) => TextUtilities.NormalizeNewLines(text, _document.LineBreak);
 
-    /// <summary><paramref name="first"/> and the edits that overlap none before them.</summary>
-    private static List<CompletionEdit> WithoutOverlaps(List<CompletionEdit> first, IEnumerable<CompletionEdit> more)
+    /// <summary>
+    /// <paramref name="first"/> and the edits that overlap none before them and touch no read-only text.
+    /// </summary>
+    private List<CompletionEdit> WithoutOverlaps(List<CompletionEdit> first, IEnumerable<CompletionEdit> more)
     {
         foreach (CompletionEdit edit in more)
         {
-            if (first.TrueForAll(other => edit.Range.End <= other.Range.Start || edit.Range.Start >= other.Range.End))
+            if (
+                CanChange(edit)
+                && first.TrueForAll(other => edit.Range.End <= other.Range.Start || edit.Range.Start >= other.Range.End)
+            )
                 first.Add(edit);
         }
         return first;
     }
+
+    private bool CanChange(CompletionEdit edit) => _changes.CanChange(edit.Range.Start, edit.Range.Length);
 
     public void Dispose() => _lateEdits?.Cancel();
 }

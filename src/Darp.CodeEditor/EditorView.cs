@@ -99,6 +99,7 @@ internal sealed class EditorView : IDisposable
             document,
             Highlighter,
             _snippets,
+            _changes,
             context.Background
         );
         _signatureHelp = new SignatureHelpController(context.Editor, area, document, Highlighter);
