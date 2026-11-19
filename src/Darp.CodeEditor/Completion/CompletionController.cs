@@ -127,8 +127,12 @@ internal sealed class CompletionController : IEditorFeature
         const CommandNeeds needs = CommandNeeds.TextFocus | CommandNeeds.Writable;
         commands.Add(CodeEditorCommands.TriggerSuggest, Trigger, needs);
         commands.Add(CodeEditorCommands.ToggleSuggestionDetails, ToggleDetails);
-        commands.Add(CodeEditorCommands.AcceptSelectedSuggestion, key => Accept(replace: false, key), needs);
-        commands.Add(CodeEditorCommands.AcceptAlternativeSelectedSuggestion, key => Accept(replace: true, key), needs);
+        commands.Add(CodeEditorCommands.AcceptSelectedSuggestion, goOn => Accept(replace: false, goOn), needs);
+        commands.Add(
+            CodeEditorCommands.AcceptAlternativeSelectedSuggestion,
+            goOn => Accept(replace: true, goOn),
+            needs
+        );
     }
 
     /// <summary>Asks for completion, where the server completes and the user can type.</summary>
@@ -149,16 +153,19 @@ internal sealed class CompletionController : IEditorFeature
     /// replace range reaches.
     /// </summary>
     /// <param name="replace">Whether to replace.</param>
-    /// <param name="key">The key that accepts, which goes on if the filter it waits for finds nothing.</param>
+    /// <param name="goOn">
+    /// What the key that accepts goes on to, as to its next binding or a new line, when the filter it waits for finds
+    /// nothing; null when no key accepts.
+    /// </param>
     /// <returns>Whether the list showed: otherwise the key goes on, as to a new line or an indent.</returns>
-    private bool Accept(bool replace, PressedKey? key)
+    private bool Accept(bool replace, Action? goOn)
     {
         if (_session is not { IsShowing: true } session)
             return false;
         if (_filter.CanCommit(session, session.Selected))
             Commit(session, session.Selected, replace);
         else
-            _filter.CommitWhenFiltered(session, replace, key);
+            _filter.CommitWhenFiltered(session, replace, goOn);
         return true;
     }
 

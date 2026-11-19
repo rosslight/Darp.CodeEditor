@@ -123,7 +123,7 @@ internal sealed class CompletionFilter
     {
         if (filtered.Items.Count == 0)
         {
-            PressedKey? waiting = session.CommitAt == key ? session.CommitKey : null;
+            Action? goOn = session.CommitAt == key ? session.CommitGoOn : null;
             // An incomplete list may have more for what is typed, and a newer request, as for a trigger character typed
             // while the list showed, brings a list of its own: its answer shows, or ends completion when it has nothing.
             if (!session.ByKey)
@@ -146,8 +146,9 @@ internal sealed class CompletionFilter
                 Freeze(session, key);
                 return;
             }
-            if (waiting is { } pressed)
-                Replay(pressed);
+            // The key that waited for this filter goes on as it would have without the list: in VS Code, which
+            // filters as the user types, the list is gone before such a key.
+            goOn?.Invoke();
             return;
         }
         session.FrozenAt = null;
@@ -186,23 +187,6 @@ internal sealed class CompletionFilter
     }
 
     /// <summary>
-    /// Presses <paramref name="key"/> again, now that the list no longer takes it: an accept that waited for a filter
-    /// that found nothing goes on as it would have without the list, as Enter to a new line. In VS Code, which filters
-    /// as the user types, the list is gone before such a key.
-    /// </summary>
-    private void Replay(PressedKey key) =>
-        _textArea.RaiseEvent(
-            new KeyEventArgs
-            {
-                RoutedEvent = InputElement.KeyDownEvent,
-                Source = _textArea,
-                Key = key.Key,
-                KeyModifiers = key.Modifiers,
-                KeySymbol = key.Symbol,
-            }
-        );
-
-    /// <summary>
     /// Whether the item at <paramref name="index"/> may be committed now: the list shows the filter of the current
     /// text, frozen or not, or the item matches it, which is checked for that item alone.
     /// </summary>
@@ -223,16 +207,16 @@ internal sealed class CompletionFilter
 
     /// <summary>
     /// Commits what the filter of the current text selects once it has run, for accepting, unless the text or
-    /// the caret changes before; starts that filter if none runs. When that filter finds nothing to commit,
-    /// <paramref name="key"/>, the key that accepted, does what it does without a list.
+    /// the caret changes before; starts that filter if none runs. When that filter finds nothing to commit, the key
+    /// that accepted goes on, by <paramref name="goOn"/>.
     /// </summary>
-    public void CommitWhenFiltered(CompletionSession session, bool replace, PressedKey? key)
+    public void CommitWhenFiltered(CompletionSession session, bool replace, Action? goOn)
     {
         if (session.Answer is not { } answer)
             return;
         session.CommitAt = CurrentKey(answer);
         session.CommitReplaces = replace;
-        session.CommitKey = key;
+        session.CommitGoOn = goOn;
         Run(session, answer, _textArea.Caret.Offset);
     }
 

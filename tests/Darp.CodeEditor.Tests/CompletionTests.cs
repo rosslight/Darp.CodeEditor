@@ -11,6 +11,7 @@ using Avalonia.VisualTree;
 using AvaloniaEdit.Editing;
 using Darp.CodeEditor.Completion;
 using Darp.CodeEditor.Popups;
+using Darp.CodeEditor.Search;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -278,6 +279,43 @@ public sealed class CompletionTests(UiFixture ui)
             ranking.Release();
             await Wait.UntilAsync(() => List(window) is null);
             document.Text.ShouldBe(NewLines.In("prizzz\n", start: ""));
+        });
+
+    [Fact]
+    public Task A_key_that_waits_for_a_filter_that_matches_nothing_goes_on_to_its_next_binding() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("println"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            var ranking = new HeldScheduler();
+            var editor = new CodeEditor
+            {
+                Document = document,
+                BackgroundScheduler = ranking,
+                // Ctrl+K Enter accepts while the list shows, and finds otherwise.
+                Keymap = CodeEditorKeymap.Default.With(
+                    new CodeEditorKeyBinding("ctrl+k enter", CodeEditorCommands.Find),
+                    new CodeEditorKeyBinding("ctrl+k enter", CodeEditorCommands.AcceptSelectedSuggestion)
+                ),
+            };
+            using var window = new EditorWindow(editor);
+            window.Type("pri");
+            await WaitForLabelsAsync(window, ["println"]);
+
+            // Typed, and the keys pressed, while the filter of "prizzz" is held: "println" does not match it.
+            ranking.Hold();
+            window.Type("zzz");
+            window.Press(Key.K, KeyModifiers.Control);
+            window.Press(Key.Enter);
+            ranking.Release();
+
+            // The list ends, and the keys go on to the binding before accepting's: the search bar opens.
+            await Wait.UntilAsync(() => editor.GetVisualDescendants().OfType<SearchBar>().Any(bar => bar.IsOpen));
+            await SearchBars.SearchedAsync(SearchBars.BarOf(window));
+            List(window).ShouldBeNull();
+            document.Text.ShouldBe("prizzz");
         });
 
     [Fact]
