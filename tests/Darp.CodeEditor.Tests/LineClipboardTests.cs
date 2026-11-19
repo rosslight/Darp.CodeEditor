@@ -1,5 +1,7 @@
 using Avalonia.Input;
 using Avalonia.Input.Platform;
+using AvaloniaEdit.Document;
+using AvaloniaEdit.Editing;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -115,6 +117,26 @@ public sealed class LineClipboardTests(UiFixture ui)
             await PasteAsync(window);
 
             MarkedText.Of(window).ShouldBe("alpha\nbegamma\n|ta");
+        });
+
+    /// <summary>Where text can go in at the caret but not at its line's start, the line goes in at the caret.</summary>
+    [Fact]
+    public Task A_copied_line_pastes_at_the_caret_where_its_lines_start_is_read_only() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("|ab\ncd", CodeLanguage.PlainText);
+            window.Press(Key.C, EditorWindow.Command);
+            await ClipboardText(window);
+            TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+            var protectedText = new TextSegmentReadOnlySectionProvider<TextSegment>(textArea.Document);
+            // Around the second line's start, not around the caret at its end.
+            protectedText.Segments.Add(new TextSegment { StartOffset = 2, Length = 2 });
+            textArea.ReadOnlySectionProvider = protectedText;
+            window.Editor.Selection = new TextSelection(5);
+
+            await PasteAsync(window);
+
+            MarkedText.Of(window).ShouldBe("ab\ncdab\n|");
         });
 
     [Fact]
