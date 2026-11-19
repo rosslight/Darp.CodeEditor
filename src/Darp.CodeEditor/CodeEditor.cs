@@ -472,6 +472,8 @@ public class CodeEditor : TemplatedControl
             // Links would be drawn in AvaloniaEdit's blue, not in the theme's colors.
             options.EnableHyperlinks = false;
             options.EnableEmailHyperlinks = false;
+            // The editor copies the caret's line itself (LineClipboard), with a line break also after the last line.
+            options.CutCopyWholeLine = false;
             part.TextArea.Caret.PositionChanged += OnPartSelectionChanged;
             part.TextArea.SelectionChanged += OnPartSelectionChanged;
             part.TemplateApplied += OnPartTemplateApplied;
