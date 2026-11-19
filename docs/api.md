@@ -558,7 +558,8 @@ How the client talks to a server, where the protocol leaves a choice:
     insert range of an insert and replace edit, or the word up to the caret for an item without an edit, and the rest
     of the word stays after it; replacing (`acceptAlternativeSelectedSuggestion`), it goes over the replace range, or
     the whole word (design.md #114). The range grows by what was typed since it was asked, as in VS Code, and shrinks by
-    what was deleted after the caret. Its `additionalTextEdits`, such as an import, apply with it, as
+    what was deleted after the caret. An item whose text would go over read-only text, such as protected text or a
+    long line's hidden tail, does not go in, and additional edits that would are left out. Its `additionalTextEdits`, such as an import, apply with it, as
     one step that the user undoes; ones that overlap another edit are left out.
   - **Resolving:** the selected item is resolved when it is selected, and the resolve of an item that is no longer
     selected is cancelled. Its detail, as code highlighted with the document's grammar, and its documentation show
@@ -572,7 +573,8 @@ How the client talks to a server, where the protocol leaves a choice:
     selected one over what was typed, and commit characters go in as text. When none of its items showed, it says "No
     suggestions." and stays while typing finds nothing. A list opened by typing freezes so too while a newer list may
     still come, as for a list marked incomplete. A key that accepted while the filter of the current text ran goes on,
-    when it finds nothing, to the binding before accepting's, or as an ordinary key.
+    when it finds nothing, to the binding before accepting's, to the second key of a sequence it starts, or as an
+    ordinary key, also when a newer list for the same text has nothing.
   - **Ending:** Escape, the caret leaving the line or moving back past the word, a selection, the editor becoming
     read-only, the list's line scrolling out of view, the editor losing the keyboard focus, a server that starts or
     stops serving the document, new colors, nothing left that matches a complete list opened by typing while no newer
