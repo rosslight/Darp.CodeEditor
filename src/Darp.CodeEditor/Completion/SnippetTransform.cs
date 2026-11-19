@@ -27,7 +27,7 @@ namespace Darp.CodeEditor.Completion;
 internal sealed class SnippetTransform
 {
     /// <summary>How long one match may take: far longer than a real snippet's transformation needs.</summary>
-    public static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(100);
+    internal static TimeSpan MatchTimeout { get; set; } = TimeSpan.FromMilliseconds(100);
 
     /// <summary>A word of the case shorthands: letters and digits, and characters beyond a surrogate pair's halves.</summary>
     private static readonly Regex s_words = new(
