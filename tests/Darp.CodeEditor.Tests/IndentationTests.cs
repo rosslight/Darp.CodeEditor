@@ -208,6 +208,22 @@ public sealed class IndentationTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Backspaces_in_the_indentation_are_one_undo_step() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("    |alpha", CodeLanguage.PlainText);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            document.Indentation = Indentation.Spaces(2);
+
+            window.Press(Key.Back);
+            window.Press(Key.Back, KeyModifiers.Shift);
+            MarkedText.Of(window).ShouldBe("|alpha");
+
+            document.Undo();
+            MarkedText.Of(window).ShouldBe("    |alpha");
+        });
+
+    [Fact]
     public Task Tab_with_a_whole_line_selected_indents_it_and_keeps_it_selected() =>
         _ui.Run(() =>
         {
