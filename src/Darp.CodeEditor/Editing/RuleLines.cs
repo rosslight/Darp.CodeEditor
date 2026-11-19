@@ -83,6 +83,35 @@ internal sealed class RuleLines
     public RuleLines With(int number, string text) =>
         new(n => n == number ? text : _text(n), (n, now) => n == number ? null : Tokens(n, now), _brackets, _typesCode);
 
+    /// <summary>These lines in other places: each line is the line that <paramref name="source"/> gives for its number.</summary>
+    public RuleLines Moved(Func<int, int> source) =>
+        new(n => _text(source(n)), (n, now) => _exactTokens(source(n), now), _brackets);
+
+    /// <summary>
+    /// These lines, with line <paramref name="number"/> indented by <paramref name="indentation"/> instead, its tokens
+    /// moving with its text.
+    /// </summary>
+    public RuleLines Reindented(int number, string indentation)
+    {
+        string text = _text(number);
+        int indent = IndentRules.Leading(text);
+        string reindented = indentation + text[indent..];
+        int shift = indentation.Length - indent;
+        return new(n => n == number ? reindented : _text(n), Shifted, _brackets, _typesCode);
+
+        int[]? Shifted(int n, bool now)
+        {
+            int[]? tokens = _exactTokens(n, now);
+            if (n != number || shift == 0 || tokens is null)
+                return tokens;
+            // The first token starts the line, its indentation in it; the others start that much further.
+            int[] shifted = (int[])tokens.Clone();
+            for (int i = 2; i < shifted.Length; i += 2)
+                shifted[i] = Math.Max(0, shifted[i] + shift);
+            return shifted;
+        }
+    }
+
     private int[]? Tokens(int number, bool tokenizeNow)
     {
         if (_tokens.Number != number || (tokenizeNow && !_tokens.Now))
