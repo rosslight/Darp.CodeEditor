@@ -228,6 +228,11 @@ with its own `ContextFlyout` or `ContextMenu`, or removes it by setting `Context
 as VS Code's `editor.detectIndentation` guesses it from the initial text; where the text gives no answer, VS Code's
 default applies: 2 spaces for YAML and 4 otherwise.
 
+**Line breaks** belong to the document too, as a VS Code text model's EOL: `\r\n` when most of the initial text's
+line breaks are, `\n` otherwise, and the operating system's in a text without one, as VS Code's `files.eol` of `auto`.
+Setting `Text` detects it again. Enter, the line commands, paste, snippets, completion and the search bar's Replace put it in; Copy uses
+`\r\n` on Windows. Text that the app sets or replaces goes in as it is.
+
 **Look.** The text and everything around it are styled differently, as in Monaco and CodeMirror:
 
 - **The text area** takes its colors from `ColorTheme`, a VS Code color theme: syntax and language-server colors,
@@ -586,7 +591,7 @@ How the client talks to a server, where the protocol leaves a choice:
   Code, and committing one selects the next stop.
   - **What goes in.** The rules of a commit hold: the edit, grown by what was typed since, the additional edits, which
     stay plain text, one undo step, and nothing in a read-only editor. Lines after the first start with the whitespace
-    that the snippet's line has before it, and their indentation is the document's; line breaks are the line's. Items
+    that the snippet's line has before it, and their indentation is the document's; line breaks are the document's. Items
     in plain text still go in as they are written; VS Code would indent their lines too, and the client does not
     advertise `insertTextMode`.
   - **Variables** have their values for the text and the caret before the commit: `TM_CURRENT_LINE`, the shown part of
