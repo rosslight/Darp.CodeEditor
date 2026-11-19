@@ -15,7 +15,8 @@ namespace Darp.CodeEditor.Completion;
 /// through <see cref="TextChanges"/>: an item whose text would touch read-only text, such as protected text or a long
 /// line's hidden tail, does not go in, and additional edits that would are left out. They go in apart from a lone
 /// carriage return next to them, which would join a line break of theirs (<see cref="LineBreaks.Apart"/>). A handler of
-/// a change that shows another document ends the commit there: nothing of it touches that one.
+/// any notification of the commit, of an edit, the selection, the caret or a snippet's first stop, that shows another
+/// document ends the commit there: nothing of it touches that one.
 /// </summary>
 internal sealed class CompletionCommit : IDisposable
 {
@@ -79,23 +80,25 @@ internal sealed class CompletionCommit : IDisposable
             late?.Cancellation.Cancel();
             return true;
         }
-        var step = new object();
-        var mark = new SnippetMark();
-        if (!Apply(step, continued: false, edits, snippet is null ? null : mark))
-        {
-            late?.Cancellation.Cancel();
-            return false;
-        }
-        // Where the item's text went: moved by the edits before it, and after a line break that went along with it.
+        // Where the item's text goes: moved by the edits before it, and after a line break that goes along with it.
         int index = Array.FindIndex(ordered, e => e.IsMain);
         TextEdit placed = edits[index];
         int at = placed.Offset + edits.Take(index).Sum(e => e.Text.Length - e.Length);
         int start = at + (placed.Offset < main.Range.Start ? _document.LineBreak.Length : 0);
-        _textArea.ClearSelection();
-        _textArea.Caret.Offset = at + placed.Text.Length;
-        _textArea.Caret.BringCaretToView();
-        if (snippet is not null)
-            _snippets.Start(snippet, start, mark);
+        var step = new object();
+        var mark = new SnippetMark();
+        // Each step stops once a handler of the one before shows another document.
+        bool shown =
+            Apply(step, continued: false, edits, snippet is null ? null : mark)
+            && _changes.WhileShown(_textArea.ClearSelection)
+            && _changes.WhileShown(() => _textArea.Caret.Offset = at + placed.Text.Length)
+            && _changes.WhileShown(_textArea.Caret.BringCaretToView)
+            && (snippet is null || _changes.WhileShown(() => _snippets.Start(snippet, start, mark)));
+        if (!shown)
+        {
+            late?.Cancellation.Cancel();
+            return false;
+        }
         if (late is not null)
             ApplyLateEdits(late, step, request.Snapshot);
         return true;
@@ -115,7 +118,7 @@ internal sealed class CompletionCommit : IDisposable
             if (
                 late.Cancellation.IsCancellationRequested
                 || item?.AdditionalEdits is not { Count: > 0 } additional
-                || !Shows
+                || !_changes.IsShown
                 || _buffer.UndoStack.LastGroupDescriptor != step
             )
             {
@@ -155,21 +158,24 @@ internal sealed class CompletionCommit : IDisposable
         {
             if (mark is not null)
                 undo.Push(mark);
-            using (_buffer.RunUpdate())
+            // Each edit raises a change, and the update's end the text's change.
+            return _changes.WhileShown(() =>
             {
-                for (int i = edits.Length - 1; i >= 0 && Shows; i--)
-                    _changes.Apply([edits[i]]);
-            }
+                using (_buffer.RunUpdate())
+                {
+                    for (int i = edits.Length - 1; i >= 0; i--)
+                    {
+                        if (!_changes.WhileShown(() => _changes.Apply([edits[i]])))
+                            break;
+                    }
+                }
+            });
         }
         finally
         {
             undo.EndUndoGroup();
         }
-        return Shows;
     }
-
-    /// <summary>Whether the editor shows the document still, not another one that a handler of a change showed.</summary>
-    private bool Shows => _textArea.Document == _buffer;
 
     /// <summary>
     /// <paramref name="edits"/>, in order, apart from a lone carriage return next to them (<see cref="LineBreaks.Apart"/>).
