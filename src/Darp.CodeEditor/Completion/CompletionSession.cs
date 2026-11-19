@@ -63,8 +63,11 @@ internal sealed class CompletionSession
     /// <summary>Whether the commit that waits for a filter replaces.</summary>
     public bool CommitReplaces { get; set; }
 
-    /// <summary>The key that accepted for the commit that waits for a filter; null when none did.</summary>
-    public PressedKey? CommitKey { get; set; }
+    /// <summary>
+    /// What the key that accepted for the commit that waits for a filter goes on to when the filter finds nothing; null
+    /// when no key accepted.
+    /// </summary>
+    public Action? CommitGoOn { get; set; }
 
     /// <summary>The request asked last: the one under way, or the one whose answer shows.</summary>
     public CompletionRequest Latest =>

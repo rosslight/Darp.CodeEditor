@@ -69,6 +69,12 @@ internal sealed class EditorView : IDisposable
     /// <summary>The key that started a sequence while the view waits for its second stroke; null otherwise.</summary>
     private PressedKey? _pending;
 
+    /// <summary>
+    /// The commands left of a key that goes on after a command that decided later to do nothing, while that key is
+    /// raised again; null otherwise.
+    /// </summary>
+    private IReadOnlyList<string>? _resumed;
+
     public EditorView(EditorContext context)
     {
         _context = context;
@@ -158,11 +164,15 @@ internal sealed class EditorView : IDisposable
         )
             return false;
         var key = PressedKey.Of(e);
-        KeyResolution resolution = KeyResolution.Of(_context.Keymap(), _pending, key);
+        KeyResolution resolution = _resumed is { } rest
+            ? new KeyResolution(rest, Waits: false)
+            : KeyResolution.Of(_context.Keymap(), _pending, key);
         _pending = null;
-        foreach (string command in resolution.Commands)
+        _resumed = null;
+        for (int i = 0; i < resolution.Commands.Count; i++)
         {
-            if (_commands.TryRun(command, key))
+            IReadOnlyList<string> after = [.. resolution.Commands.Skip(i + 1)];
+            if (_commands.TryRun(resolution.Commands[i], () => Resume(key, after)))
                 return true;
         }
         if (resolution.Waits)
@@ -180,6 +190,32 @@ internal sealed class EditorView : IDisposable
                 || _typing.OnKeyDown(e)
                 || CaretKeys.OnKeyDown(_context.Area, e)
             );
+    }
+
+    /// <summary>
+    /// Raises <paramref name="key"/> again, as it goes on after a command that decided later to do nothing: to the
+    /// commands after that one, <paramref name="commands"/>, then as an ordinary key, as it would have gone on at once.
+    /// </summary>
+    private void Resume(PressedKey key, IReadOnlyList<string> commands)
+    {
+        _resumed = commands;
+        try
+        {
+            _context.Area.RaiseEvent(
+                new KeyEventArgs
+                {
+                    RoutedEvent = InputElement.KeyDownEvent,
+                    Source = _context.Area,
+                    Key = key.Key,
+                    KeyModifiers = key.Modifiers,
+                    KeySymbol = key.Symbol,
+                }
+            );
+        }
+        finally
+        {
+            _resumed = null;
+        }
     }
 
     /// <summary>
