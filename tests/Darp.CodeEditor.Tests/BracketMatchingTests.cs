@@ -196,6 +196,34 @@ public sealed class BracketMatchingTests(UiFixture ui)
             await Wait.UntilAsync(() => window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)) == 0);
         });
 
+    /// <summary>
+    /// Brackets pair as VS Code's parser nests them: a closing bracket that closes no open bracket of its kind is no
+    /// bracket, and one that closes an outer pair leaves the brackets opened inside it unclosed. The array after them
+    /// holds a number, whose color says that the lines are tokenized.
+    /// </summary>
+    [Theory]
+    [InlineData("{ x| ] } [2]", MatchBrackets.Always, new[] { 0, 6 }, new[] { 4 })]
+    [InlineData("[ |{ x ] } [2]", MatchBrackets.Near, new int[0], new[] { 0, 2, 6, 8 })]
+    [InlineData("[ |{ x ] } [2]", MatchBrackets.Always, new[] { 0, 6 }, new[] { 2, 8 })]
+    [InlineData("[ { x ] }| [2]", MatchBrackets.Near, new int[0], new[] { 0, 2, 6, 8 })]
+    public Task In_incomplete_code_brackets_pair_as_VS_Codes_parser_nests_them(
+        string marked,
+        MatchBrackets match,
+        int[] boxed,
+        int[] unboxed
+    ) =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = await ShowColored(marked);
+
+            window.Editor.Options = CodeEditorOptions.Default with { MatchBrackets = match };
+
+            foreach (int bracket in boxed)
+                window.RenderAndCountPixels(s_bracketMatch, new TextRange(bracket, 1)).ShouldBeGreaterThan(0);
+            foreach (int bracket in unboxed)
+                window.RenderAndCountPixels(s_bracketMatch, new TextRange(bracket, 1)).ShouldBe(0);
+        });
+
     private static async Task<EditorWindow> ShowColored(string marked)
     {
         (string text, TextSelection selection) = MarkedText.Parse(marked);
