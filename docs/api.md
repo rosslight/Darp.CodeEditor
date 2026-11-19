@@ -56,7 +56,8 @@ if (compilation.Succeeded)
 - **The resource key `CodeEditorColorTheme`**: the color theme of editors that don't set `ColorTheme` (section 2).
 
 **Languages.** A `CodeLanguage` says what kind of text a document holds: a TextMate grammar for colors and VS Code's
-editing rules (comments, brackets, auto-closing pairs). Servers and script environments are not part of it.
+editing rules (comments, brackets, auto-closing pairs, indentation rules and rules for Enter). Servers and script
+environments are not part of it.
 
 - **Built in:** `CodeLanguage.PlainText`, `Json`, `Xml` and `Yaml`. Packages add theirs as extension members:
   `CodeLanguage.CSharp` from the C# package, and Luau's from its package later. IntelliSense lists them all.
@@ -75,6 +76,14 @@ editing rules (comments, brackets, auto-closing pairs). Servers and script envir
   it is always `CodeLanguage.CSharp`, and it returns a `CSharpScriptDocument` typed by its kind of script, which
   compiles itself. `CodeDocument.Create` creates documents without a server. Apps don't derive from `CodeDocument`. Headless compiling
   takes the environment, and needs no grammar.
+- **How far the editor indents by itself,** VS Code's `editor.autoIndent`, which VS Code sets per language, so it is
+  the language's `AutoIndent` (design.md #116): on Enter, on Tab on a blank line, and when a typed character makes a
+  line match the decrease pattern. `None` starts new lines at the line's start, `Keep` keeps the line's indentation,
+  `Brackets` indents after an opening bracket, `Advanced` also applies the language's rules for Enter (`onEnterRules`),
+  and `Full`, the default, also its indentation rules. `CodeLanguage.Yaml` is at `Advanced`, as VS Code's YAML
+  extension sets it, so Enter after `key:` does not indent. It is an `init` property; to change a built-in language's,
+  create it again from its files:
+  `new CodeLanguage("yaml", CodeLanguage.Yaml.Grammar, CodeLanguage.Yaml.Configuration) { AutoIndent = AutoIndent.Full }`.
 - **C# 14:** `CodeLanguage.CSharp` is an extension member, so apps need C# 14, the default for .NET 10. XAML's
   `x:Static` can't reach it; script documents are created in code.
 - **Loading:** a language starts loading its files in the background when it is created, so there is nothing to
@@ -104,7 +113,8 @@ rather than its view belong to the document, as in Monaco and CodeMirror.
 | `SaveViewState()`, `RestoreViewState(state)` | the caret, the selection and the scroll position, for an app that switches one editor between documents |
 
 **Built in, with no settings:** current-line highlight, bracket matching, auto-closing brackets and quotes,
-auto-indent, whitespace shown inside the selection, scrolling past the last line, a context menu with Cut, Copy, Paste
+auto-indent as far as the language's `AutoIndent` goes (section 1), Tab, Shift+Tab and Backspace in indentation by tab
+stops, whitespace shown inside the selection, scrolling past the last line, a context menu with Cut, Copy, Paste
 and Select All, completion's snippets with their stops (section 6), and the look of errors, hover and completion
 below.
 
@@ -902,6 +912,15 @@ with Skia:
   thread, within 2 ms, from the state at its start. Matching the indentation patterns for one new or typed line stops
   after 10 ms, and a match after 5 ms, as with a pattern that backtracks on the lines above: the line then keeps its
   indentation;
+- the language's `AutoIndent` decides how far that goes, each level as VS Code's: Enter follows the rules for Enter
+  (`onEnterRules`), such as a JSON line comment continued on the next line, and YAML at `Advanced` does not indent
+  after a key; `indentNextLinePattern` indents only the line after an `if (x)`, and a line that matches
+  `unIndentedLinePattern` gives the lines after it no indentation; Enter and typed lines leave out the brackets in
+  strings and comments; Tab on a blank line goes to the indentation that the rules give it, in a step of its own; a
+  closing bracket typed first on its line, in code, lines up with its opening bracket's line. Tab and Shift+Tab move
+  the indentation of the selected lines to the next or the previous tab stop, Tab with part of a line selected
+  replaces it with whitespace up to the next stop, and Backspace in indentation deletes back to the tab stop before
+  the caret. Enter in 5,000 lines of JSON takes the UI thread 21 ms with the layout and the frame after it;
 - the document's `Indentation` reaches every editor that shows it at once: Tab, Shift+Tab, new lines and the width of
   tabs. It starts as VS Code guesses it from the first 10,000 lines, with VS Code's default where they give no answer;
 - the keymap: VS Code's syntax for keys, also two-stroke sequences and punctuation where the keyboard layout types
@@ -1152,11 +1171,8 @@ Still open:
 - lines over 3,000 characters: the editor shows and edits lines of up to 3,000 characters in full, AvaloniaEdit's
   default, and a longer line collapses its tail (#106). The limit rises once Avalonia's text wrapping and font
   fallback get faster on long lines;
-- the parts of VS Code's editing rules that the editor does not read yet: `onEnterRules`, such as JSON's line comment
-  continued on Enter, `indentNextLinePattern` and `unIndentedLinePattern`, brackets of several characters for
-  matching, and the outdent of a closing bracket typed on an empty line by its opening bracket's line, without a
-  decrease pattern. VS Code also strips strings and comments from a line before matching its indentation patterns;
-  the editor matches the line as it is;
+- brackets of several characters, such as `begin` and `end`, for matching and for lining up a closing bracket with
+  its opening one: only the decrease pattern outdents them;
 - the editor's own text, before v1: its context menu and its search bar are in English only, also in an app that
   shows another language, such as the sample app in German. How apps get them in their language is not decided yet.
 
