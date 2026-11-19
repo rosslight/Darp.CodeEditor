@@ -780,6 +780,32 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_diagnostic_without_a_message_shows_its_code_and_a_related_place_longer_than_a_part_in_parts() =>
+        _ui.Run(() =>
+        {
+            string related = string.Join(' ', Enumerable.Repeat("word", 1_020));
+            var diagnostic = new Diagnostic(TextSnapshot.FromString(""), default, DiagnosticSeverity.Warning, "W1", "")
+            {
+                RelatedInformation = [new DiagnosticRelatedInformation(new Uri("file:///a.py"), new(2, 4), related)],
+            };
+            IReadOnlyList<HoverBlock> blocks = HoverBlocks.Of([diagnostic]);
+            blocks.SelectMany(HoverParts.Split).ShouldAllBe(piece => HoverParts.Fits(HoverParts.Size(piece)));
+            var look = new PopupLook(new FontFamily("DejaVu Sans Mono"), 13, PopupColors.Default);
+            var host = new Border();
+            using var window = new EditorWindow(new CodeEditor(), host);
+
+            HoverContent content = HoverView.Create(blocks, look);
+            host.Child = content;
+            window.Render();
+
+            content.IsComplete.ShouldBeTrue();
+            content.GetVisualDescendants().OfType<SeverityIcon>().ShouldHaveSingleItem();
+            string[] texts = [.. content.GetVisualDescendants().OfType<TextBlock>().Select(TextOf)];
+            texts[0].ShouldBe(" (W1)");
+            string.Concat(texts.Skip(1)).ShouldBe("a.py(2, 4): " + related);
+        });
+
+    [Fact]
     public Task The_popup_stays_inside_a_window_that_narrows() =>
         _ui.Run(async () =>
         {

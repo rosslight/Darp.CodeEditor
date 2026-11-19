@@ -162,15 +162,20 @@ internal static class HoverView
             else if (diagnostic.Code is { } plain)
                 Add($"({plain})", dimmed);
         }
-        SelectableTextBlock message = CodeText(look);
-        message.Inlines = inlines;
-        if (links.Count > 0)
-            OpenLinks(message, links);
-        var column = new StackPanel { Children = { message } };
+        var column = new StackPanel();
+        // A piece that goes on with places alone has no line for the message.
+        if (!diagnostic.Continues || length > 0)
+        {
+            SelectableTextBlock message = CodeText(look);
+            message.Inlines = inlines;
+            if (links.Count > 0)
+                OpenLinks(message, links);
+            column.Children.Add(message);
+        }
         foreach (HoverRelated related in diagnostic.Related)
         {
             SelectableTextBlock place = CodeText(look);
-            place.Margin = new Thickness(0, 8, 0, 0);
+            place.Margin = new Thickness(0, related.Continues ? 0 : 8, 0, 0);
             place.Inlines = [new Run(related.Place) { Foreground = look.Colors.Link }, new Run(related.Message)];
             if (related.Open is { } open)
                 OpenLinks(place, [(0, related.Place.Length, _ => open())]);
