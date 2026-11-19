@@ -118,6 +118,7 @@ internal sealed class EditorView : IDisposable
             document,
             Highlighter,
             _caretMoves,
+            context.Background,
             context.Options
         );
         _search = new FindController(context, _changes);
