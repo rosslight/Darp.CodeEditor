@@ -31,7 +31,7 @@ public sealed class BracketJumpTests(UiFixture ui)
         {
             // Brackets in strings don't count, nor a closing one that closes none; without any, the caret goes to the
             // selection's start. An opening bracket that an outer pair's closing one closes has no match.
-            using EditorWindow window = await ShowColored(marked);
+            using EditorWindow window = await ShowAsync(marked);
 
             window.Press(Keys.OemPipe, EditorWindow.Command | KeyModifiers.Shift);
 
@@ -42,7 +42,7 @@ public sealed class BracketJumpTests(UiFixture ui)
     public Task Ctrl_Shift_backslash_goes_back_and_forth_between_a_pair() =>
         _ui.Run(async () =>
         {
-            using EditorWindow window = await ShowColored("[1, [2|, 3]]");
+            using EditorWindow window = await ShowAsync("[1, [2|, 3]]");
 
             window.Press(Keys.OemPipe, EditorWindow.Command | KeyModifiers.Shift);
             MarkedText.Of(window).ShouldBe("[1, [2, 3|]]");
@@ -66,7 +66,7 @@ public sealed class BracketJumpTests(UiFixture ui)
         _ui.Run(async () =>
         {
             // From a closing bracket, backward.
-            using EditorWindow window = await ShowColored("1, |[2, 3]");
+            using EditorWindow window = await ShowAsync("1, |[2, 3]");
             window.Editor.Keymap = CodeEditorKeymap.Default.With(
                 new CodeEditorKeyBinding("ctrl+alt+b", CodeEditorCommands.SelectToBracket)
             );
@@ -82,7 +82,7 @@ public sealed class BracketJumpTests(UiFixture ui)
     public Task Select_to_bracket_passes_a_closing_bracket_that_closes_none() =>
         _ui.Run(async () =>
         {
-            using EditorWindow window = await ShowColored("|a ] [1]");
+            using EditorWindow window = await ShowAsync("|a ] [1]");
             window.Editor.Keymap = CodeEditorKeymap.Default.With(
                 new CodeEditorKeyBinding("ctrl+alt+b", CodeEditorCommands.SelectToBracket)
             );
@@ -97,7 +97,7 @@ public sealed class BracketJumpTests(UiFixture ui)
     public Task Select_to_bracket_without_a_pair_leaves_its_key_to_the_binding_before() =>
         _ui.Run(async () =>
         {
-            using EditorWindow window = await ShowColored("1, |2 3");
+            using EditorWindow window = await ShowAsync("1, |2 3");
             window.Editor.Keymap = CodeEditorKeymap.Empty.With(
                 new CodeEditorKeyBinding("ctrl+alt+b", CodeEditorCommands.CursorWordEndRight),
                 new CodeEditorKeyBinding("ctrl+alt+b", CodeEditorCommands.SelectToBracket)
@@ -122,15 +122,14 @@ public sealed class BracketJumpTests(UiFixture ui)
         keymap.Bindings.ShouldNotContain(binding => binding.Command == CodeEditorCommands.SelectToBracket);
     }
 
-    private static async Task<EditorWindow> ShowColored(string marked)
+    /// <summary>
+    /// Shows <paramref name="marked"/> as JSON once the editor has every line's tokens, for brackets in strings: not by
+    /// the colors of the text, as under load the background may give up on a line's tokens.
+    /// </summary>
+    private static async Task<EditorWindow> ShowAsync(string marked)
     {
-        await CodeLanguage.Json.Loaded;
         EditorWindow window = MarkedText.Show(marked, CodeLanguage.Json);
-        await Wait.UntilAsync(() =>
-        {
-            window.Render();
-            return window.RenderedColors().Count > 1;
-        });
+        await window.TokensKnownAsync();
         return window;
     }
 }
