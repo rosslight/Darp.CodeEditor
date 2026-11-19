@@ -165,11 +165,11 @@ public sealed class OccurrenceHighlightTests(UiFixture ui)
 
             editor.OccurrencesHighlight = OccurrencesHighlight.SingleFile;
             editor.OccurrencesHighlightDelay = TimeSpan.FromMilliseconds(200);
+            int timers = time.TimersCreated;
             editor.Selection = new TextSelection(2);
             Advance(time, s_pause);
-            await fake.WaitForAsync("documentHighlight", 2);
-            await Task.Delay(100, TestContext.Current.CancellationToken);
-            Dispatcher.UIThread.RunJobs();
+            // The answer is in, and waits for the delay, once its timer is armed: the clock stood still meanwhile.
+            await Wait.UntilAsync(() => time.HasTimerDueIn(TimeSpan.FromMilliseconds(200), timers));
             editor.Occurrences.ShouldBeEmpty();
             Advance(time, TimeSpan.FromMilliseconds(200));
             editor.Occurrences.Count.ShouldBe(3);
