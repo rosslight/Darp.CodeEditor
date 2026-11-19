@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.Collections.Frozen;
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -17,6 +19,12 @@ namespace Darp.CodeEditor.Search;
 /// </remarks>
 internal sealed class ReplacePattern
 {
+    /// <summary>
+    /// The punctuation inside words that is case-ignorable: Unicode's MidLetter, MidNumLet and Single_Quote.
+    /// </summary>
+    private const string WordPunctuation =
+        "'.:\u00B7\u0387\u05F4\u2018\u2019\u2024\u2027\uFE13\uFE52\uFE55\uFF07\uFF0E\uFF1A";
+
     private static readonly FrozenDictionary<char, string> s_upperExpansions = UpperExpansions();
 
     /// <summary>The replacement's parts, in order.</summary>
@@ -204,7 +212,7 @@ internal sealed class ReplacePattern
     /// <summary>
     /// <paramref name="text"/> in upper or lower case by Unicode's full case mappings, as JavaScript's
     /// <c>toUpperCase</c> and <c>toLowerCase</c>: .NET maps a character to one, so that <c>ß</c> stays <c>ß</c> where
-    /// they make it <c>SS</c>.
+    /// they make it <c>SS</c>, and <c>Σ</c> is <c>σ</c> also at the end of a word, where they make it <c>ς</c>.
     /// </summary>
     private static string Cased(string text, bool upper)
     {
@@ -212,7 +220,9 @@ internal sealed class ReplacePattern
         int from = 0;
         for (int i = 0; i < text.Length; i++)
         {
-            if (Expanded(text[i], upper) is not { } expanded)
+            string? expanded =
+                Expanded(text[i], upper) ?? (!upper && text[i] == '\u03A3' && IsFinalSigma(text, i) ? "\u03C2" : null);
+            if (expanded is null)
                 continue;
             cased.Append(Simple(text[from..i])).Append(expanded);
             from = i + 1;
@@ -220,6 +230,47 @@ internal sealed class ReplacePattern
         return from == 0 ? Simple(text) : cased.Append(Simple(text[from..])).ToString();
 
         string Simple(string part) => upper ? part.ToUpperInvariant() : part.ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Whether the capital sigma at <paramref name="index"/> ends a word, by Unicode's Final_Sigma: a cased letter
+    /// before it and none after it, apart from case-ignorable characters such as marks and apostrophes between.
+    /// </summary>
+    private static bool IsFinalSigma(string text, int index)
+    {
+        ReadOnlySpan<char> span = text;
+        Rune rune;
+        int before = index;
+        do
+        {
+            if (Rune.DecodeLastFromUtf16(span[..before], out rune, out int length) != OperationStatus.Done)
+                return false;
+            before -= length;
+        } while (IsCaseIgnorable(rune));
+        if (!IsCased(rune))
+            return false;
+        int after = index + 1;
+        while (
+            Rune.DecodeFromUtf16(span[after..], out rune, out int length) == OperationStatus.Done
+            && IsCaseIgnorable(rune)
+        )
+            after += length;
+        return after == text.Length || !IsCased(rune);
+
+        static bool IsCased(Rune rune) =>
+            Rune.GetUnicodeCategory(rune)
+                is UnicodeCategory.UppercaseLetter
+                    or UnicodeCategory.LowercaseLetter
+                    or UnicodeCategory.TitlecaseLetter;
+
+        static bool IsCaseIgnorable(Rune rune) =>
+            Rune.GetUnicodeCategory(rune)
+                is UnicodeCategory.NonSpacingMark
+                    or UnicodeCategory.EnclosingMark
+                    or UnicodeCategory.Format
+                    or UnicodeCategory.ModifierLetter
+                    or UnicodeCategory.ModifierSymbol
+            || (rune.IsBmp && WordPunctuation.Contains((char)rune.Value));
     }
 
     /// <summary><paramref name="c"/> in upper or lower case by Unicode's full case mappings.</summary>
