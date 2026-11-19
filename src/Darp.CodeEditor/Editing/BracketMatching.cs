@@ -34,6 +34,15 @@ internal sealed class BracketMatching : IBackgroundRenderer, IEditorFeature
     /// <summary>Whether the caret, the selection, the text or the lines' tokens changed since the pair was found.</summary>
     private bool _stale = true;
 
+    /// <summary>Counts the changes of the text.</summary>
+    private int _textVersion;
+
+    /// <summary>
+    /// The pair around the caret found last, the caret it was found for, and the versions of the text and the tokens
+    /// it was found in; null for none.
+    /// </summary>
+    private (int Open, int Close, int Caret, int Text, int Tokens)? _around;
+
     public BracketMatching(
         TextArea textArea,
         CodeDocument document,
@@ -50,7 +59,7 @@ internal sealed class BracketMatching : IBackgroundRenderer, IEditorFeature
         _options = options;
         textArea.Caret.PositionChanged += OnChanged;
         textArea.SelectionChanged += OnChanged;
-        _buffer.TextChanged += OnChanged;
+        _buffer.TextChanged += OnTextChanged;
         textArea.TextView.VisualLinesChanged += OnVisualLinesChanged;
         highlighter.TokensChanged += OnTokensChanged;
         textArea.TextView.BackgroundRenderers.Add(this);
@@ -110,7 +119,7 @@ internal sealed class BracketMatching : IBackgroundRenderer, IEditorFeature
     {
         _textArea.Caret.PositionChanged -= OnChanged;
         _textArea.SelectionChanged -= OnChanged;
-        _buffer.TextChanged -= OnChanged;
+        _buffer.TextChanged -= OnTextChanged;
         _textArea.TextView.VisualLinesChanged -= OnVisualLinesChanged;
         _highlighter.TokensChanged -= OnTokensChanged;
         _textArea.TextView.BackgroundRenderers.Remove(this);
@@ -124,11 +133,36 @@ internal sealed class BracketMatching : IBackgroundRenderer, IEditorFeature
             return null;
         int caret = _textArea.Caret.Offset;
         return BracketMatcher.FindPair(_buffer, caret, Brackets, _highlighter.TokensOf)
-            ?? (
-                match == MatchBrackets.Always
-                    ? BracketMatcher.FindEnclosing(_buffer, caret, Brackets, _highlighter.TokensOf)
-                    : null
-            );
+            ?? (match == MatchBrackets.Always ? Around(caret) : null);
+    }
+
+    /// <summary>
+    /// The pair around <paramref name="caret"/>: the one found last, while the text and its tokens stay and the brackets
+    /// between its caret and this one match among themselves, as when an arrow key or Page Down moves the caret inside
+    /// it; otherwise found again. Finding it reads up to 200,000 characters, past every bracket between.
+    /// </summary>
+    private (int Open, int Close)? Around(int caret)
+    {
+        if (
+            _around is var (open, close, at, text, tokens)
+            && text == _textVersion
+            && tokens == _highlighter.TokensVersion
+            && open < caret
+            && caret <= close
+            && caret - open <= BracketMatcher.MaxDistance
+            && close - caret < BracketMatcher.MaxDistance
+            && BracketMatcher.Balanced(
+                _buffer,
+                Math.Min(at, caret),
+                Math.Max(at, caret),
+                Brackets,
+                _highlighter.TokensOf
+            )
+        )
+            return (open, close);
+        (int Open, int Close)? found = BracketMatcher.FindEnclosing(_buffer, caret, Brackets, _highlighter.TokensOf);
+        _around = found is var (o, c) ? (o, c, caret, _textVersion, _highlighter.TokensVersion) : null;
+        return found;
     }
 
     /// <summary>
@@ -184,6 +218,12 @@ internal sealed class BracketMatching : IBackgroundRenderer, IEditorFeature
 
     private int SelectionStart() =>
         _textArea.Selection.IsEmpty ? _textArea.Caret.Offset : _textArea.Selection.SurroundingSegment.Offset;
+
+    private void OnTextChanged(object? sender, EventArgs e)
+    {
+        _textVersion++;
+        OnChanged(sender, e);
+    }
 
     /// <summary>The lines were built again, with new tokens maybe: the frame that follows finds the pair again.</summary>
     private void OnVisualLinesChanged(object? sender, EventArgs e) => _stale = true;

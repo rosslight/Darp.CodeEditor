@@ -257,6 +257,40 @@ internal static class BracketMatcher
         return pairs;
     }
 
+    /// <summary>
+    /// Whether each bracket from <paramref name="start"/> to <paramref name="end"/> has its match of its kind between
+    /// them: then the pair that <see cref="FindEnclosing"/> finds around either end is the same, within its bounds.
+    /// </summary>
+    public static bool Balanced(
+        TextDocument document,
+        int start,
+        int end,
+        IReadOnlyList<CharacterPair> brackets,
+        Func<int, int[]?> tokensOf
+    )
+    {
+        (string opens, string closes) = Characters(brackets);
+        int[] open = new int[opens.Length];
+        bool unmatched = false;
+        Scan(
+            document,
+            start,
+            end,
+            forward: true,
+            opens + closes,
+            tokensOf,
+            (c, _) =>
+            {
+                if (opens.IndexOf(c) is var kind and >= 0)
+                    open[kind]++;
+                else
+                    unmatched = open[closes.IndexOf(c)]-- == 0;
+                return unmatched;
+            }
+        );
+        return !unmatched && Array.TrueForAll(open, count => count == 0);
+    }
+
     /// <summary>The opening and the closing characters of the brackets of one character each, by kind.</summary>
     private static (string Opens, string Closes) Characters(IReadOnlyList<CharacterPair> brackets)
     {
