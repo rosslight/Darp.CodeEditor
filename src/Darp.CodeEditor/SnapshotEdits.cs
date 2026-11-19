@@ -43,4 +43,19 @@ internal sealed class SnapshotEdits
         }
         return TextRange.FromBounds(start, Math.Max(start, end));
     }
+
+    /// <summary>
+    /// Whether an edit changed the text before <paramref name="offset"/>, in the text of <see cref="Snapshot"/>: one
+    /// that starts before where the offset was when it was made.
+    /// </summary>
+    public bool ChangeBefore(int offset)
+    {
+        foreach (TextChangeEventArgs edit in _edits)
+        {
+            if (edit.Offset < offset)
+                return true;
+            offset = edit.GetNewOffset(offset, AnchorMovementType.AfterInsertion);
+        }
+        return false;
+    }
 }
