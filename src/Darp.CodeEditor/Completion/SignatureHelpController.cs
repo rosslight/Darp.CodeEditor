@@ -30,7 +30,8 @@ namespace Darp.CodeEditor.Completion;
 /// request is under way and while it waits to ask: asking then is asking again, which the server learns, with the
 /// signature that shows, or showed before the request under way. A newer request cancels the one under way, and the
 /// answer to a request that a trigger came after is dropped. Up and Down show the other signatures, while completion's
-/// list is closed.
+/// list is closed. <see cref="CodeEditor.ParameterHints"/> turns off the trigger characters, and sets whether Up and
+/// Down go around the signatures or close signature help at either end, as VS Code's <c>editor.parameterHints</c>.
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends it, for every reason it ends: Escape, leaving the call, a click or drag that moves the caret,
@@ -121,7 +122,11 @@ internal sealed class SignatureHelpController : IDisposable
     /// <summary>Whether signature help shows, waits for an answer, or waits to ask again.</summary>
     private bool IsActive => _shown is not null || _request is not null || _pause is not null;
 
-    /// <summary>Up and Down, from the editor's key handler, while more than one signature shows: the others.</summary>
+    /// <summary>
+    /// Up and Down, from the editor's key handler, while more than one signature shows: the others, as VS Code's
+    /// <c>ParameterHintsModel</c> goes through them. Past the last or the first, they go around to the other end, or
+    /// close signature help without <see cref="ParameterHintsOptions.Cycle"/>.
+    /// </summary>
     /// <returns>Whether the key was signature help's.</returns>
     public bool OnKeyDown(KeyEventArgs e)
     {
@@ -134,7 +139,17 @@ internal sealed class SignatureHelpController : IDisposable
             return false;
         }
         int count = shown.Signatures.Count;
-        Show(shown with { ActiveSignature = (shown.ActiveSignature + (e.Key == Key.Down ? 1 : count - 1)) % count });
+        int next = shown.ActiveSignature + (e.Key == Key.Down ? 1 : -1);
+        if (next < 0 || next >= count)
+        {
+            if (!_editor.ParameterHints.Cycle)
+            {
+                Close();
+                return true;
+            }
+            next = (next + count) % count;
+        }
+        Show(shown with { ActiveSignature = next });
         return true;
     }
 
@@ -172,11 +187,20 @@ internal sealed class SignatureHelpController : IDisposable
         _popup.LeftView -= OnClosingChange;
     }
 
-    /// <summary>Asks on the server's trigger characters, and on its retrigger characters while active, after the pause.</summary>
+    /// <summary>
+    /// Asks on the server's trigger characters, and on its retrigger characters while active, after the pause; neither
+    /// without <see cref="ParameterHintsOptions.Enabled"/>, as in VS Code.
+    /// </summary>
     private void OnTextEntered(object? sender, TextInputEventArgs e)
     {
-        if (e.Text is not { Length: > 0 } text || _document.Features?.SignatureHelp is not { } provider)
+        if (
+            !_editor.ParameterHints.Enabled
+            || e.Text is not { Length: > 0 } text
+            || _document.Features?.SignatureHelp is not { } provider
+        )
+        {
             return;
+        }
         char typed = text[^1];
         if (provider.TriggerCharacters.Contains(typed) || (IsActive && provider.RetriggerCharacters.Contains(typed)))
             Schedule(SignatureHelpTriggerKind.TriggerCharacter, typed, s_pause);

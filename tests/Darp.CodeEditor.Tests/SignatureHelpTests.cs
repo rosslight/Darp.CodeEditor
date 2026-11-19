@@ -212,6 +212,68 @@ public sealed class SignatureHelpTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Without_parameter_hints_typing_opens_nothing_asking_by_key_still_does_and_turning_them_off_closes_it() =>
+        _ui.Run(async () =>
+        {
+            var time = new ManualTime();
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "call");
+            var off = new ParameterHintsOptions(Enabled: false, Cycle: true);
+            var editor = new CodeEditor { Document = document, ParameterHints = off };
+            using var window = new EditorWindow(editor);
+            await CompletionTests.StartServingAsync(server, document);
+            // VS Code's default: on, and cycling.
+            new CodeEditor().ParameterHints.ShouldBe(new ParameterHintsOptions(Enabled: true, Cycle: true));
+            window.Editor.Selection = new TextSelection(4);
+
+            window.Type("(");
+            time.Advance(TimeSpan.FromMilliseconds(120));
+            // A request that the pause posted would be sent before the barrier.
+            window.Layout();
+            await CompletionTests.BarrierAsync(server, fake);
+            fake.LinesStartingWith("signatureHelp ").ShouldBeEmpty();
+
+            window.Press(Key.Space, KeyModifiers.Control | KeyModifiers.Shift);
+            await WaitForSignatureAsync(window, "first", "Calls with two.");
+            editor.ParameterHints = ParameterHintsOptions.Default;
+            Popup(window).ShouldNotBeNull();
+            editor.ParameterHints = off;
+            Popup(window).ShouldBeNull();
+        });
+
+    [Fact]
+    public Task Up_and_Down_go_around_the_signatures_or_without_cycling_close_signature_help_at_either_end() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "call");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            await CompletionTests.StartServingAsync(server, document);
+
+            // Two signatures: past the last, Down goes to the first.
+            await OpenAsync(window, document);
+            window.Press(Key.Down);
+            await WaitForSignatureAsync(window, "first", "Calls with three.");
+            window.Press(Key.Down);
+            PopupFrame popup = await WaitForSignatureAsync(window, "first", "Calls with two.");
+            ActiveSignature(popup).ShouldBe("call(first, second)");
+
+            editor.ParameterHints = new ParameterHintsOptions(Enabled: true, Cycle: false);
+            window.Press(Key.Down);
+            await WaitForSignatureAsync(window, "first", "Calls with three.");
+            window.Press(Key.Down);
+            Popup(window).ShouldBeNull();
+            await OpenAsync(window, document);
+            window.Press(Key.Up);
+            Popup(window).ShouldBeNull();
+            document.Text.ShouldBe("call(");
+            editor.Selection.ShouldBe(new TextSelection(5));
+        });
+
+    [Fact]
     public Task Signature_help_shows_above_the_line_and_an_open_completion_list_below_it() =>
         _ui.Run(async () =>
         {

@@ -254,6 +254,12 @@ public class CodeEditor : TemplatedControl
         TimeSpan
     >(nameof(HoverDelay), defaultValue: TimeSpan.FromMilliseconds(300), coerce: CoerceHoverDelay);
 
+    /// <summary>Defines the <see cref="ParameterHints"/> property.</summary>
+    public static readonly StyledProperty<ParameterHintsOptions> ParameterHintsProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        ParameterHintsOptions
+    >(nameof(ParameterHints), defaultValue: ParameterHintsOptions.Default);
+
     /// <summary>AvaloniaEdit's editor, from the template. The editor wraps it, so that its API stays out of ours.</summary>
     private TextEditor? _part;
 
@@ -728,6 +734,18 @@ public class CodeEditor : TemplatedControl
         set => SetValue(HoverDelayProperty, value);
     }
 
+    /// <summary>
+    /// How signature help shows the parameters of the call around the caret, VS Code's <c>editor.parameterHints</c>:
+    /// whether it opens as the user types, and whether Up and Down go around its signatures at either end. Turning it
+    /// off closes signature help that shows, as in VS Code. Default: <see cref="ParameterHintsOptions.Default"/>, both,
+    /// as in VS Code.
+    /// </summary>
+    public ParameterHintsOptions ParameterHints
+    {
+        get => GetValue(ParameterHintsProperty);
+        set => SetValue(ParameterHintsProperty, value);
+    }
+
     /// <summary>The semantic colors of the shown document, for benchmarks; null while it shows none.</summary>
     internal SemanticHighlighter? SemanticHighlighter => _semantic;
 
@@ -1056,6 +1074,8 @@ public class CodeEditor : TemplatedControl
             _selectionHighlights?.Update();
         else if (change.Property == OccurrencesHighlightProperty && OccurrencesHighlight == OccurrencesHighlight.Off)
             _occurrences?.Stop();
+        else if (change.Property == ParameterHintsProperty && !ParameterHints.Enabled)
+            _signatureHelp?.Close();
     }
 
     /// <summary>
