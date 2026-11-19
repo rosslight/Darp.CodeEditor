@@ -241,7 +241,8 @@ public sealed class LineCommandTests(UiFixture ui)
         // "a " in code, then "// {" in a comment.
         int[] comment = [0, 0, 2, (int)TokenType.Comment << 8];
         TokenTypes.At(comment, 5).ShouldBe(TokenType.Comment);
-        string[] text = ["a // {", "b"];
+        // "c" moves up past "b", below the brace.
+        string[] text = ["a // {", "b", "c"];
         var lines = new RuleLines(
             number => text[number - 1],
             (_, _) =>
@@ -255,7 +256,7 @@ public sealed class LineCommandTests(UiFixture ui)
         );
         var rules = new IndentRules(configuration, AutoIndent.Full, Indentation.Spaces(4), "\n");
 
-        MovedIndentation.InPlace(rules, lines, 2).ShouldBe(expected);
+        rules.Move(lines, first: 3, last: 3, down: false).First.ShouldBe(expected);
     }
 
     [Theory]
