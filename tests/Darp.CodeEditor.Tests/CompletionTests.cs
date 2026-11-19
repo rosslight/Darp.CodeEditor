@@ -1444,6 +1444,35 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Page_Up_with_the_selection_scrolled_out_of_view_goes_a_page_up_from_the_rows_that_show() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Items([.. Enumerable.Range(0, 30).Select(i => $"item{i:D2}")])
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await OpenAsync(window, 0);
+            CompletionListBox list = List(window).ShouldNotBeNull();
+            int rows = list.VisibleRows;
+
+            // The wheel scrolls to the last rows; the first item stays selected, out of view.
+            window.Window.MouseWheel(RowCenter(window, 0), new Vector(0, -10));
+            window.Layout();
+            list.FirstRow.ShouldBe(30 - rows);
+            list.SelectedIndex.ShouldBe(0);
+
+            // As VS Code's lists: a page up from the rows that show, and its first row selected.
+            window.Press(Key.PageUp);
+            list.SelectedIndex.ShouldBe(30 - 2 * rows);
+            list.FirstRow.ShouldBe(30 - 2 * rows);
+        });
+
+    [Fact]
     public Task Dragging_the_lists_edges_resizes_it_to_whole_rows_and_it_keeps_that_size() =>
         _ui.Run(async () =>
         {
