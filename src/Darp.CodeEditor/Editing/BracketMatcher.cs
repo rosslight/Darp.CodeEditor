@@ -64,6 +64,13 @@ internal static class BracketMatcher
         Find(document, offset, pair.Open[0], pair.Close[0], forward: false, tokensOf);
 
     /// <summary>
+    /// The closing bracket that an opening one at <paramref name="offset"/> would match, within
+    /// <see cref="MaxDistance"/> characters after it; null for none.
+    /// </summary>
+    public static int? FindClosing(TextDocument document, int offset, CharacterPair pair, Func<int, int[]?> tokensOf) =>
+        Find(document, offset - 1, pair.Open[0], pair.Close[0], forward: true, tokensOf);
+
+    /// <summary>
     /// The bracket that matches the one at <paramref name="from"/>: the next closing bracket at the same depth going
     /// forward, or the opening one going backward, within <see cref="MaxDistance"/> characters. The text is read in
     /// blocks into a buffer, and a line's tokens only where a bracket is, so the search allocates nothing per line.

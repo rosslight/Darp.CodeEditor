@@ -208,6 +208,29 @@ public sealed class PairTests(UiFixture ui)
         });
 
     [Fact]
+    public Task An_opening_bracket_doesnt_close_before_a_closing_one_that_no_opening_one_matches() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = await ShowColored("{\n    \"a\": |]\n}", CodeLanguage.Json);
+
+            window.Type("[");
+
+            MarkedText.Of(window).ShouldBe("{\n    \"a\": [|]\n}");
+        });
+
+    [Fact]
+    public Task A_pair_that_contains_another_closes_with_the_others_closing_character_after_the_caret() =>
+        _ui.Run(async () =>
+        {
+            await Pairs.Loaded;
+            using EditorWindow window = MarkedText.Show("|", Pairs);
+
+            window.Type("(*");
+
+            MarkedText.Of(window).ShouldBe("(*|*)");
+        });
+
+    [Fact]
     public Task A_pair_of_several_characters_closes_when_its_last_character_is_typed() =>
         _ui.Run(async () =>
         {

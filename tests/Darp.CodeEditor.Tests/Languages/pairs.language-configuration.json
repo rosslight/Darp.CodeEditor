@@ -1,7 +1,7 @@
 {
-  "comment": "Editing rules for tests: pairs without a grammar, which close before an x too, and comments.",
+  "comment": "Editing rules for tests: pairs without a grammar, which close before an x too, one of them inside another, and comments.",
   "comments": { "lineComment": "//", "blockComment": ["/*", "*/"] },
   "brackets": [["(", ")"]],
-  "autoClosingPairs": [["(", ")"], ["\"", "\""]],
+  "autoClosingPairs": [["(", ")"], ["\"", "\""], ["(*", "*)"]],
   "autoCloseBefore": "x \n\t"
 }
