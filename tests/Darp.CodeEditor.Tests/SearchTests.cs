@@ -1,9 +1,11 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using AvaloniaEdit;
 using AvaloniaEdit.Search;
+using Darp.CodeEditor.Localization;
 using Darp.CodeEditor.Search;
 using static Darp.CodeEditor.Tests.SearchBars;
 
@@ -320,6 +322,62 @@ public sealed class SearchTests(UiFixture ui)
             await Wait.UntilAsync(() => window.RenderAndCountPixels(Color.Parse("#00C000"), new TextRange(0, 3)) > 0);
             window.RenderAndCountPixels(Color.Parse("#00C000"), new TextRange(5, 3)).ShouldBeGreaterThan(0);
             window.RenderAndCountPixels(Color.Parse("#00C000"), new TextRange(13, 3)).ShouldBe(0);
+        });
+
+    /// <summary>
+    /// As VS Code's find widget, the bar narrows its query and replacement in a narrow editor, and wraps beyond, so
+    /// that every button lies inside the editor and takes a click.
+    /// </summary>
+    [Theory]
+    [InlineData(500, true)]
+    [InlineData(300, false)]
+    public Task In_a_narrow_editor_every_button_of_the_bar_lies_inside_it_and_takes_a_click(
+        double width,
+        bool oneLine
+    ) =>
+        _ui.Run(async () =>
+        {
+            using var window = new EditorWindow(
+                new CodeEditor { Document = CodeDocument.Create(CodeLanguage.PlainText, "a a") },
+                width: width
+            );
+            window.Editor.Selection = new TextSelection(0, 1);
+            window.Editor.OpenSearch(replace: true);
+            SearchBar bar = BarOf(window);
+            bar.ReplaceBox.Text = "a";
+            await SearchedAsync(bar);
+            window.Layout();
+            var editor = new Rect(window.Editor.Bounds.Size);
+            // The bar's own, not those of its parts' templates, in its order, Close last.
+            Button[] buttons =
+            [
+                .. bar.GetVisualDescendants()
+                    .OfType<Button>()
+                    .Where(button => button.TemplatedParent is null)
+                    .OrderBy(button => ToolTip.GetTip(button) as string == Strings.CloseSearch),
+            ];
+            buttons.Length.ShouldBe(10);
+            // The query gave up width, and Close stays on its line where that is enough.
+            bar.FindBox.Bounds.Width.ShouldBeLessThan(220);
+            (buttons[^1].TranslatePoint(default, bar.FindBox).ShouldNotBeNull().Y < bar.FindBox.Bounds.Height).ShouldBe(
+                oneLine
+            );
+
+            foreach (Button button in buttons)
+            {
+                Point topLeft = button.TranslatePoint(default, window.Editor).ShouldNotBeNull();
+                editor.Contains(new Rect(topLeft, button.Bounds.Size)).ShouldBeTrue();
+                int clicks = 0;
+                button.Click += (_, _) => clicks++;
+                button.IsEnabled.ShouldBeTrue();
+
+                window.Click(topLeft + new Point(button.Bounds.Width / 2, button.Bounds.Height / 2), MouseButton.Left);
+
+                clicks.ShouldBe(1);
+                await SearchedAsync(bar);
+                window.Layout();
+            }
+            bar.IsOpen.ShouldBeFalse();
         });
 
     /// <summary>
