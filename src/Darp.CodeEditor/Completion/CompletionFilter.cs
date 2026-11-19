@@ -1,3 +1,4 @@
+using Avalonia.Input;
 using Avalonia.Logging;
 using AvaloniaEdit.Editing;
 using Darp.CodeEditor.LanguageClient;
@@ -26,10 +27,11 @@ internal interface ICompletionOwner
 /// Filters completion's answer as the user types, and shows the result. Each change of the text or the caret filters
 /// anew off the UI thread (<see cref="CompletionRanking"/>), the filter under way stops, and the list shows the newest
 /// result, the previous one meanwhile. Typing on ranks the items that show, as VS Code refilters, and anything else,
-/// such as Backspace, all of the answer's: once typing shortened a long list, it tolerates a typo. When nothing matches, a list opened by typing ends, unless more may come, as
-/// from a list asked for again: it freezes meanwhile. One asked for by key freezes, or says "No suggestions.". An
-/// accept that the current text's filter has to decide commits what it selects once it has run, unless the text or
-/// the caret changes before. It owns what the list shows until completion ends, which <see cref="Hide"/> forgets.
+/// such as Backspace, all of the answer's: once typing shortened a long list, it tolerates a typo. When nothing
+/// matches, a list opened by typing ends, unless more may come, as from a list asked for again: it freezes meanwhile.
+/// One asked for by key freezes, or says "No suggestions.". An accept that the current text's filter has to decide
+/// commits what it selects once it has run, unless the text or the caret changes before. It owns what the list shows
+/// until completion ends, which <see cref="Hide"/> forgets.
 /// </summary>
 internal sealed class CompletionFilter
 {
@@ -178,6 +180,41 @@ internal sealed class CompletionFilter
         return _ranking.Matches(item, _document.CurrentSnapshot, caret, ranked <= CompletionMatcher.MaxGracefulItems);
     }
 
+    /// <summary>
+    /// Up, Down, Page Up and Page Down select among the rows that show, while the list shows more than one item: Page
+    /// Down first selects the last row that shows, and then goes a page of rows on, Page Up the same upwards.
+    /// </summary>
+    /// <returns>Whether the key selected: otherwise it goes on, as to the caret.</returns>
+    public bool SelectByKey(Key key)
+    {
+        CompletionListBox list = _view.List;
+        return key switch
+        {
+            Key.Down => SelectBy(1),
+            Key.Up => SelectBy(-1),
+            Key.PageDown when SelectsAmong => SelectAt(
+                CompletionPaging.Down(Selected, list.FirstRow, list.VisibleRows, Items.Count)
+            ),
+            Key.PageUp when SelectsAmong => SelectAt(CompletionPaging.Up(Selected, list.FirstRow, list.VisibleRows)),
+            _ => false,
+        };
+    }
+
+    /// <summary>Selects the item <paramref name="step"/> rows on, round the list's ends, while it shows more than one.</summary>
+    /// <returns>Whether it selected: otherwise the key goes on, as to the caret.</returns>
+    public bool SelectBy(int step) => SelectsAmong && SelectAt((Selected + step + Items.Count) % Items.Count);
+
+    /// <summary>Whether the list shows more than one item, among which the keys select.</summary>
+    private bool SelectsAmong => IsShowing && Items.Count > 1;
+
+    /// <summary>Selects the item at <paramref name="index"/>.</summary>
+    /// <returns>True.</returns>
+    private bool SelectAt(int index)
+    {
+        Select(index);
+        return true;
+    }
+
     public void Select(int index)
     {
         Selected = index;
@@ -298,8 +335,8 @@ internal sealed class CompletionFilter
     }
 
     /// <summary>
-    /// Whether a filter for <paramref name="key"/> ranks the items that show, rather than all of the answer's: the caret
-    /// went on past where they were filtered for, as when typing on.
+    /// Whether a filter for <paramref name="key"/> ranks the items that show, rather than all of the answer's: the
+    /// caret went on past where they were filtered for, as when typing on.
     /// </summary>
     private bool RanksShown(FilterKey key) =>
         _shown is { } shown && shown.Answer == key.Answer && key.Caret > shown.Caret;

@@ -25,18 +25,18 @@ namespace Darp.CodeEditor.Completion;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Its command asks at once. While <see cref="ParameterHintsOptions.Enabled"/>, typing one of the server's trigger characters, such as <c>(</c>, asks after a pause of
-/// 120 ms, and so does a retrigger character, such as <c>,</c>, while signature help shows, waits for an answer or for
-/// the pause; each edit and caret move meanwhile restarts the pause. Once it passes, signature help asks again, for the
-/// trigger character typed last, or by the command, and tells the server the signature that shows. A newer request
-/// cancels the one under way, and an answer about older text is dropped. Up and Down choose the active signature, while
-/// completion's list is closed.
+/// Its command asks at once. While <see cref="ParameterHintsOptions.Enabled"/>, typing one of the server's trigger
+/// characters, such as <c>(</c>, asks after a pause of 120 ms, and so does a retrigger character, such as <c>,</c>,
+/// while signature help shows, waits for an answer or for the pause; each edit and caret move meanwhile restarts the
+/// pause. Once it passes, signature help asks again, for the trigger character typed last, or by the command, and tells
+/// the server the signature that shows. A newer request cancels the one under way, and an answer about older text is
+/// dropped. Up and Down choose the active signature, while completion's list is closed.
 /// </para>
 /// <para>
-/// <see cref="Close"/> ends it, for every reason it ends: Escape, leaving the call, a click or drag that moves the caret,
-/// when the server answers with none,
-/// the editor becoming read-only, the editor losing the keyboard focus, a server that starts or stops serving the
-/// document, new colors, the caret's line scrolling out of view, and the editor no longer showing the document.
+/// <see cref="Close"/> ends it, for every reason it ends: Escape, leaving the call, a click or drag that moves the
+/// caret, when the server answers with none, the editor becoming read-only, the editor losing the keyboard focus, a
+/// server that starts or stops serving the document, new colors, the caret's line scrolling out of view, and the editor
+/// no longer showing the document.
 /// </para>
 /// </remarks>
 internal sealed class SignatureHelpController : IEditorFeature

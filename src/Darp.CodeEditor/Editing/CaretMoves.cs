@@ -8,7 +8,9 @@ namespace Darp.CodeEditor.Editing;
 /// <summary>What moves the caret of an editor's view.</summary>
 internal enum CaretMover
 {
-    /// <summary>Anything but a key or the pointer in the text: code, a command of the keymap, an undo, another editor.</summary>
+    /// <summary>
+    /// Anything but a key or the pointer in the text: code, a command of the keymap, an undo, or another editor.
+    /// </summary>
     Other,
 
     /// <summary>A key that goes to the text, or typed text.</summary>
