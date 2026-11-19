@@ -64,9 +64,9 @@ internal static class WordRules
     }
 
     /// <summary>
-    /// Where Ctrl+Left puts the caret: at the start of the word or run of separators
-    /// before <paramref name="caret"/>, past a single separator right after a word, such as the dot of <c>foo.bar</c>;
-    /// at the line's start without one. From a line's start, it starts from the end of the line before.
+    /// Where Ctrl+Left puts the caret: at the start of the word or run of separators before <paramref name="caret"/>,
+    /// past a single separator that a word character follows, such as the dot of <c>.bar</c>; at the line's start
+    /// without one. From a line's start, it starts from the end of the line before.
     /// </summary>
     public static int MoveLeft(TextDocument text, int caret)
     {
@@ -78,8 +78,8 @@ internal static class WordRules
         Word? word = Previous(lineText, column);
         if (
             word is { Type: CharClass.Separator, Length: 1 } separator
-            && separator.Start > 0
-            && Classify(lineText[separator.Start - 1]) == CharClass.Regular
+            && separator.End < lineText.Length
+            && Classify(lineText[separator.End]) == CharClass.Regular
         )
             word = Previous(lineText, separator.Start);
         return line.Offset + (word?.Start ?? 0);

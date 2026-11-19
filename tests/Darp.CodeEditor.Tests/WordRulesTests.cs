@@ -123,8 +123,10 @@ public sealed class WordRulesTests
     [InlineData("alpha beta|", "alpha |beta")]
     [InlineData("alpha |beta", "|alpha beta")]
     [InlineData("foo.bar|", "foo.|bar")]
-    // A single separator after a word goes with the word.
+    // A single separator before a word character is passed over, whatever is before it.
     [InlineData("foo.|bar", "|foo.bar")]
+    [InlineData("foo .|bar", "|foo .bar")]
+    [InlineData("foo. |", "foo|. ")]
     [InlineData("foo..|bar", "foo|..bar")]
     [InlineData("(|foo", "|(foo")]
     [InlineData("  |foo", "|  foo")]
