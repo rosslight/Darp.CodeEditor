@@ -20,7 +20,10 @@
 // says it shows, or the first. Completion in a document with the word "slow" is never answered. Selection ranges
 // answer with what the command "selection-ranges" set, as the result's first selection range, or with the word at the
 // position and its line; once "hold-selection-ranges" holds them, only when "release-selection-ranges" releases them,
-// with the answer of when they came. A request about a document that is not open is answered with an error.
+// with the answer of when they came. Document highlights are the occurrences of the word at the position, as whole
+// words: one followed by " =" is a write, the others are reads. The word "none" is answered with null, and "nothing"
+// with no highlights; once "hold-document-highlights" holds them, only when "release-document-highlights" releases
+// them. A request about a document that is not open is answered with an error.
 //
 // Arguments:
 //   --initialize never      never answer initialize
@@ -135,6 +138,14 @@ internal sealed class FakeServer
 
     private readonly List<(JsonNode? Id, JsonNode Answer)> _heldSelectionRanges = [];
 
+    /// <summary>
+    /// Set by the command <c>hold-document-highlights</c>: document highlights wait for the command
+    /// <c>release-document-highlights</c>, which answers them as they would have been answered when they came.
+    /// </summary>
+    private bool _holdDocumentHighlights;
+
+    private readonly List<(JsonNode? Id, JsonNode? Answer)> _heldDocumentHighlights = [];
+
     /// <summary>Set by the command <c>peek</c>: the file whose existence lets the server read on.</summary>
     private string? _peekSignal;
 
@@ -238,6 +249,7 @@ internal sealed class FakeServer
                                     ["retriggerCharacters"] = new JsonArray(","),
                                 },
                                 ["selectionRangeProvider"] = true,
+                                ["documentHighlightProvider"] = true,
                             },
                         }
                     );
@@ -287,6 +299,9 @@ internal sealed class FakeServer
                 break;
             case "textDocument/selectionRange":
                 SelectionRanges(id, Required(parameters, "params"));
+                break;
+            case "textDocument/documentHighlight":
+                DocumentHighlights(id, Required(parameters, "params"));
                 break;
             case "workspace/didChangeConfiguration":
                 Log($"configuration changed {parameters?.ToJsonString()}");
@@ -458,6 +473,17 @@ internal sealed class FakeServer
                     Reply(id, answer);
                 _heldSelectionRanges.Clear();
                 Log("released selection ranges");
+                break;
+            case ["hold-document-highlights"]:
+                _holdDocumentHighlights = true;
+                Log("holding document highlights");
+                break;
+            case ["release-document-highlights"]:
+                _holdDocumentHighlights = false;
+                foreach ((JsonNode? id, JsonNode? answer) in _heldDocumentHighlights)
+                    Reply(id, answer);
+                _heldDocumentHighlights.Clear();
+                Log("released document highlights");
                 break;
             case ["peek", var signal]:
                 _peekSignal = signal;
@@ -731,6 +757,37 @@ internal sealed class FakeServer
 
         JsonObject Range(int from, int to) =>
             new() { ["start"] = Position(document.Text, from), ["end"] = Position(document.Text, to) };
+    }
+
+    /// <summary>
+    /// Answers with the occurrences of the word at the position as whole words, a write where " =" follows, or with
+    /// null for "none" and none for "nothing"; once held, when the hold is released.
+    /// </summary>
+    private void DocumentHighlights(JsonNode? id, JsonNode parameters)
+    {
+        if (Known(id, "documentHighlight", parameters) is not { } document)
+            return;
+        string text = document.Text;
+        (int start, int end) = WordAt(text, Offset(text, Required(parameters["position"], "position")));
+        string word = text[start..end];
+        Log($"documentHighlight {id?.ToJsonString()} {word}");
+        JsonArray? highlights = word is "none" or "" ? null : [];
+        for (
+            int at = word is "nothing" ? -1 : text.IndexOf(word, StringComparison.Ordinal);
+            highlights is not null && at >= 0;
+            at = text.IndexOf(word, at + 1, StringComparison.Ordinal)
+        )
+        {
+            if (WordAt(text, at) != (at, at + word.Length))
+                continue;
+            bool write = text.AsSpan(at + word.Length).StartsWith(" =", StringComparison.Ordinal);
+            JsonObject range = new() { ["start"] = Position(text, at), ["end"] = Position(text, at + word.Length) };
+            highlights.Add((JsonNode)new JsonObject { ["range"] = range, ["kind"] = write ? 3 : 2 });
+        }
+        if (_holdDocumentHighlights)
+            _heldDocumentHighlights.Add((id?.DeepClone(), highlights));
+        else
+            Reply(id, highlights);
     }
 
     /// <summary>The word of letters, digits and underscores at an offset; empty where there is none.</summary>
