@@ -24,19 +24,19 @@ namespace Darp.CodeEditor.Completion;
 /// Completion opens on Ctrl+Space, also on macOS, on the server's trigger characters, and on a word that typing ends or
 /// starts, where the language's quick suggestions say (<see cref="QuickSuggest"/>). Until the server answers, nothing
 /// shows; what is typed meanwhile filters its answer, and so does what is typed while the list shows
-/// (<see cref="CompletionFilter"/>). Opened by typing, an answer with nothing ends completion, and typing on in its word
-/// opens nothing. A list that the server marks incomplete is
-/// asked for again as the user types on, and shows meanwhile. Moving back before where completion was asked, and any
-/// edit before it, as by another editor of the document, asks again while a word is left, as VS Code does when the
-/// caret moves back: the list's positions no longer fit the text. Asked for by key, an empty answer says "No
-/// suggestions." until the next key or caret move.
+/// (<see cref="CompletionFilter"/>). Opened by typing, an answer with nothing ends completion, and typing on in its
+/// word opens nothing. A list that the server marks incomplete is asked for again as the user types on, and shows meanwhile.
+/// Moving back before where completion was asked, and any edit before it, as by another editor of the document, asks
+/// again while a word is left, as VS Code does when the caret moves back: the list's positions no longer fit the text.
+/// Asked for by key, an empty answer says "No suggestions." until the next key or caret move.
 /// </para>
 /// <para>
 /// Up, Down, Page Up and Page Down select among the rows that show, while there is more than one item; with one, they
 /// go on to the text, as in VS Code. The keymap's accept commands, a click or one of the selected item's commit
 /// characters commit it (<see cref="CompletionCommit"/>): accepting inserts or replaces, a click and a commit character
-/// insert, and a commit character then goes in. Then the item's command runs, if it is one of the editor's. A frozen list commits by accepting and by a click, but not by commit
-/// characters. A read-only editor neither completes nor commits.
+/// insert, and a commit character then goes in. Then the item's command runs, if it is one of the editor's. A frozen
+/// list commits by accepting and by a click, but not by commit characters. A read-only editor neither completes nor
+/// commits.
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends completion, for every reason it ends: Escape, the caret leaving the line or moving back
@@ -147,8 +147,8 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
             goOn => Accept(replace: true, goOn),
             needs
         );
-        commands.Add(CodeEditorCommands.SelectNextSuggestion, () => SelectBy(1));
-        commands.Add(CodeEditorCommands.SelectPrevSuggestion, () => SelectBy(-1));
+        commands.Add(CodeEditorCommands.SelectNextSuggestion, () => _session is not null && _filter.SelectBy(1));
+        commands.Add(CodeEditorCommands.SelectPrevSuggestion, () => _session is not null && _filter.SelectBy(-1));
     }
 
     /// <summary>Asks for completion, where the server completes and the user can type.</summary>
@@ -204,40 +204,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
     {
         if (_session is null)
             HideEmpty();
-        if (!SelectsAmongItems || e.KeyModifiers != KeyModifiers.None)
-            return false;
-        int count = _filter.Items.Count;
-        int selected = _filter.Selected;
-        CompletionListBox list = _view.List;
-        switch (e.Key)
-        {
-            case Key.Down:
-                return SelectBy(1);
-            case Key.Up:
-                return SelectBy(-1);
-            case Key.PageDown:
-                _filter.Select(CompletionPaging.Down(selected, list.FirstRow, list.VisibleRows, count));
-                return true;
-            case Key.PageUp:
-                _filter.Select(CompletionPaging.Up(selected, list.FirstRow, list.VisibleRows));
-                return true;
-            default:
-                return false;
-        }
-    }
-
-    /// <summary>Whether the list shows more than one item, among which Up and Down select.</summary>
-    private bool SelectsAmongItems => _session is not null && _filter.IsShowing && _filter.Items.Count > 1;
-
-    /// <summary>Selects the item <paramref name="step"/> rows on, round the list's ends, while it has more than one.</summary>
-    /// <returns>Whether it selected: otherwise the key goes on, as to the caret.</returns>
-    private bool SelectBy(int step)
-    {
-        if (!SelectsAmongItems)
-            return false;
-        int count = _filter.Items.Count;
-        _filter.Select((_filter.Selected + step + count) % count);
-        return true;
+        return _session is not null && e.KeyModifiers == KeyModifiers.None && _filter.SelectByKey(e.Key);
     }
 
     /// <summary>
