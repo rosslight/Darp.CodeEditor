@@ -877,6 +877,37 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Theory]
+    [InlineData("tab")]
+    [InlineData(".")]
+    public Task A_commit_whose_change_switches_the_document_leaves_the_other_one_alone(string key) =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse("""{ "items": [ { "label": "println", "commitCharacters": ["."] } ] }""")
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "pri");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            using CodeDocument other = CodeDocument.Create(CodeLanguage.PlainText, "unrelated text");
+            await OpenAsync(window, 3);
+            document.TextChanged += (_, _) => window.Editor.Document = other;
+
+            if (key == "tab")
+                window.Press(Key.Tab);
+            else
+                window.Type(key);
+
+            window.Editor.Document.ShouldBe(other);
+            document.Text.ShouldBe("println");
+            // Neither the caret nor the typed character goes into the other document.
+            other.Text.ShouldBe("unrelated text");
+            window.Editor.Selection.ShouldBe(new TextSelection(0));
+        });
+
+    [Theory]
     [InlineData("pair", "a\nb\n\n\npair|")]
     [InlineData("${1:pair}", "a\nb\n\n\n«pair»")]
     public Task An_item_whose_text_starts_with_a_line_break_keeps_a_lone_carriage_return_before_it_a_line_of_its_own(

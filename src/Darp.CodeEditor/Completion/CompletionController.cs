@@ -223,9 +223,11 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
             && e.Text is [char typed]
             && _filter.Items[_filter.Selected].Item.CommitCharacters.Contains(typed)
             && _filter.CanCommit(_filter.Selected, session.Answer)
+            // Typed for this document: once another one shows, it goes nowhere.
+            && !Commit(_filter.Selected)
         )
         {
-            Commit(_filter.Selected);
+            e.Handled = true;
         }
     }
 
@@ -376,16 +378,17 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
     /// <see cref="CompletionCommit"/>: completion ends first. The resolve of an item whose additional edits are still to
     /// come is taken out of the resolver, so that ending completion does not cancel it.
     /// </summary>
-    private void Commit(int index, bool replace = false)
+    /// <returns>Whether the editor still shows the document: a handler of the change may show another one.</returns>
+    private bool Commit(int index, bool replace = false)
     {
         if (_filter.ShownAnswer is not { } answer)
-            return;
+            return true;
         CompletionItem selected = _filter.Items[index].Item;
         CompletionItem item = _resolver.ResolvedOf(selected) ?? selected;
         ItemResolve? late =
             item.AdditionalEdits is null && answer.List.Resolves ? _resolver.Take(selected, answer.List) : null;
         Close();
-        _commit.Commit(item, answer.Request, replace, late);
+        return _commit.Commit(item, answer.Request, replace, late);
     }
 
     private void OnClicked(int index)
