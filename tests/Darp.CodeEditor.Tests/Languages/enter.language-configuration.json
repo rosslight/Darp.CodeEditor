@@ -1,0 +1,33 @@
+{
+  "comment": "Rules for Enter for tests: doc comments as VS Code's TypeScript has them, an outdent after a one-line if, an indent after a case, and two rules that VS Code skips.",
+  "comments": { "lineComment": "//", "blockComment": ["/*", "*/"] },
+  "brackets": [["{", "}"], ["(", ")"]],
+  "onEnterRules": [
+    {
+      "beforeText": { "pattern": "^\\s*/\\*\\*(?!/)([^\\*]|\\*(?!/))*$" },
+      "afterText": { "pattern": "^\\s*\\*/$" },
+      "action": { "indent": "indentOutdent", "appendText": " * " }
+    },
+    {
+      "beforeText": { "pattern": "^\\s*/\\*\\*(?!/)([^\\*]|\\*(?!/))*$" },
+      "action": { "indent": "none", "appendText": " * " }
+    },
+    {
+      "beforeText": { "pattern": "^(\\t|[ ])*[ ]\\*([ ]([^\\*]|\\*(?!/))*)?$" },
+      "previousLineText": { "pattern": "(?=^(\\s*(/\\*\\*|\\*)).*)(?=(?!(\\s*\\*/)))" },
+      "action": { "indent": "none", "appendText": "* " }
+    },
+    {
+      "beforeText": { "pattern": "^(\\t|[ ])*[ ]\\*/\\s*$" },
+      "action": { "indent": "none", "removeText": 1 }
+    },
+    {
+      "previousLineText": "^\\s*(((else ?)?if|for|while)\\s*\\(.*\\)\\s*|else\\s*)$",
+      "beforeText": "^\\s+([^{i\\s]|i(?!f\\b))",
+      "action": { "indent": "outdent" }
+    },
+    { "beforeText": { "pattern": "^\\s*CASE\\b.*:\\s*$", "flags": "i" }, "action": { "indent": "indent" } },
+    { "beforeText": "skipped", "action": { "indent": "sideways", "appendText": "never" } },
+    { "beforeText": "(skipped", "action": { "indent": "none", "appendText": "never" } }
+  ]
+}
