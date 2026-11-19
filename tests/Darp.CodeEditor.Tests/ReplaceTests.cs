@@ -2,6 +2,8 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.VisualTree;
 using AvaloniaEdit;
+using AvaloniaEdit.Document;
+using AvaloniaEdit.Editing;
 using Darp.CodeEditor.Search;
 using static Darp.CodeEditor.Tests.SearchBars;
 
@@ -196,6 +198,31 @@ public sealed class ReplaceTests(UiFixture ui)
             clock.ReadOnUiThread.ShouldBeFalse();
         });
 
+    /// <summary>
+    /// Replace All goes in whole or not at all, as each of its edits may: also where all the text that it replaces may
+    /// change, but nothing may go in at one of its empty matches.
+    /// </summary>
+    [Fact]
+    public Task Replace_All_changes_nothing_where_one_of_its_insertions_may_not_go_in() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("|a\nb\nc", CodeLanguage.PlainText);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            EditorWindow.PartOf(window.Editor).TextArea.ReadOnlySectionProvider = new NoInsertionAt(2);
+            window.Editor.OpenSearch(replace: true);
+            SearchBar bar = BarOf(window);
+            bar.RegexToggle.IsChecked = true;
+            bar.ReplaceBox.Text = "> ";
+            bar.FindBox.Text = "^";
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("1 of 3");
+
+            Click(bar, "Replace All");
+            await SearchedAsync(bar);
+
+            document.Text.ShouldBe("a\nb\nc");
+        });
+
     [Fact]
     public Task Empty_matches_are_found_gone_through_and_replaced() =>
         _ui.Run(async () =>
@@ -247,4 +274,12 @@ public sealed class ReplaceTests(UiFixture ui)
             await SearchedAsync(bar);
             document.Text.ShouldBe("Bar BAR bar");
         });
+
+    /// <summary>Text that may all be deleted, but where nothing may go in at <paramref name="offset"/>.</summary>
+    private sealed class NoInsertionAt(int offset) : IReadOnlySectionProvider
+    {
+        public bool CanInsert(int at) => at != offset;
+
+        public IEnumerable<ISegment> GetDeletableSegments(ISegment segment) => [segment];
+    }
 }
