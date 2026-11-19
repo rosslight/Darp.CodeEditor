@@ -382,6 +382,33 @@ public sealed class SearchTests(UiFixture ui)
             bar.Message.ShouldBeNull();
         });
 
+    /// <summary>
+    /// A handler of the selection that a match takes may show another document: the search of the one before leaves
+    /// its caret alone.
+    /// </summary>
+    [Fact]
+    public Task A_document_that_a_handler_of_a_match_shows_keeps_its_caret() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("|a b a b", CodeLanguage.PlainText);
+            CodeEditor editor = window.Editor;
+            CodeDocument other = CodeDocument.Create(CodeLanguage.PlainText, "other text");
+            editor.OpenSearch();
+            SearchBar bar = BarOf(window);
+            bar.FindBox.Text = "b";
+            await SearchedAsync(bar);
+            editor.PropertyChanged += (_, e) =>
+            {
+                if (e.Property == CodeEditor.SelectionProperty && editor.Document != other)
+                    editor.Document = other;
+            };
+
+            window.Press(Key.F3);
+
+            editor.Document.ShouldBe(other);
+            editor.Selection.ShouldBe(new TextSelection(0));
+        });
+
     [Fact]
     public Task A_search_of_the_document_shown_before_never_shows_for_the_next_one() =>
         _ui.Run(async () =>
