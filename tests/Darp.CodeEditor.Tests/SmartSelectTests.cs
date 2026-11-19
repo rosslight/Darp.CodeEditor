@@ -153,6 +153,44 @@ public sealed class SmartSelectTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe("«alpha beta»");
         });
 
+    /// <summary>
+    /// Ranges that the server answers after the text changed are of text that is gone: they are dropped, and the next
+    /// expansion asks again.
+    /// </summary>
+    [Fact]
+    public Task The_servers_ranges_for_text_that_changed_meanwhile_are_dropped() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, new string('a', 100));
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await CompletionTests.StartServingAsync(server, document);
+            using (
+                await CompletionTests.CommandAsync(server, fake, "hold-selection-ranges", "holding selection ranges")
+            )
+            {
+                window.Editor.Selection = new TextSelection(90);
+                window.Press(Key.Right, SmartSelect);
+                (await fake.WaitForAsync("selection ranges ")).ShouldBe("selection ranges 90");
+            }
+
+            document.Replace(new TextRange(0, 100), "b");
+            using (
+                await CompletionTests.CommandAsync(
+                    server,
+                    fake,
+                    "release-selection-ranges",
+                    "released selection ranges"
+                )
+            ) { }
+            // Answered after the late ranges, which the editor has then dropped.
+            window.Press(Key.Right, SmartSelect);
+
+            await Wait.UntilAsync(() => !window.Editor.Selection.IsEmpty);
+            MarkedText.Of(window).ShouldBe("«b»");
+        });
+
     /// <summary>Expands the selection <paramref name="count"/> times, and the marked text after each.</summary>
     private static List<string> Expansions(EditorWindow window, int count)
     {

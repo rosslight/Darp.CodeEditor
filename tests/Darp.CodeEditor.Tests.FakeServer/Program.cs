@@ -15,8 +15,9 @@
 // Completion answers with what the command "completion" set, or with generated items (--completion-items); "." asks
 // for it as it is typed, and ";" commits items. Requests are logged with the caret's offset at the end, and so is
 // signature help. Selection ranges answer with what the command "selection-ranges" set, as the result's first
-// selection range, or with the word at the position and its line. Resolving an item answers the item with the
-// properties of its "data"
+// selection range, or with the word at the position and its line; once "hold-selection-ranges" holds them, only when
+// "release-selection-ranges" releases them, with the answer of when they came. Resolving an item answers the item with
+// the properties of its "data"
 // added. Signature help answers inside parentheses, "(" asks for it and "," asks again: the signatures that the command
 // "signatures" set, or two of "call", with the parameter at the position active, and the signature that the client
 // says it shows, or the first. Completion and signature help in a document with the word "slow" are never answered. A request about a
@@ -132,6 +133,14 @@ internal sealed class FakeServer
 
     /// <summary>Set by the command <c>selection-ranges</c>: the selection range that selection ranges answer with.</summary>
     private JsonNode? _selectionRange;
+
+    /// <summary>
+    /// Set by the command <c>hold-selection-ranges</c>: selection range requests wait for the command
+    /// <c>release-selection-ranges</c>, which answers them as they would have been answered when they came.
+    /// </summary>
+    private bool _holdSelectionRanges;
+
+    private readonly List<(JsonNode? Id, JsonNode Answer)> _heldSelectionRanges = [];
 
     /// <summary>Set by the command <c>peek</c>: the file whose existence lets the server read on.</summary>
     private string? _peekSignal;
@@ -463,6 +472,17 @@ internal sealed class FakeServer
                 _selectionRange = JsonNode.Parse(json);
                 Log("set selection ranges");
                 break;
+            case ["hold-selection-ranges"]:
+                _holdSelectionRanges = true;
+                Log("holding selection ranges");
+                break;
+            case ["release-selection-ranges"]:
+                _holdSelectionRanges = false;
+                foreach ((JsonNode? id, JsonNode answer) in _heldSelectionRanges)
+                    Reply(id, answer);
+                _heldSelectionRanges.Clear();
+                Log("released selection ranges");
+                break;
             case ["peek", var signal]:
                 _peekSignal = signal;
                 Log("peeking");
@@ -751,7 +771,7 @@ internal sealed class FakeServer
 
     /// <summary>
     /// Answers with the selection range that the command <c>selection-ranges</c> set, or with the word at the first
-    /// position inside its line.
+    /// position inside its line; once held, when the hold is released.
     /// </summary>
     private void SelectionRanges(JsonNode? id, JsonNode parameters)
     {
@@ -759,23 +779,25 @@ internal sealed class FakeServer
             return;
         int offset = Offset(document.Text, Required(parameters["positions"]?[0], "positions"));
         Log($"selection ranges {offset}");
+        JsonArray answer;
         if (_selectionRange is { } set)
+            answer = new JsonArray(set.DeepClone());
+        else
         {
-            Reply(id, new JsonArray(set.DeepClone()));
-            return;
-        }
-        (int start, int end) = WordAt(document.Text, offset);
-        (int lineStart, int lineEnd) = Lines(document.Text).Last(line => line.Start <= offset);
-        Reply(
-            id,
-            new JsonArray(
+            (int start, int end) = WordAt(document.Text, offset);
+            (int lineStart, int lineEnd) = Lines(document.Text).Last(line => line.Start <= offset);
+            answer = new JsonArray(
                 new JsonObject
                 {
                     ["range"] = Range(start, end),
                     ["parent"] = new JsonObject { ["range"] = Range(lineStart, lineEnd) },
                 }
-            )
-        );
+            );
+        }
+        if (_holdSelectionRanges)
+            _heldSelectionRanges.Add((id?.DeepClone(), answer));
+        else
+            Reply(id, answer);
 
         JsonObject Range(int from, int to) =>
             new() { ["start"] = Position(document.Text, from), ["end"] = Position(document.Text, to) };
