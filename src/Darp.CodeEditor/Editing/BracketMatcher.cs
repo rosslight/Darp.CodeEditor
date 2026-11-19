@@ -19,9 +19,9 @@ internal static class BracketMatcher
 
     /// <summary>
     /// The bracket at <paramref name="caret"/> and its match, by their offsets: the bracket after the caret first, as
-    /// in VS Code, then the one before. Brackets pair as VS Code's bracket pairs nest them (<see cref="Nesting"/>), so
-    /// an opening bracket that a closing one of an outer pair closes has no match. Null when neither is a bracket with
-    /// a match.
+    /// in VS Code, then the one before. Brackets pair as VS Code's bracket pairs nest them
+    /// (<see cref="BracketNesting"/>), so an opening bracket that a closing one of an outer pair closes has no match.
+    /// Null when neither is a bracket with a match.
     /// </summary>
     /// <param name="document">The text.</param>
     /// <param name="caret">The caret's offset.</param>
@@ -80,7 +80,7 @@ internal static class BracketMatcher
         string opens = string.Concat(brackets.Select(b => b.Open[0]).Distinct());
         string closes = string.Concat(brackets.Select(b => b.Close));
         int[] kindOf = [.. brackets.Select(b => opens.IndexOf(b.Open[0]))];
-        var nesting = new Nesting(opens.Length);
+        var nesting = new BracketNesting(opens.Length);
         bool unmatched = false;
         Scan(
             document,
@@ -105,9 +105,9 @@ internal static class BracketMatcher
 
     /// <summary>
     /// The innermost pair of brackets around <paramref name="offset"/>, by their offsets, as VS Code's bracket pairs
-    /// nest them (<see cref="Nesting"/>): the first closing bracket from the offset on that closes a bracket open at the
-    /// offset, and that one, each within <see cref="MaxDistance"/> characters. Brackets open at the offset that it
-    /// closes with it stay unclosed, and a closing bracket that closes none is no bracket. Null for none.
+    /// nest them (<see cref="BracketNesting"/>): the first closing bracket from the offset on that closes a bracket
+    /// open at the offset, and that one, each within <see cref="MaxDistance"/> characters. Brackets open at the offset
+    /// that it closes with it stay unclosed, and a closing bracket that closes none is no bracket. Null for none.
     /// </summary>
     public static (int Open, int Close)? FindEnclosing(
         TextDocument document,
@@ -117,7 +117,7 @@ internal static class BracketMatcher
     )
     {
         (string opens, string closes) = Characters(brackets);
-        Nesting nesting = OpenBefore(document, offset, opens, closes, tokensOf);
+        BracketNesting nesting = OpenBefore(document, offset, opens, closes, tokensOf);
         int around = nesting.Depth;
         (int Open, int Close)? pair = null;
         if (around > 0)
@@ -143,8 +143,8 @@ internal static class BracketMatcher
     }
 
     /// <summary>
-    /// The first bracket from <paramref name="offset"/> on, opening or closing, as VS Code's <c>findNextBracket</c> finds
-    /// it, within <see cref="MaxDistance"/> characters; null for none.
+    /// The first bracket from <paramref name="offset"/> on, opening or closing, as VS Code's <c>findNextBracket</c>
+    /// finds it, within <see cref="MaxDistance"/> characters; null for none.
     /// </summary>
     public static int? FindNext(
         TextDocument document,
@@ -192,7 +192,7 @@ internal static class BracketMatcher
         var pairs = new List<(int Open, int Close)>();
         if (opens.Length == 0)
             return pairs;
-        // Per kind, the brackets passed that wait for their match, and the closing brackets that wait for an opening one.
+        // Per kind, the brackets passed that wait for their match, and the closing brackets that wait for an opening.
         int[] waiting = new int[opens.Length];
         Queue<int>[] closings = [.. opens.Select(_ => new Queue<int>())];
         int unpaired = 0;
@@ -293,10 +293,10 @@ internal static class BracketMatcher
         Func<int, int[]?> tokensOf
     )
     {
-        var nesting = new Nesting(opens.Length);
+        var nesting = new BracketNesting(opens.Length);
         nesting.Open(kind, offset);
         // The brackets open before it, read only for a closing bracket that closes none after it.
-        Nesting? before = null;
+        BracketNesting? before = null;
         int? closing = null;
         bool closed = false;
         Scan(
@@ -330,7 +330,7 @@ internal static class BracketMatcher
     /// <summary>
     /// The brackets open at <paramref name="offset"/>, from those within <see cref="MaxDistance"/> characters before it.
     /// </summary>
-    private static Nesting OpenBefore(
+    private static BracketNesting OpenBefore(
         TextDocument document,
         int offset,
         string opens,
@@ -338,7 +338,7 @@ internal static class BracketMatcher
         Func<int, int[]?> tokensOf
     )
     {
-        var nesting = new Nesting(opens.Length);
+        var nesting = new BracketNesting(opens.Length);
         if (opens.Length == 0)
             return nesting;
         Scan(
@@ -358,46 +358,6 @@ internal static class BracketMatcher
             }
         );
         return nesting;
-    }
-
-    /// <summary>
-    /// The brackets open during a scan, as VS Code's bracket pairs nest them: a closing bracket closes the closest
-    /// open bracket of its kind, those opened inside it stay unclosed, and one that closes none is no bracket.
-    /// </summary>
-    private sealed class Nesting(int kinds)
-    {
-        // Each open bracket's kind, offset and the open one of its kind before it, and the last of each kind: a closing
-        // bracket finds its own at once, whatever other kinds are open, so that a scan stays linear.
-        private readonly List<(int Kind, int Offset, int Before)> _open = [];
-        private readonly int[] _last = [.. Enumerable.Repeat(-1, kinds)];
-
-        /// <summary>How many brackets are open.</summary>
-        public int Depth => _open.Count;
-
-        public void Open(int kind, int offset)
-        {
-            _open.Add((kind, offset, _last[kind]));
-            _last[kind] = _open.Count - 1;
-        }
-
-        /// <summary>Whether a bracket of <paramref name="kind"/> is open.</summary>
-        public bool IsOpen(int kind) => _last[kind] >= 0;
-
-        /// <summary>
-        /// Closes the closest open bracket of <paramref name="kind"/>, and those opened inside it.
-        /// </summary>
-        /// <returns>Its index among the open brackets and its offset; null when none of its kind is open.</returns>
-        public (int Index, int Offset)? Close(int kind)
-        {
-            int index = _last[kind];
-            if (index < 0)
-                return null;
-            int offset = _open[index].Offset;
-            for (int top = _open.Count - 1; top >= index; top--)
-                _last[_open[top].Kind] = _open[top].Before;
-            _open.RemoveRange(index, _open.Count - index);
-            return (index, offset);
-        }
     }
 
     /// <summary>The opening and the closing characters of the brackets of one character each, by kind.</summary>
