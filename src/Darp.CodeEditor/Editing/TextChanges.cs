@@ -40,18 +40,15 @@ internal sealed class TextChanges : IDisposable
 
     /// <summary>
     /// Runs <paramref name="edit"/>, AvaloniaEdit's own or <see cref="Apply(IReadOnlyList{TextEdit}, TextSelection?)"/>'s,
-    /// in <paramref name="step"/>, and brings the caret into view.
+    /// in <paramref name="step"/>.
     /// </summary>
-    public void Run(EditStep step, Action edit)
-    {
-        _steps.Run(step, edit);
-        _area.Caret.BringCaretToView();
-    }
+    public void Run(EditStep step, Action edit) => _steps.Run(step, edit);
 
     /// <summary>
     /// Makes <paramref name="edits"/>, in order and apart, as one change of the text, then selects
-    /// <paramref name="select"/>, by offsets in the new text. Without one, AvaloniaEdit's anchors carry the caret and the
-    /// selection through the change.
+    /// <paramref name="select"/>, by offsets in the new text, and brings the caret into view. Without one, AvaloniaEdit's
+    /// anchors carry the caret and the selection through the change, and the view stays: bringing the caret into view
+    /// lays out its line again, and after Ctrl+/ on every line, a screen of lines elsewhere.
     /// </summary>
     /// <returns>Whether they went in: not when one touches read-only text.</returns>
     public bool Apply(IReadOnlyList<TextEdit> edits, TextSelection? select = null)
@@ -69,15 +66,15 @@ internal sealed class TextChanges : IDisposable
         {
             _area.Selection = EditorSelection.Create(_area, selection.Anchor, selection.Caret);
             _area.Caret.Offset = selection.Caret;
+            _area.Caret.BringCaretToView();
         }
-        _area.Caret.BringCaretToView();
         return true;
     }
 
     /// <summary>
     /// Makes <paramref name="edits"/> as <see cref="Apply(IReadOnlyList{TextEdit}, TextSelection?)"/> does, then puts
     /// back the selection as it was before them, <paramref name="moved"/> characters further: the caret, the
-    /// selection's ends, or each line of a rectangle selection.
+    /// selection's ends, or each line of a rectangle selection; brought into view when it moved.
     /// </summary>
     /// <returns>Whether they went in.</returns>
     public bool Apply(IReadOnlyList<TextEdit> edits, int moved)
@@ -104,7 +101,8 @@ internal sealed class TextChanges : IDisposable
             _area.Selection = EditorSelection.Create(_area, anchor + moved, caret + moved);
             _area.Caret.Offset = caret + moved;
         }
-        _area.Caret.BringCaretToView();
+        if (moved != 0)
+            _area.Caret.BringCaretToView();
         return true;
     }
 
