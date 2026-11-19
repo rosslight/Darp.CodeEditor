@@ -81,22 +81,24 @@ internal static class BracketMatcher
         bool unmatched = false;
         int start = Math.Max(0, offset - MaxDistance);
         int end = Math.Min(document.TextLength, offset + MaxDistance);
-        string chars = string.Concat(brackets.Select(b => b.Open + b.Close));
+        // The kinds by their index, so that the scan's work per bracket allocates nothing.
+        string opens = string.Concat(brackets.Select(b => b.Open));
+        string closes = string.Concat(brackets.Select(b => b.Close));
         Scan(
             document,
             start,
             end,
             forward: true,
-            chars,
+            opens + closes,
             tokensOf,
             (c, at) =>
             {
-                if (brackets.Any(b => b.Open[0] == c))
+                if (opens.Contains(c))
                 {
                     open.Add(c);
                     return false;
                 }
-                int opening = open.LastIndexOf(brackets.First(b => b.Close[0] == c).Open[0]);
+                int opening = open.LastIndexOf(opens[closes.IndexOf(c)]);
                 if (opening >= 0)
                     open.RemoveRange(opening, open.Count - opening);
                 return unmatched = opening < 0 && at >= offset && c == pair.Close[0];
