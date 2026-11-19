@@ -76,7 +76,7 @@ internal sealed class Clipboard : IDisposable
         _textArea.Caret.BringCaretToView();
     }
 
-    private bool CanPaste() => _textArea.ReadOnlySectionProvider.CanInsert(_textArea.Caret.Offset);
+    private bool CanPaste() => VisibleText.CanInsert(_textArea, _textArea.Caret.Offset);
 
     public void Dispose()
     {
