@@ -20,9 +20,9 @@ public sealed class PopupPlacementTests
         bool above
     )
     {
-        var line = new Rect(50, lineTop, 8, 18);
+        Rect line = Line(lineTop);
 
-        PopupBounds placed = PopupPlacement.Place(line, new Size(100, 60), s_window, Side(side)).ShouldNotBeNull();
+        PopupBounds placed = PopupPlacement.Place(line, 50, new Size(100, 60), s_window, Side(side)).ShouldNotBeNull();
 
         placed.Above.ShouldBe(above);
         placed.Bounds.ShouldBe(new Rect(50, above ? line.Top - 60 : line.Bottom, 100, 60));
@@ -34,10 +34,8 @@ public sealed class PopupPlacementTests
     public void Where_neither_side_has_room_it_takes_the_larger_one_in_whole_pixels(string side)
     {
         // 40 pixels above the line, 42.5 below it.
-        var line = new Rect(50, 40, 8, 18);
-
         PopupBounds placed = PopupPlacement
-            .Place(line, new Size(100, 80), new Rect(0, 0, 400, 100.5), Side(side))
+            .Place(Line(40), 50, new Size(100, 80), new Rect(0, 0, 400, 100.5), Side(side))
             .ShouldNotBeNull();
 
         placed.Above.ShouldBeFalse();
@@ -46,15 +44,20 @@ public sealed class PopupPlacementTests
     }
 
     [Fact]
-    public void It_moves_left_at_the_windows_right_edge_and_is_no_wider_than_the_window()
+    public void It_moves_into_the_window_at_its_edges_and_is_no_wider_than_it()
     {
-        var line = new Rect(350, 100, 8, 18);
-
         PopupPlacement
-            .Place(line, new Size(100, 60), s_window, PopupSide.Below)
+            .Place(Line(100), 350, new Size(100, 60), s_window, PopupSide.Below)
             .ShouldNotBeNull()
             .Bounds.Left.ShouldBe(300);
-        PopupBounds wide = PopupPlacement.Place(line, new Size(500, 60), s_window, PopupSide.Below).ShouldNotBeNull();
+        // Left of the window, as a list that lines its labels up with a word at the window's left edge.
+        PopupPlacement
+            .Place(Line(100), -21, new Size(100, 60), s_window, PopupSide.Below)
+            .ShouldNotBeNull()
+            .Bounds.Left.ShouldBe(0);
+        PopupBounds wide = PopupPlacement
+            .Place(Line(100), 350, new Size(500, 60), s_window, PopupSide.Below)
+            .ShouldNotBeNull();
         wide.Bounds.Left.ShouldBe(0);
         wide.Bounds.Width.ShouldBe(400);
     }
@@ -116,10 +119,19 @@ public sealed class PopupPlacementTests
     [Fact]
     public void A_line_that_the_window_does_not_show_gets_no_popup()
     {
-        // Above the window, as a line of an editor scrolled partly out of it.
-        PopupPlacement.Place(new Rect(50, -52, 8, 18), new Size(100, 60), s_window, PopupSide.Below).ShouldBeNull();
-        PopupPlacement.Place(new Rect(50, 300, 8, 18), new Size(100, 60), s_window, PopupSide.Above).ShouldBeNull();
+        // Above the window, as a line of an editor scrolled partly out of it, and below it.
+        PopupPlacement.Place(Line(-52), 50, new Size(100, 60), s_window, PopupSide.Below).ShouldBeNull();
+        PopupPlacement.Place(Line(300), 50, new Size(100, 60), s_window, PopupSide.Above).ShouldBeNull();
     }
+
+    [Theory]
+    // An editor right of the window, and one left of it, 300 pixels wide.
+    [InlineData(400)]
+    [InlineData(-300)]
+    public void A_line_of_an_editor_beyond_the_windows_side_gets_no_popup(double viewLeft) =>
+        PopupPlacement
+            .Place(new Rect(viewLeft, 100, 300, 18), viewLeft + 50, new Size(100, 60), s_window, PopupSide.Below)
+            .ShouldBeNull();
 
     [Fact]
     public void Below_a_popup_that_fills_the_window_below_its_line_it_goes_above_the_line()
@@ -133,6 +145,9 @@ public sealed class PopupPlacementTests
         placed.Above.ShouldBeTrue();
         placed.Bounds.ShouldBe(new Rect(100, 0, 330, 85));
     }
+
+    /// <summary>A line at <paramref name="top"/>, as a view the window's width shows it.</summary>
+    private static Rect Line(double top) => new(0, top, 400, 18);
 
     private static PopupSide Side(string side) => side == "above" ? PopupSide.Above : PopupSide.Below;
 }

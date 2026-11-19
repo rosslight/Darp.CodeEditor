@@ -53,7 +53,11 @@ internal sealed class CompletionView
     {
         _editor = editor;
         _textView = textView;
-        _listPopup = new EditorPopup(editor, _list, "CompletionList", PopupSide.Below);
+        // Left of the word by the frame's border and a row's icon, so that the labels line up with the word.
+        _listPopup = new EditorPopup(editor, _list, "CompletionList", PopupSide.Below)
+        {
+            Inset = Border + CompletionListBox.LabelInset,
+        };
         _detailsPopup = new EditorPopup(editor, _details, "CompletionDetails") { IsResizable = true };
         _detailsPopup.Frame.Padding = new Thickness(6, 4, 2, 4);
         _list.Clicked += index => Clicked?.Invoke(index);
@@ -145,13 +149,9 @@ internal sealed class CompletionView
     private void Open(int wordStart)
     {
         _wordStart = wordStart;
-        // Left of the word by the frame's border and a row's icon, so that the labels line up with the word.
         _listPopup.Show(
             _textView,
-            () =>
-                TextViewBoxes
-                    .CharacterAt(_textView, Math.Min(wordStart, _textView.Document.TextLength))
-                    .Translate(new Vector(-(Border + CompletionListBox.LabelInset), 0))
+            () => TextViewBoxes.CharacterAt(_textView, Math.Min(wordStart, _textView.Document.TextLength))
         );
         if (_details.Child is not null)
             _detailsPopup.ShowBeside(_listPopup, _detailsWidth);
