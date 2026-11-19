@@ -5,6 +5,7 @@ using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Input;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
@@ -1406,6 +1407,57 @@ public sealed class CompletionTests(UiFixture ui)
             await OpenAsync(window, 0);
             List(window).ShouldNotBeNull().VisibleRows.ShouldBe(CompletionView.DefaultRows);
             BoundsInWindow(Flyout(window).ShouldNotBeNull()).Width.ShouldBe(frame.Width + 100, tolerance: 1);
+        });
+
+    [Fact]
+    public Task App_styles_for_text_and_panels_reach_neither_the_list_nor_its_details() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [ { "label": "Console", "detail": "class System.Console",
+                      "documentation": { "kind": "markdown", "value": "Writes `text` to the output." } } ] }
+                    """
+                )
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "Co");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Window.Styles.Add(
+                new Style(x => x.OfType<TextBlock>())
+                {
+                    Setters =
+                    {
+                        new Setter(TextBlock.FontWeightProperty, FontWeight.Black),
+                        new Setter(Layoutable.MarginProperty, new Thickness(20)),
+                    },
+                }
+            );
+            window.Window.Styles.Add(
+                new Style(x => x.OfType<StackPanel>()) { Setters = { new Setter(StackPanel.SpacingProperty, 40.0) } }
+            );
+
+            await OpenAsync(window, 2);
+            await Wait.UntilAsync(() => DetailTexts(window).Contains("class System.Console"));
+
+            LabelOf(window, "Console").FontWeight.ShouldBe(FontWeight.Normal);
+            PopupFrame details = Details(window).ShouldNotBeNull();
+            foreach (TextBlock text in details.GetVisualDescendants().OfType<TextBlock>())
+            {
+                text.FontWeight.ShouldBe(FontWeight.Normal);
+                text.Margin.ShouldBe(default);
+            }
+            details.GetVisualDescendants().OfType<StackPanel>().ShouldAllBe(panel => panel.Spacing == 6);
+            // As VS Code's details: in editorSuggestWidget.foreground, Light+'s editor foreground.
+            details
+                .GetValue(TextElement.ForegroundProperty)
+                .ShouldBeAssignableTo<ISolidColorBrush>()
+                .ShouldNotBeNull()
+                .Color.ShouldBe(Colors.Black);
         });
 
     [Fact]

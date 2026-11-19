@@ -391,7 +391,7 @@ internal sealed class CompletionListBox : Control
             context.FillRectangle(_background ?? Brushes.Transparent, new Rect(Bounds.Size));
 
         private static TextBlock Text() =>
-            new()
+            new PopupText
             {
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 TextWrapping = TextWrapping.NoWrap,

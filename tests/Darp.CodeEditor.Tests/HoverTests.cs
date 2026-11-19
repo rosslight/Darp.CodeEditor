@@ -46,11 +46,11 @@ public sealed class HoverTests(UiFixture ui)
             Control[] parts = [.. ((Panel)Content(popup)).Children];
             // The diagnostic's message and code, a line, the server's paragraph, and its code block.
             TextOf(parts[0]).ShouldBe($"{text} (echo)");
-            parts[1].ShouldBeOfType<Border>().Height.ShouldBe(1);
+            parts[1].ShouldBeAssignableTo<Border>().ShouldNotBeNull().Height.ShouldBe(1);
             TextOf(parts[2]).ShouldBe("key is a word in json.");
             ((TextBlock)parts[2]).Inlines.ShouldNotBeNull().OfType<Run>().First().FontWeight.ShouldBe(FontWeight.Bold);
             // Code sits on the popup's background, in the editor's font: no box of the editor's background.
-            var code = parts[3].ShouldBeOfType<TextBlock>();
+            var code = parts[3].ShouldBeAssignableTo<TextBlock>().ShouldNotBeNull();
             TextOf(code).ShouldBe("  \"key\": 1");
             code.FontFamily.ShouldBe(editor.FontFamily);
             // A code block starts from the start of the grammar: the key is a string out of an object.

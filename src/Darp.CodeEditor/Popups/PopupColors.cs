@@ -19,9 +19,6 @@ internal sealed record PopupColors
     /// <summary><c>widget.shadow</c>, as a shadow around popups.</summary>
     public required BoxShadows Shadow { get; init; }
 
-    /// <summary><c>editorWidget.foreground</c>: text beside completion's list.</summary>
-    public required IBrush WidgetForeground { get; init; }
-
     /// <summary><c>editorSuggestWidget.background</c>.</summary>
     public required IBrush SuggestBackground { get; init; }
 
@@ -100,7 +97,6 @@ internal sealed record PopupColors
                     Color = shadow,
                 }
             ),
-            WidgetForeground = Brush(widgetForeground),
             SuggestBackground = Brush(Own("editorSuggestWidget.background") ?? widgetBackground),
             SuggestBorder = Brush(Own("editorSuggestWidget.border") ?? widgetBorder),
             SuggestForeground = Own("editorSuggestWidget.foreground") is { } suggest ? Brush(suggest) : text.Foreground,

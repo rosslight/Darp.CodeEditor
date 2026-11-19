@@ -50,6 +50,9 @@ internal sealed class PopupFrame : Border
     {
         BorderThickness = new Thickness(1);
         CornerRadius = new CornerRadius(Radius);
+        // Not what the window around passes down: the popup's text is as the editor sets it.
+        TextElement.SetFontWeight(this, FontWeight.Normal);
+        TextElement.SetFontStyle(this, FontStyle.Normal);
         // Ahead of the content, which would take the press for itself.
         AddHandler(PointerPressedEvent, OnPointerPressedTunnel, RoutingStrategies.Tunnel);
         AddHandler(PointerMovedEvent, OnPointerMovedTunnel, RoutingStrategies.Tunnel);

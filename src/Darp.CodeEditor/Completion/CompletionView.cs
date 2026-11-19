@@ -192,7 +192,7 @@ internal sealed class CompletionView
         _detailsPopup.Frame.Paint(
             colors.SuggestBackground,
             colors.SuggestBorder,
-            colors.WidgetForeground,
+            colors.SuggestForeground,
             colors.Shadow
         );
         _details.SliderBrushes = colors.Slider;

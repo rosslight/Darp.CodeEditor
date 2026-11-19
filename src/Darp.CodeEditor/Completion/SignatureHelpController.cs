@@ -352,10 +352,10 @@ internal sealed class SignatureHelpController : IEditorFeature
             inlines.Add(new Run(label));
         }
         TextBlock code = HoverView.Code(inlines, look);
-        var line = new DockPanel();
+        var line = new PopupDock();
         if (help.Signatures.Count > 1)
         {
-            var counter = new TextBlock
+            var counter = new PopupText
             {
                 Text = $"{help.ActiveSignature + 1}/{help.Signatures.Count}",
                 VerticalAlignment = VerticalAlignment.Center,
@@ -365,7 +365,7 @@ internal sealed class SignatureHelpController : IEditorFeature
             line.Children.Add(counter);
         }
         line.Children.Add(code);
-        var panel = new StackPanel { Spacing = 6, Children = { line } };
+        var panel = new PopupStack { Spacing = 6, Children = { line } };
         if (documentation.Count > 0)
             panel.Children.Add(HoverView.Create(documentation, look));
         return panel;
