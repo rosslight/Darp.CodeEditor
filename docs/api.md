@@ -40,7 +40,7 @@ if (compilation.Succeeded)
 
 | Package | Public types |
 |---|---|
-| `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorColorTheme`, `CodeEditorViewState`, `CodeEditorStyles`, `TextSnapshot`, `TextRange`, `TextPosition`, `TextSelection`, `Indentation`, `Diagnostic`, `DiagnosticSeverity`; the keymap: `CodeEditorKeymap`, `CodeEditorKeyBinding`, `CodeEditorCommands`; the options: `CodeEditorOptions`, `AutoClosingOptions`, `AutoClosingMode`, `AutoIndent` |
+| `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorColorTheme`, `CodeEditorViewState`, `CodeEditorStyles`, `TextSnapshot`, `TextRange`, `TextPosition`, `TextSelection`, `Indentation`, `Diagnostic`, `DiagnosticSeverity`; the keymap: `CodeEditorKeymap`, `CodeEditorKeyBinding`, `CodeEditorCommands`; the options: `CodeEditorOptions`, `AutoClosingOptions`, `AutoClosingMode`, `ParameterHintsOptions`, `AutoIndent`, `QuickSuggestions` |
 | `Darp.CodeEditor.CSharpScript` | `CSharpScriptServer`, `CSharpScriptServerOptions`, `CSharpScriptEnvironment<TGlobals>`, `CSharpScriptDocument<TGlobals>`, `CSharpScriptCompilation<TGlobals>`, `CSharpScriptAssembly<TGlobals>`, `CSharpCodeLanguage` (adds `CodeLanguage.CSharp`) |
 | `Darp.CodeEditor.CSharpScript.Runner` | `CSharpScriptSession` (starts sessions, and scripts in them), `CSharpScriptSession<TSessionSide, TSessionObject>`, `CSharpScriptSessionOptions`, `CSharpScriptRun`, `CSharpScriptException`, `CSharpScriptSessionExit`, `CSharpScriptSessionExitReason`, and the contracts that runner-side script APIs implement: `IScriptSessionObject<TSelf, TAppSide>`, `IScriptGlobalsFactory<TGlobals, TInput>`, `IScriptGlobalsFactory<TGlobals>` |
 
@@ -85,6 +85,11 @@ environments are not part of it.
   extension sets it, so Enter after `key:` does not indent. It is an `init` property; to change a built-in language's,
   create it again from its files:
   `new CodeLanguage("yaml", CodeLanguage.Yaml.Grammar, CodeLanguage.Yaml.Configuration) { AutoIndent = AutoIndent.Full }`.
+- **Where typing opens completion,** VS Code's `editor.quickSuggestions`, which VS Code's extensions set per language,
+  so it is the language's `QuickSuggestions` (design.md #116): in code (`Other`), `Comments` and `Strings`, by the
+  token that the grammar gives the character typed. The default, `QuickSuggestions.Default`, is code only;
+  `CodeLanguage.Json` and `CodeLanguage.Yaml` also open it in strings, where their keys and values are, as their VS
+  Code extensions set it. Ctrl+Space and the server's trigger characters open completion everywhere.
 - **C# 14:** `CodeLanguage.CSharp` is an extension member, so apps need C# 14, the default for .NET 10. XAML's
   `x:Static` can't reach it; script documents are created in code.
 - **Loading:** a language starts loading its files in the background when it is created, so there is nothing to
@@ -116,7 +121,8 @@ rather than its view belong to the document, as in Monaco and CodeMirror.
 
 **Options.** One immutable record, `CodeEditorOptions`, holds the editor's settings, each at the path of its VS Code
 setting: `editor.autoClosingBrackets` is `Options.AutoClosing.Brackets` (design.md #124). Apps set it once, or share one
-instance between editors as they share a keymap; a change applies from the next keystroke on. The view settings above
+instance between editors as they share a keymap; a change applies from the next keystroke on, and closes what it turns
+off. The view settings above
 (`IsReadOnly`, `WordWrap`, `ShowLineNumbers`, `ColorTheme`) stay properties.
 
 ```csharp
@@ -134,6 +140,7 @@ editor.Options = CodeEditorOptions.Default with
 | `Find.AutoFindInSelection` | `editor.find.autoFindInSelection` | `Never`: Find in Selection turns on only by its toggle and Alt+L; `Always` whenever something is selected as the bar opens, `Multiline` for a selection over several lines |
 | `MatchBrackets` | `editor.matchBrackets` | `Always`: at a caret without a selection, the bracket next to it and its match are boxed in the theme's colors, the one after the caret first, or else the innermost pair around the caret. `Near` boxes only a bracket next to the caret and its match, the cheaper, quieter mode; `Never` none. Brackets in strings and comments don't count, and brackets pair as VS Code's parser nests them: a closing bracket closes the closest open one of its kind, and those opened inside it stay unclosed, and one that closes none counts as no bracket. A match or a pair further than 100,000 characters away shows none |
 | `OccurrencesHighlight` | `editor.occurrencesHighlight` | true: the occurrences of the symbol at the caret are highlighted, the server's with reads and writes apart, or else the word's (section 6). Off, a caret move asks the server nothing, for users who find them noise and apps whose servers they load. VS Code's `multiFile` has no counterpart: an editor knows its own document only |
+| `ParameterHints.Enabled` | `editor.parameterHints.enabled` | true: typing the server's trigger characters opens signature help. Off, only Ctrl+Shift+Space opens it, and turning it off closes signature help that shows |
 
 A setting needs a use case to become an option; VS Code having it is not enough (design.md #124).
 
@@ -322,7 +329,12 @@ popups; the search bar and the scroll bars follow the theme variant.
   Code, and in VS Code's colors where the theme sets none. Their designs are licensed CC BY 4.0: the package lists
   them in its third-party notices, and apps that show notices of their own include that entry.
 - **Signature help:** in the editor's popup in the hover's colors, above the caret's line, so that completion's list
-  shows below it; the signature as code, in the editor's font and colors.
+  shows below it; every signature of the call at once, as IntelliJ shows them (design.md #115), as code in the editor's
+  font and colors: the active one on `list.inactiveSelectionBackground` while there are more, those whose active
+  parameter falls outside their parameters dimmed, and the active parameter in bold in
+  `editorHoverWidget.highlightForeground`. A label longer than a line of the popup breaks after the commas between its
+  parameters. The popup is 440 pixels wide at most, or half the editor where that is wider, and scrolls beyond 250
+  pixels, or a quarter of the editor, keeping the active signature in view.
 
 **Before v1, additive:** marks beside the scroll bar for errors, warnings and search matches, as Monaco's overview
 ruler shows them. Scripts of 5,000 lines need them to find errors outside the view. They add to the API without
@@ -515,10 +527,13 @@ How the client talks to a server, where the protocol leaves a choice:
   colors alone take 55 ms for 300 tokens a line. Of that, the UI thread's own work, taking the tokens and laying out
   the lines with their colors, takes 35 ms, and 28 ms with 300 tokens a line, about 4.4 µs a colored token: the limit
   keeps it bounded, not within a frame (BenchmarkDotNet, i7-13700).
-- **Completion** behaves as VS Code's by default. It is asked for at the caret on Ctrl+Space, also on macOS, and when
-  typing starts a word outside a comment, as invoked; and on the server's trigger characters, as a trigger character.
-  VS Code also asks in strings for JSON and YAML, and the editor does not tell strings apart. Typing on in a word does
-  not ask again, also after Escape, until the next word or Ctrl+Space. The word before the caret goes by VS Code's word
+- **Completion** behaves as VS Code's by default. It is asked for at the caret on Ctrl+Space, also on macOS, and, as
+  invoked, as VS Code's quick suggestions ask: on a word character typed at a word's end, or as its first character,
+  in a word that is no number, where the language's `QuickSuggestions` say, by the grammar's token of the character
+  typed; and on the server's trigger characters, as a trigger character. Backspace opens nothing. Opened by typing,
+  an answer with nothing, also one marked incomplete, ends completion, and typing on in its word asks no more, as some
+  servers answer nothing in strings and comments: anything else, such as Backspace, a caret move or another word, asks
+  again. The word before the caret goes by VS Code's word
   characters and reaches back at most 1,000 of them, as a hovered word does, and items without an edit replace it up
   to the caret with their `insertText`, or their label. An item whose edit is not on the caret's line, spans lines, or
   does not contain the caret, is left out, as VS Code leaves it out, and one without a kind, or with a kind the
@@ -532,7 +547,11 @@ How the client talks to a server, where the protocol leaves a choice:
     and otherwise the label's own, by VS Code's more lenient `anyScore`. Case is ignored by .NET's invariant lower
     case, so the few letters whose case depends on their context, such as the Greek final sigma, match differently
     than in VS Code. The first item is selected, or the first that
-    the server preselects among those that match best. There is no typo tolerance. Matching runs off the UI thread,
+    the server preselects among those that match best. Lists of up to 2,000 items tolerate a typo, as VS Code's
+    `fuzzyScoreGracefulAggressive`: an item also matches with two neighbouring typed characters swapped, after the
+    first and up to the seventh and eighth, at a cost of 3, and the better match counts. As in VS Code, typing on ranks
+    the items that show, and anything else, such as Backspace, all of the answer's: a long list tolerates a typo once
+    typing shortened it, and Ctrl+Space there ranks it whole, strictly. Matching runs off the UI thread,
     whatever the list's length and the typed text's: each change cancels the filter under way, and the list shows the
     newest result, the previous one meanwhile. The UI thread reads no text for it, and matching reads the first 128
     characters of an item's typed text, as VS Code's does: an edit that starts further before the caret, also when
@@ -564,13 +583,18 @@ How the client talks to a server, where the protocol leaves a choice:
     what was deleted after the caret. An item whose text would go over read-only text, such as protected text or a
     long line's hidden tail, does not go in. Its `additionalTextEdits`, such as an import, apply with it, as one step
     that the user undoes; ones that overlap another edit are left out. As VS Code applies them together, when one
-    would go over read-only text, none does, and the item's own text still goes in.
+    would go over read-only text, none does, and the item's own text still goes in. Then its `command` runs, if it is one of the
+    editor's: `editor.action.triggerSuggest` asks again as typing would, such as for the value after a JSON key, and the
+    others run as their keys do, such as `editor.action.triggerParameterHints`. A server's own commands do not run, as
+    the editor has nowhere to send them (Q122).
   - **Resolving:** the selected item is resolved when it is selected, and the resolve of an item that is no longer
     selected is cancelled. Its detail, as code highlighted with the document's grammar, and its documentation show
     beside the list, unless Ctrl+Space hid them, as much of both as a hover shows: they share one budget of the hover's size, cut before anything
     reads them. A row shows at most 256 characters of a label, with "…". Additional edits that the resolve brings only
-    after the item was committed join the commit's undo step while it is the last one; once the user moved on, they
-    are dropped. Items resolve only in the process that sent them, while the document stays open there as it was.
+    after the item was committed go in as VS Code puts them in: in the commit's undo step while it is the last one,
+    and in a step of their own once the user typed on. They are dropped when a change since the commit, its own edit
+    included, started before where one of them goes, as by typing above an import, and when the commit was undone. Items
+    resolve only in the process that sent them, while the document stays open there as it was.
   - **Nothing to show:** asked for by key, an empty answer says "No suggestions." until the next key, caret move or
     Escape. A list asked for by key that typing filters empty stays, frozen as VS Code's: its items as they showed
     last, without the matched characters in bold, while the caret is in a word; accepting or a click commits the
@@ -580,8 +604,9 @@ How the client talks to a server, where the protocol leaves a choice:
     when it finds nothing, to the binding before accepting's, to the second key of a sequence it starts, or as an
     ordinary key, also when a newer list for the same text has nothing. What ends the wait for a sequence's second
     stroke, such as another keymap, drops where it would go on to.
-  - **Ending:** Escape, the caret leaving the line or moving back past the word, a selection, the editor becoming
-    read-only, the list's line scrolling out of view, the editor losing the keyboard focus, a server that starts or
+  - **Ending:** Escape, the caret leaving the line or moving back past the word, a caret move that is not the
+    keyboard's, as in VS Code: by a click or a drag, an undo, a paste, the app's code, or another editor's edit that
+    moves it; a selection, the editor becoming read-only, the list's line scrolling out of view, the editor losing the keyboard focus, a server that starts or
     stops serving the document, new colors, nothing left that matches a complete list opened by typing while no newer
     request is under way, and the editor no longer showing the document.
 - **Snippets** in completion items, with `insertTextFormat` 2 in a `textEdit` or an `insertText`, go in as VS Code
@@ -652,18 +677,22 @@ How the client talks to a server, where the protocol leaves a choice:
       4 ms a layout pass, so that they show their colors in that frame, and lays them out again. That cost is the same
       from 4 to 48 mirror lines, and only snippets of 2 mirror lines stay within a frame, so the limit of stops does
       not bring the keystroke within one.
-- **Signature help** is asked for on the server's trigger characters, and again at once on its retrigger characters
-  while it is open. While it is open, each edit and caret move restarts a pause of 120 ms, VS Code's, after which it
-  asks again for a change of the content; the pause runs on the options' `TimeProvider`. Asking again says that it is
-  a retrigger and sends the signature help that showed, with the signature the user chose. A newer request, and each
-  edit and caret move, cancels the one under way, and an answer about older text is dropped. An answer without
-  signatures, as outside a call, closes it. It shows the active signature, or the first, with the active parameter in
-  bold: the signature's own, or the answer's, or the first; one outside the parameters is none, as in VS Code. A
-  parameter labelled by a string is found as a whole word in the signature. The parameter's documentation shows
-  below, then the signature's, all of it as much as a hover shows, the signature first; with several signatures, which one of how many. Up and Down show the others while
-  completion's list is closed. It ends on Escape, after completion's list, with no signature, when the editor becomes
-  read-only, when the editor loses the keyboard focus, when a server starts or stops serving the document, with new colors, and when its line scrolls
-  out of view.
+- **Signature help** is asked for as VS Code asks: at once by its command, and 120 ms after the user types one of the
+  server's trigger characters, or one of its retrigger characters while signature help shows, waits for an answer or
+  for the pause, unless `Options.ParameterHints.Enabled` is off. Meanwhile, and while it shows, each edit and caret
+  move restarts the pause; once it passes, it asks for the trigger character typed last, or by the command, or else
+  for a change of the content. The pause runs on the options' `TimeProvider`. Asking while it shows or is asked for
+  says that it is a retrigger, and sends the signature help that showed, with the signature the user chose. A newer
+  request cancels the one under way, and an answer about older text is dropped. An answer without signatures, as
+  outside a call, closes it. It shows every signature (design.md #115), each with its active parameter in bold: the
+  signature's own, or the answer's, or the first; one outside the parameters is none, and a signature whose active
+  parameter is past its parameters cannot match the call, unless it has none and the first is active. A parameter
+  labelled by a string is found as a whole word in the signature. The active parameter's documentation shows below,
+  then the active signature's; all of it as much as a hover shows, the active signature first, then the others. Up and
+  Down choose the active signature, around the ends, while completion's list is closed. It ends on Escape, after
+  completion's list, on a click or drag that moves the caret, with no signature, when the editor becomes read-only,
+  when the editor loses the keyboard focus, when a server starts or stops serving the document, with new colors, when
+  parameter hints are turned off, and when its line scrolls out of view.
 - **Selection ranges** are asked for at the caret as expanding the selection starts, where the server offers them.
   The selection goes from the innermost range out through the server's ranges and VS Code's word ranges: the word at
   the caret, a line of spaces and tabs only, and the whole text. Without the server's ranges, it goes through the pairs
@@ -1210,8 +1239,10 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
 Completion and signature help (sections 2 and 6) are implemented. Proven on linux-x64, with `dotnet test` and as
 NativeAOT, in headless windows rendered with Skia, against the fake server:
 
-- completion opens on Ctrl+Space, pressed with Control, on a trigger character, which the request names, and when
-  typing starts a word; not on typing on in a word, nor at the start of one that goes on, nor in a comment. A trigger
+- completion opens on Ctrl+Space, pressed with Control, on a trigger character, which the request names, and on a
+  word character typed at a word's end or as a word's first character; not inside a word, in a number or in a
+  comment, nor on Backspace, and in strings only where the language's quick suggestions say, as for JSON; typing on in
+  a word that an answer opened by typing had nothing for asks no more, until Backspace or another word; A trigger
   character typed while a word's list shows asks again, and the new list shows, also when the server answers only
   after the word's list, filtered for the trigger character, has nothing left; one that is also the selected item's
   commit character commits it, goes in, and then asks again;
@@ -1222,7 +1253,11 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   the label only after its 128th character, the order of sort texts, and that ranking stops once cancelled; in the
   editor, typing filters on the client without asking again, off the UI thread: right after keystrokes that the UI
   thread did nothing else in between, the list still shows what it showed, and then the
-  newest result. The matched characters show in bold, and a preselected item is selected among the best;
+  newest result. The matched characters show in bold, and a preselected item is selected among the best. A typo of
+  two neighbouring characters finds the item in lists of up to 2,000, also in a longer one once typing on shortened
+  what shows, and Ctrl+Space there ranks the long list strictly; ranking 2,000 items of 128 characters against 63
+  typed characters that each label holds, the worst case, takes the background thread
+  (see the pull request's benchmarks);
 - Enter, Tab, a click, the item's own commit character and the server's commit the selected item, each as one step
   that the user undoes, and a commit character then goes in; an item's own commit characters replace the server's.
   A text edit replaces its range, also grown by what was typed since; Enter inserts an insert and replace edit over
@@ -1253,8 +1288,12 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
 - asked for by key, an empty answer says "No suggestions." until the next key, and a list with no match for the word
   says it while typing on; a list that typing filters empty stays frozen while the caret is in a word, and commits
   over what was typed by Enter and a click, but not by a commit character;
-  additional edits apply with the item in one step, and ones that come after the commit join its step, and are
-  dropped once the user typed on;
+  additional edits apply with the item in one step, and ones that come after the commit join its step, or take a step
+  of their own once the user typed on below them; they are dropped after a change above them, and once the commit is
+  undone. An item's `editor.action.triggerSuggest` asks again as typing does, its
+  `editor.action.triggerParameterHints` asks for signature help, and another command runs nowhere;
+- completion ends when a caret move is not the keyboard's: a click, the app's code, an undo, a paste, and another
+  editor's edit that moves the caret; a cursor key filters again;
 - an incomplete list is asked for again on each character typed, for incomplete completions; a newer request and
   Escape cancel the one under way with `$/cancelRequest`, and selecting another item cancels the resolve under way,
   also when it is an item resolved already;
@@ -1267,12 +1306,14 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   inside a small window, and above its line when there is no room below;
 - completion ends on Escape, on leaving the word, on focus loss, when its line scrolls out of view, and when the
   server stops serving the document;
-- signature help opens on "(" with the active parameter in bold and its Markdown, moves the parameter at once on ",",
-  asks again only after 120 ms without an edit, with a clock that the test advances, also after an edit that leaves
-  the caret where it was, shows the other signatures on
-  Up and Down, tells the server the one that shows, which keeps it, and leaves Up and Down to an open completion
-  list; it shows above the line while completion's list shows below, and ends on Escape, on leaving the call, on
-  focus loss and when the server stops serving the document;
+- signature help opens 120 ms after "(", on a clock that the test advances, with every signature, the active one
+  marked, its parameter in bold and its Markdown; what is typed within the pause asks once, for the "("; it moves the
+  parameter on ",", also while a request is under way, which it cancels; it asks again only after 120 ms without an
+  edit, also after an edit that leaves the caret where it was; Up and Down go around the signatures, the server keeps
+  the one that shows, and an open completion list takes them; it shows above the line while completion's list shows
+  below; a key that moves the caret asks again, and a click ends it; without parameter hints typing opens nothing,
+  Ctrl+Shift+Space still does, and turning them off closes it; it ends on Escape, on leaving the call, on focus loss
+  and when the server stops serving the document;
 - the client advertises exactly what it implements, snippets included;
 - snippets: VS Code's own test cases of its parser give its text, for stops, placeholders, choices, escapes and text
   that does not parse; mirrors take their text and its variables' values, also nested, and mirrors of each other end;
