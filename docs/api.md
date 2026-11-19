@@ -1029,11 +1029,21 @@ with Skia:
   pair around the caret, ignoring brackets in strings and comments by the lines' tokens, also when an edit changes them
   out of view. The search for a match, and for each bracket of the pair around the caret, reads at most 100,000
   characters, in blocks without a string per line: about 0.5 ms with six brackets on every line, the most a caret move
-  or keystroke spends on each (BenchmarkDotNet). A caret move draws the text view again without measuring it;
-  Ctrl+Shift+\ and Select to Bracket go by the same searches, and the selection grows by the server's selection ranges,
-  or by the pairs of brackets, and by words. In 5,000 lines, from text that an undo just changed and with the frame
+  or keystroke spends on each (BenchmarkDotNet). A caret move draws the text view again without measuring it, and
+  lines that the background tokenizes draw it again only when the pair changes: drawing it again for each of the
+  background's batches made Page Down 45% slower. While the text and its tokens stay, a caret that moves past brackets
+  that match among themselves keeps the pair, and reads only the stretch it moved. Finding the pair anew in the middle
+  of 5,000 lines with brackets on every line takes 0.9 ms; a caret move there, with the frame after it, takes 11 ms
+  with the pair as without it, and Page Down through 5,000 lines 13.7 ms, as before (BenchmarkDotNet,
+  `CaretMoveBenchmarks`, `ScrollingBenchmarks`). Ctrl+Shift+\ and Select to Bracket go by the same searches, and the
+  selection grows by the server's selection ranges, or by the pairs of brackets, and by words. In 5,000 lines, from text that an undo just changed and with the frame
   after it, typing a bracket that closes takes 28 ms where a digit takes 27 ms, Backspace between the pair 13 ms, and
   commenting all 5,000 lines 41 ms;
+- the occurrences of the symbol at the caret show, the server's with reads and writes apart or else the word's, also
+  when its answer comes late or the editor shows another document meanwhile, and F7 goes through them. In 5,000
+  lines that the fake server serves, a caret move until a frame shows the server's occurrence takes 17.6 ms, where
+  the move alone takes 10.9 ms: the rest is the request, the server's answer and drawing it, with the pause of 50 ms
+  left out (`OccurrenceBenchmarks`);
 - spaces and tabs show inside the selection only, in the theme's `editorWhitespace.foreground`, in a layer of the text
   view above the selection;
 - search runs in the background, so a regular expression such as `(a+)+$`, which froze the prototype for 21 s, leaves
