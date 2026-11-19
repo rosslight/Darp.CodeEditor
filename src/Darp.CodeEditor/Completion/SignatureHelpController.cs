@@ -29,8 +29,9 @@ namespace Darp.CodeEditor.Completion;
 /// characters, such as <c>(</c>, asks after a pause of 120 ms, and so does a retrigger character, such as <c>,</c>,
 /// while signature help shows, waits for an answer or for the pause; each edit and caret move meanwhile restarts the
 /// pause. Once it passes, signature help asks again, for the trigger character typed last, or by the command, and tells
-/// the server the signature that shows. A newer request cancels the one under way, and an answer about older text is
-/// dropped. Up and Down choose the active signature, while completion's list is closed.
+/// the server the signature that shows. A newer request cancels the one under way, and an answer about older text, or
+/// to a request that something asked after, is dropped. Up and Down choose the active signature, while completion's
+/// list is closed.
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends it, for every reason it ends: Escape, leaving the call, a click or drag that moves the
@@ -73,6 +74,12 @@ internal sealed class SignatureHelpController : IEditorFeature
 
     /// <summary>How the next request asks, from what asked within the pause; null while nothing waits to ask.</summary>
     private (int Kind, char? Character)? _trigger;
+
+    /// <summary>
+    /// Counts what asked, as VS Code's trigger ids: an answer is dropped once something asked after its request, while
+    /// the request stays under way, so that the next one asks again.
+    /// </summary>
+    private int _asks;
 
     /// <summary>Cancels the reading of the documentation that is about to show.</summary>
     private CancellationTokenSource? _reading;
@@ -229,6 +236,7 @@ internal sealed class SignatureHelpController : IEditorFeature
     /// </summary>
     private void Trigger(int kind, char? character, TimeSpan pause)
     {
+        _asks++;
         _trigger =
             kind == SignatureHelpTriggerKind.ContentChange && _trigger is { } earlier ? earlier : (kind, character);
         _pause?.Dispose();
@@ -284,22 +292,27 @@ internal sealed class SignatureHelpController : IEditorFeature
             _document.CurrentSnapshot,
             _textArea.Caret.Offset,
             new SignatureHelpTrigger(trigger.Kind, trigger.Character, again, _shown),
-            cancellation
+            cancellation,
+            _asks
         );
     }
 
-    /// <summary>Shows the server's answer, unless it is outdated; closes when the server has none there.</summary>
+    /// <summary>
+    /// Shows the server's answer, unless it is outdated, as something asked after <paramref name="asks"/>; closes when
+    /// the server has none there.
+    /// </summary>
     private async void AskAsync(
         TextSnapshot snapshot,
         int caret,
         SignatureHelpTrigger trigger,
-        CancellationTokenSource cancellation
+        CancellationTokenSource cancellation,
+        int asks
     )
     {
         try
         {
             SignatureHelpInfo? help = await _document.SignatureHelpAsync(snapshot, caret, trigger, cancellation.Token);
-            if (_request != cancellation)
+            if (_request != cancellation || asks != _asks)
                 return;
             _request = null;
             // Changed elsewhere meanwhile, as in another editor: the answer is about older text.
