@@ -58,6 +58,35 @@ public sealed class WordEditingTests(UiFixture ui)
             window.Window.MouseUp(point, MouseButton.Left);
         });
 
+    /// <summary>Below the last line, the pointer is at the text's end, and the drag goes to the end of the last word.</summary>
+    [Fact]
+    public Task A_drag_after_a_double_click_goes_to_the_texts_end_where_the_last_line_scrolls_above_the_pointer() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show(
+                "|" + string.Join("\n", Enumerable.Range(1, 200).Select(n => $"line{n} x")),
+                CodeLanguage.PlainText
+            );
+            TextEditor part = EditorWindow.PartOf(window.Editor);
+            double lineHeight = window.TextView.DefaultLineHeight;
+            // Line 198 in the view's fifth row.
+            part.ScrollToVerticalOffset(193 * lineHeight);
+            window.Layout();
+            DocumentLine line198 = window.TextView.Document.GetLineByNumber(198);
+            Point point = window.PointAt(line198.Offset + 2);
+            window.Click(point, MouseButton.Left);
+            window.Window.MouseDown(point, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            window.Editor.Selection.ShouldBe(new TextSelection(line198.Offset, line198.Offset + "line198".Length));
+
+            part.ScrollToVerticalOffset(199 * lineHeight);
+            window.Layout();
+            window.Layout();
+
+            window.Editor.Selection.ShouldBe(new TextSelection(line198.Offset, window.TextView.Document.TextLength));
+            window.Window.MouseUp(point, MouseButton.Left);
+        });
+
     [Fact]
     public Task Ctrl_Backspace_deletes_a_lines_whitespace_before_joining_it_to_the_line_before() =>
         _ui.Run(() =>
