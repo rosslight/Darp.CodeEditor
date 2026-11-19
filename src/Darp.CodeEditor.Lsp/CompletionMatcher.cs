@@ -14,13 +14,18 @@ namespace Darp.CodeEditor.Lsp;
 /// the same score.
 /// </para>
 /// <para>
-/// Lists of up to <see cref="MaxGracefulItems"/> items tolerate a typo: an item also matches with two neighbouring
-/// characters of the typed text swapped, after the first character and up to the seventh and eighth, at a cost of 3,
-/// and the better of the matches counts, so that "prnit" matches "print". Longer lists match strictly, as each swap is
-/// another match.
+/// Lists of up to <see cref="MaxGracefulItems"/> items tolerate a typo: an item that the typed text does not match
+/// also matches with two neighbouring characters of it swapped, after the first character and up to the seventh and
+/// eighth, at a cost of 3, the best swap counting, so that "prnit" matches "print". Longer lists match strictly, as
+/// each swap is another match.
 /// </para>
 /// <para>
-/// This is a port of VS Code's <c>fuzzyScore</c>, <c>fuzzyScoreGracefulAggressive</c> and <c>anyScore</c>
+/// One ranking fills at most <see cref="MaxCellsPerRank"/> cells of the scoring tables, as many as some 12 ms take:
+/// matching 2,000 labels of 128 characters against 63 typed characters fills about 8 million. Past them, an item's
+/// score is that of the way that one pass finds, which still tolerates a typo (<see cref="FuzzyScorer"/>).
+/// </para>
+/// <para>
+/// This is a port of VS Code's <c>fuzzyScore</c>, <c>fuzzyScoreGraceful</c> and <c>anyScore</c>
 /// (<c>src/vs/base/common/filters.ts</c>, 1.145.0, MIT license), with its default options: the first character must
 /// match strongly, and a full match is boosted. Emoji are no separators. Texts are matched up to their first 128
 /// characters. Case is ignored by .NET's invariant lower case, which differs from JavaScript's for the few letters
@@ -41,10 +46,19 @@ internal sealed class CompletionMatcher
     /// <summary>The most items that <see cref="Rank"/> matches gracefully, tolerating a typo; longer lists strictly.</summary>
     public const int MaxGracefulItems = 2000;
 
+    /// <summary>The most cells of the scoring tables that one ranking fills (<see cref="FuzzyScorer.CellsLeft"/>).</summary>
+    public const long MaxCellsPerRank = 2_000_000;
+
     /// <summary>The score of an item when nothing is typed: below any score of a match.</summary>
     private const int DefaultScore = -100;
 
     private readonly FuzzyScorer _scorer = new();
+
+    /// <summary>The cells of the scoring tables that one ranking fills at most.</summary>
+    private readonly long _cellsPerRank;
+
+    /// <param name="cellsPerRank">The cells of the scoring tables that one ranking fills at most.</param>
+    public CompletionMatcher(long cellsPerRank = MaxCellsPerRank) => _cellsPerRank = cellsPerRank;
 
     /// <summary>
     /// The items that match, best first; equal scores keep the order of <paramref name="items"/>. Up to
@@ -59,15 +73,22 @@ internal sealed class CompletionMatcher
     {
         bool graceful = items.Count <= MaxGracefulItems;
         var ranked = new List<RankedCompletion>();
-        for (int i = 0; i < items.Count; i++)
+        _scorer.CellsLeft = _cellsPerRank;
+        try
         {
-            // An item takes up to some 50 µs, and up to seven times that gracefully: a check every 64 items keeps the wait
-            // short and its cost small.
-            if (i % 64 == 0)
-                cancellationToken.ThrowIfCancellationRequested();
-            CompletionCandidate item = items[i];
-            if (Match(item.Typed, item.Label, item.FilterText, item.FilterTextIsLabel, graceful) is { } match)
-                ranked.Add(new RankedCompletion(i, match.Score, match.Highlights));
+            for (int i = 0; i < items.Count; i++)
+            {
+                // An item takes up to some 50 µs: a check every 64 items keeps the wait short and its cost small.
+                if (i % 64 == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
+                CompletionCandidate item = items[i];
+                if (Match(item.Typed, item.Label, item.FilterText, item.FilterTextIsLabel, graceful) is { } match)
+                    ranked.Add(new RankedCompletion(i, match.Score, match.Highlights));
+            }
+        }
+        finally
+        {
+            _scorer.CellsLeft = long.MaxValue;
         }
         // A stable order: List.Sort is not stable, so the index decides between equal scores.
         ranked.Sort(static (a, b) => a.Score != b.Score ? b.Score.CompareTo(a.Score) : a.Index.CompareTo(b.Index));
@@ -141,10 +162,9 @@ internal sealed class CompletionMatcher
     }
 
     /// <summary>
-    /// VS Code's <c>fuzzyScoreGracefulAggressive</c>: the best of <see cref="FuzzyScorer.Score"/> for <paramref name="pattern"/> as
-    /// typed and with two neighbouring characters swapped, one pair at a time, each swap costing 3; null when none
-    /// matches. The swaps are tried also when the pattern matches as typed, as one may match better: "cno" matches
-    /// "console" best as "con".
+    /// VS Code's <c>fuzzyScoreGraceful</c>: <see cref="FuzzyScorer.Score"/> for <paramref name="pattern"/> as typed, or
+    /// when that does not match, the best with two neighbouring characters swapped, one pair at a time, each swap
+    /// costing 3; null when none matches.
     /// </summary>
     private (int Score, int[] Positions)? GracefulScore(
         string pattern,
@@ -162,7 +182,7 @@ internal sealed class CompletionMatcher
             wordLow,
             firstMatchCanBeWeak: false
         );
-        if (pattern.Length < 3)
+        if (top is not null || pattern.Length < 3)
             return top;
         // At most 7 tries, after the first character; VS Code counts them from the start of the whole pattern.
         int tries = Math.Min(7, pattern.Length - 1);

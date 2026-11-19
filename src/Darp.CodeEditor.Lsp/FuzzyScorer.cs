@@ -3,8 +3,10 @@ namespace Darp.CodeEditor.Lsp;
 /// <summary>
 /// VS Code's <c>fuzzyScore</c> (<c>src/vs/base/common/filters.ts</c>, 1.145.0, MIT license), with <c>boostFullMatch</c>:
 /// the best score of a typed text in a filter text, by a table of every way it matches. Texts are matched up to their
-/// first <see cref="CompletionMatcher.MaxLength"/> characters. An instance keeps the table for reuse: use it on one
-/// thread at a time. It takes about 150 KB.
+/// first <see cref="CompletionMatcher.MaxLength"/> characters. Once the cells it may fill are spent
+/// (<see cref="CellsLeft"/>), it scores the one way that a single pass finds instead, as the table would score that
+/// way: a long typed text against long filter texts fills thousands of cells for each. An instance keeps the table for
+/// reuse: use it on one thread at a time. It takes about 150 KB.
 /// </summary>
 internal sealed class FuzzyScorer
 {
@@ -27,6 +29,11 @@ internal sealed class FuzzyScorer
     private readonly byte[] _arrows = new byte[Stride * Stride];
 
     /// <summary>
+    /// The cells of the table that scoring may still fill: a score that would fill more is found in one pass instead.
+    /// </summary>
+    public long CellsLeft { get; set; } = long.MaxValue;
+
+    /// <summary>
     /// The best score of <paramref name="pattern"/> from <paramref name="patternStart"/> in <paramref name="word"/>, and
     /// the positions in the word that matched, ascending; null without a match.
     /// </summary>
@@ -46,6 +53,15 @@ internal sealed class FuzzyScorer
         if (!IsPatternInWord(patternLow, patternStart, patternLength, wordLow, wordLength))
             return null;
         FillInMaxWordMatchPos(patternLength, wordLength, patternStart, patternLow, wordLow);
+        long cells = 0;
+        for (int patternPos = patternStart; patternPos < patternLength; patternPos++)
+        {
+            int next = patternPos + 1 < patternLength ? _maxWordMatchPos[patternPos + 1] : wordLength;
+            cells += next - _minWordMatchPos[patternPos];
+        }
+        if (cells > CellsLeft)
+            return OnePass(pattern, patternLow, patternStart, word, wordLow, firstMatchCanBeWeak);
+        CellsLeft -= cells;
 
         bool hasStrongFirstMatch = false;
         int row = 1;
@@ -162,6 +178,84 @@ internal sealed class FuzzyScorer
             total += 2;
         // A penalty for each skipped character of the word.
         total -= maxMatchColumn - patternLength;
+        return (total, positions);
+    }
+
+    /// <summary>
+    /// The score of one way that <paramref name="pattern"/> matches, found in one pass and scored as the table scores
+    /// that way, so that it ranks among the table's scores, at most as high as the best way: the first character where
+    /// it first matches strongly, or at all with <paramref name="firstMatchCanBeWeak"/>, and each next one where it
+    /// first matches after the one before. Null when the pattern does not match so.
+    /// </summary>
+    private static (int Score, int[] Positions)? OnePass(
+        string pattern,
+        string patternLow,
+        int patternStart,
+        string word,
+        string wordLow,
+        bool firstMatchCanBeWeak
+    )
+    {
+        int patternLength = Math.Min(pattern.Length, MaxLength);
+        int wordLength = Math.Min(word.Length, MaxLength);
+        int count = patternLength - patternStart;
+        int first = -1;
+        int total = 0;
+        for (int wordPos = 0; wordPos <= wordLength - count && first < 0; wordPos++)
+        {
+            bool strong = false;
+            int score = DoScore(
+                pattern,
+                patternLow,
+                patternStart,
+                patternStart,
+                word,
+                wordLow,
+                wordPos,
+                wordLength,
+                true,
+                ref strong
+            );
+            if (score != int.MinValue && (strong || firstMatchCanBeWeak))
+                (first, total) = (wordPos, score);
+        }
+        if (first < 0)
+            return null;
+        var positions = new int[count];
+        positions[0] = first;
+        bool unused = false;
+        int previous = first;
+        for (int i = 1; i < count; i++)
+        {
+            int patternPos = patternStart + i;
+            int found = wordLow.AsSpan(previous + 1, wordLength - previous - 1).IndexOf(patternLow[patternPos]);
+            if (found < 0)
+                return null;
+            int wordPos = previous + 1 + found;
+            bool newMatchStart = wordPos > previous + 1;
+            // The table's moves to the left cost a gap once, where it starts.
+            if (newMatchStart)
+                total -= 5;
+            total += DoScore(
+                pattern,
+                patternLow,
+                patternPos,
+                patternStart,
+                word,
+                wordLow,
+                wordPos,
+                wordLength,
+                newMatchStart,
+                ref unused
+            );
+            positions[i] = previous = wordPos;
+        }
+        // As the table: a gap after the last match, a full match, and the skipped characters.
+        if (previous + 1 < wordLength)
+            total -= 5;
+        if (wordLength == patternLength)
+            total += 2;
+        total -= previous + 1 - patternLength;
         return (total, positions);
     }
 
