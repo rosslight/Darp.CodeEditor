@@ -126,8 +126,8 @@ internal static class TextSearch
 
     /// <summary>
     /// The edit that replaces every match of <paramref name="query"/> in <paramref name="snapshot"/>, however many
-    /// there are, also beyond the matches that a search keeps: one change of the text, combined here, off the UI thread,
-    /// for <see cref="TextChanges.Apply(CombinedEdit)"/>.
+    /// there are, also beyond the matches that a search keeps: one change of the text, combined here, off the UI
+    /// thread, for <see cref="TextChanges.Apply(CombinedEdit)"/>.
     /// </summary>
     /// <returns>
     /// The edit, null without a match; null also where the search ran out of time or the regular expression is
@@ -169,18 +169,9 @@ internal static class TextSearch
 
     /// <summary>
     /// The first match that starts at <paramref name="from"/> or after it, searched from there, also beyond those that
-    /// a search keeps (<see cref="MaxMatches"/>), with what replaces it. It does not go round to the start.
+    /// a search keeps (<see cref="MaxMatches"/>), with what replaces it; with <paramref name="skipEmpty"/>, not an
+    /// empty match at <paramref name="from"/>, the current one. It does not go round to the start.
     /// </summary>
-    /// <param name="snapshot">The text.</param>
-    /// <param name="query">What to search for.</param>
-    /// <param name="replacement">What replaces the match; null when the search is not for replacing.</param>
-    /// <param name="scope">The ranges to search in, as for <see cref="Find"/>; null for all of the text.</param>
-    /// <param name="from">Where the search starts.</param>
-    /// <param name="skipEmpty">
-    /// Whether an empty match at <paramref name="from"/> is the current one, which it skips.
-    /// </param>
-    /// <param name="cancellationToken">Stops the search.</param>
-    /// <param name="clock">The clock of the time limit, as for <see cref="Find"/>.</param>
     /// <returns>The match, null for none, and whether the search ran out of time.</returns>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
     public static (SearchMatch? Match, SearchOutcome Outcome) FindNext(

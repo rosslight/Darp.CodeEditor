@@ -7,18 +7,6 @@ using EditorSelection = AvaloniaEdit.Editing.Selection;
 
 namespace Darp.CodeEditor.Search;
 
-/// <summary>Where the selection goes once a search has its result.</summary>
-internal enum SearchMove
-{
-    None,
-
-    /// <summary>To the first match from where the search started.</summary>
-    First,
-
-    Next,
-    Previous,
-}
-
 /// <summary>
 /// The search of the document that one editor shows, for the editor's bar, as VS Code's find model
 /// (<c>findModel.ts</c>): the matches of the bar's query, found in the background and highlighted, going from one to
@@ -31,8 +19,6 @@ internal sealed class DocumentSearch : IDisposable
     private readonly EditorContext _context;
     private readonly TextDocument _buffer;
     private readonly TextChanges _changes;
-
-    /// <summary>The clock of the searches' time limit: the document's.</summary>
     private readonly TimeProvider _clock;
 
     private readonly SearchBar _bar;
@@ -116,16 +102,14 @@ internal sealed class DocumentSearch : IDisposable
     /// <summary>Starts from the caret, as the bar opens.</summary>
     public void StartFromCaret() => _from = Area.Caret.Offset;
 
-    /// <summary>
-    /// The user typed in the query or clicked one of its toggles: the search moves to its first match.
-    /// </summary>
+    /// <summary>The user changed the query or clicked a toggle: the search moves to its first match.</summary>
     public void OnQueryChanged() => Search(SearchMove.First);
 
     /// <summary>The user changed the replacement or Preserve Case: the matches get theirs.</summary>
     public void OnReplacementChanged() => Search(SearchMove.None);
 
     /// <summary>
-    /// Ends the search as the bar closes, and Find in Selection with it; the keyboard goes back to the text.
+    /// Ends the search, and Find in Selection, as the bar closes; the keyboard goes back to the text.
     /// </summary>
     public void OnClosed()
     {
@@ -135,9 +119,8 @@ internal sealed class DocumentSearch : IDisposable
     }
 
     /// <summary>
-    /// Turns Find in Selection on for the selected lines, as Alt+L and the bar's toggle do, or off with
-    /// <paramref name="on"/> false, and selects the first match from where the search started. Without a selection it
-    /// stays off.
+    /// Turns Find in Selection on for the selected lines, as Alt+L and the bar's toggle do, or off, and selects the
+    /// first match from where the search started. Without a selection it stays off.
     /// </summary>
     public void FindInSelection(bool on)
     {
@@ -171,9 +154,7 @@ internal sealed class DocumentSearch : IDisposable
     /// </summary>
     public void Search(SearchMove move)
     {
-        _search.Cancel();
-        _seek.Cancel();
-        _replaceAll.Cancel();
+        CancelWork();
         if (move != SearchMove.None)
             _move = move;
         _scopeLayer.Scope = _bar.IsOpen ? Scope() : null;
@@ -319,9 +300,7 @@ internal sealed class DocumentSearch : IDisposable
         );
     }
 
-    /// <summary>
-    /// Shows in the bar how many matches there are and which one is selected, and what its buttons can do.
-    /// </summary>
+    /// <summary>Shows in the bar the matches, the one selected, and what its buttons can do.</summary>
     public void UpdateStatus()
     {
         int? index = null;
@@ -346,9 +325,7 @@ internal sealed class DocumentSearch : IDisposable
 
     public void Dispose()
     {
-        _search.Cancel();
-        _seek.Cancel();
-        _replaceAll.Cancel();
+        CancelWork();
         _buffer.Changed -= OnBufferChanged;
         _buffer.TextChanged -= OnTextChanged;
         Area.SelectionChanged -= OnSelectionChanged;
@@ -406,10 +383,8 @@ internal sealed class DocumentSearch : IDisposable
     }
 
     /// <summary>
-    /// Searches the text in the background for the match that <paramref name="find"/> finds, and selects it, or gives
-    /// it to <paramref name="found"/>, unless the result or the selection changed meanwhile; without one, going
-    /// forward, the result's first match. The result is of the text as it is: a change of the text searches again, and
-    /// the move waits for that.
+    /// Selects the match that <paramref name="find"/> finds in the background, or gives it to <paramref name="found"/>,
+    /// unless the result or the selection changed meanwhile; without one, going forward, the result's first match.
     /// </summary>
     private void Seek(
         SearchResult result,
@@ -437,8 +412,6 @@ internal sealed class DocumentSearch : IDisposable
         );
     }
 
-    private void Select(SearchMatch match) => Select(new TextRange(match.StartOffset, match.Length));
-
     /// <summary>Replaces <paramref name="match"/>; the search that the change starts goes on from its end.</summary>
     private void Replace(SearchMatch match)
     {
@@ -449,13 +422,13 @@ internal sealed class DocumentSearch : IDisposable
         _move = SearchMove.First;
     }
 
-    private void Select(TextRange match)
+    private void Select(SearchMatch match)
     {
         _selecting = true;
-        Area.Selection = EditorSelection.Create(Area, match.Start, match.End);
-        Area.Caret.Offset = match.End;
+        Area.Selection = EditorSelection.Create(Area, match.StartOffset, match.EndOffset);
+        Area.Caret.Offset = match.EndOffset;
         _selecting = false;
-        _context.Reveal(match);
+        _context.Reveal(new TextRange(match.StartOffset, match.Length));
         // Its number, now that the selection is all set.
         UpdateStatus();
     }
@@ -492,6 +465,13 @@ internal sealed class DocumentSearch : IDisposable
             && match.Length == selection.Length
             ? match
             : null;
+    }
+
+    private void CancelWork()
+    {
+        _search.Cancel();
+        _seek.Cancel();
+        _replaceAll.Cancel();
     }
 
     /// <summary>Keeps the matches on their text while the text changes.</summary>

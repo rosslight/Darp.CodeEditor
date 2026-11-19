@@ -144,7 +144,9 @@ internal sealed class TextChanges : IDisposable
 /// </summary>
 internal sealed record CombinedEdit(int Offset, int Length, string Text, OffsetChangeMap Map)
 {
-    /// <summary>Combines <paramref name="edits"/>, in order and apart, of <paramref name="text"/>; on any thread.</summary>
+    /// <summary>
+    /// Combines <paramref name="edits"/>, in order and apart, of <paramref name="text"/>; on any thread.
+    /// </summary>
     public static CombinedEdit Of(ITextSource text, IReadOnlyList<TextEdit> edits)
     {
         int start = edits[0].Offset;
