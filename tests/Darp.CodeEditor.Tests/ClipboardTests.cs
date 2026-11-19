@@ -208,6 +208,29 @@ public sealed class ClipboardTests(UiFixture ui)
             window.Editor.Document.ShouldNotBeNull().Text.ShouldBe("abcdef");
         });
 
+    /// <summary>As AvaloniaEdit's paste: not at the start of a long line's hidden tail, by key and by method alike.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public Task Paste_leaves_the_text_alone_at_a_long_lines_hidden_tail(bool byKey) =>
+        _ui.Run(async () =>
+        {
+            string line = new('a', 3_500);
+            using var window = new EditorWindow(
+                new CodeEditor { Document = CodeDocument.Create(CodeLanguage.PlainText, line) }
+            );
+            window.Editor.Selection = new TextSelection(2_990, 3_000);
+            await Clipboard(window).SetTextAsync("X");
+
+            if (byKey)
+                window.Press(Key.V, EditorWindow.Command);
+            else
+                window.Editor.Paste();
+            await EditorWindow.RunPostedJobsAsync();
+
+            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(line);
+        });
+
     /// <summary>A handler of the change that the line breaks make may show another, shorter document.</summary>
     [Fact]
     public Task A_drop_whose_change_switches_the_document_leaves_the_other_one_alone() =>
