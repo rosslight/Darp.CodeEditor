@@ -40,11 +40,11 @@ if (compilation.Succeeded)
 
 | Package | Public types |
 |---|---|
-| `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorColorTheme`, `CodeEditorViewState`, `CodeEditorStyles`, `TextSnapshot`, `TextRange`, `TextPosition`, `TextSelection`, `Indentation`, `Diagnostic`, `DiagnosticSeverity` |
+| `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorColorTheme`, `CodeEditorViewState`, `CodeEditorStyles`, `TextSnapshot`, `TextRange`, `TextPosition`, `TextSelection`, `Indentation`, `Diagnostic`, `DiagnosticSeverity`; the keymap: `CodeEditorKeymap`, `CodeEditorKeyBinding`, `CodeEditorCommands` |
 | `Darp.CodeEditor.CSharpScript` | `CSharpScriptServer`, `CSharpScriptServerOptions`, `CSharpScriptEnvironment<TGlobals>`, `CSharpScriptDocument<TGlobals>`, `CSharpScriptCompilation<TGlobals>`, `CSharpScriptAssembly<TGlobals>`, `CSharpCodeLanguage` (adds `CodeLanguage.CSharp`) |
 | `Darp.CodeEditor.CSharpScript.Runner` | `CSharpScriptSession` (starts sessions, and scripts in them), `CSharpScriptSession<TSessionSide, TSessionObject>`, `CSharpScriptSessionOptions`, `CSharpScriptRun`, `CSharpScriptException`, `CSharpScriptSessionExit`, `CSharpScriptSessionExitReason`, and the contracts that runner-side script APIs implement: `IScriptSessionObject<TSelf, TAppSide>`, `IScriptGlobalsFactory<TGlobals, TInput>`, `IScriptGlobalsFactory<TGlobals>` |
 
-34 public types in all. Three more things are public without being types of ours:
+37 public types in all. Three more things are public without being types of ours:
 
 - **The project file.**
   - `CSharpScriptReference="true"` on a package or project reference: scripts may use its assemblies. Publishing copies their DLLs next to the app, NativeAOT apps included, with their XML docs, which hover and completion show.
@@ -97,6 +97,8 @@ rather than its view belong to the document, as in Monaco and CodeMirror.
 | `Selection` | a `TextSelection`: anchor and caret, so a backward selection keeps its direction |
 | `CaretPosition` | the caret's line and column, read-only and bindable, for status bars |
 | `ScrollTo(TextRange)` | brings a range into view: not at all when it is visible, centered when it is not |
+| `Keymap` | which keys run which of the editor's commands: VS Code's keys by default (below) |
+| `PendingKeys` | the first stroke of a two-stroke sequence while the editor waits for the second, such as Ctrl+K of Ctrl+K Ctrl+I; null otherwise. Read-only and bindable, for status bars |
 | `OpenSearch(replace)` | the search or replace bar, for a Find button; Ctrl+F and Ctrl+H open them too |
 | `Cut()`, `Copy()`, `Paste()`, `SelectAll()` | for an app's Edit menu; the keys and the editor's context menu do the same, and the document's `Undo` and `Redo` the rest |
 | `SaveViewState()`, `RestoreViewState(state)` | the caret, the selection and the scroll position, for an app that switches one editor between documents |
@@ -120,15 +122,56 @@ A document holds no view state, so several editors of one document never fight o
 **Editing in code:** `document.Replace(range, text)` inserts or replaces in one step the user can undo, such as a
 template at the caret: `document.Replace(editor.Selection.Range, snippet)`. Setting `Text` replaces everything.
 
-**Keys:** the editor handles only its own: editing, navigation, search (Ctrl+F, Ctrl+H, F3), completion (Ctrl+Space),
-comments (Ctrl+/) and indentation (Tab, Shift+Tab). On macOS, Cmd takes Ctrl's place, except for completion, and
-Cmd+Alt+F opens the replace bar, as AvaloniaEdit decides by the operating system. While completion's list shows, Up,
-Down, Page Up, Page Down, Enter, Tab and Escape are its; while signature help shows several signatures, Up and Down
-are its; while a snippet's stops are active, Tab and Shift+Tab are theirs, except Shift+Tab on the first stop, and so
-is Escape after completion and signature help. Other keys, such as F5 or Ctrl+S, reach the app's key bindings.
+**Keys.** Every command of the editor has a name, VS Code's command id, in `CodeEditorCommands`, and `Keymap` binds
+keys to them (design.md #113). A `CodeEditorKeymap` is immutable and can be shared by editors:
+
+- **The default,** `CodeEditorKeymap.Default`, has VS Code's keys for the operating system it runs on (the table
+  below). On macOS, Cmd takes Ctrl's place, except for completion's Ctrl+Space.
+- **An app's or a user's keys** apply after the default, as a user's `keybindings.json` does in VS Code:
+  `CodeEditorKeymap.Default.With(new CodeEditorKeyBinding("ctrl+q", CodeEditorCommands.TriggerParameterHints))` in
+  code, or `CodeEditorKeymap.FromJson(json)` with VS Code's file format. A command with `-` before it removes
+  bindings: `{ "key": "ctrl+i", "command": "-editor.action.triggerSuggest" }`. `CodeEditorKeymap.Empty` starts from
+  nothing. `when` clauses are skipped.
+- **Sequences** have one or two strokes, such as Ctrl+K Ctrl+I. While the editor waits for the second, `PendingKeys`
+  shows the first; a second stroke that completes nothing counts as an ordinary key. A click, the keyboard leaving
+  the editor, another document or another keymap ends the wait.
+- **Where several bindings share a key,** the latest binding whose command applies runs. A command applies only where
+  it can act: those on the text while the text has the keyboard, those that change the text or ask a server not in a
+  read-only editor, and each only with something to act on, such as undo with a step to undo, comments in a language
+  that has them, or completion with a server that completes. Otherwise the key goes on to the binding before it, and
+  then as an ordinary key. A key that starts several sequences waits for the second stroke of any of them.
+- **Not in the keymap:** the keys inside open popups (Up, Down, Page Up, Page Down, Enter and Tab in completion's list,
+  Up and Down while signature help shows several signatures), Tab and Shift+Tab between a snippet's stops, except
+  Shift+Tab on the first stop, Escape, which closes completion, signature help, a snippet's stops, the hover and the
+  search bar one at a time, and AvaloniaEdit's own editing and clipboard keys. Other keys, such as F5 or Ctrl+S, reach
+  the app's key bindings, and so does a key of the keymap whose commands don't apply.
+
+The default keys on Windows and Linux; macOS in brackets where it differs beyond Cmd for Ctrl:
+
+| Keys | Commands | What they do |
+|---|---|---|
+| Ctrl+Space, Ctrl+I (macOS also Alt+Escape) | `editor.action.triggerSuggest` | completion |
+| Ctrl+Shift+Space | `editor.action.triggerParameterHints` | signature help |
+| Ctrl+F, Ctrl+H (macOS: Cmd+Alt+F for replace) | `actions.find`, `editor.action.startFindReplaceAction` | the search and the replace bar; a read-only editor opens the search bar for both |
+| F3, Shift+F3 (macOS also Cmd+G, Shift+Cmd+G) | `editor.action.nextMatchFindAction`, `editor.action.previousMatchFindAction` | the next and the previous match |
+| Ctrl+/ | `editor.action.commentLine` | toggles line comments, or block comments in a language without line comments |
+| Ctrl+Z; Ctrl+Y, Ctrl+Shift+Z (macOS: Cmd+Shift+Z only) | `undo`; `redo` | the document's `Undo` and `Redo`; nothing in a read-only editor |
 
 **Indentation** belongs to the document (`CodeDocument.Indentation`), so all editors of one document agree. It starts
-as in VS Code, 2 spaces for YAML and 4 otherwise, and is not detected from the text.
+as VS Code's `editor.detectIndentation` guesses it from the initial text; where the text gives no answer, VS Code's
+default applies: 2 spaces for YAML and 4 otherwise.
+
+**Line breaks** belong to the document too, one per document, as a VS Code text model has its EOL: `\r\n` when most of
+the initial text's line breaks are, `\n` otherwise, and the operating system's in a text without one, as VS Code's
+`files.eol` of `auto`. Setting `Text` detects it again; other edits keep it. Enter, typed text, paste, drops,
+completion's items and their additional edits, snippets and the search bar's Replace put it in; Copy and Cut use `\r\n`
+on Windows. A paste waits for the clipboard before it changes anything, and goes in as one undo step only if the editor
+still shows the document and is not read-only; as before, tabs become spaces in a document that indents with spaces,
+and a rectangle takes a line of the text on each row. Drops are AvaloniaEdit's, their line breaks corrected in the
+same undo step. Not covered, as both are in AvaloniaEdit's drop handler: a rectangle dropped on a row that ends in a
+lone `\r` goes in on one row, as AvaloniaEdit counts rows by `\n` once it gave the text that row's line break; and a
+document switch during a drop's first text change leaves AvaloniaEdit's undo group open, until AvaloniaEdit's drop
+handler closes the group on the document it opened it on. Text that the app sets or replaces goes in as it is.
 
 **Look.** The text and everything around it are styled differently, as in Monaco and CodeMirror:
 
@@ -188,8 +231,7 @@ ruler shows them. Scripts of 5,000 lines need them to find errors outside the vi
 changing it, so they wait until the core works.
 
 **Later, when asked for:** whitespace display modes, rulers, folding, a minimap, placeholder text for empty
-documents, indentation detected from the text, markers that the app adds, and a view state that can be stored across
-app starts.
+documents, markers that the app adds, and a view state that can be stored across app starts.
 
 ## 3. Who owns what
 
@@ -200,6 +242,7 @@ app starts.
 | `CodeDocument` | the app, usually a view model, one per script or file: with `CodeDocument.Create`, or a server's `CreateDocument` | the editors that show it | `Dispose`, when the user closes it for good |
 | `CodeEditor` | the view | | the visual tree; out of it, the editor drops its subscriptions, requests and rendering resources |
 | `CodeEditorViewState` | `SaveViewState` | the app, until it restores it | nothing to dispose |
+| `CodeEditorKeymap` | built in (`Default`), or the app | the editors it is set on | nothing to dispose |
 | `CSharpScriptSession` | the app, once per isolation boundary | the scripts it runs | `DisposeAsync`, or `KillAsync` |
 | The app side of a session's bridge | the app | the session's scripts | the app, once `DisposeAsync` or `KillAsync` has returned |
 | The session object | the session, in its process | the app, through `Remote`, and the session's scripts | the session's `DisposeAsync`; lost on a kill or crash |
@@ -217,7 +260,7 @@ app starts.
   - `CurrentSnapshot` is the text with its version, immutable. Reading `Text` and the version separately could pair one version's text with the next one's number.
   - The document makes a snapshot after every change, sharing the unchanged parts of the text. In AvaloniaEdit, an edit plus its snapshot takes about 1 µs on 5,000 lines (section 9).
   - `document.CompileAsync()` compiles the snapshot current at the call, and the compilation keeps it as `Snapshot`.
-- **Immutable, any thread:** `CodeLanguage`, `CodeEditorColorTheme` and `TextSnapshot`.
+- **Immutable, any thread:** `CodeLanguage`, `CodeEditorColorTheme`, `CodeEditorKeymap` and `TextSnapshot`.
 - **Any thread:** `LanguageServer`, `CSharpScriptServer`, `CSharpScriptSession` and `CSharpScriptRun`.
   - Both servers raise `PropertyChanged` for `State` on the UI thread, for a status indicator to bind. Nothing waits for it, so servers and compiling also work before the UI runs.
   - Both servers dispose synchronously too: `Dispose` kills the process at once, for app exits where only synchronous disposal runs. Sessions are only async-disposable, because the order in which they end matters.
@@ -429,12 +472,12 @@ How the client talks to a server, where the protocol leaves a choice:
   `${NAME:default}`, and the escapes `\$`, `\}` and `\\`, and `\,` and `\|` in choices. What does not parse is text, as
   in VS Code. Stops of one number are mirrors: the first one with text gives the others its text, with the same values
   of its variables. A snippet with stops gets a final stop at its end, unless it has one. A choice inserts its first
-  option as a placeholder; no list of its options shows.
+  option as a placeholder, with the document's line breaks; no list of its options shows.
   - **What goes in.** The rules of a commit hold: the edit, grown by what was typed since, the additional edits, which
     stay plain text, one undo step, and nothing in a read-only editor. Lines after the first start with the whitespace
-    that the snippet's line has before it, and their indentation is the document's; line breaks are the line's. Items
-    in plain text still go in as they are written; VS Code would indent their lines too, and the client does not
-    advertise `insertTextMode`.
+    that the snippet's line has before it, and their indentation and line breaks are the document's. Items in plain
+    text still go in as they are written, but for their line breaks; VS Code would indent their lines too, and the
+    client does not advertise `insertTextMode`.
   - **Variables** have their values for the text and the caret before the commit: `TM_CURRENT_LINE`, the shown part of
     the line, `TM_CURRENT_WORD`, `TM_LINE_INDEX`, `TM_LINE_NUMBER`, `CURSOR_INDEX` and `CURSOR_NUMBER`; `TM_FILENAME`,
     `TM_FILENAME_BASE`, `TM_DIRECTORY`, `TM_DIRECTORY_BASE`, `TM_FILEPATH` and `RELATIVE_FILEPATH` from the document's
@@ -860,7 +903,16 @@ with Skia:
   after 10 ms, and a match after 5 ms, as with a pattern that backtracks on the lines above: the line then keeps its
   indentation;
 - the document's `Indentation` reaches every editor that shows it at once: Tab, Shift+Tab, new lines and the width of
-  tabs;
+  tabs. It starts as VS Code guesses it from the first 10,000 lines, with VS Code's default where they give no answer;
+- the keymap: VS Code's syntax for keys, also two-stroke sequences and punctuation where the keyboard layout types
+  it; a `keybindings.json` added to the default, with `-` removals; the latest binding that applies wins, and a key
+  whose commands don't apply, as in a read-only editor, reaches the app; AvaloniaEdit's Ctrl+I and undo keys give way
+  to the keymap's. A caret move by an arrow key resolves through the keymap first: in 5,000 lines, with the frame
+  after it, it takes 10.1 ms, as before the keymap (BenchmarkDotNet, `CaretMoveBenchmarks`);
+- one line break per document, detected from the text when it is created or set, also when that changes no text:
+  Enter, typed text, paste, drops, completion's text and additional edits, snippets and Replace put it in, also on a
+  line that ends in another and from a regular expression's substitutions, and Copy and Cut take it, or `\r\n` on
+  Windows. The tests run with either line break as the system's (CONTRIBUTING.md);
 - the bracket next to the caret and its match are boxed in the theme's colors, ignoring brackets in strings and
   comments by the lines' tokens, also when an edit changes them out of view. The search for a match reads at most
   100,000 characters, in blocks without a string per line: about 0.5 ms with six brackets on every line, the most a
@@ -1113,4 +1165,16 @@ Still open:
 Question numbers continue the decision log in [design.md](design.md). Decisions taken in the API discussion are
 recorded there too (#61, #64–#106).
 
-None right now. Section 9 lists what still needs proving.
+Deferred by the product owner (design.md #119), to be decided later:
+
+- **Q120 Multiple carets.** VS Code's Ctrl+D adds a selection at the next match, Alt+click adds a caret, and typing
+  in a snippet's stop types in each of its mirrors. AvaloniaEdit's editor has one caret, so several need a design of
+  their own first. Until then, a snippet's mirrors are copied one after another.
+- **Q121 Related places in other documents.** A diagnostic's related places in another document need the app, which
+  knows its documents and tabs, so opening one needs an app-facing API, such as an event that the app answers by
+  opening the document.
+- **Q122 A server's own commands.** Commands that a server runs with `workspace/executeCommand`, as completion items
+  may name, need an app-facing API too, and such commands often answer with workspace edits, which the client does
+  not take in v1; the client does not advertise that request.
+
+Section 9 lists what still needs proving.

@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Logging;
@@ -7,6 +8,7 @@ using Avalonia.Media;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
+using Darp.CodeEditor.Commands;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.LanguageClient;
@@ -23,11 +25,11 @@ namespace Darp.CodeEditor.Completion;
 /// </summary>
 /// <remarks>
 /// <para>
-/// It opens when the user types one of the server's trigger characters, such as <c>(</c>, and asks again at once on a
-/// retrigger character, such as <c>,</c>, while it is open. While it is open, each edit and caret move restarts a pause
-/// of 120 ms, VS Code's; once it passes, it asks again, telling the server the signature that shows. A newer request,
-/// and every edit, cancels the request under way, and an answer about older text is dropped. Up and Down show the
-/// other signatures, while completion's list is closed.
+/// It opens by its command, and when the user types one of the server's trigger characters, such as <c>(</c>, and asks
+/// again at once on a retrigger character, such as <c>,</c>, while it is open. While it is open, each edit and caret
+/// move restarts a pause of 120 ms, VS Code's; once it passes, it asks again, telling the server the signature that
+/// shows. A newer request, and every edit, cancels the request under way, and an answer about older text is dropped.
+/// Up and Down show the other signatures, while completion's list is closed.
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends it, for every reason it ends: Escape, leaving the call, when the server answers with none,
@@ -35,12 +37,12 @@ namespace Darp.CodeEditor.Completion;
 /// document, new colors, the caret's line scrolling out of view, and the editor no longer showing the document.
 /// </para>
 /// </remarks>
-internal sealed class SignatureHelpController : IDisposable
+internal sealed class SignatureHelpController : IEditorFeature
 {
     /// <summary>The pause after an edit or a caret move before signature help is asked again: VS Code's.</summary>
     private static readonly TimeSpan s_pause = TimeSpan.FromMilliseconds(120);
 
-    private readonly CodeEditor _editor;
+    private readonly TemplatedControl _editor;
     private readonly TextArea _textArea;
     private readonly TextView _textView;
     private readonly TextDocument _buffer;
@@ -63,7 +65,7 @@ internal sealed class SignatureHelpController : IDisposable
     private CancellationTokenSource? _reading;
 
     public SignatureHelpController(
-        CodeEditor editor,
+        TemplatedControl editor,
         TextArea textArea,
         CodeDocument document,
         BackgroundTextMateHighlighter highlighter
@@ -97,6 +99,21 @@ internal sealed class SignatureHelpController : IDisposable
 
     /// <summary>Whether signature help shows, waits for an answer, or waits to ask again.</summary>
     private bool IsActive => _shown is not null || _request is not null || _pause is not null;
+
+    public void AddCommands(CommandTable commands) =>
+        commands.Add(CodeEditorCommands.TriggerParameterHints, Trigger, CommandNeeds.TextFocus | CommandNeeds.Writable);
+
+    /// <summary>Asks for signature help, where the server has it and the user can type.</summary>
+    private bool Trigger()
+    {
+        if (
+            _document.Features?.SignatureHelp is null
+            || !_textArea.ReadOnlySectionProvider.CanInsert(_textArea.Caret.Offset)
+        )
+            return false;
+        Ask(SignatureHelpTriggerKind.Invoked, null);
+        return true;
+    }
 
     /// <summary>Up and Down, from the editor's key handler, while more than one signature shows: the others.</summary>
     /// <returns>Whether the key was signature help's.</returns>

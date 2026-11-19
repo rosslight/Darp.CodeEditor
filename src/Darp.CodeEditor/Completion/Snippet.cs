@@ -1,4 +1,5 @@
 using System.Text;
+using AvaloniaEdit.Document;
 using Darp.CodeEditor.Editing;
 
 namespace Darp.CodeEditor.Completion;
@@ -805,7 +806,9 @@ internal sealed class Snippet
                             return false;
                         break;
                     case ChoiceNode choice:
-                        if (!Append(choice.Value))
+                        // Its lines keep their indentation; its line breaks, as everything's that goes in, are the
+                        // document's.
+                        if (!Append(TextUtilities.NormalizeNewLines(choice.Value, _context.LineBreak)))
                             return false;
                         break;
                     case VariableNode variable:
@@ -831,7 +834,7 @@ internal sealed class Snippet
         /// <summary>
         /// Text, as VS Code adjusts it: each line after a line break starts with the indentation of the line the
         /// snippet goes in, and its own; the indentation at the start of the snippet or of a line is the document's;
-        /// line breaks are the line's. A text longer than what is left is not read.
+        /// line breaks are the document's. A text longer than what is left is not read.
         /// </summary>
         private bool WriteText(string value)
         {
@@ -885,7 +888,7 @@ internal sealed class Snippet
 /// <summary>Where a snippet goes in, for <see cref="Snippet.Render"/>.</summary>
 /// <param name="LineIndentation">The whitespace at the start of the line it goes in, up to where it goes in.</param>
 /// <param name="Indentation">The document's indentation.</param>
-/// <param name="LineBreak">The line break of the line it goes in.</param>
+/// <param name="LineBreak">The document's line break.</param>
 /// <param name="Variable">The value of a variable by its name; null when it has none.</param>
 internal sealed record SnippetContext(
     string LineIndentation,

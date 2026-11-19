@@ -86,7 +86,7 @@ internal static class TextSearch
     /// <summary>
     /// Finds the matches of <paramref name="query"/> in <paramref name="snapshot"/>, with the text that replaces each
     /// one when <paramref name="replacement"/> is given: itself, or for a regular expression with its substitutions,
-    /// such as <c>$1</c>.
+    /// such as <c>$1</c>, with the document's line breaks.
     /// </summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
     public static SearchResult Find(
@@ -121,7 +121,19 @@ internal static class TextSearch
             query,
             replacement,
             matches,
-            FindAll(snapshot.GetText(), query, regex, replacement, matches, cancellationToken),
+            FindAll(
+                snapshot.GetText(),
+                query,
+                regex,
+                // A regular expression's only once it is expanded: \r$1\n is one line break when $1 is empty.
+                replacement is null
+                || query.UseRegex
+                    ? replacement
+                    : InLineBreaks(replacement, snapshot.LineBreak),
+                snapshot.LineBreak,
+                matches,
+                cancellationToken
+            ),
             null
         );
     }
@@ -131,6 +143,7 @@ internal static class TextSearch
         SearchQuery query,
         Regex regex,
         string? replacement,
+        string lineBreak,
         TextSegmentCollection<SearchMatch> matches,
         CancellationToken cancellationToken
     )
@@ -138,6 +151,8 @@ internal static class TextSearch
         long start = Stopwatch.GetTimestamp();
         try
         {
+            // Before the first match, which can run out of time on its own and would hide the cancellation.
+            cancellationToken.ThrowIfCancellationRequested();
             for (int lineStart = 0; ; )
             {
                 int lineEnd = text.AsSpan(lineStart).IndexOfAny('\r', '\n') is var found and >= 0
@@ -159,7 +174,8 @@ internal static class TextSearch
                     matches.Add(
                         new SearchMatch(
                             replacement is null ? ""
-                            : query.UseRegex ? match.Result(replacement)
+                            // A substitution such as $_, the whole text, brings line breaks of every kind.
+                            : query.UseRegex ? InLineBreaks(match.Result(replacement), lineBreak)
                             : replacement
                         )
                         {
@@ -177,9 +193,13 @@ internal static class TextSearch
         }
         catch (RegexMatchTimeoutException)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             return SearchOutcome.OutOfTime;
         }
     }
+
+    private static string InLineBreaks(string text, string lineBreak) =>
+        text.AsSpan().IndexOfAny('\r', '\n') < 0 ? text : TextUtilities.NormalizeNewLines(text, lineBreak);
 
     /// <summary>Whether the search took its time; throws once it is cancelled.</summary>
     private static bool IsOutOfTime(long start, CancellationToken cancellationToken)

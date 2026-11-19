@@ -78,13 +78,14 @@ namespace Darp.CodeEditor;
 /// Replace All then does nothing: it never replaces only some of the matches.
 /// </para>
 /// <para>
-/// The editor handles only its own keys: editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation, search
-/// (Ctrl+F, Ctrl+H, F3, Shift+F3), completion (Ctrl+Space), comments (Ctrl+/) and indentation (Tab, Shift+Tab). On
-/// macOS, Cmd takes Ctrl's place for the clipboard, search and comments, and Cmd+Alt+F opens the replace bar, as
-/// AvaloniaEdit decides by the operating system. Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A
-/// right click opens the editor's context menu: Cut, Copy, Paste and Select All. For an app's Edit menu,
-/// <see cref="Cut"/>, <see cref="Copy"/>, <see cref="Paste"/> and <see cref="SelectAll"/> do the same, and the
-/// document's <c>Undo</c> and <c>Redo</c> the rest.
+/// <see cref="Keymap"/> binds keys to the editor's commands, by default VS Code's: completion (Ctrl+Space, Ctrl+I),
+/// signature help (Ctrl+Shift+Space), search (Ctrl+F, Ctrl+H, F3, Shift+F3), comments (Ctrl+/), and undo and redo
+/// (Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z), with Cmd for Ctrl on macOS but for Ctrl+Space. Open popups have keys of their own,
+/// and editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation and indentation (Tab, Shift+Tab) are
+/// AvaloniaEdit's. Other keys, such as F5 or Ctrl+S, go on to the app's key bindings, and so does a key of the keymap
+/// whose command does not apply, such as Ctrl+Z in a read-only editor. A right click opens the editor's context menu:
+/// Cut, Copy, Paste and Select All. For an app's Edit menu, <see cref="Cut"/>, <see cref="Copy"/>, <see cref="Paste"/>
+/// and <see cref="SelectAll"/> do the same, and the document's <c>Undo</c> and <c>Redo</c> the rest.
 /// </para>
 /// <para>Members that take offsets or ranges clamp them to the text.</para>
 /// </remarks>
@@ -117,6 +118,16 @@ public class CodeEditor : TemplatedControl
         CodeEditor,
         CodeEditorColorTheme
     >(nameof(ColorTheme), defaultValue: CodeEditorColorTheme.LightPlus);
+
+    /// <summary>Defines the <see cref="Keymap"/> property.</summary>
+    public static readonly StyledProperty<CodeEditorKeymap> KeymapProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        CodeEditorKeymap
+    >(nameof(Keymap), defaultValue: CodeEditorKeymap.Default);
+
+    /// <summary>Defines the <see cref="PendingKeys"/> property.</summary>
+    public static readonly DirectProperty<CodeEditor, KeyGesture?> PendingKeysProperty =
+        AvaloniaProperty.RegisterDirect<CodeEditor, KeyGesture?>(nameof(PendingKeys), editor => editor.PendingKeys);
 
     /// <summary>Defines the <see cref="Selection"/> property.</summary>
     public static readonly DirectProperty<CodeEditor, TextSelection> SelectionProperty =
@@ -151,35 +162,10 @@ public class CodeEditor : TemplatedControl
     /// </summary>
     private readonly TextDocument _emptyBuffer = new();
 
-    /// <summary>Highlights the shown document.</summary>
-    private BackgroundTextMateHighlighter? _highlighter;
+    /// <summary>What the editor does for the shown document; null while it shows none.</summary>
+    private EditorView? _view;
 
-    /// <summary>The editing helpers of the shown document.</summary>
-    private EditingHelpers? _helpers;
-
-    /// <summary>Marks the bracket next to the caret in the shown document, and its match.</summary>
-    private BracketHighlighter? _brackets;
-
-    /// <summary>Shows the spaces and tabs inside the selection.</summary>
-    private WhitespaceLayer? _whitespace;
-
-    /// <summary>Draws the squiggles under the shown document's diagnostics.</summary>
-    private SquiggleLayer? _squiggles;
-
-    /// <summary>Colors the server's semantic tokens of the shown document.</summary>
-    private SemanticHighlighter? _semantic;
-
-    /// <summary>Shows the diagnostics and the server's hover where the pointer rests.</summary>
-    private HoverController? _hover;
-
-    /// <summary>The snippet that completion inserted last in the shown document, while the user tabs through it.</summary>
-    private SnippetController? _snippets;
-
-    /// <summary>The server's completion of the shown document.</summary>
-    private CompletionController? _completion;
-
-    /// <summary>The server's signature help of the shown document.</summary>
-    private SignatureHelpController? _signatureHelp;
+    private KeyGesture? _pendingKeys;
 
     /// <summary>The template's panel, which the search bar goes into, over the text.</summary>
     private Panel? _root;
@@ -191,8 +177,8 @@ public class CodeEditor : TemplatedControl
     private SearchBar? _searchBar;
 
     /// <summary>
-    /// AvaloniaEdit's search commands, for the part's text area: they open and use the editor's bar, also when code
-    /// executes them, instead of AvaloniaEdit's search panel.
+    /// AvaloniaEdit's search commands, for the part's text area: they run the editor's, also when code executes them,
+    /// instead of opening AvaloniaEdit's search panel.
     /// </summary>
     private readonly RoutedCommandBinding[] _searchCommands;
 
@@ -251,12 +237,13 @@ public class CodeEditor : TemplatedControl
         [
             new(ApplicationCommands.Find, (_, _) => OpenSearch()),
             new(ApplicationCommands.Replace, (_, _) => OpenSearch(replace: true)),
-            new(SearchCommands.FindNext, (_, _) => FindNext(previous: false)),
-            new(SearchCommands.FindPrevious, (_, _) => FindNext(previous: true)),
+            new(SearchCommands.FindNext, (_, _) => _view?.RunCommand(CodeEditorCommands.FindNext)),
+            new(SearchCommands.FindPrevious, (_, _) => _view?.RunCommand(CodeEditorCommands.FindPrevious)),
         ];
         // Ahead of AvaloniaEdit's own keys, which its text area handles as they bubble, and of its typed text.
         AddHandler(KeyDownEvent, OnKeyDownTunnel, RoutingStrategies.Tunnel);
         AddHandler(TextInputEvent, OnTextInputTunnel, RoutingStrategies.Tunnel);
+        AddHandler(PointerPressedEvent, (_, _) => EndWait(), RoutingStrategies.Tunnel, handledEventsToo: true);
     }
 
     /// <summary>
@@ -333,8 +320,23 @@ public class CodeEditor : TemplatedControl
     /// <summary>The caret's line and column, for a status bar.</summary>
     public TextPosition CaretPosition => _caretPosition;
 
+    /// <summary>
+    /// Which keys run which of the editor's commands. Default: <see cref="CodeEditorKeymap.Default"/>.
+    /// </summary>
+    public CodeEditorKeymap Keymap
+    {
+        get => GetValue(KeymapProperty);
+        set => SetValue(KeymapProperty, value);
+    }
+
+    /// <summary>
+    /// The first stroke of a key sequence while the editor waits for its second, such as Ctrl+K of Ctrl+K Ctrl+I, for a
+    /// status bar; null otherwise.
+    /// </summary>
+    public KeyGesture? PendingKeys => _pendingKeys;
+
     /// <summary>The semantic colors of the shown document, for benchmarks; null while it shows none.</summary>
-    internal SemanticHighlighter? SemanticHighlighter => _semantic;
+    internal SemanticHighlighter? SemanticHighlighter => _view?.SemanticHighlighter;
 
     /// <summary>The clock of the time limit in the background, in the grammars the editor loads: the system's.</summary>
     internal TimeProvider GrammarClock { get; init; } = TimeProvider.System;
@@ -401,32 +403,17 @@ public class CodeEditor : TemplatedControl
     /// Opens the search bar, as Ctrl+F does, or the replace bar, as Ctrl+H does, and puts the keyboard in its query. A
     /// selection within one line becomes the search text. A read-only editor opens the search bar either way.
     /// </summary>
-    public void OpenSearch(bool replace = false)
-    {
-        if (_part is { } part && CreatedSearchBar() is { } bar)
-            bar.Open(replace && !IsReadOnly, SelectedLineText(part.TextArea));
-    }
+    public void OpenSearch(bool replace = false) =>
+        _view?.RunCommand(replace ? CodeEditorCommands.Replace : CodeEditorCommands.Find);
 
     /// <summary>Moves the selection to the clipboard, as Ctrl+X does. No effect in a read-only editor.</summary>
-    public void Cut()
-    {
-        if (_shown is not null)
-            _part?.Cut();
-    }
+    public void Cut() => _view?.Cut();
 
     /// <summary>Copies the selection to the clipboard, as Ctrl+C does.</summary>
-    public void Copy()
-    {
-        if (_shown is not null)
-            _part?.Copy();
-    }
+    public void Copy() => _view?.Copy();
 
     /// <summary>Replaces the selection with the clipboard's text, as Ctrl+V does. No effect in a read-only editor.</summary>
-    public void Paste()
-    {
-        if (_shown is not null)
-            _part?.Paste();
-    }
+    public void Paste() => _view?.Paste();
 
     /// <summary>Selects the whole text, as Ctrl+A does.</summary>
     public void SelectAll() => Selection = new TextSelection(0, Document?.CurrentSnapshot.Length ?? 0);
@@ -470,8 +457,26 @@ public class CodeEditor : TemplatedControl
             part.TemplateApplied += OnPartTemplateApplied;
             foreach (RoutedCommandBinding binding in _searchCommands)
                 part.TextArea.CommandBindings.Add(binding);
+            RemoveInheritedKeys(part.TextArea);
         }
         UpdateShownDocument();
+    }
+
+    /// <summary>
+    /// Removes AvaloniaEdit's Ctrl+I, which indents the selected lines, and its undo and redo keys: the keymap binds
+    /// them, Ctrl+I to completion, and an app that unbinds them gets them.
+    /// </summary>
+    private static void RemoveInheritedKeys(TextArea textArea)
+    {
+        Remove(textArea.DefaultInputHandler.Editing.CommandBindings, AvaloniaEditCommands.IndentSelection);
+        Remove(textArea.DefaultInputHandler.CommandBindings, ApplicationCommands.Undo);
+        Remove(textArea.DefaultInputHandler.CommandBindings, ApplicationCommands.Redo);
+
+        static void Remove(ICollection<RoutedCommandBinding> bindings, RoutedCommand command)
+        {
+            foreach (RoutedCommandBinding binding in bindings.Where(b => b.Command == command).ToList())
+                bindings.Remove(binding);
+        }
     }
 
     /// <inheritdoc />
@@ -506,14 +511,12 @@ public class CodeEditor : TemplatedControl
     protected override void OnLostFocus(FocusChangedEventArgs e)
     {
         base.OnLostFocus(e);
+        EndWait();
         // Raised as the focus leaves an element inside the editor; it may stay inside, as when it goes to the search bar.
         Dispatcher.Post(() =>
         {
-            if (IsKeyboardFocusWithin)
-                return;
-            _hover?.Close();
-            _completion?.Close();
-            _signatureHelp?.Close();
+            if (!IsKeyboardFocusWithin)
+                _view?.OnFocusLeft();
         });
     }
 
@@ -527,14 +530,11 @@ public class CodeEditor : TemplatedControl
         {
             _part?.IsReadOnly = IsReadOnly || _shown is null;
             _searchBar?.UpdateReplaceRow();
-            // Nothing completes, asks for signatures or tabs through a snippet where the user cannot type.
             if (IsReadOnly)
-            {
-                _completion?.Close();
-                _signatureHelp?.Close();
-                _snippets?.End();
-            }
+                _view?.OnReadOnly();
         }
+        else if (change.Property == KeymapProperty)
+            EndWait();
         else if (
             change.Property == ColorThemeProperty
             || change.Property == ThemeVariantScope.ActualThemeVariantProperty
@@ -590,7 +590,12 @@ public class CodeEditor : TemplatedControl
                 }
             }
         }
+        // Without a document, nothing is left to search, and no key reaches the bar's view.
+        if (Document is null or { IsDisposed: true } && _searchBar is { IsOpen: true } bar)
+            bar.Close();
         UpdateHighlighting();
+        // Last, once the part, the view and the subscriptions agree: a handler may switch the document again.
+        UpdatePendingKeys();
     }
 
     private void Show(TextEditor part, CodeDocument document)
@@ -608,21 +613,10 @@ public class CodeEditor : TemplatedControl
         _shown = document;
         Select(part, place?.Selection ?? new TextSelection(0));
         TextView textView = part.TextArea.TextView;
-        _highlighter = new BackgroundTextMateHighlighter(textView, buffer, Dispatcher, null);
-        _helpers = new EditingHelpers(part.TextArea, document, _highlighter);
-        _brackets = new BracketHighlighter(part.TextArea, document, _highlighter) { Colors = _colors };
-        _whitespace = new WhitespaceLayer(part.TextArea) { Colors = _colors };
-        _squiggles = new SquiggleLayer(part.TextArea, document) { Colors = _colors };
-        _semantic = new SemanticHighlighter(textView, document, Dispatcher) { Theme = _theme };
-        _hover = new HoverController(this, part.TextArea, document, _squiggles, _highlighter) { Colors = _colors };
-        _snippets = new SnippetController(part.TextArea, document) { Colors = _colors };
-        // After the editing helpers: they see typed text first, so that a typed "(" has its ")" when it asks.
-        _completion = new CompletionController(this, part.TextArea, document, _highlighter, _snippets)
-        {
-            Colors = _colors,
-            Icons = _iconColors,
-        };
-        _signatureHelp = new SignatureHelpController(this, part.TextArea, document, _highlighter) { Colors = _colors };
+        _view = new EditorView(
+            new EditorContext(this, part.TextArea, document, () => Keymap, () => _searchBar, CreatedSearchBar)
+        );
+        _view.SetColors(_theme, _colors, _iconColors);
         _searchBar?.Attach(this, part.TextArea, document);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
         _waitingForLayout = true;
@@ -636,27 +630,9 @@ public class CodeEditor : TemplatedControl
         shown.Disposed -= OnDocumentDisposed;
         shown.PropertyChanged -= OnDocumentPropertyChanged;
         CancelLoading();
-        _helpers?.Dispose();
-        _helpers = null;
-        _brackets?.Dispose();
-        _brackets = null;
-        _whitespace?.Dispose();
-        _whitespace = null;
-        _hover?.Dispose();
-        _hover = null;
-        _completion?.Dispose();
-        _completion = null;
-        _snippets?.Dispose();
-        _snippets = null;
-        _signatureHelp?.Dispose();
-        _signatureHelp = null;
-        _squiggles?.Dispose();
-        _squiggles = null;
-        _semantic?.Dispose();
-        _semantic = null;
         _searchBar?.Detach();
-        _highlighter?.Dispose();
-        _highlighter = null;
+        _view?.Dispose();
+        _view = null;
         part.TextArea.TextView.LayoutUpdated -= OnTextViewLayoutUpdated;
         part.TextArea.TextView.VisualLinesChanged -= OnTextViewLaidOut;
         part.TextArea.TextView.ScrollOffsetChanged -= OnTextViewLaidOut;
@@ -685,83 +661,26 @@ public class CodeEditor : TemplatedControl
     /// </summary>
     private void OnDocumentDisposed(object? sender, EventArgs e) => Dispatcher.Post(UpdateShownDocument);
 
-    /// <summary>
-    /// The editor's own keys, before AvaloniaEdit's: search, also in the search bar, as AvaloniaEdit decides them by
-    /// the operating system, and in the text area the keys of completion, of signature help, of a snippet's stops and
-    /// of the editing helpers. Ctrl+F and Ctrl+H are the editor's even without a document, so that AvaloniaEdit's own
-    /// search panel never opens.
-    /// </summary>
+    /// <summary>Keys, before AvaloniaEdit's, also in the search bar: the view's (<see cref="EditorView.OnKeyDown"/>).</summary>
     private void OnKeyDownTunnel(object? sender, KeyEventArgs e)
     {
-        bool shift = e.KeyModifiers == KeyModifiers.Shift;
-        if (ApplicationCommands.Find.Gesture.Matches(e) || ApplicationCommands.Replace.Gesture.Matches(e))
-        {
-            OpenSearch(replace: ApplicationCommands.Replace.Gesture.Matches(e));
-            e.Handled = true;
-        }
-        else if (e.Key == Key.F3 && (e.KeyModifiers == KeyModifiers.None || shift))
-            e.Handled = FindNext(previous: shift);
-        else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && Dismiss())
-            e.Handled = true;
-        else if (_part is not { TextArea.IsFocused: true })
+        if (_view is not { } view)
             return;
-        else if (
-            _completion?.OnKeyDown(e) == true
-            || _signatureHelp?.OnKeyDown(e) == true
-            || _snippets?.OnKeyDown(e) == true
-        )
-        {
+        if (view.OnKeyDown(e))
             e.Handled = true;
-        }
-        else
-            _helpers?.OnKeyDown(e);
+        UpdatePendingKeys();
     }
 
-    /// <summary>Typed text, before AvaloniaEdit's text area takes it: a commit character commits completion's item.</summary>
-    private void OnTextInputTunnel(object? sender, TextInputEventArgs e)
+    private void OnTextInputTunnel(object? sender, TextInputEventArgs e) => _view?.OnTextInput(e);
+
+    /// <summary>Ends the wait for a key sequence's second stroke.</summary>
+    private void EndWait()
     {
-        if (_part is { TextArea.IsFocused: true })
-            _completion?.OnTextInput(e);
+        _view?.EndWait();
+        UpdatePendingKeys();
     }
 
-    /// <summary>
-    /// What Escape closes, one at a time: completion, signature help, a snippet's stops while the text area has the
-    /// keyboard, the hover, the search bar, in the order of VS Code's keys. Each also ends what still waits for its
-    /// server.
-    /// </summary>
-    /// <returns>Whether it closed something the user saw.</returns>
-    private bool Dismiss()
-    {
-        if (
-            _completion?.Close() == true
-            || _signatureHelp?.Close() == true
-            || (_part is { TextArea.IsFocused: true } && _snippets?.End() == true)
-            || _hover?.Close() == true
-        )
-        {
-            return true;
-        }
-        if (_searchBar is not { IsOpen: true } bar)
-            return false;
-        bar.Close();
-        return true;
-    }
-
-    /// <summary>
-    /// Selects the next or previous match, as F3 and Shift+F3 do, opening the bar for the selection if it is closed.
-    /// </summary>
-    /// <returns>Whether there is a document to search.</returns>
-    private bool FindNext(bool previous)
-    {
-        if (_part is not { } part || CreatedSearchBar() is not { } bar)
-            return false;
-        string? text = bar.IsOpen ? null : SelectedLineText(part.TextArea);
-        if (previous)
-            bar.FindPrevious(text);
-        else
-            bar.FindNext(text);
-        return true;
-    }
+    private void UpdatePendingKeys() => SetAndRaise(PendingKeysProperty, ref _pendingKeys, _view?.PendingKeys);
 
     /// <summary>
     /// The search bar, made over the text the first time it is needed while the editor shows a document; null without
@@ -788,10 +707,6 @@ public class CodeEditor : TemplatedControl
         if (sender is TextEditor { SearchPanel: { } panel })
             panel.Uninstall();
     }
-
-    /// <summary>The selected text, if it is within one line: what a search starts with.</summary>
-    private static string? SelectedLineText(TextArea textArea) =>
-        textArea.Selection is { IsEmpty: false, IsMultiline: false } selection ? selection.GetText() : null;
 
     /// <summary>Applies a new indentation of the shown document at once. Raised on the UI thread.</summary>
     private void OnDocumentPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -1052,15 +967,7 @@ public class CodeEditor : TemplatedControl
             TextAreaColors colors = TextAreaColors.From(theme);
             _colors = colors;
             _iconColors = SymbolIconColors.From(theme);
-            _completion?.Colors = colors;
-            _completion?.Icons = _iconColors;
-            _snippets?.Colors = colors;
-            _signatureHelp?.Colors = colors;
-            _brackets?.Colors = colors;
-            _whitespace?.Colors = colors;
-            _squiggles?.Colors = colors;
-            _hover?.Colors = colors;
-            _semantic?.Theme = theme;
+            _view?.SetColors(theme, colors, _iconColors);
             _searchBar?.Colors = colors;
             TextArea textArea = part.TextArea;
             part.Background = colors.Background;
@@ -1071,7 +978,7 @@ public class CodeEditor : TemplatedControl
             textArea.TextView.CurrentLineBackground = colors.CurrentLineBackground;
             textArea.TextView.CurrentLineBorder = colors.CurrentLineBorder;
         }
-        if (_highlighter is { } highlighter && (highlighter.Grammar != grammar || firstScreen is not null))
+        if (_view?.Highlighter is { } highlighter && (highlighter.Grammar != grammar || firstScreen is not null))
             highlighter.SetGrammar(grammar, firstScreen);
     }
 

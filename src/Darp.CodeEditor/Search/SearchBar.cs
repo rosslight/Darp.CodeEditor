@@ -160,6 +160,12 @@ internal sealed class SearchBar : UserControl
     /// <summary>The number of matches, and which one is selected.</summary>
     internal string? Count => _count.Text;
 
+    /// <summary>Whether a search runs, whose result is still to show.</summary>
+    internal bool IsSearching => _searching is not null;
+
+    /// <summary>Raised once a search's result shows: its matches, the match it selected and the count.</summary>
+    internal event EventHandler? Searched;
+
     /// <summary>Why the result is partial, or the regular expression is invalid; null for neither.</summary>
     internal string? Message => _message.IsVisible ? _message.Text : null;
 
@@ -379,6 +385,7 @@ internal sealed class SearchBar : UserControl
         _move = Move.None;
         Perform(move, result);
         UpdateStatus();
+        Searched?.Invoke(this, EventArgs.Empty);
     }
 
     private void CancelSearch()

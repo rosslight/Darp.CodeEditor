@@ -348,6 +348,35 @@ public sealed class SearchTests(UiFixture ui)
             bar.Message.ShouldBeNull();
         });
 
+    [Fact]
+    public Task An_open_search_bar_closes_once_the_editor_has_no_document() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("|one", CodeLanguage.PlainText);
+            window.Editor.OpenSearch();
+
+            window.Editor.Document = null;
+            window.Press(Key.Escape);
+
+            BarOf(window).IsOpen.ShouldBeFalse();
+        });
+
+    /// <summary>Completes once the search under way shows its result, or at once without one.</summary>
+    internal static Task SearchedAsync(SearchBar bar)
+    {
+        if (!bar.IsSearching)
+            return Task.CompletedTask;
+        var searched = new TaskCompletionSource();
+        bar.Searched += OnSearched;
+        return Wait.ForAsync(searched.Task);
+
+        void OnSearched(object? sender, EventArgs e)
+        {
+            bar.Searched -= OnSearched;
+            searched.TrySetResult();
+        }
+    }
+
     private static SearchBar BarOf(EditorWindow window) =>
         window.Editor.GetVisualDescendants().OfType<SearchBar>().Single();
 

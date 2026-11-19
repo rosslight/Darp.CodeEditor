@@ -206,22 +206,24 @@ public sealed class CompletionTests(UiFixture ui)
             using var window = new EditorWindow(new CodeEditor { Document = document });
             await OpenAsync(window, 0);
 
-            // Typed, and no other work run on the UI thread since: the list still shows what it showed.
             TypeAlone(window, "C");
             TypeAlone(window, "o");
             TypeAlone(window, "n");
-            Labels(window).ShouldBe(["Console", "Convert", "Math"]);
 
-            // Then the filter of what was typed last.
-            await WaitForLabelsAsync(window, ["Console", "Convert"]);
-            Row(window, "Console")
-                .GetVisualDescendants()
-                .OfType<TextBlock>()
-                .Single()
-                .Inlines.ShouldNotBeNull()
-                .OfType<Run>()
-                .First()
-                .Text.ShouldBe("Con");
+            // The filter of what was typed last: "C" and "Co" match the same items, but highlight less of them. A filter
+            // can end before the keystroke's handler does, so what shows meanwhile is not certain.
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return Labels(window).SequenceEqual(["Console", "Convert"])
+                    && Row(window, "Console")
+                        .GetVisualDescendants()
+                        .OfType<TextBlock>()
+                        .Single()
+                        .Inlines?.OfType<Run>()
+                        .First()
+                        .Text == "Con";
+            });
         });
 
     [Fact]
@@ -740,6 +742,73 @@ public sealed class CompletionTests(UiFixture ui)
             window.Editor.Selection.Caret.ShouldBe(document.Text.Length);
             document.Undo();
             document.Text.ShouldBe(text);
+        });
+
+    [Fact]
+    public Task An_items_text_and_additional_edits_go_in_with_the_documents_line_breaks() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [ { "label": "block", "insertText": "{\n}", "additionalTextEdits": [
+                      { "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 0 } },
+                        "newText": "using System;\n" } ] } ] }
+                    """
+                )
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "x\r\nbl");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            await OpenAsync(window, document.Text.Length);
+            window.Press(Key.Enter);
+
+            document.Text.ShouldBe("using System;\r\nx\r\n{\r\n}");
+        });
+
+    /// <summary>Also on a line that ends in another line break than the document's.</summary>
+    [Fact]
+    public Task A_snippets_lines_go_in_with_the_documents_line_breaks() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse("""{ "items": [ { "label": "pair", "insertTextFormat": 2, "insertText": "${1:a}\n$0" } ] }""")
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "x\r\ny\r\npa\nz");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            await OpenAsync(window, 8);
+            window.Press(Key.Enter);
+
+            document.Text.ShouldBe("x\r\ny\r\na\r\n\nz");
+        });
+
+    [Fact]
+    public Task A_snippets_choice_goes_in_with_the_documents_line_breaks_and_selected_whole() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse("""{ "items": [ { "label": "pair", "insertTextFormat": 2, "insertText": "${1|a\nb,c|}" } ] }""")
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "x\r\ny\r\npa\nz");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            await OpenAsync(window, 8);
+            window.Press(Key.Enter);
+
+            MarkedText.Of(window).ShouldBe("x\r\ny\r\n«a\r\nb»\nz");
         });
 
     [Fact]

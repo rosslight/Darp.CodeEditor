@@ -22,14 +22,19 @@ public sealed class TextSnapshot
     /// </summary>
     private int[]? _lineStarts;
 
-    internal TextSnapshot(ITextSource text, int version)
+    internal TextSnapshot(ITextSource text, int version, string lineBreak)
     {
         _text = text;
         Version = version;
+        LineBreak = lineBreak;
     }
 
+    /// <summary>This version of the text, whose new text takes <paramref name="lineBreak"/>.</summary>
+    internal TextSnapshot WithLineBreak(string lineBreak) =>
+        new(_text, Version, lineBreak) { _lineStarts = _lineStarts };
+
     /// <summary>A snapshot of a string that was compiled without a document.</summary>
-    internal static TextSnapshot FromString(string text) => new(new StringTextSource(text), 0);
+    internal static TextSnapshot FromString(string text) => new(new StringTextSource(text), 0, LineBreaks.Detect(text));
 
     /// <summary>
     /// Counts the document's changes: each change of the text makes a snapshot with a higher version. 0 for a compiled
@@ -39,6 +44,11 @@ public sealed class TextSnapshot
 
     /// <summary>The length of the text, in UTF-16 code units.</summary>
     public int Length => _text.TextLength;
+
+    /// <summary>
+    /// The line break that new text in this version takes: the document's (<see cref="CodeDocument.LineBreak"/>).
+    /// </summary>
+    internal string LineBreak { get; }
 
     /// <summary>The document's version in AvaloniaEdit, to follow its changes; null for a compiled string.</summary>
     internal ITextSourceVersion? SourceVersion => _text.Version;
