@@ -48,6 +48,18 @@ public sealed class AutoIndentTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Tab_on_a_blank_line_puts_the_documents_line_break_in_the_text_that_a_rule_appends() =>
+        _ui.Run(async () =>
+        {
+            await Rules.Loaded;
+            using EditorWindow window = Show("a\r\nAPPEND\r\n|", Rules);
+
+            window.Press(Key.Tab);
+
+            MarkedText.Of(window).ShouldBe("a\r\nAPPEND\r\nx\r\ny|");
+        });
+
+    [Fact]
     public Task Enter_before_the_text_of_an_indented_line_keeps_the_carets_column() =>
         _ui.Run(async () =>
         {
