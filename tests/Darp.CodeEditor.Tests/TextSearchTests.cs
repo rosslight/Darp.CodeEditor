@@ -23,6 +23,23 @@ public sealed class TextSearchTests
         result.Outcome.ShouldBe(SearchOutcome.OutOfTime);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_replacement_goes_in_with_the_documents_line_breaks(bool useRegex)
+    {
+        TextSnapshot snapshot = TextSnapshot.FromString("a=1\r\nb=2");
+
+        SearchResult result = TextSearch.Find(
+            snapshot,
+            new SearchQuery("=", MatchCase: true, WholeWord: false, UseRegex: useRegex),
+            "\n=\r",
+            CancellationToken.None
+        );
+
+        result.Matches.Select(match => match.Replacement).ShouldBe(["\r\n=\r\n", "\r\n=\r\n"]);
+    }
+
     [Fact]
     public void A_cancelled_search_stops()
     {
