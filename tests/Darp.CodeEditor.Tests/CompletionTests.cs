@@ -743,6 +743,53 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task An_items_text_and_additional_edits_go_in_with_the_documents_line_breaks() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [ { "label": "block", "insertText": "{\n}", "additionalTextEdits": [
+                      { "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 0 } },
+                        "newText": "using System;\n" } ] } ] }
+                    """
+                )
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "x\r\nbl");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            await OpenAsync(window, document.Text.Length);
+            window.Press(Key.Enter);
+
+            document.Text.ShouldBe("using System;\r\nx\r\n{\r\n}");
+        });
+
+    /// <summary>Also on a line that ends in another line break than the document's.</summary>
+    [Fact]
+    public Task A_snippets_lines_go_in_with_the_documents_line_breaks() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse("""{ "items": [ { "label": "pair", "insertTextFormat": 2, "insertText": "${1:a}\n$0" } ] }""")
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "x\r\ny\r\npa\nz");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            await OpenAsync(window, 8);
+            window.Press(Key.Enter);
+
+            document.Text.ShouldBe("x\r\ny\r\na\r\n\nz");
+        });
+
+    [Fact]
     public Task Additional_edits_that_come_after_the_commit_join_its_step_while_it_is_the_last_one() =>
         _ui.Run(async () =>
         {
