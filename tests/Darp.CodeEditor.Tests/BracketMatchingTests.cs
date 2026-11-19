@@ -166,6 +166,19 @@ public sealed class BracketMatchingTests(UiFixture ui)
         unmatched.ShouldBeFalse();
     }
 
+    /// <summary>An opening bracket with several closing ones pairs with each, at the caret and around it.</summary>
+    [Fact]
+    public void An_opening_bracket_with_several_closing_ones_pairs_with_each()
+    {
+        CharacterPair[] brackets = [new("(", ")"), new("(", "]")];
+        var document = new TextDocument("(1] (2)");
+
+        BracketMatcher.FindPair(document, 0, brackets, _ => null).ShouldBe((0, 2));
+        BracketMatcher.FindPair(document, 3, brackets, _ => null).ShouldBe((0, 2));
+        BracketMatcher.FindEnclosing(document, 1, brackets, _ => null).ShouldBe((0, 2));
+        BracketMatcher.FindEnclosing(document, 5, brackets, _ => null).ShouldBe((4, 6));
+    }
+
     [Fact]
     public void Line_breaks_count_against_what_the_search_reads()
     {

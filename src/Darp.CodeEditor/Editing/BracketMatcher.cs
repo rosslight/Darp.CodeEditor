@@ -34,22 +34,22 @@ internal static class BracketMatcher
         Func<int, int[]?> tokensOf
     )
     {
-        (string opens, string closes) = Characters(brackets);
+        var kinds = new BracketKinds(brackets);
         foreach (int offset in (ReadOnlySpan<int>)[caret, caret - 1])
         {
             if (offset < 0 || offset >= document.TextLength)
                 continue;
             char c = document.GetCharAt(offset);
-            int open = opens.IndexOf(c);
-            int close = closes.IndexOf(c);
+            int open = kinds.Opening(c);
+            int close = kinds.Closing(c);
             if (open < 0 && close < 0)
                 continue;
             DocumentLine line = document.GetLineByOffset(offset);
             if (IsIgnored(tokensOf(line.LineNumber), offset - line.Offset))
                 continue;
-            if (open >= 0 && Closing(document, offset, open, opens, closes, tokensOf) is { } closing)
+            if (open >= 0 && Closing(document, offset, open, kinds, tokensOf) is { } closing)
                 return (offset, closing);
-            if (open < 0 && OpenBefore(document, offset, opens, closes, tokensOf).Close(close) is var (_, opening))
+            if (open < 0 && OpenBefore(document, offset, kinds, tokensOf).Close(close) is var (_, opening))
                 return (opening, offset);
         }
         return null;
@@ -76,28 +76,24 @@ internal static class BracketMatcher
         Func<int, int[]?> tokensOf
     )
     {
-        // A kind is an opening character, which may have several closing ones.
-        string opens = string.Concat(brackets.Select(b => b.Open[0]).Distinct());
-        string closes = string.Concat(brackets.Select(b => b.Close));
-        int[] kindOf = [.. brackets.Select(b => opens.IndexOf(b.Open[0]))];
-        var nesting = new BracketNesting(opens.Length);
+        var kinds = new BracketKinds(brackets);
+        var nesting = new BracketNesting(kinds.Count);
         bool unmatched = false;
         Scan(
             document,
             Math.Max(0, offset - MaxDistance),
             Math.Min(document.TextLength, offset + MaxDistance),
             forward: true,
-            opens + closes,
+            kinds.Characters,
             tokensOf,
             (c, at) =>
             {
-                if (opens.IndexOf(c) is var kind and >= 0)
+                if (kinds.Opening(c) is var kind and >= 0)
                 {
                     nesting.Open(kind, at);
                     return false;
                 }
-                return nesting.Close(kindOf[closes.IndexOf(c)]) is null
-                    && (unmatched = at >= offset && c == pair.Close[0]);
+                return nesting.Close(kinds.Closing(c)) is null && (unmatched = at >= offset && c == pair.Close[0]);
             }
         );
         return unmatched;
@@ -116,8 +112,8 @@ internal static class BracketMatcher
         Func<int, int[]?> tokensOf
     )
     {
-        (string opens, string closes) = Characters(brackets);
-        BracketNesting nesting = OpenBefore(document, offset, opens, closes, tokensOf);
+        var kinds = new BracketKinds(brackets);
+        BracketNesting nesting = OpenBefore(document, offset, kinds, tokensOf);
         int around = nesting.Depth;
         (int Open, int Close)? pair = null;
         if (around > 0)
@@ -127,13 +123,13 @@ internal static class BracketMatcher
                 offset,
                 Math.Min(document.TextLength, offset + MaxDistance),
                 forward: true,
-                opens + closes,
+                kinds.Characters,
                 tokensOf,
                 (c, at) =>
                 {
-                    if (opens.IndexOf(c) is var kind and >= 0)
+                    if (kinds.Opening(c) is var kind and >= 0)
                         nesting.Open(kind, at);
-                    else if (nesting.Close(closes.IndexOf(c)) is var (index, opening) && index < around)
+                    else if (nesting.Close(kinds.Closing(c)) is var (index, opening) && index < around)
                         pair = (opening, at);
                     return pair is not null;
                 }
@@ -154,21 +150,21 @@ internal static class BracketMatcher
         Func<int, int[]?> tokensOf
     )
     {
-        (string opens, string closes) = Characters(brackets);
-        BracketNesting nesting = OpenBefore(document, offset, opens, closes, tokensOf);
+        var kinds = new BracketKinds(brackets);
+        BracketNesting nesting = OpenBefore(document, offset, kinds, tokensOf);
         int? next = null;
-        if (opens.Length > 0)
+        if (kinds.Count > 0)
         {
             Scan(
                 document,
                 offset,
                 Math.Min(document.TextLength, offset + MaxDistance),
                 forward: true,
-                opens + closes,
+                kinds.Characters,
                 tokensOf,
                 (c, at) =>
                 {
-                    if (opens.IndexOf(c) >= 0 || nesting.Close(closes.IndexOf(c)) is not null)
+                    if (kinds.Opening(c) >= 0 || nesting.Close(kinds.Closing(c)) is not null)
                         next = at;
                     return next is not null;
                 }
@@ -190,27 +186,26 @@ internal static class BracketMatcher
         Func<int, int[]?> tokensOf
     )
     {
-        (string opens, string closes) = Characters(brackets);
-        string characters = opens + closes;
+        var kinds = new BracketKinds(brackets);
         var pairs = new List<(int Open, int Close)>();
-        if (opens.Length == 0)
+        if (kinds.Count == 0)
             return pairs;
         // Per kind, the brackets passed that wait for their match, and the closing brackets that wait for an opening.
-        int[] waiting = new int[opens.Length];
-        Queue<int>[] closings = [.. opens.Select(_ => new Queue<int>())];
+        int[] waiting = new int[kinds.Count];
+        Queue<int>[] closings = [.. Enumerable.Range(0, kinds.Count).Select(_ => new Queue<int>())];
         int unpaired = 0;
         Scan(
             document,
             offset,
             Math.Min(document.TextLength, offset + MaxDistance),
             forward: true,
-            characters,
+            kinds.Characters,
             tokensOf,
             (c, at) =>
             {
-                if (opens.IndexOf(c) is var kind and >= 0)
+                if (kinds.Opening(c) is var kind and >= 0)
                     waiting[kind]++;
-                else if (waiting[kind = closes.IndexOf(c)] > 0)
+                else if (waiting[kind = kinds.Closing(c)] > 0)
                     waiting[kind]--;
                 else
                 {
@@ -228,13 +223,13 @@ internal static class BracketMatcher
             Math.Max(0, offset - MaxDistance),
             offset,
             forward: false,
-            characters,
+            kinds.Characters,
             tokensOf,
             (c, at) =>
             {
-                if (closes.IndexOf(c) is var kind and >= 0)
+                if (kinds.Closing(c) is var kind and >= 0)
                     waiting[kind]++;
-                else if (waiting[kind = opens.IndexOf(c)] > 0)
+                else if (waiting[kind = kinds.Opening(c)] > 0)
                     waiting[kind]--;
                 else if (closings[kind].TryDequeue(out int close))
                 {
@@ -260,7 +255,7 @@ internal static class BracketMatcher
         Func<int, int[]?> tokensOf
     )
     {
-        (string opens, string closes) = Characters(brackets);
+        var kinds = new BracketKinds(brackets);
         var open = new Stack<int>();
         bool crossed = false;
         Scan(
@@ -268,14 +263,14 @@ internal static class BracketMatcher
             start,
             end,
             forward: true,
-            opens + closes,
+            kinds.Characters,
             tokensOf,
             (c, _) =>
             {
-                if (opens.IndexOf(c) is var kind and >= 0)
+                if (kinds.Opening(c) is var kind and >= 0)
                     open.Push(kind);
                 else
-                    crossed = !open.TryPop(out int last) || last != closes.IndexOf(c);
+                    crossed = !open.TryPop(out int last) || last != kinds.Closing(c);
                 return crossed;
             }
         );
@@ -291,12 +286,11 @@ internal static class BracketMatcher
         TextDocument document,
         int offset,
         int kind,
-        string opens,
-        string closes,
+        BracketKinds kinds,
         Func<int, int[]?> tokensOf
     )
     {
-        var nesting = new BracketNesting(opens.Length);
+        var nesting = new BracketNesting(kinds.Count);
         nesting.Open(kind, offset);
         // The brackets open before it, read only for a closing bracket that closes none after it.
         BracketNesting? before = null;
@@ -307,23 +301,23 @@ internal static class BracketMatcher
             offset + 1,
             Math.Min(document.TextLength, offset + 1 + MaxDistance),
             forward: true,
-            opens + closes,
+            kinds.Characters,
             tokensOf,
             (c, at) =>
             {
-                if (opens.IndexOf(c) is var open and >= 0)
+                if (kinds.Opening(c) is var open and >= 0)
                 {
                     nesting.Open(open, at);
                     return false;
                 }
-                int close = closes.IndexOf(c);
+                int close = kinds.Closing(c);
                 if (nesting.Close(close) is var (index, _))
                 {
                     if (index == 0)
                         closing = at;
                     return index == 0;
                 }
-                before ??= OpenBefore(document, offset, opens, closes, tokensOf);
+                before ??= OpenBefore(document, offset, kinds, tokensOf);
                 return closed = before.IsOpen(close);
             }
         );
@@ -336,47 +330,30 @@ internal static class BracketMatcher
     private static BracketNesting OpenBefore(
         TextDocument document,
         int offset,
-        string opens,
-        string closes,
+        BracketKinds kinds,
         Func<int, int[]?> tokensOf
     )
     {
-        var nesting = new BracketNesting(opens.Length);
-        if (opens.Length == 0)
+        var nesting = new BracketNesting(kinds.Count);
+        if (kinds.Count == 0)
             return nesting;
         Scan(
             document,
             Math.Max(0, offset - MaxDistance),
             offset,
             forward: true,
-            opens + closes,
+            kinds.Characters,
             tokensOf,
             (c, at) =>
             {
-                if (opens.IndexOf(c) is var kind and >= 0)
+                if (kinds.Opening(c) is var kind and >= 0)
                     nesting.Open(kind, at);
                 else
-                    nesting.Close(closes.IndexOf(c));
+                    nesting.Close(kinds.Closing(c));
                 return false;
             }
         );
         return nesting;
-    }
-
-    /// <summary>The opening and the closing characters of the brackets of one character each, by kind.</summary>
-    private static (string Opens, string Closes) Characters(IReadOnlyList<CharacterPair> brackets)
-    {
-        string opens = "";
-        string closes = "";
-        foreach (CharacterPair pair in brackets)
-        {
-            if (pair is { Open: [char open], Close: [char close] } && open != close)
-            {
-                opens += open;
-                closes += close;
-            }
-        }
-        return (opens, closes);
     }
 
     /// <summary>
