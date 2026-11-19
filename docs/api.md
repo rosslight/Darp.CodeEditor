@@ -311,9 +311,10 @@ popups; the search bar and the scroll bars follow the theme variant.
   rows at once, each exactly the editor's line height, with the icon and the label in the editor's font lined up with
   the word; the selected row shows its detail while the details are closed. A window with room for fewer rows shows
   fewer, and selecting and paging stay among them. The selected item's details show in a popup of their own beside
-  the list, right of it, else left of it, else narrower, else below or above it, so that the list stays at the word.
-  Ctrl+Space shows or hides them, and dragging the edges away from the word resizes the list's width and rows and the
-  details' size, while the editor shows the document. Asked for by key, the list says "No suggestions." when the
+  the list, right of it, else left of it, else narrower, else below or above it, or on the line's other side when the
+  list leaves no room there, so that the list stays at the word. Ctrl+Space shows or hides them, and dragging the edges
+  away from the word resizes the list's width or rows and the details' width or height, as far as the edges dragged
+  change them, while the editor shows the document. Asked for by key, the list says "No suggestions." when the
   server has none.
 - **Completion icons:** VS Code's codicons, drawn as vector shapes in the theme's `symbolIcon.*` colors, as in VS
   Code, and in VS Code's colors where the theme sets none. Their designs are licensed CC BY 4.0: the package lists
@@ -542,8 +543,9 @@ How the client talks to a server, where the protocol leaves a choice:
     dropped. An answer that comes after typing is filtered with what was typed since. A trigger character asks again
     also while a list shows, as in VS Code, and the new answer's list replaces it; meanwhile the list shows what still
     matches, and nothing left to show ends completion only once the new answer has nothing either.
-  - **Selecting:** Up, Down, Page Up and Page Down select among the rows that show, a page as many rows as show less
-    one, while the list has more than one item; with one, they go on to the text, as in VS Code.
+  - **Selecting:** Up, Down, Page Up and Page Down select among the rows that show, while the list has more than one
+    item; with one, they go on to the text, as in VS Code. As VS Code's lists page, Page Down first selects the last
+    row that shows, and then goes a page of rows on; Page Up the same upwards.
   - **Committing:** the keymap's accept commands, Enter, Tab and Shift+Enter by default, a click, or one of the item's
     commit characters, or the server's `allCommitCharacters` for an item that names none, which then goes in, and asks
     again if it is a trigger character, as in VS Code. While the filter of the current text still runs, they commit the
@@ -568,7 +570,9 @@ How the client talks to a server, where the protocol leaves a choice:
     Escape. A list asked for by key that typing filters empty stays, frozen as VS Code's: its items as they showed
     last, without the matched characters in bold, while the caret is in a word; accepting or a click commits the
     selected one over what was typed, and commit characters go in as text. When none of its items showed, it says "No
-    suggestions." and stays while typing finds nothing.
+    suggestions." and stays while typing finds nothing. A list opened by typing freezes so too while a newer list may
+    still come, as for a list marked incomplete. A key that accepted while the filter of the current text ran goes on,
+    when it finds nothing, to the binding before accepting's, or as an ordinary key.
   - **Ending:** Escape, the caret leaving the line or moving back past the word, a selection, the editor becoming
     read-only, the list's line scrolling out of view, the editor losing the keyboard focus, a server that starts or
     stops serving the document, new colors, nothing left that matches a complete list opened by typing while no newer
