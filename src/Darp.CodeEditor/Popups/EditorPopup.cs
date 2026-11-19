@@ -18,7 +18,7 @@ namespace Darp.CodeEditor.Popups;
 /// <para>
 /// While open, it is placed again after each layout pass in which the window, its place or the popup it is beside
 /// moved, as when the window is resized or the text reflows. Next to a line, it closes when the line leaves the view it
-/// is in, which <see cref="LeftView"/> reports.
+/// is in, or the window, which <see cref="LeftView"/> reports.
 /// </para>
 /// <para>
 /// A resizable popup resizes by its edges away from what it is next to: its outer side and the edge away from the
@@ -160,6 +160,10 @@ internal sealed class EditorPopup
         if (_layer is not { } layer)
             return;
         Size space = layer.Bounds.Size;
+        // Before its first layout, the layer has no size to place in: the layout pass that adding the popup starts
+        // places it.
+        if (space.Width <= 0 || space.Height <= 0)
+            return;
         var window = new Rect(space);
         PopupBounds placed;
         if (_line is var (relativeTo, getAnchor))
@@ -171,8 +175,7 @@ internal sealed class EditorPopup
                 || relativeTo.TranslatePoint(anchor.TopLeft, layer) is not { } top
             )
             {
-                Hide();
-                LeftView?.Invoke(this, EventArgs.Empty);
+                LeaveView();
                 return;
             }
             var line = new Rect(top, anchor.Size);
@@ -182,13 +185,28 @@ internal sealed class EditorPopup
             _placedBy = (space, line);
             _root.MaxHeight = double.PositiveInfinity;
             _root.Measure(new Size(space.Width, double.PositiveInfinity));
-            placed = PopupPlacement.Place(line, _root.DesiredSize, window, _side);
+            // Out of the window, as with the text view out of it, the line shows nowhere for the popup to point at.
+            if (PopupPlacement.Place(line, _root.DesiredSize, window, _side) is not { } next)
+            {
+                LeaveView();
+                return;
+            }
+            placed = next;
         }
         else if (_beside is var (owner, width))
         {
             // Until the owner is placed, there is nothing to be beside.
             _root.IsVisible = owner.Placed is not null;
-            if (owner.Placed is not { } other || Equals(_placedBy, (space, other, width)))
+            if (owner.Placed is not { } ownerPlaced)
+                return;
+            // As it is laid out: whole rows of a list can leave it shorter than its room.
+            PopupBounds other = owner._root.Bounds is { Width: > 0 } laidOut
+                ? ownerPlaced with
+                {
+                    Bounds = laidOut,
+                }
+                : ownerPlaced;
+            if (Equals(_placedBy, (space, other, width)))
                 return;
             _placedBy = (space, other, width);
             _root.ClearValue(Layoutable.WidthProperty);
@@ -215,6 +233,13 @@ internal sealed class EditorPopup
             Canvas.SetTop(_root, placed.Bounds.Top);
         }
         Frame.ResizableEdges = IsResizable ? EdgesAway(placed) : Edges.None;
+    }
+
+    /// <summary>Closes the popup, as its line left the view.</summary>
+    private void LeaveView()
+    {
+        Hide();
+        LeftView?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>The popup's height at <paramref name="width"/>.</summary>
