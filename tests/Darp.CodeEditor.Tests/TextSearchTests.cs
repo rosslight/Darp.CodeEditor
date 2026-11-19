@@ -223,7 +223,7 @@ public sealed class TextSearchTests
         var replace = new SearchReplacement(replacement, PreserveCase: false);
 
         SearchResult found = TextSearch.Find(snapshot, search, replace, null, CancellationToken.None);
-        (IReadOnlyList<TextEdit>? edits, SearchOutcome outcome) = TextSearch.ReplaceAll(
+        (CombinedEdit? edit, SearchOutcome outcome) = TextSearch.ReplaceAll(
             snapshot,
             search,
             replace,
@@ -231,10 +231,13 @@ public sealed class TextSearchTests
             CancellationToken.None
         );
 
-        Replaced(text, found.Matches.Select(match => new TextEdit(match.StartOffset, match.Length, match.Replacement)))
-            .ShouldBe(expected);
+        TextEdit[] edits =
+        [
+            .. found.Matches.Select(match => new TextEdit(match.StartOffset, match.Length, match.Replacement)),
+        ];
+        Replaced(text, edits.Length > 0 ? CombinedEdit.Of(new StringTextSource(text), edits) : null).ShouldBe(expected);
         outcome.ShouldBe(SearchOutcome.Complete);
-        Replaced(text, edits.ShouldNotBeNull()).ShouldBe(expected);
+        Replaced(text, edit).ShouldBe(expected);
     }
 
     /// <summary>
@@ -308,37 +311,48 @@ public sealed class TextSearchTests
             .ShouldBe([(2, 3, "\r\n"), (12, 2, "\r\n")]);
     }
 
-    /// <summary>Replace All finds every match, also beyond those that a search keeps, each with its replacement.</summary>
+    /// <summary>
+    /// Replace All beyond the matches that a search keeps: one change, which moves anchors as separate replacements do,
+    /// and which undo takes back whole.
+    /// </summary>
     [Fact]
-    public void Replace_All_replaces_also_the_matches_beyond_those_a_search_keeps()
+    public void Replace_All_is_one_change_beyond_the_matches_kept_that_moves_anchors_as_each_replacement_does()
     {
         string text = "x " + string.Concat(Enumerable.Repeat("ab ", TextSearch.MaxMatches + 1)) + "y";
         var snapshot = TextSnapshot.FromString(text);
         var query = new SearchQuery("ab", MatchCase: true, WholeWord: false, UseRegex: false);
         var replacement = new SearchReplacement("c", PreserveCase: false);
+        var document = new TextDocument(text);
+        TextAnchor y = document.CreateAnchor(text.Length - 1);
+        TextAnchor second = document.CreateAnchor(5);
 
         SearchResult found = TextSearch.Find(snapshot, query, replacement, null, CancellationToken.None);
-        (IReadOnlyList<TextEdit>? edits, SearchOutcome outcome) = TextSearch.ReplaceAll(
+        (CombinedEdit? edit, SearchOutcome outcome) = TextSearch.ReplaceAll(
             snapshot,
             query,
             replacement,
             null,
             CancellationToken.None
         );
-
         found.Outcome.ShouldBe(SearchOutcome.TooManyMatches);
-        found.Matches.Count.ShouldBe(TextSearch.MaxMatches);
         outcome.ShouldBe(SearchOutcome.Complete);
-        edits.ShouldNotBeNull().Count.ShouldBe(TextSearch.MaxMatches + 1);
-        Replaced(text, edits).ShouldBe("x " + string.Concat(Enumerable.Repeat("c ", TextSearch.MaxMatches + 1)) + "y");
+        edit = edit.ShouldNotBeNull();
+        document.Replace(edit.Offset, edit.Length, edit.Text, edit.Map);
+
+        document.Text.ShouldBe("x " + string.Concat(Enumerable.Repeat("c ", TextSearch.MaxMatches + 1)) + "y");
+        y.Offset.ShouldBe(document.TextLength - 1);
+        second.Offset.ShouldBe(4);
+        document.UndoStack.Undo();
+        document.Text.ShouldBe(text);
+        second.Offset.ShouldBe(5);
     }
 
-    /// <summary>The text with <paramref name="edits"/>, which are in order and apart, made from the last on.</summary>
-    private static string Replaced(string text, IEnumerable<TextEdit> edits)
+    /// <summary>The text with <paramref name="edit"/> made, if any.</summary>
+    private static string Replaced(string text, CombinedEdit? edit)
     {
         var document = new TextDocument(text);
-        foreach (TextEdit edit in edits.Reverse())
-            document.Replace(edit.Offset, edit.Length, edit.Text);
+        if (edit is not null)
+            document.Replace(edit.Offset, edit.Length, edit.Text, edit.Map);
         return document.Text;
     }
 }

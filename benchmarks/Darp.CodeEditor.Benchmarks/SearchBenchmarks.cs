@@ -64,20 +64,20 @@ public class SearchBenchmarks
         Find(new SearchQuery("\",\\n", MatchCase: true, WholeWord: false, UseRegex: true), _crLfSnapshot);
 
     /// <summary>
-    /// The edits of Replace All beyond the matches that a search keeps, in the background: every "e" of 25,000 lines,
-    /// about 50,000 matches.
+    /// The edit of Replace All beyond the matches that a search keeps, combined in the background: every "e" of 25,000
+    /// lines, about 50,000 matches.
     /// </summary>
     [Benchmark]
     public int ReplaceAllBeyondTheMatchesKept()
     {
-        (IReadOnlyList<TextEdit>? edits, _) = TextSearch.ReplaceAll(
+        (CombinedEdit? edit, _) = TextSearch.ReplaceAll(
             _longSnapshot ?? throw new InvalidOperationException("Not set up."),
             new SearchQuery("e", MatchCase: true, WholeWord: false, UseRegex: false),
             new SearchReplacement("E", PreserveCase: false),
             null,
             CancellationToken.None
         );
-        return edits?.Count ?? throw new InvalidOperationException("The search stopped.");
+        return edit?.Text.Length ?? throw new InvalidOperationException("The search stopped.");
     }
 
     private int Find(SearchQuery query, TextSnapshot? snapshot = null)

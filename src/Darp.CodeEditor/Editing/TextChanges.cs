@@ -58,7 +58,7 @@ internal sealed class TextChanges : IDisposable
         if (edits.Count == 1)
             Buffer.Replace(edits[0].Offset, edits[0].Length, edits[0].Text);
         else if (edits.Count > 1)
-            ReplaceInOneChange(edits);
+            Replace(CombinedEdit.Of(Buffer, edits));
         // A handler of the change may show another document, which the offsets are not of.
         if (select is { } selection && Buffer == edited)
             Select(selection);
@@ -118,26 +118,51 @@ internal sealed class TextChanges : IDisposable
         length == 0 ? VisibleText.CanInsert(_area, offset) : VisibleText.CanDelete(_area, offset, length);
 
     /// <summary>
+    /// Makes <paramref name="edit"/>, combined beforehand, such as off the UI thread, as one change of the text, which
+    /// AvaloniaEdit's anchors such as the caret follow as they would each edit.
+    /// </summary>
+    /// <returns>Whether it went in: not when it touches read-only text.</returns>
+    public bool Apply(CombinedEdit edit)
+    {
+        if (!CanChange(edit.Offset, edit.Length))
+            return false;
+        Replace(edit);
+        return true;
+    }
+
+    /// <summary>
     /// One change from the first edit to the last, with a map of them for the anchors: AvaloniaEdit raises a change per
     /// edit also within an update, and the editor's work per change, such as the highlighter's, would run each time.
     /// </summary>
-    private void ReplaceInOneChange(IReadOnlyList<TextEdit> edits)
+    private void Replace(CombinedEdit edit) =>
+        Buffer.Replace(edit.Offset, edit.Length, new StringTextSource(edit.Text), edit.Map);
+}
+
+/// <summary>
+/// Edits made as one change of the text from the first to the last: the text that replaces that range, and a map of
+/// the edits, so that anchors such as the caret move as they would for each edit.
+/// </summary>
+internal sealed record CombinedEdit(int Offset, int Length, string Text, OffsetChangeMap Map)
+{
+    /// <summary>Combines <paramref name="edits"/>, in order and apart, of <paramref name="text"/>; on any thread.</summary>
+    public static CombinedEdit Of(ITextSource text, IReadOnlyList<TextEdit> edits)
     {
         int start = edits[0].Offset;
-        string text = Buffer.GetText(start, edits[^1].Offset + edits[^1].Length - start);
-        var replaced = new StringBuilder(text.Length);
+        string replacedText = text.GetText(start, edits[^1].Offset + edits[^1].Length - start);
+        var replaced = new StringBuilder(replacedText.Length);
         var map = new OffsetChangeMap();
         int copied = 0;
         int delta = 0;
         foreach ((int offset, int length, string inserted) in edits)
         {
-            replaced.Append(text, copied, offset - start - copied).Append(inserted);
+            replaced.Append(replacedText, copied, offset - start - copied).Append(inserted);
             map.Add(new OffsetChangeMapEntry(offset + delta, length, inserted.Length));
             delta += inserted.Length - length;
             copied = offset - start + length;
         }
-        replaced.Append(text, copied, text.Length - copied);
-        Buffer.Replace(start, text.Length, new StringTextSource(replaced.ToString()), map);
+        replaced.Append(replacedText, copied, replacedText.Length - copied);
+        map.Freeze();
+        return new CombinedEdit(start, replacedText.Length, replaced.ToString(), map);
     }
 }
 

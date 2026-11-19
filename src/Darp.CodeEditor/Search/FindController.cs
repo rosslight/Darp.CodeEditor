@@ -17,6 +17,9 @@ internal sealed class FindController : IEditorFeature
     /// <summary>The longest selection that the query takes.</summary>
     private const int MaxSeedLength = 524_288;
 
+    /// <summary>How far around the caret the word at it is read, as VS Code reads it on a long line.</summary>
+    private const int WordReach = 500;
+
     private readonly EditorContext _context;
     private readonly TextChanges _changes;
     private TextAreaColors? _colors;
@@ -169,8 +172,9 @@ internal sealed class FindController : IEditorFeature
             return null;
         int caret = Area.Caret.Offset;
         DocumentLine line = Area.Document.GetLineByOffset(caret);
-        string text = Area.Document.GetText(line);
-        return WordRules.WordAt(text, caret - line.Offset) is { } word ? text.Substring(word.Start, word.Length) : null;
+        int start = Math.Max(line.Offset, caret - WordReach);
+        string text = Area.Document.GetText(start, Math.Min(line.EndOffset, caret + WordReach) - start);
+        return WordRules.WordAt(text, caret - start) is { } word ? text.Substring(word.Start, word.Length) : null;
     }
 
     /// <summary>
