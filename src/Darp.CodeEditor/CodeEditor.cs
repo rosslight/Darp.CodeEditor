@@ -3,7 +3,6 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
-using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
@@ -50,9 +49,10 @@ namespace Darp.CodeEditor;
 /// <para>
 /// The editor needs <see cref="CodeEditorStyles"/> in the app's styles. The text area takes its colors from
 /// <see cref="ColorTheme"/>: syntax and language-server colors, background, selection, caret, line numbers, search and
-/// bracket matches, and the squiggles under diagnostics. Everything around the text takes the app's look: completion,
-/// hover and signature help look like the app's flyouts and tooltips, and the search bar and scroll bars are the app's
-/// controls. Code inside popups keeps the editor's colors, background and font.
+/// bracket matches, and the squiggles under diagnostics. The popups belong to the editor, as in VS Code: completion,
+/// hover and signature help are the editor's own controls, in the color theme's widget colors by VS Code's keys, such
+/// as <c>editorSuggestWidget.background</c>, with prose in the app's font and code in the editor's. The search bar and
+/// the scroll bars are the app's controls.
 /// </para>
 /// <para>
 /// Built in, with no settings: the current line is highlighted, whitespace shows inside the selection, and the view
@@ -60,11 +60,16 @@ namespace Darp.CodeEditor;
 /// 3,000 characters and collapses the rest into "...", which can't be edited. Editing follows the language's rules, as
 /// VS Code applies them: the bracket next to the caret and its match are boxed, pairs close as you type, typing their
 /// closing character steps over it and Backspace deletes an empty pair, opening characters surround the selection, new
-/// lines are indented by the brackets and the indentation rules, a line that comes to match the decrease rule outdents,
-/// and comments toggle with the line comment, or else the block comment. Brackets in strings and comments don't match,
+/// lines are indented by the language's rules for Enter, the brackets and the indentation rules, and a line that comes
+/// to match the decrease rule outdents, as far as the language's <see cref="CodeLanguage.AutoIndent"/> goes, a closing
+/// bracket typed first on its line lines up with the line of its opening bracket, and comments toggle with the line
+/// comment, or else the block comment. Brackets in strings and comments don't match,
 /// and pairs that the language excludes there don't close. In a rectangle selection, pairs close, step over and delete,
 /// and opening characters surround, on every line; Enter breaks only the caret's line and ends the rectangle. Tab and
-/// new lines indent by the document's <see cref="CodeDocument.Indentation"/>.
+/// new lines indent by the document's <see cref="CodeDocument.Indentation"/>. Undo takes back typing in VS Code's
+/// steps: a word with the space before it, a new line or a pair that closed with what was typed after it, Backspaces or
+/// Deletes in a row; a caret move ends a step. Undo puts back the selection from before the step, and redo the one
+/// after it.
 /// Hover shows the server's Markdown, with code blocks highlighted by the document's grammar, below the messages of
 /// the diagnostics under the pointer. Completion items show VS Code's codicons, in the color theme's symbol colors. An
 /// item in the snippet syntax goes in as VS Code inserts it: its first stop is selected, and Tab and Shift+Tab move
@@ -72,19 +77,35 @@ namespace Darp.CodeEditor;
 /// The font defaults to a monospace one; set <c>FontFamily</c> and <c>FontSize</c> as for any control.
 /// </para>
 /// <para>
-/// The search bar searches as the user types, in the background: plain text or a .NET regular expression, line by
-/// line, with Match Case and Match Whole Word. A search stops after 1 second, as a regular expression such as
-/// <c>(a+)+$</c> can take far longer, and keeps 10,000 matches at most. The bar says so when a search stops early, and
-/// Replace All then does nothing: it never replaces only some of the matches.
+/// The search bar searches as the user types, in the background: plain text or a .NET regular expression, with Match
+/// Case and Match Whole Word, line by line unless the query can match a line break, as in VS Code: a regular expression
+/// with <c>\n</c>, or a query with a line break, which Ctrl+Enter types. A search stops after 1 second, as a regular
+/// expression such as <c>(a+)+$</c> can take far longer, and highlights 19,999 matches at most, as VS Code does; Replace
+/// All replaces all of them. The bar says so when a search runs out of time, and Replace All then does nothing: it
+/// never replaces only some of the matches. A regular expression's replacement is in VS Code's syntax, not .NET's: <c>$1</c>
+/// for a group, and <c>\U$1</c> for it in upper case.
 /// </para>
 /// <para>
-/// The editor handles only its own keys: editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation, search
-/// (Ctrl+F, Ctrl+H, F3, Shift+F3), completion (Ctrl+Space), comments (Ctrl+/) and indentation (Tab, Shift+Tab). On
-/// macOS, Cmd takes Ctrl's place for the clipboard, search and comments, and Cmd+Alt+F opens the replace bar, as
-/// AvaloniaEdit decides by the operating system. Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A
-/// right click opens the editor's context menu: Cut, Copy, Paste and Select All. For an app's Edit menu,
-/// <see cref="Cut"/>, <see cref="Copy"/>, <see cref="Paste"/> and <see cref="SelectAll"/> do the same, and the
-/// document's <c>Undo</c> and <c>Redo</c> the rest.
+/// The editor's commands run by <see cref="Keymap"/>, VS Code's keys by default: completion (Ctrl+Space, Ctrl+I), undo
+/// and redo (Ctrl+Z; Ctrl+Y, Ctrl+Shift+Z), the hover at
+/// the caret (Ctrl+K Ctrl+I), signature help (Ctrl+Shift+Space), search (Ctrl+F, Ctrl+H, F3, Shift+F3), the search
+/// bar's options (Alt+C, Alt+W, Alt+R, Alt+P, and Alt+L for Find in Selection, also from the text), comments (Ctrl+/)
+/// and the next and previous diagnostic
+/// (F8, Shift+F8; also with Alt). Ctrl+D selects the word at the caret, the first step of VS Code's Ctrl+D, which goes
+/// on to add carets at the next matches. Ctrl+Left and Ctrl+Right, Alt on macOS, move by VS Code's words, and select
+/// with Shift. AvaloniaEdit's keys edit, navigate and use the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), as VS Code's
+/// do: Tab replaces a selection inside a line and indents whole lines, and on a blank line goes to the indentation that
+/// the language's rules give it, Shift+Tab outdents, and without a selection Ctrl+C and Ctrl+X take the caret's whole
+/// line, which Ctrl+V pastes above the caret's line
+/// (<see cref="EmptySelectionClipboard"/>). Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A
+/// right click opens the
+/// editor's context menu, with the keys of its items and in the UI culture's language: Show Hover, Cut, Copy, Paste,
+/// Select All, Toggle Line Comment, Find and Replace. As in VS Code, a right click outside the selection moves the
+/// caret there first. The menu is the editor's <c>ContextFlyout</c>, as in Avalonia's text box: an app replaces it with
+/// its own <c>ContextFlyout</c> or <c>ContextMenu</c>, or removes it by setting <c>ContextFlyout</c> to null. For an
+/// app's Edit menu, <see cref="Cut"/>,
+/// <see cref="Copy"/>, <see cref="Paste"/> and <see cref="SelectAll"/> do the same, and the document's <c>Undo</c> and
+/// <c>Redo</c> the rest.
 /// </para>
 /// <para>Members that take offsets or ranges clamp them to the text.</para>
 /// </remarks>
@@ -132,6 +153,171 @@ public class CodeEditor : TemplatedControl
             nameof(CaretPosition),
             editor => editor.CaretPosition
         );
+
+    /// <summary>Defines the <see cref="Keymap"/> property.</summary>
+    public static readonly StyledProperty<CodeEditorKeymap> KeymapProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        CodeEditorKeymap
+    >(nameof(Keymap), defaultValue: CodeEditorKeymap.Default);
+
+    /// <summary>Defines the <see cref="SeedSearchStringFromSelection"/> property.</summary>
+    public static readonly StyledProperty<SeedSearchString> SeedSearchStringFromSelectionProperty =
+        AvaloniaProperty.Register<CodeEditor, SeedSearchString>(
+            nameof(SeedSearchStringFromSelection),
+            defaultValue: SeedSearchString.Always
+        );
+
+    /// <summary>Defines the <see cref="PendingKeys"/> property.</summary>
+    public static readonly DirectProperty<CodeEditor, KeyGesture?> PendingKeysProperty =
+        AvaloniaProperty.RegisterDirect<CodeEditor, KeyGesture?>(nameof(PendingKeys), editor => editor.PendingKeys);
+
+    /// <summary>Defines the <see cref="DiagnosticOrder"/> property.</summary>
+    public static readonly StyledProperty<DiagnosticOrder> DiagnosticOrderProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        DiagnosticOrder
+    >(nameof(DiagnosticOrder));
+
+    /// <summary>Defines the <see cref="EmptySelectionClipboard"/> property.</summary>
+    public static readonly StyledProperty<bool> EmptySelectionClipboardProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        bool
+    >(nameof(EmptySelectionClipboard), defaultValue: true);
+
+    /// <summary>Defines the <see cref="SmartSelect"/> property.</summary>
+    public static readonly StyledProperty<SmartSelectOptions> SmartSelectProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        SmartSelectOptions
+    >(nameof(SmartSelect), defaultValue: SmartSelectOptions.Default);
+
+    /// <summary>Defines the <see cref="UseTabStops"/> property.</summary>
+    public static readonly StyledProperty<bool> UseTabStopsProperty = AvaloniaProperty.Register<CodeEditor, bool>(
+        nameof(UseTabStops),
+        defaultValue: true
+    );
+
+    /// <summary>Defines the <see cref="AutoFindInSelection"/> property.</summary>
+    public static readonly StyledProperty<AutoFindInSelection> AutoFindInSelectionProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        AutoFindInSelection
+    >(nameof(AutoFindInSelection), defaultValue: AutoFindInSelection.Never);
+
+    /// <summary>Defines the <see cref="FindLoop"/> property.</summary>
+    public static readonly StyledProperty<bool> FindLoopProperty = AvaloniaProperty.Register<CodeEditor, bool>(
+        nameof(FindLoop),
+        defaultValue: true
+    );
+
+    /// <summary>Defines the <see cref="FindCursorMoveOnType"/> property.</summary>
+    public static readonly StyledProperty<bool> FindCursorMoveOnTypeProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        bool
+    >(nameof(FindCursorMoveOnType), defaultValue: true);
+
+    /// <summary>Defines the <see cref="FindCloseOnResult"/> property.</summary>
+    public static readonly StyledProperty<bool> FindCloseOnResultProperty = AvaloniaProperty.Register<CodeEditor, bool>(
+        nameof(FindCloseOnResult)
+    );
+
+    /// <summary>Defines the <see cref="MatchBrackets"/> property.</summary>
+    public static readonly StyledProperty<MatchBrackets> MatchBracketsProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        MatchBrackets
+    >(nameof(MatchBrackets), defaultValue: MatchBrackets.Always);
+
+    /// <summary>Defines the <see cref="FindHistory"/> property.</summary>
+    public static readonly StyledProperty<SearchHistory?> FindHistoryProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        SearchHistory?
+    >(nameof(FindHistory), defaultValue: new SearchHistory());
+
+    /// <summary>Defines the <see cref="ReplaceHistory"/> property.</summary>
+    public static readonly StyledProperty<SearchHistory?> ReplaceHistoryProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        SearchHistory?
+    >(nameof(ReplaceHistory), defaultValue: new SearchHistory());
+
+    /// <summary>Defines the <see cref="SelectionHighlight"/> property.</summary>
+    public static readonly StyledProperty<bool> SelectionHighlightProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        bool
+    >(nameof(SelectionHighlight), defaultValue: true);
+
+    /// <summary>Defines the <see cref="SelectionHighlightMaxLength"/> property.</summary>
+    public static readonly StyledProperty<int> SelectionHighlightMaxLengthProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        int
+    >(nameof(SelectionHighlightMaxLength), defaultValue: 200);
+
+    /// <summary>Defines the <see cref="SelectionHighlightMultiline"/> property.</summary>
+    public static readonly StyledProperty<bool> SelectionHighlightMultilineProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        bool
+    >(nameof(SelectionHighlightMultiline));
+
+    /// <summary>Defines the <see cref="SelectedTextMatchMode"/> property.</summary>
+    public static readonly StyledProperty<SelectedTextMatchMode> SelectedTextMatchModeProperty =
+        AvaloniaProperty.Register<CodeEditor, SelectedTextMatchMode>(nameof(SelectedTextMatchMode));
+
+    /// <summary>Defines the <see cref="OccurrencesHighlight"/> property.</summary>
+    public static readonly StyledProperty<OccurrencesHighlight> OccurrencesHighlightProperty =
+        AvaloniaProperty.Register<CodeEditor, OccurrencesHighlight>(
+            nameof(OccurrencesHighlight),
+            defaultValue: OccurrencesHighlight.SingleFile
+        );
+
+    /// <summary>Defines the <see cref="OccurrencesHighlightDelay"/> property.</summary>
+    public static readonly StyledProperty<TimeSpan> OccurrencesHighlightDelayProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        TimeSpan
+    >(nameof(OccurrencesHighlightDelay));
+
+    /// <summary>Defines the <see cref="AutoClosingBrackets"/> property.</summary>
+    public static readonly StyledProperty<AutoClosing> AutoClosingBracketsProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        AutoClosing
+    >(nameof(AutoClosingBrackets), defaultValue: AutoClosing.LanguageDefined);
+
+    /// <summary>Defines the <see cref="AutoClosingQuotes"/> property.</summary>
+    public static readonly StyledProperty<AutoClosing> AutoClosingQuotesProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        AutoClosing
+    >(nameof(AutoClosingQuotes), defaultValue: AutoClosing.LanguageDefined);
+
+    /// <summary>Defines the <see cref="AutoClosingOvertype"/> property.</summary>
+    public static readonly StyledProperty<AutoClosingEdit> AutoClosingOvertypeProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        AutoClosingEdit
+    >(nameof(AutoClosingOvertype), defaultValue: AutoClosingEdit.Auto);
+
+    /// <summary>Defines the <see cref="AutoClosingDelete"/> property.</summary>
+    public static readonly StyledProperty<AutoClosingEdit> AutoClosingDeleteProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        AutoClosingEdit
+    >(nameof(AutoClosingDelete), defaultValue: AutoClosingEdit.Auto);
+
+    /// <summary>Defines the <see cref="AutoSurround"/> property.</summary>
+    public static readonly StyledProperty<AutoSurround> AutoSurroundProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        AutoSurround
+    >(nameof(AutoSurround), defaultValue: AutoSurround.LanguageDefined);
+
+    /// <summary>Defines the <see cref="CommentsInsertSpace"/> property.</summary>
+    public static readonly StyledProperty<bool> CommentsInsertSpaceProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        bool
+    >(nameof(CommentsInsertSpace), defaultValue: true);
+
+    /// <summary>Defines the <see cref="HoverDelay"/> property.</summary>
+    public static readonly StyledProperty<TimeSpan> HoverDelayProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        TimeSpan
+    >(nameof(HoverDelay), defaultValue: TimeSpan.FromMilliseconds(300), coerce: CoerceHoverDelay);
+
+    /// <summary>Defines the <see cref="ParameterHints"/> property.</summary>
+    public static readonly StyledProperty<ParameterHintsOptions> ParameterHintsProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        ParameterHintsOptions
+    >(nameof(ParameterHints), defaultValue: ParameterHintsOptions.Default);
 
     /// <summary>AvaloniaEdit's editor, from the template. The editor wraps it, so that its API stays out of ours.</summary>
     private TextEditor? _part;
@@ -181,6 +367,24 @@ public class CodeEditor : TemplatedControl
     /// <summary>The server's signature help of the shown document.</summary>
     private SignatureHelpController? _signatureHelp;
 
+    /// <summary>Goes through the shown document's diagnostics, as F8 does.</summary>
+    private DiagnosticNavigation? _diagnosticNavigation;
+
+    /// <summary>The selections that the caret left in the shown document, for cursor undo.</summary>
+    private CursorHistory? _cursorHistory;
+
+    /// <summary>Expands and shrinks the selection in the shown document.</summary>
+    private SmartSelection? _smartSelection;
+
+    /// <summary>Selects columns in the shown document, by keys and by Shift+Alt+drag.</summary>
+    private ColumnSelection? _columnSelection;
+
+    /// <summary>Highlights the other occurrences of the selection in the shown document.</summary>
+    private SelectionHighlighter? _selectionHighlights;
+
+    /// <summary>Highlights the occurrences of the symbol at the caret in the shown document.</summary>
+    private OccurrenceHighlighter? _occurrences;
+
     /// <summary>The template's panel, which the search bar goes into, over the text.</summary>
     private Panel? _root;
 
@@ -195,6 +399,15 @@ public class CodeEditor : TemplatedControl
     /// executes them, instead of AvaloniaEdit's search panel.
     /// </summary>
     private readonly RoutedCommandBinding[] _searchCommands;
+
+    /// <summary>
+    /// AvaloniaEdit's clipboard commands, for the part's text area, ahead of its own: the editor's copy, cut and paste,
+    /// by key, from the menu and from code.
+    /// </summary>
+    private readonly RoutedCommandBinding[] _clipboardCommands;
+
+    /// <summary>The editor's own context menu, as its context flyout until the app sets another.</summary>
+    private readonly EditorMenu _defaultMenu;
 
     /// <summary>
     /// Where the editor is in <see cref="Document"/> while the part cannot tell: while it shows nothing, and while the
@@ -217,6 +430,9 @@ public class CodeEditor : TemplatedControl
     private TextSelection _selection;
 
     private TextPosition _caretPosition = new(1, 1);
+
+    /// <summary>The first stroke of a key sequence, while the editor waits for its second; null otherwise.</summary>
+    private KeyStroke? _pending;
 
     /// <summary>The theme whose colors the part shows.</summary>
     private ColorThemeFile? _theme;
@@ -246,7 +462,8 @@ public class CodeEditor : TemplatedControl
         // AvaloniaEdit checks Dispatcher.UIThread: on another dispatcher, the editor would fail later and elsewhere.
         if (Application.Current?.Dispatcher != Dispatcher)
             throw new InvalidOperationException("The editor works only on the app's main UI thread.");
-        ContextMenu = CreateContextMenu();
+        ContextFlyout = _defaultMenu = new EditorMenu(this);
+        AddHandler(ContextRequestedEvent, OnContextRequestedTunnel, RoutingStrategies.Tunnel);
         _searchCommands =
         [
             new(ApplicationCommands.Find, (_, _) => OpenSearch()),
@@ -254,9 +471,61 @@ public class CodeEditor : TemplatedControl
             new(SearchCommands.FindNext, (_, _) => FindNext(previous: false)),
             new(SearchCommands.FindPrevious, (_, _) => FindNext(previous: true)),
         ];
+        _clipboardCommands =
+        [
+            new(ApplicationCommands.Copy, (_, _) => _helpers?.Copy()),
+            new(ApplicationCommands.Cut, (_, _) => _helpers?.Cut()),
+            // A paste moves the caret as code does, not as the keyboard, as in VS Code.
+            new(
+                ApplicationCommands.Paste,
+                (_, _) =>
+                {
+                    KeyboardMovesCaret = false;
+                    _helpers?.Paste();
+                }
+            ),
+        ];
         // Ahead of AvaloniaEdit's own keys, which its text area handles as they bubble, and of its typed text.
         AddHandler(KeyDownEvent, OnKeyDownTunnel, RoutingStrategies.Tunnel);
         AddHandler(TextInputEvent, OnTextInputTunnel, RoutingStrategies.Tunnel);
+        // A click ends the wait for a sequence's second key.
+        AddHandler(PointerPressedEvent, (_, _) => SetPending(null), RoutingStrategies.Tunnel, handledEventsToo: true);
+        TrackPointer(PointerPressedEvent);
+        TrackPointer(PointerMovedEvent);
+        TrackPointer(PointerReleasedEvent);
+        // The keyboard moves the caret until the key or the typed text has bubbled back up through the editor, as the
+        // text area handles them on their way.
+        AddHandler(
+            KeyDownEvent,
+            (_, _) => KeyboardMovesCaret = false,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true
+        );
+        AddHandler(
+            TextInputEvent,
+            (_, _) => KeyboardMovesCaret = false,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true
+        );
+
+        // The caret that the text area moves while it handles a pointer event moves by the pointer: tunneling, the
+        // event reaches the editor before the text area, and bubbling after it.
+        void TrackPointer<T>(RoutedEvent<T> pointerEvent)
+            where T : RoutedEventArgs
+        {
+            AddHandler(
+                pointerEvent,
+                (_, _) => PointerMovesCaret = true,
+                RoutingStrategies.Tunnel,
+                handledEventsToo: true
+            );
+            AddHandler(
+                pointerEvent,
+                (_, _) => PointerMovesCaret = false,
+                RoutingStrategies.Bubble,
+                handledEventsToo: true
+            );
+        }
     }
 
     /// <summary>
@@ -333,8 +602,347 @@ public class CodeEditor : TemplatedControl
     /// <summary>The caret's line and column, for a status bar.</summary>
     public TextPosition CaretPosition => _caretPosition;
 
+    /// <summary>
+    /// Which keys run which of the editor's commands. Default: <see cref="CodeEditorKeymap.Default"/>, VS Code's keys.
+    /// </summary>
+    public CodeEditorKeymap Keymap
+    {
+        get => GetValue(KeymapProperty);
+        set => SetValue(KeymapProperty, value);
+    }
+
+    /// <summary>
+    /// What the search takes from the text as its query, as VS Code's <c>editor.find.seedSearchStringFromSelection</c>:
+    /// when the search bar opens, and on F3 and Shift+F3 while the query is empty. Default:
+    /// <see cref="SeedSearchString.Always"/>, the selection within one line, or without a selection the word at the
+    /// caret. The replace bar takes only a selection.
+    /// </summary>
+    public SeedSearchString SeedSearchStringFromSelection
+    {
+        get => GetValue(SeedSearchStringFromSelectionProperty);
+        set => SetValue(SeedSearchStringFromSelectionProperty, value);
+    }
+
+    /// <summary>
+    /// The first stroke of a two-stroke key sequence while the editor waits for the second, such as Ctrl+K of Ctrl+K
+    /// Ctrl+I, for a status bar to say so; null otherwise.
+    /// </summary>
+    public KeyGesture? PendingKeys => _pending?.ToGesture();
+
+    /// <summary>
+    /// The order in which F8 and Shift+F8 go through the document's errors, warnings and information, as VS Code's
+    /// <c>problems.sortOrder</c>. Default: <see cref="DiagnosticOrder.Severity"/>, VS Code's.
+    /// </summary>
+    public DiagnosticOrder DiagnosticOrder
+    {
+        get => GetValue(DiagnosticOrderProperty);
+        set => SetValue(DiagnosticOrderProperty, value);
+    }
+
+    /// <summary>
+    /// Whether spaces and tabs go in and out by tab stops, VS Code's <c>editor.useTabStops</c>: Backspace in a line's
+    /// indentation deletes back to the tab stop before the caret, rather than one character, and Tab and Shift+Tab move
+    /// the selected lines' indentation to the next or the previous tab stop, rather than adding or removing a level.
+    /// Default: true, as in VS Code.
+    /// </summary>
+    public bool UseTabStops
+    {
+        get => GetValue(UseTabStopsProperty);
+        set => SetValue(UseTabStopsProperty, value);
+    }
+
+    /// <summary>
+    /// Whether copying or cutting without a selection takes the caret's whole line with its line break, VS Code's
+    /// <c>editor.emptySelectionClipboard</c>. A line copied so pastes as a whole line above the caret's line, while
+    /// nothing is selected and the clipboard still holds it. Without it, copy and cut need a selection. Default: true,
+    /// as in VS Code.
+    /// </summary>
+    public bool EmptySelectionClipboard
+    {
+        get => GetValue(EmptySelectionClipboardProperty);
+        set => SetValue(EmptySelectionClipboardProperty, value);
+    }
+
+    /// <summary>
+    /// What expanding the selection, Shift+Alt+Right, goes through besides the language server's ranges, VS Code's
+    /// <c>editor.smartSelect</c>: the parts of a word between its humps or underscores, and lines from their first text
+    /// to their last before they are taken whole. Default: <see cref="SmartSelectOptions.Default"/>, both, as in VS Code.
+    /// </summary>
+    public SmartSelectOptions SmartSelect
+    {
+        get => GetValue(SmartSelectProperty);
+        set => SetValue(SmartSelectProperty, value);
+    }
+
+    /// <summary>
+    /// When the search bar turns Find in Selection on by itself, as VS Code's <c>editor.find.autoFindInSelection</c>:
+    /// as Ctrl+F or Ctrl+H opens it, or F3 while it is closed, it then searches only the selection. Find in Selection
+    /// also turns on and off with its toggle on the bar, and with Alt+L. Default: <see cref="AutoFindInSelection.Never"/>,
+    /// as in VS Code.
+    /// </summary>
+    public AutoFindInSelection AutoFindInSelection
+    {
+        get => GetValue(AutoFindInSelectionProperty);
+        set => SetValue(AutoFindInSelectionProperty, value);
+    }
+
+    /// <summary>
+    /// Whether going to the next match after the last one goes round to the first, and to the previous match before
+    /// the first one round to the last, as VS Code's <c>editor.find.loop</c>: by F3, Shift+F3, Enter and Shift+Enter in
+    /// the query, and the search bar's buttons. Without it, the last match, or the first, stays selected. Beyond the
+    /// matches that the bar highlights, it goes round either way, as in VS Code. Default: true, as in VS Code.
+    /// </summary>
+    public bool FindLoop
+    {
+        get => GetValue(FindLoopProperty);
+        set => SetValue(FindLoopProperty, value);
+    }
+
+    /// <summary>
+    /// Whether the search bar selects the first match from the caret as the user types the query, or changes its
+    /// options or Find in Selection, as VS Code's <c>editor.find.cursorMoveOnType</c>. Without it, the selection stays
+    /// until the user goes to a match. Default: true, as in VS Code.
+    /// </summary>
+    public bool FindCursorMoveOnType
+    {
+        get => GetValue(FindCursorMoveOnTypeProperty);
+        set => SetValue(FindCursorMoveOnTypeProperty, value);
+    }
+
+    /// <summary>
+    /// Whether going to the next or the previous match while the query has the keyboard, by Enter, Shift+Enter, F3 or
+    /// Shift+F3, closes the search bar once it selects another match, as VS Code's <c>editor.find.closeOnResult</c>.
+    /// Default: false, as in VS Code.
+    /// </summary>
+    public bool FindCloseOnResult
+    {
+        get => GetValue(FindCloseOnResultProperty);
+        set => SetValue(FindCloseOnResultProperty, value);
+    }
+
+    /// <summary>
+    /// Which brackets the editor highlights at the caret, while nothing is selected, as VS Code's
+    /// <c>editor.matchBrackets</c>: the bracket next to the caret and its match, and with
+    /// <see cref="MatchBrackets.Always"/>, elsewhere the innermost pair around the caret. Default:
+    /// <see cref="MatchBrackets.Always"/>, as in VS Code.
+    /// </summary>
+    public MatchBrackets MatchBrackets
+    {
+        get => GetValue(MatchBracketsProperty);
+        set => SetValue(MatchBracketsProperty, value);
+    }
+
+    /// <summary>
+    /// What the search bar's query recalls with Up and Down, as VS Code's find history: it takes the query once the user
+    /// has paused for half a second. Default: one history that every editor shares, as VS Code's
+    /// <c>editor.find.history</c> by default keeps one for the editors of a workspace. Set a history of the app's own to
+    /// share it among some editors only, or to keep its entries, as VS Code keeps them with the workspace; null for
+    /// one that only this editor's bar has, and nothing keeps, as VS Code's <c>never</c>.
+    /// </summary>
+    public SearchHistory? FindHistory
+    {
+        get => GetValue(FindHistoryProperty);
+        set => SetValue(FindHistoryProperty, value);
+    }
+
+    /// <summary>
+    /// What the search bar's replacement recalls with Up and Down, as VS Code's replace history and
+    /// <c>editor.find.replaceHistory</c>, as <see cref="FindHistory"/> does for the query.
+    /// </summary>
+    public SearchHistory? ReplaceHistory
+    {
+        get => GetValue(ReplaceHistoryProperty);
+        set => SetValue(ReplaceHistoryProperty, value);
+    }
+
+    /// <summary>
+    /// Whether selecting text highlights its other occurrences, as VS Code's <c>editor.selectionHighlight</c>, in the
+    /// color theme's <c>editor.selectionHighlightBackground</c>: within a line, unless
+    /// <see cref="SelectionHighlightMultiline"/>, and up to <see cref="SelectionHighlightMaxLength"/> characters, as
+    /// <see cref="SelectedTextMatchMode"/> matches them. Default: true, as in VS Code.
+    /// </summary>
+    public bool SelectionHighlight
+    {
+        get => GetValue(SelectionHighlightProperty);
+        set => SetValue(SelectionHighlightProperty, value);
+    }
+
+    /// <summary>
+    /// How many characters a selection can have and still highlight its occurrences, as VS Code's
+    /// <c>editor.selectionHighlightMaxLength</c>; 0 for any number. Default: 200, as in VS Code.
+    /// </summary>
+    public int SelectionHighlightMaxLength
+    {
+        get => GetValue(SelectionHighlightMaxLengthProperty);
+        set => SetValue(SelectionHighlightMaxLengthProperty, value);
+    }
+
+    /// <summary>
+    /// Whether a selection over several lines highlights its occurrences too, as VS Code's
+    /// <c>editor.selectionHighlightMultiline</c>. Default: false, as in VS Code.
+    /// </summary>
+    public bool SelectionHighlightMultiline
+    {
+        get => GetValue(SelectionHighlightMultilineProperty);
+        set => SetValue(SelectionHighlightMultilineProperty, value);
+    }
+
+    /// <summary>
+    /// How the occurrences of the selected text match it, as VS Code's <c>editor.selectedTextMatchMode</c>. Default:
+    /// <see cref="SelectedTextMatchMode.FindOptions"/>, with the search bar's Match Case and Match Whole Word, as in VS
+    /// Code.
+    /// </summary>
+    public SelectedTextMatchMode SelectedTextMatchMode
+    {
+        get => GetValue(SelectedTextMatchModeProperty);
+        set => SetValue(SelectedTextMatchModeProperty, value);
+    }
+
+    /// <summary>
+    /// Whether the editor highlights the occurrences of the symbol at the caret, as VS Code's
+    /// <c>editor.occurrencesHighlight</c>: those the language server finds, with the reads in the color theme's
+    /// <c>editor.wordHighlightBackground</c> and the writes in <c>editor.wordHighlightStrongBackground</c>, or without a
+    /// server, or when it finds none, those of the word, in <c>editor.wordHighlightTextBackground</c>. F7 and Shift+F7
+    /// go through them. Default: <see cref="OccurrencesHighlight.SingleFile"/>, as in VS Code.
+    /// </summary>
+    public OccurrencesHighlight OccurrencesHighlight
+    {
+        get => GetValue(OccurrencesHighlightProperty);
+        set => SetValue(OccurrencesHighlightProperty, value);
+    }
+
+    /// <summary>
+    /// How long after asking for the occurrences of the symbol at the caret they show at the earliest, as VS Code's
+    /// <c>editor.occurrencesHighlightDelay</c>. Default: none, as in VS Code.
+    /// </summary>
+    public TimeSpan OccurrencesHighlightDelay
+    {
+        get => GetValue(OccurrencesHighlightDelayProperty);
+        set => SetValue(OccurrencesHighlightDelayProperty, value);
+    }
+
+    /// <summary>
+    /// Where typing an opening bracket of the language's auto-closing pairs also types its closing one, as VS Code's
+    /// <c>editor.autoClosingBrackets</c>. A pair that starts a block comment, such as <c>/**</c>, closes before what
+    /// <see cref="AutoClosing.LanguageDefined"/> allows whatever this says, as VS Code's
+    /// <c>editor.autoClosingComments</c> does by default. Default: <see cref="AutoClosing.LanguageDefined"/>, as in VS
+    /// Code.
+    /// </summary>
+    public AutoClosing AutoClosingBrackets
+    {
+        get => GetValue(AutoClosingBracketsProperty);
+        set => SetValue(AutoClosingBracketsProperty, value);
+    }
+
+    /// <summary>
+    /// Where typing a quote of the language's auto-closing pairs also types the closing one, as VS Code's
+    /// <c>editor.autoClosingQuotes</c>. Default: <see cref="AutoClosing.LanguageDefined"/>, as in VS Code.
+    /// </summary>
+    public AutoClosing AutoClosingQuotes
+    {
+        get => GetValue(AutoClosingQuotesProperty);
+        set => SetValue(AutoClosingQuotesProperty, value);
+    }
+
+    /// <summary>
+    /// Which closing characters typing the same character right before them steps over, as VS Code's
+    /// <c>editor.autoClosingOvertype</c>. Default: <see cref="AutoClosingEdit.Auto"/>, those the editor typed, as in VS
+    /// Code.
+    /// </summary>
+    public AutoClosingEdit AutoClosingOvertype
+    {
+        get => GetValue(AutoClosingOvertypeProperty);
+        set => SetValue(AutoClosingOvertypeProperty, value);
+    }
+
+    /// <summary>
+    /// Which closing characters Backspace right after their opening ones deletes with them, as VS Code's
+    /// <c>editor.autoClosingDelete</c>: only while the pair's kind closes, by <see cref="AutoClosingBrackets"/> or
+    /// <see cref="AutoClosingQuotes"/>. Default: <see cref="AutoClosingEdit.Auto"/>, those the editor typed, as in VS
+    /// Code.
+    /// </summary>
+    public AutoClosingEdit AutoClosingDelete
+    {
+        get => GetValue(AutoClosingDeleteProperty);
+        set => SetValue(AutoClosingDeleteProperty, value);
+    }
+
+    /// <summary>
+    /// Which opening characters typed over a selection put the language's surrounding pair around it, as VS Code's
+    /// <c>editor.autoSurround</c>. Default: <see cref="AutoSurround.LanguageDefined"/>, quotes and brackets, as in VS
+    /// Code.
+    /// </summary>
+    public AutoSurround AutoSurround
+    {
+        get => GetValue(AutoSurroundProperty);
+        set => SetValue(AutoSurroundProperty, value);
+    }
+
+    /// <summary>
+    /// Whether comments have a space inside their tokens, as VS Code's <c>editor.comments.insertSpace</c>: commenting
+    /// puts one after a line comment's token and inside a block comment's, and uncommenting takes it out with them.
+    /// Default: true, as in VS Code.
+    /// </summary>
+    public bool CommentsInsertSpace
+    {
+        get => GetValue(CommentsInsertSpaceProperty);
+        set => SetValue(CommentsInsertSpaceProperty, value);
+    }
+
+    /// <summary>The occurrences of the symbol at the caret that the editor highlights, for tests.</summary>
+    internal IReadOnlyList<LanguageClient.Occurrence> Occurrences => _occurrences?.Highlights ?? [];
+
+    /// <summary>The other occurrences of the selection that the editor highlights, for tests.</summary>
+    internal IReadOnlyList<TextRange> SelectionHighlights => _selectionHighlights?.Highlights ?? [];
+
+    /// <summary>Whether the server's answer to the hover that waits or shows is in, for tests.</summary>
+    internal bool HoverIsAnswered => _hover?.IsAnswered == true;
+
+    /// <summary>
+    /// How long the pointer rests on a character before its hover shows, VS Code's <c>editor.hover.delay</c>. The
+    /// server is asked halfway through, so that its answer can show with the diagnostics once the delay is over; while
+    /// it has not answered by three times the delay, the hover says "Loading…". Between 0 and 10 seconds, as in VS
+    /// Code. Default: 300 ms, as in VS Code.
+    /// </summary>
+    public TimeSpan HoverDelay
+    {
+        get => GetValue(HoverDelayProperty);
+        set => SetValue(HoverDelayProperty, value);
+    }
+
+    /// <summary>
+    /// How signature help shows the parameters of the call around the caret, VS Code's <c>editor.parameterHints</c>:
+    /// whether it opens as the user types, and whether Up and Down go around its signatures at either end. Turning it
+    /// off closes signature help that shows, as in VS Code. Default: <see cref="ParameterHintsOptions.Default"/>, both,
+    /// as in VS Code.
+    /// </summary>
+    public ParameterHintsOptions ParameterHints
+    {
+        get => GetValue(ParameterHintsProperty);
+        set => SetValue(ParameterHintsProperty, value);
+    }
+
     /// <summary>The semantic colors of the shown document, for benchmarks; null while it shows none.</summary>
     internal SemanticHighlighter? SemanticHighlighter => _semantic;
+
+    /// <summary>
+    /// Whether the caret moves by the pointer now, as a click or a drag moves it: while the editor routes a pointer
+    /// event. Completion and signature help end then, as in VS Code.
+    /// </summary>
+    internal bool PointerMovesCaret { get; private set; }
+
+    /// <summary>
+    /// Whether the caret moves by the keyboard now, as VS Code's cursor source <c>keyboard</c>: while the editor routes
+    /// typed text, or a key in the text that no command of the keymap takes, other than a cursor move by words; not
+    /// while it pastes. Completion ends on any other caret move, as in VS Code.
+    /// </summary>
+    internal bool KeyboardMovesCaret { get; private set; }
+
+    /// <summary>
+    /// The key whose commands the keymap runs now; null otherwise, as for a command from the context menu. Completion
+    /// presses it again when the item it waited to accept matches nothing.
+    /// </summary>
+    internal KeyEventArgs? KeymapKey { get; private set; }
 
     /// <summary>
     /// Scrolls <paramref name="range"/> into view: not at all when it is visible, centered when it is not. A range
@@ -395,30 +1003,62 @@ public class CodeEditor : TemplatedControl
     }
 
     /// <summary>
-    /// Opens the search bar, as Ctrl+F does, or the replace bar, as Ctrl+H does, and puts the keyboard in its query. A
-    /// selection within one line becomes the search text. A read-only editor opens the search bar either way.
+    /// Opens the search bar, as Ctrl+F does, or the replace bar, as Ctrl+H does, as VS Code opens them. The search bar
+    /// takes its query from the text as <see cref="SeedSearchStringFromSelection"/> says, by default the selection
+    /// within one line or else the word at the caret, puts the keyboard into it, and leaves the replace row of an open
+    /// bar as it is. The replace bar takes only a selection within one line, and then puts the keyboard into the
+    /// replacement, as it does when the query has the keyboard; otherwise into the query. A read-only editor opens no
+    /// replace bar, as in VS Code.
     /// </summary>
     public void OpenSearch(bool replace = false)
     {
-        if (_part is { } part && CreatedSearchBar() is { } bar)
-            bar.Open(replace && !IsReadOnly, SelectedLineText(part.TextArea));
+        if (replace && IsReadOnly)
+            return;
+        if (_part is not { } part || CreatedSearchBar() is not { } bar)
+            return;
+        SeedSearchString seed = SeedSearchStringFromSelection;
+        FindInSelectionAsItOpens(part.TextArea, bar);
+        if (!replace)
+        {
+            bar.Open(replace: false, seed == SeedSearchString.Never ? null : SearchString(part.TextArea, seed));
+            return;
+        }
+        bool fromQuery = bar.IsQueryFocused;
+        bool takesSelection =
+            !fromQuery
+            && seed != SeedSearchString.Never
+            && part.TextArea.Selection is { IsEmpty: false, IsMultiline: false };
+        bar.Open(
+            replace: true,
+            takesSelection ? SearchString(part.TextArea, seed) : null,
+            focusReplacement: fromQuery || takesSelection
+        );
     }
 
-    /// <summary>Moves the selection to the clipboard, as Ctrl+X does. No effect in a read-only editor.</summary>
+    /// <summary>
+    /// Moves the selection to the clipboard, as Ctrl+X does; without one, the caret's line, with
+    /// <see cref="EmptySelectionClipboard"/>. No effect in a read-only editor.
+    /// </summary>
     public void Cut()
     {
         if (_shown is not null)
             _part?.Cut();
     }
 
-    /// <summary>Copies the selection to the clipboard, as Ctrl+C does.</summary>
+    /// <summary>
+    /// Copies the selection to the clipboard, as Ctrl+C does; without one, the caret's line, with
+    /// <see cref="EmptySelectionClipboard"/>.
+    /// </summary>
     public void Copy()
     {
         if (_shown is not null)
             _part?.Copy();
     }
 
-    /// <summary>Replaces the selection with the clipboard's text, as Ctrl+V does. No effect in a read-only editor.</summary>
+    /// <summary>
+    /// Replaces the selection with the clipboard's text, as Ctrl+V does; a line that the editor copied without a
+    /// selection goes in above the caret's line. No effect in a read-only editor.
+    /// </summary>
     public void Paste()
     {
         if (_shown is not null)
@@ -444,6 +1084,8 @@ public class CodeEditor : TemplatedControl
             previous.TemplateApplied -= OnPartTemplateApplied;
             foreach (RoutedCommandBinding binding in _searchCommands)
                 previous.TextArea.CommandBindings.Remove(binding);
+            foreach (RoutedCommandBinding binding in _clipboardCommands)
+                previous.TextArea.CommandBindings.Remove(binding);
         }
         _part = e.NameScope.Find<TextEditor>("PART_TextEditor");
         _root = e.NameScope.Find<Panel>("PART_Root");
@@ -467,8 +1109,45 @@ public class CodeEditor : TemplatedControl
             part.TemplateApplied += OnPartTemplateApplied;
             foreach (RoutedCommandBinding binding in _searchCommands)
                 part.TextArea.CommandBindings.Add(binding);
+            // First, as the first binding of a command runs.
+            for (int i = 0; i < _clipboardCommands.Length; i++)
+                part.TextArea.CommandBindings.Insert(i, _clipboardCommands[i]);
+            RemoveDeleteLine(part.TextArea);
+            RemoveIndentAndUndoKeys(part.TextArea);
+            ColumnSelection.RemoveBoxSelectionKeys(part.TextArea);
         }
         UpdateShownDocument();
+    }
+
+    /// <summary>
+    /// Removes AvaloniaEdit's Ctrl+D, which deletes the caret's line: in VS Code, the key selects the word at the caret,
+    /// and the keymap binds it so.
+    /// </summary>
+    private static void RemoveDeleteLine(TextArea textArea)
+    {
+        ICollection<RoutedCommandBinding> bindings = textArea.DefaultInputHandler.Editing.CommandBindings;
+        foreach (
+            RoutedCommandBinding binding in bindings.Where(b => b.Command == AvaloniaEditCommands.DeleteLine).ToList()
+        )
+            bindings.Remove(binding);
+    }
+
+    /// <summary>
+    /// Removes AvaloniaEdit's Ctrl+I, which indents the selected lines, and its Ctrl+Z and Ctrl+Y: in VS Code, Ctrl+I
+    /// asks for completion, and the keymap binds it so, and undo and redo are the keymap's, with VS Code's keys on each
+    /// operating system.
+    /// </summary>
+    private static void RemoveIndentAndUndoKeys(TextArea textArea)
+    {
+        RemoveBindings(textArea.DefaultInputHandler.Editing.CommandBindings, AvaloniaEditCommands.IndentSelection);
+        RemoveBindings(textArea.DefaultInputHandler.CommandBindings, ApplicationCommands.Undo);
+        RemoveBindings(textArea.DefaultInputHandler.CommandBindings, ApplicationCommands.Redo);
+
+        static void RemoveBindings(ICollection<RoutedCommandBinding> bindings, RoutedCommand command)
+        {
+            foreach (RoutedCommandBinding binding in bindings.Where(b => b.Command == command).ToList())
+                bindings.Remove(binding);
+        }
     }
 
     /// <inheritdoc />
@@ -503,15 +1182,40 @@ public class CodeEditor : TemplatedControl
     protected override void OnLostFocus(FocusChangedEventArgs e)
     {
         base.OnLostFocus(e);
-        // Raised as the focus leaves an element inside the editor; it may stay inside, as when it goes to the search bar.
+        SetPending(null);
+        CheckFocus();
+    }
+
+    /// <summary>
+    /// Closes the popups once the keyboard has left the editor and its popups. Posted, as the focus leaves an element
+    /// before it reaches the next: it may stay inside, as when it goes to the search bar or into a popup's text.
+    /// </summary>
+    internal void CheckFocus() =>
         Dispatcher.Post(() =>
         {
-            if (IsKeyboardFocusWithin)
+            if (
+                IsKeyboardFocusWithin
+                || TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is Visual focused
+                    && EditorPopup.OwnerOf(focused) == this
+            )
                 return;
             _hover?.Close();
             _completion?.Close();
             _signatureHelp?.Close();
+            // As in VS Code, once the keyboard left the editor.
+            _occurrences?.Stop();
         });
+
+    /// <summary>Gives the keyboard back to the text, as from a popup.</summary>
+    internal void FocusText() => _part?.TextArea.Focus();
+
+    /// <summary>Types <paramref name="text"/> into the text, as the user does, with the keyboard back in the text.</summary>
+    internal void TypeText(string text)
+    {
+        if (_part is not { } part || _shown is null)
+            return;
+        part.TextArea.Focus();
+        part.TextArea.RaiseEvent(new TextInputEventArgs { RoutedEvent = TextInputEvent, Text = text });
     }
 
     /// <inheritdoc />
@@ -520,6 +1224,9 @@ public class CodeEditor : TemplatedControl
         base.OnPropertyChanged(change);
         if (change.Property == DocumentProperty)
             SwitchDocument();
+        // The sequence that waits may not be in the new keymap.
+        else if (change.Property == KeymapProperty)
+            SetPending(null);
         else if (change.Property == IsReadOnlyProperty)
         {
             _part?.IsReadOnly = IsReadOnly || _shown is null;
@@ -537,7 +1244,57 @@ public class CodeEditor : TemplatedControl
             || change.Property == ThemeVariantScope.ActualThemeVariantProperty
         )
             UpdateHighlighting();
+        else if (
+            change.Property == SelectionHighlightProperty
+            || change.Property == SelectionHighlightMaxLengthProperty
+            || change.Property == SelectionHighlightMultilineProperty
+            || change.Property == SelectedTextMatchModeProperty
+        )
+            _selectionHighlights?.Update();
+        else if (change.Property == OccurrencesHighlightProperty && OccurrencesHighlight == OccurrencesHighlight.Off)
+            _occurrences?.Stop();
+        else if (change.Property == MatchBracketsProperty)
+            _brackets?.Refresh();
+        else if (change.Property == ParameterHintsProperty && !ParameterHints.Enabled)
+            _signatureHelp?.Close();
     }
+
+    /// <summary>
+    /// A context request in the text, before the menu opens. A right click moves the caret to the click, unless it is
+    /// inside the selection, as in VS Code; a menu opened by key opens at the caret.
+    /// </summary>
+    private void OnContextRequestedTunnel(object? sender, ContextRequestedEventArgs e)
+    {
+        if (
+            e.Handled
+            || _shown is null
+            || _part?.TextArea is not { } area
+            || e.Source is not Visual source
+            || !area.IsVisualAncestorOf(source) && area != source
+        )
+            return;
+        TextView view = area.TextView;
+        if (!e.TryGetPosition(view, out Point point))
+        {
+            Rect caret = area.Caret.CalculateCaretRectangle().Translate(-view.ScrollOffset);
+            _defaultMenu.OpenAt(view.TranslatePoint(caret.BottomLeft, this));
+            return;
+        }
+        _defaultMenu.OpenAt(null);
+        if (view.GetPosition(point + view.ScrollOffset) is not { } clicked)
+            return;
+        if (!area.Selection.Contains(area.Document.GetOffset(clicked.Location)))
+        {
+            area.ClearSelection();
+            area.Caret.Position = clicked;
+        }
+    }
+
+    /// <summary>A hover delay between 0 and 10 seconds, as VS Code takes it.</summary>
+    private static TimeSpan CoerceHoverDelay(AvaloniaObject editor, TimeSpan delay) =>
+        delay < TimeSpan.Zero ? TimeSpan.Zero
+        : delay > TimeSpan.FromSeconds(10) ? TimeSpan.FromSeconds(10)
+        : delay;
 
     /// <summary>Whether a theme variant is dark: Dark, or one that inherits from it.</summary>
     private static bool IsDark(ThemeVariant variant)
@@ -606,8 +1363,8 @@ public class CodeEditor : TemplatedControl
         Select(part, place?.Selection ?? new TextSelection(0));
         TextView textView = part.TextArea.TextView;
         _highlighter = new BackgroundTextMateHighlighter(textView, buffer, Dispatcher, null);
-        _helpers = new EditingHelpers(part.TextArea, document, _highlighter);
-        _brackets = new BracketHighlighter(part.TextArea, document, _highlighter) { Colors = _colors };
+        _helpers = new EditingHelpers(this, part.TextArea, document, _highlighter);
+        _brackets = new BracketHighlighter(this, part.TextArea, document, _highlighter) { Colors = _colors };
         _whitespace = new WhitespaceLayer(part.TextArea) { Colors = _colors };
         _squiggles = new SquiggleLayer(part.TextArea, document) { Colors = _colors };
         _semantic = new SemanticHighlighter(textView, document, Dispatcher) { Theme = _theme };
@@ -620,6 +1377,16 @@ public class CodeEditor : TemplatedControl
             Icons = _iconColors,
         };
         _signatureHelp = new SignatureHelpController(this, part.TextArea, document, _highlighter) { Colors = _colors };
+        _diagnosticNavigation = new DiagnosticNavigation(part.TextArea, document, _hover);
+        _cursorHistory = new CursorHistory(part.TextArea, Dispatcher);
+        _smartSelection = new SmartSelection(this, part.TextArea, document, _highlighter);
+        _columnSelection = new ColumnSelection(part.TextArea);
+        _selectionHighlights = new SelectionHighlighter(this, part.TextArea, document)
+        {
+            Colors = _colors?.Highlights,
+            SearchBar = _searchBar,
+        };
+        _occurrences = new OccurrenceHighlighter(this, part.TextArea, document) { Colors = _colors?.Highlights };
         _searchBar?.Attach(this, part.TextArea, document);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
         _waitingForLayout = true;
@@ -630,6 +1397,8 @@ public class CodeEditor : TemplatedControl
 
     private void Hide(TextEditor part, CodeDocument shown)
     {
+        // A sequence started in the document ends with it.
+        SetPending(null);
         shown.Disposed -= OnDocumentDisposed;
         shown.PropertyChanged -= OnDocumentPropertyChanged;
         CancelLoading();
@@ -647,6 +1416,18 @@ public class CodeEditor : TemplatedControl
         _snippets = null;
         _signatureHelp?.Dispose();
         _signatureHelp = null;
+        _diagnosticNavigation?.Dispose();
+        _diagnosticNavigation = null;
+        _cursorHistory?.Dispose();
+        _cursorHistory = null;
+        _smartSelection?.Dispose();
+        _smartSelection = null;
+        _columnSelection?.Dispose();
+        _columnSelection = null;
+        _selectionHighlights?.Dispose();
+        _selectionHighlights = null;
+        _occurrences?.Dispose();
+        _occurrences = null;
         _squiggles?.Dispose();
         _squiggles = null;
         _semantic?.Dispose();
@@ -683,26 +1464,48 @@ public class CodeEditor : TemplatedControl
     private void OnDocumentDisposed(object? sender, EventArgs e) => Dispatcher.Post(UpdateShownDocument);
 
     /// <summary>
-    /// The editor's own keys, before AvaloniaEdit's: search, also in the search bar, as AvaloniaEdit decides them by
-    /// the operating system, and in the text area the keys of completion, of signature help, of a snippet's stops and
-    /// of the editing helpers. Ctrl+F and Ctrl+H are the editor's even without a document, so that AvaloniaEdit's own
-    /// search panel never opens.
+    /// The editor's own keys, before AvaloniaEdit's: first the hover's end (<see cref="CloseHoverOnKey"/>), then the
+    /// keymap's, also in the search bar, then Escape, and in the text area the keys of completion's list, of signature
+    /// help, of a snippet's stops and of the editing helpers.
     /// </summary>
     private void OnKeyDownTunnel(object? sender, KeyEventArgs e)
     {
-        bool shift = e.KeyModifiers == KeyModifiers.Shift;
-        if (ApplicationCommands.Find.Gesture.Matches(e) || ApplicationCommands.Replace.Gesture.Matches(e))
-        {
-            OpenSearch(replace: ApplicationCommands.Replace.Gesture.Matches(e));
+        // A modifier alone neither completes nor ends a key sequence, nor ends the hover.
+        if (
+            e.Key
+            is Key.LeftCtrl
+                or Key.RightCtrl
+                or Key.LeftShift
+                or Key.RightShift
+                or Key.LeftAlt
+                or Key.RightAlt
+                or Key.LWin
+                or Key.RWin
+        )
+            return;
+        bool closedHover = CloseHoverOnKey(e);
+        KeyboardMovesCaret = false;
+        KeymapKey = e;
+        bool ran = RunKeymap(e);
+        KeymapKey = null;
+        if (ran)
             e.Handled = true;
-        }
-        else if (e.Key == Key.F3 && (e.KeyModifiers == KeyModifiers.None || shift))
-            e.Handled = FindNext(previous: shift);
-        else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && Dismiss())
+        else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && (Dismiss() || closedHover))
             e.Handled = true;
         else if (_part is not { TextArea.IsFocused: true })
             return;
-        else if (
+        else
+            OnTextKeyDown(e);
+    }
+
+    /// <summary>
+    /// A key in the text that the keymap left: the keys of completion's list, of signature help, of a snippet's stops
+    /// and of the editing helpers, and then AvaloniaEdit's. They move the caret by the keyboard.
+    /// </summary>
+    private void OnTextKeyDown(KeyEventArgs e)
+    {
+        KeyboardMovesCaret = true;
+        if (
             _completion?.OnKeyDown(e) == true
             || _signatureHelp?.OnKeyDown(e) == true
             || _snippets?.OnKeyDown(e) == true
@@ -714,17 +1517,292 @@ public class CodeEditor : TemplatedControl
             _helpers?.OnKeyDown(e);
     }
 
-    /// <summary>Typed text, before AvaloniaEdit's text area takes it: a commit character commits completion's item.</summary>
-    private void OnTextInputTunnel(object? sender, TextInputEventArgs e)
+    /// <summary>
+    /// Runs the keymap's command for <paramref name="e"/>: the second stroke of the sequence that waits, or a stroke of
+    /// its own; or starts waiting for a sequence's second stroke. As VS Code resolves a key, the latest of its bindings
+    /// that applies wins, and a sequence's first stroke always applies. A second stroke that completes nothing is an
+    /// ordinary key.
+    /// </summary>
+    /// <returns>Whether the key was the keymap's.</returns>
+    private bool RunKeymap(KeyEventArgs e)
     {
-        if (_part is { TextArea.IsFocused: true })
-            _completion?.OnTextInput(e);
+        CodeEditorKeymap keymap = Keymap;
+        if (_pending is { } pending)
+        {
+            SetPending(null);
+            if (keymap.CommandsFor(e, pending).Any(Run))
+                return true;
+        }
+        foreach (CodeEditorKeyBinding binding in keymap.BindingsStartedBy(e))
+        {
+            if (binding.Strokes is [var first, _])
+            {
+                SetPending(first);
+                return true;
+            }
+            if (Run(binding.Command))
+                return true;
+        }
+        return false;
     }
 
     /// <summary>
-    /// What Escape closes, one at a time: completion, signature help, a snippet's stops while the text area has the
-    /// keyboard, the hover, the search bar, in the order of VS Code's keys. Each also ends what still waits for its
-    /// server.
+    /// Ends the hover for a key, as VS Code does: Escape ends it, also from the search bar, along with what else it
+    /// dismisses; in the text, so does any key but those that keep it (<see cref="KeepsHover"/>), unless the user
+    /// clicked into the hover.
+    /// </summary>
+    /// <returns>Whether a hover was open.</returns>
+    private bool CloseHoverOnKey(KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None)
+            return _hover?.Close() == true;
+        return _part is { TextArea.IsFocused: true } && !KeepsHover(e) && _hover?.CloseOnKey() == true;
+    }
+
+    /// <summary>
+    /// Whether a key in the text leaves the hover open, as in VS Code: one that starts a key sequence, or shows the
+    /// hover, which then takes the keyboard. Every other key ends it.
+    /// </summary>
+    private bool KeepsHover(KeyEventArgs e)
+    {
+        CodeEditorKeymap keymap = Keymap;
+        return (_pending is { } pending && keymap.CommandsFor(e, pending).Contains(CodeEditorCommands.ShowHover))
+            || keymap
+                .BindingsStartedBy(e)
+                .Any(binding => binding.Strokes.Count == 2 || binding.Command == CodeEditorCommands.ShowHover);
+    }
+
+    private void SetPending(KeyStroke? stroke)
+    {
+        if (_pending == stroke)
+            return;
+        KeyGesture? old = PendingKeys;
+        _pending = stroke;
+        RaisePropertyChanged(PendingKeysProperty, old, PendingKeys);
+    }
+
+    /// <summary>Whether the editor shows a document's text: without one, it is empty.</summary>
+    internal bool ShowsText => _shown is not null;
+
+    /// <summary>Runs one of <see cref="CodeEditorCommands"/> from the context menu, on the text.</summary>
+    internal void RunFromMenu(string command)
+    {
+        FocusText();
+        Run(command, inText: _shown is not null);
+    }
+
+    /// <summary>
+    /// Runs one of <see cref="CodeEditorCommands"/> that a completion item names, after it is committed, as its keys
+    /// run it in the text; another command does nothing.
+    /// </summary>
+    internal void RunItemCommand(string command) => Run(command, inText: _shown is not null);
+
+    /// <summary>Runs one of <see cref="CodeEditorCommands"/> by key, where it applies.</summary>
+    /// <returns>Whether it applied: otherwise the key goes on, to another binding or as an ordinary key.</returns>
+    private bool Run(string command) =>
+        Run(command, inText: _part is { TextArea.IsFocused: true } && _shown is not null);
+
+    private bool Run(string command, bool inText)
+    {
+        switch (command)
+        {
+            // Also without a document, so that AvaloniaEdit's own search panel never opens; as in VS Code, the replace
+            // bar not in a read-only editor.
+            case CodeEditorCommands.Find:
+            case CodeEditorCommands.Replace when !IsReadOnly:
+                OpenSearch(replace: command == CodeEditorCommands.Replace);
+                return true;
+            case CodeEditorCommands.FindNext or CodeEditorCommands.FindPrevious:
+                return FindNext(previous: command == CodeEditorCommands.FindPrevious);
+            case CodeEditorCommands.TriggerSuggest when inText && !IsReadOnly:
+                _completion?.Trigger();
+                return true;
+            case CodeEditorCommands.ToggleSuggestionDetails when inText:
+                return _completion?.ToggleDetails() == true;
+            case CodeEditorCommands.AcceptSelectedSuggestion
+            or CodeEditorCommands.AcceptAlternativeSelectedSuggestion when inText:
+                return _completion?.Accept(replace: command == CodeEditorCommands.AcceptAlternativeSelectedSuggestion)
+                    == true;
+            case CodeEditorCommands.ShowHover when inText:
+                _hover?.ShowAtCaret();
+                return true;
+            case CodeEditorCommands.TriggerParameterHints when inText && !IsReadOnly:
+                _signatureHelp?.Trigger();
+                return true;
+            case CodeEditorCommands.CommentLine when inText && !IsReadOnly:
+                _helpers?.ToggleComment();
+                return true;
+            // From the text or the search bar.
+            case CodeEditorCommands.ToggleFindCaseSensitive
+            or CodeEditorCommands.ToggleFindWholeWord
+            or CodeEditorCommands.ToggleFindRegex:
+                return ToggleSearchOption(command);
+            case CodeEditorCommands.NextMarker
+            or CodeEditorCommands.NextMarkerInFiles
+            or CodeEditorCommands.PreviousMarker
+            or CodeEditorCommands.PreviousMarkerInFiles when inText:
+                GoToDiagnostic(next: command is CodeEditorCommands.NextMarker or CodeEditorCommands.NextMarkerInFiles);
+                return true;
+            case CodeEditorCommands.AddSelectionToNextFindMatch when inText:
+                _helpers?.SelectWordAtCaret();
+                return true;
+            case CodeEditorCommands.CursorWordLeft
+            or CodeEditorCommands.CursorWordLeftSelect
+            or CodeEditorCommands.CursorWordEndRight
+            or CodeEditorCommands.CursorWordEndRightSelect when inText:
+                // A cursor move by the keyboard, as VS Code's word moves are.
+                KeyboardMovesCaret = true;
+                _helpers?.MoveWord(
+                    left: command is CodeEditorCommands.CursorWordLeft or CodeEditorCommands.CursorWordLeftSelect,
+                    select: command
+                        is CodeEditorCommands.CursorWordLeftSelect
+                            or CodeEditorCommands.CursorWordEndRightSelect
+                );
+                return true;
+            // Typing, Enter, Tab and caret movement; as in VS Code, no undo in a read-only editor.
+            case CodeEditorCommands.Undo or CodeEditorCommands.Redo when inText && !IsReadOnly:
+                UndoOrRedo(redo: command == CodeEditorCommands.Redo);
+                return true;
+            // Lines and selections.
+            case CodeEditorCommands.MoveLinesUp or CodeEditorCommands.MoveLinesDown when inText && !IsReadOnly:
+                _helpers?.MoveLines(down: command == CodeEditorCommands.MoveLinesDown);
+                return true;
+            case CodeEditorCommands.CopyLinesUp or CodeEditorCommands.CopyLinesDown when inText && !IsReadOnly:
+                _helpers?.CopyLines(down: command == CodeEditorCommands.CopyLinesDown);
+                return true;
+            case CodeEditorCommands.DeleteLines when inText && !IsReadOnly:
+                _helpers?.DeleteLines();
+                return true;
+            case CodeEditorCommands.InsertLineAfter or CodeEditorCommands.InsertLineBefore when inText && !IsReadOnly:
+                _helpers?.InsertLine(above: command == CodeEditorCommands.InsertLineBefore);
+                return true;
+            case CodeEditorCommands.IndentLines or CodeEditorCommands.OutdentLines when inText && !IsReadOnly:
+                _helpers?.IndentLines(outdent: command == CodeEditorCommands.OutdentLines);
+                return true;
+            case CodeEditorCommands.ExpandLineSelection when inText:
+                _helpers?.ExpandLineSelection();
+                return true;
+            case CodeEditorCommands.BlockComment when inText && !IsReadOnly:
+                _helpers?.BlockComment();
+                return true;
+            case CodeEditorCommands.JumpToBracket when inText:
+                _helpers?.JumpToBracket();
+                return true;
+            case CodeEditorCommands.SelectToBracket when inText:
+                _helpers?.SelectToBracket();
+                return true;
+            case CodeEditorCommands.CursorUndo or CodeEditorCommands.CursorRedo when inText:
+                if (command == CodeEditorCommands.CursorUndo)
+                    _cursorHistory?.Undo();
+                else
+                    _cursorHistory?.Redo();
+                return true;
+            case CodeEditorCommands.SmartSelectExpand or CodeEditorCommands.SmartSelectShrink when inText:
+                _smartSelection?.Run(expand: command == CodeEditorCommands.SmartSelectExpand);
+                return true;
+            case CodeEditorCommands.CursorColumnSelectLeft
+            or CodeEditorCommands.CursorColumnSelectRight
+            or CodeEditorCommands.CursorColumnSelectUp
+            or CodeEditorCommands.CursorColumnSelectDown
+            or CodeEditorCommands.CursorColumnSelectPageUp
+            or CodeEditorCommands.CursorColumnSelectPageDown when inText:
+                _columnSelection?.Move(
+                    command switch
+                    {
+                        CodeEditorCommands.CursorColumnSelectLeft => ColumnMove.Left,
+                        CodeEditorCommands.CursorColumnSelectRight => ColumnMove.Right,
+                        CodeEditorCommands.CursorColumnSelectUp => ColumnMove.Up,
+                        CodeEditorCommands.CursorColumnSelectDown => ColumnMove.Down,
+                        CodeEditorCommands.CursorColumnSelectPageUp => ColumnMove.PageUp,
+                        _ => ColumnMove.PageDown,
+                    }
+                );
+                return true;
+
+            // Find, replace and highlights: from the text or the search bar.
+            case CodeEditorCommands.TogglePreserveCase
+            or CodeEditorCommands.ToggleFindInSelection:
+                return ToggleSearchOption(command);
+            // In the search bar's query or replacement.
+            case CodeEditorCommands.HistoryShowPrevious or CodeEditorCommands.HistoryShowNext:
+                return _searchBar?.ShowHistory(previous: command == CodeEditorCommands.HistoryShowPrevious) == true;
+            // While occurrences show.
+            case CodeEditorCommands.NextWordHighlight or CodeEditorCommands.PreviousWordHighlight when inText:
+                return _occurrences?.Move(next: command == CodeEditorCommands.NextWordHighlight) == true;
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Undoes or redoes a step of the shown document, as the keymap's undo and redo do, and brings the caret into view.
+    /// </summary>
+    private void UndoOrRedo(bool redo)
+    {
+        if (_shown is not { } shown || _part is not { } part)
+            return;
+        if (redo)
+            shown.Redo();
+        else
+            shown.Undo();
+        part.TextArea.Caret.BringCaretToView();
+    }
+
+    /// <summary>Turns one of the search bar's options on or off, as Alt+C, Alt+W, Alt+R, Alt+P and Alt+L do.</summary>
+    /// <returns>Whether there is a document to search.</returns>
+    private bool ToggleSearchOption(string command)
+    {
+        if (CreatedSearchBar() is not { } bar)
+            return false;
+        if (command == CodeEditorCommands.ToggleFindCaseSensitive)
+            bar.ToggleMatchCase();
+        else if (command == CodeEditorCommands.ToggleFindWholeWord)
+            bar.ToggleWholeWord();
+        else if (command == CodeEditorCommands.TogglePreserveCase)
+            bar.TogglePreserveCase();
+        else if (command == CodeEditorCommands.ToggleFindInSelection)
+            bar.ToggleFindInSelection();
+        else
+            bar.ToggleRegex();
+        return true;
+    }
+
+    /// <summary>
+    /// Goes to the next or previous diagnostic, as VS Code's F8 and Shift+F8 do: the caret goes to where it starts, or
+    /// stays inside it, the line scrolls into view, centered when it was out of view, and the hover there shows what
+    /// VS Code shows in a widget between the lines: which problem it is of how many, its message, source, code and
+    /// related places.
+    /// </summary>
+    private void GoToDiagnostic(bool next)
+    {
+        if (
+            _part is not { } part
+            || _diagnosticNavigation?.Move(next, DiagnosticOrder) is not var (caret, diagnostic, index, count)
+        )
+            return;
+        Select(part, new TextSelection(caret));
+        ScrollTo(new TextRange(caret, 0));
+        _hover?.ShowProblem(caret, diagnostic, index, count);
+    }
+
+    /// <summary>
+    /// Typed text, before AvaloniaEdit's text area takes it: a commit character commits completion's item, and the
+    /// text goes in through the editing helpers, in VS Code's undo steps.
+    /// </summary>
+    private void OnTextInputTunnel(object? sender, TextInputEventArgs e)
+    {
+        if (_part is not { TextArea.IsFocused: true })
+            return;
+        KeyboardMovesCaret = true;
+        _completion?.OnTextInput(e);
+        if (!e.Handled)
+            _helpers?.Type(e);
+    }
+
+    /// <summary>
+    /// What Escape closes besides the hover, one at a time: completion, signature help, a snippet's stops while the
+    /// text area has the keyboard, the search bar, in the order of VS Code's keys. Each also ends what still waits for
+    /// its server.
     /// </summary>
     /// <returns>Whether it closed something the user saw.</returns>
     private bool Dismiss()
@@ -733,7 +1811,6 @@ public class CodeEditor : TemplatedControl
             _completion?.Close() == true
             || _signatureHelp?.Close() == true
             || (_part is { TextArea.IsFocused: true } && _snippets?.End() == true)
-            || _hover?.Close() == true
         )
         {
             return true;
@@ -745,19 +1822,40 @@ public class CodeEditor : TemplatedControl
     }
 
     /// <summary>
-    /// Selects the next or previous match, as F3 and Shift+F3 do, opening the bar for the selection if it is closed.
+    /// Selects the next or previous match, as F3 and Shift+F3 do, opening the bar if it is closed. The query stays, as
+    /// in VS Code: only an empty one is taken from the text, as <see cref="SeedSearchStringFromSelection"/> says.
     /// </summary>
     /// <returns>Whether there is a document to search.</returns>
     private bool FindNext(bool previous)
     {
         if (_part is not { } part || CreatedSearchBar() is not { } bar)
             return false;
-        string? text = bar.IsOpen ? null : SelectedLineText(part.TextArea);
+        SeedSearchString seed = SeedSearchStringFromSelection;
+        string? text =
+            bar.Query.Length == 0 && seed != SeedSearchString.Never ? SearchString(part.TextArea, seed) : null;
+        if (!bar.IsOpen)
+            FindInSelectionAsItOpens(part.TextArea, bar);
         if (previous)
             bar.FindPrevious(text);
         else
             bar.FindNext(text);
         return true;
+    }
+
+    /// <summary>
+    /// Turns Find in Selection on as the search bar opens, as <see cref="AutoFindInSelection"/> says: as VS Code does
+    /// whenever its search starts, by Ctrl+F, Ctrl+H, or F3 while the bar is closed.
+    /// </summary>
+    private void FindInSelectionAsItOpens(TextArea textArea, SearchBar bar)
+    {
+        bool scoped = AutoFindInSelection switch
+        {
+            AutoFindInSelection.Always => true,
+            AutoFindInSelection.Multiline => textArea.Selection.IsMultiline,
+            _ => false,
+        };
+        if (scoped)
+            bar.FindInSelection();
     }
 
     /// <summary>
@@ -771,10 +1869,15 @@ public class CodeEditor : TemplatedControl
             var bar = new SearchBar { Colors = _colors };
             root.Children.Add(bar);
             bar.Attach(this, part.TextArea, shown);
+            bar.StateChanged += OnSearchStateChanged;
             _searchBar = bar;
+            _selectionHighlights?.SearchBar = bar;
         }
         return _shown is null ? null : _searchBar;
     }
+
+    /// <summary>The search bar's query or options changed, or it opened or closed: the highlights follow.</summary>
+    private void OnSearchStateChanged(object? sender, EventArgs e) => _selectionHighlights?.Update();
 
     /// <summary>
     /// Removes the search panel that AvaloniaEdit's editor installs with each template, its input handler and its
@@ -786,9 +1889,27 @@ public class CodeEditor : TemplatedControl
             panel.Uninstall();
     }
 
-    /// <summary>The selected text, if it is within one line: what a search starts with.</summary>
-    private static string? SelectedLineText(TextArea textArea) =>
-        textArea.Selection is { IsEmpty: false, IsMultiline: false } selection ? selection.GetText() : null;
+    /// <summary>
+    /// What the search takes from the text, as VS Code's <c>getSelectionSearchString</c> does: the selection within one
+    /// line, unless it is too long, or without a selection the word at the caret, unless <paramref name="seed"/> takes
+    /// only a selection. Null for nothing.
+    /// </summary>
+    private static string? SearchString(TextArea textArea, SeedSearchString seed)
+    {
+        EditorSelection selection = textArea.Selection;
+        if (selection.IsMultiline)
+            return null;
+        if (!selection.IsEmpty)
+            return selection.Length < Search.TextSearch.MaxQueryLength ? selection.GetText() : null;
+        if (seed == SeedSearchString.Selection)
+            return null;
+        TextDocument buffer = textArea.Document;
+        DocumentLine line = buffer.GetLineByOffset(textArea.Caret.Offset);
+        string text = buffer.GetText(line);
+        return WordRules.WordAtPosition(text, textArea.Caret.Offset - line.Offset) is var (start, end)
+            ? text[start..end]
+            : null;
+    }
 
     /// <summary>Applies a new indentation of the shown document at once. Raised on the UI thread.</summary>
     private void OnDocumentPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -1053,6 +2174,8 @@ public class CodeEditor : TemplatedControl
             _snippets?.Colors = colors;
             _signatureHelp?.Colors = colors;
             _brackets?.Colors = colors;
+            _selectionHighlights?.Colors = colors.Highlights;
+            _occurrences?.Colors = colors.Highlights;
             _whitespace?.Colors = colors;
             _squiggles?.Colors = colors;
             _hover?.Colors = colors;
@@ -1079,34 +2202,6 @@ public class CodeEditor : TemplatedControl
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default
         );
-
-    /// <summary>The editor's context menu, in the app's look.</summary>
-    private ContextMenu CreateContextMenu()
-    {
-        PlatformHotkeyConfiguration? keys = Application.Current?.PlatformSettings?.HotkeyConfiguration;
-        MenuItem cut = Item("Cut", keys?.Cut, Cut);
-        MenuItem paste = Item("Paste", keys?.Paste, Paste);
-        var menu = new ContextMenu
-        {
-            ItemsSource = new Control[]
-            {
-                cut,
-                Item("Copy", keys?.Copy, Copy),
-                paste,
-                new Separator(),
-                Item("Select All", keys?.SelectAll, SelectAll),
-            },
-        };
-        menu.Opening += (_, _) => cut.IsEnabled = paste.IsEnabled = !IsReadOnly && _shown is not null;
-        return menu;
-
-        static MenuItem Item(string header, List<KeyGesture>? gestures, Action action)
-        {
-            var item = new MenuItem { Header = header, InputGesture = gestures?.FirstOrDefault() };
-            item.Click += (_, _) => action();
-            return item;
-        }
-    }
 
     /// <summary>A grammar that loads in the background, with the theme it loads with.</summary>
     private sealed record GrammarLoad(

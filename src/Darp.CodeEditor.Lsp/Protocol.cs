@@ -33,12 +33,16 @@ internal sealed record InitializeResult(ServerCapabilities Capabilities);
 /// <param name="SemanticTokensProvider">An object with a <c>legend</c>, and <c>range</c> and <c>full</c> when offered.</param>
 /// <param name="CompletionProvider">An object with trigger and commit characters, and whether items resolve.</param>
 /// <param name="SignatureHelpProvider">An object with trigger and retrigger characters.</param>
+/// <param name="SelectionRangeProvider">True, or an object of options.</param>
+/// <param name="DocumentHighlightProvider">True, or an object of options.</param>
 internal sealed record ServerCapabilities(
     JsonElement? TextDocumentSync = null,
     JsonElement? HoverProvider = null,
     JsonElement? SemanticTokensProvider = null,
     JsonElement? CompletionProvider = null,
-    JsonElement? SignatureHelpProvider = null
+    JsonElement? SignatureHelpProvider = null,
+    JsonElement? SelectionRangeProvider = null,
+    JsonElement? DocumentHighlightProvider = null
 );
 
 internal sealed record TextDocumentItem(string Uri, string LanguageId, int Version, string Text);
@@ -70,12 +74,28 @@ internal sealed record PublishDiagnosticsParams(
 /// <param name="Message">The text for users.</param>
 /// <param name="Severity">1 for errors, 2 warnings, 3 information, 4 hints; null leaves it to the client.</param>
 /// <param name="Code">A number or a string, read as text.</param>
+/// <param name="Source">What reported it, such as <c>typescript</c>.</param>
+/// <param name="CodeDescription">The web page that explains the code.</param>
+/// <param name="RelatedInformation">Other places the problem concerns.</param>
 internal sealed record LspDiagnostic(
     LspRange Range,
     string Message,
     int? Severity = null,
-    [property: JsonConverter(typeof(DiagnosticCodeConverter))] string? Code = null
+    [property: JsonConverter(typeof(DiagnosticCodeConverter))] string? Code = null,
+    string? Source = null,
+    LspCodeDescription? CodeDescription = null,
+    IReadOnlyList<LspDiagnosticRelatedInformation>? RelatedInformation = null
 );
+
+/// <summary>A diagnostic's <c>codeDescription</c>.</summary>
+/// <param name="Href">The web page that explains its code.</param>
+internal sealed record LspCodeDescription(string Href);
+
+/// <summary>A place that a diagnostic concerns, with a message about it.</summary>
+internal sealed record LspDiagnosticRelatedInformation(LspLocation Location, string Message);
+
+/// <summary>A range in a document.</summary>
+internal sealed record LspLocation(string Uri, LspRange Range);
 
 /// <summary>The params of <c>textDocument/hover</c>.</summary>
 internal sealed record TextDocumentPositionParams(TextDocumentIdentifier TextDocument, LspPosition Position);
@@ -97,6 +117,9 @@ internal sealed record CompletionParams(
 /// <param name="TriggerKind">One of <see cref="CompletionTriggerKind"/>.</param>
 /// <param name="TriggerCharacter">The character typed, for a trigger character.</param>
 internal sealed record CompletionContext(int TriggerKind, string? TriggerCharacter = null);
+
+/// <summary>The params of <c>textDocument/selectionRange</c>.</summary>
+internal sealed record SelectionRangeParams(TextDocumentIdentifier TextDocument, IReadOnlyList<LspPosition> Positions);
 
 /// <summary>The params of <c>textDocument/signatureHelp</c>.</summary>
 internal sealed record SignatureHelpParams(
@@ -176,6 +199,7 @@ internal static class SignatureHelpTriggerKind
 [JsonSerializable(typeof(SemanticTokensRangeParams))]
 [JsonSerializable(typeof(CompletionParams))]
 [JsonSerializable(typeof(SignatureHelpParams))]
+[JsonSerializable(typeof(SelectionRangeParams))]
 [JsonSerializable(typeof(ConfigurationParams))]
 [JsonSerializable(typeof(DidChangeConfigurationParams))]
 internal sealed partial class LspJsonContext : JsonSerializerContext;

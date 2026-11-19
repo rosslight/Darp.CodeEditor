@@ -1,3 +1,4 @@
+using System.Collections;
 using System.ComponentModel;
 using Avalonia;
 using Avalonia.Media;
@@ -56,36 +57,24 @@ internal sealed class SquiggleLayer : SelectionOverlay
 
     /// <summary>
     /// The diagnostics whose range in the current text holds the character at <paramref name="offset"/>, or starts there
-    /// when it is empty: at most <paramref name="count"/> of them, the most severe first, then in the server's order.
+    /// when it is empty, the most severe first, then in the server's order: found now, and put in order as they are
+    /// read, so that a hover that builds thousands a part at a time orders them a part at a time too.
     /// </summary>
     /// <remarks>
-    /// A server may put thousands on one character, and a hover shows a few: only the diagnostics that could be kept
-    /// are looked at further, and only those kept are put in order. AvaloniaEdit's search for them grows with their
-    /// number, but cheaply, 0.65 ms for 100,000; reading a diagnostic's offsets walks its tree, so it is left to the
-    /// few that could be kept.
+    /// A server may put thousands on one character, up to <see cref="DiagnosticsBatch.MaxShown"/>. AvaloniaEdit's search
+    /// for them grows with their number, but cheaply, 0.65 ms for 100,000; each reading puts them in a heap in linear
+    /// time, and takes them off it one at a time.
     /// </remarks>
-    public IReadOnlyList<Diagnostic> At(int offset, int count)
+    public IReadOnlyCollection<Diagnostic> At(int offset)
     {
-        if (count <= 0)
-            return [];
-        // By their rank negated: the worst kept is the first to give way.
-        var kept = new PriorityQueue<DiagnosticMarker, int>(count + 1);
+        var found = new List<DiagnosticMarker>();
         foreach (DiagnosticMarker marker in _document.ShownDiagnostics.FindSegmentsContaining(offset))
         {
-            if (kept.Count == count && kept.TryPeek(out _, out int worst) && -marker.Rank <= worst)
-                continue;
             // The search finds the ranges that end at the offset too, which do not hold its character.
-            if (marker.Length == 0 ? marker.StartOffset != offset : offset >= marker.EndOffset)
-                continue;
-            if (kept.Count < count)
-                kept.Enqueue(marker, -marker.Rank);
-            else
-                kept.DequeueEnqueue(marker, -marker.Rank);
+            if (marker.Length == 0 ? marker.StartOffset == offset : offset < marker.EndOffset)
+                found.Add(marker);
         }
-        var diagnostics = new Diagnostic[kept.Count];
-        for (int i = diagnostics.Length - 1; i >= 0; i--)
-            diagnostics[i] = kept.Dequeue().Diagnostic;
-        return diagnostics;
+        return new Ranked(found);
     }
 
     /// <remarks>
@@ -340,5 +329,20 @@ internal sealed class SquiggleLayer : SelectionOverlay
             figure.ArcTo(new Point(x - 1, y), new Size(1, 1), 0, false, SweepDirection.Clockwise);
             figure.EndFigure(isClosed: true);
         }
+    }
+
+    /// <summary>Diagnostics that go in their rank's order as they are read.</summary>
+    private sealed class Ranked(List<DiagnosticMarker> markers) : IReadOnlyCollection<Diagnostic>
+    {
+        public int Count => markers.Count;
+
+        public IEnumerator<Diagnostic> GetEnumerator()
+        {
+            var heap = new PriorityQueue<DiagnosticMarker, int>(markers.Select(marker => (marker, marker.Rank)));
+            while (heap.TryDequeue(out DiagnosticMarker? marker, out _))
+                yield return marker.Diagnostic;
+        }
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }

@@ -14,11 +14,17 @@
 //
 // Completion answers with what the command "completion" set, or with generated items (--completion-items); "." asks
 // for it as it is typed, and ";" commits items. Requests are logged with the caret's offset at the end, and so is
-// signature help. Resolving an item answers the item with the properties of its "data"
+// signature help. Selection ranges answer with what the command "selection-ranges" set, as the result's first
+// selection range, or with the word at the position and its line; once "hold-selection-ranges" holds them, only when
+// "release-selection-ranges" releases them, with the answer of when they came. Resolving an item answers the item with
+// the properties of its "data"
 // added. Signature help answers inside parentheses, "(" asks for it and "," asks again: the signatures that the command
 // "signatures" set, or two of "call", with the parameter at the position active, and the signature that the client
-// says it shows, or the first. Completion in a document with the word "slow" is never answered. A request about a
+// says it shows, or the first. Completion and signature help in a document with the word "slow" are never answered. A request about a
 // document that is not open is answered with an error.
+//
+// Document highlights are the occurrences of the word at the position, as whole words: one followed by " =" is a
+// write, the others are reads. The word "none" is answered with null, "nothing" with no highlights, and "slow" never.
 //
 // Arguments:
 //   --initialize never      never answer initialize
@@ -26,6 +32,8 @@
 //   --exit-at-start <code>  exit at start, before reading anything
 //   --unversioned           publish diagnostics without a version
 //   --no-diagnostics        publish no diagnostics for echoed documents
+//   --diagnostic-details    give the echoed diagnostic the source "fake", a code description and two related places:
+//                           its document's second character, and a third line elsewhere
 //   --full-sync             ask for the full text with every change
 //   --text-document-sync <json>  answer initialize with this textDocumentSync capability
 //   --vscode-uris           publish diagnostics with file URIs written as VS Code's URI library writes them
@@ -66,6 +74,7 @@ internal sealed class FakeServer
     private readonly bool _neverInitialize;
     private readonly bool _unversioned;
     private readonly bool _noDiagnostics;
+    private readonly bool _diagnosticDetails;
     private readonly bool _fullSync;
     private readonly bool _ignoreShutdown;
     private readonly JsonNode? _textDocumentSync;
@@ -122,6 +131,17 @@ internal sealed class FakeServer
     private readonly List<string> _startLines = [];
     private int _lastId;
 
+    /// <summary>Set by the command <c>selection-ranges</c>: the selection range that selection ranges answer with.</summary>
+    private JsonNode? _selectionRange;
+
+    /// <summary>
+    /// Set by the command <c>hold-selection-ranges</c>: selection range requests wait for the command
+    /// <c>release-selection-ranges</c>, which answers them as they would have been answered when they came.
+    /// </summary>
+    private bool _holdSelectionRanges;
+
+    private readonly List<(JsonNode? Id, JsonNode Answer)> _heldSelectionRanges = [];
+
     /// <summary>Set by the command <c>peek</c>: the file whose existence lets the server read on.</summary>
     private string? _peekSignal;
 
@@ -142,6 +162,9 @@ internal sealed class FakeServer
                     break;
                 case "--unversioned":
                     _unversioned = true;
+                    break;
+                case "--diagnostic-details":
+                    _diagnosticDetails = true;
                     break;
                 case "--no-diagnostics":
                     _noDiagnostics = true;
@@ -224,6 +247,8 @@ internal sealed class FakeServer
                                     ["triggerCharacters"] = new JsonArray("("),
                                     ["retriggerCharacters"] = new JsonArray(","),
                                 },
+                                ["selectionRangeProvider"] = true,
+                                ["documentHighlightProvider"] = true,
                             },
                         }
                     );
@@ -270,6 +295,12 @@ internal sealed class FakeServer
                 break;
             case "textDocument/signatureHelp":
                 SignatureHelp(id, Required(parameters, "params"));
+                break;
+            case "textDocument/selectionRange":
+                SelectionRanges(id, Required(parameters, "params"));
+                break;
+            case "textDocument/documentHighlight":
+                DocumentHighlight(id, Required(parameters, "params"));
                 break;
             case "workspace/didChangeConfiguration":
                 Log($"configuration changed {parameters?.ToJsonString()}");
@@ -329,7 +360,17 @@ internal sealed class FakeServer
             if (_noDiagnostics)
                 return;
             (int line, int character) = End(document.Text);
-            Publish(document, !_unversioned, Diagnostic(0, 0, line, character, document.Text));
+            JsonObject echo = Diagnostic(0, 0, line, character, document.Text);
+            if (_diagnosticDetails)
+            {
+                echo["source"] = "fake";
+                echo["codeDescription"] = new JsonObject { ["href"] = "https://example.com/echo" };
+                echo["relatedInformation"] = new JsonArray(
+                    Related(document.Uri, 0, 1, "related here"),
+                    Related("file:///elsewhere/other.txt", 2, 3, "elsewhere")
+                );
+            }
+            Publish(document, !_unversioned, echo);
             return;
         }
         foreach (string command in document.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries))
@@ -427,6 +468,21 @@ internal sealed class FakeServer
                 _signatures = JsonNode.Parse(json) ?? throw new InvalidDataException("No signatures.");
                 Log("set signatures");
                 break;
+            case ["selection-ranges", var json]:
+                _selectionRange = JsonNode.Parse(json);
+                Log("set selection ranges");
+                break;
+            case ["hold-selection-ranges"]:
+                _holdSelectionRanges = true;
+                Log("holding selection ranges");
+                break;
+            case ["release-selection-ranges"]:
+                _holdSelectionRanges = false;
+                foreach ((JsonNode? id, JsonNode answer) in _heldSelectionRanges)
+                    Reply(id, answer);
+                _heldSelectionRanges.Clear();
+                Log("released selection ranges");
+                break;
             case ["peek", var signal]:
                 _peekSignal = signal;
                 Log("peeking");
@@ -486,6 +542,50 @@ internal sealed class FakeServer
                 },
             }
         );
+    }
+
+    private void DocumentHighlight(JsonNode? id, JsonNode parameters)
+    {
+        if (Known(id, "documentHighlight", parameters) is not { } document)
+            return;
+        string text = document.Text;
+        (int start, int end) = WordAt(text, Offset(text, Required(parameters["position"], "position")));
+        string word = text[start..end];
+        Log($"documentHighlight {id?.ToJsonString()} {word}");
+        if (word == "slow")
+            return;
+        if (word is "none" or "")
+        {
+            Reply(id, null);
+            return;
+        }
+        var highlights = new JsonArray();
+        if (word != "nothing")
+        {
+            for (
+                int at = text.IndexOf(word, StringComparison.Ordinal);
+                at >= 0;
+                at = text.IndexOf(word, at + 1, StringComparison.Ordinal)
+            )
+            {
+                if (WordAt(text, at) != (at, at + word.Length))
+                    continue;
+                bool write = text.AsSpan(at + word.Length).StartsWith(" =", StringComparison.Ordinal);
+                highlights.Add(
+                    (JsonNode)
+                        new JsonObject
+                        {
+                            ["range"] = new JsonObject
+                            {
+                                ["start"] = Position(text, at),
+                                ["end"] = Position(text, at + word.Length),
+                            },
+                            ["kind"] = write ? 3 : 2,
+                        }
+                );
+            }
+        }
+        Reply(id, highlights);
     }
 
     /// <summary>
@@ -638,6 +738,8 @@ internal sealed class FakeServer
             $"signatureHelp {id?.ToJsonString()} {(int?)context?["triggerKind"]} {(string?)context?["triggerCharacter"] ?? "-"} "
                 + $"{(bool?)context?["isRetrigger"]} {showing?["activeSignature"]?.ToJsonString() ?? "-"} {offset}"
         );
+        if (document.Text.Contains("slow", StringComparison.Ordinal))
+            return;
         // The innermost parenthesis still open before the position, and the commas in it.
         int depth = 0;
         int commas = 0;
@@ -665,6 +767,40 @@ internal sealed class FakeServer
                 commas++;
         }
         Reply(id, null);
+    }
+
+    /// <summary>
+    /// Answers with the selection range that the command <c>selection-ranges</c> set, or with the word at the first
+    /// position inside its line; once held, when the hold is released.
+    /// </summary>
+    private void SelectionRanges(JsonNode? id, JsonNode parameters)
+    {
+        if (Known(id, "selection ranges", parameters) is not { } document)
+            return;
+        int offset = Offset(document.Text, Required(parameters["positions"]?[0], "positions"));
+        Log($"selection ranges {offset}");
+        JsonArray answer;
+        if (_selectionRange is { } set)
+            answer = new JsonArray(set.DeepClone());
+        else
+        {
+            (int start, int end) = WordAt(document.Text, offset);
+            (int lineStart, int lineEnd) = Lines(document.Text).Last(line => line.Start <= offset);
+            answer = new JsonArray(
+                new JsonObject
+                {
+                    ["range"] = Range(start, end),
+                    ["parent"] = new JsonObject { ["range"] = Range(lineStart, lineEnd) },
+                }
+            );
+        }
+        if (_holdSelectionRanges)
+            _heldSelectionRanges.Add((id?.DeepClone(), answer));
+        else
+            Reply(id, answer);
+
+        JsonObject Range(int from, int to) =>
+            new() { ["start"] = Position(document.Text, from), ["end"] = Position(document.Text, to) };
     }
 
     /// <summary>The word of letters, digits and underscores at an offset; empty where there is none.</summary>
@@ -745,6 +881,21 @@ internal sealed class FakeServer
             },
             ["severity"] = 1,
             ["code"] = "echo",
+            ["message"] = message,
+        };
+
+    private static JsonObject Related(string uri, int line, int character, string message) =>
+        new()
+        {
+            ["location"] = new JsonObject
+            {
+                ["uri"] = uri,
+                ["range"] = new JsonObject
+                {
+                    ["start"] = new JsonObject { ["line"] = line, ["character"] = character },
+                    ["end"] = new JsonObject { ["line"] = line, ["character"] = character + 1 },
+                },
+            },
             ["message"] = message,
         };
 

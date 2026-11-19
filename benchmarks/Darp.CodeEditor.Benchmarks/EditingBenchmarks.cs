@@ -10,7 +10,8 @@ namespace Darp.CodeEditor.Benchmarks;
 /// <summary>
 /// The editing helpers on the UI thread, with the layout and the frame that follow, in 5,000 lines of JSON: typing an
 /// opening bracket, which tokenizes the line up to the caret, closes the pair and matches the brackets; Backspace
-/// between the pair; and commenting all 5,000 lines, against a digit typed the same way. Each call starts from the same
+/// between the pair; Enter after a property and between a pair; and commenting all 5,000 lines, against a digit typed
+/// the same way. Each call starts from the same
 /// text, set up outside the measurement, and its edit is checked after it: a helper that does nothing fails the run
 /// instead of looking fast.
 /// </summary>
@@ -99,6 +100,49 @@ public class EditingBenchmarks
 
     [IterationCleanup(Targets = [nameof(BackspaceAnEmptyPair)])]
     public void CheckThePairIsGone() => Expect(Document.Text == _text, "Backspace did not delete the pair.");
+
+    [IterationSetup(Targets = [nameof(PressEnter)])]
+    public void PutTheCaretAtTheLineEndForEnter() => Select(new TextSelection(_lineEnd));
+
+    /// <summary>Enter after a property: the indentation rules indent the new line by the lines above.</summary>
+    [Benchmark]
+    public void PressEnter()
+    {
+        Window window = Window;
+        Press(window, Key.Enter, KeyModifiers.None);
+        HeadlessEditor.Render(window);
+    }
+
+    [IterationCleanup(Targets = [nameof(PressEnter)])]
+    public void CheckTheNewLineAndUndo()
+    {
+        Expect(Text(_lineEnd, 3) == "\n  " && Editor.Selection == new TextSelection(_lineEnd + 3), "No indented line.");
+        Document.Undo();
+    }
+
+    /// <summary>Types "[", which brings its "]", for Enter to break between them.</summary>
+    [IterationSetup(Targets = [nameof(PressEnterInAPair)])]
+    public void TypeAPairForEnter() => TypeAPair();
+
+    /// <summary>
+    /// Enter between "[" and "]": the line has brackets, so it is tokenized to leave out those in strings and comments.
+    /// </summary>
+    [Benchmark]
+    public void PressEnterInAPair()
+    {
+        Window window = Window;
+        Press(window, Key.Enter, KeyModifiers.None);
+        HeadlessEditor.Render(window);
+    }
+
+    [IterationCleanup(Targets = [nameof(PressEnterInAPair)])]
+    public void CheckTheBrokenPairAndUndo()
+    {
+        Expect(Text(_lineEnd, 10) == "[\n    \n  ]", "The pair did not break.");
+        while (Document.Text != _text && Document.CanUndo)
+            Document.Undo();
+        Expect(Document.Text == _text, "Undo did not restore the text.");
+    }
 
     [IterationSetup(Targets = [nameof(Comment5000Lines)])]
     public void SelectAllLines() => Select(new TextSelection(0, Document.CurrentSnapshot.Length));

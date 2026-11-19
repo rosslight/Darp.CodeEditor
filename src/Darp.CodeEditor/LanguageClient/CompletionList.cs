@@ -1,6 +1,8 @@
 using System.Text.Json;
 using Darp.CodeEditor.Completion;
+using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Lsp;
+using Darp.CodeEditor.Popups;
 
 namespace Darp.CodeEditor.LanguageClient;
 
@@ -24,7 +26,12 @@ internal sealed class CompletionList
         Items = items;
         IsIncomplete = isIncomplete;
         _resolve = resolve;
+        // Here, where the server's answer is read, off the UI thread.
+        NeedsClipboard = items.Any(item => item.Snippet is { NeedsClipboard: true });
     }
+
+    /// <summary>Whether an item's snippet has the variable <c>CLIPBOARD</c>: completion reads the clipboard for it.</summary>
+    public bool NeedsClipboard { get; }
 
     /// <summary>The items, sorted by their <see cref="CompletionItem.SortKey"/>.</summary>
     public IReadOnlyList<CompletionItem> Items { get; }
@@ -49,7 +56,10 @@ internal sealed class CompletionList
     /// </summary>
     /// <param name="result">The result.</param>
     /// <param name="snapshot">The text that completion was asked for.</param>
-    /// <param name="word">The word before the position asked for, which ends there: what items without an edit replace.</param>
+    /// <param name="word">
+    /// The word before the position asked for, which ends there: what items without an edit insert over; replacing,
+    /// they go over the rest of the word too.
+    /// </param>
     /// <param name="commitCharacters">The characters that commit items that name none of their own.</param>
     /// <param name="resolve">Asks the server to resolve an item; null when it does not resolve.</param>
     /// <exception cref="JsonException">The result is not a completion list.</exception>
@@ -79,9 +89,10 @@ internal sealed class CompletionList
         }
         var read = new List<CompletionItem>(items.GetArrayLength());
         int line = snapshot.GetPosition(word.End).Line - 1;
+        TextRange wholeWord = TextRange.FromBounds(word.Start, WordEnd(snapshot, word.End));
         foreach (JsonElement item in items.EnumerateArray())
         {
-            if (ReadItem(item, snapshot, line, word, commitCharacters) is { } completion)
+            if (ReadItem(item, snapshot, line, word, wholeWord, commitCharacters) is { } completion)
                 read.Add(completion);
         }
         return new CompletionList([.. read.OrderBy(item => item.SortKey)], isIncomplete, resolve);
@@ -103,29 +114,46 @@ internal sealed class CompletionList
                 Detail = ServerJson.String(result, "detail") ?? item.Detail,
                 Documentation = ServerJson.Documentation(result) ?? item.Documentation,
                 AdditionalEdits = AdditionalEdits(result, snapshot) ?? item.AdditionalEdits,
+                Command = Command(result) ?? item.Command,
             };
+
+    /// <summary>
+    /// Where the word that goes on after <paramref name="position"/> ends, reaching as far as a hovered word does; the
+    /// position itself when no word goes on.
+    /// </summary>
+    private static int WordEnd(TextSnapshot snapshot, int position)
+    {
+        string after = snapshot.GetText(new TextRange(position, HoverController.MaxWordReach));
+        int length = 0;
+        while (length < after.Length && WordCharacters.IsWordCharacter(after[length]))
+            length++;
+        return position + length;
+    }
 
     private static CompletionItem? ReadItem(
         JsonElement item,
         TextSnapshot snapshot,
         int line,
         TextRange word,
+        TextRange wholeWord,
         string commitCharacters
     )
     {
         if (item.ValueKind != JsonValueKind.Object || ServerJson.String(item, "label") is not { } label)
             throw new JsonException("A completion item needs a label.");
         TextRange range;
+        TextRange replaceRange;
         string newText;
         if (item.TryGetProperty("textEdit", out JsonElement edit) && edit.ValueKind != JsonValueKind.Null)
         {
             if (Edit(edit, snapshot, line, word.End) is not { } valid)
                 return null;
-            (range, newText) = valid;
+            (range, replaceRange, newText) = valid;
         }
         else
         {
-            (range, newText) = (word, ServerJson.String(item, "insertText") ?? label);
+            // As VS Code: inserting goes over the word before the position, replacing over the whole word.
+            (range, replaceRange, newText) = (word, wholeWord, ServerJson.String(item, "insertText") ?? label);
         }
         // Parsed here, off the UI thread: a server's snippet can be of any length.
         Snippet? snippet =
@@ -133,6 +161,10 @@ internal sealed class CompletionList
         string filterText = ServerJson.String(item, "filterText") ?? label;
         // As VS Code, an item without a kind, or with one the protocol does not name, is a property.
         int kind = ServerJson.Number(item, "kind") is int k and >= 1 and <= 25 ? k : CompletionItemKinds.Property;
+        JsonElement? labelDetails =
+            item.TryGetProperty("labelDetails", out JsonElement details) && details.ValueKind == JsonValueKind.Object
+                ? details
+                : null;
         return new CompletionItem(
             label,
             kind,
@@ -145,20 +177,33 @@ internal sealed class CompletionList
             string.Equals(filterText, label, StringComparison.OrdinalIgnoreCase),
             new CompletionSortKey(ServerJson.String(item, "sortText") ?? label, label, kind),
             new CompletionEdit(range, newText),
+            replaceRange,
             snippet,
             AdditionalEdits(item, snapshot),
             item.TryGetProperty("commitCharacters", out JsonElement _)
                 ? ServerFeatures.Characters(item, "commitCharacters")
                 : commitCharacters,
             item
-        );
+        )
+        {
+            LabelDetail = labelDetails is { } d ? OneLine(ServerJson.String(d, "detail")) : null,
+            LabelDescription = labelDetails is { } e ? OneLine(ServerJson.String(e, "description")) : null,
+            Command = Command(item),
+        };
     }
 
+    /// <summary>An item's <c>command</c>: the identifier of the command to run after it is committed; null for none.</summary>
+    private static string? Command(JsonElement item) =>
+        item.TryGetProperty("command", out JsonElement command) && command.ValueKind == JsonValueKind.Object
+            ? ServerJson.String(command, "command")
+            : null;
+
     /// <summary>
-    /// An item's <c>textEdit</c>: a <c>TextEdit</c>, or an <c>InsertReplaceEdit</c>, whose insert range applies, as in
-    /// VS Code by default. Null for one that is not on the line asked for, or does not contain the position asked for.
+    /// An item's <c>textEdit</c>, with the range it inserts over and the one it replaces: an <c>InsertReplaceEdit</c>'s
+    /// insert and replace ranges, or a <c>TextEdit</c>'s range for both, as in VS Code. Null for one that is not on the
+    /// line asked for, or does not contain the position asked for, or whose ranges start apart.
     /// </summary>
-    private static (TextRange Range, string NewText)? Edit(
+    private static (TextRange Range, TextRange ReplaceRange, string NewText)? Edit(
         JsonElement edit,
         TextSnapshot snapshot,
         int line,
@@ -168,22 +213,24 @@ internal sealed class CompletionList
         if (edit.ValueKind != JsonValueKind.Object || ServerJson.String(edit, "newText") is not { } newText)
             throw new JsonException("A completion item's text edit needs new text.");
         TextRange? range;
+        TextRange? replaceRange;
         if (
             edit.TryGetProperty("insert", out JsonElement insert)
             && edit.TryGetProperty("replace", out JsonElement replace)
         )
         {
             range = OnLine(insert, snapshot, line, position);
-            if (OnLine(replace, snapshot, line, position)?.Start != range?.Start)
+            replaceRange = OnLine(replace, snapshot, line, position);
+            if (replaceRange?.Start != range?.Start)
                 return null;
         }
         else
         {
-            range = edit.TryGetProperty("range", out JsonElement value)
+            range = replaceRange = edit.TryGetProperty("range", out JsonElement value)
                 ? OnLine(value, snapshot, line, position)
                 : throw new JsonException("A completion item's text edit needs a range.");
         }
-        return range is { } valid ? (valid, newText) : null;
+        return range is { } valid && replaceRange is { } replacing ? (valid, replacing, newText) : null;
     }
 
     /// <summary>The offsets of a range on <paramref name="line"/> around <paramref name="position"/>; null otherwise.</summary>
@@ -228,6 +275,19 @@ internal sealed class CompletionList
         return read;
     }
 
+    /// <summary>
+    /// A label's detail or description on one line, as VS Code shows it, and at most as long as a row shows: read here,
+    /// off the UI thread.
+    /// </summary>
+    private static string? OneLine(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return null;
+        const int MaxLength = 256;
+        string line = text.Length > MaxLength ? string.Concat(text.AsSpan(0, MaxLength), "…") : text;
+        return line.ReplaceLineEndings(" ");
+    }
+
     private static bool HasDeprecatedTag(JsonElement item) =>
         item.TryGetProperty("tags", out JsonElement tags)
         && tags.ValueKind == JsonValueKind.Array
@@ -245,7 +305,12 @@ internal sealed class CompletionList
 /// <param name="FilterText">The text it is matched by.</param>
 /// <param name="FilterTextIsLabel">Whether the whole filter text equals the label, ignoring case.</param>
 /// <param name="SortKey">Where it is in the list before anything is typed.</param>
-/// <param name="Edit">What committing it does to the text: its text as the server wrote it.</param>
+/// <param name="Edit">
+/// What committing it does to the text, inserting: its text as the server wrote it, over its insert range.
+/// </param>
+/// <param name="ReplaceRange">
+/// What its text goes over, replacing: the same start as <paramref name="Edit"/>'s range, and an end as far or further.
+/// </param>
 /// <param name="Snippet">Its text as a snippet, for an item whose text is in the snippet syntax; null otherwise.</param>
 /// <param name="AdditionalEdits">What else committing it changes, such as an import; null when it names none.</param>
 /// <param name="CommitCharacters">The characters that commit it as they are typed.</param>
@@ -261,11 +326,25 @@ internal sealed record CompletionItem(
     bool FilterTextIsLabel,
     CompletionSortKey SortKey,
     CompletionEdit Edit,
+    TextRange ReplaceRange,
     Snippet? Snippet,
     IReadOnlyList<CompletionEdit>? AdditionalEdits,
     string CommitCharacters,
     JsonElement Source
-);
+)
+{
+    /// <summary>The <c>labelDetails.detail</c>, such as a signature, right after the label, dimmed; null for none.</summary>
+    public string? LabelDetail { get; init; }
+
+    /// <summary>The <c>labelDetails.description</c>, such as a module, right-aligned in the row; null for none.</summary>
+    public string? LabelDescription { get; init; }
+
+    /// <summary>
+    /// The identifier of the command to run after the item is committed, such as
+    /// <c>editor.action.triggerSuggest</c>; null for none.
+    /// </summary>
+    public string? Command { get; init; }
+}
 
 /// <summary>A change of the text: <paramref name="Range"/> becomes <paramref name="NewText"/>.</summary>
 internal readonly record struct CompletionEdit(TextRange Range, string NewText);
@@ -286,4 +365,6 @@ internal static class InsertTextFormat
 internal static class CompletionItemKinds
 {
     public const int Property = 10;
+
+    public const int Value = 12;
 }

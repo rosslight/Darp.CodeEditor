@@ -12,6 +12,13 @@ dotnet publish tests/Darp.CodeEditor.Tests -c Release -r linux-x64 -o artifacts/
 artifacts/aot-tests/Darp.CodeEditor.Tests
 ```
 
+A document without a line break gives its new lines the system's, `\r\n` on Windows and `\n` elsewhere. To run the tests
+with the other one, set `CODE_EDITOR_TESTS_EOL` to `crlf` or `lf`:
+
+```sh
+CODE_EDITOR_TESTS_EOL=crlf dotnet test tests/Darp.CodeEditor.Tests
+```
+
 ## Sample app
 
 [`samples/Darp.CodeEditor.Sample`](samples/Darp.CodeEditor.Sample) shows how an app uses the API.

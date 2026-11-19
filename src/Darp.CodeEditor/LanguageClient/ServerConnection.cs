@@ -310,7 +310,7 @@ internal sealed class ServerConnection
             Positions.ToLsp(snapshot.GetPosition(offset)),
             new SignatureHelpContext(
                 trigger.Kind,
-                IsRetrigger: trigger.Showing is not null,
+                trigger.IsRetrigger,
                 trigger.Character?.ToString(),
                 trigger.Showing?.ToContext()
             )
@@ -320,6 +320,70 @@ internal sealed class ServerConnection
             "textDocument/signatureHelp",
             writer => JsonSerializer.Serialize(writer, parameters, LspJsonContext.Default.SignatureHelpParams),
             SignatureHelpInfo.Read,
+            cancellationToken
+        );
+    }
+
+    /// <summary>
+    /// The server's selection ranges at <paramref name="offset"/> of an open document, for an editor: the ranges that
+    /// expanding the selection goes through, from the innermost out. Null when the server does not run, the document is
+    /// not open in it, it offers no selection ranges or failed, and when <paramref name="cancellationToken"/> cancelled
+    /// the request.
+    /// </summary>
+    /// <param name="document">The document.</param>
+    /// <param name="snapshot">The document's text that the offset is in.</param>
+    /// <param name="offset">The caret.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    public Task<IReadOnlyList<TextRange>?> SelectionRangesAsync(
+        ServerDocument document,
+        TextSnapshot snapshot,
+        int offset,
+        CancellationToken cancellationToken
+    )
+    {
+        if (Target(document) is not { Features.SelectionRange: true } target)
+            return Task.FromResult<IReadOnlyList<TextRange>?>(null);
+        var parameters = new SelectionRangeParams(
+            new TextDocumentIdentifier(target.Uri),
+            [Positions.ToLsp(snapshot.GetPosition(offset))]
+        );
+        return RequestForEditorAsync(
+            target.Rpc,
+            "textDocument/selectionRange",
+            writer => JsonSerializer.Serialize(writer, parameters, LspJsonContext.Default.SelectionRangeParams),
+            result => SelectionRanges.Read(result, snapshot),
+            cancellationToken
+        );
+    }
+
+    /// <summary>
+    /// The server's occurrences of the symbol at <paramref name="position"/> of an open document, for an editor. Null
+    /// when the server does not run, the document is not open in it, it offers none, failed or answered null, and when
+    /// <paramref name="cancellationToken"/> cancelled the request: the editor then takes the words of the text, as VS
+    /// Code does.
+    /// </summary>
+    /// <param name="document">The document.</param>
+    /// <param name="snapshot">The document's text that <paramref name="position"/> is in.</param>
+    /// <param name="position">The caret.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    public Task<IReadOnlyList<Occurrence>?> DocumentHighlightsAsync(
+        ServerDocument document,
+        TextSnapshot snapshot,
+        TextPosition position,
+        CancellationToken cancellationToken
+    )
+    {
+        if (Target(document) is not { Features.DocumentHighlight: true } target)
+            return Task.FromResult<IReadOnlyList<Occurrence>?>(null);
+        var parameters = new TextDocumentPositionParams(
+            new TextDocumentIdentifier(target.Uri),
+            Positions.ToLsp(position)
+        );
+        return RequestForEditorAsync(
+            target.Rpc,
+            "textDocument/documentHighlight",
+            writer => JsonSerializer.Serialize(writer, parameters, LspJsonContext.Default.TextDocumentPositionParams),
+            result => DocumentHighlights.Read(result, snapshot),
             cancellationToken
         );
     }
@@ -724,7 +788,23 @@ internal sealed class ServerConnection
             severity,
             diagnostic.Code,
             diagnostic.Message
-        );
+        )
+        {
+            Source = diagnostic.Source,
+            CodeDescription = Uri.TryCreate(diagnostic.CodeDescription?.Href, UriKind.Absolute, out Uri? href)
+                ? href
+                : null,
+            RelatedInformation =
+            [
+                .. (diagnostic.RelatedInformation ?? [])
+                    .Where(related => Uri.IsWellFormedUriString(related.Location.Uri, UriKind.Absolute))
+                    .Select(related => new DiagnosticRelatedInformation(
+                        new Uri(related.Location.Uri),
+                        Positions.FromLsp(related.Location.Range.Start),
+                        related.Message
+                    )),
+            ],
+        };
     }
 
     /// <summary>
@@ -815,8 +895,14 @@ internal sealed class ServerConnection
             ["textDocument"] = new JsonObject
             {
                 ["synchronization"] = new JsonObject { ["dynamicRegistration"] = false },
-                ["publishDiagnostics"] = new JsonObject { ["versionSupport"] = true },
+                ["publishDiagnostics"] = new JsonObject
+                {
+                    ["versionSupport"] = true,
+                    ["relatedInformation"] = true,
+                    ["codeDescriptionSupport"] = true,
+                },
                 ["hover"] = new JsonObject { ["contentFormat"] = new JsonArray("markdown", "plaintext") },
+                ["selectionRange"] = new JsonObject { ["dynamicRegistration"] = false },
                 ["completion"] = new JsonObject
                 {
                     ["completionItem"] = new JsonObject
@@ -828,6 +914,7 @@ internal sealed class ServerConnection
                         ["preselectSupport"] = true,
                         ["tagSupport"] = new JsonObject { ["valueSet"] = new JsonArray(1) },
                         ["insertReplaceSupport"] = true,
+                        ["labelDetailsSupport"] = true,
                         ["resolveSupport"] = new JsonObject
                         {
                             ["properties"] = new JsonArray("detail", "documentation", "additionalTextEdits"),
@@ -862,6 +949,7 @@ internal sealed class ServerConnection
                     // Semantic colors are drawn over the TextMate colors.
                     ["augmentsSyntaxTokens"] = true,
                 },
+                ["documentHighlight"] = new JsonObject { ["dynamicRegistration"] = false },
             },
         };
 

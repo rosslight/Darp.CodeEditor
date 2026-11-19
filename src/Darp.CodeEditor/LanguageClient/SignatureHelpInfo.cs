@@ -61,6 +61,9 @@ internal sealed record SignatureInfo(
     int ActiveParameter
 )
 {
+    /// <summary>Whether its active parameter falls outside its parameters: it cannot match the call.</summary>
+    public bool CannotMatch { get; init; }
+
     /// <summary>
     /// Reads a <c>SignatureInformation</c>. Its own active parameter wins over the answer's; without either it is the
     /// first, and one outside the parameters is none, as in VS Code.
@@ -82,7 +85,12 @@ internal sealed record SignatureInfo(
             ServerJson.Documentation(signature),
             parameters,
             active >= 0 && active < parameters.Count ? active : -1
-        );
+        )
+        {
+            // The call has an argument where the signature has no parameter; one without parameters may still be
+            // called without arguments.
+            CannotMatch = active >= parameters.Count && !(active == 0 && parameters.Count == 0),
+        };
     }
 }
 
@@ -146,5 +154,14 @@ internal sealed record ParameterInfo(int Start, int Length, HoverText? Documenta
 /// <summary>How signature help was asked for.</summary>
 /// <param name="Kind">One of <c>SignatureHelpTriggerKind</c>.</param>
 /// <param name="Character">The character typed, for a trigger character.</param>
-/// <param name="Showing">The signature help that showed, with the signature the user chose; null when none did.</param>
-internal readonly record struct SignatureHelpTrigger(int Kind, char? Character, SignatureHelpInfo? Showing);
+/// <param name="IsRetrigger">Whether signature help showed, or was asked for, when it was asked for again.</param>
+/// <param name="Showing">
+/// The signature help that showed, or showed before the request under way, with the signature the user chose; null when
+/// none did.
+/// </param>
+internal readonly record struct SignatureHelpTrigger(
+    int Kind,
+    char? Character,
+    bool IsRetrigger,
+    SignatureHelpInfo? Showing
+);

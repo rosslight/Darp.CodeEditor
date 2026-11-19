@@ -4,7 +4,7 @@ namespace Darp.CodeEditor;
 
 /// <summary>
 /// What kind of text a document holds: its TextMate grammar for colors and its editing rules (comments, brackets,
-/// auto-closing pairs, indentation rules). Language servers are not part of it: a server creates the documents it
+/// auto-closing pairs, indentation rules, rules for Enter). Language servers are not part of it: a server creates the documents it
 /// serves, see <see cref="LanguageServer.CreateDocument"/>.
 /// </summary>
 /// <remarks>
@@ -27,11 +27,23 @@ public sealed class CodeLanguage
 {
     private static readonly Lazy<CodeLanguage> s_plainText = new(() => new CodeLanguage("plaintext"));
 
-    private static readonly Lazy<CodeLanguage> s_json = new(() => BuiltIn("json"));
+    /// <summary>
+    /// Quick suggestions also in strings, as VS Code's JSON and YAML extensions set them: values are strings there,
+    /// and need completion.
+    /// </summary>
+    private static readonly QuickSuggestions s_alsoInStrings = new(Other: true, Comments: false, Strings: true);
 
-    private static readonly Lazy<CodeLanguage> s_xml = new(() => BuiltIn("xml"));
+    private static readonly Lazy<CodeLanguage> s_json = new(() => BuiltIn("json", s_alsoInStrings));
 
-    private static readonly Lazy<CodeLanguage> s_yaml = new(() => BuiltIn("yaml"));
+    private static readonly Lazy<CodeLanguage> s_xml = new(() => BuiltIn("xml", QuickSuggestions.Default));
+
+    /// <summary>
+    /// YAML indents by brackets and the rules for Enter, not by its indentation rules, as VS Code's YAML extension sets
+    /// <c>editor.autoIndent</c> to <c>advanced</c> for the language.
+    /// </summary>
+    private static readonly Lazy<CodeLanguage> s_yaml = new(() =>
+        BuiltIn("yaml", s_alsoInStrings, AutoIndent.Advanced)
+    );
 
     /// <summary>Creates a language from the files of a VS Code extension, and starts loading them.</summary>
     /// <param name="id">The language identifier that the language server receives, such as <c>toml</c>.</param>
@@ -73,15 +85,41 @@ public sealed class CodeLanguage
     /// <summary>The editing rules; null for none.</summary>
     public Uri? Configuration { get; }
 
+    /// <summary>
+    /// Where typing opens completion by itself in the language's documents, as VS Code's <c>editor.quickSuggestions</c>
+    /// for the language. Default: <see cref="QuickSuggestions.Default"/>, in code only. <see cref="Json"/> and
+    /// <see cref="Yaml"/> open it in strings too, as VS Code's JSON and YAML extensions set it for their languages. To
+    /// override a built-in language's, create the language from its files with another value:
+    /// <c>new CodeLanguage("json", CodeLanguage.Json.Grammar, CodeLanguage.Json.Configuration) { QuickSuggestions = … }</c>.
+    /// </summary>
+    public QuickSuggestions QuickSuggestions { get; init; } = QuickSuggestions.Default;
+
+    /// <summary>
+    /// How far the editor indents by itself in the language's documents, as VS Code's <c>editor.autoIndent</c> for the
+    /// language. Default: <see cref="AutoIndent.Full"/>, VS Code's. <see cref="Yaml"/> takes
+    /// <see cref="AutoIndent.Advanced"/>, as VS Code's YAML extension sets it: its indentation rules don't apply. To
+    /// override a built-in language's, create the language from its files with another value, as for
+    /// <see cref="QuickSuggestions"/>.
+    /// </summary>
+    public AutoIndent AutoIndent { get; init; } = AutoIndent.Full;
+
     /// <summary>The grammar and editing rules, once read; <see cref="LoadedLanguage.None"/> when a file failed.</summary>
     internal Task<LoadedLanguage> Loaded { get; }
 
-    private static CodeLanguage BuiltIn(string id) =>
+    private static CodeLanguage BuiltIn(
+        string id,
+        QuickSuggestions quickSuggestions,
+        AutoIndent autoIndent = AutoIndent.Full
+    ) =>
         new(
             id,
             new Uri($"avares://Darp.CodeEditor/Languages/{id}.tmLanguage.json"),
             new Uri($"avares://Darp.CodeEditor/Languages/{id}.language-configuration.json")
-        );
+        )
+        {
+            QuickSuggestions = quickSuggestions,
+            AutoIndent = autoIndent,
+        };
 
     private LoadedLanguage Load()
     {

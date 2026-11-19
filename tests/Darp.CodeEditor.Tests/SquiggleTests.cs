@@ -12,7 +12,7 @@ namespace Darp.CodeEditor.Tests;
 public sealed class SquiggleTests(UiFixture ui)
 {
     /// <summary>The colors of the test theme's marks.</summary>
-    private static readonly Color s_error = Color.Parse("#FF8000");
+    private static readonly Color s_error = Color.Parse("#C00040");
 
     private static readonly Color s_warning = Color.Parse("#00C0C0");
     private static readonly Color s_information = Color.Parse("#8000FF");
@@ -319,7 +319,7 @@ public sealed class SquiggleTests(UiFixture ui)
             window.Layout();
             using var squiggles = new SquiggleLayer(EditorWindow.PartOf(editor).TextArea, document);
 
-            IReadOnlyList<Diagnostic> taken = squiggles.At(3, 20_000);
+            IReadOnlyList<Diagnostic> taken = [.. squiggles.At(3)];
 
             // The document keeps them all; its editors the first 10,000 errors.
             document.Diagnostics.Count.ShouldBe(100_000);

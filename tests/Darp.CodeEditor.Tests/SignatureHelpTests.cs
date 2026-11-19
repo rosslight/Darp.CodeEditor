@@ -34,9 +34,11 @@ public sealed class SignatureHelpTests(UiFixture ui)
 
             window.Type("(");
 
-            ToolTip popup = await WaitForSignatureAsync(window, "first", "Calls with two.");
+            PopupFrame popup = await WaitForSignatureAsync(window, "first", "Calls with two.");
             (await fake.WaitForAsync("signatureHelp ")).ShouldEndWith(" 2 ( False - 5");
-            Texts(popup).ShouldContain("1/2");
+            // Every signature shows, the active one marked.
+            Texts(popup).ShouldContain("call(first, second, third)");
+            ActiveSignature(popup).ShouldBe("call(first, second)");
             // The parameter's Markdown.
             popup
                 .GetVisualDescendants()
@@ -51,7 +53,35 @@ public sealed class SignatureHelpTests(UiFixture ui)
         });
 
     [Fact]
-    public Task A_retrigger_character_moves_the_active_parameter_at_once() =>
+    public Task Ctrl_Shift_Space_asks_for_the_signature_on_demand() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "call()");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            await CompletionTests.StartServingAsync(server, document);
+            window.Editor.Selection = new TextSelection(5);
+
+            window.Press(Key.Space, EditorWindow.Command | KeyModifiers.Shift);
+
+            await WaitForSignatureAsync(window, "first", "Calls with two.");
+            (await fake.WaitForAsync("signatureHelp ")).ShouldContain(" 1 ");
+        });
+
+    [Theory]
+    [InlineData("""{ "label": "f(a)", "parameters": [ { "label": "a" } ], "activeParameter": 1 }""", true)]
+    [InlineData("""{ "label": "f(a)", "parameters": [ { "label": "a" } ], "activeParameter": 0 }""", false)]
+    [InlineData("""{ "label": "f()", "parameters": [], "activeParameter": 0 }""", false)]
+    [InlineData("""{ "label": "f()", "parameters": [], "activeParameter": 1 }""", true)]
+    public void A_signature_whose_active_parameter_it_lacks_cannot_match(string json, bool cannotMatch) =>
+        LanguageClient
+            .SignatureInfo.Read(System.Text.Json.JsonDocument.Parse(json).RootElement, null)
+            .CannotMatch.ShouldBe(cannotMatch);
+
+    [Fact]
+    public Task A_retrigger_character_moves_the_active_parameter() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
@@ -70,6 +100,34 @@ public sealed class SignatureHelpTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_trigger_character_asks_after_the_pause_and_one_typed_while_a_request_is_under_way_asks_again() =>
+        _ui.Run(async () =>
+        {
+            var time = new ManualTime();
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            // The server never answers signature help in a document with "slow".
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "slow");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await CompletionTests.StartServingAsync(server, document);
+            window.Editor.Selection = new TextSelection(4);
+
+            window.Type("(");
+            time.Advance(TimeSpan.FromMilliseconds(119));
+            await CompletionTests.BarrierAsync(server, fake);
+            fake.LinesStartingWith("signatureHelp ").ShouldBeEmpty();
+            time.Advance(TimeSpan.FromMilliseconds(1));
+            string first = (await fake.WaitForAsync("signatureHelp ")).Split(' ')[1];
+            fake.LinesStartingWith("signatureHelp ")[0].ShouldEndWith(" 2 ( False - 5");
+
+            // Nothing shows yet, but a request is under way: as in VS Code, it is active, and asks again.
+            window.Type(",");
+            time.Advance(TimeSpan.FromMilliseconds(120));
+            (await fake.WaitForAsync("signatureHelp ", 2)).ShouldEndWith(" 2 , True - 6");
+            await fake.WaitForAsync($"cancel {first}");
+        });
+
+    [Fact]
     public Task Typing_inside_the_call_asks_again_after_a_pause_that_each_edit_restarts() =>
         _ui.Run(async () =>
         {
@@ -81,6 +139,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
             await CompletionTests.StartServingAsync(server, document);
             window.Editor.Selection = new TextSelection(4);
             window.Type("(");
+            time.Advance(TimeSpan.FromMilliseconds(120));
             await WaitForSignatureAsync(window, "first", "Calls with two.");
 
             window.Type("+");
@@ -107,6 +166,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
             await CompletionTests.StartServingAsync(server, document);
             window.Editor.Selection = new TextSelection(4);
             window.Type("(");
+            time.Advance(TimeSpan.FromMilliseconds(120));
             await WaitForSignatureAsync(window, "first", "Calls with two.");
 
             // As another editor of the document renames the call: same length, so the caret stays.
@@ -135,8 +195,8 @@ public sealed class SignatureHelpTests(UiFixture ui)
             await WaitForSignatureAsync(window, "first", "Calls with two.");
 
             window.Press(Key.Down);
-            ToolTip popup = await WaitForSignatureAsync(window, "first", "Calls with three.");
-            Texts(popup).ShouldContain("2/2");
+            PopupFrame popup = await WaitForSignatureAsync(window, "first", "Calls with three.");
+            ActiveSignature(popup).ShouldBe("call(first, second, third)");
             document.Text.ShouldBe("call(");
 
             // Asking again tells the server the signature that shows, and it keeps it.
@@ -148,7 +208,69 @@ public sealed class SignatureHelpTests(UiFixture ui)
             await CompletionTests.WaitForLabelsAsync(window);
             window.Press(Key.Down);
             CompletionTests.List(window).ShouldNotBeNull().SelectedIndex.ShouldBe(1);
-            Texts(Popup(window).ShouldNotBeNull()).ShouldContain("2/2");
+            ActiveSignature(Popup(window).ShouldNotBeNull()).ShouldBe("call(first, second, third)");
+        });
+
+    [Fact]
+    public Task Without_parameter_hints_typing_opens_nothing_asking_by_key_still_does_and_turning_them_off_closes_it() =>
+        _ui.Run(async () =>
+        {
+            var time = new ManualTime();
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "call");
+            var off = new ParameterHintsOptions(Enabled: false, Cycle: true);
+            var editor = new CodeEditor { Document = document, ParameterHints = off };
+            using var window = new EditorWindow(editor);
+            await CompletionTests.StartServingAsync(server, document);
+            // VS Code's default: on, and cycling.
+            new CodeEditor().ParameterHints.ShouldBe(new ParameterHintsOptions(Enabled: true, Cycle: true));
+            window.Editor.Selection = new TextSelection(4);
+
+            window.Type("(");
+            time.Advance(TimeSpan.FromMilliseconds(120));
+            // A request that the pause posted would be sent before the barrier.
+            window.Layout();
+            await CompletionTests.BarrierAsync(server, fake);
+            fake.LinesStartingWith("signatureHelp ").ShouldBeEmpty();
+
+            window.Press(Key.Space, EditorWindow.Command | KeyModifiers.Shift);
+            await WaitForSignatureAsync(window, "first", "Calls with two.");
+            editor.ParameterHints = ParameterHintsOptions.Default;
+            Popup(window).ShouldNotBeNull();
+            editor.ParameterHints = off;
+            Popup(window).ShouldBeNull();
+        });
+
+    [Fact]
+    public Task Up_and_Down_go_around_the_signatures_or_without_cycling_close_signature_help_at_either_end() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "call");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            await CompletionTests.StartServingAsync(server, document);
+
+            // Two signatures: past the last, Down goes to the first.
+            await OpenAsync(window, document);
+            window.Press(Key.Down);
+            await WaitForSignatureAsync(window, "first", "Calls with three.");
+            window.Press(Key.Down);
+            PopupFrame popup = await WaitForSignatureAsync(window, "first", "Calls with two.");
+            ActiveSignature(popup).ShouldBe("call(first, second)");
+
+            editor.ParameterHints = new ParameterHintsOptions(Enabled: true, Cycle: false);
+            window.Press(Key.Down);
+            await WaitForSignatureAsync(window, "first", "Calls with three.");
+            window.Press(Key.Down);
+            Popup(window).ShouldBeNull();
+            await OpenAsync(window, document);
+            window.Press(Key.Up);
+            Popup(window).ShouldBeNull();
+            document.Text.ShouldBe("call(");
+            editor.Selection.ShouldBe(new TextSelection(5));
         });
 
     [Fact]
@@ -168,7 +290,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
             using var window = new EditorWindow(new CodeEditor { Document = document });
             window.Editor.Selection = new TextSelection(text.Length);
             window.Type("(");
-            ToolTip popup = await WaitForSignatureAsync(window, "first", "Calls with two.");
+            PopupFrame popup = await WaitForSignatureAsync(window, "first", "Calls with two.");
 
             window.Press(Key.Space, KeyModifiers.Control);
             await CompletionTests.WaitForLabelsAsync(window);
@@ -215,6 +337,38 @@ public sealed class SignatureHelpTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_click_that_moves_the_caret_ends_signature_help_and_a_key_that_moves_it_asks_again() =>
+        _ui.Run(async () =>
+        {
+            var time = new ManualTime();
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "call");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await CompletionTests.StartServingAsync(server, document);
+            window.Editor.Selection = new TextSelection(4);
+            // The "(" and what follows it within the pause ask once, for the "(".
+            window.Type("(xy");
+            time.Advance(TimeSpan.FromMilliseconds(120));
+            await WaitForSignatureAsync(window, "first", "Calls with two.");
+            (await fake.WaitForAsync("signatureHelp ")).ShouldEndWith(" 2 ( False - 7");
+
+            // As in VS Code: a key that moves the caret asks again after the pause, a click ends it.
+            window.Press(Key.Left);
+            time.Advance(TimeSpan.FromMilliseconds(120));
+            await fake.WaitForAsync("signatureHelp ", 2);
+            Popup(window).ShouldNotBeNull();
+            // Between "(" and "x": a quarter of a character right of their boundary.
+            window.Click(window.PointAt(5) - new Point(window.TextView.WideSpaceWidth / 4, 0), MouseButton.Left);
+
+            window.Editor.Selection.ShouldBe(new TextSelection(5));
+            Popup(window).ShouldBeNull();
+            time.Advance(TimeSpan.FromMilliseconds(120));
+            await CompletionTests.BarrierAsync(server, fake);
+            fake.LinesStartingWith("signatureHelp ").Count.ShouldBe(2);
+        });
+
+    [Fact]
     public Task A_read_only_editor_ends_signature_help() =>
         _ui.Run(async () =>
         {
@@ -232,7 +386,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
         });
 
     [Fact]
-    public Task A_long_signature_and_documentation_show_only_as_much_as_a_hover() =>
+    public Task A_long_signature_and_documentation_show_in_full() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
@@ -260,7 +414,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
 
             window.Type("(");
 
-            ToolTip? popup = null;
+            PopupFrame? popup = null;
             await Wait.UntilAsync(() =>
             {
                 window.Render();
@@ -268,11 +422,16 @@ public sealed class SignatureHelpTests(UiFixture ui)
                 return popup is not null
                     && Runs(popup).Any(run => run.Text == "first" && run.FontWeight == FontWeight.Bold);
             });
-            // The signature uses up the budget: the documentation does not show.
+            // All of the signature, which breaks after its comma, too long for a line; and all of the documentation,
+            // in parts, over the frames after.
             string label = Signature(popup!).Inlines?.Text ?? "";
-            label.Length.ShouldBe(HoverBudget.MaxCharacters + 1);
-            label.ShouldEndWith("…");
-            Texts(popup!).Sum(text => text.Length).ShouldBe(label.Length);
+            label.ShouldBe("call(first,\n    " + new string('x', 5_000) + ")");
+            string documentation = string.Concat(Enumerable.Repeat("word ", 2_000)).TrimEnd();
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return string.Concat(Texts(popup!).Skip(1)) == documentation;
+            });
         });
 
     /// <summary>Opens signature help on "call" anew: types "(" after it.</summary>
@@ -287,9 +446,13 @@ public sealed class SignatureHelpTests(UiFixture ui)
     /// <summary>
     /// Waits for the popup with <paramref name="documentation"/>, whose bold parameter is <paramref name="active"/>.
     /// </summary>
-    private static async Task<ToolTip> WaitForSignatureAsync(EditorWindow window, string active, string documentation)
+    private static async Task<PopupFrame> WaitForSignatureAsync(
+        EditorWindow window,
+        string active,
+        string documentation
+    )
     {
-        ToolTip? popup = null;
+        PopupFrame? popup = null;
         await Wait.UntilAsync(() =>
         {
             window.Render();
@@ -302,14 +465,22 @@ public sealed class SignatureHelpTests(UiFixture ui)
     }
 
     /// <summary>The signature help's popup in the window's overlay layer; null while it is closed.</summary>
-    private static ToolTip? Popup(EditorWindow window) =>
-        OverlayLayer.GetOverlayLayer(window.Window)?.GetVisualDescendants().OfType<ToolTip>().FirstOrDefault();
+    private static PopupFrame? Popup(EditorWindow window) => PopupFrames.Find(window, "SignatureHelp");
 
-    private static TextBlock Signature(ToolTip popup) =>
+    /// <summary>The label of the signature marked active.</summary>
+    private static string? ActiveSignature(PopupFrame popup) =>
+        popup
+            .GetVisualDescendants()
+            .OfType<Border>()
+            .Where(border => border.Background is not null && border.Child is TextBlock)
+            .Select(border => ((TextBlock)border.Child!).Inlines?.Text)
+            .SingleOrDefault();
+
+    private static TextBlock Signature(PopupFrame popup) =>
         popup.GetVisualDescendants().OfType<TextBlock>().First(t => t.Inlines?.Text?.StartsWith("call(") == true);
 
-    private static IEnumerable<Run> Runs(ToolTip popup) => Signature(popup).Inlines?.OfType<Run>() ?? [];
+    private static IEnumerable<Run> Runs(PopupFrame popup) => Signature(popup).Inlines?.OfType<Run>() ?? [];
 
-    private static IReadOnlyList<string> Texts(ToolTip popup) =>
+    private static IReadOnlyList<string> Texts(PopupFrame popup) =>
         [.. popup.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Inlines?.Text ?? t.Text ?? "")];
 }

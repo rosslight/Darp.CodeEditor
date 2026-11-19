@@ -9,14 +9,17 @@ namespace Darp.CodeEditor.Editing;
 
 /// <summary>
 /// Draws a box around the bracket next to the caret and around its match, in the color theme's bracket match colors,
-/// as VS Code does.
+/// as VS Code does: only while nothing is selected, and as <see cref="CodeEditor.MatchBrackets"/> says, elsewhere around
+/// the innermost pair around the caret.
 /// </summary>
 /// <remarks>
-/// The pair is found when the text view draws, after the caret moved, the text changed, the lines were drawn again or
-/// the background changed lines' tokens, also out of view: once per frame, however many changes came before it.
+/// The pair is found when the text view draws, after the caret or the selection moved, the text changed, the lines were
+/// drawn again or the background changed lines' tokens, also out of view: once per frame, however many changes came
+/// before it.
 /// </remarks>
 internal sealed class BracketHighlighter : IBackgroundRenderer, IDisposable
 {
+    private readonly CodeEditor _editor;
     private readonly TextArea _textArea;
     private readonly TextDocument _buffer;
     private readonly CodeDocument _document;
@@ -24,16 +27,23 @@ internal sealed class BracketHighlighter : IBackgroundRenderer, IDisposable
     private TextAreaColors? _colors;
     private (int Open, int Close)? _pair;
 
-    /// <summary>Whether the caret, the text or the lines' tokens changed since the pair was found.</summary>
+    /// <summary>Whether the caret, the selection, the text or the lines' tokens changed since the pair was found.</summary>
     private bool _stale = true;
 
-    public BracketHighlighter(TextArea textArea, CodeDocument document, BackgroundTextMateHighlighter highlighter)
+    public BracketHighlighter(
+        CodeEditor editor,
+        TextArea textArea,
+        CodeDocument document,
+        BackgroundTextMateHighlighter highlighter
+    )
     {
+        _editor = editor;
         _textArea = textArea;
         _buffer = textArea.Document;
         _document = document;
         _highlighter = highlighter;
         textArea.Caret.PositionChanged += OnChanged;
+        textArea.SelectionChanged += OnChanged;
         _buffer.TextChanged += OnChanged;
         textArea.TextView.VisualLinesChanged += OnVisualLinesChanged;
         highlighter.TokensChanged += OnChanged;
@@ -49,7 +59,7 @@ internal sealed class BracketHighlighter : IBackgroundRenderer, IDisposable
         set
         {
             _colors = value;
-            _textArea.TextView.InvalidateLayer(Layer);
+            _textArea.TextView.InvalidateVisual();
         }
     }
 
@@ -58,7 +68,7 @@ internal sealed class BracketHighlighter : IBackgroundRenderer, IDisposable
         if (_stale)
         {
             _stale = false;
-            _pair = BracketMatcher.FindPair(_buffer, _textArea.Caret.Offset, Brackets, _highlighter.TokensOf);
+            _pair = FindPair();
         }
         if (_pair is not { } pair || _colors is not { } colors)
             return;
@@ -75,25 +85,62 @@ internal sealed class BracketHighlighter : IBackgroundRenderer, IDisposable
             drawingContext.DrawGeometry(colors.BracketMatchBackground, colors.BracketMatchBorder, geometry);
     }
 
+    /// <summary>Finds the pair again, as <see cref="CodeEditor.MatchBrackets"/> changed.</summary>
+    public void Refresh()
+    {
+        _stale = true;
+        _textArea.TextView.InvalidateVisual();
+    }
+
     public void Dispose()
     {
         _textArea.Caret.PositionChanged -= OnChanged;
+        _textArea.SelectionChanged -= OnChanged;
         _buffer.TextChanged -= OnChanged;
         _textArea.TextView.VisualLinesChanged -= OnVisualLinesChanged;
         _highlighter.TokensChanged -= OnChanged;
         _textArea.TextView.BackgroundRenderers.Remove(this);
     }
 
+    /// <summary>
+    /// The bracket next to the caret and its match, or with <see cref="MatchBrackets.Always"/> else the innermost pair
+    /// around the caret, as VS Code's <c>BracketMatchingController</c> finds them. As in VS Code, a selection has no
+    /// pair: only a caret without one.
+    /// </summary>
+    private (int Open, int Close)? FindPair()
+    {
+        MatchBrackets match = _editor.MatchBrackets;
+        if (match == MatchBrackets.Never || !_textArea.Selection.IsEmpty)
+            return null;
+        int caret = _textArea.Caret.Offset;
+        return BracketMatcher.FindPair(_buffer, caret, Brackets, _highlighter.TokensOf)
+            ?? (
+                match == MatchBrackets.Always
+                    ? BracketMatcher.FindEnclosing(_buffer, caret, Brackets, _highlighter.TokensOf)
+                    : null
+            );
+    }
+
     /// <summary>The lines were built again, with new tokens maybe: the frame that follows finds the pair again.</summary>
     private void OnVisualLinesChanged(object? sender, EventArgs e) => _stale = true;
 
-    /// <summary>Draws again where a pair shows or may show now: next to a bracket, or instead of the last pair.</summary>
+    /// <summary>
+    /// Draws again where a pair shows or may show now: next to a bracket, around the caret anywhere with
+    /// <see cref="MatchBrackets.Always"/>, or instead of the last pair, after the caret, the selection or the text
+    /// changed.
+    /// </summary>
     private void OnChanged(object? sender, EventArgs e)
     {
         _stale = true;
         int caret = _textArea.Caret.Offset;
-        if (_pair is not null || IsBracketCharacter(caret) || IsBracketCharacter(caret - 1))
-            _textArea.TextView.InvalidateLayer(Layer);
+        if (
+            _pair is not null
+            || _editor.MatchBrackets == MatchBrackets.Always
+            || IsBracketCharacter(caret)
+            || IsBracketCharacter(caret - 1)
+        )
+            // The background is drawn by TextView.Render; the bracket decoration cannot change layout.
+            _textArea.TextView.InvalidateVisual();
     }
 
     /// <summary>The language's brackets; none while they load.</summary>

@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using Darp.CodeEditor.Completion;
@@ -231,6 +232,182 @@ public sealed class SnippetSessionTests(UiFixture ui)
             largest.ShouldBe(1);
         });
 
+    [Theory]
+    [InlineData("${1/foo/bar/}$0", "foo", "bar")]
+    [InlineData("$1 baz ${1/foo/bar/}$0", "foo", "foo baz bar")]
+    [InlineData("${1:foo} ${1/(.*)/${1:/upcase}/}$0", "bar", "bar BAR")]
+    public Task Tab_transforms_the_stops_of_the_number_it_leaves(string snippet, string typed, string text) =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Item(snippet));
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+
+            window.Type(typed);
+            window.Press(Key.Tab);
+
+            document.Text.ShouldBe(text);
+            editor.Selection.ShouldBe(new TextSelection(text.Length));
+        });
+
+    [Fact]
+    public Task A_transformation_applies_as_Tab_or_Shift_Tab_leaves_its_number_and_not_on_Escape() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Item(@"${1:name} : ${2:type}${3/\s:=(.*)/${1:+ :=}${1}/};" + "\n$0")
+            );
+
+            // An empty stop with a transformation is a stop like any other; its text is transformed as Tab leaves it.
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            window.Type("clk");
+            window.Press(Key.Tab);
+            window.Type("std_logic");
+            window.Press(Key.Tab);
+            editor.Selection.ShouldBe(new TextSelection(15));
+            window.Type(" := '1'");
+            window.Press(Key.Tab);
+            document.Text.ShouldBe(NewLines.In("clk : std_logic := '1';\n", start: ""));
+            editor.Selection.ShouldBe(new TextSelection(document.Text.Length));
+
+            // Shift+Tab transforms too; Escape does not.
+            document.Text = "";
+            using CodeDocument mirrored = await SetCompletionAsync(
+                server,
+                fake,
+                Item("${1:a} ${2:b} ${2/(.*)/${1:/upcase}/}")
+            );
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            window.Press(Key.Tab);
+            window.Type("x");
+            document.Text.ShouldBe("a x x");
+            window.Press(Key.Tab, KeyModifiers.Shift);
+            document.Text.ShouldBe("a x X");
+            editor.Selection.ShouldBe(new TextSelection(0, 1));
+            window.Press(Key.Tab);
+            window.Type("y");
+            window.Press(Key.Escape);
+            document.Text.ShouldBe("a y y");
+        });
+
+    [Fact]
+    public Task A_transformed_stop_next_to_another_keeps_apart_from_it() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Item("${1:{}${2:fff}${1/{/}/}"));
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("{fff{");
+
+            window.Press(Key.Tab);
+
+            document.Text.ShouldBe("{fff}");
+            editor.Selection.ShouldBe(new TextSelection(1, 4));
+            window.Type("ggg");
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("{ggg}");
+            editor.Selection.ShouldBe(new TextSelection(5));
+        });
+
+    [Fact]
+    public Task A_transformations_lines_take_the_indentation_of_the_snippets_line_in_the_documents_indentation() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "{\n  \n}");
+            document.Indentation = Indentation.Spaces(2);
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Item("function animate () {\n\tvar ${1:a} = 12;\n\tconsole.log(${1/(.*)/\n\t\t$1\n\t/})\n}")
+            );
+            await OpenAsync(window, 4);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("{\n  function animate () {\n    var a = 12;\n    console.log(a)\n  }\n}");
+
+            window.Type("bbb");
+            window.Press(Key.Tab);
+
+            document.Text.ShouldBe(
+                "{\n  function animate () {\n    var bbb = 12;\n    console.log(\n      bbb\n    )\n  }\n}"
+            );
+        });
+
+    [Fact]
+    public Task A_choice_offers_its_options_in_the_list_and_committing_one_goes_on_to_the_next_stop() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Item("${1|red,green,blue|} ${2|x,y|} $1$0", "color")
+            );
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            int asked = fake.LinesStartingWith("completion ").Count;
+
+            // Its options, in their order, the first selected, while the choice's text is selected.
+            document.Text.ShouldBe("red x red");
+            editor.Selection.ShouldBe(new TextSelection(0, 3));
+            await WaitForLabelsAsync(window, ["red", "green", "blue"]);
+            List(window).ShouldNotBeNull().SelectedIndex.ShouldBe(0);
+
+            // Committing one puts it in, with its mirrors, and selects the next stop, a choice too.
+            window.Press(Key.Down);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("green x green");
+            editor.Selection.ShouldBe(new TextSelection(6, 7));
+            await WaitForLabelsAsync(window, ["x", "y"]);
+
+            // Shift+Tab goes back, and shows the first choice's options again; typing filters them.
+            window.Press(Key.Tab, KeyModifiers.Shift);
+            editor.Selection.ShouldBe(new TextSelection(0, 5));
+            await WaitForLabelsAsync(window, ["red", "green", "blue"]);
+            window.Type("b");
+            await WaitForLabelsAsync(window, ["blue"]);
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("blue x blue");
+            editor.Selection.ShouldBe(new TextSelection(5, 6));
+
+            // Escape closes the list and keeps the session: Tab goes on to the final stop.
+            await WaitForLabelsAsync(window, ["x", "y"]);
+            window.Press(Key.Escape);
+            List(window).ShouldBeNull();
+            window.Press(Key.Tab);
+            editor.Selection.ShouldBe(new TextSelection(document.Text.Length));
+
+            // The server was not asked while a choice was selected.
+            await BarrierAsync(server, fake);
+            fake.LinesStartingWith("completion ").Count.ShouldBe(asked);
+        });
+
     [Fact]
     public Task Typing_over_a_placeholder_drops_the_stops_inside_it() =>
         _ui.Run(async () =>
@@ -252,7 +429,7 @@ public sealed class SnippetSessionTests(UiFixture ui)
         });
 
     [Fact]
-    public Task A_change_that_would_copy_more_than_1000_characters_into_mirrors_ends_the_session() =>
+    public Task A_snippet_has_as_many_stops_as_it_likes_and_mirrors_copy_whatever_goes_in() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
@@ -260,21 +437,34 @@ public sealed class SnippetSessionTests(UiFixture ui)
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
             var editor = new CodeEditor { Document = document };
             using var window = new EditorWindow(editor);
-            string mirrors = string.Concat(Enumerable.Repeat("$1", Snippet.MaxStops - 2));
-            using CodeDocument answer = await SetCompletionAsync(server, fake, Item("${1:a}" + mirrors));
+            // 40 numbers, the first with 30 mirrors.
+            string snippet =
+                "${1:a}"
+                + string.Concat(Enumerable.Repeat(" $1", 30))
+                + string.Concat(Enumerable.Range(2, 39).Select(i => $" ${{{i}:s{i}}}"));
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Item(snippet));
             await OpenAsync(window, 0);
             window.Press(Key.Enter);
-            string text = new('a', Snippet.MaxStops - 1);
-            document.Text.ShouldBe(text);
+            editor.Selection.ShouldBe(new TextSelection(0, 1));
 
-            // 35 characters in each of the 29 stops would pass 1,000: the mirrors keep their text.
-            string pasted = new('b', SnippetController.MaxMirrorText / (Snippet.MaxStops - 1) + 1);
+            // 2,000 characters that go in over the first stop, as a paste, go into each of its mirrors.
+            string pasted = new('b', 2_000);
             document.Replace(new TextRange(0, 1), pasted);
 
-            document.Text.ShouldBe(pasted + text[1..]);
-            editor.Selection = new TextSelection(0);
+            string mirrored = pasted + string.Concat(Enumerable.Repeat(" " + pasted, 30));
+            string rest = string.Concat(Enumerable.Range(2, 39).Select(i => $" s{i}"));
+            document.Text.ShouldBe(mirrored + rest);
+            // Tab selects each of the other stops, and then the final one.
+            int start = mirrored.Length + 1;
+            for (int i = 2; i <= 40; i++)
+            {
+                window.Press(Key.Tab);
+                int length = $"s{i}".Length;
+                editor.Selection.ShouldBe(new TextSelection(start, start + length));
+                start += length + 1;
+            }
             window.Press(Key.Tab);
-            document.Text.ShouldBe("    " + pasted + text[1..]);
+            editor.Selection.ShouldBe(new TextSelection(document.Text.Length));
         });
 
     [Fact]
@@ -328,7 +518,7 @@ public sealed class SnippetSessionTests(UiFixture ui)
         });
 
     [Fact]
-    public Task Escape_ends_the_session_after_completion_and_signature_help_and_before_the_hover_and_the_search_bar() =>
+    public Task Escape_ends_the_session_after_completion_and_signature_help_along_with_the_hover_and_before_the_search_bar() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
@@ -363,8 +553,8 @@ public sealed class SnippetSessionTests(UiFixture ui)
             window.Press(Key.Tab);
             editor.Selection.ShouldBe(new TextSelection(5));
 
-            // With the keyboard in the text, Escape ends the session before the hover closes, and the hover before the
-            // bar.
+            // With the keyboard in the text, Escape ends the session and the hover together, as in VS Code, and then
+            // the bar.
             editor.OpenSearch();
             EditorWindow.PartOf(editor).TextArea.Focus();
             window.MoveMouse(window.PointAt(1));
@@ -377,8 +567,6 @@ public sealed class SnippetSessionTests(UiFixture ui)
                         .OfType<TextBlock>()
                         .Any(t => (t.Inlines?.Text ?? t.Text ?? "").Contains("is a word in", StringComparison.Ordinal));
             });
-            window.Press(Key.Escape);
-            ToolTip(window).ShouldNotBeNull();
             window.Press(Key.Escape);
             ToolTip(window).ShouldBeNull();
             bar.IsOpen.ShouldBeTrue();
@@ -466,6 +654,7 @@ public sealed class SnippetSessionTests(UiFixture ui)
             document.FilePath = Path.Combine(Path.GetTempPath(), "settings.json");
             await document.Language.Loaded;
             using var window = new EditorWindow(new CodeEditor { Document = document });
+            await Clipboard(window).SetTextAsync("copied" + Environment.NewLine);
             using CodeDocument answer = await SetCompletionAsync(
                 server,
                 fake,
@@ -480,7 +669,80 @@ public sealed class SnippetSessionTests(UiFixture ui)
             window.Press(Key.Enter);
 
             // Before the commit, at the caret: the word that the item replaces.
-            document.Text.ShouldBe("{\n  [wo|  wo|2|settings|none|//*/|1767225600|]\n}");
+            document.Text.ShouldBe("{\n  [wo|  wo|2|settings|none|//*/|1767225600|copied]\n}");
+        });
+
+    [Fact]
+    public Task The_selected_text_is_the_selection_that_typing_replaced_before_completion_committed_the_snippet() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "    foo\n    bar\nbaz");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Item("try {\n\t${1:$TM_SELECTED_TEXT}\n}$0", "try")
+            );
+
+            // Typing over the two lines opens completion; typing on in it keeps what the first key replaced.
+            editor.Selection = new TextSelection(4, 15);
+            window.Type("t");
+            await WaitForLabelsAsync(window, ["try"]);
+            window.Type("r");
+            window.Press(Key.Enter);
+
+            // Its lines after the first take the level that the snippet adds.
+            const string text = "    try {\n        foo\n        bar\n    }\nbaz";
+            document.Text.ShouldBe(text);
+            editor.Selection.ShouldBe(Selected(text, "foo\n        bar"));
+
+            // Typing that replaces no selection forgets it.
+            window.Press(Key.Escape);
+            document.Text = "t";
+            editor.Selection = new TextSelection(1);
+            window.Type("r");
+            await WaitForLabelsAsync(window, ["try"]);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe(NewLines.In("try {\n    \n}", start: "t"));
+        });
+
+    [Fact]
+    public Task The_clipboard_variable_is_the_clipboards_text_read_as_the_list_shows() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Item("[$CLIPBOARD|${CLIPBOARD/(.*)/${1:/upcase}/}|${CLIPBOARD:none}]")
+            );
+
+            // One line, without its line break.
+            await Clipboard(window).SetTextAsync("clipped\r\n");
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("[clipped|CLIPPED|clipped]");
+
+            // Lines, in the document's line breaks.
+            document.Text = "";
+            await Clipboard(window).SetTextAsync("one\r\ntwo");
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe(NewLines.In("[one\ntwo|ONE\ntwo|one\ntwo]", start: ""));
+
+            // None.
+            document.Text = "";
+            await Clipboard(window).SetTextAsync("");
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("[||none]");
         });
 
     [Fact]
@@ -537,7 +799,11 @@ public sealed class SnippetSessionTests(UiFixture ui)
         return new TextSelection(start, start + word.Length);
     }
 
+    private static IClipboard Clipboard(EditorWindow window) =>
+        window.Window.Clipboard ?? throw new InvalidOperationException("The window has no clipboard.");
+
     /// <summary>Signature help's popup; null while it is closed.</summary>
-    private static ToolTip? ToolTip(EditorWindow window) =>
-        OverlayLayer.GetOverlayLayer(window.Window)?.GetVisualDescendants().OfType<ToolTip>().FirstOrDefault();
+    /// <summary>Signature help's popup or the hover's; null while neither shows.</summary>
+    private static Popups.PopupFrame? ToolTip(EditorWindow window) =>
+        PopupFrames.Find(window, "SignatureHelp") ?? PopupFrames.Find(window, "Hover");
 }

@@ -16,11 +16,15 @@ namespace Darp.CodeEditor.Loading;
 /// </param>
 /// <param name="Colors">The <c>colors</c>, such as <c>editor.background</c>; the theme's own override included ones.</param>
 /// <param name="SemanticTokenColors">The <c>semanticTokenColors</c>, by selector, such as <c>stringLiteral</c>.</param>
+/// <param name="Type">
+/// The theme's <c>type</c>, such as <c>dark</c> or <c>hcLight</c>, where a file names one; null otherwise.
+/// </param>
 internal sealed record ColorThemeFile(
     IRawTheme TokenRules,
     IReadOnlyList<TokenColorRule> TokenColors,
     IReadOnlyDictionary<string, Color> Colors,
-    IReadOnlyDictionary<string, SemanticTokenStyle> SemanticTokenColors
+    IReadOnlyDictionary<string, SemanticTokenStyle> SemanticTokenColors,
+    string? Type = null
 )
 {
     /// <summary>Reads a theme file and the themes it includes, relative to it.</summary>
@@ -31,6 +35,7 @@ internal sealed record ColorThemeFile(
         var colors = new Dictionary<string, Color>();
         var semanticTokenColors = new Dictionary<string, SemanticTokenStyle>();
         var files = new HashSet<Uri>();
+        string? type = null;
         ReadFile(source);
         // As VS Code does, text without a rule of its own has the editor's foreground and background.
         var defaults = new ThemeRaw();
@@ -39,7 +44,13 @@ internal sealed record ColorThemeFile(
         if (colors.TryGetValue("editor.background", out Color background))
             defaults["background"] = Hex(background);
         rules.Insert(0, new ThemeRaw { ["settings"] = defaults });
-        return new ColorThemeFile(new ThemeRaw { ["tokenColors"] = rules }, tokenColors, colors, semanticTokenColors);
+        return new ColorThemeFile(
+            new ThemeRaw { ["tokenColors"] = rules },
+            tokenColors,
+            colors,
+            semanticTokenColors,
+            type
+        );
 
         void ReadFile(Uri file)
         {
@@ -50,6 +61,8 @@ internal sealed record ColorThemeFile(
             JsonElement root = json.RootElement;
             if (root.TryGetProperty("include", out JsonElement include))
                 ReadFile(new Uri(file, include.GetString()));
+            if (root.TryGetProperty("type", out JsonElement typeValue) && typeValue.ValueKind == JsonValueKind.String)
+                type = typeValue.GetString();
             if (root.TryGetProperty("colors", out JsonElement colorValues))
             {
                 foreach (JsonProperty color in colorValues.EnumerateObject())

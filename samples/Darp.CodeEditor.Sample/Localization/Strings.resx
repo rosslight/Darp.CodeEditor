@@ -66,9 +66,6 @@
   <data name="Untitled" xml:space="preserve">
     <value>Untitled {0}</value>
   </data>
-  <data name="NoFile" xml:space="preserve">
-    <value>No file</value>
-  </data>
   <data name="StateNoFile" xml:space="preserve">
     <value>not saved to a file</value>
   </data>
@@ -188,5 +185,14 @@
   </data>
   <data name="SourceCode" xml:space="preserve">
     <value>Source code on GitHub</value>
+  </data>
+  <data name="TryInTheme" xml:space="preserve">
+    <value>Try in theme</value>
+  </data>
+  <data name="WaitingForChord" xml:space="preserve">
+    <value>({0}) was pressed. Waiting for the second key…</value>
+  </data>
+  <data name="ThemeWindowTitle" xml:space="preserve">
+    <value>Darp.CodeEditor in {0}</value>
   </data>
 </root>

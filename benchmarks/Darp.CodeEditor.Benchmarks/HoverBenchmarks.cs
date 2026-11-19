@@ -11,10 +11,10 @@ using Darp.CodeEditor.Popups;
 namespace Darp.CodeEditor.Benchmarks;
 
 /// <summary>
-/// The UI thread's cost of showing the largest hover that the editor shows, in its worst shape: its content's controls
-/// built and laid out in a tooltip 320 pixels wide that scrolls, and the frame after it. The shape: a code block of as
-/// many lines, runs of one color, and characters as a hover shows (<see cref="HoverBudget"/>), the runs alternating
-/// between two colors. The frame alone takes about 5 ms of it.
+/// The UI thread's cost of showing the largest part of a hover that the editor builds at a time, in its worst shape: its
+/// content's controls built and laid out in a popup 320 pixels wide that scrolls, and the frame after it. The shape: a
+/// code block of as many lines, runs of one color, and characters as a part takes (<see cref="HoverParts"/>), the runs
+/// alternating between two colors. The frame alone takes about 5 ms of it.
 /// </summary>
 [NotInBaseline]
 [WarmupCount(2)]
@@ -22,15 +22,15 @@ namespace Darp.CodeEditor.Benchmarks;
 public class HoverBenchmarks
 {
     private Window? _window;
-    private ScrollViewer? _content;
+    private PopupScroller? _content;
     private IReadOnlyList<HoverBlock> _blocks = [];
-    private CodeLook? _look;
+    private PopupLook? _look;
 
     [GlobalSetup]
     public void SetUp()
     {
         HeadlessEditor.SetUpApp();
-        _content = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        _content = new PopupScroller();
         _window = new Window
         {
             Width = 800,
@@ -47,9 +47,9 @@ public class HoverBenchmarks
         _window.Show();
         IBrush[] colors = [new ImmutableSolidColorBrush(Colors.Red), new ImmutableSolidColorBrush(Colors.Blue)];
         // Line breaks are runs too, so the lines share the runs left.
-        int lines = HoverBudget.MaxLines;
-        int runsPerLine = (HoverBudget.MaxRuns - (lines - 1)) / lines;
-        int runLength = HoverBudget.MaxCharacters / (lines * runsPerLine);
+        int lines = HoverParts.MaxLines;
+        int runsPerLine = (HoverParts.MaxRuns - (lines - 1)) / lines;
+        int runLength = HoverParts.MaxCharacters / (lines * runsPerLine);
         var runs = new List<CodeRun>();
         for (int line = 0; line < lines; line++)
         {
@@ -59,22 +59,17 @@ public class HoverBenchmarks
                 runs.Add(new CodeRun(new string('x', runLength), colors[i % 2]));
         }
         _blocks = [new HoverCode(runs)];
-        // The largest that a hover shows: nothing of it is cut.
-        if (new HoverBudget().Fit(_blocks) is not [HoverCode { Runs.Count: var count }] || count != runs.Count)
-            throw new InvalidOperationException("The hover is larger than a hover shows.");
-        _look = new CodeLook(
-            new FontFamily("DejaVu Sans Mono"),
-            14,
-            new ImmutableSolidColorBrush(Colors.White),
-            new ImmutableSolidColorBrush(Colors.Black)
-        );
+        // The largest part: it is built at once.
+        if (!HoverParts.Fits(HoverParts.Size(_blocks[0])))
+            throw new InvalidOperationException("The hover is larger than a part.");
+        _look = new PopupLook(new FontFamily("DejaVu Sans Mono"), 14, PopupColors.Default);
     }
 
     [Benchmark]
-    public void ShowTheLargestHover()
+    public void ShowTheLargestPart()
     {
-        ScrollViewer content = _content ?? throw new InvalidOperationException("Not set up.");
-        content.Content = HoverView.Create(_blocks, _look ?? throw new InvalidOperationException("Not set up."));
+        PopupScroller content = _content ?? throw new InvalidOperationException("Not set up.");
+        content.Child = HoverView.Create(_blocks, _look ?? throw new InvalidOperationException("Not set up."));
         HeadlessEditor.Render(_window ?? throw new InvalidOperationException("Not set up."));
     }
 

@@ -9,6 +9,7 @@ internal sealed class ManualTime : TimeProvider
     private readonly Lock _lock = new();
     private readonly List<ManualTimer> _timers = [];
     private TimeSpan _now;
+    private int _created;
 
     public override long TimestampFrequency => TimeSpan.TicksPerSecond;
 
@@ -24,11 +25,33 @@ internal sealed class ManualTime : TimeProvider
             return _now.Ticks;
     }
 
+    /// <summary>How many timers the code under test has created so far.</summary>
+    public int TimersCreated
+    {
+        get
+        {
+            lock (_lock)
+                return _created;
+        }
+    }
+
     public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
     {
-        var timer = new ManualTimer(this, callback, state);
+        ManualTimer timer;
+        lock (_lock)
+            timer = new ManualTimer(this, callback, state, ++_created);
         timer.Change(dueTime, period);
         return timer;
+    }
+
+    /// <summary>
+    /// Whether a timer that the code under test created after the first <paramref name="created"/> ones
+    /// (<see cref="TimersCreated"/>) is due <paramref name="time"/> from now.
+    /// </summary>
+    public bool HasTimerDueIn(TimeSpan time, int created)
+    {
+        lock (_lock)
+            return _timers.Any(timer => timer.Number > created && timer.Due == _now + time);
     }
 
     /// <summary>Moves the clock on, and fires the timers due meanwhile.</summary>
@@ -64,12 +87,16 @@ internal sealed class ManualTime : TimeProvider
         private readonly TimerCallback _callback;
         private readonly object? _state;
 
-        public ManualTimer(ManualTime time, TimerCallback callback, object? state)
+        public ManualTimer(ManualTime time, TimerCallback callback, object? state, int number)
         {
             _time = time;
             _callback = callback;
             _state = state;
+            Number = number;
         }
+
+        /// <summary>How many timers the clock had created with this one.</summary>
+        public int Number { get; }
 
         /// <summary>Guarded by the clock's lock.</summary>
         public TimeSpan Due { get; set; }

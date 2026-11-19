@@ -91,6 +91,51 @@ public sealed class CompletionMatcherTests
     }
 
     [Fact]
+    public void Matching_gracefully_tolerates_two_neighbouring_characters_swapped_at_a_cost_of_3()
+    {
+        _matcher.Match("prnit", "print", "print", true).ShouldBeNull();
+
+        (int score, int[] highlights) = _matcher
+            .Match("prnit", "print", "print", true, graceful: true)
+            .ShouldNotBeNull();
+
+        highlights.ShouldBe([0, 1, 2, 3, 4]);
+        score.ShouldBe(_matcher.Match("print", "print", "print", true).ShouldNotBeNull().Score - 3);
+    }
+
+    [Fact]
+    public void Matching_gracefully_takes_a_swap_that_matches_better_than_the_text_as_typed()
+    {
+        // VS Code's example: "cno" matches "console" best as "con".
+        _matcher.Match("cno", "console", "console", true).ShouldNotBeNull().Highlights.ShouldBe([0, 2, 4]);
+        _matcher
+            .Match("cno", "console", "console", true, graceful: true)
+            .ShouldNotBeNull()
+            .Highlights.ShouldBe([0, 1, 2]);
+    }
+
+    [Fact]
+    public void Matching_gracefully_swaps_neither_the_first_character_nor_after_the_eighth()
+    {
+        _matcher.Match("rpint", "print", "print", true, graceful: true).ShouldBeNull();
+        _matcher.Match("abcdefhgij", "abcdefghij", "abcdefghij", true, graceful: true).ShouldNotBeNull();
+        _matcher.Match("abcdefghji", "abcdefghij", "abcdefghij", true, graceful: true).ShouldBeNull();
+    }
+
+    [Fact]
+    public void Lists_of_up_to_2000_items_rank_gracefully_and_longer_ones_strictly()
+    {
+        CompletionCandidate[] items =
+        [
+            .. Enumerable.Range(0, 1999).Select(i => new CompletionCandidate("prnit", $"x{i}", $"x{i}", true)),
+            new("prnit", "print", "print", true),
+        ];
+
+        _matcher.Rank(items, TestContext.Current.CancellationToken).Select(r => r.Index).ShouldBe([1999]);
+        _matcher.Rank([.. items, new("prnit", "x", "x", true)], TestContext.Current.CancellationToken).ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Nothing_typed_matches_every_item_in_their_order()
     {
         CompletionCandidate[] items = [new("", "b", "b", true), new("", "a", "a", true), new(" \t", "c", "c", true)];

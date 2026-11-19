@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Threading;
 using AvaloniaEdit.Document;
 using Darp.CodeEditor.Diagnostics;
+using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.LanguageClient;
 
 namespace Darp.CodeEditor;
@@ -69,13 +70,20 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     /// <summary>Diagnostics on their way to the UI thread. Only the latest is applied; null when none is on its way.</summary>
     private DiagnosticsBatch? _pendingDiagnostics;
 
+    /// <summary>Set on the UI thread, before the change that the next snapshot takes it with.</summary>
+    private string _lineBreak;
+
     private protected CodeDocument(CodeLanguage language, string text, string? filePath = null)
     {
         Language = language;
         _filePath = filePath;
-        _indentation = language.Id == "yaml" ? Indentation.Spaces(2) : Indentation.Spaces(4);
+        _indentation = IndentationGuesser.Guess(
+            text,
+            language.Id == "yaml" ? Indentation.Spaces(2) : Indentation.Spaces(4)
+        );
+        _lineBreak = LineBreaks.Detect(text);
         _document = new TextDocument(text);
-        _currentSnapshot = new TextSnapshot(_document.CreateSnapshot(), 0);
+        _currentSnapshot = new TextSnapshot(_document.CreateSnapshot(), 0, _lineBreak);
         _diagnostics = new DiagnosticsBatch([], _currentSnapshot);
         // Application.Current is null before setup, so reading it ties no dispatcher to this thread.
         _owner = Application.Current?.Dispatcher;
@@ -126,21 +134,39 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
 
     /// <summary>
     /// The whole text, as <c>CurrentSnapshot.GetText()</c>. Setting it replaces the text in one step that the user can
-    /// undo.
+    /// undo, and detects anew the line break that editors give new lines.
     /// </summary>
     public string Text
     {
         get => _currentSnapshot.GetText();
-        set => Change(document => document.Text = value);
+        set
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            Change(document =>
+            {
+                _lineBreak = LineBreaks.Detect(value);
+                document.Text = value;
+            });
+        }
     }
+
+    /// <summary>
+    /// The line break that editors give new text, as VS Code's text model has one (<see cref="LineBreaks.Detect"/>):
+    /// detected from the text when the document is created and when <see cref="Text"/> is set, and kept through the
+    /// edits in between, also those that remove every line break. On the UI thread; other threads read
+    /// <see cref="TextSnapshot.LineBreak"/>.
+    /// </summary>
+    internal string LineBreak => _lineBreak;
 
     /// <summary>The text as it is now, with its version.</summary>
     public TextSnapshot CurrentSnapshot => _currentSnapshot;
 
     /// <summary>
     /// How Tab and new lines indent, in every editor that shows the document, and how wide tabs are drawn. It starts
-    /// as in VS Code: 2 spaces for YAML, 4 spaces otherwise. The document does not detect it from the text. Changing it
-    /// leaves the existing text as it is, and editors apply it at once.
+    /// as VS Code detects it from the initial text: tabs or spaces by how many lines start with each, and the size of a
+    /// level by how much lines indent more than the line above, from the first 10,000 lines. Where the text gives no
+    /// answer, as when it is empty or has no indented lines, it is VS Code's default: 2 spaces for YAML, 4 spaces
+    /// otherwise. Changing it leaves the existing text as it is, and editors apply it at once.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The size is not from 1 to 1,000 columns.</exception>
     public Indentation Indentation
@@ -311,6 +337,28 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     ) => Task.FromResult<SignatureHelpInfo?>(null);
 
     /// <summary>
+    /// The server's selection ranges at <paramref name="offset"/> of <paramref name="snapshot"/>, the current text, for
+    /// an editor: from the innermost out. Null when there are none, and when <paramref name="cancellationToken"/>
+    /// cancelled them. Never waits on the calling thread.
+    /// </summary>
+    internal virtual Task<IReadOnlyList<TextRange>?> SelectionRangesAsync(
+        TextSnapshot snapshot,
+        int offset,
+        CancellationToken cancellationToken
+    ) => Task.FromResult<IReadOnlyList<TextRange>?>(null);
+
+    /// <summary>
+    /// The server's occurrences of the symbol at <paramref name="position"/> of <paramref name="snapshot"/>, the current
+    /// text, for an editor; null without an answer, and when <paramref name="cancellationToken"/> cancelled it: the
+    /// editor then takes the words of the text. Never waits on the calling thread.
+    /// </summary>
+    internal virtual Task<IReadOnlyList<Occurrence>?> DocumentHighlightsAsync(
+        TextSnapshot snapshot,
+        TextPosition position,
+        CancellationToken cancellationToken
+    ) => Task.FromResult<IReadOnlyList<Occurrence>?>(null);
+
+    /// <summary>
     /// What the server that serves the document offers its editors now, such as the characters that ask for
     /// completion; null without a running server.
     /// </summary>
@@ -445,7 +493,7 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
         // With every edit before it, for threads that follow the edits up to it.
         Volatile.Write(
             ref _currentSnapshot,
-            new TextSnapshot(_document.CreateSnapshot(), _currentSnapshot.Version + 1)
+            new TextSnapshot(_document.CreateSnapshot(), _currentSnapshot.Version + 1, _lineBreak)
         );
         OnChanged(_currentSnapshot);
         TextChanged?.Invoke(this, EventArgs.Empty);

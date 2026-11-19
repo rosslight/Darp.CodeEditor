@@ -14,11 +14,17 @@ namespace Darp.CodeEditor.Lsp;
 /// the same score.
 /// </para>
 /// <para>
-/// This is a port of VS Code's <c>fuzzyScore</c> and <c>anyScore</c> (<c>src/vs/base/common/filters.ts</c>, 1.145.0, MIT
-/// license), with its default options: the first character must match strongly, and a full match is boosted. It has
-/// no typo-tolerant variant, and emoji are no separators. Texts are matched up to their first 128 characters. Case is
-/// ignored by .NET's invariant lower case, which differs from JavaScript's for the few letters whose case depends on
-/// their context, such as the Greek final sigma.
+/// Lists of up to <see cref="MaxGracefulItems"/> items tolerate a typo, as VS Code's suggest widget does by default: an
+/// item also matches with two neighbouring characters of the typed text swapped, after the first character and up to
+/// the seventh and eighth, at a cost of 3, and the better of the matches counts, so that "prnit" matches "print". Longer
+/// lists match strictly, as each swap is another match.
+/// </para>
+/// <para>
+/// This is a port of VS Code's <c>fuzzyScore</c>, <c>fuzzyScoreGracefulAggressive</c> and <c>anyScore</c>
+/// (<c>src/vs/base/common/filters.ts</c>, 1.145.0, MIT license), with its default options: the first character must
+/// match strongly, and a full match is boosted. Emoji are no separators. Texts are matched up to their first 128
+/// characters. Case is ignored by .NET's invariant lower case, which differs from JavaScript's for the few letters
+/// whose case depends on their context, such as the Greek final sigma.
 /// </para>
 /// <para>
 /// An instance keeps the tables of the matching for reuse: use it on one thread at a time. They take about 150 KB.
@@ -31,6 +37,12 @@ internal sealed class CompletionMatcher
     /// text needs no more of it than this.
     /// </summary>
     public const int MaxLength = 128;
+
+    /// <summary>
+    /// The most items that <see cref="Rank"/> matches gracefully, tolerating a typo, as VS Code does; it matches longer
+    /// lists strictly.
+    /// </summary>
+    public const int MaxGracefulItems = 2000;
 
     /// <summary>The score of an item when nothing is typed: below any score of a match.</summary>
     private const int DefaultScore = -100;
@@ -53,9 +65,9 @@ internal sealed class CompletionMatcher
     private readonly byte[] _arrows = new byte[Stride * Stride];
 
     /// <summary>
-    /// The items that match, best first; equal scores keep the order of <paramref name="items"/>. Matching a long list
-    /// against a long typed text takes long, so it belongs off the UI thread; it stops soon once
-    /// <paramref name="cancellationToken"/> is cancelled.
+    /// The items that match, best first; equal scores keep the order of <paramref name="items"/>. Up to
+    /// <see cref="MaxGracefulItems"/> items match gracefully. Matching a long list against a long typed text takes
+    /// long, so it belongs off the UI thread; it stops soon once <paramref name="cancellationToken"/> is cancelled.
     /// </summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public List<RankedCompletion> Rank(
@@ -63,14 +75,16 @@ internal sealed class CompletionMatcher
         CancellationToken cancellationToken = default
     )
     {
+        bool graceful = items.Count <= MaxGracefulItems;
         var ranked = new List<RankedCompletion>();
         for (int i = 0; i < items.Count; i++)
         {
-            // An item takes up to some 50 µs: a check every 64 items keeps the wait short and its cost small.
+            // An item takes up to some 50 µs, and seven times that matched gracefully: a check every 64 items keeps
+            // the wait short and its cost small.
             if (i % 64 == 0)
                 cancellationToken.ThrowIfCancellationRequested();
             CompletionCandidate item = items[i];
-            if (Match(item.Typed, item.Label, item.FilterText, item.FilterTextIsLabel) is { } match)
+            if (Match(item.Typed, item.Label, item.FilterText, item.FilterTextIsLabel, graceful) is { } match)
                 ranked.Add(new RankedCompletion(i, match.Score, match.Highlights));
         }
         // A stable order: List.Sort is not stable, so the index decides between equal scores.
@@ -93,7 +107,14 @@ internal sealed class CompletionMatcher
     /// characters, as VS Code shows them; otherwise its own, by the most lenient score. The caller knows it from
     /// reading the item once, as comparing whole texts costs as much as they are long.
     /// </param>
-    public (int Score, int[] Highlights)? Match(string typed, string label, string filterText, bool filterTextIsLabel)
+    /// <param name="graceful">Whether a typo is tolerated, as in a list of up to <see cref="MaxGracefulItems"/>.</param>
+    public (int Score, int[] Highlights)? Match(
+        string typed,
+        string label,
+        string filterText,
+        bool filterTextIsLabel,
+        bool graceful = false
+    )
     {
         // Whitespace that the item's edit starts with is not typed text.
         int start = 0;
@@ -102,7 +123,11 @@ internal sealed class CompletionMatcher
         if (start == typed.Length)
             return (DefaultScore, []);
         string typedLow = Lower(typed);
-        if (Score(typed, typedLow, start, filterText, Lower(filterText), firstMatchCanBeWeak: false) is not { } match)
+        string filterTextLow = Lower(filterText);
+        (int Score, int[] Positions)? scored = graceful
+            ? GracefulScore(typed, typedLow, start, filterText, filterTextLow)
+            : Score(typed, typedLow, start, filterText, filterTextLow, firstMatchCanBeWeak: false);
+        if (scored is not { } match)
             return null;
         if (filterTextIsLabel)
             return match;
@@ -132,6 +157,71 @@ internal sealed class CompletionMatcher
         }
         return [];
     }
+
+    /// <summary>
+    /// VS Code's <c>fuzzyScoreGracefulAggressive</c>: the best of <see cref="Score"/> for <paramref name="pattern"/> as
+    /// typed and with two neighbouring characters swapped, one pair at a time, each swap costing 3; null when none
+    /// matches. The swaps are tried also when the pattern matches as typed, as one may match better: "cno" matches
+    /// "console" best as "con".
+    /// </summary>
+    private (int Score, int[] Positions)? GracefulScore(
+        string pattern,
+        string patternLow,
+        int patternStart,
+        string word,
+        string wordLow
+    )
+    {
+        (int Score, int[] Positions)? top = Score(
+            pattern,
+            patternLow,
+            patternStart,
+            word,
+            wordLow,
+            firstMatchCanBeWeak: false
+        );
+        if (pattern.Length < 3)
+            return top;
+        // At most 7 tries, after the first character; VS Code counts them from the start of the whole pattern.
+        int tries = Math.Min(7, pattern.Length - 1);
+        for (int moving = patternStart + 1; moving < tries; moving++)
+        {
+            // VS Code's nextTypoPermutation: alike neighbours have nothing to swap.
+            if (pattern[moving] == pattern[moving + 1])
+                continue;
+            if (
+                Score(
+                    Swapped(pattern, moving),
+                    Swapped(patternLow, moving),
+                    patternStart,
+                    word,
+                    wordLow,
+                    firstMatchCanBeWeak: false
+                )
+                    is { } candidate
+                && (top is not { } best || candidate.Score - 3 > best.Score)
+            )
+            {
+                top = (candidate.Score - 3, candidate.Positions);
+            }
+        }
+        return top;
+    }
+
+    /// <summary><paramref name="text"/> with the characters at <paramref name="position"/> and after it swapped.</summary>
+    private static string Swapped(string text, int position) =>
+        string.Create(
+            text.Length,
+            (text, position),
+            static (swapped, state) =>
+            {
+                state.text.AsSpan().CopyTo(swapped);
+                (swapped[state.position], swapped[state.position + 1]) = (
+                    swapped[state.position + 1],
+                    swapped[state.position]
+                );
+            }
+        );
 
     /// <summary>
     /// VS Code's <c>fuzzyScore</c>, with <c>boostFullMatch</c>: the score of <paramref name="pattern"/> from

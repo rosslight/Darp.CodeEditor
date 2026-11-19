@@ -7,6 +7,8 @@
     <PackageReference Include="Avalonia" />
     <PackageReference Include="Avalonia.AvaloniaEdit" />
     <PackageReference Include="TextMateSharp" />
+    <!-- Generates the Strings class of Localization/Strings.resx at build time; apps get no dependency. -->
+    <PackageReference Include="Darp.Utils.ResxSourceGenerator" PrivateAssets="all" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Darp.CodeEditor.Lsp\Darp.CodeEditor.Lsp.csproj">

@@ -356,8 +356,9 @@ public sealed class LanguageServerTests(UiFixture ui)
                           "workspace": { "configuration": true, "didChangeConfiguration": { "dynamicRegistration": false } },
                           "textDocument": {
                             "synchronization": { "dynamicRegistration": false },
-                            "publishDiagnostics": { "versionSupport": true },
+                            "publishDiagnostics": { "versionSupport": true, "relatedInformation": true, "codeDescriptionSupport": true },
                             "hover": { "contentFormat": ["markdown", "plaintext"] },
+                            "selectionRange": { "dynamicRegistration": false },
                             "completion": {
                               "completionItem": {
                                 "snippetSupport": true,
@@ -367,6 +368,7 @@ public sealed class LanguageServerTests(UiFixture ui)
                                 "preselectSupport": true,
                                 "tagSupport": { "valueSet": [1] },
                                 "insertReplaceSupport": true,
+                                "labelDetailsSupport": true,
                                 "resolveSupport": { "properties": ["detail", "documentation", "additionalTextEdits"] }
                               },
                               "completionItemKind": {
@@ -395,7 +397,8 @@ public sealed class LanguageServerTests(UiFixture ui)
                               ],
                               "formats": ["relative"],
                               "augmentsSyntaxTokens": true
-                            }
+                            },
+                            "documentHighlight": { "dynamicRegistration": false }
                           }
                         }
                         """

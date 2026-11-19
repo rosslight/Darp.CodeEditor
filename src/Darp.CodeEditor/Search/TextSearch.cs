@@ -1,4 +1,7 @@
+using System.Buffers;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using System.Text;
 using System.Text.RegularExpressions;
 using AvaloniaEdit.Document;
 using Darp.CodeEditor.Editing;
@@ -6,11 +9,44 @@ using Darp.CodeEditor.Editing;
 namespace Darp.CodeEditor.Search;
 
 /// <summary>What the user searches for, and how it matches.</summary>
-/// <param name="Text">The text, or a .NET regular expression.</param>
+/// <param name="Text">The text, or a .NET regular expression; its line breaks are <c>\n</c>.</param>
 /// <param name="MatchCase">Whether case counts.</param>
 /// <param name="WholeWord">Whether a match must not continue a word on either side, as in VS Code.</param>
 /// <param name="UseRegex">Whether <paramref name="Text"/> is a regular expression.</param>
-internal sealed record SearchQuery(string Text, bool MatchCase, bool WholeWord, bool UseRegex);
+internal sealed record SearchQuery(string Text, bool MatchCase, bool WholeWord, bool UseRegex)
+{
+    /// <summary>
+    /// Whether the query can match a line break, as VS Code decides: text with a line break, or a regular expression
+    /// with one, or with <c>\n</c>, <c>\r</c> or <c>\W</c>. Its matches may then span lines.
+    /// </summary>
+    public bool IsMultiline => UseRegex ? IsMultilineRegex(Text) : Text.Contains('\n');
+
+    /// <summary>A port of VS Code's <c>isMultilineRegexSource</c>.</summary>
+    private static bool IsMultilineRegex(string pattern)
+    {
+        for (int i = 0; i < pattern.Length; i++)
+        {
+            if (pattern[i] == '\n')
+                return true;
+            if (pattern[i] != '\\')
+                continue;
+            if (++i == pattern.Length)
+                break;
+            if (pattern[i] is 'n' or 'r' or 'W')
+                return true;
+        }
+        return false;
+    }
+}
+
+/// <summary>What replaces the matches of a search.</summary>
+/// <param name="Text">
+/// The replacement: for a regular expression in VS Code's syntax (<see cref="ReplacePattern"/>), otherwise as it is.
+/// </param>
+/// <param name="PreserveCase">
+/// Whether a replacement without groups takes the case of each match, as VS Code's Preserve Case does.
+/// </param>
+internal sealed record SearchReplacement(string Text, bool PreserveCase);
 
 /// <summary>How a search ended.</summary>
 internal enum SearchOutcome
@@ -37,7 +73,7 @@ internal sealed class SearchMatch(string replacement) : TextSegment
 /// <summary>The matches of a search in one version of the text.</summary>
 /// <param name="Version">The version of the text searched.</param>
 /// <param name="Query">What was searched for.</param>
-/// <param name="Replacement">What replaces each match, or null when the search was not for replacing.</param>
+/// <param name="Replacement">What replaces the matches, or null when the search was not for replacing.</param>
 /// <param name="Matches">
 /// The matches, which follow the edits made since once the editor keeps them up to date, as AvaloniaEdit's search
 /// does.
@@ -47,7 +83,7 @@ internal sealed class SearchMatch(string replacement) : TextSegment
 internal sealed record SearchResult(
     int Version,
     SearchQuery Query,
-    string? Replacement,
+    SearchReplacement? Replacement,
     TextSegmentCollection<SearchMatch> Matches,
     SearchOutcome Outcome,
     string? Error
@@ -58,23 +94,37 @@ internal sealed record SearchResult(
 }
 
 /// <summary>
-/// Finds the matches of a query in a snapshot, line by line, so that <c>^</c> and <c>$</c> match at every line's
-/// start and end, whatever its line break; matches don't span lines. Runs in the background.
+/// The edit that replaces every match of a search in one change: <see cref="Text"/> in place of the text from the first
+/// match to the end of the last, with <see cref="Map"/> saying where each match was, so that anchors, markers and the
+/// selection follow each replacement as they do separate ones.
+/// </summary>
+/// <param name="Start">Where the first match starts.</param>
+/// <param name="Length">The length of the text from the first match to the end of the last one.</param>
+/// <param name="Text">What replaces that text.</param>
+/// <param name="Map">The replacements, one after the other.</param>
+/// <param name="Count">The number of matches.</param>
+internal sealed record SearchEdit(int Start, int Length, string Text, OffsetChangeMap Map, int Count);
+
+/// <summary>
+/// Finds the matches of a query in a snapshot, as VS Code's <c>TextModelSearch</c> does. A query that can't match a
+/// line break is searched line by line, so that <c>^</c> and <c>$</c> match at every line's start and end, whatever its
+/// line break. One that can (<see cref="SearchQuery.IsMultiline"/>) is searched across lines, in the text with its
+/// line breaks as <c>\n</c>, and <c>^</c> and <c>$</c> match at every line's start and end too. Runs in the background.
 /// </summary>
 /// <remarks>
 /// A search has limits, so that a pathological regular expression such as <c>(a+)+$</c>, or a query that matches
 /// everywhere, can't keep a thread busy or fill the memory: <see cref="TimeLimit"/> and <see cref="MaxMatches"/>.
 /// Measured on 5,000 lines of JSON (SearchBenchmarks and ReplaceAllBenchmarks, i7-13700): a word on every line, 5,000
-/// matches, takes 1.2 ms; a regular expression with 10,000 matches 2.3 ms, and 0.2 ms with none. Each match kept takes
-/// about 140 bytes while searching. Replacing 10,000 matches takes the UI thread about 0.1 s, with the frame after it.
+/// matches, takes 1.3 ms; a regular expression with 10,000 matches 2.4 ms, and 0.3 ms with none. Each match kept takes
+/// about 140 bytes while searching. Replacing 10,000 matches takes the UI thread about 80 ms, with the frame after it.
 /// </remarks>
 internal static class TextSearch
 {
     /// <summary>
-    /// The most matches a search keeps: twice those of a word on every line of 5,000 lines, and as many as Replace All
-    /// changes in about 0.1 s.
+    /// The most matches a search keeps, and the editor highlights, as VS Code's <c>MATCHES_LIMIT</c>: about 2.8 MB
+    /// while searching. Replace All replaces all matches, also beyond it (<see cref="ReplaceAll"/>).
     /// </summary>
-    public const int MaxMatches = 10_000;
+    public const int MaxMatches = 19_999;
 
     /// <summary>
     /// How long a search may take: about 400 times what 10,000 matches in 5,000 lines take, so that a slower machine
@@ -83,97 +133,348 @@ internal static class TextSearch
     /// </summary>
     public static readonly TimeSpan TimeLimit = TimeSpan.FromSeconds(1);
 
+    /// <summary>The longest selection that the search takes as its query, as in VS Code.</summary>
+    public const int MaxQueryLength = 524_288;
+
+    private static readonly SearchValues<char> s_lineBreaks = SearchValues.Create("\r\n");
+
     /// <summary>
-    /// Finds the matches of <paramref name="query"/> in <paramref name="snapshot"/>, with the text that replaces each
-    /// one when <paramref name="replacement"/> is given: itself, or for a regular expression with its substitutions,
-    /// such as <c>$1</c>.
+    /// A regular expression that matches <paramref name="text"/>, as VS Code escapes text for its query: with a
+    /// backslash before each of <c>\ { } * + ? | ^ $ . [ ] ( )</c>.
     /// </summary>
+    public static string Escape(string text)
+    {
+        var escaped = new StringBuilder(text.Length);
+        foreach (char c in text)
+        {
+            if (c is '\\' or '{' or '}' or '*' or '+' or '?' or '|' or '^' or '$' or '.' or '[' or ']' or '(' or ')')
+                escaped.Append('\\');
+            escaped.Append(c);
+        }
+        return escaped.ToString();
+    }
+
+    /// <summary>
+    /// Finds the matches of <paramref name="query"/> in <paramref name="snapshot"/>, at most <see cref="MaxMatches"/>,
+    /// with the text that replaces each one when <paramref name="replacement"/> is given (<see cref="Replacing"/>).
+    /// </summary>
+    /// <param name="snapshot">The text.</param>
+    /// <param name="query">What to search for.</param>
+    /// <param name="replacement">What replaces the matches; null when the search is not for replacing.</param>
+    /// <param name="scopes">
+    /// The ranges to search in, as VS Code's Find in Selection; null for all of the text. A match lies inside one
+    /// range, which counts as its whole text: <c>^</c> matches at its start, as in VS Code.
+    /// </param>
+    /// <param name="cancellationToken">Stops the search.</param>
+    /// <param name="maxMatches">The most matches to keep: <see cref="MaxMatches"/>, or fewer.</param>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
     public static SearchResult Find(
         TextSnapshot snapshot,
         SearchQuery query,
-        string? replacement,
-        CancellationToken cancellationToken
+        SearchReplacement? replacement,
+        IReadOnlyList<TextRange>? scopes,
+        CancellationToken cancellationToken,
+        int maxMatches = MaxMatches
     )
     {
         var matches = new TextSegmentCollection<SearchMatch>();
-        Regex regex;
-        try
+        if (!TryCreateRegex(query, out Regex? regex, out string? error))
         {
-            RegexOptions options = query.MatchCase
-                ? RegexOptions.CultureInvariant
-                : RegexOptions.CultureInvariant | RegexOptions.IgnoreCase;
-            regex = new Regex(query.UseRegex ? query.Text : Regex.Escape(query.Text), options, TimeLimit);
+            return new SearchResult(snapshot.Version, query, replacement, matches, SearchOutcome.InvalidPattern, error);
         }
-        catch (ArgumentException e)
-        {
-            return new SearchResult(
-                snapshot.Version,
-                query,
-                replacement,
-                matches,
-                SearchOutcome.InvalidPattern,
-                e.Message
-            );
-        }
-        return new SearchResult(
-            snapshot.Version,
+        string text = snapshot.GetText();
+        Replacing? replacing = replacement is null ? null : new Replacing(query, replacement, snapshot.LineBreak);
+        SearchOutcome outcome = Scan(
+            text,
             query,
-            replacement,
-            matches,
-            FindAll(snapshot.GetText(), query, regex, replacement, matches, cancellationToken),
-            null
+            regex,
+            scopes,
+            (start, length, match) =>
+            {
+                if (matches.Count == maxMatches)
+                    return false;
+                matches.Add(new SearchMatch(replacing?.Build(match) ?? "") { StartOffset = start, Length = length });
+                return true;
+            },
+            cancellationToken
         );
+        return new SearchResult(snapshot.Version, query, replacement, matches, outcome, null);
     }
 
-    private static SearchOutcome FindAll(
-        string text,
+    /// <summary>
+    /// The edit that replaces every match of <paramref name="query"/> in <paramref name="snapshot"/>, however many
+    /// there are, in one change, as VS Code's Replace All does beyond the matches it highlights. Null when there is no
+    /// match.
+    /// </summary>
+    /// <returns>
+    /// The edit, unless the search ran out of time or the regular expression is invalid: then null, with the outcome.
+    /// </returns>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
+    public static (SearchEdit? Edit, SearchOutcome Outcome) ReplaceAll(
+        TextSnapshot snapshot,
         SearchQuery query,
-        Regex regex,
-        string? replacement,
-        TextSegmentCollection<SearchMatch> matches,
+        SearchReplacement replacement,
+        IReadOnlyList<TextRange>? scopes,
         CancellationToken cancellationToken
     )
     {
-        long start = Stopwatch.GetTimestamp();
+        if (!TryCreateRegex(query, out Regex? regex, out _))
+            return (null, SearchOutcome.InvalidPattern);
+        string text = snapshot.GetText();
+        var replacing = new Replacing(query, replacement, snapshot.LineBreak);
+        var replaced = new StringBuilder();
+        var map = new OffsetChangeMap();
+        int first = -1;
+        int copied = 0;
+        int count = 0;
+        SearchOutcome outcome = Scan(
+            text,
+            query,
+            regex,
+            scopes,
+            (start, length, match) =>
+            {
+                if (first < 0)
+                    first = copied = start;
+                string value = replacing.Build(match);
+                // Where the match is once the replacements before it are made.
+                map.Add(new OffsetChangeMapEntry(first + replaced.Length + start - copied, length, value.Length));
+                replaced.Append(text, copied, start - copied).Append(value);
+                copied = start + length;
+                count++;
+                return true;
+            },
+            cancellationToken
+        );
+        if (outcome != SearchOutcome.Complete || first < 0)
+            return (null, outcome);
+        return (new SearchEdit(first, copied - first, replaced.ToString(), map, count), outcome);
+    }
+
+    /// <summary>
+    /// The first match of <paramref name="query"/> in <paramref name="snapshot"/> that starts at
+    /// <paramref name="from"/> or after it, searched from there, as VS Code's <c>findNextMatch</c> finds the next
+    /// match beyond those that its search keeps (<see cref="MaxMatches"/>). It does not go round to the start.
+    /// </summary>
+    /// <param name="snapshot">The text.</param>
+    /// <param name="query">What to search for.</param>
+    /// <param name="scopes">The ranges to search in, as for <see cref="Find"/>; null for all of the text.</param>
+    /// <param name="from">Where the search starts.</param>
+    /// <param name="skipEmpty">Whether an empty match at <paramref name="from"/> is the current one, which it skips.</param>
+    /// <param name="cancellationToken">Stops the search.</param>
+    /// <returns>The match, null for none, and whether the search ran out of time.</returns>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
+    public static (TextRange? Match, SearchOutcome Outcome) FindNext(
+        TextSnapshot snapshot,
+        SearchQuery query,
+        IReadOnlyList<TextRange>? scopes,
+        int from,
+        bool skipEmpty,
+        CancellationToken cancellationToken
+    )
+    {
+        if (!TryCreateRegex(query, out Regex? regex, out _))
+            return (null, SearchOutcome.InvalidPattern);
+        string text = snapshot.GetText();
+        from = Math.Clamp(from, 0, text.Length);
+        if (IsInsideLineBreak(text, from))
+            from++;
+        TextRange? next = null;
+        SearchOutcome outcome = Scan(
+            text,
+            query,
+            regex,
+            scopes,
+            (start, length, _) =>
+            {
+                if (start < from || (skipEmpty && length == 0 && start == from))
+                    return true;
+                next = new TextRange(start, length);
+                return false;
+            },
+            cancellationToken,
+            from
+        );
+        return (next, outcome == SearchOutcome.OutOfTime ? outcome : SearchOutcome.Complete);
+    }
+
+    /// <summary>
+    /// The last match of <paramref name="query"/> in <paramref name="snapshot"/> that starts before
+    /// <paramref name="before"/>, as VS Code's <c>findPreviousMatch</c> finds the previous match beyond those that its
+    /// search keeps (<see cref="MaxMatches"/>): searched from <paramref name="from"/>, the start of a match that a
+    /// search found, on to <paramref name="before"/>, or with <see cref="int.MaxValue"/> to the end, for the last
+    /// match of all.
+    /// </summary>
+    /// <param name="snapshot">The text.</param>
+    /// <param name="query">What to search for.</param>
+    /// <param name="scopes">The ranges to search in, as for <see cref="Find"/>; null for all of the text.</param>
+    /// <param name="from">The start of a match that a search of the same text and query found, where it starts.</param>
+    /// <param name="before">Where the matches it takes start before.</param>
+    /// <param name="cancellationToken">Stops the search.</param>
+    /// <returns>The match, null for none, and whether the search ran out of time.</returns>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
+    public static (TextRange? Match, SearchOutcome Outcome) FindPrevious(
+        TextSnapshot snapshot,
+        SearchQuery query,
+        IReadOnlyList<TextRange>? scopes,
+        int from,
+        int before,
+        CancellationToken cancellationToken
+    )
+    {
+        if (!TryCreateRegex(query, out Regex? regex, out _))
+            return (null, SearchOutcome.InvalidPattern);
+        string text = snapshot.GetText();
+        TextRange? last = null;
+        SearchOutcome outcome = Scan(
+            text,
+            query,
+            regex,
+            scopes,
+            (start, length, _) =>
+            {
+                if (start >= before)
+                    return false;
+                last = new TextRange(start, length);
+                return true;
+            },
+            cancellationToken,
+            Math.Clamp(from, 0, text.Length)
+        );
+        return (last, outcome == SearchOutcome.OutOfTime ? outcome : SearchOutcome.Complete);
+    }
+
+    /// <summary>The query as a regular expression, across lines when it can match a line break.</summary>
+    private static bool TryCreateRegex(
+        SearchQuery query,
+        [NotNullWhen(true)] out Regex? regex,
+        [NotNullWhen(false)] out string? error
+    )
+    {
+        RegexOptions options = RegexOptions.CultureInvariant;
+        if (!query.MatchCase)
+            options |= RegexOptions.IgnoreCase;
+        // As VS Code's "m" flag: ^ and $ match at the line breaks inside the text searched.
+        if (query.IsMultiline)
+            options |= RegexOptions.Multiline;
         try
         {
-            for (int lineStart = 0; ; )
+            regex = new Regex(query.UseRegex ? query.Text : Regex.Escape(query.Text), options, TimeLimit);
+            error = null;
+        }
+        catch (ArgumentException e)
+        {
+            regex = null;
+            error = e.Message;
+            return false;
+        }
+        if (query.UseRegex && DotsMatchCodePoints(query.Text) is var rewritten && rewritten != query.Text)
+        {
+            // The query as the user wrote it is valid, and its errors read as written: the rewritten one should be.
+            try
             {
-                int lineEnd = text.AsSpan(lineStart).IndexOfAny('\r', '\n') is var found and >= 0
-                    ? lineStart + found
-                    : text.Length;
-                for (
-                    Match match = regex.Match(text, lineStart, lineEnd - lineStart);
-                    match.Success;
-                    match = match.NextMatch()
-                )
-                {
-                    // Every match counts, also one that Match Whole Word rejects: each may have taken long to find.
-                    if (IsOutOfTime(start, cancellationToken))
-                        return SearchOutcome.OutOfTime;
-                    if (query.WholeWord && !IsWholeWord(text, match.Index, match.Length))
-                        continue;
-                    if (matches.Count == MaxMatches)
-                        return SearchOutcome.TooManyMatches;
-                    matches.Add(
-                        new SearchMatch(
-                            replacement is null ? ""
-                            : query.UseRegex ? match.Result(replacement)
-                            : replacement
-                        )
-                        {
-                            StartOffset = match.Index,
-                            Length = match.Length,
-                        }
-                    );
-                }
-                if (IsOutOfTime(start, cancellationToken))
-                    return SearchOutcome.OutOfTime;
-                if (lineEnd == text.Length)
-                    return SearchOutcome.Complete;
-                lineStart = text.AsSpan(lineEnd).StartsWith("\r\n") ? lineEnd + 2 : lineEnd + 1;
+                regex = new Regex(rewritten, options, TimeLimit);
             }
+            catch (ArgumentException) { }
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// The pattern with each <c>.</c> outside a character class matching a code point, not half of a surrogate pair,
+    /// as with VS Code's <c>u</c> flag: an emoji is one match of <c>.</c>, not two. Character classes, such as
+    /// <c>[^a]</c> or <c>\W</c>, still match half of a pair, which the search then rejects.
+    /// </summary>
+    internal static string DotsMatchCodePoints(string pattern)
+    {
+        const string CodePoint = @"(?:[\uD800-\uDBFF][\uDC00-\uDFFF]|.)";
+        if (!pattern.Contains('.', StringComparison.Ordinal))
+            return pattern;
+        var rewritten = new StringBuilder(pattern.Length + CodePoint.Length);
+        // How deep in character classes, with .NET's subtractions, such as [a-z-[aeiou]], inside.
+        int depth = 0;
+        bool dash = false;
+        for (int i = 0; i < pattern.Length; i++)
+        {
+            char c = pattern[i];
+            if (c == '\\')
+            {
+                rewritten.Append(pattern.AsSpan(i, Math.Min(2, pattern.Length - i)));
+                i++;
+                dash = false;
+                continue;
+            }
+            if (depth > 0)
+            {
+                if (c == '[' && dash)
+                    depth++;
+                else if (c == ']')
+                    depth--;
+                dash = c == '-';
+                rewritten.Append(c);
+            }
+            else if (c == '[')
+            {
+                depth = 1;
+                rewritten.Append(c);
+                // A ] first in the class, also after ^, is one of its characters.
+                if (i + 1 < pattern.Length && pattern[i + 1] == '^')
+                    rewritten.Append(pattern[++i]);
+                if (i + 1 < pattern.Length && pattern[i + 1] == ']')
+                    rewritten.Append(pattern[++i]);
+            }
+            else if (pattern.AsSpan(i).StartsWith("(?#", StringComparison.Ordinal))
+            {
+                // A comment, to its first ).
+                int end = pattern.IndexOf(')', i) is var close and >= 0 ? close + 1 : pattern.Length;
+                rewritten.Append(pattern, i, end - i);
+                i = end - 1;
+            }
+            else if (c == '.')
+                rewritten.Append(CodePoint);
+            else
+                rewritten.Append(c);
+        }
+        return rewritten.ToString();
+    }
+
+    /// <summary>Takes a match: its start and length in the text, and the regular expression's match.</summary>
+    /// <returns>Whether the search goes on.</returns>
+    private delegate bool MatchFound(int start, int length, Match match);
+
+    /// <summary>
+    /// Finds the matches in <paramref name="text"/>, range by range, in order, from <paramref name="from"/> on: there
+    /// the regular expression starts, as in the middle of a line or of a range searched across lines.
+    /// </summary>
+    /// <returns>
+    /// <see cref="SearchOutcome.Complete"/>, <see cref="SearchOutcome.OutOfTime"/>, or
+    /// <see cref="SearchOutcome.TooManyMatches"/> when <paramref name="found"/> stopped the search.
+    /// </returns>
+    private static SearchOutcome Scan(
+        string text,
+        SearchQuery query,
+        Regex regex,
+        IReadOnlyList<TextRange>? scopes,
+        MatchFound found,
+        CancellationToken cancellationToken,
+        int from = 0
+    )
+    {
+        var clock = new Clock(Stopwatch.GetTimestamp(), cancellationToken);
+        try
+        {
+            foreach ((int start, int end) in Ranges(text, scopes))
+            {
+                if (end < from)
+                    continue;
+                int at = Math.Max(start, from);
+                SearchOutcome outcome = query.IsMultiline
+                    ? ScanAcrossLines(text, start, end, at, query, regex, found, clock)
+                    : ScanLines(text, start, end, at, query, regex, found, clock);
+                if (outcome != SearchOutcome.Complete)
+                    return outcome;
+            }
+            return SearchOutcome.Complete;
         }
         catch (RegexMatchTimeoutException)
         {
@@ -181,28 +482,306 @@ internal static class TextSearch
         }
     }
 
-    /// <summary>Whether the search took its time; throws once it is cancelled.</summary>
-    private static bool IsOutOfTime(long start, CancellationToken cancellationToken)
+    /// <summary>
+    /// The ranges to search: all of the text, or the scopes within it, in order, those that overlap merged, as in
+    /// VS Code. A scope that an edit left starting or ending between a <c>\r</c> and its <c>\n</c> starts after the
+    /// line break, or ends before it.
+    /// </summary>
+    private static List<(int Start, int End)> Ranges(string text, IReadOnlyList<TextRange>? scopes)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Stopwatch.GetElapsedTime(start) >= TimeLimit;
+        int length = text.Length;
+        if (scopes is null)
+            return [(0, length)];
+        var ranges = new List<(int Start, int End)>();
+        foreach (TextRange scope in scopes.OrderBy(scope => scope.Start).ThenBy(scope => scope.End))
+        {
+            int start = Math.Clamp(scope.Start, 0, length);
+            int end = Math.Clamp(scope.End, start, length);
+            if (IsInsideLineBreak(text, start))
+                start++;
+            if (IsInsideLineBreak(text, end))
+                end--;
+            end = Math.Max(start, end);
+            if (ranges.Count > 0 && ranges[^1].End > start)
+                ranges[^1] = (ranges[^1].Start, Math.Max(ranges[^1].End, end));
+            else
+                ranges.Add((start, end));
+        }
+        return ranges;
     }
 
     /// <summary>
-    /// Whether a match starts and ends at word boundaries, as VS Code decides: next to whitespace, a word separator or
-    /// the end of the line, or with such a character at its own edge.
+    /// Finds the matches line by line, each line from its start to its end within the range, from the line of
+    /// <paramref name="from"/> on, and in it from there.
     /// </summary>
-    private static bool IsWholeWord(string text, int start, int length)
+    private static SearchOutcome ScanLines(
+        string text,
+        int start,
+        int end,
+        int from,
+        SearchQuery query,
+        Regex regex,
+        MatchFound found,
+        Clock clock
+    )
+    {
+        int first = text.AsSpan(start, from - start).LastIndexOfAny(s_lineBreaks) is var last and >= 0
+            ? start + last + 1
+            : start;
+        for (int lineStart = first; ; )
+        {
+            int lineEnd = text.AsSpan(lineStart, end - lineStart).IndexOfAny(s_lineBreaks) is var i and >= 0
+                ? lineStart + i
+                : end;
+            SearchOutcome outcome = ScanText(
+                text,
+                lineStart,
+                lineEnd,
+                Math.Max(lineStart, from),
+                query,
+                regex,
+                found,
+                null,
+                clock
+            );
+            if (outcome != SearchOutcome.Complete)
+                return outcome;
+            if (clock.IsOutOfTime())
+                return SearchOutcome.OutOfTime;
+            if (lineEnd == end)
+                return SearchOutcome.Complete;
+            // Within the range, also where it ends inside the line break.
+            lineStart = Math.Min(lineEnd + LineBreakAt(text, lineEnd).Length, end);
+        }
+    }
+
+    /// <summary>Whether <paramref name="offset"/> is between a <c>\r</c> and its <c>\n</c>.</summary>
+    private static bool IsInsideLineBreak(string text, int offset) =>
+        offset > 0 && offset < text.Length && text[offset - 1] == '\r' && text[offset] == '\n';
+
+    /// <summary>
+    /// Finds the matches across lines, as VS Code does: in the range's text with its line breaks as <c>\n</c>, so that
+    /// <c>\n</c> matches every line break, and their places in the text.
+    /// </summary>
+    private static SearchOutcome ScanAcrossLines(
+        string text,
+        int start,
+        int end,
+        int from,
+        SearchQuery query,
+        Regex regex,
+        MatchFound found,
+        Clock clock
+    )
+    {
+        if (!text.AsSpan(start, end - start).Contains('\r'))
+            return ScanText(text, start, end, from, query, regex, found, null, clock);
+        LineFeedText joined = LineFeedText.Of(text, start, end);
+        return ScanText(joined.Text, 0, joined.Text.Length, joined.FromText(from), query, regex, found, joined, clock);
+    }
+
+    /// <summary>
+    /// Finds the matches in the text from <paramref name="start"/> to <paramref name="end"/> of
+    /// <paramref name="input"/>, which counts as all of the text: <c>^</c> matches at its start, and Match Whole Word
+    /// takes its ends for word boundaries, as in VS Code.
+    /// </summary>
+    /// <param name="input">The text searched: the snapshot's, or the range's with its line breaks as <c>\n</c>.</param>
+    /// <param name="start">Where the text searched starts.</param>
+    /// <param name="end">Where it ends.</param>
+    /// <param name="from">Where the regular expression starts, within the text searched.</param>
+    /// <param name="query">The query.</param>
+    /// <param name="regex">The query's regular expression.</param>
+    /// <param name="found">Takes the matches.</param>
+    /// <param name="joined">Where <paramref name="input"/> is the range's text with its line breaks as <c>\n</c>.</param>
+    /// <param name="clock">The search's time.</param>
+    private static SearchOutcome ScanText(
+        string input,
+        int start,
+        int end,
+        int from,
+        SearchQuery query,
+        Regex regex,
+        MatchFound found,
+        LineFeedText? joined,
+        Clock clock
+    )
+    {
+        // The text that the regular expression searches, and where it starts in the input: the input, or once a search
+        // starts after the start of the text searched, that text alone, as a search from an offset of its own needs.
+        string searched = input;
+        int shift = 0;
+        Match match = from <= start ? regex.Match(input, start, end - start) : MatchFrom(from);
+        while (match.Success)
+        {
+            // Every match counts, also one that Match Whole Word rejects: each may have taken long to find.
+            if (clock.IsOutOfTime())
+                return SearchOutcome.OutOfTime;
+            int index = shift + match.Index;
+            int matchEnd = index + match.Length;
+            // As VS Code's search, by code points: no match starts inside a surrogate pair, and the next try starts
+            // after it, as VS Code steps past an empty match.
+            if (IsInsideSurrogatePair(input, index))
+            {
+                if (index >= end)
+                    break;
+                match = MatchFrom(index + 1);
+                continue;
+            }
+            if (
+                !IsInsideSurrogatePair(input, matchEnd)
+                && (!query.WholeWord || IsWholeWord(input, start, end, index, match.Length))
+            )
+            {
+                bool goesOn = joined is null
+                    ? found(index, match.Length, match)
+                    : found(joined.ToText(index), joined.ToText(matchEnd) - joined.ToText(index), match);
+                if (!goesOn)
+                    return SearchOutcome.TooManyMatches;
+            }
+            // As VS Code's search: a match that ends at the end of the text is the last, also before an empty match.
+            if (matchEnd == end)
+                break;
+            match = match.NextMatch();
+        }
+        return SearchOutcome.Complete;
+
+        Match MatchFrom(int offset)
+        {
+            if (ReferenceEquals(searched, input) && (start > 0 || end < input.Length))
+                (searched, shift) = (input[start..end], start);
+            return regex.Match(searched, offset - shift);
+        }
+    }
+
+    /// <summary>Whether <paramref name="offset"/> is between the two halves of a surrogate pair.</summary>
+    private static bool IsInsideSurrogatePair(string text, int offset) =>
+        offset > 0
+        && offset < text.Length
+        && char.IsHighSurrogate(text[offset - 1])
+        && char.IsLowSurrogate(text[offset]);
+
+    /// <summary>The line break that starts at <paramref name="offset"/>.</summary>
+    private static string LineBreakAt(string text, int offset) =>
+        text[offset] == '\n' ? "\n"
+        : offset + 1 < text.Length && text[offset + 1] == '\n' ? "\r\n"
+        : "\r";
+
+    /// <summary>
+    /// Whether a match starts and ends at word boundaries, as VS Code decides: next to whitespace, a word separator or
+    /// the end of the text searched, or with such a character at its own edge.
+    /// </summary>
+    private static bool IsWholeWord(string text, int textStart, int textEnd, int start, int length)
     {
         int end = start + length;
         bool left =
-            start == 0
+            start == textStart
             || !WordCharacters.IsWordCharacter(text[start - 1])
             || (length > 0 && !WordCharacters.IsWordCharacter(text[start]));
         bool right =
-            end == text.Length
+            end == textEnd
             || !WordCharacters.IsWordCharacter(text[end])
             || (length > 0 && !WordCharacters.IsWordCharacter(text[end - 1]));
         return left && right;
+    }
+
+    /// <summary>The time a search has, and its cancellation.</summary>
+    private readonly record struct Clock(long Start, CancellationToken CancellationToken)
+    {
+        /// <summary>Whether the search took its time; throws once it is cancelled.</summary>
+        public bool IsOutOfTime()
+        {
+            CancellationToken.ThrowIfCancellationRequested();
+            return Stopwatch.GetElapsedTime(Start) >= TimeLimit;
+        }
+    }
+
+    /// <summary>
+    /// Builds the text that replaces each match: the replacement itself, or for a regular expression with its
+    /// substitutions in VS Code's syntax (<see cref="ReplacePattern"/>), such as <c>$1</c> or <c>\U$1</c>, in the case of
+    /// the match with Preserve Case. Its line breaks are <paramref name="lineBreak"/>, the document's, as VS Code's
+    /// text model makes those of the text that goes in.
+    /// </summary>
+    private sealed class Replacing(SearchQuery query, SearchReplacement replacement, string lineBreak)
+    {
+        private readonly ReplacePattern _pattern = query.UseRegex
+            ? ReplacePattern.Parse(replacement.Text)
+            : ReplacePattern.Static(replacement.Text);
+
+        /// <summary>The text that replaces <paramref name="match"/>.</summary>
+        public string Build(Match match) =>
+            TextUtilities.NormalizeNewLines(_pattern.Build(match, replacement.PreserveCase), lineBreak);
+    }
+
+    /// <summary>
+    /// A range of the text with its line breaks as <c>\n</c>, as VS Code searches across lines, and where its offsets
+    /// are in the text: before each <c>\r\n</c> that became <c>\n</c>, one more.
+    /// </summary>
+    private sealed class LineFeedText
+    {
+        /// <summary>Where the range starts in the text.</summary>
+        private readonly int _start;
+
+        /// <summary>The offsets in <see cref="Text"/> of the <c>\n</c> of each <c>\r\n</c>, in order.</summary>
+        private readonly List<int> _joined;
+
+        private LineFeedText(string text, int start, List<int> joined)
+        {
+            Text = text;
+            _start = start;
+            _joined = joined;
+        }
+
+        public string Text { get; }
+
+        public static LineFeedText Of(string text, int start, int end)
+        {
+            var joined = new List<int>();
+            var builder = new StringBuilder(end - start);
+            for (int i = start; i < end; i++)
+            {
+                if (text[i] != '\r')
+                {
+                    builder.Append(text[i]);
+                    continue;
+                }
+                if (i + 1 < end && text[i + 1] == '\n')
+                {
+                    joined.Add(builder.Length);
+                    i++;
+                }
+                builder.Append('\n');
+            }
+            return new LineFeedText(builder.ToString(), start, joined);
+        }
+
+        /// <summary>
+        /// The offset in <see cref="Text"/> of <paramref name="offset"/> of the text: of a <c>\r\n</c>, or between its
+        /// two, that of its <c>\n</c>.
+        /// </summary>
+        public int FromText(int offset)
+        {
+            // How many \r\n start before the offset, as the offsets of their \r grow.
+            int low = 0;
+            int high = _joined.Count;
+            while (low < high)
+            {
+                int middle = (low + high) / 2;
+                if (_start + _joined[middle] + middle < offset)
+                    low = middle + 1;
+                else
+                    high = middle;
+            }
+            return offset - _start - low;
+        }
+
+        /// <summary>
+        /// The offset in the text of <paramref name="offset"/> of <see cref="Text"/>: a match that starts at a joined
+        /// <c>\n</c> starts at its <c>\r</c>, and one that ends after it ends after it, as in VS Code.
+        /// </summary>
+        public int ToText(int offset)
+        {
+            int before = _joined.BinarySearch(offset);
+            return _start + offset + (before < 0 ? ~before : before);
+        }
     }
 }

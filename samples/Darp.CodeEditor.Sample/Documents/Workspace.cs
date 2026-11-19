@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using Avalonia.Platform;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Darp.CodeEditor;
 using Sample.Localization;
@@ -27,10 +29,20 @@ public sealed partial class Workspace : ObservableObject, IDisposable
     /// </summary>
     private readonly Dictionary<FileType, LanguageServer> _servers = [];
 
+    /// <summary>The servers' settings, with the schemas' text while they are open.</summary>
+    private readonly ServerSettings _settings = new();
+
+    /// <summary>
+    /// Waits for a pause in the edits of a schema before the servers get it, as they validate every open document
+    /// again with each new schema.
+    /// </summary>
+    private readonly DispatcherTimer _schemasChanged = new() { Interval = TimeSpan.FromMilliseconds(300) };
+
     private int _untitledCount;
 
     public Workspace()
     {
+        _schemasChanged.Tick += (_, _) => SendSchemas();
         foreach (FileType type in FileType.All)
         {
             if (type.ServerName is not { } name || FindOnPath(name) is not { } path)
@@ -40,7 +52,7 @@ public sealed partial class Workspace : ObservableObject, IDisposable
                 {
                     FileName = path,
                     Arguments = ["--stdio"],
-                    Settings = ServerSettings.Get,
+                    Settings = _settings.Get,
                     // Servers explain their failures there: into the app's log, with Avalonia's messages.
                     StandardError = line => Trace.WriteLine(line, name),
                 }
@@ -79,17 +91,18 @@ public sealed partial class Workspace : ObservableObject, IDisposable
     /// <summary>Creates an empty document in memory.</summary>
     public void New(FileType type)
     {
-        string name = Strings.Current.Format(Strings.Current.Untitled, ++_untitledCount);
+        string name = Strings.Default.FormatUntitled(++_untitledCount);
         Add(name, type, "", file: null, filePath: null);
     }
 
     /// <summary>
     /// Opens <paramref name="file"/>, or shows the document that has its path already. The workspace owns the file.
+    /// With <paramref name="show"/> false, the current document stays.
     /// </summary>
     /// <exception cref="IOException">
     /// The file can't be read, or an example has its path: the example's text is not the file's.
     /// </exception>
-    public async Task OpenAsync(IStorageFile file)
+    public async Task OpenAsync(IStorageFile file, bool show = true)
     {
         string text;
         try
@@ -112,11 +125,26 @@ public sealed partial class Workspace : ObservableObject, IDisposable
         {
             file.Dispose();
             if (open.File is null)
-                throw new IOException(Strings.Current.Format(Strings.Current.ExampleHasPath, open.Name));
-            Current = open;
+                throw new IOException(Strings.Default.FormatExampleHasPath(open.Name));
+            if (show)
+                Current = open;
             return;
         }
-        Add(file.Name, FileType.ForFile(file.Name), text, file, path);
+        Add(file.Name, FileType.ForFile(file.Name), text, file, path, show);
+    }
+
+    /// <summary>
+    /// Opens the schema <paramref name="path"/>, one of <see cref="ServerSettings.Schemas"/>, unless it is open, and
+    /// keeps showing the current document. Its edits apply to the documents it validates as the server allows: VS
+    /// Code's JSON server takes the text as the user types, the YAML server the file once saved.
+    /// </summary>
+    /// <exception cref="IOException">The file can't be read.</exception>
+    public async Task OpenSchemaAsync(string path, IStorageProvider storage)
+    {
+        if (WithPath(path) is not null)
+            return;
+        IStorageFile file = await storage.TryGetFileFromPathAsync(path) ?? throw new FileNotFoundException(null, path);
+        await OpenAsync(file, show: false);
     }
 
     /// <summary>
@@ -135,12 +163,18 @@ public sealed partial class Workspace : ObservableObject, IDisposable
         Documents.RemoveAt(index);
         if (Current == document)
             Current = Documents.Count == 0 ? null : Documents[Math.Min(index, Documents.Count - 1)];
+        document.Document.TextChanged -= OnTextChanged;
+        document.PropertyChanged -= OnDocumentPropertyChanged;
+        // A schema closed without saving goes back to its file.
+        if (ServerSettings.IsSchema(document.Document.FilePath))
+            _schemasChanged.Start();
         document.Dispose();
     }
 
     /// <inheritdoc />
     public void Dispose()
     {
+        _schemasChanged.Stop();
         Current = null;
         foreach (OpenDocument document in Documents)
             document.Dispose();
@@ -151,10 +185,10 @@ public sealed partial class Workspace : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Adds a document and shows it. A file type whose server is installed gets its documents from that server, which
-    /// serves them from then on; the others get documents without a server.
+    /// Adds a document, and shows it if <paramref name="show"/>. A file type whose server is installed gets its
+    /// documents from that server, which serves them from then on; the others get documents without a server.
     /// </summary>
-    private void Add(string name, FileType type, string text, IStorageFile? file, string? filePath)
+    private void Add(string name, FileType type, string text, IStorageFile? file, string? filePath, bool show = true)
     {
         LanguageServer? server = _servers.GetValueOrDefault(type);
         CodeDocument document;
@@ -166,8 +200,48 @@ public sealed partial class Workspace : ObservableObject, IDisposable
             document.FilePath = filePath;
         }
         var open = new OpenDocument(name, type, document, server, file);
+        document.TextChanged += OnTextChanged;
+        open.PropertyChanged += OnDocumentPropertyChanged;
         Documents.Add(open);
-        Current = open;
+        if (show)
+            Current = open;
+        if (ServerSettings.IsSchema(filePath))
+            _schemasChanged.Start();
+    }
+
+    /// <summary>An edit of a schema: the servers get its text after a pause.</summary>
+    private void OnTextChanged(object? sender, EventArgs e)
+    {
+        if (sender is CodeDocument document && ServerSettings.IsSchema(document.FilePath))
+        {
+            // Again from the latest edit.
+            _schemasChanged.Stop();
+            _schemasChanged.Start();
+        }
+    }
+
+    /// <summary>
+    /// A schema saved, whose file the YAML server reads; or a document saved under another path, which may have been a
+    /// schema or become one.
+    /// </summary>
+    private void OnDocumentPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (
+            e.PropertyName == nameof(OpenDocument.File)
+            || e.PropertyName == nameof(OpenDocument.State)
+                && sender is OpenDocument document
+                && ServerSettings.IsSchema(document.Document.FilePath)
+        )
+            _schemasChanged.Start();
+    }
+
+    /// <summary>Gives the servers that validate with the schemas the schemas as they are now.</summary>
+    private void SendSchemas()
+    {
+        _schemasChanged.Stop();
+        _settings.Update(Documents);
+        foreach (FileType type in (FileType[])[FileType.Json, FileType.Yaml])
+            _servers.GetValueOrDefault(type)?.NotifySettingsChanged();
     }
 
     /// <summary>

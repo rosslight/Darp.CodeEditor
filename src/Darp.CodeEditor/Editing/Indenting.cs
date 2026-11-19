@@ -8,8 +8,18 @@ internal readonly struct Indenting(Indentation indentation)
 {
     private readonly Indentation _indentation = indentation;
 
-    /// <summary>The same width, in tabs and spaces or in spaces, as the document indents.</summary>
-    public string Normalize(string whitespace) => Whitespace(Width(whitespace));
+    /// <summary>
+    /// The same width of the leading whitespace of <paramref name="text"/>, in tabs and spaces or in spaces, as the
+    /// document indents, with the rest after it as it is: VS Code's <c>normalizeIndentation</c>.
+    /// </summary>
+    public string Normalize(string text)
+    {
+        int whitespace = 0;
+        while (whitespace < text.Length && text[whitespace] is ' ' or '\t')
+            whitespace++;
+        string normalized = Whitespace(Width(text.AsSpan(0, whitespace)));
+        return whitespace == text.Length ? normalized : normalized + text[whitespace..];
+    }
 
     /// <summary>One level more: to the next stop.</summary>
     public string Shift(string whitespace) =>
