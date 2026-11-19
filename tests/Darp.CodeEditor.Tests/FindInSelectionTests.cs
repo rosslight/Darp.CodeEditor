@@ -118,6 +118,25 @@ public sealed class FindInSelectionTests(UiFixture ui)
             document.Text.ShouldBe("a\na\nb\nb\na");
         });
 
+    /// <summary>As VS Code's scope, the scope grows with text typed at either of its edges.</summary>
+    [Fact]
+    public Task The_scope_grows_with_text_typed_at_its_edges() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = Show("x «a» x");
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            window.Press(Key.L, Toggle);
+            window.Editor.OpenSearch();
+            SearchBar bar = BarOf(window);
+            bar.FindBox.Text = "a";
+            await Wait.UntilAsync(() => bar.Count?.EndsWith("of 1", StringComparison.Ordinal) == true);
+
+            document.Replace(new TextRange(2, 0), "a");
+            await Wait.UntilAsync(() => bar.Count?.EndsWith("of 2", StringComparison.Ordinal) == true);
+            document.Replace(new TextRange(4, 0), "a");
+            await Wait.UntilAsync(() => bar.Count?.EndsWith("of 3", StringComparison.Ordinal) == true);
+        });
+
     /// <summary>
     /// An edit can leave the scope ending between a <c>\r</c> and its <c>\n</c>: it then ends before the line break,
     /// and the search still finds what is inside it.
