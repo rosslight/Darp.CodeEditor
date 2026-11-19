@@ -157,6 +157,9 @@ public class CodeEditor : TemplatedControl
     /// <summary>The editing helpers of the shown document.</summary>
     private EditingHelpers? _helpers;
 
+    /// <summary>Copy, cut and paste in the shown document, with its line breaks.</summary>
+    private Clipboard? _clipboard;
+
     /// <summary>Marks the bracket next to the caret in the shown document, and its match.</summary>
     private BracketHighlighter? _brackets;
 
@@ -610,6 +613,7 @@ public class CodeEditor : TemplatedControl
         TextView textView = part.TextArea.TextView;
         _highlighter = new BackgroundTextMateHighlighter(textView, buffer, Dispatcher, null);
         _helpers = new EditingHelpers(part.TextArea, document, _highlighter);
+        _clipboard = new Clipboard(part.TextArea, document);
         _brackets = new BracketHighlighter(part.TextArea, document, _highlighter) { Colors = _colors };
         _whitespace = new WhitespaceLayer(part.TextArea) { Colors = _colors };
         _squiggles = new SquiggleLayer(part.TextArea, document) { Colors = _colors };
@@ -638,6 +642,8 @@ public class CodeEditor : TemplatedControl
         CancelLoading();
         _helpers?.Dispose();
         _helpers = null;
+        _clipboard?.Dispose();
+        _clipboard = null;
         _brackets?.Dispose();
         _brackets = null;
         _whitespace?.Dispose();
