@@ -17,6 +17,7 @@ internal sealed class RuleLines
     private readonly Func<int, string> _text;
     private readonly Func<int, bool, int[]?> _exactTokens;
     private readonly Regex? _brackets;
+    private readonly Func<int, int, bool>? _typesCode;
 
     /// <summary>The tokens of the line asked for last, and whether it was tokenized now if need be; 0 for none.</summary>
     private (int Number, int[]? Tokens, bool Now) _tokens;
@@ -27,11 +28,21 @@ internal sealed class RuleLines
     /// so; null when unknown.
     /// </param>
     /// <param name="brackets">Finds the language's brackets; null for none.</param>
-    public RuleLines(Func<int, string> text, Func<int, bool, int[]?> exactTokens, Regex? brackets)
+    /// <param name="typesCode">
+    /// Whether text typed at a column of a line, by their numbers, goes in as code, and not into a string, comment or
+    /// regular expression; null for always.
+    /// </param>
+    public RuleLines(
+        Func<int, string> text,
+        Func<int, bool, int[]?> exactTokens,
+        Regex? brackets,
+        Func<int, int, bool>? typesCode = null
+    )
     {
         _text = text;
         _exactTokens = exactTokens;
         _brackets = brackets;
+        _typesCode = typesCode;
     }
 
     /// <summary>The text of line <paramref name="number"/>, as it is.</summary>
@@ -52,9 +63,21 @@ internal sealed class RuleLines
     /// </summary>
     public string Masked(int number, int from, int to) => Masked(number, _text(number), from, to, tokenizeNow: true);
 
+    /// <summary>
+    /// <paramref name="typed"/> as the rules see it once it goes in at <paramref name="column"/> of line
+    /// <paramref name="number"/>: nothing for a bracket typed into a string, comment or regular expression.
+    /// </summary>
+    public string Typed(int number, int column, char typed)
+    {
+        string text = typed.ToString();
+        return _brackets is { } brackets && brackets.IsMatch(text) && _typesCode?.Invoke(number, column) == false
+            ? ""
+            : text;
+    }
+
     /// <summary>These lines, with line <paramref name="number"/> as <paramref name="text"/>, which the rules see as it is.</summary>
     public RuleLines With(int number, string text) =>
-        new(n => n == number ? text : _text(n), (n, now) => n == number ? null : Tokens(n, now), _brackets);
+        new(n => n == number ? text : _text(n), (n, now) => n == number ? null : Tokens(n, now), _brackets, _typesCode);
 
     private int[]? Tokens(int number, bool tokenizeNow)
     {

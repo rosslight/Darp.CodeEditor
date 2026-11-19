@@ -59,7 +59,11 @@ internal sealed class Typing : IDisposable
         new(
             number => Buffer.GetText(Buffer.GetLineByNumber(number)),
             _highlighter.ExactTokensOf,
-            Configuration.BracketPattern
+            Configuration.BracketPattern,
+            // Code unless the tokens say otherwise.
+            (number, column) =>
+                _highlighter.ContextAt(Buffer.GetLineByNumber(number).Offset + column)
+                    is not { At: not TokenType.Other }
         );
 
     public void Dispose()

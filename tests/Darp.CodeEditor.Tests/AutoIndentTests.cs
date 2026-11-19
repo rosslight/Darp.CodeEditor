@@ -267,6 +267,17 @@ public sealed class AutoIndentTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_closing_bracket_typed_in_a_comment_doesnt_outdent_its_line_by_the_indentation_rules() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = await ShowColored("{\n  /*\n  |\n  */\n}", CodeLanguage.Json, indentation: 2);
+
+            window.Type("}");
+
+            MarkedText.Of(window).ShouldBe("{\n  /*\n  }|\n  */\n}");
+        });
+
+    [Fact]
     public Task A_closing_bracket_in_a_comment_stays_where_it_is_typed() =>
         _ui.Run(async () =>
         {
