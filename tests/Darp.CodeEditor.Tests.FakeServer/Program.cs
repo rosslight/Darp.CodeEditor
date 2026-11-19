@@ -17,8 +17,10 @@
 // signature help. Resolving an item answers the item with the properties of its "data"
 // added. Signature help answers inside parentheses, "(" asks for it and "," asks again: the signatures that the command
 // "signatures" set, or two of "call", with the parameter at the position active, and the signature that the client
-// says it shows, or the first. Completion in a document with the word "slow" is never answered. A request about a
-// document that is not open is answered with an error.
+// says it shows, or the first. Completion in a document with the word "slow" is never answered. Selection ranges
+// answer with what the command "selection-ranges" set, as the result's first selection range, or with the word at the
+// position and its line; once "hold-selection-ranges" holds them, only when "release-selection-ranges" releases them,
+// with the answer of when they came. A request about a document that is not open is answered with an error.
 //
 // Arguments:
 //   --initialize never      never answer initialize
@@ -122,6 +124,17 @@ internal sealed class FakeServer
     private readonly List<string> _startLines = [];
     private int _lastId;
 
+    /// <summary>Set by the command <c>selection-ranges</c>: the selection range that selection ranges answer with.</summary>
+    private JsonNode? _selectionRange;
+
+    /// <summary>
+    /// Set by the command <c>hold-selection-ranges</c>: selection range requests wait for the command
+    /// <c>release-selection-ranges</c>, which answers them as they would have been answered when they came.
+    /// </summary>
+    private bool _holdSelectionRanges;
+
+    private readonly List<(JsonNode? Id, JsonNode Answer)> _heldSelectionRanges = [];
+
     /// <summary>Set by the command <c>peek</c>: the file whose existence lets the server read on.</summary>
     private string? _peekSignal;
 
@@ -224,6 +237,7 @@ internal sealed class FakeServer
                                     ["triggerCharacters"] = new JsonArray("("),
                                     ["retriggerCharacters"] = new JsonArray(","),
                                 },
+                                ["selectionRangeProvider"] = true,
                             },
                         }
                     );
@@ -270,6 +284,9 @@ internal sealed class FakeServer
                 break;
             case "textDocument/signatureHelp":
                 SignatureHelp(id, Required(parameters, "params"));
+                break;
+            case "textDocument/selectionRange":
+                SelectionRanges(id, Required(parameters, "params"));
                 break;
             case "workspace/didChangeConfiguration":
                 Log($"configuration changed {parameters?.ToJsonString()}");
@@ -426,6 +443,21 @@ internal sealed class FakeServer
             case ["signatures", var json]:
                 _signatures = JsonNode.Parse(json) ?? throw new InvalidDataException("No signatures.");
                 Log("set signatures");
+                break;
+            case ["selection-ranges", var json]:
+                _selectionRange = JsonNode.Parse(json);
+                Log("set selection ranges");
+                break;
+            case ["hold-selection-ranges"]:
+                _holdSelectionRanges = true;
+                Log("holding selection ranges");
+                break;
+            case ["release-selection-ranges"]:
+                _holdSelectionRanges = false;
+                foreach ((JsonNode? id, JsonNode answer) in _heldSelectionRanges)
+                    Reply(id, answer);
+                _heldSelectionRanges.Clear();
+                Log("released selection ranges");
                 break;
             case ["peek", var signal]:
                 _peekSignal = signal;
@@ -665,6 +697,40 @@ internal sealed class FakeServer
                 commas++;
         }
         Reply(id, null);
+    }
+
+    /// <summary>
+    /// Answers with the selection range that the command <c>selection-ranges</c> set, or with the word at the first
+    /// position inside its line; once held, when the hold is released.
+    /// </summary>
+    private void SelectionRanges(JsonNode? id, JsonNode parameters)
+    {
+        if (Known(id, "selection ranges", parameters) is not { } document)
+            return;
+        int offset = Offset(document.Text, Required(parameters["positions"]?[0], "positions"));
+        Log($"selection ranges {offset}");
+        JsonArray answer;
+        if (_selectionRange is { } set)
+            answer = new JsonArray(set.DeepClone());
+        else
+        {
+            (int start, int end) = WordAt(document.Text, offset);
+            (int lineStart, int lineEnd) = Lines(document.Text).Last(line => line.Start <= offset);
+            answer = new JsonArray(
+                new JsonObject
+                {
+                    ["range"] = Range(start, end),
+                    ["parent"] = new JsonObject { ["range"] = Range(lineStart, lineEnd) },
+                }
+            );
+        }
+        if (_holdSelectionRanges)
+            _heldSelectionRanges.Add((id?.DeepClone(), answer));
+        else
+            Reply(id, answer);
+
+        JsonObject Range(int from, int to) =>
+            new() { ["start"] = Position(document.Text, from), ["end"] = Position(document.Text, to) };
     }
 
     /// <summary>The word of letters, digits and underscores at an offset; empty where there is none.</summary>
