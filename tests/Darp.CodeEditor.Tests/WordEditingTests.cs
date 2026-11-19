@@ -1,5 +1,7 @@
 using Avalonia;
 using Avalonia.Input;
+using AvaloniaEdit;
+using AvaloniaEdit.Editing;
 using Darp.CodeEditor.Commands;
 using Keys = Avalonia.Input.Key;
 
@@ -110,6 +112,25 @@ public sealed class WordEditingTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe("alpha |beta");
             window.Press(Keys.Left, Words | KeyModifiers.Shift);
             window.Editor.Selection.ShouldBe(new TextSelection(6, 0));
+        });
+
+    /// <summary>AvaloniaEdit's keys extend a rectangle by words.</summary>
+    [Fact]
+    public Task Ctrl_Shift_Right_leaves_a_rectangle_selection_a_rectangle() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("|ab cd\nef gh", CodeLanguage.PlainText);
+            TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+            textArea.Caret.Position = new TextViewPosition(2, 2);
+            textArea.Selection = new RectangleSelection(
+                textArea,
+                new TextViewPosition(1, 1),
+                new TextViewPosition(2, 2)
+            );
+
+            window.Press(Keys.Right, Words | KeyModifiers.Shift);
+
+            textArea.Selection.ShouldBeOfType<RectangleSelection>();
         });
 
     [Fact]
