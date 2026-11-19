@@ -10,6 +10,20 @@ namespace Darp.CodeEditor.Tests;
 /// </summary>
 public sealed class IndentRulesTests
 {
+    /// <summary>
+    /// .NET times a match by a clock that moves in steps of up to 16 ms, on Windows, and ends it once more than its limit
+    /// less one step has passed. A match ends only after the whole indentation's time, so that only a pattern that
+    /// backtracks reaches its limit, and a step of the clock never drops a rule; the indentation's time, on a precise
+    /// clock, ends the normal work (<see cref="Indentation_stops_between_quick_matches_once_its_time_is_up"/>).
+    /// </summary>
+    [Fact]
+    public void A_match_runs_out_of_time_only_after_the_whole_indentation_does()
+    {
+        var coarsestTick = TimeSpan.FromMilliseconds(16);
+
+        (IndentationRules.MatchTimeout - coarsestTick).ShouldBeGreaterThanOrEqualTo(IndentationRules.TimeLimit);
+    }
+
     [Fact]
     public void Indentation_stops_between_quick_matches_once_its_time_is_up()
     {
