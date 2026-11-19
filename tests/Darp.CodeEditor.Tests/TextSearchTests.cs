@@ -269,6 +269,27 @@ public sealed class TextSearchTests
         string.Join(' ', result.Matches.Select(match => $"{match.StartOffset}-{match.EndOffset}")).ShouldBe(expected);
     }
 
+    /// <summary>
+    /// A scope that starts or ends inside a surrogate pair leaves the pair out, also across lines, where the search
+    /// reads the scope alone and would not see the other half.
+    /// </summary>
+    [Fact]
+    public void A_scope_inside_a_surrogate_pair_leaves_it_out()
+    {
+        const string Text = "\U0001F600\r\nz";
+
+        (CombinedEdit? edit, SearchOutcome outcome) = TextSearch.ReplaceAll(
+            TextSnapshot.FromString(Text),
+            new SearchQuery(@"\W", MatchCase: true, WholeWord: false, UseRegex: true),
+            new SearchReplacement("X", PreserveCase: false),
+            [TextRange.FromBounds(1, 5)],
+            CancellationToken.None
+        );
+
+        outcome.ShouldBe(SearchOutcome.Complete);
+        Replaced(Text, edit).ShouldBe("\U0001F600Xz");
+    }
+
     [Theory]
     [InlineData("foo", false)]
     [InlineData("", false)]
