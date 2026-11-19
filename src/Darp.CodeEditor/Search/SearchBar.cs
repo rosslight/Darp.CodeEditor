@@ -136,7 +136,6 @@ internal sealed class SearchBar : UserControl
     /// </summary>
     public DocumentSearch? Search { get; set; }
 
-    /// <summary>Whether the bar is open.</summary>
     public bool IsOpen => IsVisible;
 
     /// <summary>
@@ -153,14 +152,12 @@ internal sealed class SearchBar : UserControl
             )
             : null;
 
-    /// <summary>Whether the query is a regular expression.</summary>
     public bool UsesRegex => _regex.IsChecked == true;
 
     /// <summary>What replaces the matches; null while the replace row is hidden.</summary>
     public SearchReplacement? Replacement =>
         _replaceRow.IsVisible ? new SearchReplacement(_replace.Text ?? "", _preserveCase.IsChecked == true) : null;
 
-    /// <summary>Whether the query has the keyboard.</summary>
     public bool IsQueryFocused => _find.IsKeyboardFocusWithin;
 
     /// <summary>Shows Find in Selection on or off.</summary>
@@ -191,7 +188,6 @@ internal sealed class SearchBar : UserControl
     /// <summary>The number of matches, and which one is selected.</summary>
     internal string? Count => _count.Text;
 
-    /// <summary>The tip of the number of matches.</summary>
     internal object? CountTip => ToolTip.GetTip(_count);
 
     /// <summary>Why the result is partial, or the regular expression is invalid; null for neither.</summary>
@@ -200,12 +196,9 @@ internal sealed class SearchBar : UserControl
     /// <summary>
     /// Opens the bar, with its replace row if <paramref name="replace"/>, and otherwise with the row as it was in an
     /// open bar. <paramref name="query"/>, if given, becomes the query. The keyboard goes to
-    /// <paramref name="focus"/>, into the replacement only where the row shows.
+    /// <paramref name="focus"/>, into the replacement only where the row shows. The tips name the keys of
+    /// <paramref name="keymap"/>.
     /// </summary>
-    /// <param name="replace">Whether the replace row shows.</param>
-    /// <param name="query">The new query; null keeps it.</param>
-    /// <param name="focus">Where the keyboard goes.</param>
-    /// <param name="keymap">The editor's keymap, whose keys the tips name.</param>
     /// <returns>Whether that changed what to search for: the bar opened, or its query or replace row changed.</returns>
     public bool Open(bool replace, string? query, BarFocus focus, CodeEditorKeymap keymap)
     {
@@ -264,13 +257,9 @@ internal sealed class SearchBar : UserControl
     public void HideReplaceRow() => _replaceRow.IsVisible = false;
 
     /// <summary>
-    /// Shows how many matches there are, which one is selected, and why the result is partial; and whether Replace All
-    /// and Find in Selection can act.
+    /// Shows how many matches <paramref name="result"/> has, which one is selected, and why it is partial; and whether
+    /// Replace All and Find in Selection can act.
     /// </summary>
-    /// <param name="result">The result shown; null for none.</param>
-    /// <param name="index">The selected match's place in the result; null for none.</param>
-    /// <param name="canReplaceAll">Whether Replace All can act.</param>
-    /// <param name="canFindInSelection">Whether Find in Selection can turn on or off: with a selection.</param>
     public void ShowResult(SearchResult? result, int? index, bool canReplaceAll, bool canFindInSelection)
     {
         CultureInfo culture = CultureInfo.CurrentCulture;

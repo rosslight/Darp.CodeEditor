@@ -7,7 +7,6 @@ namespace Darp.CodeEditor.Search;
 /// <summary>How a search ended.</summary>
 internal enum SearchOutcome
 {
-    /// <summary>It found every match.</summary>
     Complete,
 
     /// <summary>It stopped at <see cref="TextSearch.MaxMatches"/>: there are more.</summary>
@@ -16,7 +15,6 @@ internal enum SearchOutcome
     /// <summary>It stopped after <see cref="TextSearch.TimeLimit"/>: there may be more.</summary>
     OutOfTime,
 
-    /// <summary>The regular expression is invalid.</summary>
     InvalidPattern,
 }
 
@@ -272,7 +270,6 @@ internal static class TextSearch
             _lineBreak = lineBreak;
         }
 
-        /// <summary>The text that replaces <paramref name="match"/>.</summary>
         public string Build(Match match)
         {
             string text = _pattern.Build(match, _preserveCase);

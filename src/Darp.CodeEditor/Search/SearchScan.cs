@@ -147,17 +147,11 @@ internal sealed class SearchScan
     }
 
     /// <summary>
-    /// Finds the matches in <paramref name="input"/> from <paramref name="start"/> to <paramref name="end"/>, which
-    /// count as all of the text: <c>^</c> matches at its start, and Match Whole Word takes its ends for word
-    /// boundaries. The regular expression starts at <paramref name="from"/>.
+    /// Finds the matches in <paramref name="input"/>, the text or, with <paramref name="joined"/>, the range's with its
+    /// line breaks as <c>\n</c>, from <paramref name="start"/> to <paramref name="end"/>, which count as all of the
+    /// text: <c>^</c> matches at its start, and Match Whole Word takes its ends for word boundaries. The regular
+    /// expression starts at <paramref name="from"/>.
     /// </summary>
-    /// <param name="input">The text, or the range's with its line breaks as <c>\n</c>.</param>
-    /// <param name="start">Where the text searched starts.</param>
-    /// <param name="end">Where it ends.</param>
-    /// <param name="from">Where the regular expression starts, within the text searched.</param>
-    /// <param name="joined">
-    /// Where <paramref name="input"/> is the range's text with its line breaks as <c>\n</c>.
-    /// </param>
     private SearchOutcome Within(string input, int start, int end, int from, LineFeedText? joined)
     {
         // The text that the regular expression searches, and where it starts in the input: the input, or once a

@@ -6,11 +6,10 @@ namespace Darp.CodeEditor.Search;
 internal static class FindScope
 {
     /// <summary>
-    /// The ranges of the selection that are not empty, each over its lines whole if it spans several, but without a
-    /// last line that it only reaches the start of; one within a line stays as it is. Null when every range is empty.
+    /// The ranges of the selection, one or a rectangle's of each line, that are not empty, each over its lines whole if
+    /// it spans several, but without a last line that it only reaches the start of; one within a line stays as it is.
+    /// Null when every range is empty.
     /// </summary>
-    /// <param name="document">The text.</param>
-    /// <param name="ranges">The selection's ranges: one, or a rectangle's of each line.</param>
     public static List<TextRange>? OfSelection(TextDocument document, IEnumerable<ISegment> ranges)
     {
         List<TextRange> scope = [.. ranges.Where(range => range.Length > 0).Select(range => Widen(range))];
