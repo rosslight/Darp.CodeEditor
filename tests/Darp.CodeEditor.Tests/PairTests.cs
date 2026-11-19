@@ -1,6 +1,7 @@
 using Avalonia.Input;
 using AvaloniaEdit;
 using AvaloniaEdit.Editing;
+using Darp.CodeEditor.Editing;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -288,6 +289,20 @@ public sealed class PairTests(UiFixture ui)
             window.Type("*");
 
             MarkedText.Of(window).ShouldBe("(|)");
+        });
+
+    [Fact]
+    public Task A_pair_doesnt_close_where_a_long_lines_hidden_tail_keeps_its_opening_out() =>
+        _ui.Run(async () =>
+        {
+            await Pairs.Loaded;
+            // The caret is where the line's hidden tail starts, right after the (, and before an x, where pairs close.
+            string line = new string('a', VisibleText.LineLimit - 1) + "(" + new string('x', 6);
+            using EditorWindow window = MarkedText.Show(line.Insert(VisibleText.LineLimit, "|"), Pairs);
+
+            window.Type("*");
+
+            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(line);
         });
 
     [Fact]

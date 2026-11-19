@@ -28,4 +28,25 @@ internal static class VisibleText
         DocumentLine line = textArea.Document.GetLineByOffset(offset);
         return textArea.ReadOnlySectionProvider.CanInsert(offset) && (!IsCollapsed(line) || offset < End(line));
     }
+
+    /// <summary>
+    /// Whether the text from <paramref name="offset"/> on, <paramref name="length"/> long, can go: none of it read-only,
+    /// in a long line's hidden tail or in the line break after it, which AvaloniaEdit's own deletes keep too.
+    /// </summary>
+    public static bool CanDelete(TextArea textArea, int offset, int length)
+    {
+        var segment = new TextSegment { StartOffset = offset, Length = length };
+        if (textArea.ReadOnlySectionProvider.GetDeletableSegments(segment).Sum(deletable => deletable.Length) != length)
+            return false;
+        for (
+            DocumentLine? line = textArea.Document.GetLineByOffset(offset);
+            line?.Offset < offset + length;
+            line = line.NextLine
+        )
+        {
+            if (IsCollapsed(line) && End(line) < offset + length && line.Offset + line.TotalLength > offset)
+                return false;
+        }
+        return true;
+    }
 }

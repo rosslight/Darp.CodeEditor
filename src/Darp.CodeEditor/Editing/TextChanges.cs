@@ -101,13 +101,12 @@ internal sealed class TextChanges : IDisposable
         return true;
     }
 
-    /// <summary>Whether the text from <paramref name="offset"/> on, <paramref name="length"/> long, may change.</summary>
+    /// <summary>
+    /// Whether the text from <paramref name="offset"/> on, <paramref name="length"/> long, may change: not read-only,
+    /// nor in the hidden tail of a long line.
+    /// </summary>
     public bool CanChange(int offset, int length) =>
-        length == 0
-            ? _area.ReadOnlySectionProvider.CanInsert(offset)
-            : _area
-                .ReadOnlySectionProvider.GetDeletableSegments(new TextSegment { StartOffset = offset, Length = length })
-                .Sum(segment => segment.Length) == length;
+        length == 0 ? VisibleText.CanInsert(_area, offset) : VisibleText.CanDelete(_area, offset, length);
 
     /// <summary>
     /// One change from the first edit to the last, with a map of them for the anchors: AvaloniaEdit raises a change per

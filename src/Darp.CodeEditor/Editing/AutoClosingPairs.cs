@@ -124,7 +124,8 @@ internal sealed class AutoClosingPairs : IDisposable
     /// </summary>
     public void Close(AutoClosingPair pair)
     {
-        if (TypingOffsets() is not { } offsets)
+        // Text can be refused after it was typed, and the opening not go in.
+        if (TypingOffsets() is not { } offsets || !Array.TrueForAll(offsets, HasOpening))
             return;
         if (!_changes.Apply([.. offsets.Select(offset => new TextEdit(offset, 0, pair.Close))], moved: 0))
             return;
@@ -139,6 +140,9 @@ internal sealed class AutoClosingPairs : IDisposable
             close.MovementType = AnchorMovementType.AfterInsertion;
             _autoClosed.Add(new AutoClosed(open, close, pair.Close, pair));
         }
+
+        bool HasOpening(int offset) =>
+            offset >= pair.Open.Length && Buffer.GetText(offset - pair.Open.Length, pair.Open.Length) == pair.Open;
     }
 
     /// <summary>
