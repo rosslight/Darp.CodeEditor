@@ -400,6 +400,33 @@ public sealed class CompletionTests(UiFixture ui)
             document.Text.ShouldBe("prizzz");
         });
 
+    [Fact]
+    public Task Opening_Find_while_an_accept_waits_for_the_filter_ends_completion_and_the_accept() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("Console", "Convert"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            var ranking = new HeldScheduler();
+            var editor = new CodeEditor { Document = document, BackgroundScheduler = ranking };
+            using var window = new EditorWindow(editor);
+            window.Type("Con");
+            await WaitForLabelsAsync(window);
+
+            // Enter waits for the filter of "Conv", which is held, and then Find takes the keyboard.
+            ranking.Hold();
+            window.Type("v");
+            window.Press(Key.Enter);
+            window.Press(Key.F, EditorWindow.Command);
+
+            List(window).ShouldBeNull();
+            await ranking.ReleaseAndWaitAsync();
+            await EditorWindow.RunPostedJobsAsync();
+            document.Text.ShouldBe("Conv");
+            await SearchBars.SearchedAsync(SearchBars.BarOf(window));
+        });
+
     [Theory]
     // F7 to the next occurrence, a jump to the bracket, smart select, moving the line and selecting it.
     [InlineData("f7")]

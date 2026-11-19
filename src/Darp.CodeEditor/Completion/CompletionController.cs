@@ -39,10 +39,10 @@ namespace Darp.CodeEditor.Completion;
 /// <para>
 /// <see cref="Close"/> ends completion, for every reason it ends: Escape, the caret leaving the line or moving back
 /// past the word, a selection, a command other than completion's that moves the caret, the editor becoming read-only,
-/// the list scrolling out of view, the editor losing the keyboard focus, a server that starts or stops serving the
-/// document, new colors, the list running out of matches, and the editor no longer showing the document. Ending it
-/// hides "No suggestions." too, and cancels the request still under way with <c>$/cancelRequest</c>, and so does a
-/// newer request; a late answer is dropped.
+/// the list scrolling out of view, the text losing the keyboard focus, also to the search bar, which ends an accept that
+/// waits for the filter, a server that starts or stops serving the document, new colors, the list running out of
+/// matches, and the editor no longer showing the document. Ending it hides "No suggestions." too, and cancels the
+/// request still under way with <c>$/cancelRequest</c>, and so does a newer request; a late answer is dropped.
 /// </para>
 /// </remarks>
 internal sealed class CompletionController : IEditorFeature, ICompletionOwner
@@ -94,6 +94,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         _buffer.TextChanged += OnBufferTextChanged;
         _textArea.TextEntered += OnTextEntered;
         _textArea.Caret.PositionChanged += OnCaretPositionChanged;
+        _textArea.LostFocus += OnClosingChange;
         _document.LanguageFeaturesChanged += OnClosingChange;
         _view.LeftView += OnClosingChange;
     }
@@ -258,6 +259,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         _buffer.TextChanged -= OnBufferTextChanged;
         _textArea.TextEntered -= OnTextEntered;
         _textArea.Caret.PositionChanged -= OnCaretPositionChanged;
+        _textArea.LostFocus -= OnClosingChange;
         _document.LanguageFeaturesChanged -= OnClosingChange;
         _view.LeftView -= OnClosingChange;
     }
