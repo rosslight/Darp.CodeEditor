@@ -79,11 +79,13 @@ internal static class BracketMatcher
     {
         // The open brackets by their kind, each with the open one of its kind before it, and the last of each kind: a
         // closing bracket finds its own at once, whatever other kinds are open, so that the scan stays linear.
+        // A kind is an opening character, which may have several closing ones.
         var open = new List<(int Kind, int Before)>();
-        int[] last = [.. brackets.Select(_ => -1)];
-        bool unmatched = false;
-        string opens = string.Concat(brackets.Select(b => b.Open));
+        string opens = string.Concat(brackets.Select(b => b.Open[0]).Distinct());
         string closes = string.Concat(brackets.Select(b => b.Close));
+        int[] kindOf = [.. brackets.Select(b => opens.IndexOf(b.Open[0]))];
+        int[] last = [.. opens.Select(_ => -1)];
+        bool unmatched = false;
         Scan(
             document,
             Math.Max(0, offset - MaxDistance),
@@ -99,7 +101,7 @@ internal static class BracketMatcher
                     last[kind] = open.Count - 1;
                     return false;
                 }
-                int opening = last[closes.IndexOf(c)];
+                int opening = last[kindOf[closes.IndexOf(c)]];
                 if (opening < 0)
                     return unmatched = at >= offset && c == pair.Close[0];
                 // The brackets opened inside it stay unclosed.

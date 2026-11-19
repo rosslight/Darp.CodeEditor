@@ -61,6 +61,16 @@ public sealed class BracketMatchingTests(UiFixture ui)
         });
 
     [Fact]
+    public void A_closing_bracket_of_an_opening_one_with_several_closes_it_before_a_pair_closes()
+    {
+        CharacterPair[] brackets = [new("(", ")"), new("(", "]")];
+
+        bool unmatched = BracketMatcher.UnmatchedClosing(new TextDocument("(]"), 1, brackets[1], brackets, _ => null);
+
+        unmatched.ShouldBeFalse();
+    }
+
+    [Fact]
     public void Line_breaks_count_against_what_the_search_reads()
     {
         // Empty lines have no characters to read: each line break counts, and the search visits no line past it all.
