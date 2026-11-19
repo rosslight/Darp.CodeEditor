@@ -142,7 +142,10 @@ internal sealed class IndentRules
         try
         {
             // A line that matched it already keeps the indentation that the user gave it.
-            if (!matching.Decreases(before + typed + after) || matching.Decreases(before + after))
+            if (
+                !matching.Decreases(before + lines.Typed(lineNumber, from, typed) + after)
+                || matching.Decreases(before + after)
+            )
                 return null;
             if (Inherited(matching, lines, lineNumber, honorIntentional: false) is not { } inherited)
                 return null;
