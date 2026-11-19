@@ -321,6 +321,45 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_key_that_waits_for_a_filter_that_matches_nothing_still_starts_its_sequence() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("println"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            var ranking = new HeldScheduler();
+            var editor = new CodeEditor
+            {
+                Document = document,
+                BackgroundScheduler = ranking,
+                // Enter accepts while the list shows, and otherwise starts Enter X, which finds.
+                Keymap = CodeEditorKeymap.Empty.With(
+                    new CodeEditorKeyBinding("enter x", CodeEditorCommands.Find),
+                    new CodeEditorKeyBinding("enter", CodeEditorCommands.AcceptSelectedSuggestion)
+                ),
+            };
+            using var window = new EditorWindow(editor);
+            window.Type("pri");
+            await WaitForLabelsAsync(window, ["println"]);
+
+            // Typed, and Enter pressed, while the filter of "prizzz" is held: "println" does not match it.
+            ranking.Hold();
+            window.Type("zzz");
+            window.Press(Key.Enter);
+            ranking.Release();
+
+            // The list ends, and Enter waits for the second key of its sequence.
+            await Wait.UntilAsync(() => editor.PendingKeys is not null);
+            editor.PendingKeys.ShouldNotBeNull().Key.ShouldBe(Key.Enter);
+            window.Press(Key.X);
+            SearchBar bar = SearchBars.BarOf(window);
+            bar.IsOpen.ShouldBeTrue();
+            await SearchBars.SearchedAsync(bar);
+            document.Text.ShouldBe("prizzz");
+        });
+
+    [Fact]
     public Task Enter_that_waits_for_a_filter_commits_from_a_newer_list_of_the_same_text() =>
         _ui.Run(async () =>
         {
