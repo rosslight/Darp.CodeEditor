@@ -82,10 +82,10 @@ public class CompletionBenchmarks
         Window window = _window ?? throw new InvalidOperationException("Not set up.");
         window.KeyPress(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
         window.KeyRelease(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
-        RunJobsUntil(() => List(window) is { ItemCount: Items }, "The list did not show.");
+        RunJobsUntil(() => List(window)?.Items.Count == Items, "The list did not show.");
         HeadlessEditor.Render(window);
         // A list that showed nothing would look fast.
-        if (List(window)?.ContainerFromIndex(0) is not ListBoxItem { Content: ShownItem { Item.Label: "alpha0" } })
+        if (List(window)?.RowOf(0)?.Item is not { Item.Label: "alpha0" })
             throw new InvalidOperationException("The frame does not show the list's items.");
     }
 
@@ -99,9 +99,9 @@ public class CompletionBenchmarks
         Window window = _window ?? throw new InvalidOperationException("Not set up.");
         window.KeyTextInput("a");
         // The items that start with "a": one in eight.
-        RunJobsUntil(() => List(window) is { ItemCount: Items / 8 }, "The list was not filtered.");
+        RunJobsUntil(() => List(window)?.Items.Count == Items / 8, "The list was not filtered.");
         HeadlessEditor.Render(window);
-        if (List(window)?.ContainerFromIndex(0) is not ListBoxItem { Content: ShownItem { Highlights.Length: 1 } })
+        if (List(window)?.RowOf(0)?.Item is not { Highlights.Length: 1 })
             throw new InvalidOperationException("The frame does not show the filtered list.");
     }
 
@@ -126,8 +126,8 @@ public class CompletionBenchmarks
         _server?.Dispose();
     }
 
-    internal static ListBox? List(Window window) =>
-        OverlayLayer.GetOverlayLayer(window)?.GetVisualDescendants().OfType<ListBox>().FirstOrDefault();
+    internal static CompletionListBox? List(Window window) =>
+        OverlayLayer.GetOverlayLayer(window)?.GetVisualDescendants().OfType<CompletionListBox>().FirstOrDefault();
 
     /// <summary>Runs the UI thread's jobs until <paramref name="condition"/> holds; fails after 10 seconds.</summary>
     internal static void RunJobsUntil(Func<bool> condition, string failure)
@@ -211,7 +211,7 @@ public class CompletionWorstCaseBenchmarks
         window.KeyRelease(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
         CompletionBenchmarks.RunJobsUntil(
             () =>
-                CompletionBenchmarks.List(window)?.ItemsSource is IReadOnlyList<ShownItem> { Count: > 0 } items
+                CompletionBenchmarks.List(window)?.Items is { Count: > 0 } items
                 && items[0].Highlights.Length == s_typed.Length,
             "The list was not filtered."
         );

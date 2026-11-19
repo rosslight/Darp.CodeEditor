@@ -31,6 +31,24 @@ internal sealed record PopupColors
     /// <summary><c>editorSuggestWidget.foreground</c>.</summary>
     public required IBrush SuggestForeground { get; init; }
 
+    /// <summary><c>editorSuggestWidget.selectedBackground</c>.</summary>
+    public required IBrush SuggestSelectedBackground { get; init; }
+
+    /// <summary><c>editorSuggestWidget.selectedForeground</c>.</summary>
+    public required IBrush SuggestSelectedForeground { get; init; }
+
+    /// <summary><c>editorSuggestWidget.selectedIconForeground</c>; null keeps the icon's own color.</summary>
+    public required IBrush? SuggestSelectedIconForeground { get; init; }
+
+    /// <summary><c>editorSuggestWidget.highlightForeground</c>: the characters that matched.</summary>
+    public required IBrush SuggestHighlight { get; init; }
+
+    /// <summary><c>editorSuggestWidget.focusHighlightForeground</c>: the characters that matched, in the selected row.</summary>
+    public required IBrush SuggestFocusHighlight { get; init; }
+
+    /// <summary><c>list.hoverBackground</c>: the row under the pointer.</summary>
+    public required IBrush ListHoverBackground { get; init; }
+
     /// <summary><c>editorHoverWidget.background</c>.</summary>
     public required IBrush HoverBackground { get; init; }
 
@@ -62,6 +80,16 @@ internal sealed record PopupColors
         Color widgetForeground = Own("editorWidget.foreground") ?? foreground;
         Color widgetBorder = Own("editorWidget.border") ?? Transparent(widgetForeground, 0.2);
         Color shadow = Own("widget.shadow") ?? Transparent(Colors.Black, dark ? 0.36 : 0.16);
+        // The selected row's colors come from the list's selection by way of the quick input's.
+        Color? selectedIcon =
+            Own("editorSuggestWidget.selectedIconForeground")
+            ?? Own("quickInputList.focusIconForeground")
+            ?? Own("list.activeSelectionIconForeground");
+        Color listHighlight = Own("list.highlightForeground") ?? Hex(dark ? 0xFF2AAAFF : 0xFF0066BF);
+        Color listFocusHighlight =
+            Own("quickInputList.focusHighlightForeground")
+            ?? Own("list.focusHighlightForeground")
+            ?? (dark || colors.ContainsKey("list.activeSelectionBackground") ? listHighlight : Hex(0xFFBBE7FF));
         return new PopupColors
         {
             Shadow = new BoxShadows(
@@ -76,6 +104,22 @@ internal sealed record PopupColors
             SuggestBackground = Brush(Own("editorSuggestWidget.background") ?? widgetBackground),
             SuggestBorder = Brush(Own("editorSuggestWidget.border") ?? widgetBorder),
             SuggestForeground = Own("editorSuggestWidget.foreground") is { } suggest ? Brush(suggest) : text.Foreground,
+            SuggestSelectedBackground = Brush(
+                Own("editorSuggestWidget.selectedBackground")
+                    ?? Own("quickInputList.focusBackground")
+                    ?? Own("list.activeSelectionBackground")
+                    ?? Hex(dark ? 0xFF04395E : 0xFF0060C0)
+            ),
+            SuggestSelectedForeground = Brush(
+                Own("editorSuggestWidget.selectedForeground")
+                    ?? Own("quickInputList.focusForeground")
+                    ?? Own("list.activeSelectionForeground")
+                    ?? Colors.White
+            ),
+            SuggestSelectedIconForeground = selectedIcon is { } icon ? Brush(icon) : null,
+            SuggestHighlight = Brush(Own("editorSuggestWidget.highlightForeground") ?? listHighlight),
+            SuggestFocusHighlight = Brush(Own("editorSuggestWidget.focusHighlightForeground") ?? listFocusHighlight),
+            ListHoverBackground = Brush(Own("list.hoverBackground") ?? Hex(dark ? 0xFF2A2D2E : 0xFFF0F0F0)),
             HoverBackground = Brush(Own("editorHoverWidget.background") ?? widgetBackground),
             HoverForeground = Brush(Own("editorHoverWidget.foreground") ?? widgetForeground),
             HoverBorder = Brush(Own("editorHoverWidget.border") ?? widgetBorder),
