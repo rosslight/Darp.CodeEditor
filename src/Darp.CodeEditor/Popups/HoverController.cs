@@ -232,19 +232,40 @@ internal sealed class HoverController : IDisposable
         Hovered hovered = Begin(offset, fromKeyboard: true);
         hovered.IsProblem = true;
         hovered.IsAnswered = true;
+        hovered.Messages = ProblemBlocks(diagnostic, index, count);
+        Due(hovered);
+    }
+
+    /// <summary>Where the problem that a key went to shows, while it shows; null otherwise.</summary>
+    public int? ProblemOffset => _hovered is { IsProblem: true } hovered && _popup.IsOpen ? hovered.Offset : null;
+
+    /// <summary>
+    /// Shows <paramref name="diagnostic"/> as the problem that shows, as new diagnostics replaced the one before: its
+    /// severity, which it is of how many, and its message, source, code and related places.
+    /// </summary>
+    public void UpdateProblem(Diagnostic diagnostic, int index, int count)
+    {
+        if (ProblemOffset is null || _hovered is not { } hovered)
+            return;
+        hovered.Messages = ProblemBlocks(diagnostic, index, count);
+        Render(hovered);
+    }
+
+    /// <summary>What the problem that a key went to shows, as <see cref="ShowProblem"/> says.</summary>
+    private IReadOnlyCollection<HoverBlock> ProblemBlocks(Diagnostic diagnostic, int index, int count)
+    {
         string of = string.Format(
             CultureInfo.CurrentCulture,
             count > 1 ? Strings.Default.ProblemOfProblems : Strings.Default.ProblemOfProblem,
             index,
             count
         );
-        hovered.Messages =
+        return
         [
             new HoverHeading(diagnostic.Severity, DocumentName(), of),
             new HoverRule(),
             .. HoverBlocks.Of([diagnostic], Opener, HoverIcon.None),
         ];
-        Due(hovered);
     }
 
     public void Dispose()

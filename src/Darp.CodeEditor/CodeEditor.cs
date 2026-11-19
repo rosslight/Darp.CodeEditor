@@ -1176,7 +1176,7 @@ public class CodeEditor : TemplatedControl
             Icons = _iconColors,
         };
         _signatureHelp = new SignatureHelpController(this, part.TextArea, document, _highlighter) { Colors = _colors };
-        _diagnosticNavigation = new DiagnosticNavigation(part.TextArea, document);
+        _diagnosticNavigation = new DiagnosticNavigation(part.TextArea, document, _hover);
         _cursorHistory = new CursorHistory(part.TextArea, Dispatcher);
         _smartSelection = new SmartSelection(this, part.TextArea, document, _highlighter);
         _columnSelection = new ColumnSelection(part.TextArea);

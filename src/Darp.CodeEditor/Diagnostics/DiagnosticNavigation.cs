@@ -16,12 +16,17 @@ namespace Darp.CodeEditor.Diagnostics;
 /// caret or ends after it; backward, to the one before that, unless it holds the caret. An empty diagnostic counts as
 /// the word it touches. Later moves take the next or previous one in the order, until the caret leaves the diagnostic
 /// moved to, or the diagnostics change. The caret goes to where the diagnostic starts, or stays where it is inside it.
+/// New diagnostics show in the problem's popup while it is open, as VS Code's widget updates: the first in the order
+/// that holds where the caret went, which it is of how many now; without one, the popup closes.
 /// </remarks>
 internal sealed class DiagnosticNavigation : IDisposable
 {
     private readonly TextArea _textArea;
     private readonly TextDocument _buffer;
     private readonly CodeDocument _document;
+
+    /// <summary>Shows the problem that a move went to.</summary>
+    private readonly HoverController _hover;
 
     /// <summary>The diagnostics in the order of the last move.</summary>
     private DiagnosticMarker[] _markers = [];
@@ -32,11 +37,15 @@ internal sealed class DiagnosticNavigation : IDisposable
     /// <summary>The index in <see cref="_markers"/> of the diagnostic moved to last; -1 to start from the caret.</summary>
     private int _index = -1;
 
-    public DiagnosticNavigation(TextArea textArea, CodeDocument document)
+    /// <summary>The order of the last move, which the problem that shows is in.</summary>
+    private DiagnosticOrder _moved;
+
+    public DiagnosticNavigation(TextArea textArea, CodeDocument document, HoverController hover)
     {
         _textArea = textArea;
         _buffer = textArea.Document;
         _document = document;
+        _hover = hover;
         _document.PropertyChanged += OnDocumentPropertyChanged;
         _textArea.Caret.PositionChanged += OnCaretPositionChanged;
     }
@@ -47,6 +56,7 @@ internal sealed class DiagnosticNavigation : IDisposable
     /// </summary>
     public (int Caret, Diagnostic Diagnostic, int Index, int Count)? Move(bool next, DiagnosticOrder order)
     {
+        _moved = order;
         if (_order != order)
         {
             _markers = Sorted(order);
@@ -135,13 +145,37 @@ internal sealed class DiagnosticNavigation : IDisposable
     /// <summary>Whether <paramref name="range"/> holds <paramref name="offset"/>, either edge included, as VS Code's ranges do.</summary>
     private static bool Holds(TextRange range, int offset) => offset >= range.Start && offset <= range.End;
 
-    /// <summary>New diagnostics: the next move sorts them, and starts from the caret.</summary>
+    /// <summary>
+    /// New diagnostics: the next move sorts them, and starts from the caret; the problem that shows shows as they have
+    /// it, or closes.
+    /// </summary>
     private void OnDocumentPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName != nameof(CodeDocument.Diagnostics))
             return;
         _order = null;
         _index = -1;
+        if (_hover.ProblemOffset is { } offset)
+            ShowProblemAt(offset);
+    }
+
+    /// <summary>
+    /// Shows the problem at <paramref name="offset"/> in the problem's popup, as VS Code's <c>MarkerList.find</c> finds
+    /// it: the first in the order of the last move whose range holds the offset; closes the popup without one.
+    /// </summary>
+    private void ShowProblemAt(int offset)
+    {
+        _markers = Sorted(_moved);
+        _order = _moved;
+        for (int i = 0; i < _markers.Length; i++)
+        {
+            if (Holds(new TextRange(_markers[i].StartOffset, _markers[i].Length), offset))
+            {
+                _hover.UpdateProblem(_markers[i].Diagnostic, i + 1, _markers.Length);
+                return;
+            }
+        }
+        _hover.Close();
     }
 
     /// <summary>The caret left the diagnostic moved to: the next move starts from the caret.</summary>
