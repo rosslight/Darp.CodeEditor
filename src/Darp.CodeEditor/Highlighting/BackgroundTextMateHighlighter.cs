@@ -66,7 +66,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
     /// How long finding the tokens around a typed character may take on the UI thread: one line up to the caret,
     /// usually well under a millisecond.
     /// </summary>
-    private static readonly TimeSpan s_insertionTimeLimit = TimeSpan.FromMilliseconds(2);
+    internal static TimeSpan InsertionTimeLimit { get; set; } = TimeSpan.FromMilliseconds(2);
 
     /// <summary>
     /// Lines that warm a grammar up before the text: its first tokenizing, and the most common expressions.
@@ -167,7 +167,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
             || line.Length > MaxSyncLineLength
             || entry.TooSlowForUiThread
             || previous is { IsValid: false }
-            || !grammar.TryEnterOnUiThread(s_insertionTimeLimit)
+            || !grammar.TryEnterOnUiThread(InsertionTimeLimit)
         )
             return null;
         int[] tokens;
@@ -178,7 +178,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
                 .Grammar.TokenizeLine2(
                     new LineText(_document.GetText(line).AsMemory()),
                     previous?.EndState,
-                    s_insertionTimeLimit
+                    InsertionTimeLimit
                 )
                 .Tokens;
         }
@@ -187,7 +187,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
             grammar.ExitOnUiThread();
         }
         // TextMate stops at the time limit without saying so.
-        return Stopwatch.GetElapsedTime(start) < s_insertionTimeLimit ? tokens : null;
+        return Stopwatch.GetElapsedTime(start) < InsertionTimeLimit ? tokens : null;
     }
 
     /// <summary>
@@ -211,7 +211,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
             column <= MaxSyncLineLength
             && !entry.TooSlowForUiThread
             && previous is null or { IsValid: true }
-            && grammar.TryEnterOnUiThread(s_insertionTimeLimit)
+            && grammar.TryEnterOnUiThread(InsertionTimeLimit)
         )
         {
             string text = _document.GetText(line.Offset, column) + " ";
@@ -220,7 +220,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
             try
             {
                 tokens = grammar
-                    .Grammar.TokenizeLine2(new LineText(text.AsMemory()), previous?.EndState, s_insertionTimeLimit)
+                    .Grammar.TokenizeLine2(new LineText(text.AsMemory()), previous?.EndState, InsertionTimeLimit)
                     .Tokens;
             }
             finally
@@ -229,7 +229,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
             }
             // TextMate stops at the time limit without saying so, and the rest of the line keeps the type of the last
             // token it reached: a string after "Log(" would read as code.
-            if (Stopwatch.GetElapsedTime(start) < s_insertionTimeLimit)
+            if (Stopwatch.GetElapsedTime(start) < InsertionTimeLimit)
                 return new InsertionContext(
                     TokenTypes.At(tokens, Math.Max(0, column - 1)),
                     TokenTypes.At(tokens, column)

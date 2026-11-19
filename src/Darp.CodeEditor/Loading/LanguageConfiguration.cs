@@ -267,8 +267,11 @@ internal sealed record IndentationRules(Regex IncreaseIndentPattern, Regex Decre
     /// </summary>
     public Regex? UnIndentedLinePattern { get; init; }
 
-    /// <summary>How long one match may take. Some patterns backtrack on long lines, as JSON's does on nested objects.</summary>
-    public static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(5);
+    /// <summary>
+    /// How long one match may take, as a language's rules load. Some patterns backtrack on long lines, as JSON's does on
+    /// nested objects.
+    /// </summary>
+    internal static TimeSpan MatchTimeout { get; set; } = TimeSpan.FromMilliseconds(5);
 
     /// <summary>
     /// How long one indentation, of a new line or of a line the user types, may read and match lines, with the rules
@@ -276,6 +279,9 @@ internal sealed record IndentationRules(Regex IncreaseIndentPattern, Regex Decre
     /// above it all needs about a microsecond per match.
     /// </summary>
     public static readonly TimeSpan TimeLimit = TimeSpan.FromMilliseconds(10);
+
+    /// <summary>The clock of <see cref="TimeLimit"/> for an indentation that isn't given one.</summary>
+    internal static TimeProvider Clock { get; set; } = TimeProvider.System;
 }
 
 /// <summary>
