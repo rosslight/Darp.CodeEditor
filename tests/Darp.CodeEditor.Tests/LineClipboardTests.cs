@@ -122,6 +122,21 @@ public sealed class LineClipboardTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe("alpha\nbegamma\n|ta");
         });
 
+    /// <summary>After a lone CR, the line is a line of its own: its LF does not join the CR.</summary>
+    [Fact]
+    public Task A_copied_empty_line_pastes_as_a_line_of_its_own_after_a_lone_CR() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("|\na\rb", CodeLanguage.PlainText);
+            window.Press(Key.C, EditorWindow.Command);
+            await ClipboardText(window);
+            window.Editor.Selection = new TextSelection(3);
+
+            await PasteAsync(window);
+
+            MarkedText.Of(window).ShouldBe("\na\n\n|b");
+        });
+
     /// <summary>Where text can go in at the caret but not at its line's start, the line goes in at the caret.</summary>
     [Fact]
     public Task A_copied_line_pastes_at_the_caret_where_its_lines_start_is_read_only() =>
