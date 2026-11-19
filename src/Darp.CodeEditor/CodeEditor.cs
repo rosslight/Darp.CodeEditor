@@ -1024,6 +1024,9 @@ public class CodeEditor : TemplatedControl
         base.OnPropertyChanged(change);
         if (change.Property == DocumentProperty)
             SwitchDocument();
+        // The sequence that waits may not be in the new keymap.
+        else if (change.Property == KeymapProperty)
+            SetPending(null);
         else if (change.Property == IsReadOnlyProperty)
         {
             _part?.IsReadOnly = IsReadOnly || _shown is null;
@@ -1190,6 +1193,8 @@ public class CodeEditor : TemplatedControl
 
     private void Hide(TextEditor part, CodeDocument shown)
     {
+        // A sequence started in the document ends with it.
+        SetPending(null);
         shown.Disposed -= OnDocumentDisposed;
         shown.PropertyChanged -= OnDocumentPropertyChanged;
         CancelLoading();

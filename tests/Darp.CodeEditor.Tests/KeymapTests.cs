@@ -180,6 +180,24 @@ public sealed class KeymapTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe("«one\n»two");
         });
 
+    [Fact]
+    public Task A_new_document_or_keymap_ends_the_wait() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("|one", CodeLanguage.PlainText);
+            window.Editor.Keymap = CodeEditorKeymap.Default.With(
+                new CodeEditorKeyBinding("ctrl+k f", CodeEditorCommands.Find)
+            );
+
+            window.Press(Keys.K, KeyModifiers.Control);
+            window.Editor.Document = CodeDocument.Create(CodeLanguage.PlainText, "two");
+            window.Editor.PendingKeys.ShouldBeNull();
+
+            window.Press(Keys.K, KeyModifiers.Control);
+            window.Editor.Keymap = CodeEditorKeymap.Default;
+            window.Editor.PendingKeys.ShouldBeNull();
+        });
+
     [Theory]
     [InlineData(CodeEditorCommands.CommentLine)]
     [InlineData(CodeEditorCommands.Undo)]
