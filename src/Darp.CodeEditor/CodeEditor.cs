@@ -483,12 +483,14 @@ public class CodeEditor : TemplatedControl
     }
 
     /// <summary>
-    /// Removes AvaloniaEdit's Ctrl+I, which indents the selected lines, and its undo and redo keys: the keymap binds
-    /// them, Ctrl+I to completion, and an app that unbinds them gets them.
+    /// Removes AvaloniaEdit's Ctrl+I, which indents the selected lines, its Ctrl+D, which deletes the caret's line, and
+    /// its undo and redo keys: the keymap binds them, Ctrl+I to completion and Ctrl+D to selecting the word, and an app
+    /// that unbinds them gets them.
     /// </summary>
     private static void RemoveInheritedKeys(TextArea textArea)
     {
         Remove(textArea.DefaultInputHandler.Editing.CommandBindings, AvaloniaEditCommands.IndentSelection);
+        Remove(textArea.DefaultInputHandler.Editing.CommandBindings, AvaloniaEditCommands.DeleteLine);
         Remove(textArea.DefaultInputHandler.CommandBindings, ApplicationCommands.Undo);
         Remove(textArea.DefaultInputHandler.CommandBindings, ApplicationCommands.Redo);
 
