@@ -11,23 +11,28 @@ using Darp.CodeEditor.Loading;
 namespace Darp.CodeEditor.Editing;
 
 /// <summary>
-/// AvaloniaEdit's copy, cut, paste and drop in one editor's view of a document, with the document's line breaks.
-/// AvaloniaEdit copies with the system's line break, and pastes and drops with that of the line the text goes in, and
-/// has no seam to give it another. So its commands run as they are, with their events and their own conversions, such
-/// as tabs that paste as spaces, and the text they put out is corrected after them: the clipboard's to
-/// <see cref="LineBreaks.OnClipboard"/>, and the text that went in to the document's, in the undo step it went in with.
+/// Copy, cut, paste and drop in one editor's view of a document, with the document's line breaks. AvaloniaEdit copies
+/// with the system's line break, and pastes and drops with that of the line the text goes in, with no seam to give it
+/// another. Its copy, cut and drop run as they are, with their events, and the text they put out is corrected after
+/// them: the clipboard's to <see cref="LineBreaks.OnClipboard"/>, and the dropped text to the document's, in the drop's
+/// undo step. Paste is the editor's own, because AvaloniaEdit's opens its undo step before it waits for the clipboard
+/// and closes it on whatever document the editor shows by then; so it raises no <c>TextPasted</c>.
 /// </summary>
 internal sealed class Clipboard : IDisposable
 {
     private readonly TextArea _textArea;
     private readonly CodeDocument _document;
+    private readonly RoutedCommandBinding _paste;
+    private bool _disposed;
 
     public Clipboard(TextArea textArea, CodeDocument document)
     {
         _textArea = textArea;
         _document = document;
+        _paste = new RoutedCommandBinding(ApplicationCommands.Paste, (_, _) => Paste());
+        // First, as the first binding of a command runs, and AvaloniaEdit's came with the text area.
+        textArea.CommandBindings.Insert(0, _paste);
         textArea.TextCopied += OnTextCopied;
-        textArea.TextPasted += OnTextPasted;
         // After AvaloniaEdit's handler, which the text area has from its start.
         textArea.AddHandler(DragDrop.DropEvent, OnDrop, RoutingStrategies.Bubble, handledEventsToo: true);
     }
@@ -38,12 +43,44 @@ internal sealed class Clipboard : IDisposable
 
     public void Copy() => ApplicationCommands.Copy.Execute(null, _textArea);
 
-    public void Paste() => ApplicationCommands.Paste.Execute(null, _textArea);
+    /// <summary>
+    /// Pastes the clipboard's text over the selection in one undo step, once the clipboard has given it, and only into
+    /// the document it was asked for in, while the editor still shows it and is not read-only. As in AvaloniaEdit, a
+    /// document that indents with spaces gets spaces for tabs, and a rectangle takes a line of the text on each of its
+    /// rows; the line breaks become the document's before that.
+    /// </summary>
+    public async void Paste()
+    {
+        if (_textArea.IsReadOnly || TopLevel.GetTopLevel(_textArea)?.Clipboard is not { } clipboard)
+            return;
+        string? text;
+        try
+        {
+            text = await clipboard.TryGetTextAsync();
+        }
+        catch (Exception e)
+        {
+            Logger
+                .TryGet(LogEventLevel.Warning, AssetFiles.LogArea)
+                ?.Log(this, "Reading the clipboard failed: {Exception}", e);
+            return;
+        }
+        if (_disposed || _textArea.IsReadOnly || string.IsNullOrEmpty(text))
+            return;
+        text = TextUtilities.NormalizeNewLines(text, _document.LineBreak);
+        TextEditorOptions options = _textArea.Options;
+        if (options.ConvertTabsToSpaces)
+            text = text.Replace("\t", new string(' ', options.IndentationSize), StringComparison.Ordinal);
+        using (Buffer.RunUpdate())
+            _textArea.Selection.ReplaceSelectionWithText(text);
+        _textArea.Caret.BringCaretToView();
+    }
 
     public void Dispose()
     {
+        _disposed = true;
+        _textArea.CommandBindings.Remove(_paste);
         _textArea.TextCopied -= OnTextCopied;
-        _textArea.TextPasted -= OnTextPasted;
         _textArea.RemoveHandler(DragDrop.DropEvent, OnDrop);
     }
 
@@ -54,15 +91,11 @@ internal sealed class Clipboard : IDisposable
             SetClipboard(copied);
     }
 
-    /// <summary>AvaloniaEdit's paste leaves the caret after the text it put in.</summary>
-    private void OnTextPasted(object? sender, TextEventArgs e)
-    {
-        int start = _textArea.Caret.Offset - e.Text.Length;
-        if (Correct(start, e.Text) is { } length)
-            _textArea.Caret.Offset = start + length;
-    }
-
-    /// <summary>AvaloniaEdit's drop selects the text it put in, unless it put it in as a rectangle.</summary>
+    /// <summary>
+    /// Gives the text that AvaloniaEdit's drop put in the document's line breaks, in the drop's undo step and with its
+    /// descriptor, so that a drag's move continues it. The drop selects the text it put in, unless it put it in as a
+    /// rectangle.
+    /// </summary>
     private void OnDrop(object? sender, DragEventArgs e)
     {
         if (
@@ -71,36 +104,21 @@ internal sealed class Clipboard : IDisposable
         )
             return;
         ISegment segment = dropped.SurroundingSegment;
-        if (Correct(segment.Offset, Buffer.GetText(segment)) is { } length)
-            _textArea.Selection = Selection.Create(_textArea, segment.Offset, segment.Offset + length);
-    }
-
-    /// <summary>
-    /// Gives <paramref name="inserted"/>, the text that went in at <paramref name="start"/>, the document's line breaks,
-    /// in the last undo step and with its descriptor, so that a drag's move continues it.
-    /// </summary>
-    /// <returns>The corrected text's length, or null when it needed none, or did not go in there.</returns>
-    private int? Correct(int start, string inserted)
-    {
-        string corrected = TextUtilities.NormalizeNewLines(inserted, _document.LineBreak);
-        if (
-            corrected == inserted
-            || start < 0
-            || start + inserted.Length > Buffer.TextLength
-            || Buffer.GetText(start, inserted.Length) != inserted
-        )
-            return null;
+        string text = Buffer.GetText(segment);
+        string corrected = TextUtilities.NormalizeNewLines(text, _document.LineBreak);
+        if (corrected == text)
+            return;
         UndoStack undo = Buffer.UndoStack;
         undo.StartContinuedUndoGroup(undo.LastGroupDescriptor);
         try
         {
-            Buffer.Replace(start, inserted.Length, corrected);
+            Buffer.Replace(segment.Offset, segment.Length, corrected);
         }
         finally
         {
             undo.EndUndoGroup();
         }
-        return corrected.Length;
+        _textArea.Selection = Selection.Create(_textArea, segment.Offset, segment.Offset + corrected.Length);
     }
 
     /// <summary>The platform's clipboard fails now and then; the text is then not copied, as in AvaloniaEdit.</summary>

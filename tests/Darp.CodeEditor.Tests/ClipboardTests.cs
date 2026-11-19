@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
+using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 
@@ -55,8 +56,9 @@ public sealed class ClipboardTests(UiFixture ui)
             using EditorWindow window = MarkedText.Show("a\r\nb\r\n|c\nd", CodeLanguage.PlainText);
             await Clipboard(window).SetTextAsync("x\ny\rz");
 
+            Task pasted = NextChangeAsync(window);
             window.Press(Key.V, EditorWindow.Command);
-            await Wait.UntilAsync(() => window.Editor.Document?.Text != "a\r\nb\r\nc\nd");
+            await pasted;
 
             MarkedText.Of(window).ShouldBe("a\r\nb\r\nx\r\ny\r\nz|c\nd");
         });
@@ -68,30 +70,50 @@ public sealed class ClipboardTests(UiFixture ui)
             using EditorWindow window = MarkedText.Show("a\r\n|b", CodeLanguage.PlainText);
             await Clipboard(window).SetTextAsync("\tx\ny");
 
+            Task pasted = NextChangeAsync(window);
             window.Press(Key.V, EditorWindow.Command);
-            await Wait.UntilAsync(() => window.Editor.Document?.Text != "a\r\nb");
+            await pasted;
 
             MarkedText.Of(window).ShouldBe("a\r\n    x\r\ny|b");
         });
 
     [Fact]
-    public Task Copy_and_paste_raise_the_text_areas_events() =>
-        _ui.Run(async () =>
+    public Task Copy_and_cut_raise_the_text_areas_TextCopied() =>
+        _ui.Run(() =>
         {
             using EditorWindow window = MarkedText.Show("«a\r\nb»", CodeLanguage.PlainText);
             TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
             var copied = new List<string>();
-            var pasted = new List<string>();
             textArea.TextCopied += (_, e) => copied.Add(e.Text);
-            textArea.TextPasted += (_, e) => pasted.Add(e.Text);
 
             window.Press(Key.C, EditorWindow.Command);
-            await ClipboardText(window);
-            window.Press(Key.V, EditorWindow.Command);
-            await Wait.UntilAsync(() => pasted.Count > 0);
+            window.Press(Key.X, EditorWindow.Command);
 
-            copied.Count.ShouldBe(1);
-            pasted.Count.ShouldBe(1);
+            copied.Count.ShouldBe(2);
+        });
+
+    /// <summary>
+    /// Each row takes a line of the text, and the last row the rest, with the document's line breaks, also on rows that
+    /// end in another.
+    /// </summary>
+    [Fact]
+    public Task A_rectangle_takes_the_pasted_lines_with_the_documents_line_breaks() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("a\r\nb\r\nc\r\n12\n3|4", CodeLanguage.PlainText);
+            TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+            textArea.Selection = new RectangleSelection(
+                textArea,
+                new TextViewPosition(4, 2),
+                new TextViewPosition(5, 3)
+            );
+            await Clipboard(window).SetTextAsync("x\ny\nz");
+
+            Task pasted = NextChangeAsync(window);
+            window.Press(Key.V, EditorWindow.Command);
+            await pasted;
+
+            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe("a\r\nb\r\nc\r\n1x\n3y\r\nz");
         });
 
     /// <summary>Also where the drop lands on a line that ends in another line break than the document's.</summary>
@@ -130,6 +152,53 @@ public sealed class ClipboardTests(UiFixture ui)
 
             MarkedText.Of(window).ShouldBe("a\r\nb\r\nx\r\ny|c\nd");
         });
+
+    /// <summary>
+    /// A platform's clipboard can take a while: what the paste reads goes nowhere once the editor shows another document
+    /// or becomes read-only, and leaves both documents as they were.
+    /// </summary>
+    [Theory]
+    [InlineData("another document")]
+    [InlineData("read-only")]
+    public Task A_paste_that_waits_for_the_clipboard_goes_in_only_where_it_started(string change) =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("|a", CodeLanguage.PlainText);
+            CodeDocument first = window.Editor.Document.ShouldNotBeNull();
+            CodeDocument second = CodeDocument.Create(CodeLanguage.PlainText, "b");
+            var held = new HeldText("x");
+            await Clipboard(window).SetDataAsync(held);
+
+            window.Press(Key.V, EditorWindow.Command);
+            if (change == "read-only")
+                window.Editor.IsReadOnly = true;
+            else
+                window.Editor.Document = second;
+            held.Release();
+            await EditorWindow.RunPostedJobsAsync();
+
+            first.Text.ShouldBe("a");
+            second.Text.ShouldBe("b");
+            // No update of either document was left open.
+            first.Replace(new TextRange(0, 0), "1");
+            second.Replace(new TextRange(0, 0), "2");
+            (first.Text, second.Text).ShouldBe(("1a", "2b"));
+        });
+
+    /// <summary>Completes once the text of the editor's document changes.</summary>
+    private static Task NextChangeAsync(EditorWindow window)
+    {
+        CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+        var changed = new TaskCompletionSource();
+        document.TextChanged += OnChanged;
+        return Wait.ForAsync(changed.Task);
+
+        void OnChanged(object? sender, EventArgs e)
+        {
+            document.TextChanged -= OnChanged;
+            changed.TrySetResult();
+        }
+    }
 
     private static IClipboard Clipboard(EditorWindow window) =>
         window.Window.Clipboard ?? throw new InvalidOperationException("The window has no clipboard.");
