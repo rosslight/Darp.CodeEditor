@@ -75,7 +75,10 @@ public sealed class HighlightingTests(UiFixture ui)
                 CodeLanguage.Json,
                 $"{{\n  \"before\": 1,\n{LongStringLine},\n  \"after\": 2\n}}"
             );
-            using var window = new EditorWindow(new CodeEditor { Document = document });
+            // The background's clock stands still: every line tokenizes in time, however slow the machine.
+            using var window = new EditorWindow(
+                new CodeEditor { GrammarClock = new ManualTime(), Document = document }
+            );
 
             // The UI thread leaves the long line to the background, and colors the next one from a guess first.
             await Wait.UntilAsync(() =>
@@ -158,7 +161,10 @@ public sealed class HighlightingTests(UiFixture ui)
         _ui.Run(async () =>
         {
             CodeDocument document = CodeDocument.Create(CodeLanguage.Json, Texts.Json(5000));
-            using var window = new EditorWindow(new CodeEditor { Document = document });
+            // The background's clock stands still: the lines it tokenizes first do not run out of time.
+            using var window = new EditorWindow(
+                new CodeEditor { GrammarClock = new ManualTime(), Document = document }
+            );
             await Wait.UntilAsync(() =>
             {
                 window.Render();
@@ -221,7 +227,12 @@ public sealed class HighlightingTests(UiFixture ui)
     public Task A_document_shown_while_the_previous_ones_grammar_loads_keeps_its_own_colors() =>
         _ui.Run(async () =>
         {
-            var editor = new CodeEditor { Document = CodeDocument.Create(CodeLanguage.Json, Texts.Json(100)) };
+            // The background's clock stands still: the first lines do not run out of time, however slow the machine.
+            var editor = new CodeEditor
+            {
+                GrammarClock = new ManualTime(),
+                Document = CodeDocument.Create(CodeLanguage.Json, Texts.Json(100)),
+            };
             using var window = new EditorWindow(editor);
 
             // JSON's grammar loads in the background, and no job has run since: its result is still to come.
