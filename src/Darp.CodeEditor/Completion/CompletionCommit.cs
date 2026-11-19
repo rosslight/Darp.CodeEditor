@@ -14,7 +14,8 @@ namespace Darp.CodeEditor.Completion;
 /// completion was asked left it. Additional edits that a resolve still under way brings come later. The edits go in
 /// through <see cref="TextChanges"/>: an item whose text would touch read-only text, such as protected text or a long
 /// line's hidden tail, does not go in, and additional edits that would are left out. They go in apart from a lone
-/// carriage return next to them, which would join a line break of theirs (<see cref="LineBreaks.Apart"/>).
+/// carriage return next to them, which would join a line break of theirs (<see cref="LineBreaks.Apart"/>). A handler of
+/// a change that shows another document ends the commit there: nothing of it touches that one.
 /// </summary>
 internal sealed class CompletionCommit : IDisposable
 {
@@ -48,7 +49,8 @@ internal sealed class CompletionCommit : IDisposable
     /// <param name="request">The request that its list answered.</param>
     /// <param name="replace">Whether it replaces, rather than inserts.</param>
     /// <param name="late">The resolve that brings its additional edits later; null when they are known.</param>
-    public void Commit(CompletionItem item, CompletionRequest request, bool replace, ItemResolve? late)
+    /// <returns>Whether the editor still shows the document: a handler of the change may show another one.</returns>
+    public bool Commit(CompletionItem item, CompletionRequest request, bool replace, ItemResolve? late)
     {
         int caret = _textArea.Caret.Offset;
         // Text typed at the caret goes in the range, and once the rest of the word is deleted, also by another editor or
@@ -75,11 +77,15 @@ internal sealed class CompletionCommit : IDisposable
         {
             // Taken out of the resolver for the edits it brings, the resolve is now nobody's: it ends here.
             late?.Cancellation.Cancel();
-            return;
+            return true;
         }
         var step = new object();
         var mark = new SnippetMark();
-        Apply(step, continued: false, edits, snippet is null ? null : mark);
+        if (!Apply(step, continued: false, edits, snippet is null ? null : mark))
+        {
+            late?.Cancellation.Cancel();
+            return false;
+        }
         // Where the item's text went: moved by the edits before it, and after a line break that went along with it.
         int index = Array.FindIndex(ordered, e => e.IsMain);
         TextEdit placed = edits[index];
@@ -92,6 +98,7 @@ internal sealed class CompletionCommit : IDisposable
             _snippets.Start(snippet, start, mark);
         if (late is not null)
             ApplyLateEdits(late, step, request.Snapshot);
+        return true;
     }
 
     /// <summary>
@@ -108,6 +115,7 @@ internal sealed class CompletionCommit : IDisposable
             if (
                 late.Cancellation.IsCancellationRequested
                 || item?.AdditionalEdits is not { Count: > 0 } additional
+                || !Shows
                 || _buffer.UndoStack.LastGroupDescriptor != step
             )
             {
@@ -135,7 +143,8 @@ internal sealed class CompletionCommit : IDisposable
     /// top to an item far below would replace all the text between them. A snippet's <paramref name="mark"/> goes in
     /// first, so that undoing the step reaches it last, once the text is back.
     /// </summary>
-    private void Apply(object step, bool continued, TextEdit[] edits, SnippetMark? mark)
+    /// <returns>Whether the editor still shows the document: the edits stop where a handler showed another one.</returns>
+    private bool Apply(object step, bool continued, TextEdit[] edits, SnippetMark? mark)
     {
         UndoStack undo = _buffer.UndoStack;
         if (continued)
@@ -148,7 +157,7 @@ internal sealed class CompletionCommit : IDisposable
                 undo.Push(mark);
             using (_buffer.RunUpdate())
             {
-                for (int i = edits.Length - 1; i >= 0; i--)
+                for (int i = edits.Length - 1; i >= 0 && Shows; i--)
                     _changes.Apply([edits[i]]);
             }
         }
@@ -156,7 +165,11 @@ internal sealed class CompletionCommit : IDisposable
         {
             undo.EndUndoGroup();
         }
+        return Shows;
     }
+
+    /// <summary>Whether the editor shows the document still, not another one that a handler of a change showed.</summary>
+    private bool Shows => _textArea.Document == _buffer;
 
     /// <summary>
     /// <paramref name="edits"/>, in order, apart from a lone carriage return next to them (<see cref="LineBreaks.Apart"/>).
