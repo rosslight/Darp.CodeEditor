@@ -165,6 +165,8 @@ public sealed class HighlightingTests(UiFixture ui)
                 return window.ColorsOfLine(2).Contains(s_propertyName);
             });
             TextSnapshot text = document.CurrentSnapshot;
+            // A clock that stands still: the UI thread's budget does not run out, however slow the machine.
+            HighlighterOf(window).FrameClock = new ManualTime();
 
             window.Editor.ScrollTo(new TextRange(text.GetOffset(new TextPosition(4000, 1)), 0));
             // A layout without the dispatcher's jobs: the background's results cannot arrive in between.
@@ -197,17 +199,21 @@ public sealed class HighlightingTests(UiFixture ui)
                 window.Render();
                 return window.ColorsOfLine(2).Contains(s_keyword);
             });
+            // The UI thread's clock stands still, except while the view builds line 4,000: there the search takes a
+            // second, whatever it takes on this machine.
+            var clock = new SlowLineClock(4000);
+            clock.Watch(window.TextView);
+            HighlighterOf(window).FrameClock = clock;
 
             window.Editor.ScrollTo(new TextRange(document.CurrentSnapshot.GetOffset(new TextPosition(4000, 1)), 0));
             // Layout passes without the dispatcher's jobs, so without the background's results. The pass that reaches
-            // line 4,000 overruns its budget and ends there; the passes after it go on below. On a machine fast enough
-            // for that search to fit in the budget, no pass overruns.
-            for (int pass = 0; pass < 5 && !window.ColorsOfLine(4001).Contains(s_keyword); pass++)
-            {
-                window.TextView.Redraw();
-                window.Window.UpdateLayout();
-            }
+            // line 4,000 overruns its budget and ends there.
+            window.Window.UpdateLayout();
+            window.ColorsOfLine(4001).ShouldBe([Avalonia.Media.Colors.Black]);
 
+            // The next pass leaves line 4,000 to the background, and goes on below.
+            window.TextView.Redraw();
+            window.Window.UpdateLayout();
             window.ColorsOfLine(4001).ShouldContain(s_keyword);
         });
 
@@ -405,6 +411,9 @@ public sealed class HighlightingTests(UiFixture ui)
     /// <summary>A property of 20,000 characters whose value is an array: tokenizing it takes seconds.</summary>
     private static string SlowLine { get; } = "  \"slow\": [" + string.Concat(Enumerable.Repeat("1, ", 6_666)) + "1],";
 
+    private static BackgroundTextMateHighlighter HighlighterOf(EditorWindow window) =>
+        window.TextView.LineTransformers.OfType<BackgroundTextMateHighlighter>().Single();
+
     private static async Task<TextMateGrammar> JsonGrammar()
     {
         IRawGrammar grammar = (await CodeLanguage.Json.Loaded).Grammar.ShouldNotBeNull();
@@ -423,6 +432,42 @@ public sealed class HighlightingTests(UiFixture ui)
                 colors.Add(brush.Color);
         }
         return colors;
+    }
+
+    /// <summary>
+    /// A clock that stands still, except while a text view builds the visual line of one document line: there, each
+    /// reading finds it a second further on.
+    /// </summary>
+    private sealed class SlowLineClock(int lineNumber) : TimeProvider
+    {
+        private readonly int _lineNumber = lineNumber;
+        private long _now;
+        private bool _building;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp()
+        {
+            long now = _now;
+            if (_building)
+                _now += TimeSpan.TicksPerSecond;
+            return now;
+        }
+
+        /// <summary>Follows the lines that <paramref name="textView"/> builds, before and after its transformers.</summary>
+        public void Watch(TextView textView)
+        {
+            textView.LineTransformers.Insert(0, new LineWatch(line => _building = line == _lineNumber));
+            textView.LineTransformers.Add(new LineWatch(_ => _building = false));
+        }
+
+        private sealed class LineWatch(Action<int> building) : IVisualLineTransformer
+        {
+            private readonly Action<int> _building = building;
+
+            public void Transform(ITextRunConstructionContext context, IList<VisualLineElement> elements) =>
+                _building(context.VisualLine.FirstDocumentLine.LineNumber);
+        }
     }
 
     /// <summary>Counts how often the text view builds the visual line of one document line.</summary>
