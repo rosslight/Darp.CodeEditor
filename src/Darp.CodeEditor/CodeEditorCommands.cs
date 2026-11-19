@@ -71,6 +71,38 @@ public static class CodeEditorCommands
     /// </summary>
     public const string AddSelectionToNextFindMatch = "editor.action.addSelectionToNextFindMatch";
 
+    /// <summary>Copies the selected lines, or the caret's, above them; the selection stays on the lines above.</summary>
+    public const string CopyLinesUp = "editor.action.copyLinesUpAction";
+
+    /// <summary>Copies the selected lines, or the caret's, below them; the selection goes to the lines below.</summary>
+    public const string CopyLinesDown = "editor.action.copyLinesDownAction";
+
+    /// <summary>
+    /// Deletes the selected lines, or the caret's; the caret keeps its column on the line that comes up in their place.
+    /// </summary>
+    public const string DeleteLines = "editor.action.deleteLines";
+
+    /// <summary>
+    /// Inserts a line below the caret's, indented as Enter at the end of the caret's line indents, and puts the caret
+    /// on it.
+    /// </summary>
+    public const string InsertLineAfter = "editor.action.insertLineAfter";
+
+    /// <summary>Inserts a line above the caret's, as <see cref="InsertLineAfter"/> inserts one below.</summary>
+    public const string InsertLineBefore = "editor.action.insertLineBefore";
+
+    /// <summary>Indents the selected lines, or the caret's, to their next tab stop.</summary>
+    public const string IndentLines = "editor.action.indentLines";
+
+    /// <summary>Outdents the selected lines, or the caret's, to their previous tab stop.</summary>
+    public const string OutdentLines = "editor.action.outdentLines";
+
+    /// <summary>
+    /// Selects the selected lines, or the caret's, whole, up to the start of the next line; again, it takes the next
+    /// line too.
+    /// </summary>
+    public const string ExpandLineSelection = "expandLineSelection";
+
     /// <summary>
     /// Undoes the document's last step, as <see cref="CodeDocument.Undo"/> does, and brings the caret into view.
     /// </summary>

@@ -70,6 +70,11 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+right, ctrl+shift+right (alt+right, shift+alt+right)</term><description><see cref="CodeEditorCommands.CursorWordEndRight"/>, <see cref="CodeEditorCommands.CursorWordEndRightSelect"/></description></item>
     /// <item><term>ctrl+backspace, ctrl+delete (alt+backspace, alt+delete)</term><description><see cref="CodeEditorCommands.DeleteWordLeft"/>, <see cref="CodeEditorCommands.DeleteWordRight"/></description></item>
     /// <item><term>ctrl+d (cmd+d)</term><description><see cref="CodeEditorCommands.AddSelectionToNextFindMatch"/></description></item>
+    /// <item><term>shift+alt+up, shift+alt+down (Linux: ctrl+shift+alt+up, ctrl+shift+alt+down)</term><description><see cref="CodeEditorCommands.CopyLinesUp"/>, <see cref="CodeEditorCommands.CopyLinesDown"/></description></item>
+    /// <item><term>ctrl+shift+k (shift+cmd+k)</term><description><see cref="CodeEditorCommands.DeleteLines"/></description></item>
+    /// <item><term>ctrl+enter, ctrl+shift+enter (cmd+enter, shift+cmd+enter)</term><description><see cref="CodeEditorCommands.InsertLineAfter"/>, <see cref="CodeEditorCommands.InsertLineBefore"/></description></item>
+    /// <item><term>ctrl+], ctrl+[ (cmd+], cmd+[)</term><description><see cref="CodeEditorCommands.IndentLines"/>, <see cref="CodeEditorCommands.OutdentLines"/></description></item>
+    /// <item><term>ctrl+l (cmd+l)</term><description><see cref="CodeEditorCommands.ExpandLineSelection"/></description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default { get; } = new(DefaultBindings(OperatingSystem.IsMacOS()));
@@ -154,5 +159,24 @@ public sealed class CodeEditorKeymap
         yield return new($"{words}+backspace", CodeEditorCommands.DeleteWordLeft);
         yield return new($"{words}+delete", CodeEditorCommands.DeleteWordRight);
         yield return new($"{command}+d", CodeEditorCommands.AddSelectionToNextFindMatch);
+        foreach (CodeEditorKeyBinding binding in LineBindings(mac, linux: !mac && OperatingSystem.IsLinux()))
+            yield return binding;
+    }
+
+    /// <summary>
+    /// The keys of the commands on whole lines: Linux has keys of its own where its desktops take the others.
+    /// </summary>
+    internal static IEnumerable<CodeEditorKeyBinding> LineBindings(bool mac, bool linux)
+    {
+        string command = mac ? "cmd" : "ctrl";
+        string copy = linux ? "ctrl+shift+alt" : "shift+alt";
+        yield return new($"{copy}+up", CodeEditorCommands.CopyLinesUp);
+        yield return new($"{copy}+down", CodeEditorCommands.CopyLinesDown);
+        yield return new($"{command}+shift+k", CodeEditorCommands.DeleteLines);
+        yield return new($"{command}+enter", CodeEditorCommands.InsertLineAfter);
+        yield return new($"{command}+shift+enter", CodeEditorCommands.InsertLineBefore);
+        yield return new($"{command}+]", CodeEditorCommands.IndentLines);
+        yield return new($"{command}+[", CodeEditorCommands.OutdentLines);
+        yield return new($"{command}+l", CodeEditorCommands.ExpandLineSelection);
     }
 }

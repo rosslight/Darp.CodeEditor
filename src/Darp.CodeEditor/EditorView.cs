@@ -87,6 +87,7 @@ internal sealed class EditorView : IDisposable
             _changes,
             new UndoCommands(area, document),
             new Comments(area, document, _changes),
+            new LineCommands(area, document, Highlighter, _changes),
             _pairs,
             _typing,
             _clipboard,
