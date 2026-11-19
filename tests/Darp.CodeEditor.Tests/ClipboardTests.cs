@@ -185,6 +185,29 @@ public sealed class ClipboardTests(UiFixture ui)
             (first.Text, second.Text).ShouldBe(("1a", "2b"));
         });
 
+    /// <summary>As AvaloniaEdit's paste: by key and by the editor's method alike.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public Task Paste_leaves_the_text_alone_where_the_caret_cannot_insert(bool byKey) =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("«abc»def", CodeLanguage.PlainText);
+            TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+            var protectedText = new TextSegmentReadOnlySectionProvider<TextSegment>(textArea.Document);
+            protectedText.Segments.Add(new TextSegment { StartOffset = 2, Length = 3 });
+            textArea.ReadOnlySectionProvider = protectedText;
+            await Clipboard(window).SetTextAsync("X");
+
+            if (byKey)
+                window.Press(Key.V, EditorWindow.Command);
+            else
+                window.Editor.Paste();
+            await EditorWindow.RunPostedJobsAsync();
+
+            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe("abcdef");
+        });
+
     /// <summary>Completes once the text of the editor's document changes.</summary>
     private static Task NextChangeAsync(EditorWindow window)
     {
