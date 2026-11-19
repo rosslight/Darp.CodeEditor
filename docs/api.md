@@ -165,9 +165,10 @@ default applies: 2 spaces for YAML and 4 otherwise.
 the initial text's line breaks are, `\n` otherwise, and the operating system's in a text without one, as VS Code's
 `files.eol` of `auto`. Setting `Text` detects it again; other edits keep it. Enter, typed text, paste, drops,
 completion's items and their additional edits, snippets and the search bar's Replace put it in; Copy and Cut use `\r\n`
-on Windows. Paste and drops keep AvaloniaEdit's own conversions, such as tabs that become spaces in a document that
-indents with spaces, and its clipboard events; the line breaks are corrected after it, in the same undo step. Text
-that the app sets or replaces goes in as it is.
+on Windows. A paste waits for the clipboard before it changes anything, and goes in as one undo step only if the editor
+still shows the document and is not read-only; as before, tabs become spaces in a document that indents with spaces,
+and a rectangle takes a line of the text on each row. Drops are AvaloniaEdit's, their line breaks corrected in the
+same undo step. Text that the app sets or replaces goes in as it is.
 
 **Look.** The text and everything around it are styled differently, as in Monaco and CodeMirror:
 
@@ -468,7 +469,7 @@ How the client talks to a server, where the protocol leaves a choice:
   `${NAME:default}`, and the escapes `\$`, `\}` and `\\`, and `\,` and `\|` in choices. What does not parse is text, as
   in VS Code. Stops of one number are mirrors: the first one with text gives the others its text, with the same values
   of its variables. A snippet with stops gets a final stop at its end, unless it has one. A choice inserts its first
-  option as a placeholder; no list of its options shows.
+  option as a placeholder, with the document's line breaks; no list of its options shows.
   - **What goes in.** The rules of a commit hold: the edit, grown by what was typed since, the additional edits, which
     stay plain text, one undo step, and nothing in a read-only editor. Lines after the first start with the whitespace
     that the snippet's line has before it, and their indentation and line breaks are the document's. Items in plain
