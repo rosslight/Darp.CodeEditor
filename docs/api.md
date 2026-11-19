@@ -128,7 +128,14 @@ are its; while a snippet's stops are active, Tab and Shift+Tab are theirs, excep
 is Escape after completion and signature help. Other keys, such as F5 or Ctrl+S, reach the app's key bindings.
 
 **Indentation** belongs to the document (`CodeDocument.Indentation`), so all editors of one document agree. It starts
-as in VS Code, 2 spaces for YAML and 4 otherwise, and is not detected from the text.
+as VS Code's `editor.detectIndentation` guesses it from the initial text; where the text gives no answer, VS Code's
+default applies: 2 spaces for YAML and 4 otherwise.
+
+**Line breaks** belong to the document too, one per document, as a VS Code text model has its EOL: `\r\n` when most of
+the initial text's line breaks are, `\n` otherwise, and the operating system's in a text without one, as VS Code's
+`files.eol` of `auto`. Setting `Text` detects it again; other edits keep it. Enter, paste, completion's items and their
+additional edits, snippets and the search bar's Replace put it in; Copy and Cut use `\r\n` on Windows. Text that the
+app sets or replaces goes in as it is.
 
 **Look.** The text and everything around it are styled differently, as in Monaco and CodeMirror:
 
@@ -188,8 +195,7 @@ ruler shows them. Scripts of 5,000 lines need them to find errors outside the vi
 changing it, so they wait until the core works.
 
 **Later, when asked for:** whitespace display modes, rulers, folding, a minimap, placeholder text for empty
-documents, indentation detected from the text, markers that the app adds, and a view state that can be stored across
-app starts.
+documents, markers that the app adds, and a view state that can be stored across app starts.
 
 ## 3. Who owns what
 
@@ -432,9 +438,9 @@ How the client talks to a server, where the protocol leaves a choice:
   option as a placeholder; no list of its options shows.
   - **What goes in.** The rules of a commit hold: the edit, grown by what was typed since, the additional edits, which
     stay plain text, one undo step, and nothing in a read-only editor. Lines after the first start with the whitespace
-    that the snippet's line has before it, and their indentation is the document's; line breaks are the line's. Items
-    in plain text still go in as they are written; VS Code would indent their lines too, and the client does not
-    advertise `insertTextMode`.
+    that the snippet's line has before it, and their indentation and line breaks are the document's. Items in plain
+    text still go in as they are written, but for their line breaks; VS Code would indent their lines too, and the
+    client does not advertise `insertTextMode`.
   - **Variables** have their values for the text and the caret before the commit: `TM_CURRENT_LINE`, the shown part of
     the line, `TM_CURRENT_WORD`, `TM_LINE_INDEX`, `TM_LINE_NUMBER`, `CURSOR_INDEX` and `CURSOR_NUMBER`; `TM_FILENAME`,
     `TM_FILENAME_BASE`, `TM_DIRECTORY`, `TM_DIRECTORY_BASE`, `TM_FILEPATH` and `RELATIVE_FILEPATH` from the document's
@@ -860,7 +866,10 @@ with Skia:
   after 10 ms, and a match after 5 ms, as with a pattern that backtracks on the lines above: the line then keeps its
   indentation;
 - the document's `Indentation` reaches every editor that shows it at once: Tab, Shift+Tab, new lines and the width of
-  tabs;
+  tabs. It starts as VS Code guesses it from the first 10,000 lines, with VS Code's default where they give no answer;
+- one line break per document, detected from the text when it is created or set: Enter, paste, completion's text and
+  additional edits, snippets and Replace put it in, also on a line that ends in another, and Copy and Cut take it, or
+  `\r\n` on Windows. The tests run with either line break as the system's (CONTRIBUTING.md);
 - the bracket next to the caret and its match are boxed in the theme's colors, ignoring brackets in strings and
   comments by the lines' tokens, also when an edit changes them out of view. The search for a match reads at most
   100,000 characters, in blocks without a string per line: about 0.5 ms with six brackets on every line, the most a
