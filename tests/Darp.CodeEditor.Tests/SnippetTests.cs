@@ -1,4 +1,5 @@
 using Darp.CodeEditor.Completion;
+using Darp.CodeEditor.LanguageClient;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -157,6 +158,22 @@ public sealed class SnippetTests
 
         stop.ShouldBeNull();
         // A million characters take 2 MB, and the text that a builder holds twice that at most.
+        allocated.ShouldBeLessThan(16_000_000);
+    }
+
+    [Fact]
+    public void A_choices_options_list_in_their_order_by_keys_of_one_size()
+    {
+        // Keys that grow with the index, as VS Code's, would take 200 million characters for 20,000 options.
+        string[] options = [.. Enumerable.Range(0, 20_000).Select(i => $"option{i}")];
+        CompletionList.OfChoice(options, new TextRange(0, 7), "option0");
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        CompletionList list = CompletionList.OfChoice(options, new TextRange(0, 7), "option0");
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        list.Items.OrderBy(item => item.SortKey).Select(item => item.Label).ShouldBe(options);
+        list.Items[1].FilterText.ShouldBe("option0_option1");
         allocated.ShouldBeLessThan(16_000_000);
     }
 

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Darp.CodeEditor.Completion;
 using Darp.CodeEditor.Editing;
@@ -45,7 +46,8 @@ internal sealed class CompletionList
     /// <summary>
     /// The options of a snippet's choice as a list, as VS Code's choice completions give them: each a value over
     /// <paramref name="range"/>, the choice's text, in their order. While that text is one of the options, each item is
-    /// matched by it and the option, so that all show.
+    /// matched by it and the option, so that all show. VS Code orders them by sort texts that grow with the index; here
+    /// they are of one size, and a matched text is as long as matching reads, as a choice may have many options.
     /// </summary>
     /// <param name="options">The choice's options.</param>
     /// <param name="range">The choice's text, around the caret.</param>
@@ -57,7 +59,7 @@ internal sealed class CompletionList
         for (int i = 0; i < options.Count; i++)
         {
             string option = options[i];
-            string filterText = isAnOption ? text + "_" + option : option;
+            string filterText = isAnOption ? Matched(text, option) : option;
             items.Add(
                 new CompletionItem(
                     option,
@@ -68,7 +70,11 @@ internal sealed class CompletionList
                     IsPreselected: false,
                     filterText,
                     string.Equals(filterText, option, StringComparison.OrdinalIgnoreCase),
-                    new CompletionSortKey(new string('a', i + 1), option, CompletionItemKinds.Value),
+                    new CompletionSortKey(
+                        i.ToString("D10", CultureInfo.InvariantCulture),
+                        option,
+                        CompletionItemKinds.Value
+                    ),
                     new CompletionEdit(range, option),
                     range,
                     Snippet: null,
@@ -79,6 +85,14 @@ internal sealed class CompletionList
             );
         }
         return new CompletionList(items, isIncomplete: false, resolve: null);
+
+        // The choice's text, "_" and the option, as far as matching reads them.
+        static string Matched(string text, string option) =>
+            string.Concat(
+                text.AsSpan(0, Math.Min(text.Length, CompletionMatcher.MaxLength)),
+                "_",
+                option.AsSpan(0, Math.Min(option.Length, CompletionMatcher.MaxLength))
+            );
     }
 
     /// <summary>
