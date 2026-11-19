@@ -210,17 +210,20 @@ public sealed class CompletionTests(UiFixture ui)
             TypeAlone(window, "o");
             TypeAlone(window, "n");
 
-            // The filter of what was typed last; a filter can end before the keystroke's handler does, so what shows
-            // meanwhile is not certain.
-            await WaitForLabelsAsync(window, ["Console", "Convert"]);
-            Row(window, "Console")
-                .GetVisualDescendants()
-                .OfType<TextBlock>()
-                .Single()
-                .Inlines.ShouldNotBeNull()
-                .OfType<Run>()
-                .First()
-                .Text.ShouldBe("Con");
+            // The filter of what was typed last: "C" and "Co" match the same items, but highlight less of them. A filter
+            // can end before the keystroke's handler does, so what shows meanwhile is not certain.
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return Labels(window).SequenceEqual(["Console", "Convert"])
+                    && Row(window, "Console")
+                        .GetVisualDescendants()
+                        .OfType<TextBlock>()
+                        .Single()
+                        .Inlines?.OfType<Run>()
+                        .First()
+                        .Text == "Con";
+            });
         });
 
     [Fact]
