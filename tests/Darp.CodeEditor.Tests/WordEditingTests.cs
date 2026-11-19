@@ -4,6 +4,7 @@ using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using Darp.CodeEditor.Commands;
+using Darp.CodeEditor.Highlighting;
 using Keys = Avalonia.Input.Key;
 
 namespace Darp.CodeEditor.Tests;
@@ -52,6 +53,11 @@ public sealed class WordEditingTests(UiFixture ui)
         {
             await CodeLanguage.Json.Loaded;
             using EditorWindow window = MarkedText.Show("a |", CodeLanguage.Json);
+            // The [ pair stays out of strings, so it closes once the grammar, which loads in the background, is in.
+            BackgroundTextMateHighlighter highlighter = window
+                .TextView.LineTransformers.OfType<BackgroundTextMateHighlighter>()
+                .Single();
+            await Wait.UntilAsync(() => highlighter.Grammar is not null);
             window.Type("[");
             MarkedText.Of(window).ShouldBe("a [|]");
 
