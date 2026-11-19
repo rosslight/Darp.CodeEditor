@@ -400,10 +400,11 @@ internal sealed class DocumentSearch : IDisposable
             {
                 if (_result != result || _changes.Selection.Range != selection)
                     return;
-                if (sought.Match is { } match)
-                    (found ?? Select)(match);
-                else if (sought.Outcome == SearchOutcome.OutOfTime)
+                // Out of time, a match found is only the last one reached, as going back finds.
+                if (sought.Outcome == SearchOutcome.OutOfTime)
                     _bar.ShowTimedOut();
+                else if (sought.Match is { } match)
+                    (found ?? Select)(match);
                 else if (move != SearchMove.Previous && result.Matches.FirstSegment is { } first)
                     Select(first);
             }
