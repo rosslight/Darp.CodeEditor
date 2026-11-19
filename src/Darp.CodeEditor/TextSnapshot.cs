@@ -29,6 +29,10 @@ public sealed class TextSnapshot
         LineBreak = lineBreak;
     }
 
+    /// <summary>This version of the text, whose new text takes <paramref name="lineBreak"/>.</summary>
+    internal TextSnapshot WithLineBreak(string lineBreak) =>
+        new(_text, Version, lineBreak) { _lineStarts = _lineStarts };
+
     /// <summary>A snapshot of a string that was compiled without a document.</summary>
     internal static TextSnapshot FromString(string text) => new(new StringTextSource(text), 0, LineBreaks.Detect(text));
 

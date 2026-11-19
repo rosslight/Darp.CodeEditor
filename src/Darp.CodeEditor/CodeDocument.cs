@@ -147,6 +147,9 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
                 _lineBreak = LineBreaks.Detect(value);
                 document.Text = value;
             });
+            // The text it had changes nothing, as an empty text for an empty document: the snapshot takes it all the same.
+            if (_currentSnapshot.LineBreak != _lineBreak)
+                Volatile.Write(ref _currentSnapshot, _currentSnapshot.WithLineBreak(_lineBreak));
         }
     }
 
