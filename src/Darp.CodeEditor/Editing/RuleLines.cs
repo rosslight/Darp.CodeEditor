@@ -9,13 +9,17 @@ namespace Darp.CodeEditor.Editing;
 /// Lines as a language's indentation rules and rules for Enter see them, as VS Code's <c>IndentationLineProcessor</c>
 /// makes them: without the brackets in strings, comments and regular expressions, by the grammar's tokens, so that a
 /// brace in a string or a comment neither indents nor outdents. A line without brackets, or whose tokens are unknown,
-/// is as it is.
+/// is as it is. Made for one indentation, it tokenizes a line at most once, also when that indentation reads its
+/// parts.
 /// </summary>
 internal sealed class RuleLines
 {
     private readonly Func<int, string> _text;
     private readonly Func<int, bool, int[]?> _exactTokens;
     private readonly Regex? _brackets;
+
+    /// <summary>The tokens of the line asked for last, and whether it was tokenized now if need be; 0 for none.</summary>
+    private (int Number, int[]? Tokens, bool Now) _tokens;
 
     /// <param name="text">The text of a line by its number.</param>
     /// <param name="exactTokens">
@@ -50,7 +54,14 @@ internal sealed class RuleLines
 
     /// <summary>These lines, with line <paramref name="number"/> as <paramref name="text"/>, which the rules see as it is.</summary>
     public RuleLines With(int number, string text) =>
-        new(n => n == number ? text : _text(n), (n, now) => n == number ? null : _exactTokens(n, now), _brackets);
+        new(n => n == number ? text : _text(n), (n, now) => n == number ? null : Tokens(n, now), _brackets);
+
+    private int[]? Tokens(int number, bool tokenizeNow)
+    {
+        if (_tokens.Number != number || (tokenizeNow && !_tokens.Now))
+            _tokens = (number, _exactTokens(number, tokenizeNow), tokenizeNow);
+        return _tokens.Tokens;
+    }
 
     private string Masked(int number, string text, int from, int to, bool tokenizeNow)
     {
@@ -59,7 +70,7 @@ internal sealed class RuleLines
             _brackets is not { } brackets
             || from >= to
             || !brackets.IsMatch(text)
-            || _exactTokens(number, tokenizeNow) is not { } tokens
+            || Tokens(number, tokenizeNow) is not { } tokens
         )
             return text[from..to];
         StringBuilder? masked = null;

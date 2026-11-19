@@ -112,7 +112,12 @@ internal sealed class AutoClosingPairs : IDisposable
         if (TypingOffsets() is not { } offsets)
             return null;
         AutoClosingPair? found = PairToClose(typed, offsets[0]);
-        return Array.TrueForAll(offsets, offset => PairToClose(typed, offset) == found) ? found : null;
+        for (int i = 1; i < offsets.Length && found is not null; i++)
+        {
+            if (PairToClose(typed, offsets[i]) != found)
+                return null;
+        }
+        return found;
     }
 
     /// <summary>

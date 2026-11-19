@@ -177,7 +177,7 @@ public sealed class IndentationTests(UiFixture ui)
         );
 
         Should.Throw<RegexMatchTimeoutException>(() =>
-            IndentRules.Inherited(new IndentationMatching(rules, deadline: 0), lines, 500_001, honorIntentional: true)
+            IndentRules.Inherited(OutOfTime(rules), lines, 500_001, honorIntentional: true)
         );
 
         reads.ShouldBe(0);
@@ -326,6 +326,15 @@ public sealed class IndentationTests(UiFixture ui)
     /// <summary>YAML with its indentation rules, which the built-in language leaves off, as VS Code's YAML extension does.</summary>
     private static CodeLanguage YamlByIndentationRules { get; } =
         new("yaml", CodeLanguage.Yaml.Grammar, CodeLanguage.Yaml.Configuration) { AutoIndent = AutoIndent.Full };
+
+    /// <summary>Matching for an indentation whose time is up.</summary>
+    private static IndentationMatching OutOfTime(IndentationRules rules)
+    {
+        var time = new ManualTime();
+        var matching = new IndentationMatching(rules, time);
+        time.Advance(IndentationRules.TimeLimit);
+        return matching;
+    }
 
     /// <summary>A language with word brackets, and indentation patterns that ignore case.</summary>
     private static CodeLanguage Pascal { get; } =

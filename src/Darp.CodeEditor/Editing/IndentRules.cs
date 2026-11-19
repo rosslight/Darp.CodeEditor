@@ -11,21 +11,32 @@ namespace Darp.CodeEditor.Editing;
 /// gives them, so its callers may ask about lines that are not, or not yet, in the document.
 /// </summary>
 /// <remarks>
-/// Matching the indentation patterns for one line stops after <see cref="IndentationRules.TimeLimit"/>, and a match
-/// after <see cref="IndentationRules.MatchTimeout"/>, as with a pattern that backtracks on long lines: the line then
-/// keeps its indentation.
+/// One call reads and matches lines, with the indentation rules and the rules for Enter, for at most
+/// <see cref="IndentationRules.TimeLimit"/>, and a match for at most <see cref="IndentationRules.MatchTimeout"/>, as
+/// with a pattern that backtracks on long lines: the line then keeps its indentation.
 /// </remarks>
 internal sealed class IndentRules
 {
     private readonly LanguageConfiguration _configuration;
     private readonly AutoIndent _autoIndent;
     private readonly Indenting _indenting;
+    private readonly TimeProvider _time;
 
-    public IndentRules(LanguageConfiguration configuration, AutoIndent autoIndent, Indentation indentation)
+    /// <param name="configuration">The language's editing rules.</param>
+    /// <param name="autoIndent">How far the rules apply.</param>
+    /// <param name="indentation">The document's indentation.</param>
+    /// <param name="time">The clock of the time limit; by default the system's.</param>
+    public IndentRules(
+        LanguageConfiguration configuration,
+        AutoIndent autoIndent,
+        Indentation indentation,
+        TimeProvider? time = null
+    )
     {
         _configuration = configuration;
         _autoIndent = autoIndent;
         _indenting = new Indenting(indentation);
+        _time = time ?? TimeProvider.System;
     }
 
     /// <summary>
@@ -45,20 +56,25 @@ internal sealed class IndentRules
         string indentation = text[..Math.Min(column, Leading(text))];
         if (_autoIndent >= AutoIndent.Brackets)
         {
-            string before = lines.Masked(lineNumber, 0, column);
-            string after = lines.Masked(lineNumber, column, text.Length);
-            string previous = lineNumber > 1 ? lines.Masked(lineNumber - 1) : "";
-            if (ActionFor(previous, before, after) is { } action)
-                return NewLineFor(action, indentation, lineBreak);
-            if (IndentForEnter(lines, lineNumber, before, after) is { } byRules)
+            try
             {
-                // The new line replaces the indentation of the text it takes along; on a line of whitespace only, all
-                // of the rest.
-                int firstText = Leading(text);
-                int replaced = firstText == text.Length ? text.Length - column : Math.Max(0, firstText - column);
-                string inserted = lineBreak + _indenting.Normalize(byRules);
-                return new NewLine(inserted, inserted.Length, replaced);
+                IndentationMatching matching = StartMatching();
+                string before = lines.Masked(lineNumber, 0, column);
+                string after = lines.Masked(lineNumber, column, text.Length);
+                string previous = lineNumber > 1 ? matching.Read(lines.Masked, lineNumber - 1) : "";
+                if (ActionFor(matching, previous, before, after) is { } action)
+                    return NewLineFor(action, indentation, lineBreak);
+                if (IndentForEnter(matching, lines, lineNumber, before, after) is { } byRules)
+                {
+                    // The new line replaces the indentation of the text it takes along; on a line of whitespace only,
+                    // all of the rest.
+                    int firstText = Leading(text);
+                    int replaced = firstText == text.Length ? text.Length - column : Math.Max(0, firstText - column);
+                    string inserted = lineBreak + _indenting.Normalize(byRules);
+                    return new NewLine(inserted, inserted.Length, replaced);
+                }
             }
+            catch (RegexMatchTimeoutException) { }
         }
         string kept = lineBreak + _indenting.Normalize(indentation);
         return new NewLine(kept, kept.Length, 0);
@@ -71,31 +87,42 @@ internal sealed class IndentRules
     /// </summary>
     public string? GoodIndentation(RuleLines lines, int lineNumber)
     {
-        if (_autoIndent == AutoIndent.Full && _configuration.IndentationRules is { } rules)
+        IndentationMatching matching = StartMatching();
+        try
         {
-            try
+            if (
+                _autoIndent == AutoIndent.Full
+                && _configuration.IndentationRules is not null
+                && Inherited(matching, lines, lineNumber, honorIntentional: false) is { } inherited
+            )
             {
-                if (Inherited(rules.StartMatching(), lines, lineNumber, honorIntentional: false) is { } inherited)
-                {
-                    string indentation = inherited.Increases
-                        ? _indenting.Shift(inherited.Indentation)
-                        : inherited.Indentation;
-                    return indentation.Length > 0 ? _indenting.Normalize(indentation) : null;
-                }
+                string indentation = inherited.Increases
+                    ? _indenting.Shift(inherited.Indentation)
+                    : inherited.Indentation;
+                return indentation.Length > 0 ? _indenting.Normalize(indentation) : null;
             }
-            catch (RegexMatchTimeoutException)
-            {
+            int above = lineNumber - 1;
+            while (above >= 1 && string.IsNullOrWhiteSpace(matching.Read(lines.Text, above)))
+                above--;
+            if (
+                above < 1
+                || ActionFor(
+                    matching,
+                    above > 1 ? matching.Read(lines.Masked, above - 1) : "",
+                    matching.Read(lines.Masked, above),
+                    ""
+                )
+                    is not { } action
+            )
                 return null;
-            }
+            string text = lines.Text(above);
+            (string kept, string append) = Resolved(action, text[..Leading(text)]);
+            return kept.Length + append.Length > 0 ? kept + append : null;
         }
-        int above = lineNumber - 1;
-        while (above >= 1 && string.IsNullOrWhiteSpace(lines.Text(above)))
-            above--;
-        if (above < 1 || ActionFor(above > 1 ? lines.Masked(above - 1) : "", lines.Masked(above), "") is not { } action)
+        catch (RegexMatchTimeoutException)
+        {
             return null;
-        string text = lines.Text(above);
-        (string kept, string append) = Resolved(action, text[..Leading(text)]);
-        return kept.Length + append.Length > 0 ? kept + append : null;
+        }
     }
 
     /// <summary>
@@ -106,12 +133,12 @@ internal sealed class IndentRules
     /// </summary>
     public string? Outdented(RuleLines lines, int lineNumber, int from, int to, char typed)
     {
-        if (_autoIndent < AutoIndent.Full || _configuration.IndentationRules is not { } rules)
+        if (_autoIndent < AutoIndent.Full || _configuration.IndentationRules is null)
             return null;
         string text = lines.Text(lineNumber);
         string before = lines.Masked(lineNumber, 0, from);
         string after = lines.Masked(lineNumber, to, text.Length);
-        IndentationMatching matching = rules.StartMatching();
+        IndentationMatching matching = StartMatching();
         try
         {
             // A line that matched it already keeps the indentation that the user gave it.
@@ -257,13 +284,13 @@ internal sealed class IndentRules
     /// match the texts; and by the brackets: between an opening and a closing bracket, indent and outdent, and after an
     /// opening bracket, indent. Null when none applies.
     /// </summary>
-    private EnterAction? ActionFor(string previous, string before, string after)
+    private EnterAction? ActionFor(IndentationMatching matching, string previous, string before, string after)
     {
         if (_autoIndent >= AutoIndent.Advanced)
         {
             foreach (OnEnterRule rule in _configuration.OnEnterRules)
             {
-                if (rule.Matches(previous, before, after))
+                if (rule.Matches(matching, previous, before, after))
                     return rule.Action;
             }
         }
@@ -315,29 +342,28 @@ internal sealed class IndentRules
 
     /// <summary>
     /// The indentation of a new line by the indentation rules, at <see cref="AutoIndent.Full"/>, with the caret's line
-    /// as the text before the caret, <paramref name="before"/>. Null without the rules, or when matching runs out of
-    /// time.
+    /// as the text before the caret, <paramref name="before"/>. Null without the rules.
     /// </summary>
-    private string? IndentForEnter(RuleLines lines, int lineNumber, string before, string after)
+    private string? IndentForEnter(
+        IndentationMatching matching,
+        RuleLines lines,
+        int lineNumber,
+        string before,
+        string after
+    )
     {
-        if (_autoIndent < AutoIndent.Full || _configuration.IndentationRules is not { } rules)
+        if (_autoIndent < AutoIndent.Full || _configuration.IndentationRules is null)
             return null;
-        IndentationMatching matching = rules.StartMatching();
-        try
-        {
-            if (
-                Inherited(matching, lines.With(lineNumber, before), lineNumber + 1, honorIntentional: true)
-                is not { } inherited
-            )
-                return before[..Leading(before)];
-            string indentation = inherited.Increases ? _indenting.Shift(inherited.Indentation) : inherited.Indentation;
-            return matching.Decreases(after) ? _indenting.Unshift(indentation) : indentation;
-        }
-        catch (RegexMatchTimeoutException)
-        {
-            return null;
-        }
+        if (
+            Inherited(matching, lines.With(lineNumber, before), lineNumber + 1, honorIntentional: true)
+            is not { } inherited
+        )
+            return before[..Leading(before)];
+        string indentation = inherited.Increases ? _indenting.Shift(inherited.Indentation) : inherited.Indentation;
+        return matching.Decreases(after) ? _indenting.Unshift(indentation) : indentation;
     }
+
+    private IndentationMatching StartMatching() => new(_configuration.IndentationRules, _time);
 
     /// <summary>
     /// Whether <paramref name="text"/> ends with <paramref name="open"/> and whitespace: a bracket that starts with a
