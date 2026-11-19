@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json.Nodes;
 using Avalonia;
 using Avalonia.Controls;
@@ -1896,6 +1897,31 @@ public sealed class CompletionTests(UiFixture ui)
             await Wait.UntilAsync(() => List(window)?.Message == "No suggestions.");
             window.Press(Key.Escape);
             List(window).ShouldBeNull();
+        });
+
+    [Fact]
+    public Task No_suggestions_shows_in_the_UI_cultures_language() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items());
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            CultureInfo before = CultureInfo.CurrentUICulture;
+            CultureInfo.CurrentUICulture = new CultureInfo("de-DE");
+            try
+            {
+                window.Editor.Selection = new TextSelection(3);
+                window.Press(Key.Space, KeyModifiers.Control);
+
+                // As VS Code's German.
+                await Wait.UntilAsync(() => List(window)?.Message == "Keine Vorschläge.");
+            }
+            finally
+            {
+                CultureInfo.CurrentUICulture = before;
+            }
         });
 
     [Fact]
