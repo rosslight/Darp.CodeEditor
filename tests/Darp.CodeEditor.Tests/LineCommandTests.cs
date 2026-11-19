@@ -270,6 +270,9 @@ public sealed class LineCommandTests(UiFixture ui)
     // In other line breaks than the document's: the selection keeps its lines and columns.
     [InlineData("«a\r\n»b\nc\nd", false, "«a\n»a\r\nb\nc\nd")]
     [InlineData("«a\r\n»b\nc\nd", true, "a\n«a\r\n»b\nc\nd")]
+    // After a lone CR: the copy is a line of its own.
+    [InlineData("a\nb\nc\r|", true, "a\nb\nc\n\n|")]
+    [InlineData("a\nb\nc\r|", false, "a\nb\nc\n|\n")]
     public Task Copying_lines_puts_a_copy_above_or_below_them_and_the_selection_on_the_lower_one_going_down(
         string marked,
         bool down,
