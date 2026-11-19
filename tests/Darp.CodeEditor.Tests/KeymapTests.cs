@@ -104,6 +104,31 @@ public sealed class KeymapTests(UiFixture ui)
         );
 
     [Fact]
+    public void On_macOS_Cmd_takes_Ctrls_place_and_Cmd_G_goes_to_the_next_match()
+    {
+        var keymap = new CodeEditorKeymap(CodeEditorKeymap.DefaultBindings(mac: true));
+        KeyModifiers cmd = KeyModifiers.Meta;
+
+        Resolve(keymap, Key(Keys.G, cmd)).Commands.ShouldBe([CodeEditorCommands.FindNext]);
+        Resolve(keymap, Key(Keys.G, cmd | KeyModifiers.Shift)).Commands.ShouldBe([CodeEditorCommands.FindPrevious]);
+        Resolve(keymap, Key(Keys.F3, KeyModifiers.None)).Commands.ShouldBe([CodeEditorCommands.FindNext]);
+        Resolve(keymap, Key(Keys.F3, KeyModifiers.Shift)).Commands.ShouldBe([CodeEditorCommands.FindPrevious]);
+        Resolve(keymap, Key(Keys.F, cmd)).Commands.ShouldBe([CodeEditorCommands.Find]);
+        Resolve(keymap, Key(Keys.F, cmd | KeyModifiers.Alt)).Commands.ShouldBe([CodeEditorCommands.Replace]);
+        // Cmd+Space is the system's search: completion keeps Ctrl+Space.
+        Resolve(keymap, Key(Keys.Space, KeyModifiers.Control)).Commands.ShouldBe([CodeEditorCommands.TriggerSuggest]);
+        Resolve(keymap, Key(Keys.Escape, KeyModifiers.Alt)).Commands.ShouldBe([CodeEditorCommands.TriggerSuggest]);
+        Resolve(keymap, Key(Keys.I, cmd)).Commands.ShouldBe([CodeEditorCommands.TriggerSuggest]);
+        Resolve(keymap, Key(Keys.Space, cmd | KeyModifiers.Shift))
+            .Commands.ShouldBe([CodeEditorCommands.TriggerParameterHints]);
+        Resolve(keymap, Key(Keys.OemQuestion, cmd)).Commands.ShouldBe([CodeEditorCommands.CommentLine]);
+        Resolve(keymap, Key(Keys.Z, cmd)).Commands.ShouldBe([CodeEditorCommands.Undo]);
+        Resolve(keymap, Key(Keys.Z, cmd | KeyModifiers.Shift)).Commands.ShouldBe([CodeEditorCommands.Redo]);
+        Resolve(keymap, Key(Keys.Y, cmd)).Commands.ShouldBeEmpty();
+        Resolve(keymap, Key(Keys.H, KeyModifiers.Control)).Commands.ShouldBeEmpty();
+    }
+
+    [Fact]
     public Task A_sequence_waits_for_its_second_key_and_says_so() =>
         _ui.Run(() =>
         {
