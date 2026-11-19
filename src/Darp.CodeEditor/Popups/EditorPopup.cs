@@ -164,16 +164,16 @@ internal sealed class EditorPopup
             if (
                 anchor.Bottom <= 0
                 || anchor.Top >= relativeTo.Bounds.Height
-                || relativeTo.TranslatePoint(anchor.TopLeft, layer) is not { } top
-                || relativeTo.TranslatePoint(default, layer) is not { } view
+                || relativeTo.TransformToVisual(layer) is not { } toLayer
             )
             {
                 LeaveView();
                 return;
             }
-            // The line as its view shows it; the place itself may be scrolled out of it sideways.
-            var line = new Rect(view.X, top.Y, relativeTo.Bounds.Width, anchor.Height);
-            double left = top.X - Inset;
+            // The line as its view shows it, in the layer, as a scaled editor shows it too; the place itself may be
+            // scrolled out of it sideways.
+            Rect line = new Rect(0, anchor.Top, relativeTo.Bounds.Width, anchor.Height).TransformToAABB(toLayer);
+            double left = anchor.TopLeft.Transform(toLayer).X - Inset;
             // Placing changes the layout, and the next layout pass finds nothing moved.
             if (Equals(_placedBy, (space, line, left)))
                 return;
