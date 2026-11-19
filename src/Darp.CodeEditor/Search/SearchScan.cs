@@ -78,9 +78,9 @@ internal sealed class SearchScan
     }
 
     /// <summary>
-    /// The ranges to search: all of the text, or the scope's ranges within it, in order, those that overlap merged,
-    /// A range that an edit left starting or ending between a <c>\r</c> and its <c>\n</c> starts
-    /// after the line break, or ends before it.
+    /// The ranges to search: all of the text, or the scope's ranges within it, in order, those that overlap merged. A
+    /// range that an edit left starting or ending between a <c>\r</c> and its <c>\n</c>, or inside a surrogate pair,
+    /// starts after it, or ends before it, so that a search across lines, which reads the range alone, sees no half.
     /// </summary>
     private List<(int Start, int End)> Ranges(IReadOnlyList<TextRange>? scope)
     {
@@ -92,9 +92,9 @@ internal sealed class SearchScan
         {
             int start = Math.Clamp(range.Start, 0, length);
             int end = Math.Clamp(range.End, start, length);
-            if (IsInsideLineBreak(_text, start))
+            if (IsInsideLineBreak(_text, start) || IsInsideSurrogatePair(_text, start))
                 start++;
-            if (IsInsideLineBreak(_text, end))
+            if (IsInsideLineBreak(_text, end) || IsInsideSurrogatePair(_text, end))
                 end--;
             end = Math.Max(start, end);
             if (ranges.Count > 0 && ranges[^1].End > start)
