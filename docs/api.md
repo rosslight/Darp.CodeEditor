@@ -40,11 +40,11 @@ if (compilation.Succeeded)
 
 | Package | Public types |
 |---|---|
-| `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorColorTheme`, `CodeEditorViewState`, `CodeEditorStyles`, `TextSnapshot`, `TextRange`, `TextPosition`, `TextSelection`, `Indentation`, `Diagnostic`, `DiagnosticSeverity`; the keymap: `CodeEditorKeymap`, `CodeEditorKeyBinding`, `CodeEditorCommands` |
+| `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorColorTheme`, `CodeEditorViewState`, `CodeEditorStyles`, `TextSnapshot`, `TextRange`, `TextPosition`, `TextSelection`, `Indentation`, `Diagnostic`, `DiagnosticSeverity`; the keymap: `CodeEditorKeymap`, `CodeEditorKeyBinding`, `CodeEditorCommands`; the options: `CodeEditorOptions`, `AutoClosingOptions`, `AutoClosingMode`, `AutoIndent` |
 | `Darp.CodeEditor.CSharpScript` | `CSharpScriptServer`, `CSharpScriptServerOptions`, `CSharpScriptEnvironment<TGlobals>`, `CSharpScriptDocument<TGlobals>`, `CSharpScriptCompilation<TGlobals>`, `CSharpScriptAssembly<TGlobals>`, `CSharpCodeLanguage` (adds `CodeLanguage.CSharp`) |
 | `Darp.CodeEditor.CSharpScript.Runner` | `CSharpScriptSession` (starts sessions, and scripts in them), `CSharpScriptSession<TSessionSide, TSessionObject>`, `CSharpScriptSessionOptions`, `CSharpScriptRun`, `CSharpScriptException`, `CSharpScriptSessionExit`, `CSharpScriptSessionExitReason`, and the contracts that runner-side script APIs implement: `IScriptSessionObject<TSelf, TAppSide>`, `IScriptGlobalsFactory<TGlobals, TInput>`, `IScriptGlobalsFactory<TGlobals>` |
 
-37 public types in all. Three more things are public without being types of ours:
+41 public types in all. Three more things are public without being types of ours:
 
 - **The project file.**
   - `CSharpScriptReference="true"` on a package or project reference: scripts may use its assemblies. Publishing copies their DLLs next to the app, NativeAOT apps included, with their XML docs, which hover and completion show.
@@ -107,14 +107,35 @@ rather than its view belong to the document, as in Monaco and CodeMirror.
 | `CaretPosition` | the caret's line and column, read-only and bindable, for status bars |
 | `ScrollTo(TextRange)` | brings a range into view: not at all when it is visible, centered when it is not |
 | `Keymap` | which keys run which of the editor's commands: VS Code's keys by default (below) |
+| `Options` | the settings that apps set differently for different editors or users, as VS Code's settings (below) |
 | `PendingKeys` | the first stroke of a two-stroke sequence while the editor waits for the second, such as Ctrl+K of Ctrl+K Ctrl+I; null otherwise. Read-only and bindable, for status bars |
 | `OpenSearch(replace)` | the search or replace bar, for a Find button; Ctrl+F and Ctrl+H open them too |
 | `Cut()`, `Copy()`, `Paste()`, `SelectAll()` | for an app's Edit menu; the keys and the editor's context menu do the same, and the document's `Undo` and `Redo` the rest |
 | `SaveViewState()`, `RestoreViewState(state)` | the caret, the selection and the scroll position, for an app that switches one editor between documents |
 
-**Built in, with no settings:** current-line highlight, bracket matching, auto-closing brackets and quotes,
-auto-indent as far as the language's `AutoIndent` goes (section 1), Tab, Shift+Tab and Backspace in indentation by tab
-stops, whitespace shown inside the selection, scrolling past the last line, a context menu with Cut, Copy, Paste
+**Options.** One immutable record, `CodeEditorOptions`, holds the editor's settings, each at the path of its VS Code
+setting: `editor.autoClosingBrackets` is `Options.AutoClosing.Brackets` (design.md #124). Apps set it once, or share one
+instance between editors as they share a keymap; a change applies from the next keystroke on. The view settings above
+(`IsReadOnly`, `WordWrap`, `ShowLineNumbers`, `ColorTheme`) stay properties.
+
+```csharp
+editor.Options = CodeEditorOptions.Default with
+{
+    AutoClosing = new AutoClosingOptions { Quotes = AutoClosingMode.Never },
+};
+```
+
+| Option | VS Code's setting | Default |
+|---|---|---|
+| `AutoClosing.Brackets`, `AutoClosing.Quotes` | `editor.autoClosingBrackets`, `editor.autoClosingQuotes` | `LanguageDefined`: a typed opening bracket or quote gets its closing one before whitespace, the line's end, another closing character, or a character of the language's `autoCloseBefore`, by default one that can't start an expression; a quote not right after a word. `Always`, `BeforeWhitespace` and `Never` as in VS Code |
+
+A setting needs a use case to become an option; VS Code having it is not enough (design.md #124).
+
+**Built in, with no settings,** as VS Code's defaults: current-line highlight, bracket matching; typing over a closing
+character, and Backspace deleting an empty pair, only where the editor closed the pair; opening characters surrounding
+the selection; auto-indent as far as the language's `AutoIndent` goes (section 1); Tab, Shift+Tab and Backspace in
+indentation by tab stops; undo in VS Code's steps, which puts back the selection before the step and redo the one after
+it; whitespace shown inside the selection, scrolling past the last line, a context menu with Cut, Copy, Paste
 and Select All, completion's snippets with their stops (section 6), and the look of errors, hover and completion
 below.
 
@@ -908,7 +929,10 @@ with Skia:
   characters step over, Backspace deletes an empty pair the editor closed, and opening characters surround the
   selection; Ctrl+/ toggles line comments, or block comments in XML, as one change of the text whose cost grows with
   the selection, as Replace All's does: 41 ms for 5,000 lines and about 0.15 s for 100,000, with the frame after it.
-  Each is one step that the user undoes. The token types come from tokenizing the line up to the caret on the UI
+  Each is one step that the user undoes, as VS Code's undo stops go: typing goes on in the step of the typing before
+  it, a space starts a step that the word after it goes on in, Backspace and Delete go on in the step of the ones
+  before them unless they join lines, and a pair that closes, Enter and a line that outdents start one. The token
+  types come from tokenizing the line up to the caret on the UI
   thread, within 2 ms, from the state at its start. Matching the indentation patterns for one new or typed line stops
   after 10 ms, and a match after 5 ms, as with a pattern that backtracks on the lines above: the line then keeps its
   indentation;

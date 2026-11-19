@@ -176,10 +176,9 @@ internal sealed class IndentRules
 
     /// <summary>
     /// The indentation that the lines above give line <paramref name="lineNumber"/>, and whether it is one level more.
-    /// Lines of whitespace only, and those that match the unindented pattern,
-    /// give none. A line that matches the increase pattern, or the pattern that indents only the next line, gives one
-    /// level more, and a line below one that indents only it gives the indentation from before. Null when no line above
-    /// gives one.
+    /// Lines of whitespace only, and those that match the unindented pattern, give none. A line that matches the
+    /// increase pattern, or the pattern that indents only the next line, gives one level more, and a line below one that
+    /// indents only it gives the indentation from before. Null when no line above gives one.
     /// </summary>
     /// <param name="matching">The language's indentation rules, within the time of one indentation.</param>
     /// <param name="lines">The lines, of which every one read counts against the time.</param>
