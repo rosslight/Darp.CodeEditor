@@ -49,21 +49,272 @@ public sealed class SnippetTests
     public void Mirrors_take_the_text_of_the_first_placeholder_of_their_number(string snippet, string text) =>
         Render(snippet).Text.ShouldBe(text);
 
+    [Fact]
+    public void A_snippet_has_as_many_stops_as_it_likes()
+    {
+        string snippet = string.Concat(Enumerable.Range(1, 100).Select(i => $"${{{i}:{i}}} $1 "));
+
+        RenderedSnippet rendered = Render(snippet);
+
+        rendered.Stops.Count.ShouldBe(201);
+        rendered.Stops.Select(stop => stop.Index).Distinct().Count().ShouldBe(101);
+    }
+
+    [Fact]
+    public void A_snippet_needs_the_clipboard_when_it_has_the_variable()
+    {
+        Snippet.Parse("${1:${CLIPBOARD:x}}").NeedsClipboard.ShouldBeTrue();
+        Snippet.Parse("$CLIPBOARDS \\$CLIPBOARD").NeedsClipboard.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_snippet_whose_text_would_pass_a_million_characters_goes_in_as_written()
+    {
+        // Lines that the line's indentation of 3,000 columns would make 30 million characters long.
+        string lines = "${1:a}" + new string('\n', 10_000);
+        AsWritten(lines, lineIndentation: new string(' ', 3_000));
+        // Wide tabs, which would make one line's indentation long, are counted before it is made.
+        AsWritten("a\n\t$1", lineIndentation: new string('\t', 1_000), indentation: Indentation.Spaces(1_001));
+        Render("a\n\t$1", lineIndentation: "\t", indentation: Indentation.Spaces(100)).Text.Length.ShouldBe(202);
+
+        // Variables' values count too: a mirror copies its text's values.
+        string selected = new('a', 10_000);
+        RenderedSnippet values = Render("${1:$TM_SELECTED_TEXT} $1 $TM_SELECTED_TEXT", _ => selected);
+        values.Text.Length.ShouldBe(30_002);
+        Stops(values).ShouldBe($"1:{selected}|1:{selected}|0:");
+        AsWritten("${1:$TM_SELECTED_TEXT}" + string.Concat(Enumerable.Repeat(" $1", 100)), _ => selected);
+
+        // Parts count too: variables without a value are asked for at most that often.
+        int asked = 0;
+        AsWritten(
+            "$1" + string.Concat(Enumerable.Repeat("$X", Snippet.MaxText + 1)),
+            _ =>
+            {
+                asked++;
+                return null;
+            }
+        );
+        asked.ShouldBeLessThanOrEqualTo(Snippet.MaxText);
+    }
+
     [Theory]
-    [InlineData("${1|one,two,three|}", "one")]
-    [InlineData("${1|one|}", "one")]
-    [InlineData(@"${1|one1\,two2|}", "one1,two2")]
-    [InlineData(@"${1|one1\|two2|}", "one1|two2")]
-    [InlineData(@"${1|one1\atwo2|}", @"one1\atwo2")]
-    [InlineData(@"console.log(${1|not\, not, five, 5, 1   23|});", "console.log(not, not);")]
-    [InlineData(@"${1|aaa$aaa|}bbb\$bbb", "aaa$aaabbb$bbb")]
-    public void Choices_insert_their_first_option_as_a_placeholder(string snippet, string text)
+    [InlineData(@"${1/foo/bar/}", "foo", "bar")]
+    // The first match, or each one with g; the rest of the text stays.
+    [InlineData(@"${1/o/0/}", "foo", "f0o")]
+    [InlineData(@"${1/o/0/g}", "foo", "f00")]
+    [InlineData(@"${1/O/0/gi}", "foo", "f00")]
+    [InlineData(@"${1/^(.)|-(.)/${1:/upcase}${2:/upcase}/g}", "my-file-name", "MyFileName")]
+    [InlineData(@"${1/\s:=(.*)/${1:+ :=}${1}/}", " := '1'", " := '1'")]
+    // An else branch is the result when nothing matches.
+    [InlineData(@"${1/(x)/${1:?yes:no}/}", "abc", "no")]
+    [InlineData(@"${1/(x)/${1:-none}/}", "abc", "none")]
+    [InlineData(@"${1/(x)/${1:none}/}", "abc", "none")]
+    [InlineData(@"${1/(x)/${1:+some}/}", "abc", "abc")]
+    // Groups that did not take part, or that the regular expression does not have, are empty.
+    [InlineData(@"${1/(a)|(b)/[$1|$2|$3]/}", "b", "[|b|]")]
+    [InlineData(@"${1/.*/[$0]/}", "abc", "[abc]")]
+    [InlineData(@"${1/.*/[$0]/g}", "abc", "[abc][]")]
+    // Escapes in the format: \/ and \\ are text, as is a backslash before anything else.
+    [InlineData(@"${1/[\/]/\\/g}", "a/b", @"a\b")]
+    [InlineData(@"${1/a/\//}", "a", "/")]
+    [InlineData(@"${1/a/\n/}", "a", @"\n")]
+    [InlineData(@"${1/(.+)/${1:+import { hello \} from world}/}", "x", "import { hello } from world")]
+    [InlineData(@"${1/(.+)/${1:+\\}/}", "x", @"\")]
+    // Options: m for lines, s for line breaks, y where the text starts; d, u and v change nothing.
+    [InlineData(@"${1/^b/B/gm}", "a\nb", "a\nB")]
+    [InlineData(@"${1/a.b/x/s}", "a\nb", "x")]
+    [InlineData(@"${1/a.b/x/}", "a\nb", "a\nb")]
+    [InlineData(@"${1/b/x/y}", "ab", "ab")]
+    [InlineData(@"${1/a/x/gy}", "aab", "xxb")]
+    [InlineData(@"${1/a/x/duv}", "a", "${1/a/x/duv}")]
+    [InlineData(@"${1/a/x/du}", "a", "x")]
+    public void A_transformation_replaces_its_matches_with_its_format(string snippet, string value, string result)
+    {
+        RenderedSnippet rendered = Render(snippet);
+
+        if (rendered.Stops.FirstOrDefault().Transform is { } transform)
+            transform.Resolve(value).ShouldBe(result);
+        else
+            rendered.Text.ShouldBe(result);
+    }
+
+    [Theory]
+    // Options that JavaScript rejects, and a regular expression that .NET rejects: the snippet as written.
+    [InlineData("${TM_FILENAME/a/b/x}")]
+    [InlineData("${TM_FILENAME/a/b/gg}")]
+    [InlineData("${TM_FILENAME/(a/b/}")]
+    [InlineData("${1/a/b/uv}")]
+    public void A_transformation_that_is_invalid_is_text(string snippet)
+    {
+        RenderedSnippet rendered = Render(snippet);
+
+        rendered.Text.ShouldBe(snippet);
+        rendered.Stops.ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("${1|one,two,three|}", "one", new[] { "one", "two", "three" })]
+    [InlineData("${1|one|}", "one", new[] { "one" })]
+    [InlineData(@"${1|one1\,two2|}", "one1,two2", new[] { "one1,two2" })]
+    [InlineData(@"${1|one1\|two2|}", "one1|two2", new[] { "one1|two2" })]
+    [InlineData(@"${1|one1\atwo2|}", @"one1\atwo2", new[] { @"one1\atwo2" })]
+    [InlineData(
+        @"console.log(${1|not\, not, five, 5, 1   23|});",
+        "console.log(not, not);",
+        new[] { "not, not", " five", " 5", " 1   23" }
+    )]
+    [InlineData(@"${1|aaa$aaa|}bbb\$bbb", "aaa$aaabbb$bbb", new[] { "aaa$aaa" })]
+    public void Choices_insert_their_first_option_as_a_placeholder_that_keeps_all_of_them(
+        string snippet,
+        string text,
+        string[] options
+    )
     {
         RenderedSnippet rendered = Render(snippet);
 
         rendered.Text.ShouldBe(text);
         rendered.Stops[0].Index.ShouldBe(1);
+        rendered.Stops[0].Choice.ShouldBe(options);
+        // A mirror of a choice is one too.
+        Render(snippet + " $1").Stops[1].Choice.ShouldBe(options);
     }
+
+    [Theory]
+    [InlineData("upcase", "foo", "FOO")]
+    [InlineData("downcase", "FOO", "foo")]
+    [InlineData("capitalize", "bar", "Bar")]
+    [InlineData("capitalize", "bar no repeat", "Bar no repeat")]
+    [InlineData("pascalcase", "bar-foo", "BarFoo")]
+    [InlineData("pascalcase", "bar-42-foo", "Bar42Foo")]
+    [InlineData("pascalcase", "snake_AndPascalCase", "SnakeAndPascalCase")]
+    [InlineData("pascalcase", "kebab-AndPascalCase", "KebabAndPascalCase")]
+    [InlineData("pascalcase", "_justPascalCase", "JustPascalCase")]
+    [InlineData("camelcase", "bar-foo", "barFoo")]
+    [InlineData("camelcase", "bar-42-foo", "bar42Foo")]
+    [InlineData("camelcase", "snake_AndCamelCase", "snakeAndCamelCase")]
+    [InlineData("camelcase", "kebab-AndCamelCase", "kebabAndCamelCase")]
+    [InlineData("camelcase", "_JustCamelCase", "justCamelCase")]
+    [InlineData("kebabcase", "barFoo", "bar-foo")]
+    [InlineData("kebabcase", "BarFoo", "bar-foo")]
+    [InlineData("kebabcase", "ABarFoo", "a-bar-foo")]
+    [InlineData("kebabcase", "bar42Foo", "bar42-foo")]
+    [InlineData("kebabcase", "snake_AndPascalCase", "snake-and-pascal-case")]
+    [InlineData("kebabcase", "kebab-AndCamelCase", "kebab-and-camel-case")]
+    [InlineData("kebabcase", "_justPascalCase", "just-pascal-case")]
+    [InlineData("kebabcase", "__UPCASE__", "upcase")]
+    [InlineData("kebabcase", "__BAR_FOO__", "bar-foo")]
+    [InlineData("snakecase", "bar-foo", "bar_foo")]
+    [InlineData("snakecase", "bar-42-foo", "bar_42_foo")]
+    [InlineData("snakecase", "snake_AndPascalCase", "snake_and_pascal_case")]
+    [InlineData("snakecase", "kebab-AndPascalCase", "kebab_and_pascal_case")]
+    [InlineData("snakecase", "_justPascalCase", "_just_pascal_case")]
+    [InlineData("notKnown", "input", "input")]
+    [InlineData("kebabcase", "одинДва", "один-два")]
+    [InlineData("kebabcase", "έναςΔύο", "ένας-δύο")]
+    [InlineData("snakecase", "одинДва", "один_два")]
+    [InlineData("snakecase", "έναςΔύο", "ένας_δύο")]
+    [InlineData("camelcase", "одинДва", "одинДва")]
+    [InlineData("camelcase", "έναςΔύο", "έναςΔύο")]
+    [InlineData("pascalcase", "одинДва", "ОдинДва")]
+    [InlineData("pascalcase", "έναςΔύο", "ΈναςΔύο")]
+    [InlineData("upcase", "одинДва", "ОДИНДВА")]
+    [InlineData("downcase", "одинДва", "одиндва")]
+    [InlineData("kebabcase", "istanbulLı", "istanbul-lı")]
+    [InlineData("pascalcase", "istanbulLı", "IstanbulLı")]
+    [InlineData("upcase", "こんにちは", "こんにちは")]
+    [InlineData("kebabcase", "こんにちは", "こんにちは")]
+    public void Format_references_change_the_case_of_their_group(string shorthand, string value, string result) =>
+        Render($"${{VALUE/(.*)/${{1:/{shorthand}}}/}}", _ => value).Text.ShouldBe(result);
+
+    [Theory]
+    [InlineData("+foo", "", "")]
+    [InlineData("+foo", "bar", "foo")]
+    [InlineData("-foo", "", "foo")]
+    [InlineData("-foo", "bar", "bar")]
+    [InlineData("foo", "", "foo")]
+    [InlineData("foo", "bar", "bar")]
+    [InlineData("?bar:foo", "", "foo")]
+    [InlineData("?bar:foo", "baz", "bar")]
+    public void Format_references_go_in_as_their_if_or_else_branch(string branch, string value, string result) =>
+        Render($"${{VALUE/(.*)/${{1:{branch}}}/}}", _ => value).Text.ShouldBe(result);
+
+    [Fact]
+    public void Selected_text_that_spans_lines_takes_the_indentation_that_the_snippet_adds_where_it_goes_in()
+    {
+        Func<string, string?> values = name => name is "TM_SELECTED_TEXT" or "SELECTION" ? "a\n    b" : null;
+
+        // The selection's line is indented by four spaces, as is the snippet's: the snippet adds a level.
+        RenderedSnippet rendered = Snippet
+            .Parse("if (x) {\n\t$TM_SELECTED_TEXT\n}\n$SELECTION")
+            .Render(
+                new SnippetContext("    ", Indentation.Spaces(4), "\n", values)
+                {
+                    MultilineSelectionIndentation = "    ",
+                }
+            );
+
+        rendered.Text.ShouldBe("if (x) {\n        a\n        b\n    }\n    a\n    b");
+        // On one line, or without the selection's line, it goes in as it is.
+        Render("{\n\t$TM_SELECTED_TEXT", values, lineIndentation: "    ").Text.ShouldBe("{\n        a\n    b");
+        SnippetVariables.IndentSelection("a\r\nb\rc\n", "\t\t", "\t").ShouldBe("a\r\n\tb\r\tc\n\t");
+    }
+
+    [Theory]
+    [InlineData("text", "text")]
+    [InlineData("line\n", "line")]
+    [InlineData("\r\n  line  \r\n\r\n", "  line  ")]
+    [InlineData("one\ntwo", "one\ntwo")]
+    [InlineData(" \n", " \n")]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void The_clipboard_variable_is_its_only_line_that_is_not_blank_or_else_the_whole_text(
+        string? clipboard,
+        string? value
+    ) => SnippetVariables.Clipboard(clipboard).ShouldBe(value);
+
+    [Fact]
+    public void Transformations_apply_to_variables_as_they_go_in_and_wait_on_stops_for_the_session()
+    {
+        Func<string, string?> values = name => name == "TM_FILENAME" ? "a.txt" : null;
+
+        Render(@"const fileName = ""${TM_FILENAME/(.*)\..+$/$1/}""", values).Text.ShouldBe(@"const fileName = ""a""");
+        // A variable without a value is transformed as empty text: here, its else branch.
+        Render("${TM_SELECTED_TEXT/^$/${0:?some:none}/}", values).Text.ShouldBe("none");
+        // A stop's goes in as its mirror's text: the session applies it.
+        RenderedSnippet mirror = Render("${1:foo} ${1/(.*)/${1:/upcase}/} ${1/(.)/${1:?yes:no}/gi}");
+        mirror.Text.ShouldBe("foo foo foo");
+        Stops(mirror).ShouldBe("1:foo|1:foo|1:foo|0:");
+        mirror.Stops[0].Transform.ShouldBeNull();
+        mirror.Stops[1].Transform.ShouldNotBeNull().Resolve("bar").ShouldBe("BAR");
+        mirror.Stops[2].Transform.ShouldNotBeNull().Resolve("bar").ShouldBe("yesyesyes");
+    }
+
+    [Fact]
+    public void Variables_take_their_value_or_else_their_default_or_else_nothing_also_unknown_ones()
+    {
+        Func<string, string?> values = name => name == "TM_FILENAME" ? "a.txt" : null;
+
+        Render("$TM_FILENAME ${TM_FILENAME:default}", values).Text.ShouldBe("a.txt a.txt");
+        // Known and unset: the default, or nothing.
+        RenderedSnippet unset = Render("[$TM_SELECTED_TEXT] [${TM_SELECTED_TEXT:${1:default}}]", values);
+        unset.Text.ShouldBe("[] [default]");
+        Stops(unset).ShouldBe("1:default|0:");
+        // A placeholder in a default that a value replaces is no stop.
+        Stops(Render("${TM_FILENAME:${1:x}}", values)).ShouldBe("0:");
+        // Unknown: the same, as VS Code's completion inserts them.
+        RenderedSnippet unknown = Render("before-$UNRECOGNIZED-after ${1:$FOO} ${UNKNOWN:default}$0", values);
+        unknown.Text.ShouldBe("before--after  default");
+        Stops(unknown).ShouldBe("1:|0:");
+        Stops(Render("${TM_SELECTED_TEXT:$FOO}", values)).ShouldBeEmpty();
+    }
+
+    [Theory]
+    // A match or a group that starts or ends between the halves of a surrogate pair does not count.
+    [InlineData("${VALUE/./x/g}", "\U0001F600a", "\U0001F600x")]
+    [InlineData("${VALUE/(.)(.*)/$2$1/}", "\U0001F600", "\U0001F600")]
+    [InlineData("${VALUE/(.*)/${1:/capitalize}/}", "\U00010428x", "\U00010400x")]
+    public void A_transformation_never_splits_a_surrogate_pair(string snippet, string value, string result) =>
+        Render(snippet, _ => value).Text.ShouldBe(result);
 
     [Theory]
     [InlineData("$", "$")]
@@ -102,36 +353,6 @@ public sealed class SnippetTests
         Stops(Render("${1:bar${2:foobar}")).ShouldBe("2:foobar|0:");
 
     [Fact]
-    public void Variables_take_their_value_or_else_their_default_and_unknown_ones_become_placeholders()
-    {
-        Func<string, string?> values = name => name == "TM_FILENAME" ? "a.txt" : null;
-
-        Render("$TM_FILENAME ${TM_FILENAME:default}", values).Text.ShouldBe("a.txt a.txt");
-        // Known and unset: the default, or nothing.
-        RenderedSnippet unset = Render("[$TM_SELECTED_TEXT] [${TM_SELECTED_TEXT:${1:default}}]", values);
-        unset.Text.ShouldBe("[] [default]");
-        Stops(unset).ShouldBe("1:default|0:");
-        // A placeholder in a default that a value replaces is no stop.
-        Stops(Render("${TM_FILENAME:${1:x}}", values)).ShouldBe("0:");
-        // Unknown without a default: a placeholder with its name, after the highest stop, one number per name; level
-        // by level, as VS Code finds them. With a default: the default.
-        RenderedSnippet unknown = Render("${1:$FOO} $BAR ${FOO} ${UNKNOWN:default}", values);
-        unknown.Text.ShouldBe("FOO BAR FOO default");
-        Stops(unknown).ShouldBe("1:FOO|3:FOO|2:BAR|3:FOO|0:");
-        // Also in a default, as the protocol says, where VS Code's own snippets leave it.
-        Stops(Render("${TM_SELECTED_TEXT:$FOO}", values)).ShouldBe("1:FOO|0:");
-    }
-
-    [Fact]
-    public void Transformations_are_read_and_not_applied()
-    {
-        Render(@"${TM_FILENAME/(.*)\..+$/$1/}", name => name == "TM_FILENAME" ? "a.txt" : null).Text.ShouldBe("a.txt");
-        RenderedSnippet mirror = Render("${1:foo} ${1/(.*)/${1:/upcase}/} ${1/(.)/${1:?yes:no}/gi}");
-        mirror.Text.ShouldBe("foo foo foo");
-        Stops(mirror).ShouldBe("1:foo|1:foo|1:foo|0:");
-    }
-
-    [Fact]
     public void Lines_after_the_first_take_the_indentation_of_the_line_in_the_documents_indentation()
     {
         // Spaces: a tab is a level of four.
@@ -152,11 +373,6 @@ public sealed class SnippetTests
     [Fact]
     public void A_snippet_beyond_the_parsing_limits_goes_in_as_written()
     {
-        // As many stops as tracked, the final one included.
-        string most = string.Concat(Enumerable.Repeat("$1", Snippet.MaxStops - 1));
-        Render(most).Stops.Count.ShouldBe(Snippet.MaxStops);
-        AsWritten(most + "$1");
-
         // As deep as placeholders and variables nest.
         string nested =
             string.Concat(Enumerable.Repeat("${TM_SELECTED_TEXT:", Snippet.MaxNesting - 1))
@@ -172,34 +388,6 @@ public sealed class SnippetTests
         // The stop at the end would parse, if parsing went on.
         AsWritten(string.Concat(Enumerable.Repeat("${1/a/b/", 20_000)) + "${1:x}");
         AsWritten(string.Concat(Enumerable.Repeat("${1/" + new string('a', 1_000), 200)) + "${1:x}");
-    }
-
-    [Fact]
-    public void A_snippet_whose_text_would_pass_5000_characters_goes_in_as_written()
-    {
-        // Lines that the line's indentation of 3,000 columns would make 30 million characters long.
-        string lines = "${1:a}" + new string('\n', 10_000);
-        AsWritten(lines, lineIndentation: new string(' ', 3_000));
-        // Wide tabs, which would make one line's indentation long, are counted before it is made.
-        AsWritten("a\n\t$1", lineIndentation: new string('\t', 20), indentation: Indentation.Spaces(1_000));
-        Render("a\n\t$1", lineIndentation: "\t", indentation: Indentation.Spaces(100)).Text.Length.ShouldBe(202);
-
-        // Variables' values.
-        string line = new('a', 1_000);
-        AsWritten(string.Concat(Enumerable.Repeat("$TM_CURRENT_LINE", 6)) + "$1", _ => line);
-        Render(string.Concat(Enumerable.Repeat("$TM_CURRENT_LINE", 4)) + "$1", _ => line).Text.Length.ShouldBe(4_000);
-
-        // Parts count too: variables without a value are asked for at most that often.
-        int asked = 0;
-        AsWritten(
-            "$1" + string.Concat(Enumerable.Repeat("$CLIPBOARD", 2 * Snippet.MaxText)),
-            _ =>
-            {
-                asked++;
-                return null;
-            }
-        );
-        asked.ShouldBeLessThanOrEqualTo(Snippet.MaxText);
     }
 
     [Fact]
