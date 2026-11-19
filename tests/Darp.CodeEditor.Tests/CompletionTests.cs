@@ -427,6 +427,40 @@ public sealed class CompletionTests(UiFixture ui)
             await SearchBars.SearchedAsync(SearchBars.BarOf(window));
         });
 
+    [Fact]
+    public Task On_macOS_Ctrl_N_and_Ctrl_P_select_in_the_list_and_otherwise_go_on() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("alpha", "beta", "gamma"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            // Ctrl+N finds where it does not select.
+            var editor = new CodeEditor
+            {
+                Document = document,
+                Keymap = new CodeEditorKeymap([
+                    new CodeEditorKeyBinding("ctrl+n", CodeEditorCommands.Find),
+                    .. CodeEditorKeymap.DefaultBindings(mac: true),
+                ]),
+            };
+            using var window = new EditorWindow(editor);
+            await OpenAsync(window, 0);
+            CompletionListBox list = List(window).ShouldNotBeNull();
+
+            window.Press(Key.N, KeyModifiers.Control);
+            list.SelectedIndex.ShouldBe(1);
+            window.Press(Key.P, KeyModifiers.Control);
+            window.Press(Key.P, KeyModifiers.Control);
+            list.SelectedIndex.ShouldBe(2);
+
+            window.Press(Key.Escape);
+            window.Press(Key.N, KeyModifiers.Control);
+            SearchBar bar = SearchBars.BarOf(window);
+            bar.IsOpen.ShouldBeTrue();
+            await SearchBars.SearchedAsync(bar);
+        });
+
     [Theory]
     // F7 to the next occurrence, a jump to the bracket, smart select, moving the line and selecting it.
     [InlineData("f7")]

@@ -208,7 +208,9 @@ The default keys on Windows and Linux; macOS in brackets where it differs beyond
 
 | Keys | Commands | What they do |
 |---|---|---|
-| Ctrl+Space, Ctrl+I (macOS also Alt+Escape) | `editor.action.triggerSuggest`; `toggleSuggestionDetails` while the list shows | completion; while its list shows, its details |
+| Ctrl+Space, Ctrl+I | `editor.action.triggerSuggest`; `toggleSuggestionDetails` while the list shows | completion; while its list shows, its details |
+| Alt+Escape (macOS only) | `editor.action.triggerSuggest` | completion only; it does not toggle the details |
+| Ctrl+N, Ctrl+P (macOS only) | `selectNextSuggestion`, `selectPrevSuggestion`, while the list shows more than one item | the next and the previous item, as Down and Up; otherwise the caret's keys |
 | Enter | `acceptSelectedSuggestion`, while the list shows | inserts the item and keeps the rest of the word (design.md #114) |
 | Tab, Shift+Enter | `acceptAlternativeSelectedSuggestion`, while the list shows | replaces the rest of the word with the item; VS Code's Tab inserts |
 | Ctrl+Shift+Space | `editor.action.triggerParameterHints` | signature help |
@@ -544,8 +546,9 @@ How the client talks to a server, where the protocol leaves a choice:
     also while a list shows, as in VS Code, and the new answer's list replaces it; meanwhile the list shows what still
     matches, and nothing left to show ends completion only once the new answer has nothing either.
   - **Selecting:** Up, Down, Page Up and Page Down select among the rows that show, while the list has more than one
-    item; with one, they go on to the text, as in VS Code. As VS Code's lists page, Page Down first selects the last
-    row that shows, and then goes a page of rows on; Page Up the same upwards.
+    item; with one, they go on to the text, as in VS Code. On macOS, Ctrl+N and Ctrl+P select as Down and Up. As VS
+    Code's lists page, Page Down first selects the last row that shows, and then goes a page of rows on; Page Up the
+    same upwards.
   - **Committing:** the keymap's accept commands, Enter, Tab and Shift+Enter by default, a click, or one of the item's
     commit characters, or the server's `allCommitCharacters` for an item that names none, which then goes in, and asks
     again if it is a trigger character, as in VS Code. While the filter of the current text still runs, they commit the

@@ -59,7 +59,9 @@ public sealed class CodeEditorKeymap
     /// <remarks>
     /// <list type="table">
     /// <listheader><term>Keys (macOS)</term><description>Command</description></listheader>
-    /// <item><term>ctrl+space, ctrl+i (cmd+i; also alt+escape)</term><description><see cref="CodeEditorCommands.TriggerSuggest"/>, and <see cref="CodeEditorCommands.ToggleSuggestionDetails"/> while the list shows, except alt+escape</description></item>
+    /// <item><term>ctrl+space, ctrl+i (cmd+i)</term><description><see cref="CodeEditorCommands.TriggerSuggest"/>, and <see cref="CodeEditorCommands.ToggleSuggestionDetails"/> while the list shows</description></item>
+    /// <item><term>(alt+escape)</term><description><see cref="CodeEditorCommands.TriggerSuggest"/> only</description></item>
+    /// <item><term>(ctrl+n, ctrl+p)</term><description><see cref="CodeEditorCommands.SelectNextSuggestion"/>, <see cref="CodeEditorCommands.SelectPrevSuggestion"/> while the list shows; otherwise the caret's keys</description></item>
     /// <item><term>enter</term><description><see cref="CodeEditorCommands.AcceptSelectedSuggestion"/> while the list shows</description></item>
     /// <item><term>tab, shift+enter</term><description><see cref="CodeEditorCommands.AcceptAlternativeSelectedSuggestion"/> while the list shows; VS Code binds Tab to <see cref="CodeEditorCommands.AcceptSelectedSuggestion"/></description></item>
     /// <item><term>ctrl+shift+space (shift+cmd+space)</term><description><see cref="CodeEditorCommands.TriggerParameterHints"/></description></item>
@@ -161,7 +163,11 @@ public sealed class CodeEditorKeymap
         yield return new("tab", CodeEditorCommands.AcceptAlternativeSelectedSuggestion);
         yield return new("shift+enter", CodeEditorCommands.AcceptAlternativeSelectedSuggestion);
         if (mac)
+        {
             yield return new("alt+escape", CodeEditorCommands.TriggerSuggest);
+            yield return new("ctrl+n", CodeEditorCommands.SelectNextSuggestion);
+            yield return new("ctrl+p", CodeEditorCommands.SelectPrevSuggestion);
+        }
         yield return new($"{command}+shift+space", CodeEditorCommands.TriggerParameterHints);
         yield return new($"{command}+f", CodeEditorCommands.Find);
         yield return new(mac ? "alt+cmd+f" : "ctrl+h", CodeEditorCommands.Replace);

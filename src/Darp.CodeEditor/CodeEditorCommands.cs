@@ -30,6 +30,15 @@ public static class CodeEditorCommands
     /// </summary>
     public const string AcceptAlternativeSelectedSuggestion = "acceptAlternativeSelectedSuggestion";
 
+    /// <summary>
+    /// Selects the next item of completion's list, as Down does, while the list shows more than one; after the last, the
+    /// first.
+    /// </summary>
+    public const string SelectNextSuggestion = "selectNextSuggestion";
+
+    /// <summary>Selects the previous item of completion's list, as Up does, as <see cref="SelectNextSuggestion"/>.</summary>
+    public const string SelectPrevSuggestion = "selectPrevSuggestion";
+
     /// <summary>Asks the language server for the signature of the call around the caret.</summary>
     public const string TriggerParameterHints = "editor.action.triggerParameterHints";
 
