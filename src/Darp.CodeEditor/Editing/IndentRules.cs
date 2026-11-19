@@ -21,22 +21,26 @@ internal sealed class IndentRules
     private readonly LanguageConfiguration _configuration;
     private readonly AutoIndent _autoIndent;
     private readonly Indenting _indenting;
+    private readonly string _lineBreak;
     private readonly TimeProvider _time;
 
     /// <param name="configuration">The language's editing rules.</param>
     /// <param name="autoIndent">How far the rules apply.</param>
     /// <param name="indentation">The document's indentation.</param>
+    /// <param name="lineBreak">The document's line break, which Enter and the text that rules append take.</param>
     /// <param name="time">The clock of the time limit; by default the system's.</param>
     public IndentRules(
         LanguageConfiguration configuration,
         AutoIndent autoIndent,
         Indentation indentation,
+        string lineBreak,
         TimeProvider? time = null
     )
     {
         _configuration = configuration;
         _autoIndent = autoIndent;
         _indenting = new Indenting(indentation);
+        _lineBreak = lineBreak;
         _time = time ?? TimeProvider.System;
     }
 
@@ -48,9 +52,9 @@ internal sealed class IndentRules
     /// <param name="lines">The document's lines.</param>
     /// <param name="lineNumber">The caret's line.</param>
     /// <param name="column">The caret's offset in its line.</param>
-    /// <param name="lineBreak">The document's line break.</param>
-    public NewLine Enter(RuleLines lines, int lineNumber, int column, string lineBreak)
+    public NewLine Enter(RuleLines lines, int lineNumber, int column)
     {
+        string lineBreak = _lineBreak;
         if (_autoIndent == AutoIndent.None)
             return new NewLine(lineBreak, lineBreak.Length, 0);
         string text = lines.Text(lineNumber);
@@ -64,7 +68,7 @@ internal sealed class IndentRules
                 string after = lines.Masked(lineNumber, column, text.Length);
                 string previous = lineNumber > 1 ? matching.Read(lines.Masked, lineNumber - 1) : "";
                 if (ActionFor(matching, previous, before, after) is { } action)
-                    return NewLineFor(action, indentation, lineBreak);
+                    return NewLineFor(action, indentation);
                 if (IndentForEnter(matching, lines, lineNumber, before, after) is { } byRules)
                 {
                     // The new line replaces the indentation of the text it takes along; on a line of whitespace only,
@@ -362,13 +366,12 @@ internal sealed class IndentRules
 
     /// <summary>
     /// The new line for <paramref name="action"/> after a line indented by <paramref name="indentation"/> up to the
-    /// caret: between brackets, the text after the caret goes on a line of its own, at that indentation. Text that the
-    /// action appends breaks lines with the document's line break.
+    /// caret: between brackets, the text after the caret goes on a line of its own, at that indentation.
     /// </summary>
-    private NewLine NewLineFor(EnterAction action, string indentation, string lineBreak)
+    private NewLine NewLineFor(EnterAction action, string indentation)
     {
+        string lineBreak = _lineBreak;
         (indentation, string append) = Resolved(action, indentation);
-        append = TextUtilities.NormalizeNewLines(append, lineBreak);
         if (action.Indent == IndentAction.IndentOutdent)
         {
             string inner = lineBreak + _indenting.Normalize(indentation + append);
@@ -383,9 +386,9 @@ internal sealed class IndentRules
     /// <summary>
     /// The indentation for <paramref name="action"/> after a line indented by <paramref name="indentation"/>, without
     /// the characters it removes, and the text to append: a tab first to indent, which the document's indentation turns
-    /// into its own.
+    /// into its own, and the document's line breaks.
     /// </summary>
-    private static (string Indentation, string Append) Resolved(EnterAction action, string indentation)
+    private (string Indentation, string Append) Resolved(EnterAction action, string indentation)
     {
         if (action.RemoveText > 0)
             indentation = indentation[..Math.Max(0, indentation.Length - action.RemoveText)];
@@ -395,7 +398,7 @@ internal sealed class IndentRules
             IndentAction.IndentOutdent when action.AppendText.Length == 0 => "\t",
             _ => action.AppendText,
         };
-        return (indentation, append);
+        return (indentation, TextUtilities.NormalizeNewLines(append, _lineBreak));
     }
 
     /// <summary>

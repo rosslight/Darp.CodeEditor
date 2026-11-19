@@ -50,7 +50,7 @@ public sealed class IndentRulesTests
             (_, _) => null,
             brackets: null
         );
-        var rules = new IndentRules(LanguageConfiguration.None, AutoIndent.Advanced, Indentation.Spaces(4), time);
+        var rules = new IndentRules(LanguageConfiguration.None, AutoIndent.Advanced, Indentation.Spaces(4), "\n", time);
 
         rules.GoodIndentation(lines, 100_000).ShouldBeNull();
 
@@ -76,9 +76,9 @@ public sealed class IndentRulesTests
             (_, _) => null,
             brackets: null
         );
-        var rules = new IndentRules(configuration, AutoIndent.Advanced, Indentation.Spaces(2), time);
+        var rules = new IndentRules(configuration, AutoIndent.Advanced, Indentation.Spaces(2), "\n", time);
 
-        rules.Enter(lines, 2, 3, "\n").ShouldBe(new NewLine("\n  ", 3, 0));
+        rules.Enter(lines, 2, 3).ShouldBe(new NewLine("\n  ", 3, 0));
     }
 
     [Fact]
@@ -96,7 +96,7 @@ public sealed class IndentRulesTests
             configuration.BracketPattern
         );
 
-        new IndentRules(configuration, AutoIndent.Full, Indentation.Spaces(4)).Enter(lines, 1, 4, "\n");
+        new IndentRules(configuration, AutoIndent.Full, Indentation.Spaces(4), "\n").Enter(lines, 1, 4);
 
         tokenized.ShouldBe(1);
     }

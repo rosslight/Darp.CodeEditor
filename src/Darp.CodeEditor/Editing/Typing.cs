@@ -53,7 +53,8 @@ internal sealed class Typing : IDisposable
     /// <summary>The language's editing rules; none while they load.</summary>
     private LanguageConfiguration Configuration => LanguageConfiguration.Of(_document.Language);
 
-    private IndentRules Rules => new(Configuration, _document.Language.AutoIndent, _document.Indentation);
+    private IndentRules Rules =>
+        new(Configuration, _document.Language.AutoIndent, _document.Indentation, _document.LineBreak);
 
     private RuleLines Lines => RuleLines.Of(Buffer, _highlighter, Configuration.BracketPattern);
 
@@ -169,7 +170,7 @@ internal sealed class Typing : IDisposable
                     _area.ClearSelection();
                     int caret = _area.Caret.Offset;
                     DocumentLine line = Buffer.GetLineByOffset(caret);
-                    NewLine newLine = Rules.Enter(Lines, line.LineNumber, caret - line.Offset, _document.LineBreak);
+                    NewLine newLine = Rules.Enter(Lines, line.LineNumber, caret - line.Offset);
                     int replaced = _changes.CanChange(caret, newLine.Replaced) ? newLine.Replaced : 0;
                     _changes.Apply(
                         [new TextEdit(caret, replaced, newLine.Text)],
