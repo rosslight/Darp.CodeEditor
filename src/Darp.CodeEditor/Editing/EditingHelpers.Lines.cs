@@ -297,7 +297,7 @@ internal sealed partial class EditingHelpers
             return null;
         var indenting = new Indenting(_document.Indentation);
         bool decreases = matching.Decreases(lineText(lineNumber));
-        if (InheritedLine(matching, lineNumber, lineText) is { } line)
+        if (inherited.Line is { } line)
         {
             // Enter after the line applies while only whitespace lines are between.
             bool applies = true;
@@ -312,25 +312,6 @@ internal sealed partial class EditingHelpers
         if (decreases)
             return inherited.Increases ? inherited.Indentation : indenting.Unshift(inherited.Indentation);
         return inherited.Increases ? indenting.Shift(inherited.Indentation) : inherited.Indentation;
-    }
-
-    /// <summary>
-    /// The line that <see cref="InheritedIndentation"/> takes the indentation of, honoring intentional indentation:
-    /// the nearest line above with text; null for the first line, and below empty lines only.
-    /// </summary>
-    private static int? InheritedLine(IndentationMatching matching, int lineNumber, Func<int, string> lineText)
-    {
-        if (lineNumber <= 1)
-            return null;
-        for (int prior = lineNumber - 1; prior > 0; prior--)
-        {
-            if (matching.Read(lineText, prior).Length > 0)
-                break;
-            if (prior == 1)
-                return null;
-        }
-        int preceding = PrecedingLineWithText(lineNumber, number => matching.Read(lineText, number));
-        return preceding >= 1 ? preceding : null;
     }
 
     /// <summary>

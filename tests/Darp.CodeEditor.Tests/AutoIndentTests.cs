@@ -179,6 +179,34 @@ public sealed class AutoIndentTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe(expected);
         });
 
+    [Theory]
+    // A statement that indents only the next line, and the line after that, back at the statement's indentation.
+    [InlineData("if (x)|", Key.Enter, "if (x)\n    |")]
+    [InlineData("if (x)\n    y();|", Key.Enter, "if (x)\n    y();\n|")]
+    [InlineData("    x\n    if (x)\n|", Key.Tab, "    x\n    if (x)\n        |")]
+    // A line that gives no indentation: the line above it does.
+    [InlineData("    a();\n#region x|", Key.Enter, "    a();\n#region x\n    |")]
+    public Task Lines_indent_by_the_patterns_for_the_next_line_only_and_for_lines_without_indentation(
+        string marked,
+        Key key,
+        string expected
+    ) =>
+        _ui.Run(async () =>
+        {
+            var language = new CodeLanguage(
+                "indent-next",
+                configuration: new Uri(
+                    "avares://Darp.CodeEditor.Tests/Languages/indent-next.language-configuration.json"
+                )
+            );
+            await language.Loaded;
+            using EditorWindow window = Show(marked, language);
+
+            window.Press(key);
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
     [Fact]
     public Task Tab_on_a_blank_line_is_an_undo_step_of_its_own() =>
         _ui.Run(async () =>

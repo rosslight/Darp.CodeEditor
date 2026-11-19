@@ -1484,8 +1484,11 @@ internal sealed partial class EditingHelpers : IDisposable
     }
 
     /// <summary>
-    /// The indentation that the lines above give line <paramref name="lineNumber"/>, and whether it is one level more:
-    /// VS Code's <c>getInheritIndentForLine</c>. Null when no line above has text.
+    /// The indentation that the lines above give line <paramref name="lineNumber"/>, whether it is one level more, and
+    /// the line it comes from: VS Code's <c>getInheritIndentForLine</c>. Lines of whitespace only and those that match
+    /// the unindented pattern give none. A line that matches the increase pattern, or the pattern that indents only the
+    /// next line, gives one level more, and a line below one that indents only it gives the indentation from before.
+    /// Null when no line above gives one.
     /// </summary>
     /// <param name="matching">The language's indentation rules, within the time of one indentation.</param>
     /// <param name="lineNumber">The line to indent.</param>
@@ -1507,55 +1510,69 @@ internal sealed partial class EditingHelpers : IDisposable
     )
     {
         if (lineNumber <= 1)
-            return new Inherited("", false);
+            return new Inherited("", false, null);
         // Every line read counts against the time, also the empty ones that the scans skip.
         string Read(int number) => matching.Read(lineText, number);
-        bool Increases(int number) =>
-            matching.Increases(ruleText is null ? Read(number) : matching.Read(ruleText, number));
-        bool Decreases(int number) =>
-            matching.Decreases(ruleText is null ? Read(number) : matching.Read(ruleText, number));
+        string Rule(int number) => ruleText is null ? Read(number) : matching.Read(ruleText, number);
+        bool Increases(int number) => matching.Increases(Rule(number));
+        bool Decreases(int number) => matching.Decreases(Rule(number));
+        bool IndentsNext(int number) => matching.IndentsNextLine(Rule(number));
+        Inherited From(int number, bool increases) => new(Leading(Read(number)), increases, number);
         // The first line with text above empty lines takes no indentation.
         for (int prior = lineNumber - 1; prior > 0; prior--)
         {
             if (Read(prior).Length > 0)
                 break;
             if (prior == 1)
-                return new Inherited("", false);
+                return new Inherited("", false, null);
         }
-        int preceding = PrecedingLineWithText(lineNumber, Read);
+        int preceding = PrecedingLineWithText(lineNumber, Read, number => matching.IsUnIndented(Rule(number)));
         if (preceding < 1)
             return null;
-        string text = Read(preceding);
-        if (Increases(preceding))
-            return new Inherited(Leading(text), true);
-        if (Decreases(preceding) || preceding == 1 || honorIntentional)
-            return new Inherited(Leading(text), false);
-        for (int above = preceding - 1; above > 0; above--)
+        if (Increases(preceding) || IndentsNext(preceding))
+            return From(preceding, true);
+        if (Decreases(preceding) || preceding == 1)
+            return From(preceding, false);
+        // Below a line that indents only it, as VS Code reads that line: as it is.
+        string above = Read(preceding - 1);
+        if (!matching.Increases(above) && !matching.Decreases(above) && matching.IndentsNextLine(above))
+            return From(StatementStart(preceding - 1), false);
+        if (honorIntentional)
+            return From(preceding, false);
+        for (int number = preceding; number > 0; number--)
         {
-            if (Increases(above))
-                return new Inherited(Leading(Read(above)), true);
-            if (Decreases(above))
-                return new Inherited(Leading(Read(above)), false);
+            if (Increases(number))
+                return From(number, true);
+            if (IndentsNext(number))
+                return From(StatementStart(number), false);
+            if (Decreases(number))
+                return From(number, false);
         }
-        return new Inherited(Leading(Read(1)), false);
+        return From(1, false);
+
+        // The first of the lines up to the given one that each indent only the next.
+        int StatementStart(int number)
+        {
+            while (number > 1 && IndentsNext(number - 1))
+                number--;
+            return number;
+        }
 
         static string Leading(string line) => line[..LeadingWhitespace(line)];
     }
 
     /// <summary>
-    /// The closest line above <paramref name="lineNumber"/> with more than whitespace, or else the first line; -1 for
-    /// none: VS Code's <c>getPrecedingValidLine</c>.
+    /// The closest line above <paramref name="lineNumber"/> with more than whitespace that is not
+    /// <paramref name="ignored"/>; -1 for none: VS Code's <c>getPrecedingValidLine</c>.
     /// </summary>
-    private static int PrecedingLineWithText(int lineNumber, Func<int, string> lineText)
+    private static int PrecedingLineWithText(int lineNumber, Func<int, string> lineText, Func<int, bool> ignored)
     {
-        int found = -1;
         for (int number = lineNumber - 1; number >= 1; number--)
         {
-            if (!string.IsNullOrWhiteSpace(lineText(number)))
+            if (!string.IsNullOrWhiteSpace(lineText(number)) && !ignored(number))
                 return number;
-            found = number;
         }
-        return found;
+        return -1;
     }
 
     /// <summary>
@@ -1745,8 +1762,8 @@ internal sealed partial class EditingHelpers : IDisposable
     /// <summary>What Enter inserts: the text, where the caret goes in it, and how much after the caret it replaces.</summary>
     private readonly record struct NewLine(string Text, int Caret, int Replaced);
 
-    /// <summary>An indentation that lines above give, and whether it is one level more.</summary>
-    internal readonly record struct Inherited(string Indentation, bool Increases);
+    /// <summary>An indentation that lines above give, whether it is one level more, and the line it is from, if one.</summary>
+    internal readonly record struct Inherited(string Indentation, bool Increases, int? Line);
 
     /// <summary>A closing text that the editor typed, and where its pair starts.</summary>
     private sealed record AutoClosed(TextAnchor Open, TextAnchor Close, string CloseText)

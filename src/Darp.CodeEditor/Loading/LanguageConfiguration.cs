@@ -73,6 +73,10 @@ internal sealed record LanguageConfiguration(
                     Pattern(rules.GetProperty("increaseIndentPattern")),
                     Pattern(rules.GetProperty("decreaseIndentPattern"))
                 )
+                {
+                    IndentNextLinePattern = Property(rules, "indentNextLinePattern") is { } next ? Pattern(next) : null,
+                    UnIndentedLinePattern = Property(rules, "unIndentedLinePattern") is { } un ? Pattern(un) : null,
+                }
                 : null
         )
         {
@@ -251,6 +255,18 @@ internal enum IndentAction
 /// <param name="DecreaseIndentPattern">A matching line is indented one level less than the lines before.</param>
 internal sealed record IndentationRules(Regex IncreaseIndentPattern, Regex DecreaseIndentPattern)
 {
+    /// <summary>
+    /// Only the line after a matching line is indented one level more, as after <c>if (x)</c> without a brace; null
+    /// for none.
+    /// </summary>
+    public Regex? IndentNextLinePattern { get; init; }
+
+    /// <summary>
+    /// A matching line, such as a comment that may stand at any indentation, gives the lines after it no indentation:
+    /// they take theirs from the lines above it. Null for none.
+    /// </summary>
+    public Regex? UnIndentedLinePattern { get; init; }
+
     /// <summary>How long one match may take. Some patterns backtrack on long lines, as JSON's does on nested objects.</summary>
     public static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(5);
 
@@ -293,8 +309,17 @@ internal readonly struct IndentationMatching(IndentationRules rules, long deadli
     /// <summary>Whether <paramref name="line"/> is indented one level less than the lines before.</summary>
     public bool Decreases(string line) => Matches(_rules.DecreaseIndentPattern, line);
 
-    private bool Matches(Regex pattern, string line) =>
-        Stopwatch.GetTimestamp() < _deadline
-            ? pattern.IsMatch(line)
-            : throw new RegexMatchTimeoutException(line, pattern.ToString(), IndentationRules.TimeLimit);
+    /// <summary>Whether only the line after <paramref name="line"/> is indented one level more.</summary>
+    public bool IndentsNextLine(string line) => Matches(_rules.IndentNextLinePattern, line);
+
+    /// <summary>Whether <paramref name="line"/> gives the lines after it no indentation.</summary>
+    public bool IsUnIndented(string line) => Matches(_rules.UnIndentedLinePattern, line);
+
+    private bool Matches(Regex? pattern, string line) =>
+        pattern is not null
+        && (
+            Stopwatch.GetTimestamp() < _deadline
+                ? pattern.IsMatch(line)
+                : throw new RegexMatchTimeoutException(line, pattern.ToString(), IndentationRules.TimeLimit)
+        );
 }
