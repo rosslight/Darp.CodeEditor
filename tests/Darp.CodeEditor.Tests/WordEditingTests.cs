@@ -134,6 +134,21 @@ public sealed class WordEditingTests(UiFixture ui)
             textArea.Selection.ShouldBeOfType<RectangleSelection>();
         });
 
+    [Fact]
+    public Task Ctrl_Delete_whose_change_switches_the_document_leaves_the_other_one_alone() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("«x»yz", CodeLanguage.PlainText);
+            CodeDocument first = window.Editor.Document.ShouldNotBeNull();
+            CodeDocument other = CodeDocument.Create(CodeLanguage.PlainText, "abc");
+            first.TextChanged += (_, _) => window.Editor.Document = other;
+
+            window.Press(Keys.Delete, Words);
+
+            first.Text.ShouldBe("yz");
+            other.Text.ShouldBe("abc");
+        });
+
     /// <summary>As a command that does not apply, it leaves its key to the binding before it.</summary>
     [Fact]
     public Task Ctrl_Backspace_on_a_read_only_selection_lets_its_key_go_on() =>
