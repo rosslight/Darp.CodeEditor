@@ -7,18 +7,15 @@ namespace Darp.CodeEditor.Editing;
 // as VS Code's lineCommentCommand falls back to it. Both share the edits that add and remove the comment.
 internal sealed partial class EditingHelpers
 {
-    /// <summary>
-    /// Whether comments get a space inside their tokens, as VS Code's <c>editor.comments.insertSpace</c> does at its
-    /// default. The editor has no such option yet: Ctrl+/ puts a space after the line comment too.
-    /// </summary>
-    private static bool CommentsInsertSpace => true;
+    /// <summary>Whether comments get a space inside their tokens: <see cref="CodeEditor.CommentsInsertSpace"/>.</summary>
+    private bool CommentsInsertSpace => _editor.CommentsInsertSpace;
 
     /// <summary>
     /// Toggles the language's block comment around the selection, as VS Code's <c>blockComment</c> does, in a step of
     /// its own: removes the comment that the selection is in, from the start token before its start to the end token
-    /// after its end, or else puts one around it, with a space inside each token, and keeps the commented text
-    /// selected. Without a selection, an empty comment goes in at the caret, and the caret inside it. Nothing for a
-    /// language without a block comment.
+    /// after its end, or else puts one around it, with a space inside each token by
+    /// <see cref="CodeEditor.CommentsInsertSpace"/>, and keeps the commented text selected. Without a selection, an
+    /// empty comment goes in at the caret, and the caret inside it. Nothing for a language without a block comment.
     /// </summary>
     public void BlockComment()
     {
@@ -70,10 +67,10 @@ internal sealed partial class EditingHelpers
                 closeIndex--;
             }
             edits = RemoveBlockCommentEdits(
-                startLine.Offset + openIndex + openToken.Length,
+                startLine.Offset + openIndex,
+                openToken.Length,
                 endLine.Offset + closeIndex,
-                openToken,
-                closeToken
+                closeToken.Length
             );
         }
         else
@@ -211,10 +208,10 @@ internal sealed partial class EditingHelpers
         if (openIndex == -1 || closeIndex == -1)
             return null;
         return RemoveBlockCommentEdits(
-            startLine.Offset + openIndex + openToken.Length,
+            startLine.Offset + openIndex,
+            openToken.Length,
             endLine.Offset + closeIndex,
-            openToken,
-            closeToken
+            closeToken.Length
         );
     }
 
@@ -236,22 +233,23 @@ internal sealed partial class EditingHelpers
     }
 
     /// <summary>
-    /// The edits that remove the tokens of a block comment around the text from <paramref name="innerStart"/> to
-    /// <paramref name="innerEnd"/>, each with the spaces that go with it; an empty comment as a whole: VS Code's
-    /// <c>_createRemoveBlockCommentOperations</c>.
+    /// The edits that remove the start token at <paramref name="open"/> and the end token at <paramref name="close"/>,
+    /// each with the spaces that go with it, as VS Code's <c>_createRemoveBlockCommentOperations</c>: tokens that meet
+    /// or overlap, as in an empty comment or one whose only space both count, go as one.
     /// </summary>
     private static List<(int Offset, int Length, string Text)> RemoveBlockCommentEdits(
-        int innerStart,
-        int innerEnd,
-        string open,
-        string close
+        int open,
+        int openLength,
+        int close,
+        int closeLength
     )
     {
-        // As VS Code's ranges, from the lower end to the higher.
-        (innerStart, innerEnd) = (Math.Min(innerStart, innerEnd), Math.Max(innerStart, innerEnd));
-        return innerStart == innerEnd
-            ? [(innerStart - open.Length, open.Length + close.Length, "")]
-            : [(innerStart - open.Length, open.Length, ""), (innerEnd, close.Length, "")];
+        // In their order in the text.
+        if (close < open)
+            (open, openLength, close, closeLength) = (close, closeLength, open, openLength);
+        return close > open + openLength
+            ? [(open, openLength, ""), (close, closeLength, "")]
+            : [(open, Math.Max(open + openLength, close + closeLength) - open, "")];
     }
 
     /// <summary>Whether <paramref name="edits"/> are within the text, apart and in order, and none is read-only.</summary>

@@ -38,9 +38,6 @@ namespace Darp.CodeEditor.Editing;
 /// </remarks>
 internal sealed partial class EditingHelpers : IDisposable
 {
-    /// <summary>The characters before which a pair closes, as VS Code's default <c>autoCloseBefore</c>.</summary>
-    private const string CloseBefore = ";:.,=}])> \n\t";
-
     private readonly CodeEditor _editor;
     private readonly TextArea _textArea;
     private readonly CodeDocument _document;
@@ -365,15 +362,29 @@ internal sealed partial class EditingHelpers : IDisposable
         int above = lineNumber - 1;
         while (above >= 1 && string.IsNullOrWhiteSpace(LineText(above)))
             above--;
-        if (above < 1)
+        if (above < 1 || EnterAtLineEnd(above) is not { } enter)
             return null;
-        string text = LineText(above);
-        string previous = above > 1 ? RuleLine(above - 1) : "";
-        if (EnterActionAt(configuration, autoIndent, previous, RuleLine(above), "") is not { } enter)
-            return null;
-        (string own, string append) = Resolved(enter, text[..LeadingWhitespace(text)]);
-        string good = own + append;
+        string good = enter.Indentation + enter.Append;
         return good.Length > 0 ? good : null;
+    }
+
+    /// <summary>
+    /// What Enter at the end of line <paramref name="lineNumber"/> does by the language's rules for Enter and its
+    /// brackets, as VS Code's <c>getEnterAction</c> finds it there, with the line and the one above as the rules see
+    /// them (<see cref="RuleText"/>): the action, the line's indentation without what the action removes, and the text
+    /// to append (<see cref="Resolved"/>). Null when Enter there does nothing special.
+    /// </summary>
+    private (EnterAction Action, string Indentation, string Append)? EnterAtLineEnd(int lineNumber)
+    {
+        string previous = lineNumber > 1 ? RuleLine(lineNumber - 1) : "";
+        if (
+            EnterActionAt(Configuration, _document.Language.AutoIndent, previous, RuleLine(lineNumber), "")
+            is not { } action
+        )
+            return null;
+        string text = LineText(lineNumber);
+        (string indentation, string append) = Resolved(action, text[..LeadingWhitespace(text)]);
+        return (action, indentation, append);
     }
 
     /// <summary>
@@ -1008,18 +1019,28 @@ internal sealed partial class EditingHelpers : IDisposable
     }
 
     /// <summary>
-    /// Whether typing the closing character that the editor typed, right before it, steps over it, as in VS Code: only
-    /// a single character, and not a quote that a backslash escapes. In a rectangle selection, on every line or none.
+    /// Whether typing a closing character right before the same one steps over it, as VS Code's
+    /// <c>autoClosingOvertype</c>: one of a pair of single characters, by <see cref="CodeEditor.AutoClosingOvertype"/>
+    /// any or only one that the editor typed, and not a quote that a backslash escapes. In a rectangle selection, on
+    /// every line or none.
     /// </summary>
     private bool CanTypeOver(char typed, int[] offsets)
     {
-        return Array.TrueForAll(offsets, IsClosedBefore);
+        AutoClosingEdit overtype = _editor.AutoClosingOvertype;
+        return overtype != AutoClosingEdit.Never
+            && Configuration.AutoClosingPairs.Any(pair =>
+                pair is { Open.Length: 1, Close: [char close] } && close == typed
+            )
+            && Array.TrueForAll(offsets, IsClosedBefore);
 
         bool IsClosedBefore(int offset) =>
             offset < Buffer.TextLength
             && Buffer.GetCharAt(offset) == typed
             && !(IsQuote(typed) && IsEscaped(offset))
-            && _autoClosed.Exists(pair => pair.Close.Offset == offset && pair.CloseText.Length == 1);
+            && (
+                overtype == AutoClosingEdit.Always
+                || _autoClosed.Exists(pair => pair.Close.Offset == offset && pair.CloseText.Length == 1)
+            );
     }
 
     /// <summary>
@@ -1046,9 +1067,10 @@ internal sealed partial class EditingHelpers : IDisposable
 
     /// <summary>
     /// The pair to close when <paramref name="typed"/> goes in at <paramref name="caret"/>: the one with the longest
-    /// opening that the character completes. As in VS Code, it closes only before whitespace, a character of
-    /// <see cref="CloseBefore"/> or another closing character; a quote not right after a word; and a pair not closed
-    /// in strings or comments only where the tokens before the caret and of the typed text are neither.
+    /// opening that the character completes. As in VS Code, it closes where <see cref="CodeEditor.AutoClosingQuotes"/>
+    /// or <see cref="CodeEditor.AutoClosingBrackets"/> lets it (<see cref="ClosesBefore"/>) or before another closing
+    /// character; a quote not right after a word, unless they always close; and a pair not closed in strings or
+    /// comments only where the tokens before the caret and of the typed text are neither.
     /// </summary>
     private AutoClosingPair? PairToClose(char typed, int caret)
     {
@@ -1068,11 +1090,22 @@ internal sealed partial class EditingHelpers : IDisposable
         }
         if (found is not { } candidate)
             return null;
+        LanguageConfiguration configuration = Configuration;
+        bool quote = IsQuote(typed);
+        AutoClosing autoClosing =
+            quote ? _editor.AutoClosingQuotes
+            // VS Code's autoClosingComments, which the editor keeps at its default.
+            : configuration.BlockComment is { } block && candidate.Open.Contains(block.Open, StringComparison.Ordinal)
+                ? AutoClosing.LanguageDefined
+            : _editor.AutoClosingBrackets;
+        if (autoClosing == AutoClosing.Never)
+            return null;
         string after = Buffer.GetText(caret, line.EndOffset - caret);
-        if (after.Length > 0 && !CloseBefore.Contains(after[0]) && !StartsWithClosingOnly(after))
+        if (after.Length > 0 && !ClosesBefore(autoClosing, quote, after[0]) && !StartsWithClosingOnly(after))
             return null;
         if (
             candidate.Open is ['\'' or '"']
+            && autoClosing != AutoClosing.Always
             && caret > line.Offset
             && WordCharacters.IsWordCharacter(Buffer.GetCharAt(caret - 1))
         )
@@ -1089,6 +1122,19 @@ internal sealed partial class EditingHelpers : IDisposable
         static bool Excludes(AutoClosingPair pair, TokenType type) =>
             (pair.NotInString && type == TokenType.String) || (pair.NotInComment && type == TokenType.Comment);
     }
+
+    /// <summary>
+    /// Whether a quote, or else a bracket, closes before <paramref name="next"/> by <paramref name="autoClosing"/>, as
+    /// VS Code's <c>shouldAutoCloseBefore</c>.
+    /// </summary>
+    private bool ClosesBefore(AutoClosing autoClosing, bool quote, char next) =>
+        autoClosing switch
+        {
+            AutoClosing.Always => true,
+            AutoClosing.LanguageDefined => Configuration.AutoCloseBeforeSet(forQuotes: quote).Contains(next),
+            AutoClosing.BeforeWhitespace => next is ' ' or '\t',
+            _ => false,
+        };
 
     /// <summary>
     /// Whether <paramref name="after"/> starts with the closing characters of a pair, and not with the opening ones of
@@ -1146,19 +1192,28 @@ internal sealed partial class EditingHelpers : IDisposable
             MoveTyping(-1);
     }
 
-    /// <summary>Whether Backspace deletes empty pairs at <paramref name="offsets"/>: at all of them, or none.</summary>
+    /// <summary>
+    /// Whether Backspace deletes empty pairs at <paramref name="offsets"/>, at all of them or none, as VS Code's
+    /// <c>autoClosingDelete</c>: pairs of single characters, by <see cref="CodeEditor.AutoClosingDelete"/> any or only
+    /// those that the editor closed, of a kind that closes by <see cref="CodeEditor.AutoClosingQuotes"/> or
+    /// <see cref="CodeEditor.AutoClosingBrackets"/>.
+    /// </summary>
     private bool CanDeletePairs(int[] offsets)
     {
-        return Array.TrueForAll(offsets, IsInEmptyPair);
+        AutoClosingEdit delete = _editor.AutoClosingDelete;
+        return delete != AutoClosingEdit.Never && Array.TrueForAll(offsets, IsInEmptyPair);
 
         bool IsInEmptyPair(int offset)
         {
             if (offset == 0 || offset >= Buffer.TextLength)
                 return false;
-            string open = Buffer.GetCharAt(offset - 1).ToString();
-            string close = Buffer.GetCharAt(offset).ToString();
-            return Configuration.AutoClosingPairs.Any(pair => pair.Open == open && pair.Close == close)
-                && _autoClosed.Exists(pair => pair.Close.Offset == offset)
+            char open = Buffer.GetCharAt(offset - 1);
+            char close = Buffer.GetCharAt(offset);
+            return (IsQuote(open) ? _editor.AutoClosingQuotes : _editor.AutoClosingBrackets) != AutoClosing.Never
+                && Configuration.AutoClosingPairs.Any(pair =>
+                    pair is { Open: [char o], Close: [char c] } && o == open && c == close
+                )
+                && (delete == AutoClosingEdit.Always || _autoClosed.Exists(pair => pair.Close.Offset == offset))
                 && CanChange(offset - 1, 2);
         }
     }
@@ -1205,12 +1260,19 @@ internal sealed partial class EditingHelpers : IDisposable
     }
 
     /// <summary>
-    /// The pair whose opening character <paramref name="typed"/> surrounds the selection with, as in VS Code: not
-    /// around whitespace only, and a quote typed over a single quote replaces it. In a rectangle selection, only when
-    /// it surrounds every line's part. Null when it surrounds nothing.
+    /// The pair whose opening character <paramref name="typed"/> surrounds the selection with, as in VS Code: a quote
+    /// or a bracket as <see cref="CodeEditor.AutoSurround"/> lets it, not around whitespace only, and a quote typed over
+    /// a single quote replaces it. In a rectangle selection, only when it surrounds every line's part. Null when it
+    /// surrounds nothing.
     /// </summary>
     private CharacterPair? SurroundingPair(char typed)
     {
+        AutoSurround surround = _editor.AutoSurround;
+        if (
+            surround != AutoSurround.LanguageDefined
+            && surround != (IsQuote(typed) ? AutoSurround.Quotes : AutoSurround.Brackets)
+        )
+            return null;
         CharacterPair? found = null;
         foreach (CharacterPair pair in Configuration.SurroundingPairs)
         {
@@ -1484,8 +1546,11 @@ internal sealed partial class EditingHelpers : IDisposable
     }
 
     /// <summary>
-    /// The indentation that the lines above give line <paramref name="lineNumber"/>, and whether it is one level more:
-    /// VS Code's <c>getInheritIndentForLine</c>. Null when no line above has text.
+    /// The indentation that the lines above give line <paramref name="lineNumber"/>, whether it is one level more, and
+    /// the line it comes from: VS Code's <c>getInheritIndentForLine</c>. Lines of whitespace only and those that match
+    /// the unindented pattern give none. A line that matches the increase pattern, or the pattern that indents only the
+    /// next line, gives one level more, and a line below one that indents only it gives the indentation from before.
+    /// Null when no line above gives one.
     /// </summary>
     /// <param name="matching">The language's indentation rules, within the time of one indentation.</param>
     /// <param name="lineNumber">The line to indent.</param>
@@ -1507,55 +1572,69 @@ internal sealed partial class EditingHelpers : IDisposable
     )
     {
         if (lineNumber <= 1)
-            return new Inherited("", false);
+            return new Inherited("", false, null);
         // Every line read counts against the time, also the empty ones that the scans skip.
         string Read(int number) => matching.Read(lineText, number);
-        bool Increases(int number) =>
-            matching.Increases(ruleText is null ? Read(number) : matching.Read(ruleText, number));
-        bool Decreases(int number) =>
-            matching.Decreases(ruleText is null ? Read(number) : matching.Read(ruleText, number));
+        string Rule(int number) => ruleText is null ? Read(number) : matching.Read(ruleText, number);
+        bool Increases(int number) => matching.Increases(Rule(number));
+        bool Decreases(int number) => matching.Decreases(Rule(number));
+        bool IndentsNext(int number) => matching.IndentsNextLine(Rule(number));
+        Inherited From(int number, bool increases) => new(Leading(Read(number)), increases, number);
         // The first line with text above empty lines takes no indentation.
         for (int prior = lineNumber - 1; prior > 0; prior--)
         {
             if (Read(prior).Length > 0)
                 break;
             if (prior == 1)
-                return new Inherited("", false);
+                return new Inherited("", false, null);
         }
-        int preceding = PrecedingLineWithText(lineNumber, Read);
+        int preceding = PrecedingLineWithText(lineNumber, Read, number => matching.IsUnIndented(Rule(number)));
         if (preceding < 1)
             return null;
-        string text = Read(preceding);
-        if (Increases(preceding))
-            return new Inherited(Leading(text), true);
-        if (Decreases(preceding) || preceding == 1 || honorIntentional)
-            return new Inherited(Leading(text), false);
-        for (int above = preceding - 1; above > 0; above--)
+        if (Increases(preceding) || IndentsNext(preceding))
+            return From(preceding, true);
+        if (Decreases(preceding) || preceding == 1)
+            return From(preceding, false);
+        // Below a line that indents only it, as VS Code reads that line: as it is.
+        string above = Read(preceding - 1);
+        if (!matching.Increases(above) && !matching.Decreases(above) && matching.IndentsNextLine(above))
+            return From(StatementStart(preceding - 1), false);
+        if (honorIntentional)
+            return From(preceding, false);
+        for (int number = preceding; number > 0; number--)
         {
-            if (Increases(above))
-                return new Inherited(Leading(Read(above)), true);
-            if (Decreases(above))
-                return new Inherited(Leading(Read(above)), false);
+            if (Increases(number))
+                return From(number, true);
+            if (IndentsNext(number))
+                return From(StatementStart(number), false);
+            if (Decreases(number))
+                return From(number, false);
         }
-        return new Inherited(Leading(Read(1)), false);
+        return From(1, false);
+
+        // The first of the lines up to the given one that each indent only the next.
+        int StatementStart(int number)
+        {
+            while (number > 1 && IndentsNext(number - 1))
+                number--;
+            return number;
+        }
 
         static string Leading(string line) => line[..LeadingWhitespace(line)];
     }
 
     /// <summary>
-    /// The closest line above <paramref name="lineNumber"/> with more than whitespace, or else the first line; -1 for
-    /// none: VS Code's <c>getPrecedingValidLine</c>.
+    /// The closest line above <paramref name="lineNumber"/> with more than whitespace that is not
+    /// <paramref name="ignored"/>; -1 for none: VS Code's <c>getPrecedingValidLine</c>.
     /// </summary>
-    private static int PrecedingLineWithText(int lineNumber, Func<int, string> lineText)
+    private static int PrecedingLineWithText(int lineNumber, Func<int, string> lineText, Func<int, bool> ignored)
     {
-        int found = -1;
         for (int number = lineNumber - 1; number >= 1; number--)
         {
-            if (!string.IsNullOrWhiteSpace(lineText(number)))
+            if (!string.IsNullOrWhiteSpace(lineText(number)) && !ignored(number))
                 return number;
-            found = number;
         }
-        return found;
+        return -1;
     }
 
     /// <summary>
@@ -1579,9 +1658,9 @@ internal sealed partial class EditingHelpers : IDisposable
         );
 
     /// <summary>
-    /// Comments the lines at their smallest indentation, by its width in columns, with a space after the token, or
-    /// uncomments them when every line is commented, as in VS Code. Lines of whitespace only take no part, unless all
-    /// lines are.
+    /// Comments the lines at their smallest indentation, by its width in columns, with a space after the token by
+    /// <see cref="CodeEditor.CommentsInsertSpace"/>, or uncomments them when every line is commented, as in VS Code.
+    /// Lines of whitespace only take no part, unless all lines are.
     /// </summary>
     private void ToggleLineComment(string token, int first, int last)
     {
@@ -1602,18 +1681,19 @@ internal sealed partial class EditingHelpers : IDisposable
         // The smallest indentation by its width, so that tabs and spaces line up.
         var indenting = new Indenting(_document.Indentation);
         int column = changed.Min(l => indenting.Width(l.Text.AsSpan(0, l.Indent)));
+        bool insertSpace = _editor.CommentsInsertSpace;
         var edits = new List<(int Offset, int Length, string Text)>(changed.Count);
         foreach ((DocumentLine line, string text, int indent) in changed)
         {
             if (!uncomment)
             {
-                edits.Add((line.Offset + (blank ? indent : indenting.OffsetOf(text, column)), 0, token + " "));
+                int offset = line.Offset + (blank ? indent : indenting.OffsetOf(text, column));
+                edits.Add((offset, 0, insertSpace ? token + " " : token));
                 continue;
             }
             int end = indent + token.Length;
-            edits.Add(
-                (line.Offset + indent, end < text.Length && text[end] == ' ' ? token.Length + 1 : token.Length, "")
-            );
+            bool space = insertSpace && end < text.Length && text[end] == ' ';
+            edits.Add((line.Offset + indent, space ? token.Length + 1 : token.Length, ""));
         }
         ReplaceInOneChange(edits);
     }
@@ -1745,8 +1825,8 @@ internal sealed partial class EditingHelpers : IDisposable
     /// <summary>What Enter inserts: the text, where the caret goes in it, and how much after the caret it replaces.</summary>
     private readonly record struct NewLine(string Text, int Caret, int Replaced);
 
-    /// <summary>An indentation that lines above give, and whether it is one level more.</summary>
-    internal readonly record struct Inherited(string Indentation, bool Increases);
+    /// <summary>An indentation that lines above give, whether it is one level more, and the line it is from, if one.</summary>
+    internal readonly record struct Inherited(string Indentation, bool Increases, int? Line);
 
     /// <summary>A closing text that the editor typed, and where its pair starts.</summary>
     private sealed record AutoClosed(TextAnchor Open, TextAnchor Close, string CloseText)

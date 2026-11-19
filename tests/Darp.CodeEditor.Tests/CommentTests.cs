@@ -8,6 +8,10 @@ public sealed class CommentTests(UiFixture ui)
 {
     private readonly UiFixture _ui = ui;
 
+    /// <summary>VS Code's keys for the block comment: Ctrl+Shift+A on Linux.</summary>
+    private static KeyModifiers BlockComment =>
+        OperatingSystem.IsLinux() ? KeyModifiers.Control | KeyModifiers.Shift : KeyModifiers.Shift | KeyModifiers.Alt;
+
     [Theory]
     [InlineData("{\n    \"a\": |1\n}", "{\n    // \"a\": 1\n}")]
     [InlineData("«    a\n\n      b\n»c", "    // a\n\n    //   b\nc")]
@@ -58,6 +62,7 @@ public sealed class CommentTests(UiFixture ui)
     [InlineData("«<a>\n  <b/>\n</a>»", "<!-- <a>\n  <b/>\n</a> -->")]
     [InlineData("<a>\n  <!-- <b/> -->|\n</a>", "<a>\n  <b/>\n</a>")]
     [InlineData("<a>\n  |\n</a>", "<a>\n  <!-- | -->\n</a>")]
+    [InlineData("<a><!-- |--></a>", "<a>|</a>")]
     public Task Ctrl_slash_uses_the_block_comment_in_a_language_without_a_line_comment(
         string marked,
         string expected
@@ -71,5 +76,26 @@ public sealed class CommentTests(UiFixture ui)
 
             string result = MarkedText.Of(window);
             (expected.Contains('|') ? result : MarkedText.Parse(result).Text).ShouldBe(expected);
+        });
+
+    [Fact]
+    public Task Without_spaces_comments_go_in_and_out_without_them() =>
+        _ui.Run(async () =>
+        {
+            await CodeLanguage.Json.Loaded;
+            using EditorWindow window = MarkedText.Show("«1»\n// 2", CodeLanguage.Json);
+            window.Editor.CommentsInsertSpace = false;
+
+            window.Press(Key.Oem2, EditorWindow.Command);
+            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe("//1\n// 2");
+
+            // The space after a token stays, as text of the line.
+            window.Editor.Selection = new TextSelection(4, 8);
+            window.Press(Key.Oem2, EditorWindow.Command);
+            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe("//1\n 2");
+
+            window.Editor.Selection = new TextSelection(0, 3);
+            window.Press(Key.A, BlockComment);
+            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe("/*//1*/\n 2");
         });
 }

@@ -6,8 +6,8 @@ namespace Darp.CodeEditor.Loading;
 
 /// <summary>
 /// The editing rules of a language, from VS Code's <c>language-configuration.json</c>: comments, brackets,
-/// auto-closing and surrounding pairs, indentation rules and the rules for Enter. Other settings of the file are not
-/// read.
+/// auto-closing and surrounding pairs, the characters before which pairs close, indentation rules and the rules for
+/// Enter. Other settings of the file are not read.
 /// </summary>
 internal sealed record LanguageConfiguration(
     string? LineComment,
@@ -23,6 +23,20 @@ internal sealed record LanguageConfiguration(
 
     /// <summary>The rules for Enter, VS Code's <c>onEnterRules</c>, in their order: the first that matches applies.</summary>
     public IReadOnlyList<OnEnterRule> OnEnterRules { get; init; } = [];
+
+    /// <summary>
+    /// The characters before which a pair closes, VS Code's <c>autoCloseBefore</c>; null for VS Code's defaults
+    /// (<see cref="AutoCloseBeforeSet"/>).
+    /// </summary>
+    public string? AutoCloseBefore { get; init; }
+
+    /// <summary>
+    /// The characters before which a quote, or else a bracket, closes, as VS Code's <c>getAutoCloseBeforeSet</c>:
+    /// <see cref="AutoCloseBefore"/>, or by default those that can't start an expression, and for brackets the quotes
+    /// too.
+    /// </summary>
+    public string AutoCloseBeforeSet(bool forQuotes) =>
+        AutoCloseBefore ?? (forQuotes ? ";:.,=}])> \n\t" : "'\"`;:.,=}])> \n\t");
 
     /// <summary>
     /// Finds the brackets, opening and closing, as VS Code's <c>getBracketRegExp</c> does: in any case, and a bracket of
@@ -73,12 +87,22 @@ internal sealed record LanguageConfiguration(
                     Pattern(rules.GetProperty("increaseIndentPattern")),
                     Pattern(rules.GetProperty("decreaseIndentPattern"))
                 )
+                {
+                    IndentNextLinePattern = Property(rules, "indentNextLinePattern") is { } next ? Pattern(next) : null,
+                    UnIndentedLinePattern = Property(rules, "unIndentedLinePattern") is { } un ? Pattern(un) : null,
+                }
                 : null
         )
         {
             OnEnterRules = Property(root, "onEnterRules") is { ValueKind: JsonValueKind.Array } onEnterRules
                 ? [.. onEnterRules.EnumerateArray().Select(OnEnter).OfType<OnEnterRule>()]
                 : [],
+            // As VS Code, an empty one counts as none.
+            AutoCloseBefore =
+                Property(root, "autoCloseBefore") is { ValueKind: JsonValueKind.String } closeBefore
+                && closeBefore.GetString() is { Length: > 0 } characters
+                    ? characters
+                    : null,
         };
     }
 
@@ -251,6 +275,18 @@ internal enum IndentAction
 /// <param name="DecreaseIndentPattern">A matching line is indented one level less than the lines before.</param>
 internal sealed record IndentationRules(Regex IncreaseIndentPattern, Regex DecreaseIndentPattern)
 {
+    /// <summary>
+    /// Only the line after a matching line is indented one level more, as after <c>if (x)</c> without a brace; null
+    /// for none.
+    /// </summary>
+    public Regex? IndentNextLinePattern { get; init; }
+
+    /// <summary>
+    /// A matching line, such as a comment that may stand at any indentation, gives the lines after it no indentation:
+    /// they take theirs from the lines above it. Null for none.
+    /// </summary>
+    public Regex? UnIndentedLinePattern { get; init; }
+
     /// <summary>How long one match may take. Some patterns backtrack on long lines, as JSON's does on nested objects.</summary>
     public static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(5);
 
@@ -293,8 +329,17 @@ internal readonly struct IndentationMatching(IndentationRules rules, long deadli
     /// <summary>Whether <paramref name="line"/> is indented one level less than the lines before.</summary>
     public bool Decreases(string line) => Matches(_rules.DecreaseIndentPattern, line);
 
-    private bool Matches(Regex pattern, string line) =>
-        Stopwatch.GetTimestamp() < _deadline
-            ? pattern.IsMatch(line)
-            : throw new RegexMatchTimeoutException(line, pattern.ToString(), IndentationRules.TimeLimit);
+    /// <summary>Whether only the line after <paramref name="line"/> is indented one level more.</summary>
+    public bool IndentsNextLine(string line) => Matches(_rules.IndentNextLinePattern, line);
+
+    /// <summary>Whether <paramref name="line"/> gives the lines after it no indentation.</summary>
+    public bool IsUnIndented(string line) => Matches(_rules.UnIndentedLinePattern, line);
+
+    private bool Matches(Regex? pattern, string line) =>
+        pattern is not null
+        && (
+            Stopwatch.GetTimestamp() < _deadline
+                ? pattern.IsMatch(line)
+                : throw new RegexMatchTimeoutException(line, pattern.ToString(), IndentationRules.TimeLimit)
+        );
 }

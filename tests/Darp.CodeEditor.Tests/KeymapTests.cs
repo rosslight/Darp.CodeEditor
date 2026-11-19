@@ -46,7 +46,7 @@ public sealed class KeymapTests(UiFixture ui)
         );
 
         keymap.CommandsFor(Key(Keys.Q, KeyModifiers.Control), null).ShouldBe([CodeEditorCommands.ShowHover]);
-        keymap.ChordStartedBy(Key(Keys.K, KeyModifiers.Control)).ShouldBeNull();
+        keymap.BindingsStartedBy(Key(Keys.K, KeyModifiers.Control)).ShouldBeEmpty();
         keymap.CommandsFor(Key(Keys.F, KeyModifiers.Control), null).ShouldBeEmpty();
         // The defaults stay otherwise; the latest binding of a key comes first.
         keymap
@@ -153,6 +153,69 @@ public sealed class KeymapTests(UiFixture ui)
             window.Editor.PendingKeys.ShouldBeNull();
             // F3 ran as it does alone: the next match of the selection.
             window.Editor.Selection.ShouldBe(new TextSelection(8, 11));
+        });
+
+    [Fact]
+    public Task A_later_binding_of_a_key_wins_over_an_earlier_sequence_that_starts_with_it_where_it_applies() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("o|ne\ntwo", CodeLanguage.PlainText);
+            CodeEditorKeymap sequence = CodeEditorKeymap.Empty.With(
+                new CodeEditorKeyBinding("ctrl+k ctrl+i", CodeEditorCommands.ShowHover)
+            );
+
+            // The search history's key applies in the search bar only: the sequence goes on to wait.
+            window.Editor.Keymap = sequence.With(
+                new CodeEditorKeyBinding("ctrl+k", CodeEditorCommands.HistoryShowPrevious)
+            );
+            window.Press(Keys.K, KeyModifiers.Control);
+            window.Editor.PendingKeys.ShouldBe(new KeyGesture(Keys.K, KeyModifiers.Control));
+
+            window.Editor.Keymap = sequence.With(
+                new CodeEditorKeyBinding("ctrl+k", CodeEditorCommands.ExpandLineSelection)
+            );
+            window.Press(Keys.K, KeyModifiers.Control);
+
+            window.Editor.PendingKeys.ShouldBeNull();
+            MarkedText.Of(window).ShouldBe("«one\n»two");
+        });
+
+    [Fact]
+    public Task A_new_document_or_keymap_ends_the_wait() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("|one", CodeLanguage.PlainText);
+            window.Editor.Keymap = CodeEditorKeymap.Default.With(
+                new CodeEditorKeyBinding("ctrl+k f", CodeEditorCommands.Find)
+            );
+
+            window.Press(Keys.K, KeyModifiers.Control);
+            window.Editor.Document = CodeDocument.Create(CodeLanguage.PlainText, "two");
+            window.Editor.PendingKeys.ShouldBeNull();
+
+            window.Press(Keys.K, KeyModifiers.Control);
+            window.Editor.Keymap = CodeEditorKeymap.Default;
+            window.Editor.PendingKeys.ShouldBeNull();
+        });
+
+    [Theory]
+    [InlineData(CodeEditorCommands.CommentLine)]
+    [InlineData(CodeEditorCommands.Undo)]
+    [InlineData(CodeEditorCommands.Redo)]
+    public Task An_edit_that_a_read_only_editor_refuses_leaves_its_key_to_the_binding_before(string command) =>
+        _ui.Run(async () =>
+        {
+            await CodeLanguage.Json.Loaded;
+            using EditorWindow window = MarkedText.Show("1|\n2", CodeLanguage.Json);
+            window.Editor.IsReadOnly = true;
+            window.Editor.Keymap = CodeEditorKeymap.Default.With(
+                new CodeEditorKeyBinding("f2", CodeEditorCommands.ExpandLineSelection),
+                new CodeEditorKeyBinding("f2", command)
+            );
+
+            window.Press(Keys.F2);
+
+            MarkedText.Of(window).ShouldBe("«1\n»2");
         });
 
     [Fact]

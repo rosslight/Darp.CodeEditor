@@ -27,6 +27,8 @@ public sealed class BlockCommentTests(UiFixture ui)
     // As VS Code, a start token up to its length after the caret counts.
     [InlineData("/* a */ b /* c */", 9, 9, "/* a */ b «c»")]
     [InlineData("/* a */", 4, 4, "«a»")]
+    // A comment with one space: the space goes once, and the text around stays.
+    [InlineData("a/* */b", 4, 4, "a|b")]
     public Task Shift_Alt_A_puts_a_block_comment_around_the_selection_or_removes_the_one_it_is_in(
         string text,
         int anchor,

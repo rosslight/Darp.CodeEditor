@@ -12,8 +12,9 @@ namespace Darp.CodeEditor;
 /// <para>
 /// Bindings apply in order, as in VS Code's <c>keybindings.json</c>: a later binding of a key wins over an earlier one,
 /// and a binding whose command starts with <c>-</c> removes the earlier bindings of that command, of its keys only when
-/// it names keys. Where several bindings share a key, the latest whose command applies runs, so that one key can do
-/// different things where they make sense, such as Ctrl+Space, which asks for completion, or toggles the details
+/// it names keys. Where several bindings share a key, the latest whose command applies runs, or the latest sequence
+/// that starts with the key waits for its second stroke if it comes first, so that one key can do different things
+/// where they make sense, such as Ctrl+Space, which asks for completion, or toggles the details
 /// while the list shows, and Enter, which accepts completion's item while the list shows and otherwise goes on to make
 /// a new line. <c>when</c> clauses are read and ignored.
 /// </para>
@@ -157,31 +158,32 @@ public sealed class CodeEditorKeymap
     /// The commands bound to <paramref name="key"/> alone, or to <paramref name="pending"/> followed by it: the latest
     /// binding first.
     /// </summary>
-    internal IEnumerable<string> CommandsFor(KeyEventArgs key, KeyStroke? pending)
+    internal IEnumerable<string> CommandsFor(KeyEventArgs key, KeyStroke? pending) =>
+        pending is { } prefix
+            ? BindingsStartedBy(prefix).Where(b => b.Strokes[1].Matches(key)).Select(b => b.Command)
+            : BindingsStartedBy(key).Where(b => b.Strokes.Count == 1).Select(b => b.Command);
+
+    /// <summary>
+    /// The bindings whose first stroke <paramref name="key"/> is, of one stroke or two: the latest first, the order in
+    /// which the editor tries them.
+    /// </summary>
+    internal IEnumerable<CodeEditorKeyBinding> BindingsStartedBy(KeyEventArgs key)
     {
         for (int i = _effective.Count - 1; i >= 0; i--)
         {
-            IReadOnlyList<KeyStroke> strokes = _effective[i].Strokes;
-            if (pending is { } prefix)
-            {
-                if (strokes.Count == 2 && strokes[0] == prefix && strokes[1].Matches(key))
-                    yield return _effective[i].Command;
-            }
-            else if (strokes.Count == 1 && strokes[0].Matches(key))
-                yield return _effective[i].Command;
+            if (_effective[i].Strokes[0].Matches(key))
+                yield return _effective[i];
         }
     }
 
-    /// <summary>The first stroke of a two-stroke sequence that <paramref name="e"/> is; null if none starts with it.</summary>
-    internal KeyStroke? ChordStartedBy(KeyEventArgs e)
+    /// <summary>The two-stroke bindings that start with <paramref name="first"/>, the latest first.</summary>
+    private IEnumerable<CodeEditorKeyBinding> BindingsStartedBy(KeyStroke first)
     {
         for (int i = _effective.Count - 1; i >= 0; i--)
         {
-            IReadOnlyList<KeyStroke> strokes = _effective[i].Strokes;
-            if (strokes.Count == 2 && strokes[0].Matches(e))
-                return strokes[0];
+            if (_effective[i].Strokes is [var stroke, _] && stroke == first)
+                yield return _effective[i];
         }
-        return null;
     }
 
     /// <summary>The keys of <paramref name="command"/>'s latest binding, for a menu to show; none if it has no binding.</summary>

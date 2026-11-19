@@ -248,6 +248,42 @@ public class CodeEditor : TemplatedControl
         TimeSpan
     >(nameof(OccurrencesHighlightDelay));
 
+    /// <summary>Defines the <see cref="AutoClosingBrackets"/> property.</summary>
+    public static readonly StyledProperty<AutoClosing> AutoClosingBracketsProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        AutoClosing
+    >(nameof(AutoClosingBrackets), defaultValue: AutoClosing.LanguageDefined);
+
+    /// <summary>Defines the <see cref="AutoClosingQuotes"/> property.</summary>
+    public static readonly StyledProperty<AutoClosing> AutoClosingQuotesProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        AutoClosing
+    >(nameof(AutoClosingQuotes), defaultValue: AutoClosing.LanguageDefined);
+
+    /// <summary>Defines the <see cref="AutoClosingOvertype"/> property.</summary>
+    public static readonly StyledProperty<AutoClosingEdit> AutoClosingOvertypeProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        AutoClosingEdit
+    >(nameof(AutoClosingOvertype), defaultValue: AutoClosingEdit.Auto);
+
+    /// <summary>Defines the <see cref="AutoClosingDelete"/> property.</summary>
+    public static readonly StyledProperty<AutoClosingEdit> AutoClosingDeleteProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        AutoClosingEdit
+    >(nameof(AutoClosingDelete), defaultValue: AutoClosingEdit.Auto);
+
+    /// <summary>Defines the <see cref="AutoSurround"/> property.</summary>
+    public static readonly StyledProperty<AutoSurround> AutoSurroundProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        AutoSurround
+    >(nameof(AutoSurround), defaultValue: AutoSurround.LanguageDefined);
+
+    /// <summary>Defines the <see cref="CommentsInsertSpace"/> property.</summary>
+    public static readonly StyledProperty<bool> CommentsInsertSpaceProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        bool
+    >(nameof(CommentsInsertSpace), defaultValue: true);
+
     /// <summary>Defines the <see cref="HoverDelay"/> property.</summary>
     public static readonly StyledProperty<TimeSpan> HoverDelayProperty = AvaloniaProperty.Register<
         CodeEditor,
@@ -710,6 +746,74 @@ public class CodeEditor : TemplatedControl
         set => SetValue(OccurrencesHighlightDelayProperty, value);
     }
 
+    /// <summary>
+    /// Where typing an opening bracket of the language's auto-closing pairs also types its closing one, as VS Code's
+    /// <c>editor.autoClosingBrackets</c>. A pair that starts a block comment, such as <c>/**</c>, closes before what
+    /// <see cref="AutoClosing.LanguageDefined"/> allows whatever this says, as VS Code's
+    /// <c>editor.autoClosingComments</c> does by default. Default: <see cref="AutoClosing.LanguageDefined"/>, as in VS
+    /// Code.
+    /// </summary>
+    public AutoClosing AutoClosingBrackets
+    {
+        get => GetValue(AutoClosingBracketsProperty);
+        set => SetValue(AutoClosingBracketsProperty, value);
+    }
+
+    /// <summary>
+    /// Where typing a quote of the language's auto-closing pairs also types the closing one, as VS Code's
+    /// <c>editor.autoClosingQuotes</c>. Default: <see cref="AutoClosing.LanguageDefined"/>, as in VS Code.
+    /// </summary>
+    public AutoClosing AutoClosingQuotes
+    {
+        get => GetValue(AutoClosingQuotesProperty);
+        set => SetValue(AutoClosingQuotesProperty, value);
+    }
+
+    /// <summary>
+    /// Which closing characters typing the same character right before them steps over, as VS Code's
+    /// <c>editor.autoClosingOvertype</c>. Default: <see cref="AutoClosingEdit.Auto"/>, those the editor typed, as in VS
+    /// Code.
+    /// </summary>
+    public AutoClosingEdit AutoClosingOvertype
+    {
+        get => GetValue(AutoClosingOvertypeProperty);
+        set => SetValue(AutoClosingOvertypeProperty, value);
+    }
+
+    /// <summary>
+    /// Which closing characters Backspace right after their opening ones deletes with them, as VS Code's
+    /// <c>editor.autoClosingDelete</c>: only while the pair's kind closes, by <see cref="AutoClosingBrackets"/> or
+    /// <see cref="AutoClosingQuotes"/>. Default: <see cref="AutoClosingEdit.Auto"/>, those the editor typed, as in VS
+    /// Code.
+    /// </summary>
+    public AutoClosingEdit AutoClosingDelete
+    {
+        get => GetValue(AutoClosingDeleteProperty);
+        set => SetValue(AutoClosingDeleteProperty, value);
+    }
+
+    /// <summary>
+    /// Which opening characters typed over a selection put the language's surrounding pair around it, as VS Code's
+    /// <c>editor.autoSurround</c>. Default: <see cref="AutoSurround.LanguageDefined"/>, quotes and brackets, as in VS
+    /// Code.
+    /// </summary>
+    public AutoSurround AutoSurround
+    {
+        get => GetValue(AutoSurroundProperty);
+        set => SetValue(AutoSurroundProperty, value);
+    }
+
+    /// <summary>
+    /// Whether comments have a space inside their tokens, as VS Code's <c>editor.comments.insertSpace</c>: commenting
+    /// puts one after a line comment's token and inside a block comment's, and uncommenting takes it out with them.
+    /// Default: true, as in VS Code.
+    /// </summary>
+    public bool CommentsInsertSpace
+    {
+        get => GetValue(CommentsInsertSpaceProperty);
+        set => SetValue(CommentsInsertSpaceProperty, value);
+    }
+
     /// <summary>The occurrences of the symbol at the caret that the editor highlights, for tests.</summary>
     internal IReadOnlyList<LanguageClient.Occurrence> Occurrences => _occurrences?.Highlights ?? [];
 
@@ -1024,6 +1128,9 @@ public class CodeEditor : TemplatedControl
         base.OnPropertyChanged(change);
         if (change.Property == DocumentProperty)
             SwitchDocument();
+        // The sequence that waits may not be in the new keymap.
+        else if (change.Property == KeymapProperty)
+            SetPending(null);
         else if (change.Property == IsReadOnlyProperty)
         {
             _part?.IsReadOnly = IsReadOnly || _shown is null;
@@ -1190,6 +1297,8 @@ public class CodeEditor : TemplatedControl
 
     private void Hide(TextEditor part, CodeDocument shown)
     {
+        // A sequence started in the document ends with it.
+        SetPending(null);
         shown.Disposed -= OnDocumentDisposed;
         shown.PropertyChanged -= OnDocumentPropertyChanged;
         CancelLoading();
@@ -1307,8 +1416,9 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>
     /// Runs the keymap's command for <paramref name="e"/>: the second stroke of the sequence that waits, or a stroke of
-    /// its own; or starts waiting for a sequence's second stroke. A second stroke that completes nothing is an ordinary
-    /// key.
+    /// its own; or starts waiting for a sequence's second stroke. As VS Code resolves a key, the latest of its bindings
+    /// that applies wins, and a sequence's first stroke always applies. A second stroke that completes nothing is an
+    /// ordinary key.
     /// </summary>
     /// <returns>Whether the key was the keymap's.</returns>
     private bool RunKeymap(KeyEventArgs e)
@@ -1320,12 +1430,17 @@ public class CodeEditor : TemplatedControl
             if (keymap.CommandsFor(e, pending).Any(Run))
                 return true;
         }
-        if (keymap.ChordStartedBy(e) is { } first)
+        foreach (CodeEditorKeyBinding binding in keymap.BindingsStartedBy(e))
         {
-            SetPending(first);
-            return true;
+            if (binding.Strokes is [var first, _])
+            {
+                SetPending(first);
+                return true;
+            }
+            if (Run(binding.Command))
+                return true;
         }
-        return keymap.CommandsFor(e, null).Any(Run);
+        return false;
     }
 
     /// <summary>
@@ -1349,8 +1464,9 @@ public class CodeEditor : TemplatedControl
     {
         CodeEditorKeymap keymap = Keymap;
         return (_pending is { } pending && keymap.CommandsFor(e, pending).Contains(CodeEditorCommands.ShowHover))
-            || keymap.ChordStartedBy(e) is not null
-            || keymap.CommandsFor(e, null).Contains(CodeEditorCommands.ShowHover);
+            || keymap
+                .BindingsStartedBy(e)
+                .Any(binding => binding.Strokes.Count == 2 || binding.Command == CodeEditorCommands.ShowHover);
     }
 
     private void SetPending(KeyStroke? stroke)
@@ -1410,7 +1526,7 @@ public class CodeEditor : TemplatedControl
             case CodeEditorCommands.TriggerParameterHints when inText && !IsReadOnly:
                 _signatureHelp?.Trigger();
                 return true;
-            case CodeEditorCommands.CommentLine when inText:
+            case CodeEditorCommands.CommentLine when inText && !IsReadOnly:
                 _helpers?.ToggleComment();
                 return true;
             // From the text or the search bar.
@@ -1440,8 +1556,8 @@ public class CodeEditor : TemplatedControl
                             or CodeEditorCommands.CursorWordEndRightSelect
                 );
                 return true;
-            // Typing, Enter, Tab and caret movement.
-            case CodeEditorCommands.Undo or CodeEditorCommands.Redo when inText:
+            // Typing, Enter, Tab and caret movement; as in VS Code, no undo in a read-only editor.
+            case CodeEditorCommands.Undo or CodeEditorCommands.Redo when inText && !IsReadOnly:
                 UndoOrRedo(redo: command == CodeEditorCommands.Redo);
                 return true;
             // Lines and selections.
@@ -1516,12 +1632,11 @@ public class CodeEditor : TemplatedControl
     }
 
     /// <summary>
-    /// Undoes or redoes a step of the shown document, as the keymap's undo and redo do, and brings the caret into view:
-    /// nothing in a read-only editor, as in VS Code.
+    /// Undoes or redoes a step of the shown document, as the keymap's undo and redo do, and brings the caret into view.
     /// </summary>
     private void UndoOrRedo(bool redo)
     {
-        if (IsReadOnly || _shown is not { } shown || _part is not { } part)
+        if (_shown is not { } shown || _part is not { } part)
             return;
         if (redo)
             shown.Redo();

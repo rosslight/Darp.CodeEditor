@@ -78,11 +78,17 @@ internal sealed partial class EditingHelpers
         {
             DocumentLine moving = first.PreviousLine;
             edits.Add((moving.Offset, first.Offset - moving.Offset, ""));
-            edits.Add((last.EndOffset, 0, lineBreak + Buffer.GetText(moving)));
             if (!AddMovedUp(edits, first, last, end, moving, ref shrinkEnd))
-                edits.RemoveRange(2, edits.Count - 2);
+                edits.RemoveRange(1, edits.Count - 1);
+            // After the indentation of an empty last line, which goes in at the same offset.
+            edits.Add((last.EndOffset, 0, lineBreak + Buffer.GetText(moving)));
         }
-        List<(int Offset, int Length, string Text)> sorted = [.. edits.OrderBy(edit => edit.Offset)];
+        // As VS Code orders a command's edits by their ranges: at one offset, insertions as they came, then a deletion,
+        // so that an empty last line takes its indentation before the line break after it goes.
+        List<(int Offset, int Length, string Text)> sorted =
+        [
+            .. edits.OrderBy(edit => edit.Offset).ThenBy(edit => edit.Length),
+        ];
         if (!sorted.TrueForAll(edit => CanChange(edit.Offset, edit.Length)))
             return;
         bool atLineEnd =
@@ -133,7 +139,7 @@ internal sealed partial class EditingHelpers
                 string? indentation = GoodIndentForLine(
                     matching,
                     first.LineNumber,
-                    number => number == first.LineNumber ? movingText : LineText(number)
+                    number => number == first.LineNumber ? moving.LineNumber : number
                 );
                 if (indentation is not null && SpaceCount(indentation) != SpaceCount(oldIndentation))
                     inserting = GenerateIndent(SpaceCount(indentation)) + movingText.TrimStart();
@@ -148,9 +154,10 @@ internal sealed partial class EditingHelpers
                     matching,
                     first.LineNumber + 1,
                     number =>
-                        number == first.LineNumber ? inserting
-                        : number > first.LineNumber && number <= last.LineNumber + 1 ? LineText(number - 1)
-                        : LineText(number)
+                        number == first.LineNumber ? moving.LineNumber
+                        : number > first.LineNumber && number <= last.LineNumber + 1 ? number - 1
+                        : number,
+                    (first.LineNumber, inserting)
                 );
                 if (indentation is not null)
                     offset = SpaceCount(indentation) - SpaceCount(Leading(LineText(first.LineNumber)));
@@ -191,7 +198,7 @@ internal sealed partial class EditingHelpers
                 string? indentation = GoodIndentForLine(
                     matching,
                     moving.LineNumber,
-                    number => LineText(number == moving.LineNumber ? first.LineNumber : number)
+                    number => number == moving.LineNumber ? first.LineNumber : number
                 );
                 if (indentation is not null)
                     offset = SpaceCount(indentation) - SpaceCount(Leading(LineText(first.LineNumber)));
@@ -238,7 +245,7 @@ internal sealed partial class EditingHelpers
     /// <summary>
     /// How many columns the line before <paramref name="lineAbove"/>, or the nearest one above with text, gives line
     /// <paramref name="lineNumber"/> more than it has, as Enter after it would: VS Code's <c>matchEnterRule</c>. Null
-    /// when Enter after it does nothing special.
+    /// when Enter after it does nothing special for the line.
     /// </summary>
     private int? MatchEnterRule(IndentationMatching matching, int lineNumber, int lineAbove)
     {
@@ -247,7 +254,7 @@ internal sealed partial class EditingHelpers
             valid--;
         if (valid < 1 || lineNumber > Buffer.LineCount)
             return null;
-        return EnterIndentDelta(matching, lineNumber, LineText(valid));
+        return EnterIndentDelta(matching, lineNumber, valid);
     }
 
     /// <summary>
@@ -262,77 +269,96 @@ internal sealed partial class EditingHelpers
     ) =>
         string.IsNullOrWhiteSpace(movedText)
             ? MatchEnterRule(matching, lineNumber, lineNumber - 1)
-            : EnterIndentDelta(matching, lineNumber, LineText(movedLine));
+            : EnterIndentDelta(matching, lineNumber, movedLine);
 
     /// <summary>
-    /// How many columns Enter at the end of <paramref name="before"/> gives line <paramref name="lineNumber"/> more than
-    /// it has: one level more after an opening bracket, one less for a line that matches the decrease pattern; VS
-    /// Code's <c>parseEnterResult</c>. Null when Enter there does nothing special.
+    /// How many columns Enter at the end of line <paramref name="enterLine"/> (<see cref="EnterAtLineEnd"/>) gives line
+    /// <paramref name="lineNumber"/> more than it has, VS Code's <c>parseEnterResult</c>: the indentation that starts
+    /// the new line, one level less for a line that matches the decrease pattern. Null when Enter there does nothing
+    /// special, or when the line lacks the text that Enter puts on the new line, such as a doc comment's <c>*</c>.
     /// </summary>
-    private int? EnterIndentDelta(IndentationMatching matching, int lineNumber, string before)
+    private int? EnterIndentDelta(IndentationMatching matching, int lineNumber, int enterLine)
     {
-        if (!IndentsAfter(before))
+        if (EnterAtLineEnd(enterLine) is not { } enter)
             return null;
-        // VS Code's appendText of an indenting Enter: a tab, as wide as a tab stop.
-        string indentation = Leading(before) + "\t";
+        var indenting = new Indenting(_document.Indentation);
+        // What the new line starts with; between brackets, the line after it.
+        string prefix = enter.Action.Indent switch
+        {
+            IndentAction.IndentOutdent => enter.Indentation,
+            IndentAction.Outdent => indenting.Unshift(enter.Indentation) + enter.Append,
+            _ => enter.Indentation + enter.Append,
+        };
         string text = LineText(lineNumber);
-        if (matching.Decreases(text))
-            indentation = new Indenting(_document.Indentation).Unshift(indentation);
+        if (!text.TrimStart().Contains(prefix.TrimStart(), StringComparison.Ordinal))
+            return null;
+        string indentation = Leading(prefix);
+        if (matching.Decreases(matching.Read(RuleLine, lineNumber)))
+            indentation = indenting.Unshift(indentation);
         return SpaceCount(indentation) - SpaceCount(Leading(text));
     }
 
     /// <summary>
-    /// The indentation that the lines above give line <paramref name="lineNumber"/> by the indentation rules, as read
-    /// by <paramref name="lineText"/>: VS Code's <c>getGoodIndentForLine</c>. Null when no line above has text.
+    /// The indentation that the lines above give line <paramref name="lineNumber"/> by the indentation rules and the
+    /// rules for Enter, with the lines in other places: VS Code's <c>getGoodIndentForLine</c>. Null when no line above
+    /// gives one.
     /// </summary>
-    private string? GoodIndentForLine(IndentationMatching matching, int lineNumber, Func<int, string> lineText)
+    /// <param name="matching">The language's indentation rules, within the time of one indentation.</param>
+    /// <param name="lineNumber">The line to indent.</param>
+    /// <param name="source">The line of the document that is in a place, by the place's number.</param>
+    /// <param name="reindented">A place whose line has other indentation, and its text.</param>
+    private string? GoodIndentForLine(
+        IndentationMatching matching,
+        int lineNumber,
+        Func<int, int> source,
+        (int Number, string Text)? reindented = null
+    )
     {
-        if (InheritedIndentation(matching, lineNumber, honorIntentional: true, lineText) is not { } inherited)
+        if (InheritedIndentation(matching, lineNumber, honorIntentional: true, LineAt, RuleAt) is not { } inherited)
             return null;
         var indenting = new Indenting(_document.Indentation);
-        bool decreases = matching.Decreases(lineText(lineNumber));
-        if (InheritedLine(matching, lineNumber, lineText) is { } line)
+        bool decreases = matching.Decreases(matching.Read(RuleAt, lineNumber));
+        if (inherited.Line is { } line)
         {
             // Enter after the line applies while only whitespace lines are between.
             bool applies = true;
             for (int between = line; between < lineNumber - 1 && applies; between++)
-                applies = string.IsNullOrWhiteSpace(lineText(between));
-            if (applies && IndentsAfter(lineText(line)))
+                applies = string.IsNullOrWhiteSpace(LineAt(between));
+            if (
+                applies
+                && EnterActionAt(Configuration, _document.Language.AutoIndent, "", RuleAt(line), "") is { } action
+            )
             {
-                string indentation = indenting.Shift(Leading(lineText(line)));
-                return decreases ? indenting.Unshift(indentation) : indentation;
+                string indentation = Leading(LineAt(line));
+                if (action.RemoveText > 0)
+                    indentation = indentation[..Math.Max(0, indentation.Length - action.RemoveText)];
+                indentation = action.Indent switch
+                {
+                    IndentAction.Indent or IndentAction.IndentOutdent => indenting.Shift(indentation),
+                    IndentAction.Outdent => indenting.Unshift(indentation),
+                    _ => indentation,
+                };
+                if (decreases)
+                    indentation = indenting.Unshift(indentation);
+                return Leading(indentation + action.AppendText);
             }
         }
         if (decreases)
             return inherited.Increases ? inherited.Indentation : indenting.Unshift(inherited.Indentation);
         return inherited.Increases ? indenting.Shift(inherited.Indentation) : inherited.Indentation;
-    }
 
-    /// <summary>
-    /// The line that <see cref="InheritedIndentation"/> takes the indentation of, honoring intentional indentation:
-    /// the nearest line above with text; null for the first line, and below empty lines only.
-    /// </summary>
-    private static int? InheritedLine(IndentationMatching matching, int lineNumber, Func<int, string> lineText)
-    {
-        if (lineNumber <= 1)
-            return null;
-        for (int prior = lineNumber - 1; prior > 0; prior--)
+        string LineAt(int number) =>
+            reindented is { } place && place.Number == number ? place.Text : LineText(source(number));
+
+        // Only its indentation differs, which the rules see as it is.
+        string RuleAt(int number)
         {
-            if (matching.Read(lineText, prior).Length > 0)
-                break;
-            if (prior == 1)
-                return null;
+            string rule = RuleLine(source(number));
+            return reindented is { } place && place.Number == number
+                ? Leading(place.Text) + rule[LeadingWhitespace(rule)..]
+                : rule;
         }
-        int preceding = PrecedingLineWithText(lineNumber, number => matching.Read(lineText, number));
-        return preceding >= 1 ? preceding : null;
     }
-
-    /// <summary>
-    /// Whether Enter at the end of <paramref name="text"/> indents the next line, by the language's brackets: VS Code's
-    /// enter action at a line's end, without the language's own enter rules.
-    /// </summary>
-    private bool IndentsAfter(string text) =>
-        text.Length > 0 && Configuration.Brackets.Any(bracket => EndsWithOpening(text, bracket.Open));
 
     private void DoCopyLines(bool down)
     {
