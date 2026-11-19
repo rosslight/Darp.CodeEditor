@@ -134,9 +134,11 @@ public sealed class KeymapTests(UiFixture ui)
         Resolve(keymap, Key(Keys.F, cmd)).Commands.ShouldBe([CodeEditorCommands.Find]);
         Resolve(keymap, Key(Keys.F, cmd | KeyModifiers.Alt)).Commands.ShouldBe([CodeEditorCommands.Replace]);
         // Cmd+Space is the system's search: completion keeps Ctrl+Space.
-        Resolve(keymap, Key(Keys.Space, KeyModifiers.Control)).Commands.ShouldBe([CodeEditorCommands.TriggerSuggest]);
+        Resolve(keymap, Key(Keys.Space, KeyModifiers.Control))
+            .Commands.ShouldBe([CodeEditorCommands.ToggleSuggestionDetails, CodeEditorCommands.TriggerSuggest]);
         Resolve(keymap, Key(Keys.Escape, KeyModifiers.Alt)).Commands.ShouldBe([CodeEditorCommands.TriggerSuggest]);
-        Resolve(keymap, Key(Keys.I, cmd)).Commands.ShouldBe([CodeEditorCommands.TriggerSuggest]);
+        Resolve(keymap, Key(Keys.I, cmd))
+            .Commands.ShouldBe([CodeEditorCommands.ToggleSuggestionDetails, CodeEditorCommands.TriggerSuggest]);
         Resolve(keymap, Key(Keys.Space, cmd | KeyModifiers.Shift))
             .Commands.ShouldBe([CodeEditorCommands.TriggerParameterHints]);
         Resolve(keymap, Key(Keys.OemQuestion, cmd)).Commands.ShouldBe([CodeEditorCommands.CommentLine]);

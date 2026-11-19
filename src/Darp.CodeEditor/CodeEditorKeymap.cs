@@ -59,7 +59,9 @@ public sealed class CodeEditorKeymap
     /// <remarks>
     /// <list type="table">
     /// <listheader><term>Keys (macOS)</term><description>Command</description></listheader>
-    /// <item><term>ctrl+space, ctrl+i (cmd+i; also alt+escape)</term><description><see cref="CodeEditorCommands.TriggerSuggest"/></description></item>
+    /// <item><term>ctrl+space, ctrl+i (cmd+i; also alt+escape)</term><description><see cref="CodeEditorCommands.TriggerSuggest"/>, and <see cref="CodeEditorCommands.ToggleSuggestionDetails"/> while the list shows, except alt+escape</description></item>
+    /// <item><term>enter</term><description><see cref="CodeEditorCommands.AcceptSelectedSuggestion"/> while the list shows</description></item>
+    /// <item><term>tab, shift+enter</term><description><see cref="CodeEditorCommands.AcceptAlternativeSelectedSuggestion"/> while the list shows; VS Code binds Tab to <see cref="CodeEditorCommands.AcceptSelectedSuggestion"/></description></item>
     /// <item><term>ctrl+shift+space (shift+cmd+space)</term><description><see cref="CodeEditorCommands.TriggerParameterHints"/></description></item>
     /// <item><term>ctrl+f (cmd+f)</term><description><see cref="CodeEditorCommands.Find"/></description></item>
     /// <item><term>ctrl+h (alt+cmd+f)</term><description><see cref="CodeEditorCommands.Replace"/></description></item>
@@ -151,6 +153,13 @@ public sealed class CodeEditorKeymap
         string command = mac ? "cmd" : "ctrl";
         yield return new("ctrl+space", CodeEditorCommands.TriggerSuggest);
         yield return new($"{command}+i", CodeEditorCommands.TriggerSuggest);
+        // After asking, so that the key toggles the details while the list shows.
+        yield return new("ctrl+space", CodeEditorCommands.ToggleSuggestionDetails);
+        yield return new($"{command}+i", CodeEditorCommands.ToggleSuggestionDetails);
+        yield return new("enter", CodeEditorCommands.AcceptSelectedSuggestion);
+        // Replacing, where VS Code's Tab inserts: Enter and Tab split inserting and replacing.
+        yield return new("tab", CodeEditorCommands.AcceptAlternativeSelectedSuggestion);
+        yield return new("shift+enter", CodeEditorCommands.AcceptAlternativeSelectedSuggestion);
         if (mac)
             yield return new("alt+escape", CodeEditorCommands.TriggerSuggest);
         yield return new($"{command}+shift+space", CodeEditorCommands.TriggerParameterHints);
