@@ -228,6 +228,28 @@ public sealed class KeymapTests(UiFixture ui)
             window.Editor.Document.ShouldNotBeNull().Text.ShouldBe("1\n2");
         });
 
+    /// <summary>Plain text, without a server, comments or anything to undo.</summary>
+    [Theory]
+    [InlineData(CodeEditorCommands.CommentLine)]
+    [InlineData(CodeEditorCommands.Undo)]
+    [InlineData(CodeEditorCommands.Redo)]
+    [InlineData(CodeEditorCommands.TriggerSuggest)]
+    [InlineData(CodeEditorCommands.TriggerParameterHints)]
+    public Task A_command_with_nothing_to_act_on_leaves_its_key_to_the_binding_before(string command) =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("1|\n2", CodeLanguage.PlainText);
+            window.Editor.Keymap = CodeEditorKeymap.Default.With(
+                new CodeEditorKeyBinding("f2", CodeEditorCommands.Find),
+                new CodeEditorKeyBinding("f2", command)
+            );
+
+            window.Press(Keys.F2);
+
+            BarOf(window).IsOpen.ShouldBeTrue();
+            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe("1\n2");
+        });
+
     [Fact]
     public Task A_click_ends_the_wait() =>
         _ui.Run(() =>
