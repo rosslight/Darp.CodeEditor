@@ -124,7 +124,7 @@ internal sealed class DocumentSearch : IDisposable
     /// </summary>
     public void FindInSelection(bool on)
     {
-        List<TextRange>? scope = on ? FindScope.OfSelection(_buffer, Area.Selection.Segments, trimEnd: true) : null;
+        List<TextRange>? scope = on ? FindScope.OfSelection(_buffer, Area.Selection.Segments) : null;
         if (scope is null && _scope is null)
             _bar.FindInSelection = false;
         else
@@ -135,13 +135,13 @@ internal sealed class DocumentSearch : IDisposable
     }
 
     /// <summary>
-    /// Searches only the selected ranges as they are, if any, as the automatic Find in Selection does as the bar
-    /// opens, without searching yet.
+    /// Searches only the selected lines, if any, as the automatic Find in Selection does as the bar opens, without
+    /// searching yet.
     /// </summary>
     /// <returns>Whether something is selected, and the scope changed.</returns>
     public bool ScopeToSelection()
     {
-        if (FindScope.OfSelection(_buffer, Area.Selection.Segments, trimEnd: false) is not { } scope)
+        if (FindScope.OfSelection(_buffer, Area.Selection.Segments) is not { } scope)
             return false;
         SetScope(scope);
         return true;
