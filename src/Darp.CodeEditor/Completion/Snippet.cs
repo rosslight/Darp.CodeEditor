@@ -20,13 +20,12 @@ namespace Darp.CodeEditor.Completion;
 /// it has one.
 /// </para>
 /// <para>
-/// A snippet may have as many stops as it likes, as in VS Code. The limits are sized for real snippets, which have a
-/// few lines, so that the UI thread's work with a snippet is bounded by small constants, whatever the server sends.
-/// Parsing runs where the server's answer is read, off the UI thread, and reads the characters at most four times over.
-/// A snippet that parsing would read more often, nested deeper than <see cref="MaxNesting"/> levels, or whose text would
-/// be longer than <see cref="MaxText"/> characters with its mirrors and its indentation goes in as written, without
-/// stops, as a plain item goes in. Its variables' values do not count, as they are the user's text, such as the
-/// selection, which VS Code puts in whatever its length.
+/// A snippet may have as many stops as it likes, as in VS Code. The limits are far beyond real snippets, which have a
+/// few lines; they bound the UI thread's work with a snippet whatever the server sends, as VS Code has none. Parsing
+/// runs where the server's answer is read, off the UI thread, and reads the characters at most four times over. A
+/// snippet that parsing would read more often, nested deeper than <see cref="MaxNesting"/> levels, or whose text would
+/// be longer than <see cref="MaxText"/> characters with its mirrors, its indentation and its variables' values goes in
+/// as written, without stops, as a plain item goes in.
 /// </para>
 /// </remarks>
 internal sealed class Snippet
@@ -35,10 +34,10 @@ internal sealed class Snippet
     public const int MaxNesting = 100;
 
     /// <summary>
-    /// The most characters that a snippet's text may have once it is rendered, each part of it counting one too: many
-    /// times a real snippet's few lines.
+    /// The most characters that a snippet's text may have once it is rendered, its variables' values among them and
+    /// each part of it counting one too: a megabyte or two, far beyond a real snippet's few lines.
     /// </summary>
-    public const int MaxText = 5_000;
+    public const int MaxText = 1_000_000;
 
     /// <summary>The snippet as the server wrote it.</summary>
     private readonly string _source;
@@ -79,9 +78,8 @@ internal sealed class Snippet
     /// <summary>
     /// The text that goes in, and its stops, as VS Code adjusts and resolves them: lines after the first are indented
     /// by the line it goes in, the indentation is that of the document, line breaks are the line's, and variables have
-    /// their values. A text that would be longer than <see cref="MaxText"/> without its variables' values goes in as
-    /// written, without stops: rendering stops there, so it costs the UI thread at most that many characters and parts
-    /// besides the values, and a variable is asked for once.
+    /// their values. A text that would be longer than <see cref="MaxText"/> goes in as written, without stops: rendering
+    /// stops there, so it costs the UI thread at most that many characters and parts, and a variable is asked for once.
     /// </summary>
     public RenderedSnippet Render(SnippetContext context)
     {
@@ -763,7 +761,7 @@ internal sealed class Snippet
         /// <summary>The variables' values: each is asked for once, and a mirror's copy has its source's.</summary>
         private readonly Dictionary<VariableNode, string?> _values = [];
 
-        /// <summary>The characters and parts that the text may still take, besides variables' values.</summary>
+        /// <summary>The characters and parts that the text may still take.</summary>
         private int _budget = MaxText;
 
         /// <summary>
@@ -826,7 +824,8 @@ internal sealed class Snippet
                         }
                         else
                         {
-                            Text.Append(value);
+                            if (!Append(value))
+                                return false;
                             _lastIndentation = LeadingWhitespace(LastLine(value));
                         }
                         break;

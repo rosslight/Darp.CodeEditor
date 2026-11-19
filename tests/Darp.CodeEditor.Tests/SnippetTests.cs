@@ -318,25 +318,26 @@ public sealed class SnippetTests
     }
 
     [Fact]
-    public void A_snippet_whose_text_would_pass_5000_characters_goes_in_as_written()
+    public void A_snippet_whose_text_would_pass_a_million_characters_goes_in_as_written()
     {
         // Lines that the line's indentation of 3,000 columns would make 30 million characters long.
         string lines = "${1:a}" + new string('\n', 10_000);
         AsWritten(lines, lineIndentation: new string(' ', 3_000));
         // Wide tabs, which would make one line's indentation long, are counted before it is made.
-        AsWritten("a\n\t$1", lineIndentation: new string('\t', 20), indentation: Indentation.Spaces(1_000));
+        AsWritten("a\n\t$1", lineIndentation: new string('\t', 1_000), indentation: Indentation.Spaces(1_001));
         Render("a\n\t$1", lineIndentation: "\t", indentation: Indentation.Spaces(100)).Text.Length.ShouldBe(202);
 
-        // Variables' values do not count: they are the user's text, which goes in whatever its length.
+        // Variables' values count too: a mirror copies its text's values.
         string selected = new('a', 10_000);
         RenderedSnippet values = Render("${1:$TM_SELECTED_TEXT} $1 $TM_SELECTED_TEXT", _ => selected);
         values.Text.Length.ShouldBe(30_002);
         Stops(values).ShouldBe($"1:{selected}|1:{selected}|0:");
+        AsWritten("${1:$TM_SELECTED_TEXT}" + string.Concat(Enumerable.Repeat(" $1", 100)), _ => selected);
 
         // Parts count too: variables without a value are asked for at most that often.
         int asked = 0;
         AsWritten(
-            "$1" + string.Concat(Enumerable.Repeat("$CLIPBOARD", 2 * Snippet.MaxText)),
+            "$1" + string.Concat(Enumerable.Repeat("$X", Snippet.MaxText + 1)),
             _ =>
             {
                 asked++;
