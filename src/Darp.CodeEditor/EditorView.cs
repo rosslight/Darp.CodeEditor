@@ -70,10 +70,10 @@ internal sealed class EditorView : IDisposable
     private PressedKey? _pending;
 
     /// <summary>
-    /// The commands left of a key that goes on after a command that decided later to do nothing, while that key is
-    /// raised again; null otherwise.
+    /// What is left of a key's resolution after a command that decided later to do nothing, while that key is raised
+    /// again: the commands after that one, and whether the key starts a sequence; null otherwise.
     /// </summary>
-    private IReadOnlyList<string>? _resumed;
+    private KeyResolution? _resumed;
 
     public EditorView(EditorContext context)
     {
@@ -165,15 +165,13 @@ internal sealed class EditorView : IDisposable
         )
             return false;
         var key = PressedKey.Of(e);
-        KeyResolution resolution = _resumed is { } rest
-            ? new KeyResolution(rest, Waits: false)
-            : KeyResolution.Of(_context.Keymap(), _pending, key);
+        KeyResolution resolution = _resumed ?? KeyResolution.Of(_context.Keymap(), _pending, key);
         _pending = null;
         _resumed = null;
         for (int i = 0; i < resolution.Commands.Count; i++)
         {
-            IReadOnlyList<string> after = [.. resolution.Commands.Skip(i + 1)];
-            if (_commands.TryRun(resolution.Commands[i], () => Resume(key, after)))
+            var rest = new KeyResolution([.. resolution.Commands.Skip(i + 1)], resolution.Waits);
+            if (_commands.TryRun(resolution.Commands[i], () => Resume(key, rest)))
                 return true;
         }
         if (resolution.Waits)
@@ -194,12 +192,13 @@ internal sealed class EditorView : IDisposable
     }
 
     /// <summary>
-    /// Raises <paramref name="key"/> again, as it goes on after a command that decided later to do nothing: to the
-    /// commands after that one, <paramref name="commands"/>, then as an ordinary key, as it would have gone on at once.
+    /// Raises <paramref name="key"/> again, as it goes on after a command that decided later to do nothing: by
+    /// <paramref name="rest"/>, to the commands after that one, then to the second stroke of a sequence it starts, or
+    /// as an ordinary key, as it would have gone on at once.
     /// </summary>
-    private void Resume(PressedKey key, IReadOnlyList<string> commands)
+    private void Resume(PressedKey key, KeyResolution rest)
     {
-        _resumed = commands;
+        _resumed = rest;
         try
         {
             _context.Area.RaiseEvent(
