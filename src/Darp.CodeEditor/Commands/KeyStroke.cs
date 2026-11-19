@@ -78,6 +78,9 @@ internal readonly record struct KeyStroke(Key Key, KeyModifiers Modifiers, strin
         };
     }
 
+    /// <summary>The stroke as Avalonia's gesture, which shows it in the platform's way, such as in a menu.</summary>
+    public KeyGesture ToGesture() => new(Key, Modifiers);
+
     /// <summary>
     /// Whether <paramref name="key"/> is this stroke: its key with exactly its modifiers. A punctuation stroke also
     /// matches the key that types its character, with the Shift that the layout needs for it unless the stroke has
