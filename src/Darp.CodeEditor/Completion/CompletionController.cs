@@ -55,6 +55,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
     private readonly TextArea _textArea;
     private readonly TextDocument _buffer;
     private readonly CodeDocument _document;
+    private readonly TextChanges _changes;
     private readonly CompletionView _view;
 
     /// <summary>Completion from its first request until it ends; null while there is none.</summary>
@@ -99,6 +100,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         _textArea = textArea;
         _buffer = textArea.Document;
         _document = document;
+        _changes = changes;
         _view = new CompletionView(editor, textArea.TextView);
         _commit = new CompletionCommit(textArea, document, snippets, changes);
         _resolver = new CompletionResolver(_view, highlighter);
@@ -407,7 +409,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         if (item.Command is { } command)
             _textArea.Dispatcher.Post(() =>
             {
-                if (_textArea.Document == _buffer)
+                if (_changes.IsShown)
                     RunCommand(command);
             });
         return true;
@@ -500,7 +502,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
     private void OnChoiceSelected(object? sender, EventArgs e) =>
         _textArea.Dispatcher.Post(() =>
         {
-            if (_snippets.Choices() is not null)
+            if (_changes.IsShown && _snippets.Choices() is not null)
                 Ask(new CompletionTrigger(CompletionTriggerKind.Invoked), byKey: true);
         });
 

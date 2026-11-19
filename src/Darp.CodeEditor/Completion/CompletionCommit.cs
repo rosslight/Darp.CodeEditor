@@ -107,9 +107,14 @@ internal sealed class CompletionCommit : IDisposable
         var marks = new List<IUndoableOperation>();
         if (snippet is not null)
             marks.Add(mark);
-        // Undoing the commit drops the additional edits still to come, as they would go in without the item.
+        // Undoing the commit drops the additional edits still to come, as they would go in without the item, and so does
+        // the view's end from the commit's first change on.
         if (late is not null)
+        {
+            _lateEdits?.Cancel();
+            _lateEdits = late.Cancellation;
             marks.Add(new LateEditsMark(late.Cancellation));
+        }
         // Each step stops once a handler of the one before shows another document.
         bool shown =
             Apply(step, continued: false, edits, marks)
@@ -142,8 +147,6 @@ internal sealed class CompletionCommit : IDisposable
     /// <param name="before">The text before the commit.</param>
     private async void ApplyLateEdits(ItemResolve late, object step, TextSnapshot snapshot, TextSnapshot before)
     {
-        _lateEdits?.Cancel();
-        _lateEdits = late.Cancellation;
         try
         {
             CompletionItem? item = await late.Task;
