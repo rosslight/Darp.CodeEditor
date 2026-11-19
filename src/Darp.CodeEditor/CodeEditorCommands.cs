@@ -54,8 +54,8 @@ public static class CodeEditorCommands
     public const string CursorWordEndRightSelect = "cursorWordEndRightSelect";
 
     /// <summary>
-    /// Deletes the selection, or else back to the start of the word before the caret; two or more spaces before it go
-    /// alone, and at a line's start, the line break.
+    /// Deletes the selection, or else back to the start of the word before the caret; an empty pair that the editor
+    /// closed goes as a whole, two or more spaces before the caret go alone, and at a line's start, the line break.
     /// </summary>
     public const string DeleteWordLeft = "deleteWordLeft";
 

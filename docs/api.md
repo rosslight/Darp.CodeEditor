@@ -198,7 +198,7 @@ The default keys on Windows and Linux; macOS in brackets where it differs beyond
 | Shift+Alt+A (Linux: Ctrl+Shift+A) | `editor.action.blockComment` | removes the block comment that the selection is in, or puts one around it; without a selection, an empty one with the caret inside |
 | Ctrl+Z; Ctrl+Y, Ctrl+Shift+Z (macOS: Cmd+Shift+Z only) | `undo`; `redo` | the document's `Undo` and `Redo`; nothing in a read-only editor |
 | Ctrl+Left, Ctrl+Right, with Shift to select (macOS: Alt) | `cursorWordLeft`, `cursorWordEndRight`, `cursorWordLeftSelect`, `cursorWordEndRightSelect` | to the start of the word before the caret and the end of the word after it |
-| Ctrl+Backspace, Ctrl+Delete (macOS: Alt) | `deleteWordLeft`, `deleteWordRight` | deletes the selection, or by words; two or more spaces before the caret, or spaces after it, go alone |
+| Ctrl+Backspace, Ctrl+Delete (macOS: Alt) | `deleteWordLeft`, `deleteWordRight` | deletes the selection, or by words; two or more spaces before the caret, or spaces after it, go alone, and an empty pair that the editor closed as a whole |
 | Ctrl+D | `editor.action.addSelectionToNextFindMatch` | selects the word at the caret; with a selection it does not apply, as the editor has one caret (design.md #119) |
 | Alt+Up, Alt+Down | `editor.action.moveLinesUpAction`, `editor.action.moveLinesDownAction` | moves the lines past the line above or below them, with the selection |
 | Shift+Alt+Up, Shift+Alt+Down (Linux: with Ctrl) | `editor.action.copyLinesUpAction`, `editor.action.copyLinesDownAction` | copies the lines above or below them; going down, the selection goes with the copy. In a rectangle selection the keys go on to AvaloniaEdit's, which extend the rectangle on Windows |
