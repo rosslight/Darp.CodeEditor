@@ -100,8 +100,10 @@ internal sealed class Clipboard : IDisposable
     /// </summary>
     private void OnDrop(object? sender, DragEventArgs e)
     {
+        // The drop's change may have shown another document meanwhile, as may the change here.
         if (
-            e.DragEffects == DragDropEffects.None
+            _disposed
+            || e.DragEffects == DragDropEffects.None
             || _textArea.Selection is not SimpleSelection { IsEmpty: false } dropped
         )
             return;
@@ -120,7 +122,8 @@ internal sealed class Clipboard : IDisposable
         {
             undo.EndUndoGroup();
         }
-        _textArea.Selection = Selection.Create(_textArea, segment.Offset, segment.Offset + corrected.Length);
+        if (!_disposed)
+            _textArea.Selection = Selection.Create(_textArea, segment.Offset, segment.Offset + corrected.Length);
     }
 
     /// <summary>The platform's clipboard fails now and then; the text is then not copied, as in AvaloniaEdit.</summary>
