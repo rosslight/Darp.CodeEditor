@@ -597,7 +597,9 @@ How the client talks to a server, where the protocol leaves a choice:
     reads them. A row shows at most 256 characters of a label, with "…". Additional edits that the resolve brings only
     after the item was committed go in as VS Code puts them in: in the commit's undo step while it is the last one,
     and in a step of their own once the user typed on. They are dropped when a change since the commit, its own edit
-    included, started before where one of them goes, as by typing above an import, and when the commit was undone. Items
+    included, ended before where one of them goes, as by typing above an import, as VS Code drops them; when a change
+    took away or went inside the text that one of them replaces, which VS Code does not check; and when the commit was
+    undone. Items
     resolve only in the process that sent them, while the document stays open there as it was.
   - **Nothing to show:** asked for by key, an empty answer says "No suggestions." until the next key, caret move or
     Escape. A list asked for by key that typing filters empty stays, frozen as VS Code's: its items as they showed
@@ -1309,8 +1311,8 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   says it while typing on; a list that typing filters empty stays frozen while the caret is in a word, and commits
   over what was typed by Enter and a click, but not by a commit character;
   additional edits apply with the item in one step, and ones that come after the commit join its step, or take a step
-  of their own once the user typed on below them; they are dropped after a change above them, and once the commit is
-  undone. An item's `editor.action.triggerSuggest` asks again as typing does, its
+  of their own once the user typed on below them; they are dropped after a change that ended above them, one in the
+  text they replace, and once the commit is undone. An item's `editor.action.triggerSuggest` asks again as typing does, its
   `editor.action.triggerParameterHints` asks for signature help, and another command runs nowhere;
 - completion ends when a caret move is not the keyboard's: a click, the app's code, an undo, a paste, and another
   editor's edit that moves the caret; a cursor key filters again;

@@ -12,13 +12,13 @@ namespace Darp.CodeEditor.Completion;
 /// that the user undoes, with the caret after its text. Inserting, the item's text goes over its edit's range, its insert
 /// range, or the word up to the caret; replacing, over its replace range, or the whole word, as far as the edits since
 /// completion was asked left it. Additional edits that a resolve still under way brings come later, as in VS Code:
-/// unless the text changed before where one of them goes since the commit, or the commit was undone. The edits go in
-/// through <see cref="TextChanges"/>: an item whose text would touch read-only text, such as protected text or a long
-/// line's hidden tail, does not go in. When one of its additional edits would, none of them does, as VS Code applies
-/// them together, and the item's own text still goes in. They go in apart from a lone carriage return next to them,
-/// which would join a line break of theirs (<see cref="LineBreaks.Apart"/>), unless that return is read-only. A handler of
-/// any notification of the commit, of an edit, the selection, the caret or a snippet's first stop, that shows another
-/// document ends the commit there: nothing of it touches that one.
+/// unless a change since the commit ended before where one of them goes, or changed its text, or the commit was undone.
+/// The edits go in through <see cref="TextChanges"/>: an item whose text would touch read-only text, such as protected
+/// text or a long line's hidden tail, does not go in. When one of its additional edits would, none of them does, as VS
+/// Code applies them together, and the item's own text still goes in. They go in apart from a lone carriage return next
+/// to them, which would join a line break of theirs (<see cref="LineBreaks.Apart"/>), unless that return is read-only. A
+/// handler of any notification of the commit, of an edit, the selection, the caret or a snippet's first stop, that shows
+/// another document ends the commit there: nothing of it touches that one.
 /// </summary>
 internal sealed class CompletionCommit : IDisposable
 {
@@ -162,8 +162,10 @@ internal sealed class CompletionCommit : IDisposable
     /// <summary>
     /// Applies the additional edits that a committed item's resolve brings: in the commit's undo step while that is the
     /// last one, and otherwise, as the user typed on, in a step of their own. They are dropped when a change since the
-    /// commit, its own edit included, started before where one of them goes, as by typing above an import: their
-    /// places may no longer be what the server meant.
+    /// commit, its own edit included, ended before where one of them goes, as by typing above an import, as VS Code's
+    /// suggest controller drops them: their places may no longer be what the server meant. So are they when a change
+    /// took away text that one of them replaces, or went inside it, which VS Code does not check: it would replace other
+    /// text.
     /// </summary>
     /// <param name="late">The resolve, which the commit's undo cancels.</param>
     /// <param name="step">The commit's undo step.</param>
@@ -184,8 +186,14 @@ internal sealed class CompletionCommit : IDisposable
             }
             var asked = new SnapshotEdits(snapshot, before);
             var since = new SnapshotEdits(before, _document.CurrentSnapshot);
-            if (additional.Any(edit => since.ChangeBefore(asked.Map(edit.Range).Start)))
+            if (
+                additional.Any(edit =>
+                    asked.Map(edit.Range) is var range && (since.EndsBefore(range.Start) || since.Overlaps(range))
+                )
+            )
+            {
                 return;
+            }
             TextEdit[] edits = Apart(WithoutOverlaps([], Mapped(snapshot, additional)).OrderBy(e => e.Range.Start));
             bool last = _buffer.UndoStack.LastGroupDescriptor == step;
             if (edits.All(CanChange))

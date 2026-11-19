@@ -302,6 +302,66 @@ public sealed class CompletionBehaviorTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Additional_edits_that_come_late_go_in_after_a_change_that_ends_where_they_go_but_not_into_changed_text() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            // An import at the second line's start, and an edit that replaces its "y".
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [ { "label": "Console", "data": { "additionalTextEdits": [
+                      { "range": { "start": { "line": 1, "character": 0 }, "end": { "line": 1, "character": 0 } },
+                        "newText": "using System;\n" } ] } },
+                      { "label": "Convert", "data": { "additionalTextEdits": [
+                      { "range": { "start": { "line": 1, "character": 0 }, "end": { "line": 1, "character": 1 } },
+                        "newText": "z" } ] } } ] }
+                    """
+                )
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "x\ny\nCon");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+
+            // The first line deleted ends where the import goes: as in VS Code, it still goes in.
+            using (await CommandAsync(server, fake, "hold-resolve", "holding resolve"))
+            {
+                await OpenAsync(window, 7);
+                await fake.WaitForAsync("resolve ");
+                window.Press(Key.Enter);
+                editor.Selection = new TextSelection(0, 2);
+                window.Press(Key.Back);
+            }
+            using (await CommandAsync(server, fake, "release-resolve", "released resolve"))
+            {
+                // A list shows after the late answer: the client has read it by then.
+                await OpenAsync(window, document.Text.Length);
+                document.Text.ShouldBe("using System;\ny\nConsole");
+            }
+            window.Press(Key.Escape);
+
+            // Typed over the "y" that the edit replaces: it would replace other text.
+            document.Text = "x\ny\nCon";
+            using (await CommandAsync(server, fake, "hold-resolve", "holding resolve", 2))
+            {
+                await OpenAsync(window, 7);
+                window.Press(Key.Down);
+                await fake.WaitForAsync("resolve ", 3);
+                window.Press(Key.Enter);
+                editor.Selection = new TextSelection(2, 3);
+                window.Type("q");
+            }
+            using (await CommandAsync(server, fake, "release-resolve", "released resolve", 2))
+            {
+                await OpenAsync(window, document.Text.Length);
+                document.Text.ShouldBe("x\nq\nConvert");
+            }
+        });
+
+    [Fact]
     public Task Additional_edits_that_come_late_are_dropped_once_the_commit_is_undone() =>
         _ui.Run(async () =>
         {
