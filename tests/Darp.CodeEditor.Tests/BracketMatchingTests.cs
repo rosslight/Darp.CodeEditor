@@ -87,6 +87,32 @@ public sealed class BracketMatchingTests(UiFixture ui)
             (window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)) > 0).ShouldBe(boxed);
         });
 
+    /// <summary>
+    /// The pair around the caret follows it into a nested pair and out of it, and stays as the caret passes pairs that
+    /// close between its places.
+    /// </summary>
+    [Fact]
+    public Task The_pair_around_the_caret_follows_it_into_nested_pairs_and_out() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = await ShowColored("[1|, [2, 3], [4], 5]");
+            int[] brackets = [0, 4, 9, 12, 14, 18];
+
+            (int Caret, int Open, int Close)[] steps = [(2, 0, 18), (7, 4, 9), (16, 0, 18), (11, 0, 18), (3, 0, 18)];
+            foreach ((int caret, int open, int close) in steps)
+            {
+                window.Editor.Selection = new TextSelection(caret);
+
+                foreach (int bracket in brackets)
+                {
+                    (window.RenderAndCountPixels(s_bracketMatch, new TextRange(bracket, 1)) > 0).ShouldBe(
+                        bracket == open || bracket == close,
+                        $"the bracket at {bracket} with the caret at {caret}"
+                    );
+                }
+            }
+        });
+
     /// <summary>As in VS Code, a pair shows only for a caret without a selection.</summary>
     [Fact]
     public Task A_selection_shows_no_pair() =>

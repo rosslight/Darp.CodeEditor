@@ -122,6 +122,12 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
     /// </summary>
     public event EventHandler? TokensChanged;
 
+    /// <summary>
+    /// Counts the changes of lines' tokens, also of those that the view tokenizes as it builds them, which raise no
+    /// <see cref="TokensChanged"/>: what was found from the tokens holds while it stays the same.
+    /// </summary>
+    public int TokensVersion { get; private set; }
+
     /// <summary>The grammar the tokens come from; null for none.</summary>
     public TextMateGrammar? Grammar => _grammar;
 
@@ -255,6 +261,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
             _request?.Cancel();
             foreach (LineEntry entry in _lines)
                 entry.Tokenized(null, null, exact: false);
+            TokensVersion++;
             _firstInvalid = 0;
         }
         if (
@@ -276,6 +283,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
                 if (!exact)
                     _firstInvalid = Math.Min(_firstInvalid, firstScreen.FirstLine + i);
             }
+            TokensVersion++;
         }
         _textView.Redraw();
         Schedule();
@@ -432,6 +440,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         }
         bool endStateChanged = !Equals(entry.EndState, result.RuleStack);
         entry.Tokenized(result.Tokens, result.RuleStack, exact);
+        TokensVersion++;
         if (!endStateChanged || index + 1 >= _lines.Count)
             return;
         // The next line starts in a different state. It may be built already, from tokens for the old state; it has
@@ -575,7 +584,10 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
             }
         }
         if (anyChanged)
+        {
+            TokensVersion++;
             TokensChanged?.Invoke(this, EventArgs.Empty);
+        }
         Schedule();
     }
 
