@@ -308,6 +308,24 @@ public sealed class PairTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_longer_opening_closes_in_no_document_that_a_handler_of_its_typing_shows() =>
+        _ui.Run(async () =>
+        {
+            await Pairs.Loaded;
+            using EditorWindow window = MarkedText.Show("(|", Pairs);
+            CodeDocument other = CodeDocument.Create(Pairs, "(*");
+            EditorWindow.PartOf(window.Editor).TextArea.TextEntered += (_, _) =>
+            {
+                window.Editor.Document = other;
+                window.Editor.Selection = new TextSelection(2);
+            };
+
+            window.Type("*");
+
+            other.Text.ShouldBe("(*");
+        });
+
+    [Fact]
     public Task A_pair_of_several_characters_closes_when_its_last_character_is_typed() =>
         _ui.Run(async () =>
         {
