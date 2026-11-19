@@ -28,6 +28,12 @@ public sealed record CodeEditorOptions
     /// <see cref="MatchBrackets.Near"/> is the cheaper, quieter mode.
     /// </summary>
     public MatchBrackets MatchBrackets { get; init; } = MatchBrackets.Always;
+
+    /// <summary>
+    /// Whether the occurrences of the symbol at the caret are highlighted, the language server's or else the word's:
+    /// <c>editor.occurrencesHighlight</c>. Off, a caret move asks the server nothing.
+    /// </summary>
+    public bool OccurrencesHighlight { get; init; } = true;
 }
 
 /// <summary>

@@ -188,4 +188,13 @@ public static class CodeEditorCommands
 
     /// <summary>Shrinks the selection back through the ranges that <see cref="SmartSelectExpand"/> went through.</summary>
     public const string SmartSelectShrink = "editor.action.smartSelect.shrink";
+
+    /// <summary>
+    /// Moves the caret to the start of the next occurrence of the symbol at the caret, after the last to the first,
+    /// while they are highlighted (<see cref="CodeEditorOptions.OccurrencesHighlight"/>); otherwise it does not apply.
+    /// </summary>
+    public const string WordHighlightNext = "editor.action.wordHighlight.next";
+
+    /// <summary>Moves the caret to the start of the previous occurrence, as <see cref="WordHighlightNext"/> does.</summary>
+    public const string WordHighlightPrevious = "editor.action.wordHighlight.prev";
 }

@@ -56,6 +56,9 @@ public sealed class TextSnapshot
     /// <summary>The text. For a document's snapshot, each call copies it into a new string.</summary>
     public string GetText() => _text.Text;
 
+    /// <summary>Reads the text without copying it into one string.</summary>
+    internal TextReader CreateReader() => _text.CreateReader();
+
     /// <summary>The text of <paramref name="range"/>, clamped to the text.</summary>
     public string GetText(TextRange range)
     {
