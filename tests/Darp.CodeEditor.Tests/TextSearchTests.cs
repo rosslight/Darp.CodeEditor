@@ -40,6 +40,22 @@ public sealed class TextSearchTests
         result.Matches.Select(match => match.Replacement).ShouldBe(["\r\n=\r\n", "\r\n=\r\n"]);
     }
 
+    /// <summary><c>$_</c> is the whole text, with its line breaks of every kind.</summary>
+    [Fact]
+    public void A_replacement_takes_the_documents_line_breaks_also_from_its_substitutions()
+    {
+        TextSnapshot snapshot = TextSnapshot.FromString("x\r\ny\nz");
+
+        SearchResult result = TextSearch.Find(
+            snapshot,
+            new SearchQuery("y", MatchCase: true, WholeWord: false, UseRegex: true),
+            "$_",
+            CancellationToken.None
+        );
+
+        result.Matches.Single().Replacement.ShouldBe("x\ny\nz");
+    }
+
     [Fact]
     public void A_cancelled_search_stops()
     {

@@ -118,6 +118,19 @@ public sealed class ClipboardTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe("a\r\nb\r\n«x\r\ny»c\nd");
         });
 
+    /// <summary>A text input of several characters, as from an input method, with a line break in it.</summary>
+    [Fact]
+    public Task Typed_text_with_line_breaks_goes_in_with_the_documents() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("a\r\nb\r\n|c\nd", CodeLanguage.PlainText);
+
+            window.Window.KeyTextInput("x\ny");
+            window.Layout();
+
+            MarkedText.Of(window).ShouldBe("a\r\nb\r\nx\r\ny|c\nd");
+        });
+
     private static IClipboard Clipboard(EditorWindow window) =>
         window.Window.Clipboard ?? throw new InvalidOperationException("The window has no clipboard.");
 

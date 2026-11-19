@@ -125,10 +125,8 @@ internal static class TextSearch
                 snapshot.GetText(),
                 query,
                 regex,
-                // Matches don't span lines, so the substitutions bring no line breaks.
-                replacement is null
-                    ? null
-                    : TextUtilities.NormalizeNewLines(replacement, snapshot.LineBreak),
+                replacement is null ? null : InLineBreaks(replacement, snapshot.LineBreak),
+                snapshot.LineBreak,
                 matches,
                 cancellationToken
             ),
@@ -141,6 +139,7 @@ internal static class TextSearch
         SearchQuery query,
         Regex regex,
         string? replacement,
+        string lineBreak,
         TextSegmentCollection<SearchMatch> matches,
         CancellationToken cancellationToken
     )
@@ -169,7 +168,8 @@ internal static class TextSearch
                     matches.Add(
                         new SearchMatch(
                             replacement is null ? ""
-                            : query.UseRegex ? match.Result(replacement)
+                            // A substitution such as $_, the whole text, brings line breaks of every kind.
+                            : query.UseRegex ? InLineBreaks(match.Result(replacement), lineBreak)
                             : replacement
                         )
                         {
@@ -190,6 +190,9 @@ internal static class TextSearch
             return SearchOutcome.OutOfTime;
         }
     }
+
+    private static string InLineBreaks(string text, string lineBreak) =>
+        text.AsSpan().IndexOfAny('\r', '\n') < 0 ? text : TextUtilities.NormalizeNewLines(text, lineBreak);
 
     /// <summary>Whether the search took its time; throws once it is cancelled.</summary>
     private static bool IsOutOfTime(long start, CancellationToken cancellationToken)
