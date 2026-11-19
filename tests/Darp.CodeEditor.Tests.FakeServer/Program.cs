@@ -552,15 +552,16 @@ internal sealed class FakeServer
                     continue;
                 bool write = text.AsSpan(at + word.Length).StartsWith(" =", StringComparison.Ordinal);
                 highlights.Add(
-                    (JsonNode)new JsonObject
-                    {
-                        ["range"] = new JsonObject
+                    (JsonNode)
+                        new JsonObject
                         {
-                            ["start"] = Position(text, at),
-                            ["end"] = Position(text, at + word.Length),
-                        },
-                        ["kind"] = write ? 3 : 2,
-                    }
+                            ["range"] = new JsonObject
+                            {
+                                ["start"] = Position(text, at),
+                                ["end"] = Position(text, at + word.Length),
+                            },
+                            ["kind"] = write ? 3 : 2,
+                        }
                 );
             }
         }
