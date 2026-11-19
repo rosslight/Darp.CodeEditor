@@ -125,7 +125,11 @@ internal static class TextSearch
                 snapshot.GetText(),
                 query,
                 regex,
-                replacement is null ? null : InLineBreaks(replacement, snapshot.LineBreak),
+                // A regular expression's only once it is expanded: \r$1\n is one line break when $1 is empty.
+                replacement is null
+                || query.UseRegex
+                    ? replacement
+                    : InLineBreaks(replacement, snapshot.LineBreak),
                 snapshot.LineBreak,
                 matches,
                 cancellationToken
