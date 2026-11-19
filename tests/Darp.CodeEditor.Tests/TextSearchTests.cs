@@ -139,6 +139,80 @@ public sealed class TextSearchTests
         }
     }
 
+    /// <summary>
+    /// As VS Code searches, by code points: no match starts or ends inside a surrogate pair, an empty match steps past
+    /// a pair whole, and <c>.</c> matches a pair whole. A character class such as <c>[^b]</c> matches half of one,
+    /// which the search rejects: VS Code's would match the pair.
+    /// </summary>
+    [Theory]
+    [InlineData("\U0001F600", "(?=.)", "X", "X\U0001F600")]
+    [InlineData("\U0001F600", "(?:)", "X", "X\U0001F600X")]
+    [InlineData("a\U0001F600b", ".", "<$0>", "<a><\U0001F600><b>")]
+    [InlineData("\U0001F600\U0001F601", "(?<=.)", "|", "\U0001F600|\U0001F601|")]
+    [InlineData("\U0001F600", "[^b]", "X", "\U0001F600")]
+    public void No_match_splits_a_surrogate_pair(string text, string query, string replacement, string expected)
+    {
+        var snapshot = TextSnapshot.FromString(text);
+        var search = new SearchQuery(query, MatchCase: true, WholeWord: false, UseRegex: true);
+        var replace = new SearchReplacement(replacement, PreserveCase: false);
+
+        SearchResult found = TextSearch.Find(snapshot, search, replace, null, CancellationToken.None);
+        (SearchEdit? edit, SearchOutcome outcome) = TextSearch.ReplaceAll(
+            snapshot,
+            search,
+            replace,
+            null,
+            CancellationToken.None
+        );
+
+        var replaced = new TextDocument(text);
+        foreach (SearchMatch match in found.Matches.Reverse())
+            replaced.Replace(match.StartOffset, match.Length, match.Replacement);
+        replaced.Text.ShouldBe(expected);
+        outcome.ShouldBe(SearchOutcome.Complete);
+        var all = new TextDocument(text);
+        if (edit is not null)
+            all.Replace(edit.Start, edit.Length, edit.Text, edit.Map);
+        all.Text.ShouldBe(expected);
+    }
+
+    /// <summary>
+    /// A scope that starts or ends between a <c>\r</c> and its <c>\n</c>, as an edit can leave one, starts after the
+    /// line break or ends before it.
+    /// </summary>
+    [Theory]
+    [InlineData(0, 2, "a", "0-1")]
+    [InlineData(0, 2, "^", "0-0")]
+    [InlineData(2, 4, "[ab]", "3-4")]
+    [InlineData(2, 2, "^", "3-3")]
+    public void A_scope_inside_a_line_break_leaves_it_out(int start, int end, string query, string expected)
+    {
+        SearchResult result = TextSearch.Find(
+            TextSnapshot.FromString("a\r\nb"),
+            new SearchQuery(query, MatchCase: true, WholeWord: false, UseRegex: true),
+            null,
+            [TextRange.FromBounds(start, end)],
+            CancellationToken.None
+        );
+
+        result.Outcome.ShouldBe(SearchOutcome.Complete);
+        string.Join(' ', result.Matches.Select(match => $"{match.StartOffset}-{match.EndOffset}")).ShouldBe(expected);
+    }
+
+    [Theory]
+    [InlineData("a.b", "a~b")]
+    [InlineData(@"\.\\.", @"\.\\~")]
+    [InlineData("[.].", "[.]~")]
+    [InlineData("[].].", "[].]~")]
+    [InlineData("[^].].", "[^].]~")]
+    [InlineData(@"[\].].", @"[\].]~")]
+    [InlineData("[a-z-[.]].", "[a-z-[.]]~")]
+    [InlineData("(?#a.b).", "(?#a.b)~")]
+    public void Only_a_dot_outside_a_character_class_matches_a_code_point(string pattern, string expected) =>
+        TextSearch
+            .DotsMatchCodePoints(pattern)
+            .ShouldBe(expected.Replace("~", @"(?:[\uD800-\uDBFF][\uDC00-\uDFFF]|.)", StringComparison.Ordinal));
+
     [Theory]
     [InlineData("foo", false)]
     [InlineData("", false)]

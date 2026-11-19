@@ -43,6 +43,46 @@ public sealed class SearchTests(UiFixture ui)
             await Wait.UntilAsync(() => bar.Count == "3 of 4");
         });
 
+    /// <summary>
+    /// VS Code's <c>editor.find.loop</c>, <c>cursorMoveOnType</c> and <c>closeOnResult</c>: without the loop, going on
+    /// stops at the last match and going back at the first; without moving on type, the selection stays as the query
+    /// changes; and closing on the result closes the bar once going on from the query selects another match.
+    /// </summary>
+    [Fact]
+    public Task The_find_options_go_round_move_on_type_and_close_as_they_say() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("|a b a b a", CodeLanguage.PlainText);
+            CodeEditor editor = window.Editor;
+            editor.FindLoop.ShouldBeTrue();
+            editor.FindCursorMoveOnType.ShouldBeTrue();
+            editor.FindCloseOnResult.ShouldBeFalse();
+            editor.FindLoop = false;
+            editor.FindCursorMoveOnType = false;
+
+            editor.OpenSearch();
+            SearchBar bar = BarOf(window);
+            window.Type("b");
+            await Wait.UntilAsync(() => bar.Count == "? of 2");
+            editor.Selection.ShouldBe(new TextSelection(0));
+
+            window.Press(Key.Enter);
+            window.Press(Key.Enter);
+            window.Press(Key.Enter);
+            editor.Selection.ShouldBe(new TextSelection(6, 7));
+            window.Press(Key.Enter, KeyModifiers.Shift);
+            window.Press(Key.Enter, KeyModifiers.Shift);
+            editor.Selection.ShouldBe(new TextSelection(2, 3));
+
+            editor.FindCloseOnResult = true;
+            window.Press(Key.Enter, KeyModifiers.Shift);
+            bar.IsOpen.ShouldBeTrue();
+            window.Press(Key.Enter);
+            editor.Selection.ShouldBe(new TextSelection(6, 7));
+            bar.IsOpen.ShouldBeFalse();
+            EditorWindow.PartOf(editor).TextArea.IsFocused.ShouldBeTrue();
+        });
+
     [Fact]
     public Task Tab_goes_between_the_query_and_the_replacement_as_in_VS_Code() =>
         _ui.Run(() =>
@@ -263,9 +303,74 @@ public sealed class SearchTests(UiFixture ui)
             );
             bar.Message.ShouldBeNull();
             Click(bar, "Replace All");
+            await Wait.UntilAsync(() => document.Text != text);
             document.Text.ShouldBe(string.Concat(Enumerable.Repeat("b\n", TextSearch.MaxMatches + 2)));
             document.Undo();
             document.Text.ShouldBe(text);
+        });
+
+    /// <summary>
+    /// Replace All beyond the matches highlighted searches the rest of the text in the background, as the search does,
+    /// so that a costly expression there leaves the UI thread free; out of time, it replaces nothing.
+    /// </summary>
+    [Fact]
+    public Task Replace_All_beyond_the_matches_highlighted_searches_in_the_background() =>
+        _ui.Run(async () =>
+        {
+            // The search stops at the matches it keeps, before the line on which (a+)+$ backtracks.
+            string text =
+                string.Concat(Enumerable.Repeat("x\n", TextSearch.MaxMatches + 1)) + new string('a', 29) + "!";
+            using EditorWindow window = MarkedText.Show("|" + text, CodeLanguage.PlainText);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            window.Editor.OpenSearch(replace: true);
+            SearchBar bar = BarOf(window);
+            bar.RegexToggle.IsChecked = true;
+            bar.ReplaceBox.Text = "y";
+            bar.FindBox.Text = "x|(a+)+$";
+            await Wait.UntilAsync(() => bar.ReplaceAllButton.IsEnabled);
+
+            Click(bar, "Replace All");
+
+            // The click returns before the search ends: it has no outcome yet.
+            bar.Message.ShouldBeNull();
+            await Wait.UntilAsync(() => bar.Message?.Contains("stopped", StringComparison.Ordinal) == true);
+            document.Text.ShouldBe(text);
+        });
+
+    /// <summary>
+    /// As in VS Code, every match stays within reach beyond those highlighted: F3 and Shift+F3 search the text for
+    /// the next and the previous one, and go round only past the last match of all.
+    /// </summary>
+    [Fact]
+    public Task F3_and_Shift_F3_reach_the_matches_beyond_those_highlighted() =>
+        _ui.Run(async () =>
+        {
+            const int Count = TextSearch.MaxMatches + 2;
+            using EditorWindow window = MarkedText.Show(
+                "|" + string.Concat(Enumerable.Repeat("a\n", Count)),
+                CodeLanguage.PlainText
+            );
+            // The query is the word at the caret.
+            window.Editor.OpenSearch();
+            SearchBar bar = BarOf(window);
+            await Wait.UntilAsync(() => bar.Count == "? of 19,999+");
+
+            // The last match highlighted, then the two after it, and round to the first.
+            window.Editor.Selection = Match(TextSearch.MaxMatches - 1);
+            foreach (int next in (int[])[TextSearch.MaxMatches, Count - 1, 0])
+            {
+                window.Press(Key.F3);
+                await Wait.UntilAsync(() => window.Editor.Selection == Match(next));
+            }
+            // Back round to the last match of all, and on back to the last one highlighted.
+            foreach (int previous in (int[])[Count - 1, TextSearch.MaxMatches, TextSearch.MaxMatches - 1])
+            {
+                window.Press(Key.F3, KeyModifiers.Shift);
+                await Wait.UntilAsync(() => window.Editor.Selection == Match(previous));
+            }
+            bar.Count.ShouldBe("19999 of 19,999+");
+
+            static TextSelection Match(int index) => new(index * 2, index * 2 + 1);
         });
 
     /// <summary>

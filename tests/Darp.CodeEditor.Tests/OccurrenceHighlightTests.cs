@@ -165,14 +165,36 @@ public sealed class OccurrenceHighlightTests(UiFixture ui)
 
             editor.OccurrencesHighlight = OccurrencesHighlight.SingleFile;
             editor.OccurrencesHighlightDelay = TimeSpan.FromMilliseconds(200);
+            int timers = time.TimersCreated;
             editor.Selection = new TextSelection(2);
             Advance(time, s_pause);
-            await fake.WaitForAsync("documentHighlight", 2);
-            await Task.Delay(100, TestContext.Current.CancellationToken);
-            Dispatcher.UIThread.RunJobs();
+            // The answer is in, and waits for the delay, once its timer is armed: the clock stood still meanwhile.
+            await Wait.UntilAsync(() => time.HasTimerDueIn(TimeSpan.FromMilliseconds(200), timers));
             editor.Occurrences.ShouldBeEmpty();
             Advance(time, TimeSpan.FromMilliseconds(200));
             editor.Occurrences.Count.ShouldBe(3);
+        });
+
+    /// <summary>
+    /// A selection that changes without the caret moving, as when only its anchor moves onto another line, no longer
+    /// highlights the word at the caret.
+    /// </summary>
+    [Fact]
+    public Task A_selection_whose_anchor_moves_onto_another_line_clears_the_highlights() =>
+        _ui.Run(async () =>
+        {
+            var time = new ManualTime();
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "abc abc\nabc");
+            using EditorWindow window = Show(document);
+            await CompletionTests.StartServingAsync(server, document);
+            await ShowAtAsync(window, time, 1, 3);
+
+            window.Editor.Selection = new TextSelection(9, 1);
+
+            window.Editor.CaretPosition.ShouldBe(new TextPosition(1, 2));
+            window.Editor.Occurrences.ShouldBeEmpty();
         });
 
     [Fact]

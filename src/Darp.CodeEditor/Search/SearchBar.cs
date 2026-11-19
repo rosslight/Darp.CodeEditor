@@ -77,6 +77,15 @@ internal sealed class SearchBar : UserControl
     private CancellationTokenSource? _searching;
 
     /// <summary>
+    /// The search for the match to select beyond those that the result keeps, under way in the background; null for
+    /// none.
+    /// </summary>
+    private CancellationTokenSource? _seeking;
+
+    /// <summary>The search of Replace All beyond the matches that the result keeps, under way; null for none.</summary>
+    private CancellationTokenSource? _replacing;
+
+    /// <summary>
     /// Where to move once the search under way has its result. A newer search that takes over keeps it: it replaces
     /// the search, not what the search was for.
     /// </summary>
@@ -574,6 +583,9 @@ internal sealed class SearchBar : UserControl
     private void Search(Move move)
     {
         CancelSearch();
+        // As VS Code's editor.find.cursorMoveOnType: the query, its options and the scope may leave the selection.
+        if (move == Move.First && _shown?.Editor.FindCursorMoveOnType == false)
+            move = Move.None;
         if (move != Move.None)
             _move = move;
         if (!IsOpen || _shown is not { } shown || _find.Text is not { Length: > 0 } text)
@@ -640,51 +652,212 @@ internal sealed class SearchBar : UserControl
     {
         _searching?.Cancel();
         _searching = null;
+        _seeking?.Cancel();
+        _seeking = null;
+        _replacing?.Cancel();
+        _replacing = null;
     }
 
-    /// <summary>Selects a match as <paramref name="move"/> says, and scrolls it into view.</summary>
+    /// <summary>
+    /// Selects a match as <paramref name="move"/> says, and scrolls it into view. Where the match may be beyond those
+    /// that the result keeps, it searches the text for it in the background, as VS Code does beyond the matches it
+    /// highlights: every match stays within reach.
+    /// </summary>
     private void Perform(Move move, SearchResult result)
     {
-        if (_shown is not { } shown || result.Matches.Count == 0)
+        if (_shown is not { } shown || result.Matches is not { Count: > 0, LastSegment: { } last } matches)
             return;
-        TextSegmentCollection<SearchMatch> matches = result.Matches;
         TextRange selection = shown.Editor.Selection.Range;
-        SearchMatch? match = move switch
+        bool capped = result.Outcome == SearchOutcome.TooManyMatches;
+        switch (move)
         {
-            Move.First => matches.FindFirstSegmentWithStartAfter(_from) ?? matches.FirstSegment,
-            Move.Next => After(selection),
-            Move.Previous => matches.FindFirstSegmentWithStartAfter(selection.Start) is { } after
-                ? matches.GetPreviousSegment(after) ?? matches.LastSegment
-                : matches.LastSegment,
-            _ => null,
-        };
-        if (match is not null)
-            Select(match);
+            case Move.First when matches.FindFirstSegmentWithStartAfter(_from) is { } first:
+                Land(move, first);
+                break;
+            case Move.First when capped:
+                int from = _from;
+                Seek(
+                    move,
+                    result,
+                    selection,
+                    (snapshot, scopes, cancellation) =>
+                        TextSearch.FindNext(snapshot, result.Query, scopes, from, skipEmpty: false, cancellation)
+                );
+                break;
+            case Move.Next when After(selection) is { } next:
+                Land(move, next);
+                break;
+            case Move.Next when capped:
+                Seek(
+                    move,
+                    result,
+                    selection,
+                    (snapshot, scopes, cancellation) =>
+                        TextSearch.FindNext(
+                            snapshot,
+                            result.Query,
+                            scopes,
+                            selection.End,
+                            skipEmpty: selection.Length == 0,
+                            cancellation
+                        )
+                );
+                break;
+            case Move.Previous
+                when matches.FindFirstSegmentWithStartAfter(selection.Start) is { } after
+                    && matches.GetPreviousSegment(after) is { } previous:
+                Land(move, previous);
+                break;
+            case Move.Previous when capped:
+                // The last match before the selection, which may be beyond the last kept, or the last of all.
+                int before = matches.FindFirstSegmentWithStartAfter(selection.Start) is null
+                    ? selection.Start
+                    : int.MaxValue;
+                int known = last.StartOffset;
+                Seek(
+                    move,
+                    result,
+                    selection,
+                    (snapshot, scopes, cancellation) =>
+                        TextSearch.FindPrevious(snapshot, result.Query, scopes, known, before, cancellation)
+                );
+                break;
+            // Past the last match, round to the first, and before the first to the last; as VS Code without
+            // editor.find.loop, the last match before, or the first after, again. Beyond the matches a result keeps,
+            // it goes round either way, as VS Code does.
+            case Move.First or Move.Next when shown.Editor.FindLoop:
+                Land(move, matches.FirstSegment ?? last);
+                break;
+            case Move.First or Move.Next:
+                Land(move, Before(move == Move.First ? _from : selection.End) ?? last);
+                break;
+            case Move.Previous when shown.Editor.FindLoop:
+                Land(move, last);
+                break;
+            case Move.Previous:
+                Land(move, matches.FindFirstSegmentWithStartAfter(selection.Start) ?? matches.FirstSegment ?? last);
+                break;
+        }
 
-        SearchMatch After(TextRange range)
+        // The first match after the range; an empty match at the caret is the current one.
+        SearchMatch? After(TextRange range)
         {
             SearchMatch? next = matches.FindFirstSegmentWithStartAfter(range.End);
-            // An empty match at the caret is the current one.
             if (next is not null && next.StartOffset == range.Start && next.Length == range.Length)
                 next = matches.GetNextSegment(next);
-            return next ?? matches.FirstSegment;
+            return next;
+        }
+
+        // The last match that ends at the offset or before it.
+        SearchMatch? Before(int offset)
+        {
+            SearchMatch? match = last;
+            while (match is not null && match.EndOffset > offset)
+                match = matches.GetPreviousSegment(match);
+            return match;
         }
     }
 
-    private void Select(SearchMatch match)
+    /// <summary>
+    /// Searches the text in the background for the match that <paramref name="find"/> finds, and selects it unless
+    /// the result, the text or the selection changed meanwhile; without one, going forward, the result's first match.
+    /// </summary>
+    private void Seek(
+        Move move,
+        SearchResult result,
+        TextRange selection,
+        Func<TextSnapshot, IReadOnlyList<TextRange>?, CancellationToken, (TextRange? Match, SearchOutcome Outcome)> find
+    )
+    {
+        if (_shown is not { } shown || shown.Document.CurrentSnapshot is not { } snapshot)
+            return;
+        if (snapshot.Version != result.Version)
+            return;
+        List<TextRange>? scopes = Scopes();
+        _seeking?.Cancel();
+        var seeking = new CancellationTokenSource();
+        _seeking = seeking;
+        Task<(TextRange? Match, SearchOutcome Outcome)> seek = Task.Run(
+            () => find(snapshot, scopes, seeking.Token),
+            seeking.Token
+        );
+        seek.ContinueWith(
+            _ => Dispatcher.Post(() => OnSought(seek, seeking, move, result, selection)),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default
+        );
+    }
+
+    private void OnSought(
+        Task<(TextRange? Match, SearchOutcome Outcome)> seek,
+        CancellationTokenSource seeking,
+        Move move,
+        SearchResult result,
+        TextRange selection
+    )
+    {
+        if (seek.Exception is { } exception)
+        {
+            Logger
+                .TryGet(LogEventLevel.Error, AssetFiles.LogArea)
+                ?.Log(this, "The search for the next match failed: {Exception}", exception);
+        }
+        if (_seeking != seeking)
+            return;
+        _seeking = null;
+        if (
+            !seek.IsCompletedSuccessfully
+            || _result != result
+            || _shown is not { } shown
+            || shown.Document.CurrentSnapshot.Version != result.Version
+            || shown.Editor.Selection.Range != selection
+        )
+            return;
+        (TextRange? match, SearchOutcome outcome) = seek.Result;
+        if (match is { } found)
+            Land(move, found);
+        else if (outcome == SearchOutcome.OutOfTime)
+            ShowMessage(outcome, null);
+        else if (move != Move.Previous && result.Matches.FirstSegment is { } first)
+            Land(move, first);
+    }
+
+    private void Land(Move move, SearchMatch match) => Land(move, new TextRange(match.StartOffset, match.Length));
+
+    /// <summary>
+    /// Selects the match that <paramref name="move"/> went to; going to the next or the previous one from the query
+    /// closes the bar once it selects another match, if the editor says so, as VS Code's
+    /// <c>editor.find.closeOnResult</c>.
+    /// </summary>
+    private void Land(Move move, TextRange match)
+    {
+        if (_shown is not { } shown)
+            return;
+        bool moved = shown.Editor.Selection.Range != match;
+        Select(match);
+        if (moved && move is Move.Next or Move.Previous && shown.Editor.FindCloseOnResult && IsOpen && IsQueryFocused)
+            Close();
+    }
+
+    private void Select(SearchMatch match) => Select(new TextRange(match.StartOffset, match.Length));
+
+    private void Select(TextRange match)
     {
         if (_shown is not { } shown)
             return;
         _selecting = true;
         try
         {
-            shown.Editor.Selection = new TextSelection(match.StartOffset, match.EndOffset);
+            shown.Editor.Selection = new TextSelection(match.Start, match.End);
         }
         finally
         {
             _selecting = false;
         }
-        shown.Editor.ScrollTo(new TextRange(match.StartOffset, match.Length));
+        shown.Editor.ScrollTo(match);
+        // Its number, now that the selection is all set.
+        UpdateStatus();
     }
 
     /// <summary>
@@ -718,7 +891,7 @@ internal sealed class SearchBar : UserControl
             return;
         if (result.Outcome == SearchOutcome.TooManyMatches)
         {
-            ReplaceAllBeyondTheResult(shown, result.Query, replacement);
+            ReplaceAllBeyondTheResult(shown, result, replacement);
             return;
         }
         if (!result.IsComplete)
@@ -734,22 +907,62 @@ internal sealed class SearchBar : UserControl
 
     /// <summary>
     /// Replaces every match of the text as it is, however many, as VS Code's Replace All does beyond the matches it
-    /// highlights: found on the UI thread, within the search's time limit, and replaced in one change of the text from
-    /// the first match to the last, which moves anchors, markers and the selection as separate replacements would.
+    /// highlights: found in the background, within the search's time limit, and replaced in one change of the text
+    /// from the first match to the last, which moves anchors, markers and the selection as separate replacements
+    /// would; only while the text, the query, the replacement, the scope and the editor's writability stay as they were.
     /// </summary>
-    private void ReplaceAllBeyondTheResult(Shown shown, SearchQuery query, SearchReplacement replacement)
+    private void ReplaceAllBeyondTheResult(Shown shown, SearchResult result, SearchReplacement replacement)
     {
-        (SearchEdit? edit, SearchOutcome outcome) = TextSearch.ReplaceAll(
-            shown.Document.CurrentSnapshot,
-            query,
-            replacement,
-            Scopes(),
-            CancellationToken.None
+        TextSnapshot snapshot = shown.Document.CurrentSnapshot;
+        List<TextRange>? scopes = Scopes();
+        _replacing?.Cancel();
+        var replacing = new CancellationTokenSource();
+        _replacing = replacing;
+        Task<(SearchEdit? Edit, SearchOutcome Outcome)> replace = Task.Run(
+            () => TextSearch.ReplaceAll(snapshot, result.Query, replacement, scopes, replacing.Token),
+            replacing.Token
         );
+        replace.ContinueWith(
+            _ => Dispatcher.Post(() => OnReplacedAll(replace, replacing, result, snapshot, scopes)),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default
+        );
+    }
+
+    private void OnReplacedAll(
+        Task<(SearchEdit? Edit, SearchOutcome Outcome)> replace,
+        CancellationTokenSource replacing,
+        SearchResult result,
+        TextSnapshot snapshot,
+        List<TextRange>? scopes
+    )
+    {
+        if (replace.Exception is { } exception)
+        {
+            Logger
+                .TryGet(LogEventLevel.Error, AssetFiles.LogArea)
+                ?.Log(this, "Replace All failed: {Exception}", exception);
+        }
+        if (_replacing != replacing)
+            return;
+        _replacing = null;
+        if (
+            !replace.IsCompletedSuccessfully
+            || _shown is not { } shown
+            || CurrentResult() != result
+            || shown.Document.CurrentSnapshot != snapshot
+            || !SameScopes(Scopes(), scopes)
+        )
+            return;
+        (SearchEdit? edit, SearchOutcome outcome) = replace.Result;
         if (edit is not null)
             shown.Buffer.Replace(edit.Start, edit.Length, edit.Text, edit.Map);
         else if (outcome == SearchOutcome.OutOfTime)
             ShowMessage(SearchOutcome.OutOfTime, null);
+
+        static bool SameScopes(List<TextRange>? now, List<TextRange>? then) =>
+            now is null ? then is null : then is not null && now.SequenceEqual(then);
     }
 
     /// <summary>

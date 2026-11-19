@@ -201,6 +201,29 @@ public class CodeEditor : TemplatedControl
         AutoFindInSelection
     >(nameof(AutoFindInSelection), defaultValue: AutoFindInSelection.Never);
 
+    /// <summary>Defines the <see cref="FindLoop"/> property.</summary>
+    public static readonly StyledProperty<bool> FindLoopProperty = AvaloniaProperty.Register<CodeEditor, bool>(
+        nameof(FindLoop),
+        defaultValue: true
+    );
+
+    /// <summary>Defines the <see cref="FindCursorMoveOnType"/> property.</summary>
+    public static readonly StyledProperty<bool> FindCursorMoveOnTypeProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        bool
+    >(nameof(FindCursorMoveOnType), defaultValue: true);
+
+    /// <summary>Defines the <see cref="FindCloseOnResult"/> property.</summary>
+    public static readonly StyledProperty<bool> FindCloseOnResultProperty = AvaloniaProperty.Register<CodeEditor, bool>(
+        nameof(FindCloseOnResult)
+    );
+
+    /// <summary>Defines the <see cref="MatchBrackets"/> property.</summary>
+    public static readonly StyledProperty<MatchBrackets> MatchBracketsProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        MatchBrackets
+    >(nameof(MatchBrackets), defaultValue: MatchBrackets.Always);
+
     /// <summary>Defines the <see cref="FindHistory"/> property.</summary>
     public static readonly StyledProperty<SearchHistory?> FindHistoryProperty = AvaloniaProperty.Register<
         CodeEditor,
@@ -655,6 +678,52 @@ public class CodeEditor : TemplatedControl
     {
         get => GetValue(AutoFindInSelectionProperty);
         set => SetValue(AutoFindInSelectionProperty, value);
+    }
+
+    /// <summary>
+    /// Whether going to the next match after the last one goes round to the first, and to the previous match before
+    /// the first one round to the last, as VS Code's <c>editor.find.loop</c>: by F3, Shift+F3, Enter and Shift+Enter in
+    /// the query, and the search bar's buttons. Without it, the last match, or the first, stays selected. Beyond the
+    /// matches that the bar highlights, it goes round either way, as in VS Code. Default: true, as in VS Code.
+    /// </summary>
+    public bool FindLoop
+    {
+        get => GetValue(FindLoopProperty);
+        set => SetValue(FindLoopProperty, value);
+    }
+
+    /// <summary>
+    /// Whether the search bar selects the first match from the caret as the user types the query, or changes its
+    /// options or Find in Selection, as VS Code's <c>editor.find.cursorMoveOnType</c>. Without it, the selection stays
+    /// until the user goes to a match. Default: true, as in VS Code.
+    /// </summary>
+    public bool FindCursorMoveOnType
+    {
+        get => GetValue(FindCursorMoveOnTypeProperty);
+        set => SetValue(FindCursorMoveOnTypeProperty, value);
+    }
+
+    /// <summary>
+    /// Whether going to the next or the previous match while the query has the keyboard, by Enter, Shift+Enter, F3 or
+    /// Shift+F3, closes the search bar once it selects another match, as VS Code's <c>editor.find.closeOnResult</c>.
+    /// Default: false, as in VS Code.
+    /// </summary>
+    public bool FindCloseOnResult
+    {
+        get => GetValue(FindCloseOnResultProperty);
+        set => SetValue(FindCloseOnResultProperty, value);
+    }
+
+    /// <summary>
+    /// Which brackets the editor highlights at the caret, while nothing is selected, as VS Code's
+    /// <c>editor.matchBrackets</c>: the bracket next to the caret and its match, and with
+    /// <see cref="MatchBrackets.Always"/>, elsewhere the innermost pair around the caret. Default:
+    /// <see cref="MatchBrackets.Always"/>, as in VS Code.
+    /// </summary>
+    public MatchBrackets MatchBrackets
+    {
+        get => GetValue(MatchBracketsProperty);
+        set => SetValue(MatchBracketsProperty, value);
     }
 
     /// <summary>
@@ -1157,6 +1226,8 @@ public class CodeEditor : TemplatedControl
             _selectionHighlights?.Update();
         else if (change.Property == OccurrencesHighlightProperty && OccurrencesHighlight == OccurrencesHighlight.Off)
             _occurrences?.Stop();
+        else if (change.Property == MatchBracketsProperty)
+            _brackets?.Refresh();
     }
 
     /// <summary>
@@ -1264,7 +1335,7 @@ public class CodeEditor : TemplatedControl
         TextView textView = part.TextArea.TextView;
         _highlighter = new BackgroundTextMateHighlighter(textView, buffer, Dispatcher, null);
         _helpers = new EditingHelpers(this, part.TextArea, document, _highlighter);
-        _brackets = new BracketHighlighter(part.TextArea, document, _highlighter) { Colors = _colors };
+        _brackets = new BracketHighlighter(this, part.TextArea, document, _highlighter) { Colors = _colors };
         _whitespace = new WhitespaceLayer(part.TextArea) { Colors = _colors };
         _squiggles = new SquiggleLayer(part.TextArea, document) { Colors = _colors };
         _semantic = new SemanticHighlighter(textView, document, Dispatcher) { Theme = _theme };

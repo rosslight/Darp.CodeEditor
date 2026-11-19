@@ -118,6 +118,31 @@ public sealed class FindInSelectionTests(UiFixture ui)
             document.Text.ShouldBe("a\na\nb\nb\na");
         });
 
+    /// <summary>
+    /// An edit can leave the scope ending between a <c>\r</c> and its <c>\n</c>: it then ends before the line break,
+    /// and the search still finds what is inside it.
+    /// </summary>
+    [Fact]
+    public Task A_scope_that_an_edit_ends_inside_a_line_break_ends_before_it() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = Show("«ab»\nb");
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            window.Press(Key.L, Toggle);
+            window.Editor.OpenSearch();
+            SearchBar bar = BarOf(window);
+            bar.RegexToggle.IsChecked = true;
+            bar.FindBox.Text = "a|b";
+            await Wait.UntilAsync(() => bar.Count?.EndsWith("of 2", StringComparison.Ordinal) == true);
+
+            // The scope "ab" is now "a\r", and the "b" after it was the scope's.
+            document.Replace(new TextRange(1, 1), "\r");
+
+            await Wait.UntilAsync(() => bar.Count?.EndsWith("of 1", StringComparison.Ordinal) == true);
+            window.Press(Key.F3);
+            window.Editor.Selection.ShouldBe(new TextSelection(0, 1));
+        });
+
     [Fact]
     public Task AutoFindInSelection_turns_it_on_as_the_bar_opens_as_it_says() =>
         _ui.Run(async () =>

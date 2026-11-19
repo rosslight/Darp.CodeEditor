@@ -1,3 +1,4 @@
+using Avalonia.Logging;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using Darp.CodeEditor.Highlighting;
@@ -48,42 +49,56 @@ internal sealed class SmartSelection : IDisposable
     /// <summary>
     /// Selects the next range out, or with <paramref name="expand"/> false the next one in, as VS Code's
     /// <c>smartSelect.expand</c> and <c>smartSelect.shrink</c> do. The first time, it waits for the server's ranges.
+    /// Failures go to the log.
     /// </summary>
     public async void Run(bool expand)
     {
-        if (_state is null)
+        try
         {
-            TextSnapshot snapshot = _document.CurrentSnapshot;
-            Selection selection = _textArea.Selection;
-            int caret = _textArea.Caret.Offset;
-            List<TextRange> ranges;
-            try
-            {
-                ranges = await RangesAsync(snapshot, caret, _disposed.Token);
-            }
-            catch (OperationCanceledException)
-            {
+            if (_state is null && !await StartAsync())
                 return;
-            }
-            if (_disposed.IsCancellationRequested)
-                return;
-            // Only while the text and the selection are as they were; an expansion meanwhile still counts.
-            if (
-                _document.CurrentSnapshot == snapshot
-                && _textArea.Selection.Equals(selection)
-                && _textArea.Caret.Offset == caret
-                && ranges.Count > 0
-            )
-            {
-                (int start, int end) = SelectionBounds();
-                List<TextRange> around = [TextRange.FromBounds(start, end)];
-                around.AddRange(ranges.Where(range => range.Start <= start && end <= range.End));
-                _state = (around, 0);
-            }
-            if (_state is null)
-                return;
+            Select(expand);
         }
-        (IReadOnlyList<TextRange> all, int index) = _state.Value;
+        catch (OperationCanceledException) when (_disposed.IsCancellationRequested) { }
+        catch (Exception e)
+        {
+            Logger.TryGet(LogEventLevel.Error, AssetFiles.LogArea)?.Log(this, "Smart select failed: {Exception}", e);
+        }
+    }
+
+    /// <summary>
+    /// Finds the ranges around the selection, as expanding starts; only while the text and the selection stay as they
+    /// were meanwhile, though an expansion meanwhile still counts.
+    /// </summary>
+    /// <returns>Whether there are ranges to go through.</returns>
+    private async Task<bool> StartAsync()
+    {
+        TextSnapshot snapshot = _document.CurrentSnapshot;
+        Selection selection = _textArea.Selection;
+        int caret = _textArea.Caret.Offset;
+        List<TextRange>? ranges = await RangesAsync(snapshot, caret, _disposed.Token);
+        if (_state is not null)
+            return true;
+        if (
+            ranges is not { Count: > 0 }
+            || _disposed.IsCancellationRequested
+            || _document.CurrentSnapshot != snapshot
+            || !_textArea.Selection.Equals(selection)
+            || _textArea.Caret.Offset != caret
+        )
+            return false;
+        (int start, int end) = SelectionBounds();
+        List<TextRange> around = [TextRange.FromBounds(start, end)];
+        around.AddRange(ranges.Where(range => range.Start <= start && end <= range.End));
+        _state = (around, 0);
+        return true;
+    }
+
+    /// <summary>Selects the next range out or in.</summary>
+    private void Select(bool expand)
+    {
+        if (_state is not var (all, index))
+            return;
         index = Move(all, index, expand);
         _state = (all, index);
         _selecting = true;
@@ -104,24 +119,30 @@ internal sealed class SmartSelection : IDisposable
 
     /// <summary>
     /// The ranges around <paramref name="caret"/>: the server's, when it offers them, or else the bracket ranges, with
-    /// the word ranges either way, combined as VS Code combines them.
+    /// the word ranges either way, combined as VS Code combines them. Null when the text changed while the server
+    /// answered: its ranges, and the caret, are then of text that is gone.
     /// </summary>
-    private async Task<List<TextRange>> RangesAsync(TextSnapshot snapshot, int caret, CancellationToken cancellation)
+    private async Task<List<TextRange>?> RangesAsync(TextSnapshot snapshot, int caret, CancellationToken cancellation)
     {
-        TextDocument buffer = _textArea.Document;
         SmartSelectOptions options = _editor.SmartSelect;
         var ranges = new List<TextRange>();
         if (_document.Features is { SelectionRange: true })
         {
             // A server that fails gives no ranges, and the bracket ranges stay out, as in VS Code.
-            if (await _document.SelectionRangesAsync(snapshot, caret, cancellation) is { } server)
-                ranges.AddRange(server);
+            IReadOnlyList<TextRange>? server = await _document.SelectionRangesAsync(snapshot, caret, cancellation);
             cancellation.ThrowIfCancellationRequested();
+            if (_document.CurrentSnapshot != snapshot)
+                return null;
+            if (server is not null)
+                ranges.AddRange(server);
         }
         else
         {
-            ranges.AddRange(SelectionRangeProviders.Brackets(buffer, caret, Brackets, _highlighter.TokensOf));
+            ranges.AddRange(
+                SelectionRangeProviders.Brackets(_textArea.Document, caret, Brackets, _highlighter.TokensOf)
+            );
         }
+        TextDocument buffer = _textArea.Document;
         ranges.AddRange(SelectionRangeProviders.Words(buffer, caret, options.SelectSubwords));
         return SelectionRangeProviders.Combine(buffer, ranges, caret, options.SelectLeadingAndTrailingWhitespace);
     }
