@@ -131,6 +131,53 @@ public sealed class OccurrenceHighlightTests(UiFixture ui)
         });
 
     /// <summary>
+    /// The answer about a word that the caret has left before the pause ended is about another symbol: it shows
+    /// nothing, and the pause asks about the word at the caret.
+    /// </summary>
+    [Fact]
+    public Task An_answer_about_a_word_that_the_caret_left_shows_nothing() =>
+        _ui.Run(async () =>
+        {
+            var time = new ManualTime();
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "abc abc def");
+            using EditorWindow window = Show(document);
+            await CompletionTests.StartServingAsync(server, document);
+            using (
+                await CompletionTests.CommandAsync(
+                    server,
+                    fake,
+                    "hold-document-highlights",
+                    "holding document highlights"
+                )
+            )
+            {
+                window.Editor.Selection = new TextSelection(1);
+                Advance(time, s_pause);
+                await fake.WaitForAsync("documentHighlight");
+            }
+
+            // On "def", before the pause ends.
+            window.Editor.Selection = new TextSelection(9);
+            using (
+                await CompletionTests.CommandAsync(
+                    server,
+                    fake,
+                    "release-document-highlights",
+                    "released document highlights"
+                )
+            ) { }
+            await Wait.UntilAsync(() => !window.Editor.IsAskingForOccurrences);
+            await AnswersInAsync(document);
+            window.Editor.Occurrences.ShouldBeEmpty();
+
+            Advance(time, s_pause);
+            await Wait.UntilAsync(() => window.Editor.Occurrences.Count > 0);
+            window.Editor.Occurrences.ShouldBe([new Occurrence(new TextRange(8, 3), OccurrenceKind.Read)]);
+        });
+
+    /// <summary>
     /// As in VS Code, a selection inside a word asks too, but not one beyond it or over several lines; with the option
     /// off, a caret move asks nothing.
     /// </summary>
@@ -281,6 +328,13 @@ public sealed class OccurrenceHighlightTests(UiFixture ui)
             .Commands(CodeEditorKeymap.Default, Keys.F7, KeyModifiers.Shift)
             .ShouldBe([CodeEditorCommands.WordHighlightPrevious]);
     }
+
+    /// <summary>
+    /// Waits until the editor has the server's answers to the requests sent before: it reads them in order, so once a
+    /// later request's answer is in, theirs were handed on.
+    /// </summary>
+    private static Task AnswersInAsync(CodeDocument document) =>
+        document.HoverAsync(document.CurrentSnapshot, new TextPosition(1, 1), CancellationToken.None);
 
     /// <summary>Puts the caret at <paramref name="caret"/>, and waits for the occurrences there.</summary>
     private static async Task ShowAtAsync(EditorWindow window, ManualTime time, int caret, int count)

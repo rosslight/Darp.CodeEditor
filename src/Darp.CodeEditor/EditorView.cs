@@ -225,6 +225,9 @@ internal sealed class EditorView : IDisposable
     /// <summary>The occurrences of the symbol at the caret, for tests.</summary>
     internal IReadOnlyList<Occurrence> Occurrences => _occurrences.Highlights;
 
+    /// <summary>Whether the view asks for the occurrences, for tests.</summary>
+    internal bool IsAskingForOccurrences => _occurrences.IsAsking;
+
     /// <summary>Closes the popups, and clears the occurrences, once the keyboard has left the editor.</summary>
     public void OnFocusLeft()
     {
