@@ -45,6 +45,10 @@ public sealed class ReplacePatternTests
     [InlineData("func privateFunc(", @"func (\w+)\(", @"func \L$1(", "func privatefunc(")]
     [InlineData("func PrivateFunc(", @"func (\w+)\(", @"func \l$1(", "func privateFunc(")]
     [InlineData("hellogooDbye", @"hello(\w+)", @"hello\u\u\l\l\U$1", "helloGOodBYE")]
+    // By Unicode's full case mappings, as JavaScript's: a character's case may be longer than the character.
+    [InlineData("straße", @"(\w+)", @"\U$1", "STRASSE")]
+    [InlineData("ßa", @"(\w+)", @"\u$1", "SSa")]
+    [InlineData("\u0130", "(.)", @"\L$1", "i\u0307")]
     public void A_replacement_takes_the_match_its_groups_escapes_and_case_changes(
         string text,
         string pattern,
@@ -74,6 +78,9 @@ public sealed class ReplacePatternTests
     [InlineData("Foo_Bar-abc", "newfoo_newbar-abc", "Newfoo_newbar-abc")]
     [InlineData("foo_Bar", "newfoo_newbar", "newfoo_Newbar")]
     [InlineData("foo_BAR", "newfoo_newbar", "newfoo_NEWBAR")]
+    // By Unicode's full case mappings.
+    [InlineData("FOO", "straße", "STRASSE")]
+    [InlineData("Foo", "ßar", "SSar")]
     public void With_Preserve_Case_a_replacement_takes_the_case_of_the_match(
         string match,
         string replacement,

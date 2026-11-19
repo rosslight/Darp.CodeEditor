@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -16,6 +17,8 @@ namespace Darp.CodeEditor.Search;
 /// </remarks>
 internal sealed class ReplacePattern
 {
+    private static readonly FrozenDictionary<char, string> s_upperExpansions = UpperExpansions();
+
     /// <summary>The replacement's parts, in order.</summary>
     private readonly IReadOnlyList<Piece> _pieces;
 
@@ -153,7 +156,7 @@ internal sealed class ReplacePattern
                 return;
             }
             char c = caseOps[op];
-            result.Append(c is 'U' or 'u' ? char.ToUpperInvariant(value[i]) : char.ToLowerInvariant(value[i]));
+            result.Append(Cased(value[i], upper: c is 'U' or 'u'));
             if (c is 'u' or 'l')
                 op++;
         }
@@ -180,22 +183,81 @@ internal sealed class ReplacePattern
                 replacement.Split(separator).Select((part, i) => WithCaseOf(matchParts[i], part))
             );
         }
-        if (match.ToUpperInvariant() == match)
-            return replacement.ToUpperInvariant();
-        if (match.ToLowerInvariant() == match)
-            return replacement.ToLowerInvariant();
+        if (Cased(match, upper: true) == match)
+            return Cased(replacement, upper: true);
+        if (Cased(match, upper: false) == match)
+            return Cased(replacement, upper: false);
         if (replacement.Length == 0)
             return replacement;
-        if (char.ToLowerInvariant(match[0]) != match[0])
-            return char.ToUpperInvariant(replacement[0]) + replacement[1..];
-        if (char.ToUpperInvariant(match[0]) != match[0])
-            return char.ToLowerInvariant(replacement[0]) + replacement[1..];
+        if (Cased(match[0], upper: false) != match[..1])
+            return Cased(replacement[0], upper: true) + replacement[1..];
+        if (Cased(match[0], upper: true) != match[..1])
+            return Cased(replacement[0], upper: false) + replacement[1..];
         return replacement;
 
         static bool HaveSameParts(string match, string replacement, char separator) =>
             match.Contains(separator)
             && replacement.Contains(separator)
             && match.Split(separator).Length == replacement.Split(separator).Length;
+    }
+
+    /// <summary>
+    /// <paramref name="text"/> in upper or lower case by Unicode's full case mappings, as JavaScript's
+    /// <c>toUpperCase</c> and <c>toLowerCase</c>: .NET maps a character to one, so that <c>ß</c> stays <c>ß</c> where
+    /// they make it <c>SS</c>.
+    /// </summary>
+    private static string Cased(string text, bool upper)
+    {
+        var cased = new StringBuilder(text.Length);
+        int from = 0;
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (Expanded(text[i], upper) is not { } expanded)
+                continue;
+            cased.Append(Simple(text[from..i])).Append(expanded);
+            from = i + 1;
+        }
+        return from == 0 ? Simple(text) : cased.Append(Simple(text[from..])).ToString();
+
+        string Simple(string part) => upper ? part.ToUpperInvariant() : part.ToLowerInvariant();
+    }
+
+    /// <summary><paramref name="c"/> in upper or lower case by Unicode's full case mappings.</summary>
+    private static string Cased(char c, bool upper) =>
+        Expanded(c, upper) ?? (upper ? char.ToUpperInvariant(c) : char.ToLowerInvariant(c)).ToString();
+
+    /// <summary>The case of <paramref name="c"/> where it is longer than one character; null elsewhere.</summary>
+    private static string? Expanded(char c, bool upper) =>
+        upper ? s_upperExpansions.GetValueOrDefault(c)
+        : c == '\u0130' ? "i\u0307"
+        : null;
+
+    /// <summary>The characters whose upper case is longer than one character, by Unicode's SpecialCasing.txt.</summary>
+    private static FrozenDictionary<char, string> UpperExpansions()
+    {
+        const string Table =
+            "\u00DFSS|\u0149\u02BCN|\u01F0J\u030C|\u0390\u0399\u0308\u0301|\u03B0\u03A5\u0308\u0301|\u0587\u0535\u0552|"
+            + "\u1E96H\u0331|\u1E97T\u0308|\u1E98W\u030A|\u1E99Y\u030A|\u1E9AA\u02BE|\u1F50\u03A5\u0313|"
+            + "\u1F52\u03A5\u0313\u0300|\u1F54\u03A5\u0313\u0301|\u1F56\u03A5\u0313\u0342|\u1FB2\u1FBA\u0399|"
+            + "\u1FB3\u0391\u0399|\u1FB4\u0386\u0399|\u1FB6\u0391\u0342|\u1FB7\u0391\u0342\u0399|\u1FBC\u0391\u0399|"
+            + "\u1FC2\u1FCA\u0399|\u1FC3\u0397\u0399|\u1FC4\u0389\u0399|\u1FC6\u0397\u0342|\u1FC7\u0397\u0342\u0399|"
+            + "\u1FCC\u0397\u0399|\u1FD2\u0399\u0308\u0300|\u1FD3\u0399\u0308\u0301|\u1FD6\u0399\u0342|"
+            + "\u1FD7\u0399\u0308\u0342|\u1FE2\u03A5\u0308\u0300|\u1FE3\u03A5\u0308\u0301|\u1FE4\u03A1\u0313|"
+            + "\u1FE6\u03A5\u0342|\u1FE7\u03A5\u0308\u0342|\u1FF2\u1FFA\u0399|\u1FF3\u03A9\u0399|\u1FF4\u038F\u0399|"
+            + "\u1FF6\u03A9\u0342|\u1FF7\u03A9\u0342\u0399|\u1FFC\u03A9\u0399|\uFB00FF|\uFB01FI|\uFB02FL|\uFB03FFI|"
+            + "\uFB04FFL|\uFB05ST|\uFB06ST|\uFB13\u0544\u0546|\uFB14\u0544\u0535|\uFB15\u0544\u053B|"
+            + "\uFB16\u054E\u0546|\uFB17\u0544\u053D";
+        Dictionary<char, string> upper = Table.Split('|').ToDictionary(entry => entry[0], entry => entry[1..]);
+        // Greek with ypogegrammeni or prosgegrammeni: the capital without it, and a capital iota.
+        foreach (
+            (char first, char capital) in (ReadOnlySpan<(char, char)>)
+                [('\u1F80', '\u1F08'), ('\u1F90', '\u1F28'), ('\u1FA0', '\u1F68')]
+        )
+        {
+            for (int i = 0; i < 16; i++)
+                upper[(char)(first + i)] = $"{(char)(capital + i % 8)}\u0399";
+        }
+        return upper.ToFrozenDictionary();
     }
 
     /// <summary>Text, or a group with the case changes before it.</summary>
