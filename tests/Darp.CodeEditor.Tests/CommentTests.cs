@@ -58,6 +58,7 @@ public sealed class CommentTests(UiFixture ui)
     [InlineData("«<a>\n  <b/>\n</a>»", "<!-- <a>\n  <b/>\n</a> -->")]
     [InlineData("<a>\n  <!-- <b/> -->|\n</a>", "<a>\n  <b/>\n</a>")]
     [InlineData("<a>\n  |\n</a>", "<a>\n  <!-- | -->\n</a>")]
+    [InlineData("<a><!-- |--></a>", "<a>|</a>")]
     public Task Ctrl_slash_uses_the_block_comment_in_a_language_without_a_line_comment(
         string marked,
         string expected
