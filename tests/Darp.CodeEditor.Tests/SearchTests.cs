@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Automation.Peers;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
@@ -348,13 +349,10 @@ public sealed class SearchTests(UiFixture ui)
             await SearchedAsync(bar);
             window.Layout();
             var editor = new Rect(window.Editor.Bounds.Size);
-            // The bar's own, not those of its parts' templates, in its order, Close last.
+            // Close last.
             Button[] buttons =
             [
-                .. bar.GetVisualDescendants()
-                    .OfType<Button>()
-                    .Where(button => button.TemplatedParent is null)
-                    .OrderBy(button => ToolTip.GetTip(button) as string == Strings.CloseSearch),
+                .. ButtonsOf(bar).OrderBy(button => ToolTip.GetTip(button) as string == Strings.CloseSearch),
             ];
             buttons.Length.ShouldBe(10);
             // The query gave up width, and Close stays on its line where that is enough.
@@ -378,6 +376,31 @@ public sealed class SearchTests(UiFixture ui)
                 window.Layout();
             }
             bar.IsOpen.ShouldBeFalse();
+        });
+
+    /// <summary>Every button and toggle of the bar has a name for screen readers: its tip's, without its keys.</summary>
+    [Fact]
+    public Task The_buttons_of_the_bar_have_names_for_screen_readers() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("|a", CodeLanguage.PlainText);
+
+            window.Editor.OpenSearch(replace: true);
+
+            ButtonsOf(BarOf(window))
+                .Select(button => ControlAutomationPeer.CreatePeerForElement(button).GetName())
+                .ShouldBe([
+                    Strings.MatchCase,
+                    Strings.MatchWholeWord,
+                    Strings.UseRegularExpression,
+                    Strings.PreviousMatch,
+                    Strings.NextMatch,
+                    Strings.FindInSelection,
+                    Strings.CloseSearch,
+                    Strings.PreserveCase,
+                    Strings.Replace,
+                    Strings.ReplaceAll,
+                ]);
         });
 
     /// <summary>

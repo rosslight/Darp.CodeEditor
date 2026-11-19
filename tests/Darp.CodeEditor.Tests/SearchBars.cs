@@ -17,6 +17,10 @@ internal static class SearchBars
     public static SearchBar BarOf(EditorWindow window) =>
         window.Editor.GetVisualDescendants().OfType<SearchBar>().Single();
 
+    /// <summary>The bar's buttons and toggles in its order, not those of its parts' templates.</summary>
+    public static Button[] ButtonsOf(SearchBar bar) =>
+        [.. bar.GetVisualDescendants().OfType<Button>().Where(button => button.TemplatedParent is null)];
+
     /// <summary>Clicks a button of the bar, also a disabled one, as a command could.</summary>
     public static void Click(SearchBar bar, string content) =>
         bar.GetVisualDescendants()
