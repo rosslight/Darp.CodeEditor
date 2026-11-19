@@ -1,4 +1,6 @@
 using Avalonia.Input;
+using AvaloniaEdit;
+using AvaloniaEdit.Editing;
 using Darp.CodeEditor.Commands;
 using Keys = Avalonia.Input.Key;
 
@@ -238,6 +240,45 @@ public sealed class LineCommandTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe(NewLines.In(expected, start: marked));
             DocumentOf(window).Undo();
             MarkedText.Of(window).ShouldBe(marked);
+        });
+
+    [Fact]
+    public Task A_rectangle_selection_copies_no_lines_and_stays_a_rectangle() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("|ab\ncd\nef", CodeLanguage.PlainText);
+            TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+            textArea.Caret.Position = new TextViewPosition(2, 3);
+            textArea.Selection = new RectangleSelection(
+                textArea,
+                new TextViewPosition(1, 2),
+                new TextViewPosition(2, 3)
+            );
+
+            window.Press(Keys.Down, CopyLines);
+
+            DocumentOf(window).Text.ShouldBe("ab\ncd\nef");
+            textArea.Selection.ShouldBeOfType<RectangleSelection>();
+        });
+
+    /// <summary>On Windows these are also the keys that copy lines.</summary>
+    [Fact]
+    public Task The_rectangle_selections_keys_extend_a_rectangle_downwards() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("|ab\ncd\nef", CodeLanguage.PlainText);
+            TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+            textArea.Caret.Position = new TextViewPosition(2, 3);
+            textArea.Selection = new RectangleSelection(
+                textArea,
+                new TextViewPosition(1, 2),
+                new TextViewPosition(2, 3)
+            );
+
+            window.Press(Keys.Down, HotkeyConfiguration.BoxSelectionModifiers | KeyModifiers.Shift);
+
+            DocumentOf(window).Text.ShouldBe("ab\ncd\nef");
+            textArea.Selection.ShouldBeOfType<RectangleSelection>().EndPosition.Line.ShouldBe(3);
         });
 
     [Fact]

@@ -201,7 +201,7 @@ The default keys on Windows and Linux; macOS in brackets where it differs beyond
 | Ctrl+Backspace, Ctrl+Delete (macOS: Alt) | `deleteWordLeft`, `deleteWordRight` | deletes the selection, or by words; two or more spaces before the caret, or spaces after it, go alone |
 | Ctrl+D | `editor.action.addSelectionToNextFindMatch` | selects the word at the caret; with a selection it does not apply, as the editor has one caret (design.md #119) |
 | Alt+Up, Alt+Down | `editor.action.moveLinesUpAction`, `editor.action.moveLinesDownAction` | moves the lines past the line above or below them, with the selection |
-| Shift+Alt+Up, Shift+Alt+Down (Linux: with Ctrl) | `editor.action.copyLinesUpAction`, `editor.action.copyLinesDownAction` | copies the lines above or below them; going down, the selection goes with the copy |
+| Shift+Alt+Up, Shift+Alt+Down (Linux: with Ctrl) | `editor.action.copyLinesUpAction`, `editor.action.copyLinesDownAction` | copies the lines above or below them; going down, the selection goes with the copy. In a rectangle selection the keys go on to AvaloniaEdit's, which extend the rectangle on Windows |
 | Ctrl+Shift+K | `editor.action.deleteLines` | deletes the lines; the caret keeps its column |
 | Ctrl+Enter, Ctrl+Shift+Enter | `editor.action.insertLineAfter`, `editor.action.insertLineBefore` | inserts a line below or above the caret's, indented as Enter would |
 | Ctrl+], Ctrl+[ | `editor.action.indentLines`, `editor.action.outdentLines` | indents and outdents the lines to the next or the previous tab stop |
