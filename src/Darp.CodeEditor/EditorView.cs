@@ -17,6 +17,7 @@ namespace Darp.CodeEditor;
 /// <param name="Area">AvaloniaEdit's text area, which shows <paramref name="Document"/>.</param>
 /// <param name="Document">The document shown.</param>
 /// <param name="Keymap">The editor's keymap, as it is now.</param>
+/// <param name="Options">The editor's settings, as they are now.</param>
 /// <param name="SearchBar">The editor's search bar, kept across documents; null until it is first needed.</param>
 /// <param name="CreateSearchBar">
 /// The editor's search bar, made the first time it is needed, as few editors are searched; null without a place for it
@@ -27,6 +28,7 @@ internal sealed record EditorContext(
     TextArea Area,
     CodeDocument Document,
     Func<CodeEditorKeymap> Keymap,
+    Func<CodeEditorOptions> Options,
     Func<SearchBar?> SearchBar,
     Func<SearchBar?> CreateSearchBar
 );
@@ -43,7 +45,10 @@ internal sealed class EditorView : IDisposable
     /// <summary>Everything the view made, in the order it made them: disposed the other way round.</summary>
     private readonly IDisposable[] _features;
 
+    private readonly TextChanges _changes;
     private readonly EditingHelpers _helpers;
+    private readonly AutoClosingPairs _pairs;
+    private readonly Typing _typing;
     private readonly Clipboard _clipboard;
     private readonly BracketHighlighter _brackets;
     private readonly WhitespaceLayer _whitespace;
@@ -63,7 +68,10 @@ internal sealed class EditorView : IDisposable
         TextArea area = context.Area;
         CodeDocument document = context.Document;
         Highlighter = new BackgroundTextMateHighlighter(area.TextView, area.Document, context.Editor.Dispatcher, null);
-        _helpers = new EditingHelpers(area, document, Highlighter);
+        _changes = new TextChanges(area);
+        _helpers = new EditingHelpers(area, document, _changes);
+        _pairs = new AutoClosingPairs(area, document, Highlighter, _changes, context.Options);
+        _typing = new Typing(area, document, Highlighter, _changes, _pairs);
         _clipboard = new Clipboard(area, document);
         _brackets = new BracketHighlighter(area, document, Highlighter);
         _whitespace = new WhitespaceLayer(area);
@@ -71,14 +79,17 @@ internal sealed class EditorView : IDisposable
         SemanticHighlighter = new SemanticHighlighter(area.TextView, document, context.Editor.Dispatcher);
         _hover = new HoverController(context.Editor, area, document, _squiggles, Highlighter);
         _snippets = new SnippetController(area, document);
-        // After the editing helpers: they see typed text first, so that a typed "(" has its ")" when it asks.
+        // After typing: it sees typed text first, so that a typed "(" has its ")" when completion asks.
         _completion = new CompletionController(context.Editor, area, document, Highlighter, _snippets);
         _signatureHelp = new SignatureHelpController(context.Editor, area, document, Highlighter);
         _search = new FindCommands(area, context.SearchBar, context.CreateSearchBar);
         _features =
         [
             Highlighter,
+            _changes,
             _helpers,
+            _pairs,
+            _typing,
             _clipboard,
             _brackets,
             _whitespace,
@@ -107,7 +118,7 @@ internal sealed class EditorView : IDisposable
     /// <summary>
     /// A key, before AvaloniaEdit's: first the keymap's commands, as <see cref="KeyResolution"/> resolves the key, then
     /// Escape, which dismisses, and in the text the keys of completion's list, of signature help, of a snippet's stops
-    /// and of the editing helpers.
+    /// and of typing.
     /// </summary>
     /// <returns>Whether the key was the view's.</returns>
     public bool OnKeyDown(KeyEventArgs e)
@@ -145,18 +156,25 @@ internal sealed class EditorView : IDisposable
                 _completion.OnKeyDown(e)
                 || _signatureHelp.OnKeyDown(e)
                 || _snippets.OnKeyDown(e)
-                || _helpers.OnKeyDown(e)
+                || _typing.OnKeyDown(e)
             );
     }
 
     /// <summary>
-    /// Typed text, before AvaloniaEdit's text area takes it: a commit character commits completion's item.
+    /// Typed text, before AvaloniaEdit's text area takes it: a commit character commits completion's item, and the text
+    /// goes in by the rules of typing.
     /// </summary>
     public void OnTextInput(TextInputEventArgs e)
     {
-        if (_context.Area.IsFocused)
-            _completion.OnTextInput(e);
+        if (!_context.Area.IsFocused)
+            return;
+        _completion.OnTextInput(e);
+        if (!e.Handled)
+            _typing.OnTextInput(e);
     }
+
+    public void OnOptionsChanged(CodeEditorOptions old, CodeEditorOptions now) =>
+        _pairs.OnOptionsChanged(old.AutoClosing, now.AutoClosing);
 
     /// <summary>Runs a command, as its key does, where it applies.</summary>
     /// <returns>Whether it applied.</returns>

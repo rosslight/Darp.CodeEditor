@@ -58,13 +58,17 @@ namespace Darp.CodeEditor;
 /// Built in, with no settings: the current line is highlighted, whitespace shows inside the selection, and the view
 /// scrolls past the last line. Lines of up to 3,000 characters show and edit in full; a longer line shows its first
 /// 3,000 characters and collapses the rest into "...", which can't be edited. Editing follows the language's rules, as
-/// VS Code applies them: the bracket next to the caret and its match are boxed, pairs close as you type, typing their
-/// closing character steps over it and Backspace deletes an empty pair, opening characters surround the selection, new
-/// lines are indented by the brackets and the indentation rules, a line that comes to match the decrease rule outdents,
-/// and comments toggle with the line comment, or else the block comment. Brackets in strings and comments don't match,
+/// VS Code applies them: the bracket next to the caret and its match are boxed, pairs close as you type, as far as
+/// <see cref="Options"/> lets them, typing their closing character steps over it and Backspace deletes an empty pair,
+/// opening characters surround the selection, new lines are indented by the rules for Enter, the brackets and the
+/// indentation rules, as far as the language's <see cref="CodeLanguage.AutoIndent"/> goes, a line that comes to match
+/// the decrease rule outdents, a closing bracket typed first on its line lines up with its opening one, and comments
+/// toggle with the line comment, or else the block comment. Brackets in strings and comments don't match or indent,
 /// and pairs that the language excludes there don't close. In a rectangle selection, pairs close, step over and delete,
-/// and opening characters surround, on every line; Enter breaks only the caret's line and ends the rectangle. Tab and
-/// new lines indent by the document's <see cref="CodeDocument.Indentation"/>.
+/// and opening characters surround, on every line; Enter breaks only the caret's line and ends the rectangle. Tab,
+/// Shift+Tab and Backspace in indentation go by the tab stops of the document's
+/// <see cref="CodeDocument.Indentation"/>. Undo takes back VS Code's steps: a space with the word after it, a run of
+/// Backspace or Delete, a line break with what follows, each pair that closes.
 /// Hover shows the server's Markdown, with code blocks highlighted by the document's grammar, below the messages of
 /// the diagnostics under the pointer. Completion items show VS Code's codicons, in the color theme's symbol colors. An
 /// item in the snippet syntax goes in as VS Code inserts it: its first stop is selected, and Tab and Shift+Tab move
@@ -124,6 +128,12 @@ public class CodeEditor : TemplatedControl
         CodeEditor,
         CodeEditorKeymap
     >(nameof(Keymap), defaultValue: CodeEditorKeymap.Default);
+
+    /// <summary>Defines the <see cref="Options"/> property.</summary>
+    public static readonly StyledProperty<CodeEditorOptions> OptionsProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        CodeEditorOptions
+    >(nameof(Options), defaultValue: CodeEditorOptions.Default);
 
     /// <summary>Defines the <see cref="PendingKeys"/> property.</summary>
     public static readonly DirectProperty<CodeEditor, KeyGesture?> PendingKeysProperty =
@@ -327,6 +337,16 @@ public class CodeEditor : TemplatedControl
     {
         get => GetValue(KeymapProperty);
         set => SetValue(KeymapProperty, value);
+    }
+
+    /// <summary>
+    /// The editor's settings. Default: <see cref="CodeEditorOptions.Default"/>. A change applies from the next keystroke
+    /// on.
+    /// </summary>
+    public CodeEditorOptions Options
+    {
+        get => GetValue(OptionsProperty);
+        set => SetValue(OptionsProperty, value);
     }
 
     /// <summary>
@@ -535,6 +555,8 @@ public class CodeEditor : TemplatedControl
         }
         else if (change.Property == KeymapProperty)
             EndWait();
+        else if (change.Property == OptionsProperty)
+            _view?.OnOptionsChanged(change.GetOldValue<CodeEditorOptions>(), change.GetNewValue<CodeEditorOptions>());
         else if (
             change.Property == ColorThemeProperty
             || change.Property == ThemeVariantScope.ActualThemeVariantProperty
@@ -614,7 +636,15 @@ public class CodeEditor : TemplatedControl
         Select(part, place?.Selection ?? new TextSelection(0));
         TextView textView = part.TextArea.TextView;
         _view = new EditorView(
-            new EditorContext(this, part.TextArea, document, () => Keymap, () => _searchBar, CreatedSearchBar)
+            new EditorContext(
+                this,
+                part.TextArea,
+                document,
+                () => Keymap,
+                () => Options,
+                () => _searchBar,
+                CreatedSearchBar
+            )
         );
         _view.SetColors(_theme, _colors, _iconColors);
         _searchBar?.Attach(this, part.TextArea, document);
