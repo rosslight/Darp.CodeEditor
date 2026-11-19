@@ -175,7 +175,7 @@ internal sealed class EditorView : IDisposable
         for (int i = 0; i < resolution.Commands.Count; i++)
         {
             var rest = new KeyResolution([.. resolution.Commands.Skip(i + 1)], resolution.Waits);
-            if (_commands.TryRun(resolution.Commands[i], () => GoOn(key, rest, waitsEnded)))
+            if (Run(resolution.Commands[i], () => GoOn(key, rest, waitsEnded)))
                 return true;
         }
         if (resolution.Waits)
@@ -246,7 +246,24 @@ internal sealed class EditorView : IDisposable
 
     /// <summary>Runs a command, as its key does, where it applies.</summary>
     /// <returns>Whether it applied.</returns>
-    public bool RunCommand(string id) => _commands.TryRun(id);
+    public bool RunCommand(string id) => Run(id);
+
+    /// <summary>
+    /// Runs a command where it applies. One that moves the caret or the selection ends completion, as in VS Code, such
+    /// as F7 or a jump to a bracket: its list was for the word at the caret. Completion's own end it as they commit.
+    /// </summary>
+    /// <param name="id">The command.</param>
+    /// <param name="goOn">What the key goes on to after a command that decided later to do nothing.</param>
+    /// <returns>Whether it applied.</returns>
+    private bool Run(string id, Action? goOn = null)
+    {
+        TextSelection before = _changes.Selection;
+        if (!_commands.TryRun(id, goOn))
+            return false;
+        if (_changes.Selection != before)
+            _completion.Close();
+        return true;
+    }
 
     public void Cut() => _clipboard.Cut();
 
