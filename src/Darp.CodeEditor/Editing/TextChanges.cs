@@ -16,10 +16,14 @@ internal sealed class TextChanges : IDisposable
     private readonly TextArea _area;
     private readonly UndoSteps _steps;
 
+    /// <summary>The document that the view edits: the text area's when the view was made.</summary>
+    private readonly TextDocument _shown;
+
     public TextChanges(TextArea area)
     {
         _area = area;
         _steps = new UndoSteps(area);
+        _shown = area.Document;
     }
 
     private TextDocument Buffer => _area.Document;
@@ -64,6 +68,23 @@ internal sealed class TextChanges : IDisposable
             Select(selection);
         return true;
     }
+
+    /// <summary>
+    /// Runs <paramref name="step"/> of a change made of several, such as an edit, a selection or a caret move, while the
+    /// text area shows the view's document: a handler of any notification of the steps before may show another one,
+    /// which the rest of the change must not touch.
+    /// </summary>
+    /// <returns>Whether the text area still shows the view's document after the step.</returns>
+    public bool WhileShown(Action step)
+    {
+        if (!IsShown)
+            return false;
+        step();
+        return IsShown;
+    }
+
+    /// <summary>Whether the text area shows the view's document, not another one that a handler showed.</summary>
+    public bool IsShown => _area.Document == _shown;
 
     /// <summary>Selects <paramref name="selection"/>, by offsets, and brings the caret into view.</summary>
     public void Select(TextSelection selection)

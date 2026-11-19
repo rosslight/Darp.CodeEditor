@@ -55,6 +55,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     private const double EmptyStopWidth = 2;
 
     private readonly TextArea _textArea;
+    private readonly TextChanges _changes;
     private readonly TextDocument _buffer;
     private readonly CodeDocument _document;
     private TextAreaColors? _colors;
@@ -69,9 +70,10 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     /// <summary>Whether the controller selects a stop: it does not follow its own selection.</summary>
     private bool _selecting;
 
-    public SnippetController(TextArea textArea, CodeDocument document)
+    public SnippetController(TextArea textArea, CodeDocument document, TextChanges changes)
     {
         _textArea = textArea;
+        _changes = changes;
         _buffer = textArea.Document;
         _document = document;
         _buffer.Changing += OnBufferChanging;
@@ -283,24 +285,31 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         _textArea.TextView.InvalidateLayer(Layer);
     }
 
-    /// <summary>Selects a stop's text, with the caret at its end; an empty stop puts the caret there.</summary>
+    /// <summary>
+    /// Selects a stop's text, with the caret at its end; an empty stop puts the caret there. Each step stops once a
+    /// handler of the one before shows another document.
+    /// </summary>
     private void Select(Stop stop)
     {
         (int start, int end) = (stop.StartOffset, stop.EndOffset);
         _selecting = true;
         try
         {
-            if (start == end)
-                _textArea.ClearSelection();
-            else
-                _textArea.Selection = Selection.Create(_textArea, start, end);
-            _textArea.Caret.Offset = end;
+            _ =
+                _changes.WhileShown(() =>
+                {
+                    if (start == end)
+                        _textArea.ClearSelection();
+                    else
+                        _textArea.Selection = Selection.Create(_textArea, start, end);
+                })
+                && _changes.WhileShown(() => _textArea.Caret.Offset = end)
+                && _changes.WhileShown(_textArea.Caret.BringCaretToView);
         }
         finally
         {
             _selecting = false;
         }
-        _textArea.Caret.BringCaretToView();
     }
 
     /// <summary>The stops of a snippet that went in at <paramref name="start"/>, inside <paramref name="parent"/>.</summary>

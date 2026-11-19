@@ -94,7 +94,7 @@ internal sealed class EditorView : IDisposable
         _squiggles = new SquiggleLayer(area, document);
         SemanticHighlighter = new SemanticHighlighter(area.TextView, document, context.Editor.Dispatcher);
         _hover = new HoverController(context.Editor, area, document, _squiggles, Highlighter);
-        _snippets = new SnippetController(area, document);
+        _snippets = new SnippetController(area, document, _changes);
         // After typing: it sees typed text first, so that a typed "(" has its ")" when completion asks.
         _completion = new CompletionController(
             context.Editor,
