@@ -199,18 +199,24 @@ internal sealed class WordEditing : IEditorFeature
 
     /// <summary>The selection from the drag's <paramref name="start"/> by words to the pointer, if over a line.</summary>
     private TextSelection? DragTo(TextRange start) =>
-        LineAt(_pointer) is (var line, var text, var column)
+        LineAt(_pointer, belowAtEnd: true) is (var line, var text, var column)
             ? WordRules.DragTo(start, text, line.Offset, column)
             : null;
 
     /// <summary>
-    /// The line at <paramref name="point"/> of the text view, its text and the nearest column; above or below the text,
-    /// the nearest line.
+    /// The line at <paramref name="point"/> of the text view, its text and the nearest column; above or below the view,
+    /// the nearest line; below the last line, with <paramref name="belowAtEnd"/>, the text's end, which a drag past the
+    /// text goes to.
     /// </summary>
-    private (DocumentLine Line, string Text, int Column)? LineAt(Point point)
+    private (DocumentLine Line, string Text, int Column)? LineAt(Point point, bool belowAtEnd = false)
     {
         TextView view = _area.TextView;
         point = point.WithY(Math.Clamp(point.Y, 0, view.Bounds.Height)) + view.ScrollOffset;
+        if (belowAtEnd && point.Y >= view.DocumentHeight)
+        {
+            DocumentLine last = Buffer.GetLineByNumber(Buffer.LineCount);
+            return (last, Buffer.GetText(last), last.Length);
+        }
         if (view.GetPosition(point) is not { } position)
             return null;
         DocumentLine line = Buffer.GetLineByNumber(position.Line);
