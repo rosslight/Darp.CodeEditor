@@ -212,6 +212,64 @@ public sealed class SmartSelectTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe("«gamma» delta");
         });
 
+    /// <summary>
+    /// A caret that moved away and back starts another expansion: the answer for the one before it is dropped, as it
+    /// neither starts nor moves along the ranges of the new one.
+    /// </summary>
+    [Fact]
+    public Task An_expansion_answered_after_the_caret_moved_away_and_back_is_dropped() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "alpha beta");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await CompletionTests.StartServingAsync(server, document);
+            using (
+                await CompletionTests.CommandAsync(server, fake, "hold-selection-ranges", "holding selection ranges")
+            )
+            {
+                window.Editor.Selection = new TextSelection(8);
+                window.Press(Keys.Right, SmartSelect);
+                await fake.WaitForAsync("selection ranges ");
+                window.Press(Keys.Home);
+                window.Editor.Selection = new TextSelection(8);
+                window.Press(Keys.Right, SmartSelect);
+                await fake.WaitForAsync("selection ranges ", 2);
+            }
+
+            using (
+                await CompletionTests.CommandAsync(
+                    server,
+                    fake,
+                    "release-selection-ranges",
+                    "released selection ranges"
+                )
+            ) { }
+            await Wait.UntilAsync(() => !window.Editor.Selection.IsEmpty);
+            // Both answers are in once a later one is: the editor reads them in order.
+            await document.HoverAsync(document.CurrentSnapshot, new TextPosition(1, 1), CancellationToken.None);
+
+            MarkedText.Of(window).ShouldBe("alpha «beta»");
+        });
+
+    /// <summary>A selection whose anchor alone moves is another selection: shrinking starts from it.</summary>
+    [Fact]
+    public Task Moving_only_the_anchor_ends_the_ranges() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("one tw|o", CodeLanguage.PlainText);
+            window.Press(Keys.Right, SmartSelect);
+            MarkedText.Of(window).ShouldBe("one «two»");
+
+            // The text area's own selection, which leaves the caret where it is.
+            TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+            textArea.Selection = Selection.Create(textArea, 0, 7);
+            window.Press(Keys.Left, SmartSelect);
+
+            MarkedText.Of(window).ShouldBe("«one two»");
+        });
+
     /// <summary>A rectangle selection keeps its own keys, which grow it on Windows and Linux.</summary>
     [Fact]
     public Task A_rectangle_selection_does_not_expand_and_stays_a_rectangle() =>

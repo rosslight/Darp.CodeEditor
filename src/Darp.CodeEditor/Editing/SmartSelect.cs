@@ -9,8 +9,8 @@ namespace Darp.CodeEditor.Editing;
 
 /// <summary>
 /// Expands and shrinks the selection, as VS Code's smart select (<c>editor.action.smartSelect.expand</c> and
-/// <c>.shrink</c>): through the ranges around the caret, found as expanding starts, until the caret moves otherwise or
-/// the text changes. They are the server's <c>textDocument/selectionRange</c> where it offers them, or else the bracket
+/// <c>.shrink</c>): through the ranges around the caret, found as expanding starts, until the selection, the caret or
+/// the text changes otherwise. They are the server's <c>textDocument/selectionRange</c> where it offers them, or else the bracket
 /// ranges, with the word ranges either way (<see cref="SmartSelectRanges"/>).
 /// </summary>
 internal sealed class SmartSelect : IEditorFeature
@@ -27,7 +27,13 @@ internal sealed class SmartSelect : IEditorFeature
     /// <summary>The ranges from the selection out, and the one selected; null until expanding starts.</summary>
     private (IReadOnlyList<TextRange> Ranges, int Index)? _ranges;
 
-    /// <summary>Whether the caret moves as a range is selected, which keeps the ranges.</summary>
+    /// <summary>
+    /// Counts the selection's sessions: each change of the selection, the caret or the text but the feature's own
+    /// starts another, and an answer for an earlier one neither starts nor moves along the ranges.
+    /// </summary>
+    private int _session;
+
+    /// <summary>Whether a range is selected, which changes the selection within the session.</summary>
     private bool _selecting;
 
     public SmartSelect(
@@ -42,7 +48,8 @@ internal sealed class SmartSelect : IEditorFeature
         _document = document;
         _highlighter = highlighter;
         _changes = changes;
-        area.Caret.PositionChanged += OnCaretMoved;
+        area.Caret.PositionChanged += OnSelectionChanged;
+        area.SelectionChanged += OnSelectionChanged;
         _buffer.Changed += OnTextChanged;
     }
 
@@ -54,7 +61,8 @@ internal sealed class SmartSelect : IEditorFeature
 
     public void Dispose()
     {
-        _area.Caret.PositionChanged -= OnCaretMoved;
+        _area.Caret.PositionChanged -= OnSelectionChanged;
+        _area.SelectionChanged -= OnSelectionChanged;
         _buffer.Changed -= OnTextChanged;
         _disposed.Cancel();
         _disposed.Dispose();
@@ -75,28 +83,23 @@ internal sealed class SmartSelect : IEditorFeature
 
     /// <summary>
     /// Finds the ranges around the selection, from the server where it offers them, and selects the next one: only
-    /// while the text and the selection stay as they were meanwhile, unless another expansion found them first.
-    /// Failures go to the log.
+    /// while the session lasts, as the text and the selection stay but for the feature's own changes. An expansion
+    /// meanwhile in the session may have found them first. Failures go to the log.
     /// </summary>
     private async void Start(bool expand)
     {
         CancellationToken cancellation = _disposed.Token;
-        TextSnapshot snapshot = _document.CurrentSnapshot;
+        int session = _session;
         TextSelection selection = _changes.Selection;
         try
         {
             // A server that fails gives no ranges, and the bracket ranges stay out, as in VS Code.
             IReadOnlyList<TextRange>? server = _document.Features is { SelectionRange: true }
-                ? await _document.SelectionRangesAsync(snapshot, selection.Caret, cancellation) ?? []
+                ? await _document.SelectionRangesAsync(_document.CurrentSnapshot, selection.Caret, cancellation) ?? []
                 : null;
-            if (cancellation.IsCancellationRequested)
+            if (cancellation.IsCancellationRequested || session != _session)
                 return;
-            if (_ranges is null)
-            {
-                if (_document.CurrentSnapshot != snapshot || _changes.Selection != selection)
-                    return;
-                _ranges = (Ranges(selection, server), 0);
-            }
+            _ranges ??= (Ranges(selection, server), 0);
             Select(expand);
         }
         catch (Exception e)
@@ -152,12 +155,19 @@ internal sealed class SmartSelect : IEditorFeature
         }
     }
 
-    private void OnCaretMoved(object? sender, EventArgs e)
+    /// <summary>A caret move or a selection of anyone's but the feature's starts another session.</summary>
+    private void OnSelectionChanged(object? sender, EventArgs e)
     {
         if (!_selecting)
-            _ranges = null;
+            EndSession();
     }
 
     /// <summary>The ranges are of the text before the change.</summary>
-    private void OnTextChanged(object? sender, DocumentChangeEventArgs e) => _ranges = null;
+    private void OnTextChanged(object? sender, DocumentChangeEventArgs e) => EndSession();
+
+    private void EndSession()
+    {
+        _session++;
+        _ranges = null;
+    }
 }
