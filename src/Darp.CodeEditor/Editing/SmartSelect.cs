@@ -1,0 +1,163 @@
+using Avalonia.Logging;
+using AvaloniaEdit.Document;
+using AvaloniaEdit.Editing;
+using Darp.CodeEditor.Commands;
+using Darp.CodeEditor.Highlighting;
+using Darp.CodeEditor.Loading;
+
+namespace Darp.CodeEditor.Editing;
+
+/// <summary>
+/// Expands and shrinks the selection, as VS Code's smart select (<c>editor.action.smartSelect.expand</c> and
+/// <c>.shrink</c>): through the ranges around the caret, found as expanding starts, until the caret moves otherwise or
+/// the text changes. They are the server's <c>textDocument/selectionRange</c> where it offers them, or else the bracket
+/// ranges, with the word ranges either way (<see cref="SmartSelectRanges"/>).
+/// </summary>
+internal sealed class SmartSelect : IEditorFeature
+{
+    private readonly TextArea _area;
+    private readonly TextDocument _buffer;
+    private readonly CodeDocument _document;
+    private readonly BackgroundTextMateHighlighter _highlighter;
+    private readonly TextChanges _changes;
+
+    /// <summary>Drops what the server answers once the view no longer shows the document.</summary>
+    private readonly CancellationTokenSource _disposed = new();
+
+    /// <summary>The ranges from the selection out, and the one selected; null until expanding starts.</summary>
+    private (IReadOnlyList<TextRange> Ranges, int Index)? _ranges;
+
+    /// <summary>Whether the caret moves as a range is selected, which keeps the ranges.</summary>
+    private bool _selecting;
+
+    public SmartSelect(
+        TextArea area,
+        CodeDocument document,
+        BackgroundTextMateHighlighter highlighter,
+        TextChanges changes
+    )
+    {
+        _area = area;
+        _buffer = area.Document;
+        _document = document;
+        _highlighter = highlighter;
+        _changes = changes;
+        area.Caret.PositionChanged += OnCaretMoved;
+        _buffer.Changed += OnTextChanged;
+    }
+
+    public void AddCommands(CommandTable commands)
+    {
+        commands.Add(CodeEditorCommands.SmartSelectExpand, () => Run(expand: true));
+        commands.Add(CodeEditorCommands.SmartSelectShrink, () => Run(expand: false));
+    }
+
+    public void Dispose()
+    {
+        _area.Caret.PositionChanged -= OnCaretMoved;
+        _buffer.Changed -= OnTextChanged;
+        _disposed.Cancel();
+        _disposed.Dispose();
+    }
+
+    /// <summary>Selects the next range out or in, once the ranges are found.</summary>
+    /// <returns>Whether it applies: not to a rectangle selection, whose keys grow it.</returns>
+    private bool Run(bool expand)
+    {
+        if (_area.Selection is RectangleSelection)
+            return false;
+        if (_ranges is null)
+            Start(expand);
+        else
+            Select(expand);
+        return true;
+    }
+
+    /// <summary>
+    /// Finds the ranges around the selection, from the server where it offers them, and selects the next one: only
+    /// while the text and the selection stay as they were meanwhile, unless another expansion found them first.
+    /// Failures go to the log.
+    /// </summary>
+    private async void Start(bool expand)
+    {
+        CancellationToken cancellation = _disposed.Token;
+        TextSnapshot snapshot = _document.CurrentSnapshot;
+        TextSelection selection = _changes.Selection;
+        try
+        {
+            // A server that fails gives no ranges, and the bracket ranges stay out, as in VS Code.
+            IReadOnlyList<TextRange>? server = _document.Features is { SelectionRange: true }
+                ? await _document.SelectionRangesAsync(snapshot, selection.Caret, cancellation) ?? []
+                : null;
+            if (cancellation.IsCancellationRequested)
+                return;
+            if (_ranges is null)
+            {
+                if (_document.CurrentSnapshot != snapshot || _changes.Selection != selection)
+                    return;
+                _ranges = (Ranges(selection, server), 0);
+            }
+            Select(expand);
+        }
+        catch (Exception e)
+        {
+            Logger.TryGet(LogEventLevel.Error, AssetFiles.LogArea)?.Log(this, "Smart select failed: {Exception}", e);
+        }
+    }
+
+    /// <summary>
+    /// The ranges from <paramref name="selection"/> out: those of <paramref name="server"/>, or without them the bracket
+    /// ranges, and the word ranges, that hold the selection.
+    /// </summary>
+    private List<TextRange> Ranges(TextSelection selection, IReadOnlyList<TextRange>? server)
+    {
+        int caret = selection.Caret;
+        IEnumerable<TextRange> found =
+            server
+            ?? SmartSelectRanges.Brackets(
+                _buffer,
+                caret,
+                LanguageConfiguration.Of(_document.Language).Brackets,
+                _highlighter.TokensOf
+            );
+        TextRange selected = selection.Range;
+        return
+        [
+            selected,
+            .. SmartSelectRanges
+                .Combine(_buffer, found.Concat(SmartSelectRanges.Words(_buffer, caret)), caret)
+                .Where(range => range.Start <= selected.Start && selected.End <= range.End),
+        ];
+    }
+
+    /// <summary>Selects the next range out, or in, past those equal to the one selected; at either end, none.</summary>
+    private void Select(bool expand)
+    {
+        if (_ranges is not var (ranges, index))
+            return;
+        int next = index + (expand ? 1 : -1);
+        while (next >= 0 && next < ranges.Count && ranges[next] == ranges[index])
+            next += expand ? 1 : -1;
+        if (next < 0 || next >= ranges.Count)
+            return;
+        _ranges = (ranges, next);
+        _selecting = true;
+        try
+        {
+            _changes.Select(new TextSelection(ranges[next].Start, ranges[next].End));
+        }
+        finally
+        {
+            _selecting = false;
+        }
+    }
+
+    private void OnCaretMoved(object? sender, EventArgs e)
+    {
+        if (!_selecting)
+            _ranges = null;
+    }
+
+    /// <summary>The ranges are of the text before the change.</summary>
+    private void OnTextChanged(object? sender, DocumentChangeEventArgs e) => _ranges = null;
+}

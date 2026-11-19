@@ -179,4 +179,13 @@ public static class CodeEditorCommands
     /// between its brackets; backward from a closing bracket. Without a pair it does not apply. No key by default.
     /// </summary>
     public const string SelectToBracket = "editor.action.selectToBracket";
+
+    /// <summary>
+    /// Expands the selection to the next range around it: the language server's selection ranges, or without them the
+    /// pairs of brackets, and the words, the lines, and the whole text. In a rectangle selection it does not apply.
+    /// </summary>
+    public const string SmartSelectExpand = "editor.action.smartSelect.expand";
+
+    /// <summary>Shrinks the selection back through the ranges that <see cref="SmartSelectExpand"/> went through.</summary>
+    public const string SmartSelectShrink = "editor.action.smartSelect.shrink";
 }
