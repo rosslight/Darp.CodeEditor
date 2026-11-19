@@ -193,7 +193,10 @@ internal sealed class EditorView : IDisposable
             return true;
         if (!_context.Area.IsFocused)
             return false;
-        _caretMoves.OnKeyboard();
+        // With Ctrl or Cmd, a key that reaches the text runs one of AvaloniaEdit's commands, such as paste, which may
+        // move the caret within the key's event, as when the clipboard answers at once: that is no typing.
+        if ((e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) == 0)
+            _caretMoves.OnKeyboard();
         return _completion.OnKeyDown(e)
             || _signatureHelp.OnKeyDown(e)
             || _snippets.OnKeyDown(e)
