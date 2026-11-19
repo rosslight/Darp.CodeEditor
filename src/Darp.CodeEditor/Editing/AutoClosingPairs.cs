@@ -12,7 +12,7 @@ namespace Darp.CodeEditor.Editing;
 /// surrounds it. In a rectangle selection, each acts on every line or on none. <see cref="CodeEditorOptions.AutoClosing"/>
 /// says where brackets and quotes close; typing over and deleting act only on pairs that the editor closed, and
 /// surrounding on every pair, as VS Code's defaults for <c>editor.autoClosingOvertype</c>, <c>autoClosingDelete</c> and
-/// <c>autoSurround</c>.
+/// <c>autoSurround</c>. Surrounding and deleting a pair are each a step of their own.
 /// </summary>
 /// <remarks>
 /// A pair that the language does not close in strings or comments asks the highlighter for the tokens where the user
@@ -77,7 +77,9 @@ internal sealed class AutoClosingPairs : IDisposable
             edits.Add(new TextEdit(segment.StartOffset, 0, pair.Open));
             edits.Add(new TextEdit(segment.EndOffset, 0, pair.Close));
         }
-        return _changes.Apply(edits, moved: pair.Open.Length);
+        bool surrounded = false;
+        _changes.Run(EditStep.Own, () => surrounded = _changes.Apply(edits, moved: pair.Open.Length));
+        return surrounded;
     }
 
     /// <summary>
@@ -89,7 +91,8 @@ internal sealed class AutoClosingPairs : IDisposable
     {
         if (TypingOffsets() is not { } offsets || !Array.TrueForAll(offsets, IsClosedBefore))
             return false;
-        return _changes.Apply([], moved: 1);
+        _changes.Run(_changes.Typing(typed.ToString()), () => _changes.Apply([], moved: 1));
+        return true;
 
         bool IsClosedBefore(int offset) =>
             offset < Buffer.TextLength
@@ -144,7 +147,12 @@ internal sealed class AutoClosingPairs : IDisposable
     {
         if (TypingOffsets() is not { } offsets || !Array.TrueForAll(offsets, IsInEmptyPair))
             return false;
-        return _changes.Apply([.. offsets.Select(offset => new TextEdit(offset - 1, 2, ""))], moved: -1);
+        bool deleted = false;
+        _changes.Run(
+            new EditStep(EditKind.DeletingLeft, StartsStep: true),
+            () => deleted = _changes.Apply([.. offsets.Select(offset => new TextEdit(offset - 1, 2, ""))], moved: -1)
+        );
+        return deleted;
 
         bool IsInEmptyPair(int offset)
         {

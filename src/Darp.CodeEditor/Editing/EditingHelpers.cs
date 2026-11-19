@@ -64,9 +64,9 @@ internal sealed class EditingHelpers : IEditorFeature
         (int first, int last) = SelectedLines();
         bool toggled = false;
         if (configuration.LineComment is { } token)
-            _changes.Run(() => toggled = ToggleLineComment(token, first, last));
+            _changes.Run(EditStep.Own, () => toggled = ToggleLineComment(token, first, last));
         else if (configuration.BlockComment is { } block)
-            _changes.Run(() => toggled = ToggleBlockComment(block, first, last));
+            _changes.Run(EditStep.Own, () => toggled = ToggleBlockComment(block, first, last));
         return toggled;
     }
 

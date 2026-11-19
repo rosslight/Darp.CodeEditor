@@ -45,6 +45,7 @@ internal sealed class EditorView : IDisposable
     /// <summary>Everything the view made, in the order it made them: disposed the other way round.</summary>
     private readonly IDisposable[] _features;
 
+    private readonly TextChanges _changes;
     private readonly EditingHelpers _helpers;
     private readonly Typing _typing;
     private readonly Clipboard _clipboard;
@@ -66,9 +67,9 @@ internal sealed class EditorView : IDisposable
         TextArea area = context.Area;
         CodeDocument document = context.Document;
         Highlighter = new BackgroundTextMateHighlighter(area.TextView, area.Document, context.Editor.Dispatcher, null);
-        var changes = new TextChanges(area);
-        _helpers = new EditingHelpers(area, document, changes);
-        _typing = new Typing(area, document, Highlighter, changes, context.Options);
+        _changes = new TextChanges(area);
+        _helpers = new EditingHelpers(area, document, _changes);
+        _typing = new Typing(area, document, Highlighter, _changes, context.Options);
         _clipboard = new Clipboard(area, document);
         _brackets = new BracketHighlighter(area, document, Highlighter);
         _whitespace = new WhitespaceLayer(area);
@@ -83,6 +84,7 @@ internal sealed class EditorView : IDisposable
         _features =
         [
             Highlighter,
+            _changes,
             _helpers,
             _typing,
             _clipboard,

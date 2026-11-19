@@ -7,14 +7,20 @@ using EditorSelection = AvaloniaEdit.Editing.Selection;
 namespace Darp.CodeEditor.Editing;
 
 /// <summary>
-/// How one editor's view edits its document: each edit is one undo step, and the edits of a list go in as one change of
-/// the text, with the selection carried through them. Edits that touch read-only text don't go in.
+/// How one editor's view edits its document: each edit goes in the undo step that <see cref="UndoSteps"/> gives it,
+/// and the edits of a list go in as one change of the text, with the selection carried through them. Edits that touch
+/// read-only text don't go in.
 /// </summary>
-internal sealed class TextChanges
+internal sealed class TextChanges : IDisposable
 {
     private readonly TextArea _area;
+    private readonly UndoSteps _steps;
 
-    public TextChanges(TextArea area) => _area = area;
+    public TextChanges(TextArea area)
+    {
+        _area = area;
+        _steps = new UndoSteps(area);
+    }
 
     private TextDocument Buffer => _area.Document;
 
@@ -24,22 +30,21 @@ internal sealed class TextChanges
             ? new TextSelection(_area.Caret.Offset)
             : new TextSelection(Buffer.GetOffset(_area.Selection.StartPosition.Location), _area.Caret.Offset);
 
+    public void Dispose() => _steps.Dispose();
+
+    /// <inheritdoc cref="UndoSteps.Typing"/>
+    public EditStep Typing(string text) => _steps.Typing(text);
+
+    /// <inheritdoc cref="UndoSteps.Deleting"/>
+    public EditStep Deleting(EditKind kind, bool joinsLines) => _steps.Deleting(kind, joinsLines);
+
     /// <summary>
     /// Runs <paramref name="edit"/>, AvaloniaEdit's own or <see cref="Apply(IReadOnlyList{TextEdit}, TextSelection?)"/>'s,
-    /// as one undo step, and brings the caret into view.
+    /// in <paramref name="step"/>, and brings the caret into view.
     /// </summary>
-    public void Run(Action edit)
+    public void Run(EditStep step, Action edit)
     {
-        UndoStack undo = Buffer.UndoStack;
-        undo.StartUndoGroup();
-        try
-        {
-            edit();
-        }
-        finally
-        {
-            undo.EndUndoGroup();
-        }
+        _steps.Run(step, edit);
         _area.Caret.BringCaretToView();
     }
 
