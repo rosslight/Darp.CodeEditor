@@ -1,5 +1,7 @@
 using Avalonia;
+using Avalonia.Headless;
 using Avalonia.Input;
+using Avalonia.Threading;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
@@ -30,6 +32,30 @@ public sealed class WordEditingTests(UiFixture ui)
 
             DoubleClick(window, window.PointAt(8) + new Point(40, 0));
             MarkedText.Of(window).ShouldBe("a == b.«c»\nnext");
+        });
+
+    /// <summary>The pointer stays put while the view scrolls: the drag's end goes to the word that comes under it.</summary>
+    [Fact]
+    public Task A_drag_after_a_double_click_follows_the_text_that_scrolls_under_the_pointer() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show(
+                "|" + string.Join("\n", Enumerable.Range(1, 200).Select(n => $"line{n} x")),
+                CodeLanguage.PlainText
+            );
+            Point point = window.PointAt(2);
+            window.Click(point, MouseButton.Left);
+            window.Window.MouseDown(point, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            window.Editor.Selection.ShouldBe(new TextSelection(0, 5));
+
+            EditorWindow.PartOf(window.Editor).ScrollToVerticalOffset(40 * window.TextView.DefaultLineHeight);
+            window.Layout();
+            window.Layout();
+
+            DocumentLine line41 = window.TextView.Document.GetLineByNumber(41);
+            window.Editor.Selection.ShouldBe(new TextSelection(0, line41.Offset + "line41".Length));
+            window.Window.MouseUp(point, MouseButton.Left);
         });
 
     [Fact]
