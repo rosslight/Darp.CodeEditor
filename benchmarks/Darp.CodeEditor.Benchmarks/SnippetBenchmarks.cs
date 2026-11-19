@@ -16,7 +16,8 @@ namespace Darp.CodeEditor.Benchmarks;
 /// once had. Committing one from the list renders nearly 5,000 characters, inserts them and starts its session; a
 /// keystroke at the end of another's first stop has its mirrors copy nearly 1,000 characters. Each beside the same work
 /// without a snippet: the same text committed as plain text, and a keystroke after the session ended, so that the
-/// difference is the snippet's own. Not in the CI category: no budget names this case.
+/// difference is the snippet's own. Beyond what a session once allowed: a keystroke that 500 mirrors copy, and a commit
+/// of nearly the most a snippet may insert, a million characters. Not in the CI category: no budget names this case.
 /// </summary>
 [NotInBaseline]
 [InvocationCount(1)]
@@ -37,6 +38,12 @@ public class SnippetBenchmarks
 
     /// <summary>The first stop's length that, grown by a keystroke, has the mirrors copy nearly 1,000 characters.</summary>
     private const int KeystrokeStop = 1_000 / (Mirrors + 1) - 1;
+
+    /// <summary>The mirrors of the first stop of the snippet with many, each copying one character.</summary>
+    private const int ManyMirrors = 500;
+
+    /// <summary>The first stop's length that comes nearest the most text a snippet may insert, its parts counted.</summary>
+    private const int MostStop = (Snippet.MaxText - 4 * (Mirrors + 1)) / (Mirrors + 1) - Indentation - 1;
 
     private readonly ConcurrentQueue<string> _serverLines = new();
     private LanguageServer? _server;
@@ -71,6 +78,8 @@ public class SnippetBenchmarks
         var items = new JsonArray(
             Item("commit", SnippetText(CommitStop), 2),
             Item("keystroke", SnippetText(KeystrokeStop), 2),
+            Item("many", "${1:}" + string.Concat(Enumerable.Repeat("\n$1", ManyMirrors)), 2),
+            Item("most", SnippetText(MostStop), 2),
             Item("plain", Rendered(CommitStop), null)
         );
         _answer = _server.CreateDocument(
@@ -118,7 +127,7 @@ public class SnippetBenchmarks
     }
 
     [IterationSetup(Target = nameof(CommitTheSameTextAsPlainText))]
-    public void OpenTheListOnThePlainText() => OpenTheList(2);
+    public void OpenTheListOnThePlainText() => OpenTheList(4);
 
     /// <summary>The snippet's text, as an item in plain text.</summary>
     [Benchmark]
@@ -145,6 +154,29 @@ public class SnippetBenchmarks
     /// <summary>A keystroke at the end of the first stop, which its mirrors copy, nearly 1,000 characters.</summary>
     [Benchmark]
     public void KeystrokeThatTheMirrorsCopy() => Type(Mirrors + 1);
+
+    [IterationSetup(Target = nameof(KeystrokeThatManyMirrorsCopy))]
+    public void CommitTheSnippetWithManyMirrors()
+    {
+        OpenTheList(2);
+        Commit();
+    }
+
+    /// <summary>A keystroke in the empty first stop, which its 500 mirrors copy.</summary>
+    [Benchmark]
+    public void KeystrokeThatManyMirrorsCopy() => Type(ManyMirrors + 1);
+
+    [IterationSetup(Target = nameof(CommitTheMostASnippetMayInsert))]
+    public void OpenTheListOnTheLargestSnippet() => OpenTheList(3);
+
+    /// <summary>The snippet of nearly a million characters, the most a snippet may insert, with its stops.</summary>
+    [Benchmark]
+    public void CommitTheMostASnippetMayInsert()
+    {
+        Commit();
+        if (_editor?.Selection != new TextSelection(_start, _start + MostStop))
+            throw new InvalidOperationException("The snippet did not go in with its stops.");
+    }
 
     [IterationSetup(Target = nameof(KeystrokeWithoutASession))]
     public void CommitAndEndTheSession()
@@ -203,7 +235,7 @@ public class SnippetBenchmarks
         window.KeyPress(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
         window.KeyRelease(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
         CompletionBenchmarks.RunJobsUntil(
-            () => CompletionBenchmarks.List(window)?.Items.Count == 3,
+            () => CompletionBenchmarks.List(window)?.Items.Count == 5,
             "The list did not show."
         );
         for (int i = 0; i < index; i++)
