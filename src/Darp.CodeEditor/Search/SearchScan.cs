@@ -28,6 +28,9 @@ internal sealed class SearchScan
     /// <summary>Whether the text has surrogates, between whose halves no match or group may start or end.</summary>
     private readonly bool _surrogates;
 
+    /// <summary>The regular expression's group numbers, which may skip some, as <c>(?&lt;10&gt;a)</c> does.</summary>
+    private readonly int[] _groups;
+
     public SearchScan(
         string text,
         SearchQuery query,
@@ -45,6 +48,7 @@ internal sealed class SearchScan
         _found = found;
         _cancellationToken = cancellationToken;
         _surrogates = text.AsSpan().IndexOfAnyInRange('\uD800', '\uDFFF') >= 0;
+        _groups = regex.GetGroupNumbers();
     }
 
     /// <summary>
@@ -215,19 +219,22 @@ internal sealed class SearchScan
         offset > 0 && offset < text.Length && text[offset - 1] == '\r' && text[offset] == '\n';
 
     /// <summary>
-    /// Whether the match or one of its groups starts or ends between the two halves of a surrogate pair, where a
-    /// replacement would split it: .NET's classes and quantifiers work on UTF-16 units.
+    /// Whether the match or a capture of one of its groups starts or ends between the two halves of a surrogate pair,
+    /// where a replacement would split it: .NET's classes and quantifiers work on UTF-16 units.
     /// </summary>
-    private static bool SplitsAPair(string input, int shift, Match match)
+    private bool SplitsAPair(string input, int shift, Match match)
     {
-        foreach (Group group in match.Groups)
+        foreach (int group in _groups)
         {
-            int groupStart = shift + group.Index;
-            if (
-                group.Success
-                && (IsInsideSurrogatePair(input, groupStart) || IsInsideSurrogatePair(input, groupStart + group.Length))
-            )
-                return true;
+            foreach (Capture capture in match.Groups[group].Captures)
+            {
+                int captureStart = shift + capture.Index;
+                if (
+                    IsInsideSurrogatePair(input, captureStart)
+                    || IsInsideSurrogatePair(input, captureStart + capture.Length)
+                )
+                    return true;
+            }
         }
         return false;
     }

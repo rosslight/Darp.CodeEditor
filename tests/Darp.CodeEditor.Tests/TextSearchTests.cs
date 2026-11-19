@@ -222,6 +222,9 @@ public sealed class TextSearchTests
     [InlineData("\U0001F600", "(.)(.)", "$2$1", "\U0001F600")]
     [InlineData("\U0001F600", @"(\uD83D)(\uDE00)", "$2$1", "\U0001F600")]
     [InlineData("\U0001F600", @"\uD83D\uDE00", "X", "X")]
+    // Every capture of a group, not only its last, and a group of a number that others skip.
+    [InlineData("\U0001F600a", "(.)+", "<$1>", "\U0001F600a")]
+    [InlineData("\U0001F600", "(?=(?<10>.))..", "X", "\U0001F600")]
     public void No_match_splits_a_surrogate_pair(string text, string query, string replacement, string expected)
     {
         var snapshot = TextSnapshot.FromString(text);
