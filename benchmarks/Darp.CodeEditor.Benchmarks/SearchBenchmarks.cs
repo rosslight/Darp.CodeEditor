@@ -6,6 +6,7 @@ using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using BenchmarkDotNet.Attributes;
+using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Search;
 
 namespace Darp.CodeEditor.Benchmarks;
@@ -22,8 +23,20 @@ public class SearchBenchmarks
 {
     private TextSnapshot? _snapshot;
 
+    /// <summary>The same lines apart by <c>\r\n</c>, which a search across lines reads with <c>\n</c>.</summary>
+    private TextSnapshot? _crLfSnapshot;
+
+    /// <summary>25,000 lines, with more matches of a letter than a search keeps.</summary>
+    private TextSnapshot? _longSnapshot;
+
     [GlobalSetup]
-    public void SetUp() => _snapshot = TextSnapshot.FromString(HeadlessEditor.Json(5000));
+    public void SetUp()
+    {
+        string json = HeadlessEditor.Json(5000);
+        _snapshot = TextSnapshot.FromString(json);
+        _crLfSnapshot = TextSnapshot.FromString(json.Replace("\n", "\r\n", StringComparison.Ordinal));
+        _longSnapshot = TextSnapshot.FromString(HeadlessEditor.Json(25_000));
+    }
 
     /// <summary>A word on every line: about 5,000 matches.</summary>
     [Benchmark]
@@ -39,10 +52,38 @@ public class SearchBenchmarks
     [Benchmark]
     public int FindNothing() => Find(new SearchQuery("missing", MatchCase: false, WholeWord: false, UseRegex: false));
 
-    private int Find(SearchQuery query)
+    /// <summary>
+    /// A regular expression across the end of every line: about 5,000 matches, in all of the text at once.
+    /// </summary>
+    [Benchmark]
+    public int FindAcrossLines() => Find(new SearchQuery("\",\\n", MatchCase: true, WholeWord: false, UseRegex: true));
+
+    /// <summary>The same, in lines apart by <c>\r\n</c>: the search first makes them <c>\n</c>.</summary>
+    [Benchmark]
+    public int FindAcrossCrLfLines() =>
+        Find(new SearchQuery("\",\\n", MatchCase: true, WholeWord: false, UseRegex: true), _crLfSnapshot);
+
+    /// <summary>
+    /// The edits of Replace All beyond the matches that a search keeps, in the background: every "e" of 25,000 lines,
+    /// about 50,000 matches.
+    /// </summary>
+    [Benchmark]
+    public int ReplaceAllBeyondTheMatchesKept()
+    {
+        (IReadOnlyList<TextEdit>? edits, _) = TextSearch.ReplaceAll(
+            _longSnapshot ?? throw new InvalidOperationException("Not set up."),
+            new SearchQuery("e", MatchCase: true, WholeWord: false, UseRegex: false),
+            new SearchReplacement("E", PreserveCase: false),
+            null,
+            CancellationToken.None
+        );
+        return edits?.Count ?? throw new InvalidOperationException("The search stopped.");
+    }
+
+    private int Find(SearchQuery query, TextSnapshot? snapshot = null)
     {
         SearchResult result = TextSearch.Find(
-            _snapshot ?? throw new InvalidOperationException("Not set up."),
+            snapshot ?? _snapshot ?? throw new InvalidOperationException("Not set up."),
             query,
             null,
             null,
