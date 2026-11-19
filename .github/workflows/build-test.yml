@@ -82,6 +82,8 @@ jobs:
 
   test-other-platforms:
     strategy:
+      # Each platform runs to its end, so that a failure on one shows every other platform's failures too.
+      fail-fast: false
       matrix:
         include:
           - name: Windows x64

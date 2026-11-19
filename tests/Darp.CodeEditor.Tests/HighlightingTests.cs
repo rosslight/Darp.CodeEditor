@@ -75,7 +75,10 @@ public sealed class HighlightingTests(UiFixture ui)
                 CodeLanguage.Json,
                 $"{{\n  \"before\": 1,\n{LongStringLine},\n  \"after\": 2\n}}"
             );
-            using var window = new EditorWindow(new CodeEditor { Document = document });
+            // The background's clock stands still: every line tokenizes in time, however slow the machine.
+            using var window = new EditorWindow(
+                new CodeEditor { GrammarClock = new ManualTime(), Document = document }
+            );
 
             // The UI thread leaves the long line to the background, and colors the next one from a guess first.
             await Wait.UntilAsync(() =>
@@ -86,6 +89,24 @@ public sealed class HighlightingTests(UiFixture ui)
 
             window.ColorsOfLine(3).ShouldContain(s_propertyName);
             window.ColorsOfLine(3).ShouldContain(s_string);
+        });
+
+    [Fact]
+    public Task A_cold_grammar_whose_first_lines_run_out_of_time_still_colors_them() =>
+        _ui.Run(async () =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.Json, "{ \"first\": 1,\n  \"second\": 2\n}");
+            // The background's first lines each take a second, as warming up a grammar can on a slow machine.
+            using var window = new EditorWindow(
+                new CodeEditor { GrammarClock = new SlowStartClock(readings: 10), Document = document }
+            );
+
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return window.ColorsOfLine(1).Contains(s_propertyName)
+                    && window.ColorsOfLine(2).Contains(s_propertyName);
+            });
         });
 
     /// <summary>The languages of a new editor's first frames.</summary>
@@ -132,7 +153,15 @@ public sealed class HighlightingTests(UiFixture ui)
                 CodeLanguage.Json,
                 $"{{\n  \"long\": {value},\n  \"after\": 1\n}}"
             );
-            using var window = new EditorWindow(new CodeEditor { Document = document });
+            // The string tokenizes in time on any machine: the background's clock stands still for it. The array runs
+            // out of time for real: it takes seconds.
+            using var window = new EditorWindow(
+                new CodeEditor
+                {
+                    GrammarClock = kind == "string" ? new ManualTime() : TimeProvider.System,
+                    Document = document,
+                }
+            );
             // Near the line's start: the editor edits and draws only the first 3,000 characters of a longer line.
             window.Editor.Selection = new TextSelection(document.CurrentSnapshot.GetOffset(new TextPosition(2, 100)));
 
@@ -158,13 +187,18 @@ public sealed class HighlightingTests(UiFixture ui)
         _ui.Run(async () =>
         {
             CodeDocument document = CodeDocument.Create(CodeLanguage.Json, Texts.Json(5000));
-            using var window = new EditorWindow(new CodeEditor { Document = document });
+            // The background's clock stands still: the lines it tokenizes first do not run out of time.
+            using var window = new EditorWindow(
+                new CodeEditor { GrammarClock = new ManualTime(), Document = document }
+            );
             await Wait.UntilAsync(() =>
             {
                 window.Render();
                 return window.ColorsOfLine(2).Contains(s_propertyName);
             });
             TextSnapshot text = document.CurrentSnapshot;
+            // A clock that stands still: the UI thread's budget does not run out, however slow the machine.
+            HighlighterOf(window).FrameClock = new ManualTime();
 
             window.Editor.ScrollTo(new TextRange(text.GetOffset(new TextPosition(4000, 1)), 0));
             // A layout without the dispatcher's jobs: the background's results cannot arrive in between.
@@ -197,17 +231,21 @@ public sealed class HighlightingTests(UiFixture ui)
                 window.Render();
                 return window.ColorsOfLine(2).Contains(s_keyword);
             });
+            // The UI thread's clock stands still, except while the view builds line 4,000: there the search takes a
+            // second, whatever it takes on this machine.
+            var clock = new SlowLineClock(4000);
+            clock.Watch(window.TextView);
+            HighlighterOf(window).FrameClock = clock;
 
             window.Editor.ScrollTo(new TextRange(document.CurrentSnapshot.GetOffset(new TextPosition(4000, 1)), 0));
             // Layout passes without the dispatcher's jobs, so without the background's results. The pass that reaches
-            // line 4,000 overruns its budget and ends there; the passes after it go on below. On a machine fast enough
-            // for that search to fit in the budget, no pass overruns.
-            for (int pass = 0; pass < 5 && !window.ColorsOfLine(4001).Contains(s_keyword); pass++)
-            {
-                window.TextView.Redraw();
-                window.Window.UpdateLayout();
-            }
+            // line 4,000 overruns its budget and ends there.
+            window.Window.UpdateLayout();
+            window.ColorsOfLine(4001).ShouldBe([Avalonia.Media.Colors.Black]);
 
+            // The next pass leaves line 4,000 to the background, and goes on below.
+            window.TextView.Redraw();
+            window.Window.UpdateLayout();
             window.ColorsOfLine(4001).ShouldContain(s_keyword);
         });
 
@@ -215,7 +253,12 @@ public sealed class HighlightingTests(UiFixture ui)
     public Task A_document_shown_while_the_previous_ones_grammar_loads_keeps_its_own_colors() =>
         _ui.Run(async () =>
         {
-            var editor = new CodeEditor { Document = CodeDocument.Create(CodeLanguage.Json, Texts.Json(100)) };
+            // The background's clock stands still: the first lines do not run out of time, however slow the machine.
+            var editor = new CodeEditor
+            {
+                GrammarClock = new ManualTime(),
+                Document = CodeDocument.Create(CodeLanguage.Json, Texts.Json(100)),
+            };
             using var window = new EditorWindow(editor);
 
             // JSON's grammar loads in the background, and no job has run since: its result is still to come.
@@ -405,6 +448,9 @@ public sealed class HighlightingTests(UiFixture ui)
     /// <summary>A property of 20,000 characters whose value is an array: tokenizing it takes seconds.</summary>
     private static string SlowLine { get; } = "  \"slow\": [" + string.Concat(Enumerable.Repeat("1, ", 6_666)) + "1],";
 
+    private static BackgroundTextMateHighlighter HighlighterOf(EditorWindow window) =>
+        window.TextView.LineTransformers.OfType<BackgroundTextMateHighlighter>().Single();
+
     private static async Task<TextMateGrammar> JsonGrammar()
     {
         IRawGrammar grammar = (await CodeLanguage.Json.Loaded).Grammar.ShouldNotBeNull();
@@ -423,6 +469,66 @@ public sealed class HighlightingTests(UiFixture ui)
                 colors.Add(brush.Color);
         }
         return colors;
+    }
+
+    /// <summary>
+    /// A clock that stands still, except while a text view builds the visual line of one document line: there, each
+    /// reading finds it a second further on.
+    /// </summary>
+    private sealed class SlowLineClock(int lineNumber) : TimeProvider
+    {
+        private readonly int _lineNumber = lineNumber;
+        private long _now;
+        private bool _building;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp()
+        {
+            long now = _now;
+            if (_building)
+                _now += TimeSpan.TicksPerSecond;
+            return now;
+        }
+
+        /// <summary>Follows the lines that <paramref name="textView"/> builds, before and after its transformers.</summary>
+        public void Watch(TextView textView)
+        {
+            textView.LineTransformers.Insert(0, new LineWatch(line => _building = line == _lineNumber));
+            textView.LineTransformers.Add(new LineWatch(_ => _building = false));
+        }
+
+        private sealed class LineWatch(Action<int> building) : IVisualLineTransformer
+        {
+            private readonly Action<int> _building = building;
+
+            public void Transform(ITextRunConstructionContext context, IList<VisualLineElement> elements) =>
+                _building(context.VisualLine.FirstDocumentLine.LineNumber);
+        }
+    }
+
+    /// <summary>A clock that moves a second each time it is read, for its first readings, and then stands still.</summary>
+    private sealed class SlowStartClock(int readings) : TimeProvider
+    {
+        private readonly Lock _lock = new();
+        private int _readings = readings;
+        private long _now;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp()
+        {
+            lock (_lock)
+            {
+                long now = _now;
+                if (_readings > 0)
+                {
+                    _readings--;
+                    _now += TimeSpan.TicksPerSecond;
+                }
+                return now;
+            }
+        }
     }
 
     /// <summary>Counts how often the text view builds the visual line of one document line.</summary>

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
 using Darp.CodeEditor.Loading;
@@ -36,12 +35,19 @@ internal sealed class TextMateGrammar
     /// </summary>
     private volatile bool _uiThreadWaiting;
 
-    private TextMateGrammar(ColorThemeFile theme, IRawGrammar source, IGrammar grammar, IBrush?[] brushes)
+    private TextMateGrammar(
+        ColorThemeFile theme,
+        IRawGrammar source,
+        IGrammar grammar,
+        IBrush?[] brushes,
+        TimeProvider clock
+    )
     {
         Theme = theme;
         Source = source;
         Grammar = grammar;
         Brushes = brushes;
+        Clock = clock;
     }
 
     /// <summary>The theme whose colors the tokens carry.</summary>
@@ -56,6 +62,12 @@ internal sealed class TextMateGrammar
     public IBrush?[] Brushes { get; }
 
     /// <summary>
+    /// The clock of the time limit in the background: the system's. On another clock, such as a test's, only that
+    /// clock ends the time, and TextMate takes as long as it needs.
+    /// </summary>
+    public TimeProvider Clock { get; }
+
+    /// <summary>
     /// The color of a token, from its encoded attributes; null for the theme's default foreground, which keeps the
     /// editor's foreground.
     /// </summary>
@@ -65,8 +77,11 @@ internal sealed class TextMateGrammar
         return id > DefaultForegroundId && id < Brushes.Length ? Brushes[id] : null;
     }
 
-    /// <summary>Loads <paramref name="grammar"/> with <paramref name="theme"/>, in a registry of its own.</summary>
-    public static TextMateGrammar Load(ColorThemeFile theme, IRawGrammar grammar)
+    /// <summary>
+    /// Loads <paramref name="grammar"/> with <paramref name="theme"/>, in a registry of its own, with the time limit
+    /// in the background on <paramref name="clock"/>: the system's by default.
+    /// </summary>
+    public static TextMateGrammar Load(ColorThemeFile theme, IRawGrammar grammar, TimeProvider? clock = null)
     {
         var registry = new Registry(new RegistryOptions(theme, grammar));
         IGrammar loaded = registry.LoadGrammar(grammar.GetScopeName());
@@ -79,7 +94,7 @@ internal sealed class TextMateGrammar
             if (id < brushes.Length && ColorThemeFile.TryParseColor(color, out Color parsed))
                 brushes[id] = new ImmutableSolidColorBrush(parsed);
         }
-        return new TextMateGrammar(theme, grammar, loaded, brushes);
+        return new TextMateGrammar(theme, grammar, loaded, brushes, clock ?? TimeProvider.System);
     }
 
     /// <summary>Takes the grammar on the UI thread, ahead of background tokenizing; false after the timeout.</summary>
@@ -108,9 +123,14 @@ internal sealed class TextMateGrammar
             SpinWait.SpinUntil(() => !_uiThreadWaiting, s_maxYield);
         lock (_gate)
         {
-            long start = Stopwatch.GetTimestamp();
-            ITokenizeLineResult2 result = Grammar.TokenizeLine2(new LineText(line.AsMemory()), state, timeLimit);
-            return Stopwatch.GetElapsedTime(start) < timeLimit ? result : null;
+            long start = Clock.GetTimestamp();
+            // TextMate stops by real time, which uses up the time limit on the system's clock only.
+            ITokenizeLineResult2 result = Grammar.TokenizeLine2(
+                new LineText(line.AsMemory()),
+                state,
+                Clock == TimeProvider.System ? timeLimit : TimeSpan.MaxValue
+            );
+            return Clock.GetElapsedTime(start) < timeLimit ? result : null;
         }
     }
 

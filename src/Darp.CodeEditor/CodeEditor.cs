@@ -336,6 +336,9 @@ public class CodeEditor : TemplatedControl
     /// <summary>The semantic colors of the shown document, for benchmarks; null while it shows none.</summary>
     internal SemanticHighlighter? SemanticHighlighter => _semantic;
 
+    /// <summary>The clock of the time limit in the background, in the grammars the editor loads: the system's.</summary>
+    internal TimeProvider GrammarClock { get; init; } = TimeProvider.System;
+
     /// <summary>
     /// Scrolls <paramref name="range"/> into view: not at all when it is visible, centered when it is not. A range
     /// taller or wider than the view shows from its start.
@@ -999,13 +1002,14 @@ public class CodeEditor : TemplatedControl
                 ? textView.VisualLines[0].FirstDocumentLine.LineNumber - 1
                 : 0;
         var cancellation = new CancellationTokenSource();
+        TimeProvider clock = GrammarClock;
         var loading = new GrammarLoad(
             theme,
             source,
             cancellation,
             Task.Run(() =>
             {
-                TextMateGrammar grammar = TextMateGrammar.Load(theme, source);
+                TextMateGrammar grammar = TextMateGrammar.Load(theme, source, clock);
                 return (grammar, BackgroundTextMateHighlighter.Prepare(grammar, text, firstLine, cancellation.Token));
             })
         );
