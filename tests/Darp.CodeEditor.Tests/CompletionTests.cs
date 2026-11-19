@@ -1102,6 +1102,48 @@ public sealed class CompletionTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe(expected);
         });
 
+    [Theory]
+    // Right after the lone CR, which it would take along as a line break of its own: it goes in as it was.
+    [InlineData(
+        """[ { "range": { "start": { "line": 2, "character": 0 }, "end": { "line": 2, "character": 0 } }, "newText": "\nc" } ]""",
+        "a\n\r\ncb\nprintln"
+    )]
+    // One of two would delete the CR: neither goes in, as VS Code applies them together.
+    [InlineData(
+        """
+            [ { "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 0 } }, "newText": "x" },
+              { "range": { "start": { "line": 1, "character": 0 }, "end": { "line": 2, "character": 0 } }, "newText": "" } ]
+            """,
+        "a\n\rb\nprintln"
+    )]
+    public Task Additional_edits_that_read_only_text_stops_leave_the_items_own_text_to_go_in(
+        string additional,
+        string expected
+    ) =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            var item = new JsonObject { ["label"] = "println", ["additionalTextEdits"] = Parse(additional) };
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                new JsonObject { ["items"] = new JsonArray(item) }
+            );
+            // A document of LF line breaks, with a protected lone CR.
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "a\n\rb\npr");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+            var protectedText = new TextSegmentReadOnlySectionProvider<TextSegment>(textArea.Document);
+            protectedText.Segments.Add(new TextSegment { StartOffset = 2, Length = 1 });
+            textArea.ReadOnlySectionProvider = protectedText;
+
+            await OpenAsync(window, document.Text.Length);
+            window.Press(Key.Enter);
+
+            document.Text.ShouldBe(expected);
+        });
+
     [Fact]
     public Task A_commit_that_does_not_go_in_cancels_the_resolve_that_would_bring_its_additional_edits() =>
         _ui.Run(async () =>

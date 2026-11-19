@@ -13,8 +13,9 @@ namespace Darp.CodeEditor.Completion;
 /// range, or the word up to the caret; replacing, over its replace range, or the whole word, as far as the edits since
 /// completion was asked left it. Additional edits that a resolve still under way brings come later. The edits go in
 /// through <see cref="TextChanges"/>: an item whose text would touch read-only text, such as protected text or a long
-/// line's hidden tail, does not go in, and additional edits that would are left out. They go in apart from a lone
-/// carriage return next to them, which would join a line break of theirs (<see cref="LineBreaks.Apart"/>). A handler of
+/// line's hidden tail, does not go in. When one of its additional edits would, none of them does, as VS Code applies
+/// them together, and the item's own text still goes in. They go in apart from a lone carriage return next to them,
+/// which would join a line break of theirs (<see cref="LineBreaks.Apart"/>), unless that return is read-only. A handler of
 /// any notification of the commit, of an edit, the selection, the caret or a snippet's first stop, that shows another
 /// document ends the commit there: nothing of it touches that one.
 /// </summary>
@@ -72,13 +73,17 @@ internal sealed class CompletionCommit : IDisposable
                 .OrderBy(e => e.Item1.Range.Start)
                 .ThenBy(e => e.Item2),
         ];
-        TextEdit[] edits = Apart(ordered.Select(e => e.Edit));
-        // A lone carriage return that goes along with an edit may be read-only too.
-        if (!CanChange(main) || !edits.All(e => _changes.CanChange(e.Offset, e.Length)))
+        if (!CanChange(main))
         {
             // Taken out of the resolver for the edits it brings, the resolve is now nobody's: it ends here.
             late?.Cancellation.Cancel();
             return true;
+        }
+        TextEdit[] edits = Apart(ordered.Select(e => e.Edit));
+        if (!edits.All(CanChange))
+        {
+            ordered = [(main, true)];
+            edits = Apart([main]);
         }
         // Where the item's text goes: moved by the edits before it, and after a line break that goes along with it.
         int index = Array.FindIndex(ordered, e => e.IsMain);
@@ -125,7 +130,8 @@ internal sealed class CompletionCommit : IDisposable
                 return;
             }
             TextEdit[] edits = Apart(WithoutOverlaps([], Mapped(snapshot, additional)).OrderBy(e => e.Range.Start));
-            Apply(step, continued: true, [.. edits.Where(e => _changes.CanChange(e.Offset, e.Length))], mark: null);
+            if (edits.All(CanChange))
+                Apply(step, continued: true, edits, mark: null);
         }
         catch (Exception e)
         {
@@ -178,16 +184,20 @@ internal sealed class CompletionCommit : IDisposable
     }
 
     /// <summary>
-    /// <paramref name="edits"/>, in order, apart from a lone carriage return next to them (<see cref="LineBreaks.Apart"/>).
+    /// <paramref name="edits"/>, in order, apart from a lone carriage return next to them (<see cref="LineBreaks.Apart"/>),
+    /// unless taking it along would change read-only text: such an edit stays as it was.
     /// </summary>
-    private TextEdit[] Apart(IEnumerable<CompletionEdit> edits) =>
-        [
-            .. LineBreaks.Apart(
-                _buffer,
-                [.. edits.Select(e => new TextEdit(e.Range.Start, e.Range.Length, e.NewText))],
-                _document.LineBreak
-            ),
-        ];
+    private TextEdit[] Apart(IEnumerable<CompletionEdit> edits)
+    {
+        TextEdit[] asWere = [.. edits.Select(e => new TextEdit(e.Range.Start, e.Range.Length, e.NewText))];
+        TextEdit[] apart = [.. LineBreaks.Apart(_buffer, asWere, _document.LineBreak)];
+        for (int i = 0; i < apart.Length; i++)
+        {
+            if (apart[i].Offset != asWere[i].Offset && !CanChange(apart[i]))
+                apart[i] = asWere[i];
+        }
+        return apart;
+    }
 
     /// <summary>
     /// Edits in the text of <paramref name="snapshot"/>, moved to the current text, with the document's line breaks.
@@ -200,23 +210,20 @@ internal sealed class CompletionCommit : IDisposable
 
     private string InLineBreaks(string text) => TextUtilities.NormalizeNewLines(text, _document.LineBreak);
 
-    /// <summary>
-    /// <paramref name="first"/> and the edits that overlap none before them and touch no read-only text.
-    /// </summary>
+    /// <summary><paramref name="first"/> and the edits that overlap none before them.</summary>
     private List<CompletionEdit> WithoutOverlaps(List<CompletionEdit> first, IEnumerable<CompletionEdit> more)
     {
         foreach (CompletionEdit edit in more)
         {
-            if (
-                CanChange(edit)
-                && first.TrueForAll(other => edit.Range.End <= other.Range.Start || edit.Range.Start >= other.Range.End)
-            )
+            if (first.TrueForAll(other => edit.Range.End <= other.Range.Start || edit.Range.Start >= other.Range.End))
                 first.Add(edit);
         }
         return first;
     }
 
     private bool CanChange(CompletionEdit edit) => _changes.CanChange(edit.Range.Start, edit.Range.Length);
+
+    private bool CanChange(TextEdit edit) => _changes.CanChange(edit.Offset, edit.Length);
 
     public void Dispose() => _lateEdits?.Cancel();
 }

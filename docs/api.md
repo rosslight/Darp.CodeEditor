@@ -562,8 +562,9 @@ How the client talks to a server, where the protocol leaves a choice:
     of the word stays after it; replacing (`acceptAlternativeSelectedSuggestion`), it goes over the replace range, or
     the whole word (design.md #114). The range grows by what was typed since it was asked, as in VS Code, and shrinks by
     what was deleted after the caret. An item whose text would go over read-only text, such as protected text or a
-    long line's hidden tail, does not go in, and additional edits that would are left out. Its `additionalTextEdits`, such as an import, apply with it, as
-    one step that the user undoes; ones that overlap another edit are left out.
+    long line's hidden tail, does not go in. Its `additionalTextEdits`, such as an import, apply with it, as one step
+    that the user undoes; ones that overlap another edit are left out. As VS Code applies them together, when one
+    would go over read-only text, none does, and the item's own text still goes in.
   - **Resolving:** the selected item is resolved when it is selected, and the resolve of an item that is no longer
     selected is cancelled. Its detail, as code highlighted with the document's grammar, and its documentation show
     beside the list, unless Ctrl+Space hid them, as much of both as a hover shows: they share one budget of the hover's size, cut before anything
