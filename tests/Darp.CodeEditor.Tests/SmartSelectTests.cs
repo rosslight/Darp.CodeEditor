@@ -247,15 +247,17 @@ public sealed class SmartSelectTests(UiFixture ui)
                 )
             ) { }
             await Wait.UntilAsync(() => !window.Editor.Selection.IsEmpty);
-            // Both answers are in once a later one is: the editor reads them in order.
+            // Both answers are in once a later one is, as the editor reads them in order, and handed on once the
+            // dispatcher ran what they posted.
             await document.HoverAsync(document.CurrentSnapshot, new TextPosition(1, 1), CancellationToken.None);
+            await EditorWindow.RunPostedJobsAsync();
 
             MarkedText.Of(window).ShouldBe("alpha «beta»");
         });
 
     /// <summary>
     /// Keys that come while the ranges are asked for wait for them, and go through them in their order, with the one
-    /// request: Expand, then Shrink, ends where it started.
+    /// request: Shrink, then Expand, selects the word. Expand first would end at the caret, as dropping both would.
     /// </summary>
     [Fact]
     public Task Keys_while_the_ranges_are_asked_for_go_through_them_in_order_with_one_request() =>
@@ -271,8 +273,8 @@ public sealed class SmartSelectTests(UiFixture ui)
             )
             {
                 window.Editor.Selection = new TextSelection(8);
-                window.Press(Keys.Right, SmartSelect);
                 window.Press(Keys.Left, SmartSelect);
+                window.Press(Keys.Right, SmartSelect);
                 await CompletionTests.BarrierAsync(server, fake);
                 fake.LinesStartingWith("selection ranges ").Count.ShouldBe(1);
             }
@@ -285,12 +287,11 @@ public sealed class SmartSelectTests(UiFixture ui)
                     "released selection ranges"
                 )
             ) { }
-            // The answer is in once a later one is: the editor reads them in order.
-            await document.HoverAsync(document.CurrentSnapshot, new TextPosition(1, 1), CancellationToken.None);
-            MarkedText.Of(window).ShouldBe("alpha be|ta");
+            await Wait.UntilAsync(() => !window.Editor.Selection.IsEmpty);
+            MarkedText.Of(window).ShouldBe("alpha «beta»");
 
             window.Press(Keys.Right, SmartSelect);
-            MarkedText.Of(window).ShouldBe("alpha «beta»");
+            MarkedText.Of(window).ShouldBe("«alpha beta»");
             fake.LinesStartingWith("selection ranges ").Count.ShouldBe(1);
         });
 
