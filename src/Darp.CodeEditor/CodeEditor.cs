@@ -363,7 +363,7 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>
     /// The editor's settings. Default: <see cref="CodeEditorOptions.Default"/>. A change applies from the next keystroke
-    /// on.
+    /// on, and closes what it turns off, such as signature help.
     /// </summary>
     public CodeEditorOptions Options
     {

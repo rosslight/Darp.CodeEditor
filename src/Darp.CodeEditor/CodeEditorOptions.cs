@@ -34,6 +34,21 @@ public sealed record CodeEditorOptions
     /// <c>editor.occurrencesHighlight</c>. Off, a caret move asks the server nothing.
     /// </summary>
     public bool OccurrencesHighlight { get; init; } = true;
+
+    /// <summary>Signature help as the user types: <c>editor.parameterHints</c>.</summary>
+    public ParameterHintsOptions ParameterHints { get; init; } = new();
+}
+
+/// <summary>
+/// Signature help as the user types: the signatures of the call around the caret, on the server's trigger characters.
+/// </summary>
+public sealed record ParameterHintsOptions
+{
+    /// <summary>
+    /// Whether typing opens signature help: <c>editor.parameterHints.enabled</c>. Off, only its command opens it, and
+    /// turning it off closes signature help that shows.
+    /// </summary>
+    public bool Enabled { get; init; } = true;
 }
 
 /// <summary>
