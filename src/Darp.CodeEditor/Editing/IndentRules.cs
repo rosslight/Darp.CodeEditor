@@ -37,7 +37,7 @@ internal sealed class IndentRules
         _autoIndent = autoIndent;
         _indenting = new Indenting(indentation);
         _lineBreak = lineBreak;
-        _time = time ?? TimeProvider.System;
+        _time = time ?? IndentationRules.Clock;
     }
 
     /// <summary>
