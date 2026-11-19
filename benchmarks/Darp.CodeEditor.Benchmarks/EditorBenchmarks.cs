@@ -129,6 +129,56 @@ public class TypingBenchmarks
 }
 
 /// <summary>
+/// One caret move by an arrow key on the UI thread, with the layout and the frame that follow it: every key resolves
+/// through the editor's keymap before it moves the caret. Each call moves the caret a line down or back up, so the view
+/// stays where it is.
+/// </summary>
+[WarmupCount(2)]
+[IterationCount(10)]
+public class CaretMoveBenchmarks
+{
+    private Window? _window;
+    private CodeEditor? _editor;
+    private bool _down;
+
+    /// <summary>In the middle of 5,000 lines of JSON, in view.</summary>
+    [GlobalSetup]
+    public void Show()
+    {
+        HeadlessEditor.SetUpApp();
+        CodeDocument document = CodeDocument.Create(CodeLanguage.Json, HeadlessEditor.Json(5000));
+        var editor = new CodeEditor { Document = document };
+        _editor = editor;
+        _window = HeadlessEditor.Show(editor);
+        HeadlessEditor.RenderUntilColored(_window, editor, HeadlessEditor.JsonKey);
+        int caret = document.CurrentSnapshot.GetOffset(new TextPosition(2500, 4));
+        editor.Selection = new TextSelection(caret);
+        editor.ScrollTo(new TextRange(caret, 0));
+        editor.Focus();
+        HeadlessEditor.RenderUntilColored(_window, editor, HeadlessEditor.JsonKey);
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("CI")]
+    public void CaretMoveIn5000Lines()
+    {
+        Window window = _window ?? throw new InvalidOperationException("Not set up.");
+        CodeEditor editor = _editor ?? throw new InvalidOperationException("Not set up.");
+        _down = !_down;
+        (Key key, PhysicalKey physical) = _down ? (Key.Down, PhysicalKey.ArrowDown) : (Key.Up, PhysicalKey.ArrowUp);
+        window.KeyPress(key, RawInputModifiers.None, physical, null);
+        window.KeyRelease(key, RawInputModifiers.None, physical, null);
+        HeadlessEditor.Render(window);
+        // A key that moves nothing would look fast.
+        if (editor.CaretPosition.Line != (_down ? 2501 : 2500))
+            throw new InvalidOperationException("The key did not move the caret.");
+    }
+
+    [GlobalCleanup]
+    public void Close() => _window?.Close();
+}
+
+/// <summary>
 /// One page down through 5,000 lines of JSON, just opened, on the UI thread, with the layout and the frame that follow:
 /// each page shows lines that are not tokenized yet. An iteration goes through the document once.
 /// </summary>
