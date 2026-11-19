@@ -46,15 +46,34 @@ internal sealed class SnapshotEdits
 
     /// <summary>
     /// Whether an edit changed the text before <paramref name="offset"/>, in the text of <see cref="Snapshot"/>: one
-    /// that starts before where the offset was when it was made.
+    /// whose range, before it was made, ended before where the offset was then.
     /// </summary>
-    public bool ChangeBefore(int offset)
+    public bool EndsBefore(int offset)
     {
         foreach (TextChangeEventArgs edit in _edits)
         {
-            if (edit.Offset < offset)
+            if (edit.Offset + edit.RemovalLength < offset)
                 return true;
             offset = edit.GetNewOffset(offset, AnchorMovementType.AfterInsertion);
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Whether an edit changed the text of <paramref name="range"/>, in the text of <see cref="Snapshot"/>, or took away
+    /// where an empty range is: it removed some of it, or put text inside it.
+    /// </summary>
+    public bool Overlaps(TextRange range)
+    {
+        (int start, int length) = Snapshot.Clamp(range);
+        int end = start + length;
+        foreach (TextChangeEventArgs edit in _edits)
+        {
+            int removed = edit.Offset + edit.RemovalLength;
+            if ((edit.Offset < end && removed > start) || (edit.Offset > start && edit.Offset < end))
+                return true;
+            start = edit.GetNewOffset(start, AnchorMovementType.AfterInsertion);
+            end = edit.GetNewOffset(end, AnchorMovementType.BeforeInsertion);
         }
         return false;
     }
