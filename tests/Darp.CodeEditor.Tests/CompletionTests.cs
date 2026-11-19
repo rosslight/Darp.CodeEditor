@@ -353,6 +353,38 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Enter_that_waits_for_a_filter_goes_on_to_a_new_line_when_a_newer_list_has_nothing() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            // Incomplete: typing on asks again.
+            using CodeDocument first = await SetCompletionAsync(
+                server,
+                fake,
+                Parse("""{ "isIncomplete": true, "items": [ { "label": "print" } ] }""")
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            var ranking = new HeldScheduler();
+            using var window = new EditorWindow(new CodeEditor { Document = document, BackgroundScheduler = ranking });
+            window.Type("pri");
+            await WaitForLabelsAsync(window, ["print"]);
+            using CodeDocument hold = await CommandAsync(server, fake, "hold-completion", "holding completion");
+            using CodeDocument second = await SetCompletionAsync(server, fake, Items());
+
+            // Typed, and Enter pressed, while the filter of "priz" is held: "print" does not match it.
+            ranking.Hold();
+            window.Type("z");
+            window.Press(Key.Enter);
+            // The list asked for again for "priz" has nothing: completion, opened by typing, ends, and Enter goes on.
+            using CodeDocument release = await CommandAsync(server, fake, "release-completion", "released completion");
+            await Wait.UntilAsync(() => List(window) is null);
+            ranking.Release();
+
+            await Wait.UntilAsync(() => document.Text == NewLines.In("priz\n", start: ""));
+        });
+
+    [Fact]
     public Task An_edit_that_leaves_the_caret_drops_the_commit_that_waits_for_a_filter() =>
         _ui.Run(async () =>
         {
