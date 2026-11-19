@@ -34,6 +34,10 @@ internal sealed class OccurrenceHighlighter : IBackgroundRenderer, IEditorFeatur
     private readonly CodeDocument _document;
     private readonly TextChanges _changes;
     private readonly Func<CodeEditorOptions> _options;
+
+    /// <summary>Brings a range into view as the editor's <c>ScrollTo</c> does: centered unless visible.</summary>
+    private readonly Action<TextRange> _reveal;
+
     private TextAreaColors? _colors;
 
     /// <summary>The occurrences highlighted, in order, in the current text.</summary>
@@ -58,7 +62,8 @@ internal sealed class OccurrenceHighlighter : IBackgroundRenderer, IEditorFeatur
         TextArea area,
         CodeDocument document,
         TextChanges changes,
-        Func<CodeEditorOptions> options
+        Func<CodeEditorOptions> options,
+        Action<TextRange> reveal
     )
     {
         _area = area;
@@ -66,6 +71,7 @@ internal sealed class OccurrenceHighlighter : IBackgroundRenderer, IEditorFeatur
         _document = document;
         _changes = changes;
         _options = options;
+        _reveal = reveal;
         area.Caret.PositionChanged += OnCaretMoved;
         area.SelectionChanged += OnSelectionChanged;
         area.GotFocus += OnFocused;
@@ -243,7 +249,8 @@ internal sealed class OccurrenceHighlighter : IBackgroundRenderer, IEditorFeatur
 
     /// <summary>
     /// Moves the caret to the start of the next or the previous occurrence, from the one that holds the caret, as VS
-    /// Code's F7 and Shift+F7 do, keeping the occurrences.
+    /// Code's F7 and Shift+F7 do, keeping the occurrences, and brings the occurrence to the middle of the view unless
+    /// it shows.
     /// </summary>
     /// <returns>Whether there were occurrences to move to.</returns>
     private bool Move(bool next)
@@ -253,15 +260,18 @@ internal sealed class OccurrenceHighlighter : IBackgroundRenderer, IEditorFeatur
         int caret = _area.Caret.Offset;
         int count = _highlights.Length;
         int index = Array.FindIndex(_highlights, found => found.Range.Start <= caret && caret <= found.Range.End);
+        TextRange target = _highlights[(index + (next ? 1 : count - 1)) % count].Range;
         _moving = true;
         try
         {
-            _changes.Select(new TextSelection(_highlights[(index + (next ? 1 : count - 1)) % count].Range.Start));
+            _area.ClearSelection();
+            _area.Caret.Offset = target.Start;
         }
         finally
         {
             _moving = false;
         }
+        _reveal(target);
         return true;
     }
 

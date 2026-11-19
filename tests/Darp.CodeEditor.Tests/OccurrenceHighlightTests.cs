@@ -268,6 +268,33 @@ public sealed class OccurrenceHighlightTests(UiFixture ui)
             window.Editor.Occurrences.Count.ShouldBe(3);
         });
 
+    /// <summary>F7 brings an occurrence out of view to the middle of the view, as VS Code does.</summary>
+    [Fact]
+    public Task F7_brings_an_occurrence_out_of_view_to_the_middle() =>
+        _ui.Run(async () =>
+        {
+            var time = new ManualTime();
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            string filler = string.Concat(Enumerable.Repeat("x\n", 100));
+            using CodeDocument document = server.CreateDocument(
+                CodeLanguage.PlainText,
+                "ab\n" + filler + "ab\n" + filler
+            );
+            using EditorWindow window = Show(document);
+            await CompletionTests.StartServingAsync(server, document);
+            await ShowAtAsync(window, time, 1, 2);
+
+            window.Press(Keys.F7);
+
+            window.Editor.CaretPosition.ShouldBe(new TextPosition(102, 1));
+            window.Layout();
+            int last = window.TextView.VisualLines[^1].LastDocumentLine.LineNumber;
+            int first = window.TextView.VisualLines[0].FirstDocumentLine.LineNumber;
+            (last - 102).ShouldBeGreaterThan(5);
+            (102 - first).ShouldBeGreaterThan(5);
+        });
+
     /// <summary>
     /// The server's answer about text that changed meanwhile, or about a document that the editor no longer shows, is
     /// of text that is gone: nothing shows.
