@@ -347,6 +347,24 @@ public sealed class LineCommandTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe(marked);
         });
 
+    /// <summary>As a command that does not apply, it leaves its key to the binding before it.</summary>
+    [Fact]
+    public Task Outdenting_a_line_without_indentation_lets_its_key_go_on() =>
+        _ui.Run(async () =>
+        {
+            await CodeLanguage.Json.Loaded;
+            using EditorWindow window = MarkedText.Show("a|b", CodeLanguage.Json);
+            string command = OperatingSystem.IsMacOS() ? "cmd" : "ctrl";
+            window.Editor.Keymap = new CodeEditorKeymap([
+                new CodeEditorKeyBinding($"{command}+[", CodeEditorCommands.CommentLine),
+                .. CodeEditorKeymap.Default.Bindings,
+            ]);
+
+            window.Press(Keys.OemOpenBrackets, EditorWindow.Command);
+
+            DocumentOf(window).Text.ShouldBe("// ab");
+        });
+
     [Fact]
     public Task A_read_only_editor_deletes_inserts_and_indents_no_lines() =>
         _ui.Run(() =>

@@ -67,7 +67,7 @@ internal sealed class LineCommands : IEditorFeature
     /// line. By the language's rules, the line moved past them takes the indentation of its new place, and they the
     /// indentation of theirs, all by as many columns as their first line.
     /// </summary>
-    /// <returns>Whether there was a line to move past: not at the text's start or end.</returns>
+    /// <returns>Whether the lines moved: not at the text's start or end, nor into read-only text.</returns>
     private bool Move(bool down)
     {
         TextSelection selection = _changes.Selection;
@@ -83,15 +83,16 @@ internal sealed class LineCommands : IEditorFeature
             List<TextEdit> swap = down
                 ? [new TextEdit(first.Offset, 0, other), new TextEdit(moving.Offset, moving.Length, "")]
                 : [new TextEdit(moving.Offset, moving.Length, ""), new TextEdit(first.Offset, 0, other)];
+            bool swapped = false;
             _changes.Run(
                 EditStep.Own,
                 () =>
                 {
-                    if (_changes.Apply(other.Length > 0 ? swap : []))
+                    if (swapped = _changes.Apply(other.Length > 0 ? swap : []))
                         Select(selection, new Place(otherLine, 0), new Place(otherLine, 0), endMovesDown, false);
                 }
             );
-            return true;
+            return swapped;
         }
         (List<TextEdit> edits, int delta) = down ? MovedDown(first, last, moving) : MovedUp(first, last, moving);
         // A selection never grows at its ends, and a caret stays before text that goes in at it only at its line's end.
@@ -108,15 +109,16 @@ internal sealed class LineCommands : IEditorFeature
             NewIndentation(endIndentation, delta).Length == 0
             && endIndentation.Length > 0
             && end - endLine.Offset <= endIndentation.Length;
+        bool moved = false;
         _changes.Run(
             EditStep.Own,
             () =>
             {
-                if (_changes.Apply(edits))
+                if (moved = _changes.Apply(edits))
                     Select(selection, newStart, newEnd, endMovesDown, shrinks);
             }
         );
-        return true;
+        return moved;
 
         Place Track(int offset, bool sticks)
         {
@@ -193,7 +195,8 @@ internal sealed class LineCommands : IEditorFeature
     /// Copies the lines above or below themselves, with the document's line breaks; the selection stays on the lines
     /// above, so it goes with the copy when that is below.
     /// </summary>
-    private void Copy(bool down)
+    /// <returns>Whether the lines were copied.</returns>
+    private bool Copy(bool down)
     {
         TextSelection selection = _changes.Selection;
         (DocumentLine first, DocumentLine last, _) = LinesOf(selection.Range);
@@ -206,17 +209,19 @@ internal sealed class LineCommands : IEditorFeature
             ? new TextEdit(first.Offset, 0, lines + lineBreak)
             : new TextEdit(last.EndOffset, 0, lineBreak + lines);
         int moved = down ? copy.Text.Length : 0;
+        bool copied = false;
         _changes.Run(
             EditStep.Own,
-            () => _changes.Apply([copy], new TextSelection(selection.Anchor + moved, selection.Caret + moved))
+            () => copied = _changes.Apply([copy], new TextSelection(selection.Anchor + moved, selection.Caret + moved))
         );
+        return copied;
     }
 
     /// <summary>
     /// Deletes the lines with the line break after them, or for the last lines the one before them; the caret keeps
     /// its column, as far as the line that comes up in their place, or the one above them, is long.
     /// </summary>
-    /// <returns>Whether there was text.</returns>
+    /// <returns>Whether there was text, and it was deleted.</returns>
     private bool Delete()
     {
         if (Buffer.TextLength == 0)
@@ -235,48 +240,53 @@ internal sealed class LineCommands : IEditorFeature
         }
         else
             deleted = TextRange.FromBounds(first.Offset, last.EndOffset);
+        bool applied = false;
         _changes.Run(
             EditStep.Own,
             () =>
             {
-                if (!_changes.Apply([new TextEdit(deleted.Start, deleted.Length, "")]))
-                    return;
-                DocumentLine line = Buffer.GetLineByNumber(lineNumber);
-                _changes.Select(new TextSelection(line.Offset + Math.Min(column, line.Length)));
+                if (applied = _changes.Apply([new TextEdit(deleted.Start, deleted.Length, "")]))
+                    _changes.Select(new TextSelection(OffsetOf(new Place(lineNumber, column))));
             }
         );
-        return true;
+        return applied;
     }
 
     /// <summary>
     /// Inserts a line below the caret's, or above it, as Enter at the end of the line above it does, and puts the caret
     /// on it; above the first line, an empty line.
     /// </summary>
-    private void Insert(bool above)
+    /// <returns>Whether the line went in.</returns>
+    private bool Insert(bool above)
     {
         DocumentLine caretLine = Buffer.GetLineByOffset(_area.Caret.Offset);
         string lineBreak = _document.LineBreak;
+        bool inserted = false;
         _changes.Run(
             EditStep.Own,
             () =>
             {
                 if (above && caretLine.PreviousLine is null)
                 {
-                    _changes.Apply([new TextEdit(0, 0, lineBreak)], new TextSelection(0));
+                    inserted = _changes.Apply([new TextEdit(0, 0, lineBreak)], new TextSelection(0));
                     return;
                 }
                 DocumentLine line = above ? caretLine.PreviousLine : caretLine;
                 NewLine newLine = Rules.Enter(Lines, line.LineNumber, line.Length);
-                _changes.Apply(
+                inserted = _changes.Apply(
                     [new TextEdit(line.EndOffset, newLine.Replaced, newLine.Text)],
                     new TextSelection(line.EndOffset + newLine.Caret)
                 );
             }
         );
+        return inserted;
     }
 
     /// <summary>Indents or outdents the lines by the tab stops, as Tab and Shift+Tab do whole lines.</summary>
-    /// <returns>Whether the selection is no rectangle, which AvaloniaEdit's own commands keep.</returns>
+    /// <returns>
+    /// Whether a line's indentation changed: not in a rectangle selection, which AvaloniaEdit's own commands keep, nor
+    /// for lines without indentation to outdent.
+    /// </returns>
     private bool Shift(bool outdent)
     {
         if (_area.Selection is RectangleSelection)
@@ -284,8 +294,11 @@ internal sealed class LineCommands : IEditorFeature
         TabEdit edit = outdent
             ? TabStops.Outdent(Buffer, _changes.Selection, _document.Indentation)
             : TabStops.Indent(Buffer, _changes.Selection, _document.Indentation);
-        _changes.Run(EditStep.Own, () => _changes.Apply(edit.Edits, edit.Selection));
-        return true;
+        if (edit.Edits.Count == 0)
+            return false;
+        bool shifted = false;
+        _changes.Run(EditStep.Own, () => shifted = _changes.Apply(edit.Edits, edit.Selection));
+        return shifted;
     }
 
     /// <summary>
@@ -328,12 +341,13 @@ internal sealed class LineCommands : IEditorFeature
                 ? new TextSelection(startOffset, endOffset)
                 : new TextSelection(endOffset, startOffset)
         );
+    }
 
-        int OffsetOf(Place place)
-        {
-            DocumentLine line = Buffer.GetLineByNumber(place.Line);
-            return line.Offset + Math.Min(place.Column, line.Length);
-        }
+    /// <summary>The offset of <paramref name="place"/>, within its line.</summary>
+    private int OffsetOf(Place place)
+    {
+        DocumentLine line = Buffer.GetLineByNumber(place.Line);
+        return line.Offset + Math.Min(place.Column, line.Length);
     }
 
     /// <summary>
@@ -390,6 +404,6 @@ internal sealed class LineCommands : IEditorFeature
         return column + now - old;
     }
 
-    /// <summary>A line and a column in it, from 0.</summary>
+    /// <summary>A line by its number, and a column in it, from 0.</summary>
     private readonly record struct Place(int Line, int Column);
 }
