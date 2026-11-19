@@ -124,6 +124,9 @@ internal sealed class EditingHelpers : IEditorFeature
             else
                 _closing = PairToClose(typed, offsets);
         }
+        // Text of several characters, as from an input method.
+        else if (e.Text is { } text && text.AsSpan().IndexOfAny('\r', '\n') >= 0)
+            e.Text = TextUtilities.NormalizeNewLines(text, _document.LineBreak);
     }
 
     /// <summary>
