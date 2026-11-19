@@ -19,8 +19,8 @@ public enum AutoIndent
     Advanced,
 
     /// <summary>
-    /// The language's indentation rules apply too: on Enter, on Tab on a blank line, and when typing makes a line match
-    /// the pattern that outdents it.
+    /// The language's indentation rules apply too: on Enter, on Tab on a blank line, when typing makes a line match the
+    /// pattern that outdents it, and to moved lines.
     /// </summary>
     Full,
 }
