@@ -1,12 +1,10 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Input;
-using Avalonia.Interactivity;
 using Avalonia.Media;
-using Avalonia.VisualTree;
 using AvaloniaEdit;
 using Darp.CodeEditor.Search;
+using static Darp.CodeEditor.Tests.SearchBars;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -21,10 +19,6 @@ public sealed class FindInSelectionTests(UiFixture ui)
     private static readonly Color s_findRange = Color.Parse("#C08040");
 
     private readonly UiFixture _ui = ui;
-
-    /// <summary>The modifiers of the search bar's toggles: Alt, and Alt+Cmd on macOS.</summary>
-    private static KeyModifiers Toggle =>
-        OperatingSystem.IsMacOS() ? KeyModifiers.Alt | KeyModifiers.Meta : KeyModifiers.Alt;
 
     /// <summary>
     /// A selection within lines searches them whole, as in VS Code; the lines show in the theme's find range color while
@@ -44,7 +38,8 @@ public sealed class FindInSelectionTests(UiFixture ui)
             window.Type("a");
 
             // The first match of the second line, and the two others of the second and the third.
-            await Wait.UntilAsync(() => bar.Count == "1 of 3");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("1 of 3");
             window.Editor.Selection.ShouldBe(new TextSelection(4, 5));
             await Wait.UntilAsync(() => FindRangeOnLine(window, 3) > 0);
             FindRangeOnLine(window, 1).ShouldBe(0);
@@ -52,19 +47,22 @@ public sealed class FindInSelectionTests(UiFixture ui)
 
             // Off again, from the query: all five matches, from where the search started, as in VS Code.
             window.Press(Key.L, Toggle);
-            await Wait.UntilAsync(() => bar.Count == "5 of 5");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("5 of 5");
             bar.FindInSelectionToggle.IsChecked.ShouldBe(false);
             FindRangeOnLine(window, 3).ShouldBe(0);
 
             // On, and closed: off.
             window.Editor.Selection = new TextSelection(4, 9);
             window.Press(Key.L, Toggle);
-            await Wait.UntilAsync(() => bar.Count == "1 of 3");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("1 of 3");
             window.Press(Key.Escape);
             bar.FindInSelectionToggle.IsChecked.ShouldBe(false);
             FindRangeOnLine(window, 3).ShouldBe(0);
             window.Press(find.Key, find.KeyModifiers);
-            await Wait.UntilAsync(() => bar.Count?.EndsWith("of 5", StringComparison.Ordinal) == true);
+            await SearchedAsync(bar);
+            bar.Count.ShouldNotBeNull().ShouldEndWith("of 5");
         });
 
     /// <summary>
@@ -79,7 +77,8 @@ public sealed class FindInSelectionTests(UiFixture ui)
             // The query is the word at the caret.
             window.Editor.OpenSearch();
             SearchBar bar = BarOf(window);
-            await Wait.UntilAsync(() => bar.Count == "? of 6");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("? of 6");
             window.Editor.Selection = new TextSelection(4);
             bar.FindInSelectionToggle.IsEnabled.ShouldBeFalse();
             ToolTip
@@ -91,10 +90,12 @@ public sealed class FindInSelectionTests(UiFixture ui)
             bar.FindInSelectionToggle.IsEnabled.ShouldBeTrue();
             Click(bar.FindInSelectionToggle);
 
-            await Wait.UntilAsync(() => bar.Count == "1 of 2");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("1 of 2");
             window.Editor.Selection.ShouldBe(new TextSelection(4, 5));
             Click(bar.FindInSelectionToggle);
-            await Wait.UntilAsync(() => bar.Count == "5 of 6");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("5 of 6");
         });
 
     /// <summary>The scope follows the edits, and Replace All replaces only inside it.</summary>
@@ -109,12 +110,14 @@ public sealed class FindInSelectionTests(UiFixture ui)
             SearchBar bar = BarOf(window);
             bar.FindBox.Text = "a";
             bar.ReplaceBox.Text = "b";
-            await Wait.UntilAsync(() => bar.Count?.EndsWith("of 2", StringComparison.Ordinal) == true);
+            await SearchedAsync(bar);
+            bar.Count.ShouldNotBeNull().ShouldEndWith("of 2");
 
             document.Replace(new TextRange(0, 0), "a\n");
-            await Wait.UntilAsync(() => bar.ReplaceAllButton.IsEnabled);
+            await SearchedAsync(bar);
+            bar.ReplaceAllButton.IsEnabled.ShouldBeTrue();
             Click(bar, "Replace All");
-            await SearchTests.SearchedAsync(bar);
+            await SearchedAsync(bar);
 
             document.Text.ShouldBe("a\na\nb\nb\na");
         });
@@ -130,12 +133,15 @@ public sealed class FindInSelectionTests(UiFixture ui)
             window.Editor.OpenSearch();
             SearchBar bar = BarOf(window);
             bar.FindBox.Text = "a";
-            await Wait.UntilAsync(() => bar.Count?.EndsWith("of 1", StringComparison.Ordinal) == true);
+            await SearchedAsync(bar);
+            bar.Count.ShouldNotBeNull().ShouldEndWith("of 1");
 
             document.Replace(new TextRange(2, 0), "a");
-            await Wait.UntilAsync(() => bar.Count?.EndsWith("of 2", StringComparison.Ordinal) == true);
+            await SearchedAsync(bar);
+            bar.Count.ShouldNotBeNull().ShouldEndWith("of 2");
             document.Replace(new TextRange(4, 0), "a");
-            await Wait.UntilAsync(() => bar.Count?.EndsWith("of 3", StringComparison.Ordinal) == true);
+            await SearchedAsync(bar);
+            bar.Count.ShouldNotBeNull().ShouldEndWith("of 3");
         });
 
     /// <summary>
@@ -153,12 +159,14 @@ public sealed class FindInSelectionTests(UiFixture ui)
             SearchBar bar = BarOf(window);
             bar.RegexToggle.IsChecked = true;
             bar.FindBox.Text = "a|b";
-            await Wait.UntilAsync(() => bar.Count?.EndsWith("of 2", StringComparison.Ordinal) == true);
+            await SearchedAsync(bar);
+            bar.Count.ShouldNotBeNull().ShouldEndWith("of 2");
 
             // The scope "ab" is now "a\r", and the "b" after it was the scope's.
             document.Replace(new TextRange(1, 1), "\r");
 
-            await Wait.UntilAsync(() => bar.Count?.EndsWith("of 1", StringComparison.Ordinal) == true);
+            await SearchedAsync(bar);
+            bar.Count.ShouldNotBeNull().ShouldEndWith("of 1");
             window.Press(Key.F3);
             window.Editor.Selection.ShouldBe(new TextSelection(0, 1));
         });
@@ -192,7 +200,8 @@ public sealed class FindInSelectionTests(UiFixture ui)
             window.Press(find.Key, find.KeyModifiers);
             bar.FindInSelectionToggle.IsChecked.ShouldBe(true);
             bar.FindBox.Text.ShouldBe("b");
-            await Wait.UntilAsync(() => bar.Count == "1 of 1");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("1 of 1");
 
             static CodeEditorOptions WithAutoFindInSelection(AutoFindInSelection mode) =>
                 CodeEditorOptions.Default with
@@ -225,21 +234,5 @@ public sealed class FindInSelectionTests(UiFixture ui)
         Rect character = window.CharacterArea(Math.Max(0, end - 1));
         var area = new Rect(character.Right + 20, character.Top, 40, character.Height);
         return window.RenderAndCountPixels(s_findRange, area);
-    }
-
-    private static SearchBar BarOf(EditorWindow window) =>
-        window.Editor.GetVisualDescendants().OfType<SearchBar>().Single();
-
-    private static void Click(SearchBar bar, string content) =>
-        bar.GetVisualDescendants()
-            .OfType<Button>()
-            .Single(button => button.Content as string == content)
-            .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-
-    /// <summary>Clicks a toggle, which turns it on or off and then raises its click, as a click with the pointer does.</summary>
-    private static void Click(ToggleButton toggle)
-    {
-        toggle.IsChecked = toggle.IsChecked != true;
-        toggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
     }
 }
