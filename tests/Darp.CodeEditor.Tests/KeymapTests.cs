@@ -132,16 +132,17 @@ public sealed class KeymapTests(UiFixture ui)
     public Task On_macOS_Cmd_G_and_Shift_Cmd_G_go_to_the_next_and_the_previous_match() =>
         _ui.Run(async () =>
         {
-            using EditorWindow window = MarkedText.Show("«one» two one", CodeLanguage.PlainText);
+            // Three matches, so that the next and the previous one differ.
+            using EditorWindow window = MarkedText.Show("one two «one» two one", CodeLanguage.PlainText);
             window.Editor.Keymap = new CodeEditorKeymap(CodeEditorKeymap.DefaultBindings(mac: true));
 
             window.Press(Keys.G, KeyModifiers.Meta);
             await SearchTests.SearchedAsync(BarOf(window));
-            window.Editor.Selection.ShouldBe(new TextSelection(8, 11));
+            window.Editor.Selection.ShouldBe(new TextSelection(16, 19));
 
             window.Press(Keys.G, KeyModifiers.Meta | KeyModifiers.Shift);
             await SearchTests.SearchedAsync(BarOf(window));
-            window.Editor.Selection.ShouldBe(new TextSelection(0, 3));
+            window.Editor.Selection.ShouldBe(new TextSelection(8, 11));
         });
 
     [Fact]
