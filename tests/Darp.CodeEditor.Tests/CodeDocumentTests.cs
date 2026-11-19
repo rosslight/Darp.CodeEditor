@@ -48,6 +48,24 @@ public sealed class CodeDocumentTests(UiFixture ui)
             document.CurrentSnapshot.LineBreak.ShouldBe(NewLines.OfNewDocuments);
         });
 
+    /// <summary>
+    /// Setting the text it already has changes no text, and still takes the line break of the new text: the system's
+    /// for an empty one.
+    /// </summary>
+    [Fact]
+    public Task An_empty_document_whose_text_is_set_empty_takes_the_systems_line_break() =>
+        _ui.Run(() =>
+        {
+            string other = NewLines.OfNewDocuments == "\n" ? "\r\n" : "\n";
+            using CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "a" + other + "b");
+            document.Replace(new TextRange(0, document.CurrentSnapshot.Length), "");
+
+            document.Text = "";
+
+            document.LineBreak.ShouldBe(NewLines.OfNewDocuments);
+            document.CurrentSnapshot.LineBreak.ShouldBe(NewLines.OfNewDocuments);
+        });
+
     [Theory]
     [InlineData(-4, 5, "xbc")]
     [InlineData(2, 99, "abx")]
