@@ -21,6 +21,36 @@ public sealed class CodeDocumentTests(UiFixture ui)
             document.CurrentSnapshot.Version.ShouldBeGreaterThan(before.Version);
         });
 
+    /// <summary>
+    /// As VS Code's text model detects it: <c>\r\n</c> when more than half of the line breaks are <c>\r\n</c> or
+    /// <c>\r</c>, and the system's without any.
+    /// </summary>
+    [Theory]
+    [InlineData("a\nb", "\n")]
+    [InlineData("a\r\nb", "\r\n")]
+    [InlineData("a\rb", "\r\n")]
+    [InlineData("a\r\nb\nc", "\n")]
+    [InlineData("a\r\nb\rc\nd", "\r\n")]
+    [InlineData("abc", null)]
+    public void New_lines_take_the_line_break_that_most_lines_of_the_text_end_with(string text, string? expected) =>
+        LineBreaks.Detect(text).ShouldBe(expected ?? LineBreaks.System);
+
+    /// <summary>As in VS Code, edits keep it, also those that remove every line break; setting the text detects it anew.</summary>
+    [Fact]
+    public Task The_line_break_is_found_when_the_text_is_created_or_set() =>
+        _ui.Run(() =>
+        {
+            using CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "a\r\nb");
+
+            document.Replace(new TextRange(1, 2), "");
+            document.LineBreak.ShouldBe("\r\n");
+            document.CurrentSnapshot.LineBreak.ShouldBe("\r\n");
+            document.Text = "a\nb";
+            document.LineBreak.ShouldBe("\n");
+            document.Text = "a";
+            document.CurrentSnapshot.LineBreak.ShouldBe(LineBreaks.System);
+        });
+
     [Theory]
     [InlineData(-4, 5, "xbc")]
     [InlineData(2, 99, "abx")]
