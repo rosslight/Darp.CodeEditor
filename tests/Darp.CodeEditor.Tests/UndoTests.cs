@@ -163,6 +163,29 @@ public sealed class UndoTests(UiFixture ui)
             UndoSteps(window).ShouldBe(["ab|xy!", "ab|xy", "|xy"]);
         });
 
+    [Fact]
+    public Task Redo_of_an_edit_whose_change_showed_another_document_puts_back_none_of_that_ones_selection() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("|", CodeLanguage.PlainText);
+            CodeDocument tabbed = DocumentOf(window);
+            CodeDocument other = CodeDocument.Create(CodeLanguage.PlainText, "abcdef");
+            tabbed.TextChanged += (_, _) =>
+            {
+                if (window.Editor.Document != tabbed)
+                    return;
+                window.Editor.Document = other;
+                window.Editor.Selection = new TextSelection(2, 5);
+            };
+
+            window.Press(Key.Tab);
+            tabbed.Undo();
+            tabbed.Redo();
+
+            // AvaloniaEdit's own undo step still puts the caret where the edited document's caret was.
+            window.Editor.Selection.ShouldBe(new TextSelection(0));
+        });
+
     /// <summary>Undoes every step, and the marked text after each.</summary>
     private static List<string> UndoSteps(EditorWindow window)
     {
