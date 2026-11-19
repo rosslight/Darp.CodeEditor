@@ -132,7 +132,7 @@ editor.Options = CodeEditorOptions.Default with
 | `EmptySelectionClipboard` | `editor.emptySelectionClipboard` | true: without a selection, Copy and Cut take the caret's line with a line break, the last line too, and Paste puts that line above the caret's line while nothing is selected. Off, they need a selection, so that a stray Ctrl+C keeps the clipboard |
 | `Find.SeedSearchStringFromSelection` | `editor.find.seedSearchStringFromSelection` | `Always`: Ctrl+F's query starts with the selection within one line, or else the word at the caret, escaped while the bar uses a regular expression; `Selection` takes only a selection, `Never` nothing. Ctrl+H takes only a selection, and F3 takes one only for an empty query |
 | `Find.AutoFindInSelection` | `editor.find.autoFindInSelection` | `Never`: Find in Selection turns on only by its toggle and Alt+L; `Always` whenever something is selected as the bar opens, `Multiline` for a selection over several lines |
-| `MatchBrackets` | `editor.matchBrackets` | `Always`: at a caret without a selection, the bracket next to it and its match are boxed in the theme's colors, the one after the caret first, or else the innermost pair around the caret. `Near` boxes only a bracket next to the caret and its match, the cheaper, quieter mode; `Never` none. Brackets in strings and comments don't count; a match or a pair further than 100,000 characters away shows none |
+| `MatchBrackets` | `editor.matchBrackets` | `Always`: at a caret without a selection, the bracket next to it and its match are boxed in the theme's colors, the one after the caret first, or else the innermost pair around the caret. `Near` boxes only a bracket next to the caret and its match, the cheaper, quieter mode; `Never` none. Brackets in strings and comments don't count, and brackets pair as VS Code's parser nests them: a closing bracket closes the closest open one of its kind, and those opened inside it stay unclosed, and one that closes none counts as no bracket. A match or a pair further than 100,000 characters away shows none |
 | `OccurrencesHighlight` | `editor.occurrencesHighlight` | true: the occurrences of the symbol at the caret are highlighted, the server's with reads and writes apart, or else the word's (section 6). Off, a caret move asks the server nothing, for users who find them noise and apps whose servers they load. VS Code's `multiFile` has no counterpart: an editor knows its own document only |
 
 A setting needs a use case to become an option; VS Code having it is not enough (design.md #124).
@@ -645,7 +645,8 @@ How the client talks to a server, where the protocol leaves a choice:
   answer from it, the word's occurrences show in `editor.wordHighlightTextBackground`: whole words with case, at most
   999, as VS Code finds them, found off the UI thread. An edit, a caret that it moves and the keyboard leaving the
   editor clear them; a selection over several lines, or beyond the word at the caret, shows none. An answer that
-  comes after an edit or once the editor shows another document is dropped. F7 and Shift+F7 go through them.
+  comes after an edit, once the selection left the word it was asked for or once the editor shows another document is
+  dropped, and a request for a word that the selection left ends at once. F7 and Shift+F7 go through them.
 - **Token colors** come from the color theme as in VS Code: its `semanticTokenColors`, matched by type, modifiers and
   language with VS Code's scores; otherwise its TextMate color of the scopes that VS Code's standard mapping gives the
   type and modifiers, such as `entity.name.type` for a class or `variable.other.constant` for a read-only variable.
