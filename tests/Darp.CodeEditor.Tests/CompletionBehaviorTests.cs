@@ -2,6 +2,8 @@ using System.Text.Json.Nodes;
 using Avalonia;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
+using AvaloniaEdit.Document;
+using AvaloniaEdit.Editing;
 using static Darp.CodeEditor.Tests.CompletionTests;
 
 namespace Darp.CodeEditor.Tests;
@@ -360,6 +362,40 @@ public sealed class CompletionBehaviorTests(UiFixture ui)
                 other.Text.ShouldBe("x\nunrelated text");
                 document.Text.ShouldBe("x\nConsole");
             }
+        });
+
+    [Fact]
+    public Task An_items_command_runs_only_once_the_item_went_in() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [ { "label": "key",
+                      "command": { "title": "Suggest", "command": "editor.action.triggerSuggest" } } ] }
+                    """
+                )
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "keXYZ");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            // The word's end is protected: replacing goes over it, so nothing goes in.
+            TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+            var protectedText = new TextSegmentReadOnlySectionProvider<TextSegment>(textArea.Document);
+            protectedText.Segments.Add(new TextSegment { StartOffset = 2, Length = 3 });
+            textArea.ReadOnlySectionProvider = protectedText;
+
+            await OpenAsync(window, 2);
+            int asked = fake.LinesStartingWith("completion ").Count;
+            window.Press(Key.Tab);
+            await BarrierAsync(server, fake);
+
+            document.Text.ShouldBe("keXYZ");
+            fake.LinesStartingWith("completion ").Count.ShouldBe(asked);
+            List(window).ShouldBeNull();
         });
 
     [Fact]
