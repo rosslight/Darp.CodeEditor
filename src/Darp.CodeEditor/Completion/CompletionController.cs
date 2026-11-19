@@ -71,8 +71,6 @@ internal sealed class CompletionController : IEditorFeature
     private readonly BackgroundTextMateHighlighter _highlighter;
     private readonly SnippetController _snippets;
     private readonly CompletionView _view;
-    private PopupColors _colors = PopupColors.Default;
-    private SymbolIconColors? _icons;
 
     /// <summary>Completion from its first request until it ends; null while there is none.</summary>
     private CompletionSession? _session;
@@ -102,7 +100,7 @@ internal sealed class CompletionController : IEditorFeature
         _document = document;
         _highlighter = highlighter;
         _snippets = snippets;
-        _view = new CompletionView(editor);
+        _view = new CompletionView(editor, _textView);
         _commit = new CompletionCommit(textArea, document, snippets);
         _view.Clicked += OnClicked;
         _buffer.Changing += OnBufferChanging;
@@ -118,9 +116,9 @@ internal sealed class CompletionController : IEditorFeature
     {
         set
         {
-            if (value == _colors)
+            if (value == _view.Colors)
                 return;
-            _colors = value;
+            _view.Colors = value;
             Close();
         }
     }
@@ -130,9 +128,9 @@ internal sealed class CompletionController : IEditorFeature
     {
         set
         {
-            if (value == _icons)
+            if (value == _view.Icons)
                 return;
-            _icons = value;
+            _view.Icons = value;
             Close();
         }
     }
@@ -469,8 +467,7 @@ internal sealed class CompletionController : IEditorFeature
             return;
         }
         int wordStart = key.Answer.Request.Word.Start;
-        _view.Show(session.Items, session.Selected, Look(), _icons, _textView.DefaultLineHeight);
-        _view.Open(_textView, () => TextViewBoxes.CharacterAt(_textView, Math.Min(wordStart, _buffer.TextLength)));
+        _view.Show(session.Items, session.Selected, wordStart);
         // Placing it may have ended completion, as its line is out of view.
         if (_session == session)
             ResolveSelected(session);
@@ -490,15 +487,14 @@ internal sealed class CompletionController : IEditorFeature
         else if (!wasFrozen)
         {
             ShownItem[] items = [.. session.Items.Select(shown => shown with { Highlights = [] })];
-            _view.Show(items, session.Selected, Look(), _icons, _textView.DefaultLineHeight);
+            _view.Show(items, session.Selected, key.Answer.Request.Word.Start);
         }
     }
 
     /// <summary>Shows "No suggestions." at the word that starts at <paramref name="wordStart"/>.</summary>
     private void ShowMessage(int wordStart)
     {
-        _view.ShowMessage("No suggestions.", Look(), _textView.DefaultLineHeight);
-        _view.Open(_textView, () => TextViewBoxes.CharacterAt(_textView, Math.Min(wordStart, _buffer.TextLength)));
+        _view.ShowMessage("No suggestions.", wordStart);
     }
 
     /// <summary>Hides "No suggestions." of an empty answer, if it shows.</summary>
@@ -659,7 +655,7 @@ internal sealed class CompletionController : IEditorFeature
             );
             if (_session != session || cancellation.IsCancellationRequested || !session.IsShowing)
                 return;
-            _view.ShowDetails(HoverView.Create(blocks, Look()));
+            _view.ShowDetails(HoverView.Create(blocks, _view.Look));
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception e)
@@ -798,6 +794,4 @@ internal sealed class CompletionController : IEditorFeature
             start--;
         return TextRange.FromBounds(start, caret);
     }
-
-    private PopupLook Look() => new(_editor.FontFamily, _editor.FontSize, _colors);
 }
