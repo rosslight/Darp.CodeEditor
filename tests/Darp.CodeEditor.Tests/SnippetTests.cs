@@ -133,9 +133,31 @@ public sealed class SnippetTests
         RenderedSnippet rendered = Render(snippet);
 
         if (rendered.Stops.FirstOrDefault().Transform is { } transform)
-            transform.Resolve(value).ShouldBe(result);
+            transform.Resolve(value, Snippet.MaxText).ShouldBe(result);
         else
             rendered.Text.ShouldBe(result);
+    }
+
+    [Fact]
+    public void A_transformation_stops_once_its_result_would_pass_what_the_snippets_text_may_still_take()
+    {
+        // Each of 10,001 empty matches would take 10,000 characters: 100 million in all.
+        string format = new('x', 10_000);
+        string selected = new('a', 10_000);
+        string snippet = "${TM_SELECTED_TEXT/(?:)/" + format + "/g}";
+        AsWritten(snippet, _ => selected);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        AsWritten(snippet, _ => selected);
+        string? stop = Render("${1/(?:)/" + format + "/g}")
+            .Stops[0]
+            .Transform.ShouldNotBeNull()
+            .Resolve(selected, 1000);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        stop.ShouldBeNull();
+        // A million characters take 2 MB, and the text that a builder holds twice that at most.
+        allocated.ShouldBeLessThan(16_000_000);
     }
 
     [Theory]
@@ -285,8 +307,8 @@ public sealed class SnippetTests
         mirror.Text.ShouldBe("foo foo foo");
         Stops(mirror).ShouldBe("1:foo|1:foo|1:foo|0:");
         mirror.Stops[0].Transform.ShouldBeNull();
-        mirror.Stops[1].Transform.ShouldNotBeNull().Resolve("bar").ShouldBe("BAR");
-        mirror.Stops[2].Transform.ShouldNotBeNull().Resolve("bar").ShouldBe("yesyesyes");
+        mirror.Stops[1].Transform.ShouldNotBeNull().Resolve("bar", Snippet.MaxText).ShouldBe("BAR");
+        mirror.Stops[2].Transform.ShouldNotBeNull().Resolve("bar", Snippet.MaxText).ShouldBe("yesyesyes");
     }
 
     [Fact]

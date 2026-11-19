@@ -342,7 +342,10 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
             if (stop.Transform is not { } transform || stop.IsGone)
                 continue;
             string text = _buffer.GetText(stop.StartOffset, stop.EndOffset - stop.StartOffset);
-            string result = Indented(transform.Resolve(text), session.LineIndentation);
+            // A result longer than a snippet's text may be leaves the stop as it is.
+            if (transform.Resolve(text, Snippet.MaxText) is not { } resolved)
+                continue;
+            string result = Indented(resolved, session.LineIndentation);
             if (result != text)
                 transformed.Add((stop, result));
         }
