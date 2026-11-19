@@ -91,7 +91,9 @@ internal sealed class UndoSteps : IDisposable
         try
         {
             edit();
-            undo.PushOptional(new RedoSelection(_area));
+            // Not the selection of another document, which a handler of the change showed.
+            if (_area.Document == _buffer)
+                undo.PushOptional(new RedoSelection(_area));
         }
         finally
         {
