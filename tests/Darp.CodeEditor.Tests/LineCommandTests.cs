@@ -325,6 +325,7 @@ public sealed class LineCommandTests(UiFixture ui)
             textArea.Selection.ShouldBeOfType<RectangleSelection>().EndPosition.Line.ShouldBe(3);
         });
 
+    /// <summary>The keys go on: on Windows, Shift+Alt+Down then starts AvaloniaEdit's rectangle.</summary>
     [Fact]
     public Task A_read_only_editor_moves_and_copies_no_lines() =>
         _ui.Run(() =>
@@ -335,7 +336,7 @@ public sealed class LineCommandTests(UiFixture ui)
             window.Press(Keys.Up, KeyModifiers.Alt);
             window.Press(Keys.Down, CopyLines);
 
-            MarkedText.Of(window).ShouldBe("a\nb|\nc");
+            DocumentOf(window).Text.ShouldBe("a\nb\nc");
         });
 
     [Theory]
