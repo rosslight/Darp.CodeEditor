@@ -378,6 +378,35 @@ public sealed class SearchTests(UiFixture ui)
             bar.IsOpen.ShouldBeFalse();
         });
 
+    /// <summary>
+    /// The query's width follows the editor's alone, not the width it had before, also beside a message wider than the
+    /// rows, which wraps on its own.
+    /// </summary>
+    [Fact]
+    public Task The_query_has_the_same_width_in_an_editor_of_a_width_from_a_narrower_or_a_wider_one() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("|a", CodeLanguage.PlainText);
+            window.Editor.OpenSearch(replace: true);
+            SearchBar bar = BarOf(window);
+            bar.RegexToggle.IsChecked = true;
+            // .NET's message names the pattern.
+            bar.FindBox.Text = "(" + new string('a', 100);
+            await SearchedAsync(bar);
+            bar.Message.ShouldNotBeNull();
+
+            double[] widths = [.. ((int[])[300, 550, 800, 550]).Select(width => QueryWidthAt(width))];
+
+            widths[3].ShouldBe(widths[1]);
+
+            double QueryWidthAt(double width)
+            {
+                window.Window.Width = width;
+                window.Layout();
+                return bar.FindBox.Bounds.Width;
+            }
+        });
+
     /// <summary>Every button and toggle of the bar has a name for screen readers: its tip's, without its keys.</summary>
     [Fact]
     public Task The_buttons_of_the_bar_have_names_for_screen_readers() =>
