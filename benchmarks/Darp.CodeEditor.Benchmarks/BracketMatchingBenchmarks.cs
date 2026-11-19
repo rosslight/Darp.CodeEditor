@@ -11,8 +11,9 @@ namespace Darp.CodeEditor.Benchmarks;
 /// <summary>
 /// The longest search for a matching bracket, which runs on the UI thread when the caret moves next to a bracket: from
 /// the opening bracket of 5,000 lines of JSON, with brackets in strings, through as many characters as the search reads
-/// (<see cref="BracketMatcher.MaxDistance"/>), without finding the match at the end. And the scan before a typed
-/// opening bracket closes, through brackets of other kinds than the closing ones.
+/// (<see cref="BracketMatcher.MaxDistance"/>), without finding the match at the end; the search for the pair around the
+/// caret, which runs on every caret move, from the middle of the same lines; and the scan before a typed opening bracket
+/// closes, through brackets of other kinds than the closing ones.
 /// </summary>
 [MemoryDiagnoser]
 [NotInBaseline]
@@ -64,6 +65,22 @@ public class BracketMatchingBenchmarks
     {
         TextDocument document = _document ?? throw new InvalidOperationException("Not set up.");
         return BracketMatcher.FindPair(document, 0, _brackets, line => _tokens[line - 1]);
+    }
+
+    /// <summary>
+    /// The pair around a caret between two lines in the middle: the brackets that span the text, each about 57,000
+    /// characters away, past a pair on every line.
+    /// </summary>
+    [Benchmark]
+    public (int, int)? FindThePairAroundTheCaret()
+    {
+        TextDocument document = _document ?? throw new InvalidOperationException("Not set up.");
+        return BracketMatcher.FindEnclosing(
+            document,
+            document.GetLineByNumber(Lines / 2).Offset,
+            _brackets,
+            line => _tokens[line - 1]
+        );
     }
 
     /// <summary>

@@ -130,8 +130,8 @@ public class TypingBenchmarks
 
 /// <summary>
 /// One caret move by an arrow key on the UI thread, with the layout and the frame that follow it: every key resolves
-/// through the editor's keymap before it moves the caret. Each call moves the caret a line down or back up, so the view
-/// stays where it is.
+/// through the editor's keymap before it moves the caret, and the brackets around it are boxed, as the editor's default
+/// <c>MatchBrackets</c> has it. Each call moves the caret a line down or back up, so the view stays where it is.
 /// </summary>
 [WarmupCount(2)]
 [IterationCount(10)]
@@ -141,26 +141,49 @@ public class CaretMoveBenchmarks
     private CodeEditor? _editor;
     private bool _down;
 
-    /// <summary>In the middle of 5,000 lines of JSON, in view.</summary>
-    [GlobalSetup]
-    public void Show()
-    {
-        HeadlessEditor.SetUpApp();
-        CodeDocument document = CodeDocument.Create(CodeLanguage.Json, HeadlessEditor.Json(5000));
-        var editor = new CodeEditor { Document = document };
-        _editor = editor;
-        _window = HeadlessEditor.Show(editor);
-        HeadlessEditor.RenderUntilColored(_window, editor, HeadlessEditor.JsonKey);
-        int caret = document.CurrentSnapshot.GetOffset(new TextPosition(2500, 4));
-        editor.Selection = new TextSelection(caret);
-        editor.ScrollTo(new TextRange(caret, 0));
-        editor.Focus();
-        HeadlessEditor.RenderUntilColored(_window, editor, HeadlessEditor.JsonKey);
-    }
+    /// <summary>In the middle of 5,000 lines of JSON, in view, at the start of a key.</summary>
+    [GlobalSetup(Target = nameof(CaretMoveIn5000Lines))]
+    public void ShowJson() => Show(HeadlessEditor.Json(5000), 4, HeadlessEditor.JsonKey);
+
+    /// <summary>
+    /// In the middle of 5,000 lines of JSON that hold brackets on every line, some in strings, between a line's spaces:
+    /// the pair around the caret spans the text, so that finding it reads about 57,000 characters on either side.
+    /// </summary>
+    [GlobalSetup(Target = nameof(CaretMoveInsideAPairOf5000LinesWithBrackets))]
+    public void ShowBrackets() =>
+        Show(
+            "[\n"
+                + string.Concat(Enumerable.Range(1, 4998).Select(i => $"  [\"key{i} (]\", {i}, {{}}],\n"))
+                + "  []\n]",
+            2,
+            // The strings, in their color once the background has tokenized their lines.
+            HeadlessEditor.Expect("\"key", Color.Parse("#A31515"))
+        );
 
     [Benchmark]
     [BenchmarkCategory("CI")]
-    public void CaretMoveIn5000Lines()
+    public void CaretMoveIn5000Lines() => MoveDownOrUp();
+
+    [Benchmark]
+    [BenchmarkCategory("CI")]
+    public void CaretMoveInsideAPairOf5000LinesWithBrackets() => MoveDownOrUp();
+
+    private void Show(string json, int column, HeadlessEditor.Expected colored)
+    {
+        HeadlessEditor.SetUpApp();
+        CodeDocument document = CodeDocument.Create(CodeLanguage.Json, json);
+        var editor = new CodeEditor { Document = document };
+        _editor = editor;
+        _window = HeadlessEditor.Show(editor);
+        HeadlessEditor.RenderUntilColored(_window, editor, colored);
+        int caret = document.CurrentSnapshot.GetOffset(new TextPosition(2500, column));
+        editor.Selection = new TextSelection(caret);
+        editor.ScrollTo(new TextRange(caret, 0));
+        editor.Focus();
+        HeadlessEditor.RenderUntilColored(_window, editor, colored);
+    }
+
+    private void MoveDownOrUp()
     {
         Window window = _window ?? throw new InvalidOperationException("Not set up.");
         CodeEditor editor = _editor ?? throw new InvalidOperationException("Not set up.");
