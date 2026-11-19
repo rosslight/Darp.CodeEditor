@@ -101,6 +101,9 @@ public sealed class LineCommandTests(UiFixture ui)
     // Into a block and out of it.
     [InlineData("{\n}\n|a();", Key.Up, "{\n    |a();\n}")]
     [InlineData("{\n    |a();\n}", Key.Down, "{\n}\n|a();")]
+    // Lines that end in an empty line, which takes the indentation too.
+    [InlineData("«x\n\n»{\nz", Key.Down, "{\n    «x\n    \n»z")]
+    [InlineData("if (a) {\n}\n«x\n\n»z", Key.Up, "if (a) {\n    «x\n    \n»}\nz")]
     public Task Moved_lines_take_the_indentation_that_the_language_gives_their_new_place(
         string marked,
         Key key,

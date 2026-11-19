@@ -78,11 +78,17 @@ internal sealed partial class EditingHelpers
         {
             DocumentLine moving = first.PreviousLine;
             edits.Add((moving.Offset, first.Offset - moving.Offset, ""));
-            edits.Add((last.EndOffset, 0, lineBreak + Buffer.GetText(moving)));
             if (!AddMovedUp(edits, first, last, end, moving, ref shrinkEnd))
-                edits.RemoveRange(2, edits.Count - 2);
+                edits.RemoveRange(1, edits.Count - 1);
+            // After the indentation of an empty last line, which goes in at the same offset.
+            edits.Add((last.EndOffset, 0, lineBreak + Buffer.GetText(moving)));
         }
-        List<(int Offset, int Length, string Text)> sorted = [.. edits.OrderBy(edit => edit.Offset)];
+        // As VS Code orders a command's edits by their ranges: at one offset, insertions as they came, then a deletion,
+        // so that an empty last line takes its indentation before the line break after it goes.
+        List<(int Offset, int Length, string Text)> sorted =
+        [
+            .. edits.OrderBy(edit => edit.Offset).ThenBy(edit => edit.Length),
+        ];
         if (!sorted.TrueForAll(edit => CanChange(edit.Offset, edit.Length)))
             return;
         bool atLineEnd =
