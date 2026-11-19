@@ -15,10 +15,10 @@ namespace Darp.CodeEditor.Editing;
 /// (<c>editor.action.jumpToBracket</c>) or selects a pair (<c>editor.action.selectToBracket</c>).
 /// </summary>
 /// <remarks>
-/// The pair is found when the text view draws, after the caret, the selection or the text changed, the lines were drawn
-/// again or the background changed lines' tokens, also out of view: once per frame, however many changes came before
-/// it. A change draws the text view again without measuring it again: AvaloniaEdit's <c>InvalidateLayer</c> measures
-/// it, which a caret move along a line otherwise does not.
+/// The pair is found when the text view draws, after the caret, the selection or the text changed or the lines were
+/// drawn again: once per frame, however many changes came before it. A change draws the text view again without
+/// measuring it again: AvaloniaEdit's <c>InvalidateLayer</c> measures it, which a caret move along a line otherwise does
+/// not. When the background changes lines' tokens, also out of view, the pair is found at once.
 /// </remarks>
 internal sealed class BracketMatching : IBackgroundRenderer, IEditorFeature
 {
@@ -52,7 +52,7 @@ internal sealed class BracketMatching : IBackgroundRenderer, IEditorFeature
         textArea.SelectionChanged += OnChanged;
         _buffer.TextChanged += OnChanged;
         textArea.TextView.VisualLinesChanged += OnVisualLinesChanged;
-        highlighter.TokensChanged += OnChanged;
+        highlighter.TokensChanged += OnTokensChanged;
         textArea.TextView.BackgroundRenderers.Add(this);
     }
 
@@ -112,7 +112,7 @@ internal sealed class BracketMatching : IBackgroundRenderer, IEditorFeature
         _textArea.SelectionChanged -= OnChanged;
         _buffer.TextChanged -= OnChanged;
         _textArea.TextView.VisualLinesChanged -= OnVisualLinesChanged;
-        _highlighter.TokensChanged -= OnChanged;
+        _highlighter.TokensChanged -= OnTokensChanged;
         _textArea.TextView.BackgroundRenderers.Remove(this);
     }
 
@@ -187,6 +187,21 @@ internal sealed class BracketMatching : IBackgroundRenderer, IEditorFeature
 
     /// <summary>The lines were built again, with new tokens maybe: the frame that follows finds the pair again.</summary>
     private void OnVisualLinesChanged(object? sender, EventArgs e) => _stale = true;
+
+    /// <summary>
+    /// The background tokenized lines, also out of view, whose brackets may be in strings or comments now: finds the
+    /// pair at once, and draws again only when it changed. Drawing again for each of the background's batches drew the
+    /// text view twice per Page Down, which cost it 45%.
+    /// </summary>
+    private void OnTokensChanged(object? sender, EventArgs e)
+    {
+        (int Open, int Close)? pair = Find();
+        _stale = false;
+        if (pair == _pair)
+            return;
+        _pair = pair;
+        _textArea.TextView.InvalidateVisual();
+    }
 
     /// <summary>
     /// Draws again where a pair shows or may show now: around the caret, next to a bracket, or instead of the last pair.
