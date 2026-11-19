@@ -39,6 +39,8 @@ public sealed class ReplacePatternTests
     [InlineData("hi", "hi", "hello$`", "hello$`")]
     [InlineData("hi", "hi", "hello$'", "hello$'")]
     [InlineData("hi", "(?<x>hi)", "hello${x}", "hello${x}")]
+    // The groups that the expression declares, whose numbers may skip some.
+    [InlineData("a", "(?<10>a)", "$10/$1", "a/$1")]
     // \u and \l change the case of the next character of the group after them, \U and \L of all the rest.
     [InlineData("func privateFunc(", @"func (\w+)\(", @"func \U$1(", "func PRIVATEFUNC(")]
     [InlineData("func privateFunc(", @"func (\w+)\(", @"func \u$1(", "func PrivateFunc(")]
@@ -54,7 +56,12 @@ public sealed class ReplacePatternTests
         string pattern,
         string replacement,
         string expected
-    ) => ReplacePattern.Parse(replacement).Build(Regex.Match(text, pattern)).ShouldBe(expected);
+    )
+    {
+        var regex = new Regex(pattern);
+
+        ReplacePattern.Parse(replacement, regex).Build(regex.Match(text)).ShouldBe(expected);
+    }
 
     /// <summary>Preserve Case: a replacement without groups takes the case of the match, by VS Code's own tests.</summary>
     [Theory]
@@ -89,17 +96,18 @@ public sealed class ReplacePatternTests
         string expected
     )
     {
-        Match matched = Regex.Match(match, Regex.Escape(match));
+        var regex = new Regex(Regex.Escape(match));
+        Match matched = regex.Match(match);
 
-        ReplacePattern.Parse(replacement).Build(matched, preserveCase: true).ShouldBe(expected);
+        ReplacePattern.Parse(replacement, regex).Build(matched, preserveCase: true).ShouldBe(expected);
         ReplacePattern.Static(replacement).Build(matched, preserveCase: true).ShouldBe(expected);
     }
 
     [Fact]
     public void With_Preserve_Case_a_replacement_with_a_group_keeps_its_case()
     {
-        Match matched = Regex.Match("FOO", "(FOO)");
+        var regex = new Regex("(FOO)");
 
-        ReplacePattern.Parse("bar$1").Build(matched, preserveCase: true).ShouldBe("barFOO");
+        ReplacePattern.Parse("bar$1", regex).Build(regex.Match("FOO"), preserveCase: true).ShouldBe("barFOO");
     }
 }
