@@ -1604,6 +1604,49 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_list_above_its_line_stays_there_while_its_top_edge_shrinks_it_to_fit_below() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Items([.. Enumerable.Range(0, 30).Select(i => $"item{i:D2}")])
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, new string('\n', 8));
+            using var window = new EditorWindow(new CodeEditor { Document = document }, width: 420, height: 240);
+            // More room above the caret's line than below it, too little on either side for the whole list.
+            await OpenAsync(window, 8);
+            CompletionListBox list = List(window).ShouldNotBeNull();
+            Rect frame = BoundsInWindow(Flyout(window).ShouldNotBeNull());
+            double caret = window.PointAt(8).Y;
+            frame.Bottom.ShouldBeLessThan(caret);
+            // Two rows fit below it.
+            (window.Window.ClientSize.Height - caret).ShouldBeGreaterThan(3 * list.RowHeight);
+
+            // The top edge, dragged down to leave two rows, and held there.
+            var edge = new Point(frame.Center.X, frame.Top + 2);
+            Point to = edge + new Point(0, (list.VisibleRows - 2) * list.RowHeight);
+            window.Window.MouseDown(edge, MouseButton.Left);
+            window.Window.MouseMove(to);
+            window.Layout();
+
+            list.VisibleRows.ShouldBe(2);
+            BoundsInWindow(Flyout(window).ShouldNotBeNull()).Bottom.ShouldBeLessThan(caret);
+            window.Window.MouseUp(to, MouseButton.Left);
+            window.Layout();
+            BoundsInWindow(Flyout(window).ShouldNotBeNull()).Bottom.ShouldBeLessThan(caret);
+            // Placed again once let go, it takes the side below, where it now fits.
+            window.Type("i");
+            await Wait.UntilAsync(() =>
+            {
+                window.Layout();
+                return Flyout(window) is { } flyout && BoundsInWindow(flyout).Top > caret;
+            });
+        });
+
+    [Fact]
     public Task Growing_the_list_at_its_last_row_shows_more_of_its_items_before_it() =>
         _ui.Run(async () =>
         {
