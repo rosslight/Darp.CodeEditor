@@ -20,6 +20,10 @@ internal sealed record LanguageConfiguration(
     /// <summary>No editing rules.</summary>
     public static LanguageConfiguration None { get; } = new(null, null, [], [], [], null);
 
+    /// <summary>The editing rules of <paramref name="language"/>; none while they load.</summary>
+    public static LanguageConfiguration Of(CodeLanguage language) =>
+        language.Loaded is { IsCompletedSuccessfully: true } loaded ? loaded.Result.Configuration : None;
+
     /// <summary>The rules for Enter, <c>onEnterRules</c>, in their order: the first that matches applies.</summary>
     public IReadOnlyList<OnEnterRule> OnEnterRules { get; init; } = [];
 

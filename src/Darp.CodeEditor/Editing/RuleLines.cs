@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using AvaloniaEdit.Document;
 using Darp.CodeEditor.Highlighting;
 using TextMateSharp.Internal.Grammars;
 
@@ -44,6 +45,20 @@ internal sealed class RuleLines
         _brackets = brackets;
         _typesCode = typesCode;
     }
+
+    /// <summary>
+    /// The lines of <paramref name="document"/> by the tokens of <paramref name="highlighter"/>, which also tell where
+    /// typed text goes: in code, unless they say otherwise.
+    /// </summary>
+    public static RuleLines Of(TextDocument document, BackgroundTextMateHighlighter highlighter, Regex? brackets) =>
+        new(
+            number => document.GetText(document.GetLineByNumber(number)),
+            highlighter.ExactTokensOf,
+            brackets,
+            (number, column) =>
+                highlighter.ContextAt(document.GetLineByNumber(number).Offset + column)
+                    is not { At: not TokenType.Other }
+        );
 
     /// <summary>The text of line <paramref name="number"/>, as it is.</summary>
     public string Text(int number) => _text(number);

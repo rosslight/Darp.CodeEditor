@@ -48,23 +48,11 @@ internal sealed class Typing : IDisposable
     private TextDocument Buffer => _area.Document;
 
     /// <summary>The language's editing rules; none while they load.</summary>
-    private LanguageConfiguration Configuration =>
-        _document.Language.Loaded is { IsCompletedSuccessfully: true } loaded
-            ? loaded.Result.Configuration
-            : LanguageConfiguration.None;
+    private LanguageConfiguration Configuration => LanguageConfiguration.Of(_document.Language);
 
     private IndentRules Rules => new(Configuration, _document.Language.AutoIndent, _document.Indentation);
 
-    private RuleLines Lines =>
-        new(
-            number => Buffer.GetText(Buffer.GetLineByNumber(number)),
-            _highlighter.ExactTokensOf,
-            Configuration.BracketPattern,
-            // Code unless the tokens say otherwise.
-            (number, column) =>
-                _highlighter.ContextAt(Buffer.GetLineByNumber(number).Offset + column)
-                    is not { At: not TokenType.Other }
-        );
+    private RuleLines Lines => RuleLines.Of(Buffer, _highlighter, Configuration.BracketPattern);
 
     public void Dispose()
     {
@@ -111,18 +99,24 @@ internal sealed class Typing : IDisposable
         EditStep step = _changes.Typing(text);
         if (text is [char typed])
         {
-            if ((_indentation = Outdented(typed)) is not null)
+            if ((_indentation = Retyped(typed, Rules.Outdented)) is not null)
                 step = new EditStep(EditKind.TypingOther, StartsStep: true);
             else if (_pairs.TypeOver(typed) || _pairs.Surround(typed))
             {
                 e.Handled = true;
                 return;
             }
-            // The closing text of a longer opening, such as "<!--", waits for a step of its own.
-            else if ((_closing = _pairs.PairToClose(typed)) is { } pair)
-                step = new EditStep(EditKind.TypingOther, StartsStep: true, EndsStep: pair.Open.Length > 1);
-            else if ((_indentation = LinedUp(typed)) is not null)
-                step = new EditStep(EditKind.TypingOther, StartsStep: false, EndsStep: true);
+            else
+            {
+                // A block opened under a statement goes back to the statement's indentation, and its pair still closes.
+                _indentation = Retyped(typed, Rules.Opened);
+                _closing = _pairs.PairToClose(typed);
+                // The closing text of a longer opening, such as "<!--", waits for a step of its own.
+                if (_indentation is not null || _closing is not null)
+                    step = new EditStep(EditKind.TypingOther, StartsStep: true, EndsStep: _closing?.Open.Length > 1);
+                else if ((_indentation = LinedUp(typed)) is not null)
+                    step = new EditStep(EditKind.TypingOther, StartsStep: false, EndsStep: true);
+            }
         }
         // Text of several characters, as from an input method.
         else if (text.AsSpan().IndexOfAny('\r', '\n') >= 0)
@@ -150,7 +144,7 @@ internal sealed class Typing : IDisposable
             DocumentLine line = Buffer.GetLineByOffset(_area.Caret.Offset);
             _changes.Apply([new TextEdit(line.Offset, IndentRules.Leading(Buffer.GetText(line)), indentation)]);
         }
-        else if (_closing is { Open.Length: 1 } pair)
+        if (_closing is { Open.Length: 1 } pair)
             _pairs.Close(pair);
     }
 
@@ -219,19 +213,22 @@ internal sealed class Typing : IDisposable
         return true;
     }
 
-    /// <summary>The new indentation of the line once <paramref name="typed"/> replaces the selection on it, if it outdents.</summary>
-    private string? Outdented(char typed)
+    /// <summary>
+    /// The new indentation that <paramref name="rule"/> gives the line once <paramref name="typed"/> replaces the
+    /// selection on it; null for a selection over several lines.
+    /// </summary>
+    private string? Retyped(char typed, Func<RuleLines, int, int, int, char, string?> rule)
     {
         TextRange range = _changes.Selection.Range;
         DocumentLine line = Buffer.GetLineByOffset(range.Start);
         return _area.Selection is RectangleSelection || range.End > line.EndOffset
             ? null
-            : Rules.Outdented(Lines, line.LineNumber, range.Start - line.Offset, range.End - line.Offset, typed);
+            : rule(Lines, line.LineNumber, range.Start - line.Offset, range.End - line.Offset, typed);
     }
 
     /// <summary>
-    /// The new indentation of the caret's line, if <paramref name="typed"/> completes a closing bracket first on it, in
-    /// code, whose opening bracket is on a line above.
+    /// The new indentation of the caret's line, if <paramref name="typed"/> completes a closing bracket first on it
+    /// whose opening bracket is on a line above.
     /// </summary>
     private string? LinedUp(char typed)
     {
@@ -242,10 +239,7 @@ internal sealed class Typing : IDisposable
         return Rules.LinedUp(Lines, line.LineNumber, caret - line.Offset, typed, OpeningLine);
 
         int? OpeningLine(CharacterPair pair) =>
-            (
-                _document.Language.Loaded.Result.Grammar is null
-                || _highlighter.ContextAt(caret) is { At: TokenType.Other }
-            ) && BracketMatcher.FindOpening(Buffer, caret, pair, _highlighter.TokensOf) is { } opening
+            BracketMatcher.FindOpening(Buffer, caret, pair, _highlighter.TokensOf) is { } opening
                 ? Buffer.GetLineByOffset(opening).LineNumber
                 : null;
     }

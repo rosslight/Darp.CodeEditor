@@ -48,10 +48,7 @@ internal sealed class AutoClosingPairs : IDisposable
     private TextDocument Buffer => _area.Document;
 
     /// <summary>The language's editing rules; none while they load.</summary>
-    private LanguageConfiguration Configuration =>
-        _document.Language.Loaded is { IsCompletedSuccessfully: true } loaded
-            ? loaded.Result.Configuration
-            : LanguageConfiguration.None;
+    private LanguageConfiguration Configuration => LanguageConfiguration.Of(_document.Language);
 
     public void Dispose()
     {
