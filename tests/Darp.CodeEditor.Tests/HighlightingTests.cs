@@ -153,7 +153,15 @@ public sealed class HighlightingTests(UiFixture ui)
                 CodeLanguage.Json,
                 $"{{\n  \"long\": {value},\n  \"after\": 1\n}}"
             );
-            using var window = new EditorWindow(new CodeEditor { Document = document });
+            // The string tokenizes in time on any machine: the background's clock stands still for it. The array runs
+            // out of time for real: it takes seconds.
+            using var window = new EditorWindow(
+                new CodeEditor
+                {
+                    GrammarClock = kind == "string" ? new ManualTime() : TimeProvider.System,
+                    Document = document,
+                }
+            );
             // Near the line's start: the editor edits and draws only the first 3,000 characters of a longer line.
             window.Editor.Selection = new TextSelection(document.CurrentSnapshot.GetOffset(new TextPosition(2, 100)));
 
