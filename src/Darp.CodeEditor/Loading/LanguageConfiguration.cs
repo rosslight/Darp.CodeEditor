@@ -194,8 +194,11 @@ internal sealed record LanguageConfiguration(
             options |= RegexOptions.Multiline;
         if (flags.Contains('s'))
             options |= RegexOptions.Singleline;
-        return new Regex(source, options, IndentationRules.MatchTimeout);
+        return new Regex(source, options, PatternTimeout);
     }
+
+    /// <summary>The time limit of a match of the rules that load: <see cref="IndentationRules.MatchTimeout"/>.</summary>
+    internal static TimeSpan PatternTimeout { get; set; } = IndentationRules.MatchTimeout;
 
     /// <summary>A string value; anything else makes the file invalid.</summary>
     private static string Text(JsonElement value) =>
@@ -268,15 +271,18 @@ internal sealed record IndentationRules(Regex IncreaseIndentPattern, Regex Decre
     public Regex? UnIndentedLinePattern { get; init; }
 
     /// <summary>
-    /// How long one match may take, as a language's rules load. Some patterns backtrack on long lines, as JSON's does on
-    /// nested objects.
+    /// How long one match may take. It only stops a pattern that backtracks, as JSON's does on long lines of nested
+    /// objects; <see cref="TimeLimit"/>, on a precise clock, budgets the normal work. .NET times a match by
+    /// <see cref="Environment.TickCount64"/>, which on Windows moves in steps of up to 16 ms, and ends it once more than
+    /// its limit less one step has passed: at 5 ms, a step during any match could end it and drop a rule at random. At
+    /// 32 ms, two steps, a match that ends has run for more than 16 ms, longer than the whole budget.
     /// </summary>
-    internal static TimeSpan MatchTimeout { get; set; } = TimeSpan.FromMilliseconds(5);
+    public static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(32);
 
     /// <summary>
     /// How long one indentation, of a new line or of a line the user types, may read and match lines, with the rules
-    /// for Enter: on the UI thread, about 10 ms, and with a match that starts just before then, at most 15 ms. A line
-    /// above it all needs about a microsecond per match.
+    /// for Enter: on the UI thread, about 10 ms, and a match that starts just before then may run on up to
+    /// <see cref="MatchTimeout"/>. A line above it all needs about a microsecond per match.
     /// </summary>
     public static readonly TimeSpan TimeLimit = TimeSpan.FromMilliseconds(10);
 

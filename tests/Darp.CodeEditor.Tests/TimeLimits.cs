@@ -15,7 +15,7 @@ internal static class TimeLimits
     internal static void Initialize()
     {
         IndentationRules.Clock = new ManualTime();
-        IndentationRules.MatchTimeout = TimeSpan.FromSeconds(1);
+        LanguageConfiguration.PatternTimeout = TimeSpan.FromSeconds(1);
         BackgroundTextMateHighlighter.InsertionTimeLimit = TimeSpan.FromSeconds(1);
     }
 }
