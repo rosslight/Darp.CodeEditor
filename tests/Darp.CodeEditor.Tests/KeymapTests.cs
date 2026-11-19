@@ -129,6 +129,22 @@ public sealed class KeymapTests(UiFixture ui)
     }
 
     [Fact]
+    public Task On_macOS_Cmd_G_and_Shift_Cmd_G_go_to_the_next_and_the_previous_match() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("«one» two one", CodeLanguage.PlainText);
+            window.Editor.Keymap = new CodeEditorKeymap(CodeEditorKeymap.DefaultBindings(mac: true));
+
+            window.Press(Keys.G, KeyModifiers.Meta);
+            await SearchTests.SearchedAsync(BarOf(window));
+            window.Editor.Selection.ShouldBe(new TextSelection(8, 11));
+
+            window.Press(Keys.G, KeyModifiers.Meta | KeyModifiers.Shift);
+            await SearchTests.SearchedAsync(BarOf(window));
+            window.Editor.Selection.ShouldBe(new TextSelection(0, 3));
+        });
+
+    [Fact]
     public Task A_sequence_waits_for_its_second_key_and_says_so() =>
         _ui.Run(() =>
         {
@@ -150,7 +166,7 @@ public sealed class KeymapTests(UiFixture ui)
 
     [Fact]
     public Task A_second_key_that_completes_no_sequence_is_an_ordinary_key() =>
-        _ui.Run(() =>
+        _ui.Run(async () =>
         {
             using EditorWindow window = MarkedText.Show("«one» two one", CodeLanguage.PlainText);
             window.Editor.Keymap = CodeEditorKeymap.Default.With(
@@ -159,6 +175,7 @@ public sealed class KeymapTests(UiFixture ui)
 
             window.Press(Keys.K, KeyModifiers.Control);
             window.Press(Keys.F3);
+            await SearchTests.SearchedAsync(BarOf(window));
 
             window.Editor.PendingKeys.ShouldBeNull();
             // F3 ran as it does alone: the next match of the selection.

@@ -361,6 +361,22 @@ public sealed class SearchTests(UiFixture ui)
             BarOf(window).IsOpen.ShouldBeFalse();
         });
 
+    /// <summary>Completes once the search under way shows its result, or at once without one.</summary>
+    internal static Task SearchedAsync(SearchBar bar)
+    {
+        if (!bar.IsSearching)
+            return Task.CompletedTask;
+        var searched = new TaskCompletionSource();
+        bar.Searched += OnSearched;
+        return Wait.ForAsync(searched.Task);
+
+        void OnSearched(object? sender, EventArgs e)
+        {
+            bar.Searched -= OnSearched;
+            searched.TrySetResult();
+        }
+    }
+
     private static SearchBar BarOf(EditorWindow window) =>
         window.Editor.GetVisualDescendants().OfType<SearchBar>().Single();
 
