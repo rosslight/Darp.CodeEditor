@@ -89,6 +89,7 @@ internal readonly struct Indenting(Indentation indentation)
             is (>= 0x2E80 and <= 0xD7AF)
                 or (>= 0xF900 and <= 0xFAFF)
                 or (>= 0xFF01 and <= 0xFF5E)
+                or (>= 0xFFE0 and <= 0xFFE6)
                 or (>= 0x1F1E6 and <= 0x1F1FF)
                 or 0x231A
                 or 0x231B
