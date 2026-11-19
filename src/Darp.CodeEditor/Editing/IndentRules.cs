@@ -43,14 +43,14 @@ internal sealed class IndentRules
     /// <summary>
     /// What Enter inserts at the caret, <paramref name="column"/> characters into line <paramref name="lineNumber"/>: the
     /// rules for Enter, then the brackets, then the indentation rules, each as far as <see cref="AutoIndent"/> goes.
-    /// Without any of them, the new line keeps the line's indentation up to the caret.
+    /// Without any of them, the new line keeps the line's indentation up to the caret, in its own time or a larger one.
     /// </summary>
-    public NewLine Enter(RuleLines lines, int lineNumber, int column)
+    public NewLine Enter(RuleLines lines, int lineNumber, int column, IndentationMatching? larger = null)
     {
         if (_autoIndent == AutoIndent.None)
             return new NewLine(_lineBreak, _lineBreak.Length, 0);
         // The line is read out of time too, for its indentation to keep, but its time counts.
-        IndentationMatching matching = StartMatching();
+        IndentationMatching matching = larger ?? StartMatching();
         string text = lines.Text(lineNumber);
         string indentation = text[..Math.Min(column, Leading(text))];
         if (_autoIndent >= AutoIndent.Brackets)
@@ -112,6 +112,42 @@ internal sealed class IndentRules
         catch (RegexMatchTimeoutException)
         {
             return null;
+        }
+    }
+
+    /// <summary>
+    /// The indentation of lines moved past the next one, as VS Code's <c>moveLinesCommand.ts</c> gives it, in one time
+    /// limit: Enter's at the end of the line above a line's new place, less a level where it decreases. Down, the line
+    /// after <paramref name="first"/> to <paramref name="last"/> takes the first's place, they the next; up, they take
+    /// the place of the line before. Null keeps it: out of time, or where a line read was unclassified.
+    /// </summary>
+    public (string? Past, string? First) Move(RuleLines lines, int first, int last, bool down)
+    {
+        if (_autoIndent < AutoIndent.Full || _configuration.IndentationRules is null)
+            return (null, null);
+        IndentationMatching matching = StartMatching();
+        try
+        {
+            if (!down)
+                return Checked(null, Placed(lines.Moved(n => n == first - 1 ? first : n), first - 1));
+            string past = Placed(lines.Moved(n => n == first ? last + 1 : n), first);
+            RuleLines below = lines.Moved(n => n == first ? last + 1 : n - (n > first && n <= last + 1 ? 1 : 0));
+            return Checked(past, Placed(below.Reindented(first, _indenting.Normalize(past)), first + 1));
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return (null, null);
+        }
+
+        (string?, string?) Checked(string? past, string moved) => lines.Unclassified ? (null, null) : (past, moved);
+
+        // Out of time, also within Enter, the read of the line fails.
+        string Placed(RuleLines placed, int number)
+        {
+            string line = number == 1 ? "" : Enter(placed, number - 1, placed.Text(number - 1).Length, matching).Text;
+            line = line.TrimStart('\r', '\n');
+            line = line[..Leading(line)];
+            return matching.Decreases(matching.Read(placed.Masked, number)) ? _indenting.Unshift(line) : line;
         }
     }
 
