@@ -75,7 +75,7 @@ internal sealed class CompletionController : IEditorFeature
     private SymbolIconColors? _icons;
 
     /// <summary>Completion from its first request until it ends; null while there is none.</summary>
-    private Session? _session;
+    private CompletionSession? _session;
 
     /// <summary>Whether "No suggestions." shows for an empty answer to a request by key, with no completion open.</summary>
     private bool _showsEmpty;
@@ -263,7 +263,7 @@ internal sealed class CompletionController : IEditorFeature
         _session = null;
         session.Pending?.Cancellation.Cancel();
         session.Filtering?.Cancellation.Cancel();
-        foreach (Resolve resolve in session.Resolves.Values)
+        foreach (ItemResolve resolve in session.Resolves.Values)
             resolve.Cancellation.Cancel();
         session.Details?.Cancel();
         _view.Hide();
@@ -293,9 +293,9 @@ internal sealed class CompletionController : IEditorFeature
         int caret = _textArea.Caret.Offset;
         if (!_textArea.ReadOnlySectionProvider.CanInsert(caret))
             return;
-        var request = new Request(_document.CurrentSnapshot, WordBefore(caret));
+        var request = new CompletionRequest(_document.CurrentSnapshot, WordBefore(caret));
         HideEmpty();
-        Session session = _session ??= new Session();
+        CompletionSession session = _session ??= new CompletionSession();
         session.ByKey |= byKey;
         session.Pending?.Cancellation.Cancel();
         session.Pending = request;
@@ -303,7 +303,7 @@ internal sealed class CompletionController : IEditorFeature
     }
 
     /// <summary>Shows the server's answer, unless completion ended or asked again meanwhile.</summary>
-    private async void AskAsync(Session session, Request request, CompletionTrigger trigger)
+    private async void AskAsync(CompletionSession session, CompletionRequest request, CompletionTrigger trigger)
     {
         try
         {
@@ -334,7 +334,7 @@ internal sealed class CompletionController : IEditorFeature
                 }
                 list ??= new CompletionList([], isIncomplete: false, resolve: null);
             }
-            session.Answer = new Answer(list, request);
+            session.Answer = new CompletionAnswer(list, request);
             Update();
         }
         catch (Exception e)
@@ -353,7 +353,7 @@ internal sealed class CompletionController : IEditorFeature
             return;
         }
         int caret = _textArea.Caret.Offset;
-        Request latest = session.Latest;
+        CompletionRequest latest = session.Latest;
         if (
             !_textArea.Selection.IsEmpty
             || (!latest.IsStale && _buffer.GetLineByOffset(caret) != _buffer.GetLineByOffset(latest.Offset))
@@ -385,7 +385,7 @@ internal sealed class CompletionController : IEditorFeature
     /// Filters <paramref name="answer"/> for the text up to the caret, off the UI thread, unless that filter runs or
     /// shows already: the filter under way stops, and the list shows the new one's result once it has run.
     /// </summary>
-    private void Filter(Session session, Answer answer, int caret)
+    private void Filter(CompletionSession session, CompletionAnswer answer, int caret)
     {
         // While the request is not stale, its offsets up to where it was asked are the current text's.
         if (answer.Request.IsStale || caret < answer.Request.Offset)
@@ -400,26 +400,26 @@ internal sealed class CompletionController : IEditorFeature
         session.Filtering?.Cancellation.Cancel();
         if (session.CommitAt != key)
             session.CommitAt = null;
-        var filtering = new Filtering(key, new CancellationTokenSource());
+        var filtering = new FilterRun(key, new CancellationTokenSource());
         session.Filtering = filtering;
         // The UI thread reads no text: each item's typed text is read off it, from the snapshot of the key's version.
         FilterAsync(session, filtering, _document.CurrentSnapshot);
     }
 
     /// <summary>Shows a filter's result, unless completion ended, or a newer filter replaced it.</summary>
-    private async void FilterAsync(Session session, Filtering filtering, TextSnapshot snapshot)
+    private async void FilterAsync(CompletionSession session, FilterRun filtering, TextSnapshot snapshot)
     {
         try
         {
             CancellationToken cancellationToken = filtering.Cancellation.Token;
-            Task<Filtered?> ranking = _matching.ContinueWith(
+            Task<RankedItems?> ranking = _matching.ContinueWith(
                 _ => Rank(filtering.Key.Answer.List.Items, snapshot, filtering.Key.Caret, cancellationToken),
                 CancellationToken.None,
                 TaskContinuationOptions.DenyChildAttach,
                 TaskScheduler.Default
             );
             _matching = ranking;
-            Filtered? filtered = await ranking;
+            RankedItems? filtered = await ranking;
             if (filtered is null || _session != session || session.Filtering != filtering)
                 return;
             session.Filtering = null;
@@ -443,7 +443,7 @@ internal sealed class CompletionController : IEditorFeature
     /// starts up to <paramref name="caret"/>, best first, and the one to select; null once cancelled. Of each typed
     /// text only what the matcher reads is read, however far before the caret the edit starts.
     /// </summary>
-    private Filtered? Rank(
+    private RankedItems? Rank(
         IReadOnlyList<CompletionItem> items,
         TextSnapshot snapshot,
         int caret,
@@ -473,7 +473,7 @@ internal sealed class CompletionController : IEditorFeature
         }
         // As VS Code: the first item, or the first that the server preselects among those that match best.
         int preselected = ranked.FindIndex(r => r.Score == ranked[0].Score && items[r.Index].IsPreselected);
-        return new Filtered(
+        return new RankedItems(
             [.. ranked.Select(r => new ShownItem(items[r.Index], r.Highlights))],
             Math.Max(0, preselected)
         );
@@ -483,7 +483,7 @@ internal sealed class CompletionController : IEditorFeature
     /// Shows a filter's items. When none match, a list opened by typing ends, unless more may come; one asked for by key
     /// freezes, or says that nothing matches.
     /// </summary>
-    private void Show(Session session, FilterKey key, Filtered filtered)
+    private void Show(CompletionSession session, FilterKey key, RankedItems filtered)
     {
         if (filtered.Items.Count == 0)
         {
@@ -537,7 +537,7 @@ internal sealed class CompletionController : IEditorFeature
     /// VS Code's frozen list: without their matched characters in bold. An accept that waited for this filter commits
     /// the selected item over what was typed now.
     /// </summary>
-    private void Freeze(Session session, FilterKey key)
+    private void Freeze(CompletionSession session, FilterKey key)
     {
         bool wasFrozen = session.FrozenAt is not null;
         session.FrozenAt = key;
@@ -589,7 +589,7 @@ internal sealed class CompletionController : IEditorFeature
     /// Whether the item at <paramref name="index"/> may be committed now: the list shows the filter of the current
     /// text, frozen or not, or the item matches it, which is checked for that item alone.
     /// </summary>
-    private bool CanCommit(Session session, int index)
+    private bool CanCommit(CompletionSession session, int index)
     {
         if (session.Shown is not { } shown)
             return false;
@@ -615,7 +615,7 @@ internal sealed class CompletionController : IEditorFeature
     /// the caret changes before; starts that filter if none runs. When that filter finds nothing to commit,
     /// <paramref name="key"/>, the key that accepted, does what it does without a list.
     /// </summary>
-    private void CommitWhenFiltered(Session session, bool replace, PressedKey? key)
+    private void CommitWhenFiltered(CompletionSession session, bool replace, PressedKey? key)
     {
         if (session.Answer is not { } answer)
             return;
@@ -635,10 +635,10 @@ internal sealed class CompletionController : IEditorFeature
         snapshot.GetText(TextRange.FromBounds(start, Math.Min(caret, start + CompletionMatcher.MaxLength)));
 
     /// <summary>What filtering <paramref name="answer"/> now would filter for.</summary>
-    private FilterKey CurrentKey(Answer answer) =>
+    private FilterKey CurrentKey(CompletionAnswer answer) =>
         new(answer, _document.CurrentSnapshot.Version, _textArea.Caret.Offset);
 
-    private void Select(Session session, int index)
+    private void Select(CompletionSession session, int index)
     {
         session.Selected = index;
         _view.Select(index);
@@ -646,7 +646,7 @@ internal sealed class CompletionController : IEditorFeature
     }
 
     /// <summary>Hides the list while completion waits for an answer; a filter of the old one under way stops.</summary>
-    private void Hide(Session session)
+    private void Hide(CompletionSession session)
     {
         session.ShowsNoMatch = false;
         session.FrozenAt = null;
@@ -666,12 +666,12 @@ internal sealed class CompletionController : IEditorFeature
     /// replace them once it answers, if the item is still selected. The resolve of an item no longer selected is
     /// cancelled while it is under way.
     /// </summary>
-    private async void ResolveSelected(Session session)
+    private async void ResolveSelected(CompletionSession session)
     {
         CompletionItem item = session.Items[session.Selected].Item;
         // Whether or not this item still needs its own, the resolve of another one is no longer needed.
         foreach (
-            (CompletionItem other, Resolve running) in session
+            (CompletionItem other, ItemResolve running) in session
                 .Resolves.Where(r => !ReferenceEquals(r.Key, item) && !r.Value.Task.IsCompleted)
                 .ToList()
         )
@@ -684,7 +684,7 @@ internal sealed class CompletionController : IEditorFeature
             return;
         var cancellation = new CancellationTokenSource();
         Task<CompletionItem?> resolving = answer.List.ResolveAsync(item, cancellation.Token);
-        session.Resolves[item] = new Resolve(resolving, cancellation);
+        session.Resolves[item] = new ItemResolve(resolving, cancellation);
         try
         {
             if (
@@ -707,7 +707,7 @@ internal sealed class CompletionController : IEditorFeature
     /// Shows <paramref name="item"/>'s detail, as code, and its documentation beside the list, read off the UI thread
     /// as the hover reads its Markdown; nothing when it has neither. Typing that keeps the item selected keeps them.
     /// </summary>
-    private async void ShowDetails(Session session, CompletionItem item)
+    private async void ShowDetails(CompletionSession session, CompletionItem item)
     {
         if (ReferenceEquals(session.DetailsOf, item))
             return;
@@ -773,7 +773,7 @@ internal sealed class CompletionController : IEditorFeature
     /// selected. Additional edits that overlap others are left out, and stay plain text. Additional edits that a resolve
     /// still under way brings come later.
     /// </summary>
-    private void Commit(Session session, int index, bool replace = false)
+    private void Commit(CompletionSession session, int index, bool replace = false)
     {
         if (session.Shown?.Answer is not { } answer)
             return;
@@ -784,7 +784,7 @@ internal sealed class CompletionController : IEditorFeature
         }
         CompletionItem selected = session.Items[index].Item;
         CompletionItem item = session.ResolvedOf(selected) ?? selected;
-        Request request = answer.Request;
+        CompletionRequest request = answer.Request;
         int caret = _textArea.Caret.Offset;
         // Text typed at the caret goes in the range, and once the rest of the word is deleted, also by another editor or
         // code, the text after it stays out.
@@ -796,14 +796,14 @@ internal sealed class CompletionController : IEditorFeature
         );
         RenderedSnippet? snippet = item.Snippet is { } source ? _snippets.Render(source, range.Start) : null;
         var main = new CompletionEdit(range, snippet?.Text ?? InLineBreaks(item.Edit.NewText));
-        Resolve? late = null;
+        ItemResolve? late = null;
         if (item.AdditionalEdits is null && answer.List.Resolves)
         {
             // Taken out of the session, so that ending it does not cancel it.
             if (!session.Resolves.Remove(selected, out late))
             {
                 var cancellation = new CancellationTokenSource();
-                late = new Resolve(answer.List.ResolveAsync(selected, cancellation.Token), cancellation);
+                late = new ItemResolve(answer.List.ResolveAsync(selected, cancellation.Token), cancellation);
             }
         }
         Close();
@@ -828,7 +828,7 @@ internal sealed class CompletionController : IEditorFeature
     /// Applies the additional edits that a committed item's resolve brings, in the commit's undo step, if that step is
     /// still the last one; drops them otherwise.
     /// </summary>
-    private async void ApplyLateEdits(Resolve late, object step, TextSnapshot snapshot)
+    private async void ApplyLateEdits(ItemResolve late, object step, TextSnapshot snapshot)
     {
         _lateEdits?.Cancel();
         _lateEdits = late.Cancellation;
@@ -958,7 +958,7 @@ internal sealed class CompletionController : IEditorFeature
     {
         if (_session is not { } session)
             return;
-        foreach (Request? request in (Request?[])[session.Answer?.Request, session.Pending])
+        foreach (CompletionRequest? request in (CompletionRequest?[])[session.Answer?.Request, session.Pending])
         {
             if (request is { IsStale: false } && e.Offset < request.Offset)
                 request.IsStale = true;
@@ -989,108 +989,4 @@ internal sealed class CompletionController : IEditorFeature
     }
 
     private PopupLook Look() => new(_editor.FontFamily, _editor.FontSize, _colors);
-
-    /// <summary>A request for completion.</summary>
-    /// <param name="snapshot">The text it was asked for.</param>
-    /// <param name="word">The word before the caret then: what items without an edit replace.</param>
-    private sealed class Request(TextSnapshot snapshot, TextRange word)
-    {
-        public TextSnapshot Snapshot { get; } = snapshot;
-
-        public TextRange Word { get; } = word;
-
-        /// <summary>
-        /// Where the caret was, in <see cref="Snapshot"/>; also in the current text, while the request is not stale.
-        /// </summary>
-        public int Offset => Word.End;
-
-        /// <summary>Cancels the request.</summary>
-        public CancellationTokenSource Cancellation { get; } = new();
-
-        /// <summary>
-        /// Whether the text before <see cref="Offset"/> changed since: then the answer's positions no longer fit the
-        /// current text.
-        /// </summary>
-        public bool IsStale { get; set; }
-    }
-
-    /// <summary>A server's list, with the request it answered.</summary>
-    private sealed record Answer(CompletionList List, Request Request);
-
-    /// <summary>An item's resolve, under way or done.</summary>
-    private sealed record Resolve(Task<CompletionItem?> Task, CancellationTokenSource Cancellation);
-
-    /// <summary>What a list is filtered for: an answer, at a version of the text and a caret.</summary>
-    private readonly record struct FilterKey(Answer Answer, int Version, int Caret);
-
-    /// <summary>A filter under way.</summary>
-    private sealed record Filtering(FilterKey Key, CancellationTokenSource Cancellation);
-
-    /// <summary>A filter's result: the items that match, in order, and the one to select.</summary>
-    private sealed record Filtered(List<ShownItem> Items, int Selected);
-
-    /// <summary>Completion from its first request until it ends.</summary>
-    private sealed class Session
-    {
-        /// <summary>The answer whose items show; null until the first one.</summary>
-        public Answer? Answer { get; set; }
-
-        /// <summary>The request under way; null for none.</summary>
-        public Request? Pending { get; set; }
-
-        /// <summary>Whether the user asked by key: when nothing matches, the list freezes or says so.</summary>
-        public bool ByKey { get; set; }
-
-        /// <summary>What the frozen list's text is: its items show as they were, none of them matching; null otherwise.</summary>
-        public FilterKey? FrozenAt { get; set; }
-
-        /// <summary>Whether the list says "No suggestions." instead of showing items.</summary>
-        public bool ShowsNoMatch { get; set; }
-
-        /// <summary>Whether the commit that waits for a filter replaces.</summary>
-        public bool CommitReplaces { get; set; }
-
-        /// <summary>The key that accepted for the commit that waits for a filter; null when none did.</summary>
-        public PressedKey? CommitKey { get; set; }
-
-        /// <summary>The request asked last: the one under way, or the one whose answer shows.</summary>
-        public Request Latest =>
-            Pending ?? Answer?.Request ?? throw new InvalidOperationException("Completion was not asked for.");
-
-        /// <summary>Whether the list shows.</summary>
-        public bool IsShowing => Shown is not null;
-
-        /// <summary>What the items that show were filtered for; null while none show.</summary>
-        public FilterKey? Shown { get; set; }
-
-        /// <summary>The filter under way; null for none.</summary>
-        public Filtering? Filtering { get; set; }
-
-        /// <summary>
-        /// The filter whose selection Enter or Tab commits once it has run; null for none. A filter for anything else
-        /// drops it.
-        /// </summary>
-        public FilterKey? CommitAt { get; set; }
-
-        /// <summary>The items that show, in order.</summary>
-        public List<ShownItem> Items { get; set; } = [];
-
-        /// <summary>The selected item's index in <see cref="Items"/>.</summary>
-        public int Selected { get; set; }
-
-        /// <summary>The resolves of the items, under way or done.</summary>
-        public Dictionary<CompletionItem, Resolve> Resolves { get; } = new(ReferenceEqualityComparer.Instance);
-
-        /// <summary>The item whose details show, or are about to; null for none.</summary>
-        public CompletionItem? DetailsOf { get; set; }
-
-        /// <summary>Cancels the reading of the details that are about to show.</summary>
-        public CancellationTokenSource? Details { get; set; }
-
-        /// <summary>The item as the server resolved it; null while it did not.</summary>
-        public CompletionItem? ResolvedOf(CompletionItem item) =>
-            Resolves.TryGetValue(item, out Resolve? resolve) && resolve.Task.IsCompletedSuccessfully
-                ? resolve.Task.Result
-                : null;
-    }
 }
