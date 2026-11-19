@@ -29,13 +29,20 @@ internal sealed class ReplacePattern
 
     private readonly IReadOnlyList<Piece> _pieces;
 
-    private ReplacePattern(IReadOnlyList<Piece> pieces) => _pieces = pieces;
+    /// <summary>The group numbers that the expression declares, which may skip some.</summary>
+    private readonly int[] _groups;
+
+    private ReplacePattern(IReadOnlyList<Piece> pieces, int[] groups)
+    {
+        _pieces = pieces;
+        _groups = groups;
+    }
 
     /// <summary>A replacement taken as it is, as for a query that is not a regular expression.</summary>
-    public static ReplacePattern Static(string text) => new([new Piece(text, 0, "")]);
+    public static ReplacePattern Static(string text) => new([new Piece(text, 0, "")], []);
 
-    /// <summary>Reads <paramref name="replacement"/>.</summary>
-    public static ReplacePattern Parse(string replacement)
+    /// <summary>Reads <paramref name="replacement"/>, for the matches of <paramref name="regex"/>.</summary>
+    public static ReplacePattern Parse(string replacement, Regex regex)
     {
         var pieces = new List<Piece>();
         var text = new StringBuilder();
@@ -86,7 +93,7 @@ internal sealed class ReplacePattern
         text.Append(replacement, unchanged, replacement.Length - unchanged);
         if (text.Length > 0)
             pieces.Add(new Piece(text.ToString(), 0, ""));
-        return new ReplacePattern(pieces);
+        return new ReplacePattern(pieces, regex.GetGroupNumbers());
 
         // Adds value in place of the escape whose second character is at end.
         void AddText(string value, int end)
@@ -134,14 +141,14 @@ internal sealed class ReplacePattern
     /// The group's text; for a group of two digits that the expression doesn't have, the group of the first digit and
     /// the second digit, as in JavaScript; <c>$</c> and the digits for a group of one digit that it doesn't have.
     /// </summary>
-    private static string Substitute(int group, GroupCollection groups)
+    private string Substitute(int group, GroupCollection groups)
     {
         if (group == 0)
             return groups[0].Value;
         string rest = "";
         for (; group > 0; group /= 10)
         {
-            if (group < groups.Count)
+            if (_groups.Contains(group))
                 return groups[group].Value + rest;
             rest = (char)('0' + group % 10) + rest;
         }

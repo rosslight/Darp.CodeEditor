@@ -102,7 +102,9 @@ internal static class TextSearch
         string text = snapshot.GetText();
         if (!query.TryCreateRegex(out Regex? regex, out string? error))
             return new SearchResult(snapshot.Version, query, replacement, matches, SearchOutcome.InvalidPattern, error);
-        Replacing? replacing = replacement is null ? null : new Replacing(query, replacement, snapshot.LineBreak);
+        Replacing? replacing = replacement is null
+            ? null
+            : new Replacing(query, regex, replacement, snapshot.LineBreak);
         SearchOutcome outcome = new SearchScan(
             text,
             query,
@@ -142,7 +144,7 @@ internal static class TextSearch
         string text = snapshot.GetText();
         if (!query.TryCreateRegex(out Regex? regex, out _))
             return (null, SearchOutcome.InvalidPattern);
-        var replacing = new Replacing(query, replacement, snapshot.LineBreak);
+        var replacing = new Replacing(query, regex, replacement, snapshot.LineBreak);
         var edits = new List<TextEdit>();
         SearchOutcome outcome = new SearchScan(
             text,
@@ -187,7 +189,9 @@ internal static class TextSearch
         from = Math.Clamp(from, 0, text.Length);
         if (SearchScan.IsInsideLineBreak(text, from))
             from++;
-        Replacing? replacing = replacement is null ? null : new Replacing(query, replacement, snapshot.LineBreak);
+        Replacing? replacing = replacement is null
+            ? null
+            : new Replacing(query, regex, replacement, snapshot.LineBreak);
         SearchMatch? next = null;
         SearchOutcome outcome = new SearchScan(
             text,
@@ -259,10 +263,10 @@ internal static class TextSearch
         private readonly bool _preserveCase;
         private readonly string _lineBreak;
 
-        public Replacing(SearchQuery query, SearchReplacement replacement, string lineBreak)
+        public Replacing(SearchQuery query, Regex regex, SearchReplacement replacement, string lineBreak)
         {
             _pattern = query.UseRegex
-                ? ReplacePattern.Parse(replacement.Text)
+                ? ReplacePattern.Parse(replacement.Text, regex)
                 : ReplacePattern.Static(replacement.Text);
             _preserveCase = replacement.PreserveCase;
             _lineBreak = lineBreak;
