@@ -80,22 +80,25 @@ public sealed class KeymapTests(UiFixture ui)
     }
 
     [Fact]
-    public void By_default_Alt_Up_and_Alt_Down_choose_the_signature_before_their_other_bindings_and_on_macOS_Ctrl_P_and_Ctrl_N_too()
+    public void By_default_Alt_Up_and_Alt_Down_choose_the_signature_before_moving_lines_and_on_macOS_Ctrl_P_and_Ctrl_N_after_the_list()
     {
         foreach (bool mac in (bool[])[false, true])
         {
             var keymap = new CodeEditorKeymap(CodeEditorKeymap.DefaultBindings(mac));
-            // As the line moves of Alt+Up and Alt+Down would come before them.
-            keymap = new CodeEditorKeymap([new("alt+up", "earlier"), new("alt+down", "earlier"), .. keymap.Bindings]);
 
             Resolve(keymap, Key(Keys.Up, KeyModifiers.Alt))
-                .Commands.ShouldBe([CodeEditorCommands.ShowPrevParameterHint, "earlier"]);
+                .Commands.ShouldBe([CodeEditorCommands.ShowPrevParameterHint, CodeEditorCommands.MoveLinesUp]);
             Resolve(keymap, Key(Keys.Down, KeyModifiers.Alt))
-                .Commands.ShouldBe([CodeEditorCommands.ShowNextParameterHint, "earlier"]);
+                .Commands.ShouldBe([CodeEditorCommands.ShowNextParameterHint, CodeEditorCommands.MoveLinesDown]);
+            // Completion's list takes them first.
             Resolve(keymap, Key(Keys.P, KeyModifiers.Control))
-                .Commands.ShouldBe(mac ? [CodeEditorCommands.ShowPrevParameterHint] : []);
+                .Commands.ShouldBe(
+                    mac ? [CodeEditorCommands.SelectPrevSuggestion, CodeEditorCommands.ShowPrevParameterHint] : []
+                );
             Resolve(keymap, Key(Keys.N, KeyModifiers.Control))
-                .Commands.ShouldBe(mac ? [CodeEditorCommands.ShowNextParameterHint] : []);
+                .Commands.ShouldBe(
+                    mac ? [CodeEditorCommands.SelectNextSuggestion, CodeEditorCommands.ShowNextParameterHint] : []
+                );
         }
     }
 
