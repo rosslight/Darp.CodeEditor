@@ -255,7 +255,7 @@ public sealed class LineCommandTests(UiFixture ui)
         );
         var rules = new IndentRules(configuration, AutoIndent.Full, Indentation.Spaces(4), "\n");
 
-        rules.IndentationInPlace(lines, 2).ShouldBe(expected);
+        MovedIndentation.InPlace(rules, lines, 2).ShouldBe(expected);
     }
 
     [Theory]

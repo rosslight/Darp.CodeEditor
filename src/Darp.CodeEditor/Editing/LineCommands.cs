@@ -11,8 +11,9 @@ namespace Darp.CodeEditor.Editing;
 /// and <c>copyLinesCommand.ts</c> run them, with their tracked selections: moving, copying, deleting and inserting
 /// lines, indenting and outdenting them, and selecting them whole. They take the selected lines,
 /// or the caret's, without a last line that the selection touches only at its start. Each edit is a step of its own
-/// for undo. Moved lines take the indentation of their new place from <see cref="IndentRules"/>, as far as the
-/// language's <see cref="AutoIndent"/> goes, and inserted lines the indentation that Enter gives them.
+/// for undo. Moved lines take the indentation of their new place by the language's rules
+/// (<see cref="MovedIndentation"/>), as far as its <see cref="AutoIndent"/> goes, and inserted lines the indentation
+/// that Enter gives them (<see cref="IndentRules"/>).
 /// </summary>
 internal sealed class LineCommands : IEditorFeature
 {
@@ -158,8 +159,8 @@ internal sealed class LineCommands : IEditorFeature
         int top = first.LineNumber;
         string text = Buffer.GetText(moving);
         string? indentation =
-            rules.EnteredIndentation(lines, moving.LineNumber, top - 1)
-            ?? rules.IndentationInPlace(lines.Moved(n => n == top ? moving.LineNumber : n), top);
+            MovedIndentation.Entered(rules, lines, moving.LineNumber, top - 1)
+            ?? MovedIndentation.InPlace(rules, lines.Moved(n => n == top ? moving.LineNumber : n), top);
         string inserting = Indented(text, indentation);
         RuleLines afterMove = lines
             .Moved(n =>
@@ -170,8 +171,12 @@ internal sealed class LineCommands : IEditorFeature
             .Reindented(top, inserting[..IndentRules.Leading(inserting)]);
         int delta = Delta(
             first,
-            rules.EnteredIndentation(lines, top, string.IsNullOrWhiteSpace(inserting) ? top - 1 : moving.LineNumber)
-                ?? rules.IndentationInPlace(afterMove, top + 1)
+            MovedIndentation.Entered(
+                rules,
+                lines,
+                top,
+                string.IsNullOrWhiteSpace(inserting) ? top - 1 : moving.LineNumber
+            ) ?? MovedIndentation.InPlace(rules, afterMove, top + 1)
         );
         List<TextEdit> edits = [new TextEdit(first.Offset, 0, inserting + _document.LineBreak)];
         AddIndentation(edits, first, last, delta);
@@ -191,8 +196,9 @@ internal sealed class LineCommands : IEditorFeature
         RuleLines lines = MoveLines;
         int delta = Delta(
             first,
-            rules.EnteredIndentation(lines, first.LineNumber, first.LineNumber - 2)
-                ?? rules.IndentationInPlace(
+            MovedIndentation.Entered(rules, lines, first.LineNumber, first.LineNumber - 2)
+                ?? MovedIndentation.InPlace(
+                    rules,
                     lines.Moved(n => n == moving.LineNumber ? first.LineNumber : n),
                     moving.LineNumber
                 )

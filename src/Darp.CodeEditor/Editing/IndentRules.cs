@@ -6,10 +6,9 @@ namespace Darp.CodeEditor.Editing;
 
 /// <summary>
 /// The indentation of lines by a language's editing rules, as far as its <see cref="AutoIndent"/> goes, ported from VS
-/// Code's <c>enterAction.ts</c>, <c>autoIndent.ts</c>, the electric characters of <c>typeOperations.ts</c> and the
-/// rules of <c>moveLinesCommand.ts</c>: what Enter inserts, the indentation that a line should have, a line that
-/// outdents as the user types, a closing bracket typed first on its line that lines up with its opening one, and the
-/// indentation of lines moved to another place. It sees the lines as <see cref="RuleLines"/>
+/// Code's <c>enterAction.ts</c>, <c>autoIndent.ts</c> and the electric characters of <c>typeOperations.ts</c>: what
+/// Enter inserts, the indentation that a line should have, a line that outdents as the user types, and a closing
+/// bracket typed first on its line that lines up with its opening one. It sees the lines as <see cref="RuleLines"/>
 /// gives them, so its callers may ask about lines that are not, or not yet, in the document.
 /// </summary>
 /// <remarks>
@@ -109,93 +108,6 @@ internal sealed class IndentRules
                 && kept.Length + append.Length > 0
                 ? kept + append
                 : null;
-        }
-        catch (RegexMatchTimeoutException)
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// The indentation that line <paramref name="lineNumber"/> should have where it stands, as a moved line: what the
-    /// lines above give it by the indentation rules, or, right below the line that gives it, what Enter at that line's
-    /// end gives, without the text that Enter appends; one level less when the line itself matches the decrease
-    /// pattern. Null below <see cref="AutoIndent.Full"/>, without indentation rules, when no line above gives one, when
-    /// matching runs out of time, or when a line it read is <see cref="RuleLines.Unclassified"/>.
-    /// </summary>
-    public string? IndentationInPlace(RuleLines lines, int lineNumber)
-    {
-        if (_autoIndent < AutoIndent.Full || _configuration.IndentationRules is null)
-            return null;
-        IndentationMatching matching = StartMatching();
-        try
-        {
-            if (Inherited(matching, lines, lineNumber, honorIntentional: true) is not { } inherited)
-                return null;
-            bool decreases = matching.Decreases(matching.Read(lines.Masked, lineNumber));
-            if (
-                inherited.Line == lineNumber - 1
-                && ActionFor(matching, "", matching.Read(lines.Masked, lineNumber - 1), "") is { } action
-            )
-            {
-                string text = lines.Text(lineNumber - 1);
-                string indentation = text[..Math.Max(0, Leading(text) - action.RemoveText)];
-                indentation = action.Indent switch
-                {
-                    IndentAction.Indent or IndentAction.IndentOutdent => _indenting.Shift(indentation),
-                    IndentAction.Outdent => _indenting.Unshift(indentation),
-                    _ => indentation,
-                };
-                string entered = (decreases ? _indenting.Unshift(indentation) : indentation) + action.AppendText;
-                return lines.Unclassified ? null : entered[..Leading(entered)];
-            }
-            if (lines.Unclassified)
-                return null;
-            if (decreases)
-                return inherited.Increases ? inherited.Indentation : _indenting.Unshift(inherited.Indentation);
-            return Indentation(inherited);
-        }
-        catch (RegexMatchTimeoutException)
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// The indentation that Enter at the end of line <paramref name="above"/>, or of the closest line with text above
-    /// it, gives line <paramref name="lineNumber"/> as a moved line: that of the new line, one level less when the line
-    /// matches the decrease pattern. Null below <see cref="AutoIndent.Full"/>, without indentation rules, when no rule
-    /// for Enter or bracket applies there, when the line lacks the text that Enter puts on the new line, such as a doc
-    /// comment's <c>*</c>, when matching runs out of time, or when a line it read is <see cref="RuleLines.Unclassified"/>.
-    /// </summary>
-    public string? EnteredIndentation(RuleLines lines, int lineNumber, int above)
-    {
-        if (_autoIndent < AutoIndent.Full || _configuration.IndentationRules is null)
-            return null;
-        IndentationMatching matching = StartMatching();
-        try
-        {
-            if (EnterAtEnd(matching, lines, above) is not var (action, indentation, append))
-                return null;
-            // What the new line starts with: between brackets, without the line that takes the text after the caret.
-            string prefix = action.Indent switch
-            {
-                IndentAction.IndentOutdent => indentation,
-                IndentAction.Outdent => _indenting.Unshift(indentation) + append,
-                _ => indentation + append,
-            };
-            if (
-                !matching
-                    .Read(lines.Text, lineNumber)
-                    .TrimStart()
-                    .Contains(prefix.TrimStart(), StringComparison.Ordinal)
-            )
-                return null;
-            string entered = prefix[..Leading(prefix)];
-            bool decreases = matching.Decreases(matching.Read(lines.Masked, lineNumber));
-            return lines.Unclassified ? null
-                : decreases ? _indenting.Unshift(entered)
-                : entered;
         }
         catch (RegexMatchTimeoutException)
         {
@@ -401,7 +313,7 @@ internal sealed class IndentRules
     /// for Enter or the bracket that applies there, the indentation it keeps and the text it appends. Null when none
     /// applies, or no line above has text.
     /// </summary>
-    private (EnterAction Action, string Indentation, string Append)? EnterAtEnd(
+    internal (EnterAction Action, string Indentation, string Append)? EnterAtEnd(
         IndentationMatching matching,
         RuleLines lines,
         int above
@@ -422,7 +334,7 @@ internal sealed class IndentRules
     /// match the texts; and by the brackets: between an opening and a closing bracket, indent and outdent, and after an
     /// opening bracket, indent. Null when none applies.
     /// </summary>
-    private EnterAction? ActionFor(IndentationMatching matching, string previous, string before, string after)
+    internal EnterAction? ActionFor(IndentationMatching matching, string previous, string before, string after)
     {
         if (_autoIndent >= AutoIndent.Advanced)
         {
@@ -500,10 +412,15 @@ internal sealed class IndentRules
         return matching.Decreases(after) ? _indenting.Unshift(Indentation(inherited)) : Indentation(inherited);
     }
 
-    private string Indentation(InheritedIndentation inherited) =>
+    internal string Indentation(InheritedIndentation inherited) =>
         inherited.Increases ? _indenting.Shift(inherited.Indentation) : inherited.Indentation;
 
-    private IndentationMatching StartMatching() => new(_configuration.IndentationRules, _time);
+    internal IndentationMatching StartMatching() => new(_configuration.IndentationRules, _time);
+
+    /// <summary>Whether the language's indentation rules apply in full, at <see cref="AutoIndent.Full"/>.</summary>
+    internal bool IndentsByRules => _autoIndent == AutoIndent.Full && _configuration.IndentationRules is not null;
+
+    internal Indenting Indenting => _indenting;
 
     /// <summary>
     /// Line <paramref name="lineNumber"/>, and its parts before <paramref name="from"/> and after <paramref name="to"/>
