@@ -403,8 +403,13 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         Close();
         if (!_commit.Commit(item, answer, replace, late, _overtyping.Last))
             return false;
+        // Once the key that committed is handled: its command ends completion where the commit moved the caret.
         if (item.Command is { } command)
-            RunCommand(command);
+            _textArea.Dispatcher.Post(() =>
+            {
+                if (_textArea.Document == _buffer)
+                    RunCommand(command);
+            });
         return true;
     }
 
