@@ -153,7 +153,7 @@ internal sealed class EditorView : IDisposable
         _pending = null;
         foreach (string command in resolution.Commands)
         {
-            if (_commands.TryRun(command))
+            if (_commands.TryRun(command, key))
                 return true;
         }
         if (resolution.Waits)
