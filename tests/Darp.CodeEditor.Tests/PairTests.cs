@@ -207,15 +207,21 @@ public sealed class PairTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe(expected);
         });
 
-    [Fact]
-    public Task An_opening_bracket_doesnt_close_before_a_closing_one_that_no_opening_one_matches() =>
+    [Theory]
+    [InlineData("{\n    \"a\": |]\n}", "{\n    \"a\": [|]\n}")]
+    // The first ] closes the [ before it, and the second is the new one's.
+    [InlineData("{\n    \"a\": [|]]\n}", "{\n    \"a\": [[|]]\n}")]
+    public Task An_opening_bracket_doesnt_close_before_a_closing_one_that_no_opening_one_matches(
+        string marked,
+        string expected
+    ) =>
         _ui.Run(async () =>
         {
-            using EditorWindow window = await ShowColored("{\n    \"a\": |]\n}", CodeLanguage.Json);
+            using EditorWindow window = await ShowColored(marked, CodeLanguage.Json);
 
             window.Type("[");
 
-            MarkedText.Of(window).ShouldBe("{\n    \"a\": [|]\n}");
+            MarkedText.Of(window).ShouldBe(expected);
         });
 
     [Fact]

@@ -64,16 +64,20 @@ internal static class BracketMatcher
         Find(document, offset, pair.Open[0], pair.Close[0], forward: false, tokensOf);
 
     /// <summary>
-    /// The closing bracket that an opening one at <paramref name="offset"/> would match, within
-    /// <see cref="MaxDistance"/> characters after it; null for none.
+    /// How many brackets of <paramref name="pair"/> within <see cref="MaxDistance"/> characters
+    /// <paramref name="after"/> <paramref name="offset"/> close, or before it open, that no bracket on that side matches.
     /// </summary>
-    public static int? FindClosing(TextDocument document, int offset, CharacterPair pair, Func<int, int[]?> tokensOf) =>
-        Find(document, offset - 1, pair.Open[0], pair.Close[0], forward: true, tokensOf);
+    public static int Unmatched(
+        TextDocument document,
+        int offset,
+        CharacterPair pair,
+        Func<int, int[]?> tokensOf,
+        bool after
+    ) => Scan(document, after ? offset - 1 : offset, pair.Open[0], pair.Close[0], after, all: true, tokensOf).Count;
 
     /// <summary>
     /// The bracket that matches the one at <paramref name="from"/>: the next closing bracket at the same depth going
-    /// forward, or the opening one going backward, within <see cref="MaxDistance"/> characters. The text is read in
-    /// blocks into a buffer, and a line's tokens only where a bracket is, so the search allocates nothing per line.
+    /// forward, or the opening one going backward, within <see cref="MaxDistance"/> characters.
     /// </summary>
     private static int? Find(
         TextDocument document,
@@ -82,8 +86,25 @@ internal static class BracketMatcher
         char close,
         bool forward,
         Func<int, int[]?> tokensOf
+    ) => Scan(document, from, open, close, forward, all: false, tokensOf).First;
+
+    /// <summary>
+    /// The brackets after <paramref name="from"/> going forward, or before it going backward, within
+    /// <see cref="MaxDistance"/> characters, that no bracket on that side matches: the first, and with
+    /// <paramref name="all"/>, how many. The text is read in blocks into a buffer, and a line's tokens only where a
+    /// bracket is, so the scan allocates nothing per line.
+    /// </summary>
+    private static (int? First, int Count) Scan(
+        TextDocument document,
+        int from,
+        char open,
+        char close,
+        bool forward,
+        bool all,
+        Func<int, int[]?> tokensOf
     )
     {
+        int count = 0;
         int start = forward ? from + 1 : Math.Max(0, from - MaxDistance);
         int end = forward ? Math.Min(document.TextLength, from + 1 + MaxDistance) : from;
         Span<char> block = stackalloc char[4096];
@@ -119,12 +140,16 @@ internal static class BracketMatcher
                     continue;
                 if (c == (forward ? open : close))
                     depth++;
-                else if (depth-- == 0)
-                    return offset;
+                else if (depth > 0)
+                    depth--;
+                else if (!all)
+                    return (offset, 1);
+                else
+                    count++;
             }
             done += length;
         }
-        return null;
+        return (null, count);
 
         // The next bracket after index in the block going forward, or before it going backward; -1 for none.
         int Next(ReadOnlySpan<char> text, int index) =>
