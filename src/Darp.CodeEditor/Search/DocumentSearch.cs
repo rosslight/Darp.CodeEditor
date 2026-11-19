@@ -409,13 +409,20 @@ internal sealed class DocumentSearch : IDisposable
         );
     }
 
-    /// <summary>Replaces <paramref name="match"/>; the search that the change starts goes on from its end.</summary>
+    /// <summary>
+    /// Replaces <paramref name="match"/>, apart from a lone carriage return (<see cref="LineBreaks.Apart"/>); the search
+    /// that the change starts goes on from its end.
+    /// </summary>
     private void Replace(SearchMatch match)
     {
-        int end = match.StartOffset + match.Replacement.Length;
-        if (!Apply([new TextEdit(match.StartOffset, match.Length, match.Replacement)]))
+        TextEdit replaced = LineBreaks.Apart(
+            _buffer,
+            [new TextEdit(match.StartOffset, match.Length, match.Replacement)],
+            _context.Document.LineBreak
+        )[0];
+        if (!Apply([replaced]))
             return;
-        _from = end;
+        _from = replaced.Offset + replaced.Text.Length;
         _move = SearchMove.First;
     }
 
