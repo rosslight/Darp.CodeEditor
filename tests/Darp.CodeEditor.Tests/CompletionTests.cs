@@ -13,6 +13,7 @@ using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
 using Darp.CodeEditor.Completion;
+using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Popups;
 using Darp.CodeEditor.Search;
 
@@ -848,6 +849,30 @@ public sealed class CompletionTests(UiFixture ui)
             document.Replace(new TextRange(4, 0), "xx");
             window.Press(Key.Tab);
             document.Text.ShouldBe("println + tail");
+        });
+
+    [Fact]
+    public Task Replacing_does_not_go_into_a_long_lines_hidden_tail() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("println"));
+            // A line of 3,500 characters whose last word starts before its hidden tail and ends in it.
+            string head = new string('a', VisibleText.LineLimit - 10) + " ";
+            string text = head + "pri" + new string('x', 3_500 - head.Length - 3);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            int caret = head.Length + 3;
+
+            // Replacing goes over the rest of the word, into the tail: nothing goes in.
+            await OpenAsync(window, caret);
+            window.Press(Key.Tab);
+            document.Text.ShouldBe(text);
+            // Inserting goes over the word up to the caret only.
+            await OpenAsync(window, caret);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe(head + "println" + text[caret..]);
         });
 
     [Fact]
