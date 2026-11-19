@@ -25,7 +25,7 @@ namespace Darp.CodeEditor.Completion;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Its command asks at once. Typing one of the server's trigger characters, such as <c>(</c>, asks after a pause of
+/// Its command asks at once. While <see cref="ParameterHintsOptions.Enabled"/>, typing one of the server's trigger characters, such as <c>(</c>, asks after a pause of
 /// 120 ms, and so does a retrigger character, such as <c>,</c>, while signature help shows, waits for an answer or for
 /// the pause; each edit and caret move meanwhile restarts the pause. Once it passes, signature help asks again, for the
 /// trigger character typed last, or by the command, and tells the server the signature that shows. A newer request
@@ -57,6 +57,7 @@ internal sealed class SignatureHelpController : IEditorFeature
     private readonly CodeDocument _document;
     private readonly BackgroundTextMateHighlighter _highlighter;
     private readonly CaretMoves _caretMoves;
+    private readonly Func<CodeEditorOptions> _options;
     private readonly PopupScroller _content = new();
     private readonly EditorPopup _popup;
     private PopupColors _colors = PopupColors.Default;
@@ -81,11 +82,13 @@ internal sealed class SignatureHelpController : IEditorFeature
         TextArea textArea,
         CodeDocument document,
         BackgroundTextMateHighlighter highlighter,
-        CaretMoves caretMoves
+        CaretMoves caretMoves,
+        Func<CodeEditorOptions> options
     )
     {
         _editor = editor;
         _caretMoves = caretMoves;
+        _options = options;
         _textArea = textArea;
         _textView = textArea.TextView;
         _buffer = textArea.Document;
@@ -171,10 +174,24 @@ internal sealed class SignatureHelpController : IEditorFeature
         _popup.LeftView -= OnClosingChange;
     }
 
-    /// <summary>Asks on the server's trigger characters, and on its retrigger characters while active.</summary>
+    /// <summary>Turning parameter hints off closes signature help.</summary>
+    public void OnOptionsChanged(ParameterHintsOptions old, ParameterHintsOptions now)
+    {
+        if (now != old && !now.Enabled)
+            Close();
+    }
+
+    /// <summary>
+    /// Asks on the server's trigger characters, and on its retrigger characters while active, if the user lets typing
+    /// ask.
+    /// </summary>
     private void OnTextEntered(object? sender, TextInputEventArgs e)
     {
-        if (e.Text is not { Length: > 0 } text || _document.Features?.SignatureHelp is not { } provider)
+        if (
+            e.Text is not { Length: > 0 } text
+            || !_options().ParameterHints.Enabled
+            || _document.Features?.SignatureHelp is not { } provider
+        )
             return;
         char typed = text[^1];
         if (provider.TriggerCharacters.Contains(typed) || (IsActive && provider.RetriggerCharacters.Contains(typed)))

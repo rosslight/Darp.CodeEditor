@@ -111,7 +111,14 @@ internal sealed class EditorView : IDisposable
             context.Background,
             RunCommand
         );
-        _signatureHelp = new SignatureHelpController(context.Editor, area, document, Highlighter, _caretMoves);
+        _signatureHelp = new SignatureHelpController(
+            context.Editor,
+            area,
+            document,
+            Highlighter,
+            _caretMoves,
+            context.Options
+        );
         _search = new FindController(context, _changes);
         _features =
         [
@@ -252,6 +259,7 @@ internal sealed class EditorView : IDisposable
         _pairs.OnOptionsChanged(old.AutoClosing, now.AutoClosing);
         _brackets.OnOptionsChanged(old.MatchBrackets, now.MatchBrackets);
         _occurrences.OnOptionsChanged(old.OccurrencesHighlight, now.OccurrencesHighlight);
+        _signatureHelp.OnOptionsChanged(old.ParameterHints, now.ParameterHints);
     }
 
     /// <summary>Runs a command, as its key does, where it applies.</summary>
