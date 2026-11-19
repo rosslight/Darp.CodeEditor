@@ -54,6 +54,12 @@ internal sealed class RuleLines
                     is not { At: not TokenType.Other }
         );
 
+    /// <summary>
+    /// Whether a line with brackets was read as it is because its tokens are unknown, so that a bracket in a string or a
+    /// comment may have counted. A language without a grammar has no tokens to wait for: empty ones say so.
+    /// </summary>
+    public bool Unclassified { get; private set; }
+
     /// <summary>The text of line <paramref name="number"/>, as it is.</summary>
     public string Text(int number) => _text(number);
 
@@ -122,13 +128,13 @@ internal sealed class RuleLines
     private string Masked(int number, string text, int from, int to, bool tokenizeNow)
     {
         // Most lines have no brackets, and need no tokens.
-        if (
-            _brackets is not { } brackets
-            || from >= to
-            || !brackets.IsMatch(text)
-            || Tokens(number, tokenizeNow) is not { } tokens
-        )
+        if (_brackets is not { } brackets || from >= to || !brackets.IsMatch(text))
             return text[from..to];
+        if (Tokens(number, tokenizeNow) is not { } tokens)
+        {
+            Unclassified = true;
+            return text[from..to];
+        }
         StringBuilder? masked = null;
         int copied = from;
         for (int i = 0; i < tokens.Length; i += 2)

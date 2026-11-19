@@ -1,7 +1,11 @@
+using System.Text.RegularExpressions;
 using Avalonia.Input;
 using AvaloniaEdit;
 using AvaloniaEdit.Editing;
 using Darp.CodeEditor.Commands;
+using Darp.CodeEditor.Editing;
+using Darp.CodeEditor.Highlighting;
+using Darp.CodeEditor.Loading;
 using Keys = Avalonia.Input.Key;
 
 namespace Darp.CodeEditor.Tests;
@@ -202,17 +206,57 @@ public sealed class LineCommandTests(UiFixture ui)
             await CodeLanguage.Json.Loaded;
             using EditorWindow window = MarkedText.Show("{\n    |\"a\": 1,\n    \"b\": 2 // {\n}", CodeLanguage.Json);
             DocumentOf(window).Indentation = Indentation.Spaces(4);
-            // The comment is known by its tokens.
-            await Wait.UntilAsync(() =>
-            {
-                window.Render();
-                return window.RenderedColors().Count > 1;
-            });
+            BackgroundTextMateHighlighter highlighter = window
+                .TextView.LineTransformers.OfType<BackgroundTextMateHighlighter>()
+                .Single();
+            // The comment is known by the line's tokens.
+            await Wait.UntilAsync(() => highlighter.ExactTokensOf(3, tokenizeNow: false) is not null);
 
             window.Press(Keys.Down, KeyModifiers.Alt);
 
             MarkedText.Of(window).ShouldBe("{\n    \"b\": 2 // {\n    |\"a\": 1,\n}");
         });
+
+    /// <summary>
+    /// A brace that only the tokens of its line tell from code: in a comment it gives the line below no indentation,
+    /// without a grammar it does, and while its tokens are unknown the moved line keeps its own.
+    /// </summary>
+    [Theory]
+    [InlineData("comment", "")]
+    [InlineData("no grammar", "    ")]
+    [InlineData("unknown", null)]
+    public void A_moved_line_takes_its_indentation_from_a_bracket_only_by_the_tokens_of_its_line(
+        string tokens,
+        string? expected
+    )
+    {
+        var configuration = new LanguageConfiguration(
+            null,
+            null,
+            [new CharacterPair("{", "}")],
+            [],
+            [],
+            new IndentationRules(new Regex(@"\{\s*$"), new Regex(@"^\s*\}"))
+        );
+        // "a " in code, then "// {" in a comment.
+        int[] comment = [0, 0, 2, (int)TokenType.Comment << 8];
+        TokenTypes.At(comment, 5).ShouldBe(TokenType.Comment);
+        string[] text = ["a // {", "b"];
+        var lines = new RuleLines(
+            number => text[number - 1],
+            (_, _) =>
+                tokens switch
+                {
+                    "comment" => comment,
+                    "no grammar" => [],
+                    _ => null,
+                },
+            configuration.BracketPattern
+        );
+        var rules = new IndentRules(configuration, AutoIndent.Full, Indentation.Spaces(4), "\n");
+
+        rules.IndentationInPlace(lines, 2).ShouldBe(expected);
+    }
 
     [Theory]
     [InlineData("first\nsec|ond\nthird", false, "first\nsec|ond\nsecond\nthird")]

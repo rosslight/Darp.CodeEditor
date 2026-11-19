@@ -43,6 +43,19 @@ internal sealed class LineCommands : IEditorFeature
 
     private RuleLines Lines => RuleLines.Of(Buffer, _highlighter, Configuration.BracketPattern);
 
+    /// <summary>
+    /// The lines as the rules see them for a move: each by its exact tokens, tokenized now if need be, as typing's are;
+    /// without a grammar, all code. Where the tokens of a line with brackets stay unknown, the lines keep their
+    /// indentation.
+    /// </summary>
+    private RuleLines MoveLines =>
+        new(
+            number => Buffer.GetText(Buffer.GetLineByNumber(number)),
+            (number, _) =>
+                _document.Language.Grammar is null ? [] : _highlighter.ExactTokensOf(number, tokenizeNow: true),
+            Configuration.BracketPattern
+        );
+
     private Indenting Indenting => new(_document.Indentation);
 
     public void Dispose() { }
@@ -141,7 +154,7 @@ internal sealed class LineCommands : IEditorFeature
     private (List<TextEdit> Edits, int Delta) MovedDown(DocumentLine first, DocumentLine last, DocumentLine moving)
     {
         IndentRules rules = Rules;
-        RuleLines lines = Lines;
+        RuleLines lines = MoveLines;
         int top = first.LineNumber;
         string text = Buffer.GetText(moving);
         string? indentation =
@@ -175,7 +188,7 @@ internal sealed class LineCommands : IEditorFeature
     private (List<TextEdit> Edits, int Delta) MovedUp(DocumentLine first, DocumentLine last, DocumentLine moving)
     {
         IndentRules rules = Rules;
-        RuleLines lines = Lines;
+        RuleLines lines = MoveLines;
         int delta = Delta(
             first,
             rules.EnteredIndentation(lines, first.LineNumber, first.LineNumber - 2)
