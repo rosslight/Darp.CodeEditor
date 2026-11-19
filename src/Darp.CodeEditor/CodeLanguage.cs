@@ -4,7 +4,7 @@ namespace Darp.CodeEditor;
 
 /// <summary>
 /// What kind of text a document holds: its TextMate grammar for colors and its editing rules (comments, brackets,
-/// auto-closing pairs, indentation rules). Language servers are not part of it: a server creates the documents it
+/// auto-closing pairs, indentation rules, rules for Enter). Language servers are not part of it: a server creates the documents it
 /// serves, see <see cref="LanguageServer.CreateDocument"/>.
 /// </summary>
 /// <remarks>
@@ -31,7 +31,11 @@ public sealed class CodeLanguage
 
     private static readonly Lazy<CodeLanguage> s_xml = new(() => BuiltIn("xml"));
 
-    private static readonly Lazy<CodeLanguage> s_yaml = new(() => BuiltIn("yaml"));
+    /// <summary>
+    /// YAML indents by brackets and the rules for Enter, not by its indentation rules, which indent the line after every
+    /// key: VS Code's YAML extension sets <c>editor.autoIndent</c> so for the language.
+    /// </summary>
+    private static readonly Lazy<CodeLanguage> s_yaml = new(() => BuiltIn("yaml", AutoIndent.Advanced));
 
     /// <summary>Creates a language from the files of a VS Code extension, and starts loading them.</summary>
     /// <param name="id">The language identifier that the language server receives, such as <c>toml</c>.</param>
@@ -73,15 +77,26 @@ public sealed class CodeLanguage
     /// <summary>The editing rules; null for none.</summary>
     public Uri? Configuration { get; }
 
+    /// <summary>
+    /// How far the editor indents by itself in the language's documents. Default: <see cref="AutoIndent.Full"/>.
+    /// <see cref="Yaml"/> takes <see cref="AutoIndent.Advanced"/>, so Enter after a key does not indent. To change a
+    /// built-in language's, create the language from its files:
+    /// <c>new CodeLanguage("yaml", CodeLanguage.Yaml.Grammar, CodeLanguage.Yaml.Configuration) { AutoIndent = … }</c>.
+    /// </summary>
+    public AutoIndent AutoIndent { get; init; } = AutoIndent.Full;
+
     /// <summary>The grammar and editing rules, once read; <see cref="LoadedLanguage.None"/> when a file failed.</summary>
     internal Task<LoadedLanguage> Loaded { get; }
 
-    private static CodeLanguage BuiltIn(string id) =>
+    private static CodeLanguage BuiltIn(string id, AutoIndent autoIndent = AutoIndent.Full) =>
         new(
             id,
             new Uri($"avares://Darp.CodeEditor/Languages/{id}.tmLanguage.json"),
             new Uri($"avares://Darp.CodeEditor/Languages/{id}.language-configuration.json")
-        );
+        )
+        {
+            AutoIndent = autoIndent,
+        };
 
     private LoadedLanguage Load()
     {
