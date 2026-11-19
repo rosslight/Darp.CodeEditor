@@ -408,6 +408,10 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         return _commit.Commit(item, answer.Request, replace, late);
     }
 
+    /// <summary>
+    /// A click on a row commits its item where a commit may: also on a frozen list while the filter of what was typed
+    /// last still runs, as the frozen list's rows show what the click commits.
+    /// </summary>
     private void OnClicked(int index)
     {
         if (
@@ -415,7 +419,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
             && _filter.IsShowing
             && index >= 0
             && index < _filter.Items.Count
-            && _filter.CanCommit(index, session.Answer)
+            && (_filter.IsFrozen || _filter.CanCommit(index, session.Answer))
         )
         {
             Commit(index);

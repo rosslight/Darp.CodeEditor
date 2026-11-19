@@ -2318,6 +2318,32 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_click_on_a_frozen_list_commits_while_the_filter_of_what_was_typed_last_still_runs() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("print"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "pri");
+            var ranking = new HeldScheduler();
+            using var window = new EditorWindow(new CodeEditor { Document = document, BackgroundScheduler = ranking });
+            await OpenAsync(window, 3);
+            window.Type("z");
+            await FrozenForTextAsync(window, ranking, "print");
+
+            // Frozen for "priz", while the filter of "prizz" is held.
+            ranking.Hold();
+            window.Type("z");
+            window.Click(RowCenter(window, 0), MouseButton.Left);
+
+            document.Text.ShouldBe("print");
+            await ranking.ReleaseAndWaitAsync();
+            await EditorWindow.RunPostedJobsAsync();
+            document.Text.ShouldBe("print");
+            List(window).ShouldBeNull();
+        });
+
+    [Fact]
     public Task Ctrl_Space_toggles_the_details_while_the_list_shows() =>
         _ui.Run(async () =>
         {
