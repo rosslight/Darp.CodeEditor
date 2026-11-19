@@ -206,13 +206,12 @@ public sealed class CompletionTests(UiFixture ui)
             using var window = new EditorWindow(new CodeEditor { Document = document });
             await OpenAsync(window, 0);
 
-            // Typed, and no other work run on the UI thread since: the list still shows what it showed.
             TypeAlone(window, "C");
             TypeAlone(window, "o");
             TypeAlone(window, "n");
-            Labels(window).ShouldBe(["Console", "Convert", "Math"]);
 
-            // Then the filter of what was typed last.
+            // The filter of what was typed last; a filter can end before the keystroke's handler does, so what shows
+            // meanwhile is not certain.
             await WaitForLabelsAsync(window, ["Console", "Convert"]);
             Row(window, "Console")
                 .GetVisualDescendants()
