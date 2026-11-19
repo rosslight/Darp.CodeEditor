@@ -231,6 +231,19 @@ public sealed class ClipboardTests(UiFixture ui)
             window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(line);
         });
 
+    /// <summary>Menus ask the command whether it can run.</summary>
+    [Fact]
+    public Task The_paste_command_can_run_only_where_text_can_go_in() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("a|b", CodeLanguage.PlainText);
+            TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+
+            ApplicationCommands.Paste.CanExecute(null, textArea).ShouldBeTrue();
+            window.Editor.IsReadOnly = true;
+            ApplicationCommands.Paste.CanExecute(null, textArea).ShouldBeFalse();
+        });
+
     /// <summary>A handler of the change that the line breaks make may show another, shorter document.</summary>
     [Fact]
     public Task A_drop_whose_change_switches_the_document_leaves_the_other_one_alone() =>

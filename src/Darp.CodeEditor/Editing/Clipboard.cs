@@ -29,7 +29,12 @@ internal sealed class Clipboard : IDisposable
     {
         _textArea = textArea;
         _document = document;
-        _paste = new RoutedCommandBinding(ApplicationCommands.Paste, (_, _) => Paste());
+        // Asked by menus too. Where it cannot run, AvaloniaEdit's binding answers, with the same check.
+        _paste = new RoutedCommandBinding(
+            ApplicationCommands.Paste,
+            (_, _) => Paste(),
+            (_, e) => e.CanExecute = CanPaste()
+        );
         // First, as the first binding of a command runs, and AvaloniaEdit's came with the text area.
         textArea.CommandBindings.Insert(0, _paste);
         textArea.TextCopied += OnTextCopied;
