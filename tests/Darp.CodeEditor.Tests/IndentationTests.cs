@@ -229,6 +229,8 @@ public sealed class IndentationTests(UiFixture ui)
     [Theory]
     // A wide character counts two columns, and a character with its combining mark one.
     [InlineData("\u754c|", "\u754c  |")]
+    // A fullwidth currency sign.
+    [InlineData("\uFFE5|", "\uFFE5  |")]
     [InlineData("e\u0301|", "e\u0301   |")]
     public Task Tab_goes_to_the_next_tab_stop_by_the_columns_that_the_text_shows(string marked, string expected) =>
         _ui.Run(() =>
