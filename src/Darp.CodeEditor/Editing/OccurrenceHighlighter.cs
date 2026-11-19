@@ -18,7 +18,7 @@ namespace Darp.CodeEditor.Editing;
 /// <remarks>
 /// As in VS Code: a caret that the user moves asks again after 50 ms, unless it stays inside a highlight; typing, an
 /// edit and the keyboard leaving the editor clear the highlights; a selection over several lines, or one that is not
-/// inside a word, highlights nothing. The highlights show <see cref="CodeEditor.OccurrencesHighlightDelay"/> after the
+/// inside a word, highlights nothing, also one that changes without the caret moving. The highlights show <see cref="CodeEditor.OccurrencesHighlightDelay"/> after the
 /// request at the earliest.
 /// </remarks>
 internal sealed class OccurrenceHighlighter : IBackgroundRenderer, IDisposable
@@ -65,6 +65,7 @@ internal sealed class OccurrenceHighlighter : IBackgroundRenderer, IDisposable
         _buffer = textArea.Document;
         _document = document;
         textArea.Caret.PositionChanged += OnCaretPositionChanged;
+        textArea.SelectionChanged += OnSelectionChanged;
         textArea.GotFocus += OnTextFocused;
         _buffer.Changing += OnBufferChanging;
         _buffer.Changed += OnBufferChanged;
@@ -160,6 +161,7 @@ internal sealed class OccurrenceHighlighter : IBackgroundRenderer, IDisposable
         _runSoon?.Dispose();
         _runSoon = null;
         _textArea.Caret.PositionChanged -= OnCaretPositionChanged;
+        _textArea.SelectionChanged -= OnSelectionChanged;
         _textArea.GotFocus -= OnTextFocused;
         _buffer.Changing -= OnBufferChanging;
         _buffer.Changed -= OnBufferChanged;
@@ -181,22 +183,12 @@ internal sealed class OccurrenceHighlighter : IBackgroundRenderer, IDisposable
         // Without the keyboard, VS Code asks again for the symbol it asked for last: the same highlights.
         if (!_textArea.IsFocused)
             return;
-        Selection selection = _textArea.Selection;
-        int caret = _textArea.Caret.Offset;
-        (int start, int end) = selection.IsEmpty
-            ? (caret, caret)
-            : (selection.SurroundingSegment.Offset, selection.SurroundingSegment.EndOffset);
-        DocumentLine line = _buffer.GetLineByOffset(start);
-        if (
-            selection.IsMultiline
-            || WordRules.WordAtPosition(_buffer.GetText(line), start - line.Offset) is not var (wordStart, wordEnd)
-            || line.Offset + wordStart > start
-            || line.Offset + wordEnd < end
-        )
+        if (!IsInsideWord())
         {
             Stop();
             return;
         }
+        int caret = _textArea.Caret.Offset;
         if (_highlights?.FindSegmentsContaining(caret).Count > 0)
             return;
         Stop();
@@ -215,6 +207,21 @@ internal sealed class OccurrenceHighlighter : IBackgroundRenderer, IDisposable
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default
         );
+    }
+
+    /// <summary>Whether the caret, or the selection, is inside a word on one line: only then are there occurrences.</summary>
+    private bool IsInsideWord()
+    {
+        Selection selection = _textArea.Selection;
+        int caret = _textArea.Caret.Offset;
+        (int start, int end) = selection.IsEmpty
+            ? (caret, caret)
+            : (selection.SurroundingSegment.Offset, selection.SurroundingSegment.EndOffset);
+        DocumentLine line = _buffer.GetLineByOffset(start);
+        return !selection.IsMultiline
+            && WordRules.WordAtPosition(_buffer.GetText(line), start - line.Offset) is var (wordStart, wordEnd)
+            && line.Offset + wordStart <= start
+            && end <= line.Offset + wordEnd;
     }
 
     /// <summary>
@@ -327,6 +334,16 @@ internal sealed class OccurrenceHighlighter : IBackgroundRenderer, IDisposable
             return;
         }
         RunSoon();
+    }
+
+    /// <summary>
+    /// A selection that changes without the caret moving, as when only its anchor moves, may no longer be inside a
+    /// word: then nothing is highlighted, and the request under way ends.
+    /// </summary>
+    private void OnSelectionChanged(object? sender, EventArgs e)
+    {
+        if (_editor.OccurrencesHighlight != OccurrencesHighlight.Off && !IsInsideWord())
+            Stop();
     }
 
     /// <summary>As the text takes the keyboard, it asks unless a request is under way, as in VS Code.</summary>
