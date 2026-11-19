@@ -57,15 +57,15 @@ internal sealed class IndentRules
         string lineBreak = _lineBreak;
         if (_autoIndent == AutoIndent.None)
             return new NewLine(lineBreak, lineBreak.Length, 0);
+        // The line is read out of time too, for its indentation to keep, but its time counts.
+        IndentationMatching matching = StartMatching();
         string text = lines.Text(lineNumber);
         string indentation = text[..Math.Min(column, Leading(text))];
         if (_autoIndent >= AutoIndent.Brackets)
         {
             try
             {
-                IndentationMatching matching = StartMatching();
-                string before = lines.Masked(lineNumber, 0, column);
-                string after = lines.Masked(lineNumber, column, text.Length);
+                (_, string before, string after) = Around(matching, lines, lineNumber, column, column);
                 string previous = lineNumber > 1 ? matching.Read(lines.Masked, lineNumber - 1) : "";
                 if (ActionFor(matching, previous, before, after) is { } action)
                     return NewLineFor(action, indentation);
@@ -147,15 +147,13 @@ internal sealed class IndentRules
     {
         if (_autoIndent < AutoIndent.Full || _configuration.IndentationRules is null)
             return null;
-        string text = lines.Text(lineNumber);
-        string before = lines.Masked(lineNumber, 0, from);
-        string after = lines.Masked(lineNumber, to, text.Length);
         IndentationMatching matching = StartMatching();
         try
         {
+            (string text, string before, string after) = Around(matching, lines, lineNumber, from, to);
             // A line that matched it already keeps the indentation that the user gave it.
             if (
-                !matching.Decreases(before + lines.Typed(lineNumber, from, typed) + after)
+                !matching.Decreases(before + matching.Read(() => lines.Typed(lineNumber, from, typed)) + after)
                 || matching.Decreases(before + after)
             )
                 return null;
@@ -188,17 +186,14 @@ internal sealed class IndentRules
             || !_configuration.AutoClosingPairs.Any(pair => pair.Open[^1] == typed)
         )
             return null;
-        string text = lines.Text(lineNumber);
-        string before = lines.Masked(lineNumber, 0, from);
-        string after = lines.Masked(lineNumber, to, text.Length);
-        if (!string.IsNullOrWhiteSpace(before + after))
-            return null;
         IndentationMatching matching = StartMatching();
         try
         {
+            (string text, string before, string after) = Around(matching, lines, lineNumber, from, to);
             if (
-                !matching.IndentsNextLine(matching.Read(lines.Masked, lineNumber - 1))
-                || !matching.Increases(before + lines.Typed(lineNumber, from, typed) + after)
+                !string.IsNullOrWhiteSpace(before + after)
+                || !matching.IndentsNextLine(matching.Read(lines.Masked, lineNumber - 1))
+                || !matching.Increases(before + matching.Read(() => lines.Typed(lineNumber, from, typed)) + after)
                 || Inherited(matching, lines, lineNumber, honorIntentional: false) is not { } inherited
             )
                 return null;
@@ -425,6 +420,26 @@ internal sealed class IndentRules
     }
 
     private IndentationMatching StartMatching() => new(_configuration.IndentationRules, _time);
+
+    /// <summary>
+    /// Line <paramref name="lineNumber"/>, and its parts before <paramref name="from"/> and after <paramref name="to"/>
+    /// as the rules see them, read within the time of the indentation.
+    /// </summary>
+    private static (string Text, string Before, string After) Around(
+        IndentationMatching matching,
+        RuleLines lines,
+        int lineNumber,
+        int from,
+        int to
+    )
+    {
+        string text = matching.Read(lines.Text, lineNumber);
+        return (
+            text,
+            matching.Read(() => lines.Masked(lineNumber, 0, from)),
+            matching.Read(() => lines.Masked(lineNumber, to, text.Length))
+        );
+    }
 
     /// <summary>
     /// Whether <paramref name="text"/> ends with <paramref name="open"/> and whitespace: a bracket that starts with a

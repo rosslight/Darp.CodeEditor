@@ -82,6 +82,29 @@ public sealed class IndentRulesTests
     }
 
     [Fact]
+    public void Enter_counts_reading_the_carets_line_against_the_time_of_its_indentation()
+    {
+        // Reading the caret's line takes all of the time: the rule for Enter that its text matches doesn't apply.
+        var time = new ManualTime();
+        LanguageConfiguration configuration = LanguageConfiguration.None with
+        {
+            OnEnterRules = [new OnEnterRule(new Regex("x"), null, null, new EnterAction(IndentAction.Indent, "", 0))],
+        };
+        var lines = new RuleLines(
+            _ =>
+            {
+                time.Advance(IndentationRules.TimeLimit);
+                return "  x";
+            },
+            (_, _) => null,
+            brackets: null
+        );
+        var rules = new IndentRules(configuration, AutoIndent.Advanced, Indentation.Spaces(2), "\n", time);
+
+        rules.Enter(lines, 1, 3).ShouldBe(new NewLine("\n  ", 3, 0));
+    }
+
+    [Fact]
     public void Enter_tokenizes_the_carets_line_once()
     {
         var configuration = new LanguageConfiguration(null, null, [new CharacterPair("(", ")")], [], [], null);

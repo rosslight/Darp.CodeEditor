@@ -310,13 +310,26 @@ internal readonly struct IndentationMatching
     }
 
     /// <summary>
-    /// Reads line <paramref name="number"/> with <paramref name="lineText"/>, within the time limit: a scan over
-    /// whitespace lines reads many without matching any.
+    /// Reads line <paramref name="number"/> with <paramref name="lineText"/>, within the time limit, which a read that
+    /// takes it all, as masking a line that needs tokenizing, uses up too: a scan over whitespace lines reads many
+    /// without matching any.
     /// </summary>
-    public string Read(Func<int, string> lineText, int number) =>
-        _time.GetTimestamp() < _deadline
-            ? lineText(number)
-            : throw new RegexMatchTimeoutException("", "", IndentationRules.TimeLimit);
+    public string Read(Func<int, string> lineText, int number)
+    {
+        ThrowIfOutOfTime();
+        string text = lineText(number);
+        ThrowIfOutOfTime();
+        return text;
+    }
+
+    /// <inheritdoc cref="Read(Func{int, string}, int)"/>
+    public string Read(Func<string> read)
+    {
+        ThrowIfOutOfTime();
+        string text = read();
+        ThrowIfOutOfTime();
+        return text;
+    }
 
     /// <summary>Whether lines after <paramref name="line"/> are indented one level more.</summary>
     public bool Increases(string line) => Matches(_rules?.IncreaseIndentPattern, line);
@@ -331,11 +344,17 @@ internal readonly struct IndentationMatching
     public bool IsUnIndented(string line) => Matches(_rules?.UnIndentedLinePattern, line);
 
     /// <summary>Whether <paramref name="pattern"/> matches <paramref name="text"/>, within the time; none matches nothing.</summary>
-    public bool Matches(Regex? pattern, string text) =>
-        pattern is not null
-        && (
-            _time.GetTimestamp() < _deadline
-                ? pattern.IsMatch(text)
-                : throw new RegexMatchTimeoutException(text, pattern.ToString(), IndentationRules.TimeLimit)
-        );
+    public bool Matches(Regex? pattern, string text)
+    {
+        if (pattern is null)
+            return false;
+        ThrowIfOutOfTime();
+        return pattern.IsMatch(text);
+    }
+
+    private void ThrowIfOutOfTime()
+    {
+        if (_time.GetTimestamp() >= _deadline)
+            throw new RegexMatchTimeoutException("", "", IndentationRules.TimeLimit);
+    }
 }
