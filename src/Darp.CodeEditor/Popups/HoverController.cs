@@ -38,7 +38,7 @@ namespace Darp.CodeEditor.Popups;
 /// </remarks>
 internal sealed class HoverController : IDisposable
 {
-    private readonly CodeEditor _editor;
+    private readonly TemplatedControl _editor;
     private readonly TextView _textView;
     private readonly TextDocument _buffer;
     private readonly CodeDocument _document;
@@ -52,7 +52,7 @@ internal sealed class HoverController : IDisposable
     private Hovered? _hovered;
 
     public HoverController(
-        CodeEditor editor,
+        TemplatedControl editor,
         TextArea textArea,
         CodeDocument document,
         SquiggleLayer squiggles,

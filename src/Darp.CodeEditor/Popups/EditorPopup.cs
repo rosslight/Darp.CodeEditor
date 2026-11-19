@@ -27,7 +27,7 @@ namespace Darp.CodeEditor.Popups;
 /// </remarks>
 internal sealed class EditorPopup
 {
-    private readonly CodeEditor _editor;
+    private readonly TemplatedControl _editor;
     private readonly ThemeVariantScope _root;
     private readonly bool _below;
     private OverlayLayer? _layer;
@@ -44,7 +44,7 @@ internal sealed class EditorPopup
     /// <param name="editor">The editor whose text the popup is next to.</param>
     /// <param name="content">What the popup shows.</param>
     /// <param name="below">Whether it opens below its place's line when both sides have room.</param>
-    public EditorPopup(CodeEditor editor, Control content, bool below = false)
+    public EditorPopup(TemplatedControl editor, Control content, bool below = false)
     {
         _editor = editor;
         _root = new ThemeVariantScope { Child = content };

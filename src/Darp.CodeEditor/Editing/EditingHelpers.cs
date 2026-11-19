@@ -4,6 +4,7 @@ using Avalonia.Input;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
+using Darp.CodeEditor.Commands;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.Loading;
 
@@ -13,7 +14,8 @@ namespace Darp.CodeEditor.Editing;
 /// The editing helpers of one editor's view of a document, from the language's editing rules, as VS Code applies
 /// them: Enter indents the new line, typing outdents a line that comes to match the decrease pattern, opening
 /// characters bring their closing ones, which are typed over and deleted with them, and opening characters surround a
-/// selection. Ctrl+/ toggles comments. Tab and Shift+Tab are AvaloniaEdit's, with the document's indentation.
+/// selection. Its commands toggle comments, and undo and redo. Tab and Shift+Tab are AvaloniaEdit's, with the
+/// document's indentation.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -26,15 +28,10 @@ namespace Darp.CodeEditor.Editing;
 /// types, found on the UI thread within a short time limit. While they are unknown, such a pair does not close.
 /// </para>
 /// </remarks>
-internal sealed class EditingHelpers : IDisposable
+internal sealed class EditingHelpers : IEditorFeature
 {
     /// <summary>The characters before which a pair closes, as VS Code's default <c>autoCloseBefore</c>.</summary>
     private const string CloseBefore = ";:.,=}])> \n\t";
-
-    /// <summary>The key that commands hold with Ctrl elsewhere, as AvaloniaEdit decides it: Cmd on macOS.</summary>
-    private static readonly KeyModifiers s_command = OperatingSystem.IsMacOS()
-        ? KeyModifiers.Meta
-        : KeyModifiers.Control;
 
     private readonly TextArea _textArea;
     private readonly CodeDocument _document;
@@ -75,26 +72,39 @@ internal sealed class EditingHelpers : IDisposable
         _autoClosed.Clear();
     }
 
-    /// <summary>Backspace and Ctrl+/, from the editor's key handler, while the text area has the keyboard.</summary>
-    public void OnKeyDown(KeyEventArgs e)
+    public void AddCommands(CommandTable commands)
     {
-        if (e.Key == Key.Back && e.KeyModifiers == KeyModifiers.None && TypingOffsets() is { } offsets)
-            e.Handled = DeletePairs(offsets);
-        else if (IsToggleComment(e))
-        {
-            ToggleComment();
-            e.Handled = true;
-        }
+        commands.Add(CodeEditorCommands.CommentLine, ToggleComment, CommandNeeds.TextFocus | CommandNeeds.Writable);
+        commands.Add(
+            CodeEditorCommands.Undo,
+            () => UndoOrRedo(redo: false),
+            CommandNeeds.TextFocus | CommandNeeds.Writable
+        );
+        commands.Add(
+            CodeEditorCommands.Redo,
+            () => UndoOrRedo(redo: true),
+            CommandNeeds.TextFocus | CommandNeeds.Writable
+        );
     }
 
     /// <summary>
-    /// Ctrl+/, or Cmd+/ on macOS: the key that types a slash, also on layouts where it needs Shift, or the slash key
-    /// of a US layout or the number pad.
+    /// Backspace, from the editor's key handler, while the text area has the keyboard: it deletes a pair.
     /// </summary>
-    private static bool IsToggleComment(KeyEventArgs e) =>
-        e.KeyModifiers.HasFlag(s_command)
-        && !e.KeyModifiers.HasFlag(KeyModifiers.Alt)
-        && (e.KeySymbol == "/" || (e.KeyModifiers == s_command && e.Key is Key.Oem2 or Key.Divide));
+    /// <returns>Whether the key was the helpers'.</returns>
+    public bool OnKeyDown(KeyEventArgs e) =>
+        e.Key == Key.Back
+        && e.KeyModifiers == KeyModifiers.None
+        && TypingOffsets() is { } offsets
+        && DeletePairs(offsets);
+
+    private void UndoOrRedo(bool redo)
+    {
+        if (redo)
+            _document.Redo();
+        else
+            _document.Undo();
+        _textArea.Caret.BringCaretToView();
+    }
 
     private void OnTextEntering(object? sender, TextInputEventArgs e)
     {
