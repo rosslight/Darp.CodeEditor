@@ -75,6 +75,9 @@ internal sealed class EditorView : IDisposable
     /// </summary>
     private KeyResolution? _resumed;
 
+    /// <summary>How many waits ended, so that a key that would go on after one, by an earlier keymap, does not.</summary>
+    private int _waitsEnded;
+
     public EditorView(EditorContext context)
     {
         _context = context;
@@ -168,10 +171,11 @@ internal sealed class EditorView : IDisposable
         KeyResolution resolution = _resumed ?? KeyResolution.Of(_context.Keymap(), _pending, key);
         _pending = null;
         _resumed = null;
+        int waitsEnded = _waitsEnded;
         for (int i = 0; i < resolution.Commands.Count; i++)
         {
             var rest = new KeyResolution([.. resolution.Commands.Skip(i + 1)], resolution.Waits);
-            if (_commands.TryRun(resolution.Commands[i], () => Resume(key, rest)))
+            if (_commands.TryRun(resolution.Commands[i], () => GoOn(key, rest, waitsEnded)))
                 return true;
         }
         if (resolution.Waits)
@@ -194,10 +198,12 @@ internal sealed class EditorView : IDisposable
     /// <summary>
     /// Raises <paramref name="key"/> again, as it goes on after a command that decided later to do nothing: by
     /// <paramref name="rest"/>, to the commands after that one, then to the second stroke of a sequence it starts, or
-    /// as an ordinary key, as it would have gone on at once.
+    /// as an ordinary key, as it would have gone on at once. A wait that ended since, as by a new keymap, drops it.
     /// </summary>
-    private void Resume(PressedKey key, KeyResolution rest)
+    private void GoOn(PressedKey key, KeyResolution rest, int waitsEnded)
     {
+        if (waitsEnded != _waitsEnded)
+            return;
         _resumed = rest;
         try
         {
@@ -250,9 +256,14 @@ internal sealed class EditorView : IDisposable
     public void Paste() => AvaloniaEdit.ApplicationCommands.Paste.Execute(null, _context.Area);
 
     /// <summary>
-    /// Ends the wait for a sequence's second stroke, as a click, the focus leaving or a new keymap does.
+    /// Ends the wait for a sequence's second stroke, as a click, the focus leaving or a new keymap does, and drops what
+    /// a key that waits for a command, as for completion's filter, would go on to.
     /// </summary>
-    public void EndWait() => _pending = null;
+    public void EndWait()
+    {
+        _pending = null;
+        _waitsEnded++;
+    }
 
     /// <summary>
     /// What Escape closes, one at a time: completion, signature help, a snippet's stops while the text area has the

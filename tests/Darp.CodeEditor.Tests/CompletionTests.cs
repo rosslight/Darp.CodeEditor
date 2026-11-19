@@ -360,6 +360,43 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_new_keymap_drops_what_a_key_that_waits_for_a_filter_would_go_on_to() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("println"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            var ranking = new HeldScheduler();
+            var editor = new CodeEditor
+            {
+                Document = document,
+                BackgroundScheduler = ranking,
+                // Ctrl+K Enter accepts while the list shows, and otherwise finds.
+                Keymap = CodeEditorKeymap.Empty.With(
+                    new CodeEditorKeyBinding("ctrl+k enter", CodeEditorCommands.Find),
+                    new CodeEditorKeyBinding("ctrl+k enter", CodeEditorCommands.AcceptSelectedSuggestion)
+                ),
+            };
+            using var window = new EditorWindow(editor);
+            window.Type("pri");
+            await WaitForLabelsAsync(window, ["println"]);
+
+            // Pressed while the filter of "prizzz", which "println" does not match, is held; then the keymap changes.
+            ranking.Hold();
+            window.Type("zzz");
+            window.Press(Key.K, KeyModifiers.Control);
+            window.Press(Key.Enter);
+            editor.Keymap = CodeEditorKeymap.Empty;
+            ranking.Release();
+
+            // The list ends, and Ctrl+K Enter goes on to no binding of the keymap it was pressed in.
+            await Wait.UntilAsync(() => List(window) is null);
+            editor.GetVisualDescendants().OfType<SearchBar>().ShouldNotContain(bar => bar.IsOpen);
+            document.Text.ShouldBe("prizzz");
+        });
+
+    [Fact]
     public Task Enter_that_waits_for_a_filter_commits_from_a_newer_list_of_the_same_text() =>
         _ui.Run(async () =>
         {
