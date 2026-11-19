@@ -1,16 +1,24 @@
+using Avalonia.Input;
 using Avalonia.Media;
 using AvaloniaEdit.Document;
 using Darp.CodeEditor.Editing;
+using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.Loading;
 
 namespace Darp.CodeEditor.Tests;
 
-/// <summary>The bracket next to the caret and its match, boxed in the color theme's bracket match colors.</summary>
+/// <summary>
+/// The bracket next to the caret and its match, or else the pair around the caret, boxed in the color theme's bracket
+/// match colors.
+/// </summary>
 [Collection(UiFixture.Collection)]
 public sealed class BracketMatchingTests(UiFixture ui)
 {
     /// <summary><c>editorBracketMatch.background</c> of the tests' theme.</summary>
     private static readonly Color s_bracketMatch = Color.Parse("#FF00FF");
+
+    /// <summary>The brackets of the tests that search without an editor.</summary>
+    private static readonly CharacterPair[] s_brackets = [new("(", ")"), new("[", "]"), new("{", "}")];
 
     private readonly UiFixture _ui = ui;
 
@@ -32,33 +40,121 @@ public sealed class BracketMatchingTests(UiFixture ui)
     ) =>
         _ui.Run(async () =>
         {
-            using EditorWindow window = await ShowColored(marked);
+            using EditorWindow window = await ShowAsync(marked);
 
             window.RenderAndCountPixels(s_bracketMatch, new TextRange(open, 1)).ShouldBeGreaterThan(0);
             window.RenderAndCountPixels(s_bracketMatch, new TextRange(close, 1)).ShouldBeGreaterThan(0);
             window.RenderAndCountPixels(s_bracketMatch, new TextRange(other, 1)).ShouldBe(0);
         });
 
-    [Fact]
-    public Task Away_from_brackets_nothing_is_boxed() =>
+    /// <summary>
+    /// Away from brackets, the innermost pair around the caret is boxed, as VS Code's <c>editor.matchBrackets</c> does
+    /// by default; with <see cref="MatchBrackets.Near"/> only a bracket next to the caret, and with
+    /// <see cref="MatchBrackets.Never"/> none.
+    /// </summary>
+    [Theory]
+    [InlineData(MatchBrackets.Always, true, true)]
+    [InlineData(MatchBrackets.Near, false, true)]
+    [InlineData(MatchBrackets.Never, false, false)]
+    public Task Away_from_brackets_the_pair_around_the_caret_is_boxed_as_the_option_says(
+        MatchBrackets match,
+        bool around,
+        bool next
+    ) =>
         _ui.Run(async () =>
         {
-            using EditorWindow window = await ShowColored("[1, 2|, 3]");
+            using EditorWindow window = await ShowAsync("[1, [2], |3]");
+            window.Editor.Options.MatchBrackets.ShouldBe(MatchBrackets.Always);
 
-            window.RenderAndCountPixels(s_bracketMatch).ShouldBe(0);
+            window.Editor.Options = CodeEditorOptions.Default with { MatchBrackets = match };
+
+            (window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)) > 0).ShouldBe(around);
+            (window.RenderAndCountPixels(s_bracketMatch, new TextRange(10, 1)) > 0).ShouldBe(around);
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(4, 1)).ShouldBe(0);
+            window.Editor.Selection = new TextSelection(4);
+            (window.RenderAndCountPixels(s_bracketMatch, new TextRange(6, 1)) > 0).ShouldBe(next);
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)).ShouldBe(0);
         });
 
-    /// <summary>The search for a match reads a bounded number of characters, so it can't stall the UI thread.</summary>
+    /// <summary>
+    /// The pair around the caret is found by a bounded scan as well: a closing bracket further away than the search
+    /// reads after the caret, or an opening one further than it reads before it, gives no pair. Without tokens, so that
+    /// every bracket is code.
+    /// </summary>
     [Theory]
     [InlineData(BracketMatcher.MaxDistance - 1, true)]
     [InlineData(BracketMatcher.MaxDistance, false)]
-    public Task A_match_further_away_than_the_search_reads_shows_no_pair(int spaces, bool boxed) =>
+    public void A_pair_around_the_caret_further_away_than_the_search_reads_is_none(int spaces, bool found)
+    {
+        string spacing = new(' ', spaces);
+
+        (
+            BracketMatcher.FindEnclosing(new TextDocument("[1 " + spacing + "]"), 3, s_brackets, _ => null) is not null
+        ).ShouldBe(found);
+        (
+            BracketMatcher.FindEnclosing(new TextDocument("[" + spacing + "]"), 1 + spaces, s_brackets, _ => null)
+            is not null
+        ).ShouldBe(found);
+    }
+
+    /// <summary>
+    /// The pair around the caret follows it into a nested pair and out of it, and stays as the caret passes pairs that
+    /// close between its places.
+    /// </summary>
+    [Fact]
+    public Task The_pair_around_the_caret_follows_it_into_nested_pairs_and_out() =>
         _ui.Run(async () =>
         {
-            using EditorWindow window = await ShowColored("1\n[|" + new string(' ', spaces) + "]");
+            using EditorWindow window = await ShowAsync("[1|, [2, 3], [4], 5]");
+            int[] brackets = [0, 4, 9, 12, 14, 18];
 
-            (window.RenderAndCountPixels(s_bracketMatch, new TextRange(2, 1)) > 0).ShouldBe(boxed);
+            (int Caret, int Open, int Close)[] steps = [(2, 0, 18), (7, 4, 9), (16, 0, 18), (11, 0, 18), (3, 0, 18)];
+            foreach ((int caret, int open, int close) in steps)
+            {
+                window.Editor.Selection = new TextSelection(caret);
+
+                foreach (int bracket in brackets)
+                {
+                    (window.RenderAndCountPixels(s_bracketMatch, new TextRange(bracket, 1)) > 0).ShouldBe(
+                        bracket == open || bracket == close,
+                        $"the bracket at {bracket} with the caret at {caret}"
+                    );
+                }
+            }
         });
+
+    /// <summary>As in VS Code, a pair shows only for a caret without a selection.</summary>
+    [Fact]
+    public Task A_selection_shows_no_pair() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = await ShowAsync("|[1, 2] ");
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(5, 1)).ShouldBeGreaterThan(0);
+
+            // The bracket selected, with the caret after it.
+            window.Press(Key.Right, KeyModifiers.Shift);
+            window.Editor.Selection.ShouldBe(new TextSelection(0, 1));
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(5, 1)).ShouldBe(0);
+
+            // A selection that leaves the caret where it was, next to a bracket.
+            window.Editor.Selection = new TextSelection(6);
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)).ShouldBeGreaterThan(0);
+            window.Editor.Selection = new TextSelection(7, 6);
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)).ShouldBe(0);
+        });
+
+    /// <summary>
+    /// The search for a match reads a bounded number of characters, so it can't stall the UI thread. Without tokens, so
+    /// that every bracket is code.
+    /// </summary>
+    [Theory]
+    [InlineData(BracketMatcher.MaxDistance - 1, true)]
+    [InlineData(BracketMatcher.MaxDistance, false)]
+    public void A_match_further_away_than_the_search_reads_is_none(int spaces, bool found) =>
+        (
+            BracketMatcher.FindPair(new TextDocument("1\n[" + new string(' ', spaces) + "]"), 3, s_brackets, _ => null)
+            is not null
+        ).ShouldBe(found);
 
     [Fact]
     public void A_closing_bracket_of_an_opening_one_with_several_closes_it_before_a_pair_closes()
@@ -68,6 +164,19 @@ public sealed class BracketMatchingTests(UiFixture ui)
         bool unmatched = BracketMatcher.UnmatchedClosing(new TextDocument("(]"), 1, brackets[1], brackets, _ => null);
 
         unmatched.ShouldBeFalse();
+    }
+
+    /// <summary>An opening bracket with several closing ones pairs with each, at the caret and around it.</summary>
+    [Fact]
+    public void An_opening_bracket_with_several_closing_ones_pairs_with_each()
+    {
+        CharacterPair[] brackets = [new("(", ")"), new("(", "]")];
+        var document = new TextDocument("(1] (2)");
+
+        BracketMatcher.FindPair(document, 0, brackets, _ => null).ShouldBe((0, 2));
+        BracketMatcher.FindPair(document, 3, brackets, _ => null).ShouldBe((0, 2));
+        BracketMatcher.FindEnclosing(document, 1, brackets, _ => null).ShouldBe((0, 2));
+        BracketMatcher.FindEnclosing(document, 5, brackets, _ => null).ShouldBe((4, 6));
     }
 
     [Fact]
@@ -98,7 +207,7 @@ public sealed class BracketMatchingTests(UiFixture ui)
         _ui.Run(async () =>
         {
             // The closing brace below the view.
-            using EditorWindow window = await ShowColored(
+            using EditorWindow window = await ShowAsync(
                 "|{ \"a\": 1,\n// b\n" + string.Concat(Enumerable.Repeat("// padding\n", 50)) + "}"
             );
             window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)).ShouldBeGreaterThan(0);
@@ -111,21 +220,128 @@ public sealed class BracketMatchingTests(UiFixture ui)
             await Wait.UntilAsync(() => window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)) == 0);
         });
 
-    private static async Task<EditorWindow> ShowColored(string marked)
+    /// <summary>
+    /// The pair around a caret inside it, found again once the background has tokenized the lines out of view as
+    /// comments: their tokens changed, the text and the caret did not.
+    /// </summary>
+    [Fact]
+    public Task A_pair_around_the_caret_whose_closing_bracket_becomes_a_comment_out_of_view_is_no_longer_boxed() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = await ShowAsync(
+                "{ \"a\": |1,\n// b\n" + string.Concat(Enumerable.Repeat("// padding\n", 50)) + "}"
+            );
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)).ShouldBeGreaterThan(0);
+
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            // While the test holds the grammar, the background tokenizes nothing: drawn after the edit, the lines out of
+            // view keep their tokens as last tokenized, and the pair its closing brace.
+            TextMateGrammar grammar = EditorWindow
+                .TextViewOf(window.Editor)
+                .LineTransformers.OfType<BackgroundTextMateHighlighter>()
+                .Single()
+                .Grammar.ShouldNotBeNull();
+            grammar.TryEnterOnUiThread(TimeSpan.FromSeconds(30)).ShouldBeTrue();
+            try
+            {
+                document.Replace(new TextRange(document.CurrentSnapshot.GetOffset(new TextPosition(2, 2)), 1), "*");
+                window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)).ShouldBeGreaterThan(0);
+            }
+            finally
+            {
+                grammar.ExitOnUiThread();
+            }
+
+            await Wait.UntilAsync(() => window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)) == 0);
+        });
+
+    /// <summary>
+    /// The search reads a bounded stretch before the caret: a caret that moves so that it reads an earlier opening
+    /// bracket finds the pair that this bracket opens, not the pair found before.
+    /// </summary>
+    [Fact]
+    public Task A_bracket_that_comes_into_what_the_search_reads_changes_the_pair_around_the_caret() =>
+        _ui.Run(async () =>
+        {
+            // "[" first, and on the last line a stray "]" inside braces, with the caret between "a" and "b" just past
+            // where the search reads the "[".
+            string text =
+                "[\n"
+                + string.Concat(Enumerable.Repeat(new string(' ', 999) + "\n", 99))
+                + new string(' ', 995)
+                + "\n{ ab ] }";
+            int caret = text.IndexOf("ab", StringComparison.Ordinal) + 1;
+            caret.ShouldBe(BracketMatcher.MaxDistance + 1);
+            var editor = Editor(text);
+            using var window = new EditorWindow(editor);
+            editor.Selection = new TextSelection(caret);
+            editor.ScrollTo(new TextRange(caret, 0));
+            await window.TokensKnownAsync();
+            (int brace, int square, int closingBrace) = (caret - 3, caret + 2, caret + 4);
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(brace, 1)).ShouldBeGreaterThan(0);
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(closingBrace, 1)).ShouldBeGreaterThan(0);
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(square, 1)).ShouldBe(0);
+
+            window.Press(Key.Left);
+
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(square, 1)).ShouldBeGreaterThan(0);
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(brace, 1)).ShouldBe(0);
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(closingBrace, 1)).ShouldBe(0);
+        });
+
+    /// <summary>
+    /// Brackets pair as VS Code's parser nests them: a closing bracket that closes no open bracket of its kind is no
+    /// bracket, and one that closes an outer pair leaves the brackets opened inside it unclosed.
+    /// </summary>
+    [Theory]
+    [InlineData("{ x| ] }", MatchBrackets.Always, new[] { 0, 6 }, new[] { 4 })]
+    [InlineData("[ |{ x ] }", MatchBrackets.Near, new int[0], new[] { 0, 2, 6, 8 })]
+    [InlineData("[ |{ x ] }", MatchBrackets.Always, new[] { 0, 6 }, new[] { 2, 8 })]
+    [InlineData("[ { x ] }|", MatchBrackets.Near, new int[0], new[] { 0, 2, 6, 8 })]
+    public Task In_incomplete_code_brackets_pair_as_VS_Codes_parser_nests_them(
+        string marked,
+        MatchBrackets match,
+        int[] boxed,
+        int[] unboxed
+    ) =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = await ShowAsync(marked);
+
+            window.Editor.Options = CodeEditorOptions.Default with { MatchBrackets = match };
+
+            foreach (int bracket in boxed)
+                window.RenderAndCountPixels(s_bracketMatch, new TextRange(bracket, 1)).ShouldBeGreaterThan(0);
+            foreach (int bracket in unboxed)
+                window.RenderAndCountPixels(s_bracketMatch, new TextRange(bracket, 1)).ShouldBe(0);
+        });
+
+    /// <summary>
+    /// Shows <paramref name="marked"/> as JSON in the tests' theme, once the editor has its grammar and every line's
+    /// tokens: not by the colors of the text.
+    /// </summary>
+    private static async Task<EditorWindow> ShowAsync(string marked)
     {
         (string text, TextSelection selection) = MarkedText.Parse(marked);
-        var editor = new CodeEditor
+        CodeEditor editor = Editor(text);
+        var window = new EditorWindow(editor);
+        editor.Selection = selection;
+        await window.TokensKnownAsync();
+        return window;
+    }
+
+    /// <summary>
+    /// An editor of JSON in the tests' theme. Its grammar's clock stands still, so that the background never gives up
+    /// on a line's tokens, as it may in 50 ms on a busy machine.
+    /// </summary>
+    private static CodeEditor Editor(string text) =>
+        new()
         {
             Document = CodeDocument.Create(CodeLanguage.Json, text),
             ColorTheme = new CodeEditorColorTheme
             {
                 Source = new Uri("avares://Darp.CodeEditor.Tests/Themes/marks.json"),
             },
+            GrammarClock = new ManualTime(),
         };
-        var window = new EditorWindow(editor);
-        editor.Selection = selection;
-        // The numbers in the theme's color: the grammar and the theme are loaded, and the lines in view tokenized.
-        await Wait.UntilAsync(() => window.RenderAndCountPixels(Color.Parse("#098658")) > 0);
-        return window;
-    }
 }

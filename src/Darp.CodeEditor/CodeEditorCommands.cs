@@ -167,4 +167,34 @@ public static class CodeEditorCommands
     /// Redoes the last step undone, as <see cref="CodeDocument.Redo"/> does, and brings the caret into view.
     /// </summary>
     public const string Redo = "redo";
+
+    /// <summary>
+    /// Moves the caret to the bracket that matches the one at the start of the selection; elsewhere to the closing
+    /// bracket of the pair around it, or else to the next bracket. Brackets in strings and comments don't count.
+    /// </summary>
+    public const string JumpToBracket = "editor.action.jumpToBracket";
+
+    /// <summary>
+    /// Selects the pair at the start of the selection, or else the pair around it, or else the next pair, with the text
+    /// between its brackets; backward from a closing bracket. Without a pair it does not apply. No key by default.
+    /// </summary>
+    public const string SelectToBracket = "editor.action.selectToBracket";
+
+    /// <summary>
+    /// Expands the selection to the next range around it: the language server's selection ranges, or without them the
+    /// pairs of brackets, and the words, the lines, and the whole text. In a rectangle selection it does not apply.
+    /// </summary>
+    public const string SmartSelectExpand = "editor.action.smartSelect.expand";
+
+    /// <summary>Shrinks the selection back through the ranges that <see cref="SmartSelectExpand"/> went through.</summary>
+    public const string SmartSelectShrink = "editor.action.smartSelect.shrink";
+
+    /// <summary>
+    /// Moves the caret to the start of the next occurrence of the symbol at the caret, after the last to the first,
+    /// while they are highlighted (<see cref="CodeEditorOptions.OccurrencesHighlight"/>); otherwise it does not apply.
+    /// </summary>
+    public const string WordHighlightNext = "editor.action.wordHighlight.next";
+
+    /// <summary>Moves the caret to the start of the previous occurrence, as <see cref="WordHighlightNext"/> does.</summary>
+    public const string WordHighlightPrevious = "editor.action.wordHighlight.prev";
 }

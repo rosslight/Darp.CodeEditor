@@ -325,6 +325,68 @@ internal sealed class ServerConnection
     }
 
     /// <summary>
+    /// The server's selection ranges at <paramref name="offset"/> of an open document, for an editor: its innermost
+    /// range and the parents, from the inside out. Null when the server does not run, the document is not open in it,
+    /// it offers no selection ranges or failed, and when <paramref name="cancellationToken"/> cancelled the request.
+    /// </summary>
+    /// <param name="document">The document.</param>
+    /// <param name="snapshot">The document's text that the offset is in, which the ranges are of.</param>
+    /// <param name="offset">The caret.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    public Task<IReadOnlyList<TextRange>?> SelectionRangesAsync(
+        ServerDocument document,
+        TextSnapshot snapshot,
+        int offset,
+        CancellationToken cancellationToken
+    )
+    {
+        if (Target(document) is not { Features.SelectionRange: true } target)
+            return Task.FromResult<IReadOnlyList<TextRange>?>(null);
+        var parameters = new SelectionRangeParams(
+            new TextDocumentIdentifier(target.Uri),
+            [Positions.ToLsp(snapshot.GetPosition(offset))]
+        );
+        return RequestForEditorAsync(
+            target.Rpc,
+            "textDocument/selectionRange",
+            writer => JsonSerializer.Serialize(writer, parameters, LspJsonContext.Default.SelectionRangeParams),
+            result => SelectionRanges.Read(result, snapshot),
+            cancellationToken
+        );
+    }
+
+    /// <summary>
+    /// The server's occurrences of the symbol at <paramref name="offset"/> of an open document, for an editor. Null when
+    /// the server does not run, the document is not open in it, it offers no document highlights, failed or answered
+    /// null, and when <paramref name="cancellationToken"/> cancelled the request.
+    /// </summary>
+    /// <param name="document">The document.</param>
+    /// <param name="snapshot">The document's text that the offset is in, which the occurrences are of.</param>
+    /// <param name="offset">The caret.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    public Task<IReadOnlyList<Occurrence>?> DocumentHighlightsAsync(
+        ServerDocument document,
+        TextSnapshot snapshot,
+        int offset,
+        CancellationToken cancellationToken
+    )
+    {
+        if (Target(document) is not { Features.DocumentHighlight: true } target)
+            return Task.FromResult<IReadOnlyList<Occurrence>?>(null);
+        var parameters = new TextDocumentPositionParams(
+            new TextDocumentIdentifier(target.Uri),
+            Positions.ToLsp(snapshot.GetPosition(offset))
+        );
+        return RequestForEditorAsync(
+            target.Rpc,
+            "textDocument/documentHighlight",
+            writer => JsonSerializer.Serialize(writer, parameters, LspJsonContext.Default.TextDocumentPositionParams),
+            result => DocumentHighlights.Read(result, snapshot),
+            cancellationToken
+        );
+    }
+
+    /// <summary>
     /// What the running server offers the editors of a document; null while it does not run or the document is not
     /// open in it.
     /// </summary>
@@ -817,6 +879,7 @@ internal sealed class ServerConnection
                 ["synchronization"] = new JsonObject { ["dynamicRegistration"] = false },
                 ["publishDiagnostics"] = new JsonObject { ["versionSupport"] = true },
                 ["hover"] = new JsonObject { ["contentFormat"] = new JsonArray("markdown", "plaintext") },
+                ["selectionRange"] = new JsonObject { ["dynamicRegistration"] = false },
                 ["completion"] = new JsonObject
                 {
                     ["completionItem"] = new JsonObject
@@ -862,6 +925,7 @@ internal sealed class ServerConnection
                     // Semantic colors are drawn over the TextMate colors.
                     ["augmentsSyntaxTokens"] = true,
                 },
+                ["documentHighlight"] = new JsonObject { ["dynamicRegistration"] = false },
             },
         };
 

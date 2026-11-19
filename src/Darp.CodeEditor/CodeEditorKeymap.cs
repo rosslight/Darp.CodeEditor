@@ -79,6 +79,9 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+], ctrl+[ (cmd+], cmd+[)</term><description><see cref="CodeEditorCommands.IndentLines"/>, <see cref="CodeEditorCommands.OutdentLines"/></description></item>
     /// <item><term>ctrl+l (cmd+l)</term><description><see cref="CodeEditorCommands.ExpandLineSelection"/></description></item>
     /// <item><term>shift+alt+a (Linux: ctrl+shift+a)</term><description><see cref="CodeEditorCommands.BlockComment"/></description></item>
+    /// <item><term>ctrl+shift+\ (shift+cmd+\)</term><description><see cref="CodeEditorCommands.JumpToBracket"/></description></item>
+    /// <item><term>shift+alt+right, shift+alt+left (ctrl+shift+cmd+right, ctrl+shift+cmd+left)</term><description><see cref="CodeEditorCommands.SmartSelectExpand"/>, <see cref="CodeEditorCommands.SmartSelectShrink"/></description></item>
+    /// <item><term>f7, shift+f7</term><description><see cref="CodeEditorCommands.WordHighlightNext"/>, <see cref="CodeEditorCommands.WordHighlightPrevious"/></description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default { get; } = new(DefaultBindings(OperatingSystem.IsMacOS()));
@@ -183,6 +186,12 @@ public sealed class CodeEditorKeymap
         yield return new($"{command}+d", CodeEditorCommands.AddSelectionToNextFindMatch);
         foreach (CodeEditorKeyBinding binding in LineBindings(mac, linux: !mac && OperatingSystem.IsLinux()))
             yield return binding;
+        yield return new($"{command}+shift+\\", CodeEditorCommands.JumpToBracket);
+        string smartSelect = mac ? "ctrl+shift+cmd" : "shift+alt";
+        yield return new($"{smartSelect}+right", CodeEditorCommands.SmartSelectExpand);
+        yield return new($"{smartSelect}+left", CodeEditorCommands.SmartSelectShrink);
+        yield return new("f7", CodeEditorCommands.WordHighlightNext);
+        yield return new("shift+f7", CodeEditorCommands.WordHighlightPrevious);
     }
 
     /// <summary>

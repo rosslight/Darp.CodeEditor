@@ -358,6 +358,7 @@ public sealed class LanguageServerTests(UiFixture ui)
                             "synchronization": { "dynamicRegistration": false },
                             "publishDiagnostics": { "versionSupport": true },
                             "hover": { "contentFormat": ["markdown", "plaintext"] },
+                            "selectionRange": { "dynamicRegistration": false },
                             "completion": {
                               "completionItem": {
                                 "snippetSupport": true,
@@ -395,7 +396,8 @@ public sealed class LanguageServerTests(UiFixture ui)
                               ],
                               "formats": ["relative"],
                               "augmentsSyntaxTokens": true
-                            }
+                            },
+                            "documentHighlight": { "dynamicRegistration": false }
                           }
                         }
                         """

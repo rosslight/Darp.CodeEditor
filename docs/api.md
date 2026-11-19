@@ -132,10 +132,12 @@ editor.Options = CodeEditorOptions.Default with
 | `EmptySelectionClipboard` | `editor.emptySelectionClipboard` | true: without a selection, Copy and Cut take the caret's line with a line break, the last line too, and Paste puts that line above the caret's line while nothing is selected. Off, they need a selection, so that a stray Ctrl+C keeps the clipboard |
 | `Find.SeedSearchStringFromSelection` | `editor.find.seedSearchStringFromSelection` | `Always`: Ctrl+F's query starts with the selection within one line, or else the word at the caret, escaped while the bar uses a regular expression; `Selection` takes only a selection, `Never` nothing. Ctrl+H takes only a selection, and F3 takes one only for an empty query |
 | `Find.AutoFindInSelection` | `editor.find.autoFindInSelection` | `Never`: Find in Selection turns on only by its toggle and Alt+L; `Always` whenever something is selected as the bar opens, `Multiline` for a selection over several lines |
+| `MatchBrackets` | `editor.matchBrackets` | `Always`: at a caret without a selection, the bracket next to it and its match are boxed in the theme's colors, the one after the caret first, or else the innermost pair around the caret. `Near` boxes only a bracket next to the caret and its match, the cheaper, quieter mode; `Never` none. Brackets in strings and comments don't count, and brackets pair as VS Code's parser nests them: a closing bracket closes the closest open one of its kind, and those opened inside it stay unclosed, and one that closes none counts as no bracket. A match or a pair further than 100,000 characters away shows none |
+| `OccurrencesHighlight` | `editor.occurrencesHighlight` | true: the occurrences of the symbol at the caret are highlighted, the server's with reads and writes apart, or else the word's (section 6). Off, a caret move asks the server nothing, for users who find them noise and apps whose servers they load. VS Code's `multiFile` has no counterpart: an editor knows its own document only |
 
 A setting needs a use case to become an option; VS Code having it is not enough (design.md #124).
 
-**Built in, with no settings,** as VS Code's defaults: current-line highlight, bracket matching; typing over a closing
+**Built in, with no settings,** as VS Code's defaults: current-line highlight; typing over a closing
 character, and Backspace deleting an empty pair, only where the editor closed the pair; opening characters surrounding
 the selection; auto-indent as far as the language's `AutoIndent` goes (section 1); Tab, Shift+Tab and Backspace in
 indentation by tab stops; undo in VS Code's steps, which puts back the selection before the step and redo the one after
@@ -223,6 +225,12 @@ The default keys on Windows and Linux; macOS in brackets where it differs beyond
 | Ctrl+Enter, Ctrl+Shift+Enter | `editor.action.insertLineAfter`, `editor.action.insertLineBefore` | inserts a line below or above the caret's, indented as Enter would |
 | Ctrl+], Ctrl+[ | `editor.action.indentLines`, `editor.action.outdentLines` | indents and outdents the lines to the next or the previous tab stop |
 | Ctrl+L | `expandLineSelection` | selects the lines whole; again, it takes the next line too |
+| Ctrl+Shift+\ | `editor.action.jumpToBracket` | goes to the bracket that matches the one at the start of the selection; elsewhere to the closing bracket of the pair around it, or else to the next bracket |
+| F7, Shift+F7 | `editor.action.wordHighlight.next`, `editor.action.wordHighlight.prev` | the next and the previous occurrence of the symbol at the caret, while they show, in the middle of the view unless it shows already (section 6) |
+| Shift+Alt+Right, Shift+Alt+Left (macOS: Ctrl+Shift+Cmd) | `editor.action.smartSelect.expand`, `editor.action.smartSelect.shrink` | expands the selection to the next range around it, and shrinks it back (section 6). In a rectangle selection the keys go on to AvaloniaEdit's, which grow the rectangle |
+
+`editor.action.selectToBracket` has no key, as in VS Code: it selects the pair at the start of the selection, or else
+the pair around it, or else the next one, with the text between its brackets, backward from a closing bracket.
 
 **Context menu:** the editor's `ContextFlyout`, as in Avalonia's text box, with Cut, Copy, Paste, Select All, Toggle
 Line Comment, Find and Replace, their keys from the keymap and their text in the UI culture's language, English or
@@ -249,7 +257,8 @@ handler closes the group on the document it opened it on. Text that the app sets
 
 - **The text area** takes its colors from `ColorTheme`, a VS Code color theme: syntax and language-server colors,
   background, selection, caret, line numbers, current line, search and bracket matches, the lines that Find in
-  Selection searches, squiggles, a snippet's stops. Token colors are made for their theme's background, so they come together.
+  Selection searches, the occurrences of the symbol at the caret, squiggles, a snippet's stops. Token colors are made
+  for their theme's background, so they come together.
 - **Everything around the text** takes the app's look: completion, hover and signature help look like the app's
   flyouts and tooltips, and the search bar, the scroll bars and the context menu are the app's controls. They match
   Avalonia's Fluent theme, FluentAvalonia or any other theme, font, padding and corners included. Where the app's
@@ -361,7 +370,7 @@ follows the edits made since, so clicking an error after typing above it still l
 
 - **Lifecycle:** `initialize` (with the root folder and initialization options), shutdown and exit, and `$/cancelRequest`.
 - **Documents:** incremental `didOpen`, `didChange` and `didClose`.
-- **Features:** completion with resolve, hover, signature help, semantic tokens (range, or full), and pushed diagnostics (`publishDiagnostics`).
+- **Features:** completion with resolve, hover, signature help, semantic tokens (range, or full), selection ranges (`textDocument/selectionRange`), document highlights (`textDocument/documentHighlight`), and pushed diagnostics (`publishDiagnostics`).
 - **Settings:** `workspace/didChangeConfiguration` with all settings, when the server starts and on `NotifySettingsChanged`.
 - **Server requests the client answers:** `workspace/configuration` (through `Settings`) and `client/registerCapability`. Registrations are acknowledged, and only the features above take effect.
 - **Not in v1:** pulled diagnostics, workspace edits, file watching, code actions, formatting, rename. The client does not advertise them.
@@ -410,7 +419,7 @@ How the client talks to a server, where the protocol leaves a choice:
   closed or that the app's process, whose id it gets in `initialize`, is gone, as the protocol asks servers to do.
 - **Capabilities** of the server that have another JSON type than the protocol says count as not given.
 - **Editors ask, documents don't.** Only an editor that shows a document asks for its hover, semantic tokens,
-  completion and signature help; a document that no editor shows costs the server nothing but its text, so the
+  completion, signature help, selection ranges and document highlights; a document that no editor shows costs the server nothing but its text, so the
   documents that editors show go first. Editors never wait for an answer, and keep no queue of their own: each editor
   asks at once, and an editor that loses the keyboard focus cancels what it asked for completion and signature help.
   Their requests take the path of every request, with its hang limit, and a server's error or an answer of another
@@ -620,6 +629,25 @@ How the client talks to a server, where the protocol leaves a choice:
   completion's list is closed. It ends on Escape, after completion's list, with no signature, when the editor becomes
   read-only, when the editor loses the keyboard focus, when a server starts or stops serving the document, with new colors, and when its line scrolls
   out of view.
+- **Selection ranges** are asked for at the caret as expanding the selection starts, where the server offers them.
+  The selection goes from the innermost range out through the server's ranges and VS Code's word ranges: the word at
+  the caret, a line of spaces and tabs only, and the whole text. Without the server's ranges, it goes through the pairs
+  of brackets around the caret instead, as VS Code's smart select does: the text between their brackets, the pair, and
+  for a pair over several lines, from the text that starts its line, or from the line above that an opening bracket on
+  a line of its own belongs to. A server that fails gives no ranges, and the brackets' stay out, as in VS Code. Where a
+  range reaches other lines, first the lines of the range before it go in, from their first text to their last, then
+  whole. The ranges are found once, as expanding starts; shrinking goes back through them, and a caret move otherwise
+  or an edit ends them. An answer that comes after the text, the selection or the shown document changed is dropped.
+- **Document highlights:** with `OccurrencesHighlight` on, a caret that the user moves asks
+  `textDocument/documentHighlight` after a pause of 50 ms, VS Code's, unless the selection stays inside an occurrence,
+  as VS Code's word highlighter does; the pause runs on the options' `TimeProvider`. Reads show in the theme's
+  `editor.wordHighlightBackground` and writes in `editor.wordHighlightStrongBackground`. Without a server, or without an
+  answer from it, the word's occurrences show in `editor.wordHighlightTextBackground`: whole words with case, at most
+  999, as VS Code finds them, found off the UI thread. An edit, a caret that it moves and the keyboard leaving the
+  editor clear them; a selection over several lines, or beyond the word at the caret, shows none. An answer that
+  comes after an edit, once the selection left the word it was asked for or once the editor shows another document is
+  dropped, and a request for a word that the selection left ends at once. The word at the caret is read within 500
+  characters on either side, as the search bar reads it. F7 and Shift+F7 go through them.
 - **Token colors** come from the color theme as in VS Code: its `semanticTokenColors`, matched by type, modifiers and
   language with VS Code's scores; otherwise its TextMate color of the scopes that VS Code's standard mapping gives the
   type and modifiers, such as `entity.name.type` for a class or `variable.other.constant` for a read-only variable.
@@ -999,12 +1027,25 @@ with Skia:
   Enter, typed text, paste, drops, completion's text and additional edits, snippets and Replace put it in, also on a
   line that ends in another and from a regular expression's substitutions, and Copy and Cut take it, or `\r\n` on
   Windows. The tests run with either line break as the system's (CONTRIBUTING.md);
-- the bracket next to the caret and its match are boxed in the theme's colors, ignoring brackets in strings and
-  comments by the lines' tokens, also when an edit changes them out of view. The search for a match reads at most
-  100,000 characters, in blocks without a string per line: about 0.5 ms with six brackets on every line, the most a
-  caret move or keystroke spends on it (BenchmarkDotNet). In 5,000 lines, from text that an undo just changed and with
-  the frame after it, typing a bracket that closes takes 28 ms where a digit takes 27 ms, Backspace between the pair
-  13 ms, and commenting all 5,000 lines 41 ms;
+- the bracket next to a caret without a selection and its match are boxed in the theme's colors, and by default the
+  pair around the caret, ignoring brackets in strings and comments by the lines' tokens, also when an edit changes them
+  out of view. The search for a match, and for each bracket of the pair around the caret, reads at most 100,000
+  characters, in blocks without a string per line: about 0.5 ms with six brackets on every line, the most a caret move
+  or keystroke spends on each (BenchmarkDotNet). A caret move draws the text view again without measuring it, and
+  lines that the background tokenizes draw it again only when the pair changes: drawing it again for each of the
+  background's batches made Page Down 45% slower. While the text and its tokens stay, a caret that moves past brackets
+  that match among themselves keeps the pair, and reads only the stretch it moved. Finding the pair anew in the middle
+  of 5,000 lines with brackets on every line takes 0.9 ms; a caret move there, with the frame after it, takes 11 ms
+  with the pair as without it, and Page Down through 5,000 lines 13.7 ms, as before (BenchmarkDotNet,
+  `CaretMoveBenchmarks`, `ScrollingBenchmarks`). Ctrl+Shift+\ and Select to Bracket go by the same searches, and the
+  selection grows by the server's selection ranges, or by the pairs of brackets, and by words. In 5,000 lines, from text that an undo just changed and with the frame
+  after it, typing a bracket that closes takes 28 ms where a digit takes 27 ms, Backspace between the pair 13 ms, and
+  commenting all 5,000 lines 41 ms;
+- the occurrences of the symbol at the caret show, the server's with reads and writes apart or else the word's, also
+  when its answer comes late or the editor shows another document meanwhile, and F7 goes through them. In 5,000
+  lines that the fake server serves, a caret move until a frame shows the server's occurrence takes 17.6 ms, where
+  the move alone takes 10.9 ms: the rest is the request, the server's answer and drawing it, with the pause of 50 ms
+  left out (`OccurrenceBenchmarks`);
 - spaces and tabs show inside the selection only, in the theme's `editorWhitespace.foreground`, in a layer of the text
   view above the selection;
 - search runs in the background, so a regular expression such as `(a+)+$`, which froze the prototype for 21 s, leaves
