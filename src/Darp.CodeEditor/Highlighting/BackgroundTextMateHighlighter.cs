@@ -40,6 +40,11 @@ namespace Darp.CodeEditor.Highlighting;
 /// unknown, so the line after it starts from the start of the grammar. The UI thread leaves lines over 1,000
 /// characters to the background.
 /// </para>
+/// <para>
+/// A new grammar is slow on its first lines, and far slower in a new process: it compiles the expressions they need.
+/// It warms up on lines of its own before the first screen, and a line of the first screen that runs out of time all
+/// the same gets one more try, with the lines after it.
+/// </para>
 /// </remarks>
 internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransformer, IDisposable
 {
@@ -63,7 +68,9 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
     /// </summary>
     private static readonly TimeSpan s_insertionTimeLimit = TimeSpan.FromMilliseconds(2);
 
-    /// <summary>Lines that compile the most common expressions of a grammar, for a document without text.</summary>
+    /// <summary>
+    /// Lines that warm a grammar up before the text: its first tokenizing, and the most common expressions.
+    /// </summary>
     private static readonly string[] s_warmUpLines = ["x = f(1, \"s\") // c", "{ [ ] } /* c */ 'c' 0.5"];
 
     private static readonly char[] s_lineBreaks = ['\r', '\n'];
@@ -213,11 +220,17 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
             && version.CompareAge(_document.Version) == 0
         )
         {
-            // Lines from the start of the text are exact; lines further down started from a guessed state.
+            // Lines from the start of the text are exact, up to one that ran out of time: it may have run out while the
+            // grammar warmed up, so the background tries it again, and the lines after it. Lines further down started
+            // from a guessed state.
+            bool exact = firstScreen.FirstLine == 0;
             for (int i = 0; i < firstScreen.Lines.Length && firstScreen.FirstLine + i < _lines.Count; i++)
             {
                 LineResult line = firstScreen.Lines[i];
-                _lines[firstScreen.FirstLine + i].Tokenized(line.Tokens, line.EndState, firstScreen.FirstLine == 0);
+                exact &= !line.RanOutOfTime;
+                _lines[firstScreen.FirstLine + i].Tokenized(line.Tokens, line.EndState, exact);
+                if (!exact)
+                    _firstInvalid = Math.Min(_firstInvalid, firstScreen.FirstLine + i);
             }
         }
         _textView.Redraw();
@@ -225,8 +238,9 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
     }
 
     /// <summary>
-    /// Tokenizes the lines of <paramref name="text"/> from <paramref name="firstLine"/>, with a grammar just loaded and
-    /// in the background: this compiles the expressions they need there instead of on the UI thread.
+    /// Warms up a grammar just loaded, and tokenizes the lines of <paramref name="text"/> from
+    /// <paramref name="firstLine"/>, in the background: this compiles the expressions they need there instead of on
+    /// the UI thread.
     /// </summary>
     public static FirstScreen Prepare(
         TextMateGrammar grammar,
@@ -242,9 +256,8 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
             while (texts.Count < FirstScreenLines && reader.ReadLine() is { } line)
                 texts.Add(line);
         }
-        // Without text yet, compile at least the expressions that most lines need.
-        if (texts.Count == 0)
-            Tokenize(grammar, null, s_warmUpLines, cancellationToken);
+        // Before the text, so that its first lines do not pay for it.
+        Tokenize(grammar, null, s_warmUpLines, cancellationToken);
         return new FirstScreen(firstLine, Tokenize(grammar, null, [.. texts], cancellationToken), text.Version);
     }
 
@@ -591,7 +604,11 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
 /// The state at the end of the line; null when it is unknown, and the next line starts from the start of the grammar.
 /// </param>
 /// <param name="Tokens">Pairs of start index and encoded attributes, as TextMate's binary tokens; null for none.</param>
-internal readonly record struct LineResult(IStateStack? EndState, int[]? Tokens);
+internal readonly record struct LineResult(IStateStack? EndState, int[]? Tokens)
+{
+    /// <summary>True for a line that ran out of time: it has no tokens, and the state at its end is unknown.</summary>
+    public bool RanOutOfTime => EndState is null;
+}
 
 /// <summary>The lines from <paramref name="FirstLine"/> of the text at <paramref name="Version"/>, tokenized.</summary>
 internal sealed record FirstScreen(int FirstLine, LineResult[] Lines, ITextSourceVersion? Version);

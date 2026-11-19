@@ -91,6 +91,24 @@ public sealed class HighlightingTests(UiFixture ui)
             window.ColorsOfLine(3).ShouldContain(s_string);
         });
 
+    [Fact]
+    public Task A_cold_grammar_whose_first_lines_run_out_of_time_still_colors_them() =>
+        _ui.Run(async () =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.Json, "{ \"first\": 1,\n  \"second\": 2\n}");
+            // The background's first lines each take a second, as warming up a grammar can on a slow machine.
+            using var window = new EditorWindow(
+                new CodeEditor { GrammarClock = new SlowStartClock(readings: 10), Document = document }
+            );
+
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return window.ColorsOfLine(1).Contains(s_propertyName)
+                    && window.ColorsOfLine(2).Contains(s_propertyName);
+            });
+        });
+
     /// <summary>The languages of a new editor's first frames.</summary>
     public static TheoryData<string> FirstFrameLanguages => ["json", "yaml"];
 
@@ -478,6 +496,30 @@ public sealed class HighlightingTests(UiFixture ui)
 
             public void Transform(ITextRunConstructionContext context, IList<VisualLineElement> elements) =>
                 _building(context.VisualLine.FirstDocumentLine.LineNumber);
+        }
+    }
+
+    /// <summary>A clock that moves a second each time it is read, for its first readings, and then stands still.</summary>
+    private sealed class SlowStartClock(int readings) : TimeProvider
+    {
+        private readonly Lock _lock = new();
+        private int _readings = readings;
+        private long _now;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp()
+        {
+            lock (_lock)
+            {
+                long now = _now;
+                if (_readings > 0)
+                {
+                    _readings--;
+                    _now += TimeSpan.TicksPerSecond;
+                }
+                return now;
+            }
         }
     }
 
