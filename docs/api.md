@@ -315,7 +315,7 @@ popups; the search bar and the scroll bars follow the theme variant.
   list leaves no room there, so that the list stays at the word. Ctrl+Space shows or hides them, and dragging the edges
   away from the word resizes the list's width or rows and the details' width or height, as far as the edges dragged
   change them, while the editor shows the document. Asked for by key, the list says "No suggestions." when the
-  server has none.
+  server has none, in the UI culture's language, English or German, as the search bar's.
 - **Completion icons:** VS Code's codicons, drawn as vector shapes in the theme's `symbolIcon.*` colors, as in VS
   Code, and in VS Code's colors where the theme sets none. Their designs are licensed CC BY 4.0: the package lists
   them in its third-party notices, and apps that show notices of their own include that entry.

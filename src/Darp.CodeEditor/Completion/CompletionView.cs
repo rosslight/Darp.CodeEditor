@@ -4,6 +4,7 @@ using Avalonia.Controls.Primitives;
 using AvaloniaEdit.Rendering;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.LanguageClient;
+using Darp.CodeEditor.Localization;
 using Darp.CodeEditor.Popups;
 
 namespace Darp.CodeEditor.Completion;
@@ -114,7 +115,7 @@ internal sealed class CompletionView
         // A message keeps its size, as in VS Code.
         _listPopup.IsResizable = false;
         _list.Width = DefaultWidth / 2 - 2 * Border;
-        _list.ShowMessage("No suggestions.", look, _textView.DefaultLineHeight);
+        _list.ShowMessage(Strings.NoSuggestions, look, _textView.DefaultLineHeight);
         ShowDetails(null);
         Open(wordStart);
     }
