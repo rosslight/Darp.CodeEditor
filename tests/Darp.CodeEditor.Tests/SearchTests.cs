@@ -363,23 +363,27 @@ public sealed class SearchTests(UiFixture ui)
     public Task Replace_All_beyond_the_matches_highlighted_searches_in_the_background() =>
         _ui.Run(async () =>
         {
-            // The search stops at the matches it keeps, before the line on which (a+)+$ backtracks.
-            string text =
-                string.Concat(Enumerable.Repeat("x\n", TextSearch.MaxMatches + 1)) + new string('a', 29) + "!";
-            using EditorWindow window = MarkedText.Show("|" + text, CodeLanguage.PlainText);
+            string text = string.Concat(Enumerable.Repeat("x\n", TextSearch.MaxMatches + 1));
+            // Still for the search; then running out at Replace All's first look at it.
+            var clock = new SteppingTime();
+            using var window = new EditorWindow(
+                new CodeEditor { Document = new StandaloneDocument(CodeLanguage.PlainText, text, clock) }
+            );
             CodeDocument document = window.Editor.Document.ShouldNotBeNull();
             window.Editor.OpenSearch(replace: true);
             SearchBar bar = BarOf(window);
-            bar.RegexToggle.IsChecked = true;
             bar.ReplaceBox.Text = "y";
-            bar.FindBox.Text = "x|(a+)+$";
-            await Wait.UntilAsync(() => bar.ReplaceAllButton.IsEnabled);
+            bar.FindBox.Text = "x";
+            await SearchedAsync(bar);
+            bar.ReplaceAllButton.IsEnabled.ShouldBeTrue();
+            clock.Step = TextSearch.TimeLimit;
 
             Click(bar, "Replace All");
 
-            // The click returns before the search ends: it has no outcome yet.
+            // The click returns before the search ends, whose result the UI thread takes later.
             bar.Message.ShouldBeNull();
-            await Wait.UntilAsync(() => bar.Message?.Contains("stopped", StringComparison.Ordinal) == true);
+            await SearchedAsync(bar);
+            bar.Message.ShouldNotBeNull().ShouldContain("stopped");
             document.Text.ShouldBe(text);
         });
 
@@ -476,25 +480,29 @@ public sealed class SearchTests(UiFixture ui)
             bar.FindBox.Text.ShouldBe("foo\nbar");
         });
 
+    /// <summary>
+    /// A search that runs out of its time, as one for a regular expression such as <c>(a+)+$</c> does, says so, and
+    /// Replace All then replaces nothing.
+    /// </summary>
     [Fact]
-    public Task A_pathological_regular_expression_stops_with_a_message_and_Replace_All_is_refused() =>
+    public Task A_search_out_of_its_time_says_so_and_Replace_All_is_refused() =>
         _ui.Run(async () =>
         {
-            // The prototype's search froze for 21 s on this expression and line.
-            string text = new string('a', 29) + "!";
-            using EditorWindow window = MarkedText.Show("|" + text, CodeLanguage.PlainText);
+            // A clock that runs out at the search's first look at it.
+            var clock = new SteppingTime { Step = TextSearch.TimeLimit };
+            using var window = new EditorWindow(
+                new CodeEditor { Document = new StandaloneDocument(CodeLanguage.PlainText, "aaa", clock) }
+            );
             window.Editor.OpenSearch(replace: true);
             SearchBar bar = BarOf(window);
-            bar.RegexToggle.IsChecked = true;
             bar.ReplaceBox.Text = "b";
+            bar.FindBox.Text = "a";
+            await SearchedAsync(bar);
 
-            bar.FindBox.Text = "(a+)+$";
-            // Not a time limit for the test: a guard against a search that never returns.
-            await Wait.UntilAsync(() => bar.Message?.Contains("stopped", StringComparison.Ordinal) == true);
-
+            bar.Message.ShouldNotBeNull().ShouldContain("stopped");
             bar.ReplaceAllButton.IsEnabled.ShouldBeFalse();
             Click(bar, "Replace All");
-            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(text);
+            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe("aaa");
         });
 
     [Fact]
@@ -559,22 +567,19 @@ public sealed class SearchTests(UiFixture ui)
     public Task A_search_of_the_document_shown_before_never_shows_for_the_next_one() =>
         _ui.Run(async () =>
         {
-            // The first document's search runs into the time limit; the second's finds one match at once.
-            CodeDocument slow = CodeDocument.Create(CodeLanguage.PlainText, new string('a', 29) + "!");
-            using EditorWindow window = MarkedText.Show("|aaa", CodeLanguage.PlainText);
-            CodeDocument quick = window.Editor.Document.ShouldNotBeNull();
-            window.Editor.Document = slow;
+            // The first document's search can show only after the switch: the UI thread takes its result.
+            CodeDocument first = CodeDocument.Create(CodeLanguage.PlainText, "aaa");
+            using EditorWindow window = MarkedText.Show("|a", CodeLanguage.PlainText);
+            CodeDocument next = window.Editor.Document.ShouldNotBeNull();
+            window.Editor.Document = first;
             window.Editor.OpenSearch();
             SearchBar bar = BarOf(window);
-            bar.RegexToggle.IsChecked = true;
-            bar.FindBox.Text = "(a+)+$";
-            Task first = bar.LatestSearch;
+            bar.FindBox.Text = "a";
+            Task firstSearch = bar.LatestSearch;
 
-            window.Editor.Document = quick;
-            await Wait.UntilAsync(() => bar.Count == "? of 1");
-            // Once the first search has ended, and its result was shown or dropped.
-            await Wait.ForAsync(first);
-            Dispatcher.UIThread.RunJobs();
+            window.Editor.Document = next;
+            await Wait.ForAsync(firstSearch);
+            await SearchedAsync(bar);
 
             bar.Count.ShouldBe("? of 1");
             bar.Message.ShouldBeNull();
@@ -758,7 +763,10 @@ public sealed class SearchTests(UiFixture ui)
             document.Text.ShouldBe("Bar BAR bar");
         });
 
-    /// <summary>Completes once the latest search shows its result, or at once without one under way.</summary>
+    /// <summary>
+    /// Completes once the search's latest work in the background, and any it started, has shown its result, or at once
+    /// without work under way.
+    /// </summary>
     internal static async Task SearchedAsync(SearchBar bar)
     {
         Task latest;

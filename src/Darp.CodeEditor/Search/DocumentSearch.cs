@@ -31,6 +31,10 @@ internal sealed class DocumentSearch : IDisposable
     private readonly EditorContext _context;
     private readonly TextDocument _buffer;
     private readonly TextChanges _changes;
+
+    /// <summary>The clock of the searches' time limit: the document's.</summary>
+    private readonly TimeProvider _clock;
+
     private readonly SearchBar _bar;
     private readonly SearchMatchLayer _matchLayer;
     private readonly SearchScopeLayer _scopeLayer;
@@ -71,6 +75,7 @@ internal sealed class DocumentSearch : IDisposable
         _context = context;
         _buffer = context.Area.Document;
         _changes = changes;
+        _clock = context.Document.TimeProvider;
         _bar = bar;
         _matchLayer = new SearchMatchLayer(Area) { Colors = colors };
         _scopeLayer = new SearchScopeLayer(Area.TextView) { Colors = colors };
@@ -87,7 +92,10 @@ internal sealed class DocumentSearch : IDisposable
         Search(SearchMove.None);
     }
 
-    /// <summary>The latest search: completes once its result shows, or was dropped.</summary>
+    /// <summary>
+    /// The latest work in the background: a search, a search for a match beyond those kept, or Replace All's. It
+    /// completes once its result was taken, or dropped, on the UI thread.
+    /// </summary>
     public Task LatestSearch { get; private set; } = Task.CompletedTask;
 
     /// <summary>The colors of the color theme, once it is loaded.</summary>
@@ -180,7 +188,7 @@ internal sealed class DocumentSearch : IDisposable
         List<TextRange>? scope = Scope();
         TextSnapshot snapshot = _context.Document.CurrentSnapshot;
         LatestSearch = _search.Start(
-            cancellation => TextSearch.Find(snapshot, query, replacement, scope, cancellation),
+            cancellation => TextSearch.Find(snapshot, query, replacement, scope, cancellation, _clock),
             OnSearched
         );
         UpdateStatus();
@@ -217,7 +225,11 @@ internal sealed class DocumentSearch : IDisposable
                 // The last match before the selection, which may be beyond the last kept, or the last of all.
                 int before = after is null ? selection.Start : int.MaxValue;
                 int from = last.StartOffset;
-                Seek(result, move, (text, scope, c) => TextSearch.FindPrevious(text, query, scope, from, before, c));
+                Seek(
+                    result,
+                    move,
+                    (text, scope, c) => TextSearch.FindPrevious(text, query, scope, from, before, c, _clock)
+                );
             }
             return;
         }
@@ -231,7 +243,11 @@ internal sealed class DocumentSearch : IDisposable
         if (next is not null)
             Select(next);
         else if (capped)
-            Seek(result, move, (text, scope, c) => TextSearch.FindNext(text, query, null, scope, start, skipEmpty, c));
+            Seek(
+                result,
+                move,
+                (text, scope, c) => TextSearch.FindNext(text, query, null, scope, start, skipEmpty, c, _clock)
+            );
         else
             Select(first);
     }
@@ -256,7 +272,7 @@ internal sealed class DocumentSearch : IDisposable
                 result,
                 SearchMove.Next,
                 (text, scope, c) =>
-                    TextSearch.FindNext(text, result.Query, replacement, scope, selection.Start, false, c),
+                    TextSearch.FindNext(text, result.Query, replacement, scope, selection.Start, false, c, _clock),
                 found =>
                 {
                     if (found.StartOffset == selection.Start && found.Length == selection.Length)
@@ -288,8 +304,8 @@ internal sealed class DocumentSearch : IDisposable
             return;
         TextSnapshot snapshot = _context.Document.CurrentSnapshot;
         List<TextRange>? scope = Scope();
-        _replaceAll.Start(
-            cancellation => TextSearch.ReplaceAll(snapshot, result.Query, replacement, scope, cancellation),
+        LatestSearch = _replaceAll.Start(
+            cancellation => TextSearch.ReplaceAll(snapshot, result.Query, replacement, scope, cancellation, _clock),
             replaced =>
             {
                 // A change of the text, the query, the replacement or the scope searches again and cancels this.
@@ -405,7 +421,7 @@ internal sealed class DocumentSearch : IDisposable
         TextSnapshot snapshot = _context.Document.CurrentSnapshot;
         List<TextRange>? scope = Scope();
         TextRange selection = _changes.Selection.Range;
-        _seek.Start(
+        LatestSearch = _seek.Start(
             cancellation => find(snapshot, scope, cancellation),
             sought =>
             {

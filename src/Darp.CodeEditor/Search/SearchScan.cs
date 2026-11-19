@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
 using Darp.CodeEditor.Editing;
@@ -23,7 +22,8 @@ internal sealed class SearchScan
     private readonly Regex _regex;
     private readonly MatchFound _found;
     private readonly CancellationToken _cancellationToken;
-    private readonly long _start = Stopwatch.GetTimestamp();
+    private readonly TimeProvider _clock;
+    private readonly long _start;
 
     /// <summary>Whether the regular expression has groups, whose bounds a match must not put inside a pair.</summary>
     private readonly bool _hasGroups;
@@ -33,9 +33,12 @@ internal sealed class SearchScan
         SearchQuery query,
         Regex regex,
         MatchFound found,
+        TimeProvider clock,
         CancellationToken cancellationToken
     )
     {
+        _clock = clock;
+        _start = clock.GetTimestamp();
         _text = text;
         _query = query;
         _regex = regex;
@@ -204,7 +207,7 @@ internal sealed class SearchScan
     private bool IsOutOfTime()
     {
         _cancellationToken.ThrowIfCancellationRequested();
-        return Stopwatch.GetElapsedTime(_start) >= TextSearch.TimeLimit;
+        return _clock.GetElapsedTime(_start) >= TextSearch.TimeLimit;
     }
 
     /// <summary>Whether <paramref name="offset"/> is between a <c>\r</c> and its <c>\n</c>.</summary>
