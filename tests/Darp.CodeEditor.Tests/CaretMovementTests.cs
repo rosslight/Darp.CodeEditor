@@ -110,6 +110,24 @@ public sealed class CaretMovementTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe("abcdef\nabc|def\nabcdef");
         });
 
+    /// <summary>Up and Down's other keys on macOS; elsewhere the editor leaves them to the app.</summary>
+    [Fact]
+    public Task On_macOS_Ctrl_P_and_Ctrl_N_move_as_Up_and_Down_also_to_the_texts_ends() =>
+        _ui.Run(() =>
+        {
+            bool mac = OperatingSystem.IsMacOS();
+            using EditorWindow window = MarkedText.Show("ab|c\nabc", CodeLanguage.PlainText);
+
+            window.Press(Key.N, KeyModifiers.Control);
+            MarkedText.Of(window).ShouldBe(mac ? "abc\nab|c" : "ab|c\nabc");
+            window.Press(Key.N, KeyModifiers.Control);
+            MarkedText.Of(window).ShouldBe(mac ? "abc\nabc|" : "ab|c\nabc");
+
+            window.Editor.Selection = new TextSelection(2);
+            window.Press(Key.P, KeyModifiers.Control);
+            MarkedText.Of(window).ShouldBe(mac ? "|abc\nabc" : "ab|c\nabc");
+        });
+
     [Fact]
     public Task With_Shift_Up_and_Down_select_to_the_documents_start_and_end() =>
         _ui.Run(() =>
