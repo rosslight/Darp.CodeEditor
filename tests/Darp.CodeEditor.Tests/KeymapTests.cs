@@ -96,6 +96,13 @@ public sealed class KeymapTests(UiFixture ui)
         KeyResolution.Of(keymap, divide, Key(Keys.G, KeyModifiers.None)).Commands.ShouldBe(["divide"]);
     }
 
+    /// <summary>Only an omitted or empty key removes every binding of the command.</summary>
+    [Fact]
+    public void A_key_that_is_no_string_is_refused() =>
+        Should.Throw<System.Text.Json.JsonException>(() =>
+            CodeEditorKeymap.FromJson("""[ { "key": 7, "command": "-actions.find" } ]""")
+        );
+
     [Fact]
     public Task A_sequence_waits_for_its_second_key_and_says_so() =>
         _ui.Run(() =>
