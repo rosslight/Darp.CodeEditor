@@ -54,6 +54,12 @@ internal enum SearchOption
 /// </remarks>
 internal sealed class SearchBar : UserControl
 {
+    /// <summary>The width of the query and the replacement in an editor wide enough for the bar.</summary>
+    private const double BoxWidth = 220;
+
+    /// <summary>The narrowest that they get in a narrow editor, before the rows wrap.</summary>
+    private const double MinBoxWidth = 100;
+
     private static readonly Geometry s_previous = Geometry.Parse("M8,2 L14,9 L10,9 L10,14 L6,14 L6,9 L2,9 Z");
     private static readonly Geometry s_next = Geometry.Parse("M8,14 L14,7 L10,7 L10,2 L6,2 L6,7 L2,7 Z");
     private static readonly Geometry s_close = Geometry.Parse(
@@ -79,7 +85,7 @@ internal sealed class SearchBar : UserControl
     private readonly ToggleButton _preserveCase = new() { Content = "AB" };
     private readonly Button _replaceOne = new();
     private readonly Button _replaceAll = new();
-    private readonly StackPanel _replaceRow;
+    private readonly WrapPanel _replaceRow;
     private readonly TextBlock _message = new() { TextWrapping = TextWrapping.Wrap, IsVisible = false };
 
     /// <summary>Whether the code, not the user, changes the bar: the search knows already.</summary>
@@ -99,7 +105,7 @@ internal sealed class SearchBar : UserControl
         _replaceRow.IsVisible = false;
         // About the width of the rows, which a longer message wraps to.
         _message.MaxWidth = 520;
-        Content = new FlyoutPresenter
+        var presenter = new FlyoutPresenter
         {
             // Not cut to a flyout's width.
             MaxWidth = double.PositiveInfinity,
@@ -114,6 +120,9 @@ internal sealed class SearchBar : UserControl
                 },
             },
         };
+        // Its rows wrap to the editor's width rather than scroll.
+        ScrollViewer.SetHorizontalScrollBarVisibility(presenter, ScrollBarVisibility.Disabled);
+        Content = presenter;
         // Raised as soon as the text changed; TextChanged comes later, posted.
         _find.TextChanging += (_, _) => OnUserChange(search => search.OnQueryChanged());
         foreach (ToggleButton option in (ToggleButton[])[_matchCase, _wholeWord, _regex])
@@ -289,6 +298,19 @@ internal sealed class SearchBar : UserControl
     /// <summary>Says that a search for a match beyond those kept, or Replace All's, stopped after its time.</summary>
     public void ShowTimedOut() => ShowMessage(null, SearchOutcome.OutOfTime);
 
+    /// <summary>
+    /// As VS Code's find widget in a narrow editor, the query and the replacement give up width, down to
+    /// <see cref="MinBoxWidth"/>, so that the buttons stay beside them and inside the editor; narrower still, the rows
+    /// wrap.
+    /// </summary>
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        Size natural = base.MeasureOverride(availableSize.WithWidth(double.PositiveInfinity));
+        double overflow = natural.Width - _find.Width + BoxWidth - availableSize.Width;
+        _find.Width = _replace.Width = Math.Clamp(BoxWidth - overflow, MinBoxWidth, BoxWidth);
+        return base.MeasureOverride(availableSize);
+    }
+
     /// <inheritdoc />
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
@@ -392,15 +414,15 @@ internal sealed class SearchBar : UserControl
     private static TextBox QueryBox() =>
         new()
         {
-            Width = 220,
+            Width = BoxWidth,
             AcceptsReturn = true,
             NewLine = "\n",
             MaxLines = 6,
         };
 
-    private static StackPanel Row(params Control[] children)
+    private static WrapPanel Row(params Control[] children)
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+        var row = new WrapPanel { ItemSpacing = 4, LineSpacing = 4 };
         row.Children.AddRange(children);
         return row;
     }
