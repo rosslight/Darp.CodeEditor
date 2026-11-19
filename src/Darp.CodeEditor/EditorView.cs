@@ -52,6 +52,7 @@ internal sealed class EditorView : IDisposable
     /// <summary>Everything the view made, in the order it made them: disposed the other way round.</summary>
     private readonly IDisposable[] _features;
 
+    private readonly CaretMoves _caretMoves;
     private readonly TextChanges _changes;
     private readonly AutoClosingPairs _pairs;
     private readonly Typing _typing;
@@ -86,6 +87,7 @@ internal sealed class EditorView : IDisposable
         // Before the features, which run each other's commands; they add them once all are made.
         _commands = new CommandTable(area);
         Highlighter = new BackgroundTextMateHighlighter(area.TextView, area.Document, context.Editor.Dispatcher, null);
+        _caretMoves = new CaretMoves(context.Editor, area);
         _changes = new TextChanges(area);
         _pairs = new AutoClosingPairs(area, document, Highlighter, _changes, context.Options);
         _typing = new Typing(area, document, Highlighter, _changes, _pairs);
@@ -105,14 +107,16 @@ internal sealed class EditorView : IDisposable
             Highlighter,
             _snippets,
             _changes,
+            _caretMoves,
             context.Background,
-            id => _commands.TryRun(id)
+            RunCommand
         );
-        _signatureHelp = new SignatureHelpController(context.Editor, area, document, Highlighter);
+        _signatureHelp = new SignatureHelpController(context.Editor, area, document, Highlighter, _caretMoves);
         _search = new FindController(context, _changes);
         _features =
         [
             Highlighter,
+            _caretMoves,
             _changes,
             new UndoCommands(area, document),
             new Comments(area, document, _changes),
@@ -187,14 +191,14 @@ internal sealed class EditorView : IDisposable
         }
         if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && Dismiss())
             return true;
-        return _context.Area.IsFocused
-            && (
-                _completion.OnKeyDown(e)
-                || _signatureHelp.OnKeyDown(e)
-                || _snippets.OnKeyDown(e)
-                || _typing.OnKeyDown(e)
-                || CaretKeys.OnKeyDown(_context.Area, e)
-            );
+        if (!_context.Area.IsFocused)
+            return false;
+        _caretMoves.OnKeyboard();
+        return _completion.OnKeyDown(e)
+            || _signatureHelp.OnKeyDown(e)
+            || _snippets.OnKeyDown(e)
+            || _typing.OnKeyDown(e)
+            || CaretKeys.OnKeyDown(_context.Area, e);
     }
 
     /// <summary>
@@ -234,6 +238,7 @@ internal sealed class EditorView : IDisposable
     {
         if (!_context.Area.IsFocused)
             return;
+        _caretMoves.OnKeyboard();
         _completion.OnTextInput(e);
         if (!e.Handled)
             _typing.OnTextInput(e);

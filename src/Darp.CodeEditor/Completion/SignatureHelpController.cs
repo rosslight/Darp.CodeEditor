@@ -32,7 +32,8 @@ namespace Darp.CodeEditor.Completion;
 /// Up and Down show the other signatures, while completion's list is closed.
 /// </para>
 /// <para>
-/// <see cref="Close"/> ends it, for every reason it ends: Escape, leaving the call, when the server answers with none,
+/// <see cref="Close"/> ends it, for every reason it ends: Escape, leaving the call, a click or drag that moves the caret,
+/// when the server answers with none,
 /// the editor becoming read-only, the editor losing the keyboard focus, a server that starts or stops serving the
 /// document, new colors, the caret's line scrolling out of view, and the editor no longer showing the document.
 /// </para>
@@ -48,6 +49,7 @@ internal sealed class SignatureHelpController : IEditorFeature
     private readonly TextDocument _buffer;
     private readonly CodeDocument _document;
     private readonly BackgroundTextMateHighlighter _highlighter;
+    private readonly CaretMoves _caretMoves;
     private readonly PopupScroller _content = new();
     private readonly EditorPopup _popup;
     private PopupColors _colors = PopupColors.Default;
@@ -68,10 +70,12 @@ internal sealed class SignatureHelpController : IEditorFeature
         TemplatedControl editor,
         TextArea textArea,
         CodeDocument document,
-        BackgroundTextMateHighlighter highlighter
+        BackgroundTextMateHighlighter highlighter,
+        CaretMoves caretMoves
     )
     {
         _editor = editor;
+        _caretMoves = caretMoves;
         _textArea = textArea;
         _textView = textArea.TextView;
         _buffer = textArea.Document;
@@ -82,8 +86,8 @@ internal sealed class SignatureHelpController : IEditorFeature
         _popup.Frame.Padding = new Avalonia.Thickness(8, 4);
         _popup.Frame.MaxWidth = 440;
         _textArea.TextEntered += OnTextEntered;
-        _textArea.Caret.PositionChanged += OnEditOrCaretMove;
-        _buffer.Changed += OnEditOrCaretMove;
+        _textArea.Caret.PositionChanged += OnCaretPositionChanged;
+        _buffer.Changed += OnEdit;
         _document.LanguageFeaturesChanged += OnClosingChange;
         _popup.LeftView += OnClosingChange;
     }
@@ -152,8 +156,8 @@ internal sealed class SignatureHelpController : IEditorFeature
     {
         Close();
         _textArea.TextEntered -= OnTextEntered;
-        _textArea.Caret.PositionChanged -= OnEditOrCaretMove;
-        _buffer.Changed -= OnEditOrCaretMove;
+        _textArea.Caret.PositionChanged -= OnCaretPositionChanged;
+        _buffer.Changed -= OnEdit;
         _document.LanguageFeaturesChanged -= OnClosingChange;
         _popup.LeftView -= OnClosingChange;
     }
@@ -168,13 +172,19 @@ internal sealed class SignatureHelpController : IEditorFeature
             Ask(SignatureHelpTriggerKind.TriggerCharacter, typed);
     }
 
-    /// <summary>
-    /// While active, an edit, also one that leaves the caret where it was, or a caret move outdates what is asked, and
-    /// restarts the pause.
-    /// </summary>
-    private void OnEditOrCaretMove(object? sender, EventArgs e)
+    /// <summary>While active, an edit, also one that leaves the caret where it was, outdates what is asked.</summary>
+    private void OnEdit(object? sender, EventArgs e)
     {
         if (IsActive)
+            Wait();
+    }
+
+    /// <summary>A caret that the pointer moves ends signature help; any other move outdates what is asked.</summary>
+    private void OnCaretPositionChanged(object? sender, EventArgs e)
+    {
+        if (_caretMoves.Mover == CaretMover.Pointer)
+            Close();
+        else if (IsActive)
             Wait();
     }
 

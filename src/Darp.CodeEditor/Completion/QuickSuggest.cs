@@ -106,7 +106,7 @@ internal sealed class QuickSuggest : IDisposable
     }
 
     /// <summary>
-    /// Whether <paramref name="word"/> reads as a number, as VS Code tells by JavaScript's <c>Number</c>: decimal digits,
+    /// Whether <paramref name="word"/> reads as a number, as JavaScript's <c>Number</c> reads it: decimal digits,
     /// with an exponent, or hexadecimal, binary or octal ones after their prefix. A word holds no sign or dot.
     /// </summary>
     private static bool IsNumber(string word)
