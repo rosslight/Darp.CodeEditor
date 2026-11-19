@@ -62,7 +62,7 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+shift+space (shift+cmd+space)</term><description><see cref="CodeEditorCommands.TriggerParameterHints"/></description></item>
     /// <item><term>ctrl+f (cmd+f)</term><description><see cref="CodeEditorCommands.Find"/></description></item>
     /// <item><term>ctrl+h (alt+cmd+f)</term><description><see cref="CodeEditorCommands.Replace"/></description></item>
-    /// <item><term>f3, shift+f3</term><description><see cref="CodeEditorCommands.FindNext"/>, <see cref="CodeEditorCommands.FindPrevious"/></description></item>
+    /// <item><term>f3, shift+f3 (also cmd+g, shift+cmd+g)</term><description><see cref="CodeEditorCommands.FindNext"/>, <see cref="CodeEditorCommands.FindPrevious"/></description></item>
     /// <item><term>ctrl+/ (cmd+/)</term><description><see cref="CodeEditorCommands.CommentLine"/></description></item>
     /// <item><term>ctrl+z (cmd+z)</term><description><see cref="CodeEditorCommands.Undo"/></description></item>
     /// <item><term>ctrl+y, ctrl+shift+z (shift+cmd+z)</term><description><see cref="CodeEditorCommands.Redo"/></description></item>
@@ -118,7 +118,8 @@ public sealed class CodeEditorKeymap
         return (basedOn ?? Default).With(bindings);
     }
 
-    private static IEnumerable<CodeEditorKeyBinding> DefaultBindings(bool mac)
+    /// <summary>VS Code's keys on macOS when <paramref name="mac"/> is true, else on Windows and Linux.</summary>
+    internal static IEnumerable<CodeEditorKeyBinding> DefaultBindings(bool mac)
     {
         string command = mac ? "cmd" : "ctrl";
         yield return new("ctrl+space", CodeEditorCommands.TriggerSuggest);
@@ -130,6 +131,12 @@ public sealed class CodeEditorKeymap
         yield return new(mac ? "alt+cmd+f" : "ctrl+h", CodeEditorCommands.Replace);
         yield return new("f3", CodeEditorCommands.FindNext);
         yield return new("shift+f3", CodeEditorCommands.FindPrevious);
+        // Later, as the latest binding of a command is the one that a menu shows.
+        if (mac)
+        {
+            yield return new("cmd+g", CodeEditorCommands.FindNext);
+            yield return new("shift+cmd+g", CodeEditorCommands.FindPrevious);
+        }
         yield return new($"{command}+/", CodeEditorCommands.CommentLine);
         yield return new($"{command}+z", CodeEditorCommands.Undo);
         if (!mac)
