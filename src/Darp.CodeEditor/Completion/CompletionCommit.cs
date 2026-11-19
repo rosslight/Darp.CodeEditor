@@ -49,12 +49,20 @@ internal sealed class CompletionCommit : IDisposable
     /// still under way brings come later.
     /// </summary>
     /// <param name="item">The item, as it was resolved.</param>
-    /// <param name="request">The request that its list answered.</param>
+    /// <param name="answer">The answer that its list is.</param>
     /// <param name="replace">Whether it replaces, rather than inserts.</param>
     /// <param name="late">The resolve that brings its additional edits later; null when they are known.</param>
+    /// <param name="selected">The selection that typing replaced, for a snippet's selected text; null for none.</param>
     /// <returns>Whether the editor still shows the document: a handler of the change may show another one.</returns>
-    public bool Commit(CompletionItem item, CompletionRequest request, bool replace, ItemResolve? late)
+    public bool Commit(
+        CompletionItem item,
+        CompletionAnswer answer,
+        bool replace,
+        ItemResolve? late,
+        SelectedText? selected
+    )
     {
+        CompletionRequest request = answer.Request;
         int caret = _textArea.Caret.Offset;
         // Text typed at the caret goes in the range, and once the rest of the word is deleted, also by another editor or
         // code, the text after it stays out.
@@ -64,7 +72,9 @@ internal sealed class CompletionCommit : IDisposable
             item.Edit.Range.Start,
             Math.Min(_buffer.GetLineByOffset(caret).EndOffset, Math.Max(caret, end))
         );
-        RenderedSnippet? snippet = item.Snippet is { } source ? _snippets.Render(source, range.Start) : null;
+        RenderedSnippet? snippet = item.Snippet is { } source
+            ? _snippets.Render(source, range.Start, selected, answer.Clipboard)
+            : null;
         var main = new CompletionEdit(range, snippet?.Text ?? InLineBreaks(item.Edit.NewText));
         // In order, the item's edit marked; an additional edit at the item's start goes before its text.
         (CompletionEdit Edit, bool IsMain)[] ordered =
@@ -114,6 +124,9 @@ internal sealed class CompletionCommit : IDisposable
         }
         if (late is not null)
             ApplyLateEdits(late, step, request.Snapshot, before);
+        // As VS Code's choices go on to the next stop.
+        if (answer.IsChoice)
+            _snippets.Next();
         return true;
     }
 

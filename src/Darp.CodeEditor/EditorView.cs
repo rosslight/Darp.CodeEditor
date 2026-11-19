@@ -109,7 +109,8 @@ internal sealed class EditorView : IDisposable
             _changes,
             _caretMoves,
             context.Background,
-            RunCommand
+            RunCommand,
+            _clipboard.ReadTextAsync
         );
         _signatureHelp = new SignatureHelpController(
             context.Editor,
@@ -345,8 +346,7 @@ internal sealed class EditorView : IDisposable
     {
         PopupColors popups =
             theme is not null && colors is not null ? PopupColors.From(theme, colors) : PopupColors.Default;
-        _completion.Colors = popups;
-        _completion.Icons = icons;
+        _completion.SetColors(popups, icons);
         _snippets.Colors = colors;
         _signatureHelp.Colors = popups;
         _brackets.Colors = colors;
