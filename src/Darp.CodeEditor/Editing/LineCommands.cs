@@ -192,8 +192,8 @@ internal sealed class LineCommands : IEditorFeature
     }
 
     /// <summary>
-    /// Copies the lines above or below themselves, with the document's line breaks; the selection stays on the lines
-    /// above, so it goes with the copy when that is below.
+    /// Copies the lines above or below themselves, with the document's line breaks; the selection keeps its lines and
+    /// columns on the lines above, so it goes with the copy when that is below.
     /// </summary>
     /// <returns>Whether the lines were copied.</returns>
     private bool Copy(bool down)
@@ -208,11 +208,23 @@ internal sealed class LineCommands : IEditorFeature
         TextEdit copy = down
             ? new TextEdit(first.Offset, 0, lines + lineBreak)
             : new TextEdit(last.EndOffset, 0, lineBreak + lines);
-        int moved = down ? copy.Text.Length : 0;
+        int moved = down ? last.LineNumber - first.LineNumber + 1 : 0;
+        (Place anchor, Place caret) = (PlaceOf(selection.Anchor), PlaceOf(selection.Caret));
         bool copied = false;
         _changes.Run(
             EditStep.Own,
-            () => copied = _changes.Apply([copy], new TextSelection(selection.Anchor + moved, selection.Caret + moved))
+            () =>
+            {
+                if (copied = _changes.Apply([copy]))
+                {
+                    _changes.Select(
+                        new TextSelection(
+                            OffsetOf(anchor with { Line = anchor.Line + moved }),
+                            OffsetOf(caret with { Line = caret.Line + moved })
+                        )
+                    );
+                }
+            }
         );
         return copied;
     }
@@ -341,6 +353,12 @@ internal sealed class LineCommands : IEditorFeature
                 ? new TextSelection(startOffset, endOffset)
                 : new TextSelection(endOffset, startOffset)
         );
+    }
+
+    private Place PlaceOf(int offset)
+    {
+        DocumentLine line = Buffer.GetLineByOffset(offset);
+        return new Place(line.LineNumber, offset - line.Offset);
     }
 
     /// <summary>The offset of <paramref name="place"/>, within its line.</summary>

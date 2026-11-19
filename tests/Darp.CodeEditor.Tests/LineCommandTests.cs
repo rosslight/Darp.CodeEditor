@@ -221,6 +221,9 @@ public sealed class LineCommandTests(UiFixture ui)
     [InlineData("a\n|\nb", true, "a\n\n|\nb")]
     [InlineData("a\n|\nb", false, "a\n|\n\nb")]
     [InlineData("ab|", false, "ab|\nab")]
+    // In other line breaks than the document's: the selection keeps its lines and columns.
+    [InlineData("«a\r\n»b\nc\nd", false, "«a\n»a\r\nb\nc\nd")]
+    [InlineData("«a\r\n»b\nc\nd", true, "a\n«a\r\n»b\nc\nd")]
     public Task Copying_lines_puts_a_copy_above_or_below_them_and_the_selection_on_the_lower_one_going_down(
         string marked,
         bool down,
