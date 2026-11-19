@@ -193,11 +193,14 @@ internal sealed class LineCommands : IEditorFeature
 
     /// <summary>
     /// Copies the lines above or below themselves, with the document's line breaks; the selection keeps its lines and
-    /// columns on the lines above, so it goes with the copy when that is below.
+    /// columns on the lines above, so it goes with the copy when that is below. Not in a rectangle selection, whose
+    /// keys go on to AvaloniaEdit's: Shift+Alt+Up and Shift+Alt+Down extend it on Windows.
     /// </summary>
     /// <returns>Whether the lines were copied.</returns>
     private bool Copy(bool down)
     {
+        if (_area.Selection is RectangleSelection)
+            return false;
         TextSelection selection = _changes.Selection;
         (DocumentLine first, DocumentLine last, _) = LinesOf(selection.Range);
         string lineBreak = _document.LineBreak;
