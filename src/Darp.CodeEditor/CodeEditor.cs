@@ -745,6 +745,12 @@ public class CodeEditor : TemplatedControl
     internal bool KeyboardMovesCaret { get; private set; }
 
     /// <summary>
+    /// The key whose commands the keymap runs now; null otherwise, as for a command from the context menu. Completion
+    /// presses it again when the item it waited to accept matches nothing.
+    /// </summary>
+    internal KeyEventArgs? KeymapKey { get; private set; }
+
+    /// <summary>
     /// Scrolls <paramref name="range"/> into view: not at all when it is visible, centered when it is not. A range
     /// taller or wider than the view shows from its start.
     /// </summary>
@@ -1276,7 +1282,10 @@ public class CodeEditor : TemplatedControl
             return;
         bool closedHover = CloseHoverOnKey(e);
         KeyboardMovesCaret = false;
-        if (RunKeymap(e))
+        KeymapKey = e;
+        bool ran = RunKeymap(e);
+        KeymapKey = null;
+        if (ran)
             e.Handled = true;
         else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && (Dismiss() || closedHover))
             e.Handled = true;

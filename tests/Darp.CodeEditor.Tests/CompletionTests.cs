@@ -389,6 +389,27 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Enter_that_waits_for_a_filter_that_matches_nothing_goes_on_to_a_new_line() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("println"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Type("pri");
+            await WaitForLabelsAsync(window, ["println"]);
+
+            // Typed, and Enter pressed, before the filter of "prizzz" shows: "println" does not match it.
+            TypeAlone(window, "zzz");
+            PressAlone(window, Key.Enter);
+
+            // Opened by typing, the list ends once that filter has run, and Enter makes its new line then.
+            await Wait.UntilAsync(() => List(window) is null);
+            document.Text.ShouldBe("prizzz\n");
+        });
+
+    [Fact]
     public Task An_edit_that_leaves_the_caret_drops_the_commit_that_waits_for_a_filter() =>
         _ui.Run(async () =>
         {

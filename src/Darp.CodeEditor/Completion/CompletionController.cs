@@ -47,8 +47,9 @@ namespace Darp.CodeEditor.Completion;
 /// inserts, over the word up to the caret, or replaces, over the rest of the word too; a click and a commit character
 /// insert. While the filter of the current text still runs, they commit the item that shows if it matches the current
 /// text, checked on the UI thread for that item alone; otherwise accepting commits what that filter selects once it has
-/// run, unless the text, by any editor or code, or the caret changes before, and a commit character goes in as text, as
-/// it does when nothing matches: deciding later would hold back or reorder what the user types. A read-only editor
+/// run, unless the text, by any editor or code, or the caret changes before, and when nothing matches then, the key that
+/// accepted goes on, as Enter to a new line; a commit character goes in as text, as it does when nothing matches:
+/// deciding later would hold back or reorder what the user types. A read-only editor
 /// neither completes nor commits. The server resolves the selected item, so that its detail and documentation show
 /// beside the list. An item whose additional edits are still to come when it is committed gets them when they come, as
 /// in VS Code, unless the text changed before where they start since: in its step while that is the last one, and
@@ -216,7 +217,7 @@ internal sealed class CompletionController : IDisposable
         if (CanCommit(session, session.Selected))
             Commit(session, session.Selected, replace);
         else
-            CommitWhenFiltered(session, replace);
+            CommitWhenFiltered(session, replace, _editor.KeymapKey is { } key ? new PressedKey(key) : null);
         return true;
     }
 
@@ -543,6 +544,7 @@ internal sealed class CompletionController : IDisposable
     {
         if (filtered.Items.Count == 0)
         {
+            PressedKey? waiting = session.CommitAt == key ? session.CommitKey : null;
             // As in VS Code: asked by key, the items of the answer that showed last stay, frozen, while the caret is in
             // a word; when none of its items showed, the list says that nothing matches. Otherwise, an incomplete list
             // may have more for what is typed, and a newer request, as for a trigger character typed while the list
@@ -559,7 +561,13 @@ internal sealed class CompletionController : IDisposable
             else if (WordBefore(key.Caret).Length == 0)
                 Close();
             else
+            {
                 Freeze(session, key);
+                return;
+            }
+            // The key that waited for this filter to accept goes on, as it would have without the list.
+            if (waiting is { } pressed)
+                Press(pressed);
             return;
         }
         session.ShowsNoMatch = false;
@@ -709,16 +717,37 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>
     /// Commits what the filter of the current text selects once it has run, for <see cref="Accept"/>, unless the text
-    /// or the caret changes before; starts that filter if none runs.
+    /// or the caret changes before; starts that filter if none runs. When that filter finds nothing to commit,
+    /// <paramref name="key"/>, the key that accepted, does what it does without a list.
     /// </summary>
-    private void CommitWhenFiltered(Session session, bool replace)
+    private void CommitWhenFiltered(Session session, bool replace, PressedKey? key)
     {
         if (session.Answer is not { } answer)
             return;
         session.CommitAt = CurrentKey(answer);
         session.CommitReplaces = replace;
+        session.CommitKey = key;
         Filter(session, answer, _textArea.Caret.Offset);
     }
+
+    /// <summary>
+    /// Presses <paramref name="key"/> again, now that the list no longer takes it, as the key that waited for a filter
+    /// that found nothing: it goes on as it would have without a list, as Enter to a new line. In VS Code, which filters
+    /// as the user types, the list is gone before such a key.
+    /// </summary>
+    private void Press(PressedKey key) =>
+        _textArea.RaiseEvent(
+            new KeyEventArgs
+            {
+                RoutedEvent = InputElement.KeyDownEvent,
+                Source = _textArea,
+                Key = key.Key,
+                KeyModifiers = key.Modifiers,
+                PhysicalKey = key.PhysicalKey,
+                KeySymbol = key.Symbol,
+                KeyDeviceType = key.DeviceType,
+            }
+        );
 
     /// <summary>
     /// The text typed from <paramref name="start"/> up to <paramref name="caret"/>, as far as the matcher reads it: an
@@ -1250,6 +1279,19 @@ internal sealed class CompletionController : IDisposable
     /// <summary>An item's resolve, under way or done.</summary>
     private sealed record Resolve(Task<CompletionItem?> Task, CancellationTokenSource Cancellation);
 
+    /// <summary>A key that was pressed, to press it again.</summary>
+    private readonly record struct PressedKey(
+        Key Key,
+        KeyModifiers Modifiers,
+        PhysicalKey PhysicalKey,
+        string? Symbol,
+        KeyDeviceType DeviceType
+    )
+    {
+        public PressedKey(KeyEventArgs e)
+            : this(e.Key, e.KeyModifiers, e.PhysicalKey, e.KeySymbol, e.KeyDeviceType) { }
+    }
+
     /// <summary>What a list is filtered for: an answer, at a version of the text and a caret.</summary>
     private readonly record struct FilterKey(Answer Answer, int Version, int Caret);
 
@@ -1310,6 +1352,12 @@ internal sealed class CompletionController : IDisposable
 
         /// <summary>Whether the commit that waits for <see cref="CommitAt"/> replaces the rest of the word.</summary>
         public bool CommitReplaces { get; set; }
+
+        /// <summary>
+        /// The key that accepted for <see cref="CommitAt"/>, to press again when its filter finds nothing to commit;
+        /// null for none, as when the context menu accepted.
+        /// </summary>
+        public PressedKey? CommitKey { get; set; }
 
         /// <summary>The items that show, in order.</summary>
         public List<ShownItem> Items { get; set; } = [];
