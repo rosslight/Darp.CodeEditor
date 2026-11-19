@@ -9,7 +9,10 @@ namespace Darp.CodeEditor.Editing;
 /// The auto-closing and surrounding pairs of one editor's view, from the language's <c>autoClosingPairs</c> and
 /// <c>surroundingPairs</c>, as VS Code types them: an opening character brings its closing one, which typing steps over
 /// and Backspace deletes with it while the caret stays inside the pair; an opening character typed over a selection
-/// surrounds it. In a rectangle selection, each acts on every line or on none.
+/// surrounds it. In a rectangle selection, each acts on every line or on none. <see cref="CodeEditorOptions.AutoClosing"/>
+/// says where brackets and quotes close; typing over and deleting act only on pairs that the editor closed, and
+/// surrounding on every pair, as VS Code's defaults for <c>editor.autoClosingOvertype</c>, <c>autoClosingDelete</c> and
+/// <c>autoSurround</c>.
 /// </summary>
 /// <remarks>
 /// A pair that the language does not close in strings or comments asks the highlighter for the tokens where the user
@@ -17,13 +20,11 @@ namespace Darp.CodeEditor.Editing;
 /// </remarks>
 internal sealed class AutoClosingPairs : IDisposable
 {
-    /// <summary>The characters before which a pair closes.</summary>
-    private const string CloseBefore = ";:.,=}])> \n\t";
-
     private readonly TextArea _area;
     private readonly CodeDocument _document;
     private readonly BackgroundTextMateHighlighter _highlighter;
     private readonly TextChanges _changes;
+    private readonly Func<CodeEditorOptions> _options;
 
     /// <summary>The closing texts that the editor typed, while the caret stays inside their pair.</summary>
     private readonly List<AutoClosed> _autoClosed = [];
@@ -32,13 +33,15 @@ internal sealed class AutoClosingPairs : IDisposable
         TextArea area,
         CodeDocument document,
         BackgroundTextMateHighlighter highlighter,
-        TextChanges changes
+        TextChanges changes,
+        Func<CodeEditorOptions> options
     )
     {
         _area = area;
         _document = document;
         _highlighter = highlighter;
         _changes = changes;
+        _options = options;
         area.Caret.PositionChanged += OnCaretPositionChanged;
     }
 
@@ -97,9 +100,9 @@ internal sealed class AutoClosingPairs : IDisposable
 
     /// <summary>
     /// The pair that <paramref name="typed"/> closes where it goes in, the same one at each place, or none: the one with
-    /// the longest opening that the character completes. It closes only before whitespace, a character of
-    /// <see cref="CloseBefore"/> or another closing character; a quote not right after a word; and a pair not closed in
-    /// strings or comments only where the tokens before the caret and of the typed text are neither.
+    /// the longest opening that the character completes. It closes where the options let it, or before another closing
+    /// character; a quote not right after a word, unless quotes always close; and a pair not closed in strings or
+    /// comments only where the tokens before the caret and of the typed text are neither.
     /// </summary>
     public AutoClosingPair? PairToClose(char typed)
     {
@@ -147,9 +150,13 @@ internal sealed class AutoClosingPairs : IDisposable
         {
             if (offset == 0 || offset >= Buffer.TextLength)
                 return false;
-            string open = Buffer.GetCharAt(offset - 1).ToString();
-            string close = Buffer.GetCharAt(offset).ToString();
-            return Configuration.AutoClosingPairs.Any(pair => pair.Open == open && pair.Close == close)
+            char open = Buffer.GetCharAt(offset - 1);
+            char close = Buffer.GetCharAt(offset);
+            AutoClosingOptions options = _options().AutoClosing;
+            return (IsQuote(open) ? options.Quotes : options.Brackets) != AutoClosingMode.Never
+                && Configuration.AutoClosingPairs.Any(pair =>
+                    pair is { Open: [char o], Close: [char c] } && o == open && c == close
+                )
                 && _autoClosed.Exists(pair => pair.Close.Offset == offset);
         }
     }
@@ -191,11 +198,23 @@ internal sealed class AutoClosingPairs : IDisposable
         }
         if (found is not { } candidate)
             return null;
+        LanguageConfiguration configuration = Configuration;
+        AutoClosingOptions options = _options().AutoClosing;
+        bool quote = IsQuote(typed);
+        AutoClosingMode mode =
+            quote ? options.Quotes
+            // Pairs that open a block comment close by the language's rules alone: comments have no option.
+            : configuration.BlockComment is { } block && candidate.Open.Contains(block.Open, StringComparison.Ordinal)
+                ? AutoClosingMode.LanguageDefined
+            : options.Brackets;
+        if (mode == AutoClosingMode.Never)
+            return null;
         string after = Buffer.GetText(caret, line.EndOffset - caret);
-        if (after.Length > 0 && !CloseBefore.Contains(after[0]) && !StartsWithClosingOnly(after))
+        if (after.Length > 0 && !ClosesBefore(mode, quote, after[0]) && !StartsWithClosingOnly(after))
             return null;
         if (
             candidate.Open is ['\'' or '"']
+            && mode != AutoClosingMode.Always
             && caret > line.Offset
             && WordCharacters.IsWordCharacter(Buffer.GetCharAt(caret - 1))
         )
@@ -212,6 +231,16 @@ internal sealed class AutoClosingPairs : IDisposable
         static bool Excludes(AutoClosingPair pair, TokenType type) =>
             (pair.NotInString && type == TokenType.String) || (pair.NotInComment && type == TokenType.Comment);
     }
+
+    /// <summary>Whether a quote, or else a bracket, closes before <paramref name="next"/> by <paramref name="mode"/>.</summary>
+    private bool ClosesBefore(AutoClosingMode mode, bool quote, char next) =>
+        mode switch
+        {
+            AutoClosingMode.Always => true,
+            AutoClosingMode.LanguageDefined => Configuration.AutoCloseBeforeSet(forQuotes: quote).Contains(next),
+            AutoClosingMode.BeforeWhitespace => next is ' ' or '\t',
+            _ => false,
+        };
 
     /// <summary>
     /// Whether <paramref name="after"/> starts with the closing text of a pair, and not with the opening text of

@@ -6,8 +6,8 @@ namespace Darp.CodeEditor.Loading;
 
 /// <summary>
 /// The editing rules of a language, from VS Code's <c>language-configuration.json</c>: comments, brackets,
-/// auto-closing and surrounding pairs, indentation rules and the rules for Enter. Other settings of the file are not
-/// read.
+/// auto-closing and surrounding pairs, the characters before which pairs close, indentation rules and the rules for
+/// Enter. Other settings of the file are not read.
 /// </summary>
 internal sealed record LanguageConfiguration(
     string? LineComment,
@@ -23,6 +23,16 @@ internal sealed record LanguageConfiguration(
 
     /// <summary>The rules for Enter, <c>onEnterRules</c>, in their order: the first that matches applies.</summary>
     public IReadOnlyList<OnEnterRule> OnEnterRules { get; init; } = [];
+
+    /// <summary>The characters before which a pair closes, <c>autoCloseBefore</c>; null for the defaults.</summary>
+    public string? AutoCloseBefore { get; init; }
+
+    /// <summary>
+    /// The characters before which a quote, or else a bracket, closes: <see cref="AutoCloseBefore"/>, or by default
+    /// those that can't start an expression, and for brackets the quotes too.
+    /// </summary>
+    public string AutoCloseBeforeSet(bool forQuotes) =>
+        AutoCloseBefore ?? (forQuotes ? ";:.,=}])> \n\t" : "'\"`;:.,=}])> \n\t");
 
     /// <summary>
     /// Finds the brackets, opening and closing, in any case, and a bracket of letters, such as <c>begin</c>, as a whole
@@ -83,6 +93,12 @@ internal sealed record LanguageConfiguration(
             OnEnterRules = Property(root, "onEnterRules") is { ValueKind: JsonValueKind.Array } onEnterRules
                 ? [.. onEnterRules.EnumerateArray().Select(OnEnter).OfType<OnEnterRule>()]
                 : [],
+            // An empty one counts as none.
+            AutoCloseBefore =
+                Property(root, "autoCloseBefore") is { ValueKind: JsonValueKind.String } closeBefore
+                && closeBefore.GetString() is { Length: > 0 } characters
+                    ? characters
+                    : null,
         };
     }
 
