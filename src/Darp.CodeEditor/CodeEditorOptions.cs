@@ -19,6 +19,9 @@ public sealed record CodeEditorOptions
     /// clipboard.
     /// </summary>
     public bool EmptySelectionClipboard { get; init; } = true;
+
+    /// <summary>What the search bar starts with as it opens: <c>editor.find.*</c>.</summary>
+    public FindOptions Find { get; init; } = new();
 }
 
 /// <summary>
@@ -52,4 +55,49 @@ public enum AutoClosingMode
 
     /// <summary>Never.</summary>
     Never,
+}
+
+/// <summary>What the search bar takes from the text as it opens, as Ctrl+F, Ctrl+H or F3 opens it.</summary>
+public sealed record FindOptions
+{
+    /// <summary>
+    /// What the query starts with: <c>editor.find.seedSearchStringFromSelection</c>. The query keeps its text unless
+    /// this gives one, and F3 takes one only for an empty query.
+    /// </summary>
+    public SeedSearchString SeedSearchStringFromSelection { get; init; } = SeedSearchString.Always;
+
+    /// <summary>When the bar searches only the selection as it opens: <c>editor.find.autoFindInSelection</c>.</summary>
+    public AutoFindInSelection AutoFindInSelection { get; init; } = AutoFindInSelection.Never;
+}
+
+/// <summary>
+/// What the search bar's query starts with as the bar opens, as VS Code's
+/// <c>editor.find.seedSearchStringFromSelection</c> values; escaped while the bar uses a regular expression.
+/// </summary>
+public enum SeedSearchString
+{
+    /// <summary>Nothing: the query keeps its text.</summary>
+    Never,
+
+    /// <summary>The selection within one line, or without a selection the word at the caret.</summary>
+    Always,
+
+    /// <summary>The selection within one line only.</summary>
+    Selection,
+}
+
+/// <summary>
+/// When the search bar turns Find in Selection on as it opens, as VS Code's <c>editor.find.autoFindInSelection</c>
+/// values. Alt+L and the bar's toggle turn it on and off either way.
+/// </summary>
+public enum AutoFindInSelection
+{
+    /// <summary>Never.</summary>
+    Never,
+
+    /// <summary>Whenever something is selected.</summary>
+    Always,
+
+    /// <summary>When the selection spans several lines.</summary>
+    Multiline,
 }

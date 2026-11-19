@@ -7,7 +7,8 @@ namespace Darp.CodeEditor;
 /// <remarks>
 /// A command applies only where it can act, and its key otherwise goes on to the binding before it, or to the editor
 /// and the app as an ordinary key. Commands on the text apply while the text has the keyboard, and those that change
-/// the text or ask a language server not in a read-only editor; the search bar's apply also while it has the keyboard.
+/// the text or ask a language server not in a read-only editor; the search bar's apply also while it has the keyboard,
+/// and its toggles also while it is closed.
 /// </remarks>
 public static class CodeEditorCommands
 {
@@ -17,17 +18,54 @@ public static class CodeEditorCommands
     /// <summary>Asks the language server for the signature of the call around the caret.</summary>
     public const string TriggerParameterHints = "editor.action.triggerParameterHints";
 
-    /// <summary>Opens the search bar, with the selection within one line as its query.</summary>
+    /// <summary>
+    /// Opens the search bar and puts the keyboard in its query, which starts with the selection within one line, or the
+    /// word at the caret, as <see cref="FindOptions.SeedSearchStringFromSelection"/> says.
+    /// </summary>
     public const string Find = "actions.find";
 
-    /// <summary>Opens the search bar with its replace row; a read-only editor opens the search bar only.</summary>
+    /// <summary>
+    /// Opens the search bar with its replace row. A selection within one line becomes the query, and the keyboard then
+    /// goes into the replacement, as it does when the query has it; otherwise into the query. Not in a read-only
+    /// editor.
+    /// </summary>
     public const string Replace = "editor.action.startFindReplaceAction";
 
-    /// <summary>Selects the next match, opening the bar for the selection if it is closed.</summary>
+    /// <summary>
+    /// Selects the next match, opening the bar if it is closed, also beyond the matches it highlights. An empty query
+    /// starts as for <see cref="Find"/>.
+    /// </summary>
     public const string FindNext = "editor.action.nextMatchFindAction";
 
-    /// <summary>Selects the previous match, opening the bar for the selection if it is closed.</summary>
+    /// <summary>Selects the previous match, as <see cref="FindNext"/> selects the next one.</summary>
     public const string FindPrevious = "editor.action.previousMatchFindAction";
+
+    /// <summary>
+    /// Turns the search bar's Match Case on or off, also while the bar is closed, for the next search. An open bar
+    /// searches again and leaves the selection where it is.
+    /// </summary>
+    public const string ToggleFindCaseSensitive = "toggleFindCaseSensitive";
+
+    /// <summary>Turns Match Whole Word on or off, as <see cref="ToggleFindCaseSensitive"/> does Match Case.</summary>
+    public const string ToggleFindWholeWord = "toggleFindWholeWord";
+
+    /// <summary>
+    /// Turns Use Regular Expression on or off, as <see cref="ToggleFindCaseSensitive"/> does Match Case.
+    /// </summary>
+    public const string ToggleFindRegex = "toggleFindRegex";
+
+    /// <summary>
+    /// Turns Preserve Case on or off, as <see cref="ToggleFindCaseSensitive"/> does Match Case: a replacement without
+    /// groups then takes the case of each match, so that replacing <c>foo</c> with <c>bar</c> turns <c>FOO</c> into
+    /// <c>BAR</c>.
+    /// </summary>
+    public const string TogglePreserveCase = "togglePreserveCase";
+
+    /// <summary>
+    /// Turns Find in Selection on for the selected lines, or off, also while the bar is closed, and selects the first
+    /// match from where the search started. Without a selection it stays off; closing the bar turns it off.
+    /// </summary>
+    public const string ToggleFindInSelection = "toggleFindInSelection";
 
     /// <summary>
     /// Comments the selected lines, or the caret's, with the language's line comment, or uncomments them when all

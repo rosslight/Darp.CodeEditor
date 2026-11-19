@@ -3,7 +3,6 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
-using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
@@ -80,10 +79,12 @@ namespace Darp.CodeEditor;
 /// The font defaults to a monospace one; set <c>FontFamily</c> and <c>FontSize</c> as for any control.
 /// </para>
 /// <para>
-/// The search bar searches as the user types, in the background: plain text or a .NET regular expression, line by
-/// line, with Match Case and Match Whole Word. A search stops after 1 second, as a regular expression such as
-/// <c>(a+)+$</c> can take far longer, and keeps 10,000 matches at most. The bar says so when a search stops early, and
-/// Replace All then does nothing: it never replaces only some of the matches.
+/// The search bar searches as the user types, in the background, as VS Code's does: plain text or a .NET regular
+/// expression, across lines where the query can match a line break, with Match Case, Match Whole Word, Preserve Case
+/// and VS Code's replace syntax, and only in the selected lines with Find in Selection. Its query starts from the text
+/// as <see cref="Options"/> says. A search stops after 1 second, as a regular expression such as <c>(a+)+$</c> can
+/// take far longer, and the bar says so. It highlights 19,999 matches, and F3 and Replace All reach those beyond:
+/// Replace All never replaces only some of the matches.
 /// </para>
 /// <para>
 /// <see cref="Keymap"/> binds keys to the editor's commands, by default VS Code's: completion (Ctrl+Space, Ctrl+I),
@@ -95,9 +96,13 @@ namespace Darp.CodeEditor;
 /// macOS but for Ctrl+Space, and Linux's own keys where its desktops take these. Open popups have keys of their own,
 /// and editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation and indentation (Tab, Shift+Tab) are
 /// AvaloniaEdit's. Other keys, such as F5 or Ctrl+S, go on to the app's key bindings, and so does a key of the keymap
-/// whose command does not apply, such as Ctrl+Z in a read-only editor. A right click opens the editor's context menu:
-/// Cut, Copy, Paste and Select All. For an app's Edit menu, <see cref="Cut"/>, <see cref="Copy"/>, <see cref="Paste"/>
-/// and <see cref="SelectAll"/> do the same, and the document's <c>Undo</c> and <c>Redo</c> the rest.
+/// whose command does not apply, such as Ctrl+Z in a read-only editor. A right click opens the editor's context menu,
+/// its <c>ContextFlyout</c>, with the items' keys and in the UI culture's language, English or German: Cut, Copy,
+/// Paste, Select All, Toggle Line Comment, Find and Replace. As in VS Code, a right click outside the selection moves
+/// the caret there first. An app replaces the menu with its own <c>ContextFlyout</c> or <c>ContextMenu</c>, or removes
+/// it by setting <c>ContextFlyout</c> to null. For an app's Edit menu, <see cref="Cut"/>, <see cref="Copy"/>,
+/// <see cref="Paste"/> and <see cref="SelectAll"/> do the same, and the document's <c>Undo</c> and <c>Redo</c> the
+/// rest.
 /// </para>
 /// <para>Members that take offsets or ranges clamp them to the text.</para>
 /// </remarks>
@@ -185,6 +190,9 @@ public class CodeEditor : TemplatedControl
 
     private KeyGesture? _pendingKeys;
 
+    /// <summary>The editor's own context menu, which the app may replace.</summary>
+    private readonly EditorMenu _menu;
+
     /// <summary>The template's panel, which the search bar goes into, over the text.</summary>
     private Panel? _root;
 
@@ -250,7 +258,7 @@ public class CodeEditor : TemplatedControl
         // AvaloniaEdit checks Dispatcher.UIThread: on another dispatcher, the editor would fail later and elsewhere.
         if (Application.Current?.Dispatcher != Dispatcher)
             throw new InvalidOperationException("The editor works only on the app's main UI thread.");
-        ContextMenu = CreateContextMenu();
+        ContextFlyout = _menu = new EditorMenu(this);
         _searchCommands =
         [
             new(ApplicationCommands.Find, (_, _) => OpenSearch()),
@@ -262,6 +270,7 @@ public class CodeEditor : TemplatedControl
         AddHandler(KeyDownEvent, OnKeyDownTunnel, RoutingStrategies.Tunnel);
         AddHandler(TextInputEvent, OnTextInputTunnel, RoutingStrategies.Tunnel);
         AddHandler(PointerPressedEvent, (_, _) => EndWait(), RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(ContextRequestedEvent, OnContextRequestedTunnel, RoutingStrategies.Tunnel);
     }
 
     /// <summary>
@@ -428,8 +437,9 @@ public class CodeEditor : TemplatedControl
     }
 
     /// <summary>
-    /// Opens the search bar, as Ctrl+F does, or the replace bar, as Ctrl+H does, and puts the keyboard in its query. A
-    /// selection within one line becomes the search text. A read-only editor opens the search bar either way.
+    /// Opens the search bar, as Ctrl+F does, or the replace bar, as Ctrl+H does: their commands,
+    /// <see cref="CodeEditorCommands.Find"/> and <see cref="CodeEditorCommands.Replace"/>, say what the query starts
+    /// with and where the keyboard goes. A read-only editor opens no replace bar, as in VS Code.
     /// </summary>
     public void OpenSearch(bool replace = false) =>
         _view?.RunCommand(replace ? CodeEditorCommands.Replace : CodeEditorCommands.Find);
@@ -561,7 +571,6 @@ public class CodeEditor : TemplatedControl
         else if (change.Property == IsReadOnlyProperty)
         {
             _part?.IsReadOnly = IsReadOnly || _shown is null;
-            _searchBar?.UpdateReplaceRow();
             if (IsReadOnly)
                 _view?.OnReadOnly();
         }
@@ -655,11 +664,11 @@ public class CodeEditor : TemplatedControl
                 () => Keymap,
                 () => Options,
                 () => _searchBar,
-                CreatedSearchBar
+                CreatedSearchBar,
+                ScrollTo
             )
         );
         _view.SetColors(_theme, _colors, _iconColors);
-        _searchBar?.Attach(this, part.TextArea, document);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
         _waitingForLayout = true;
         textView.LayoutUpdated += OnTextViewLayoutUpdated;
@@ -672,7 +681,6 @@ public class CodeEditor : TemplatedControl
         shown.Disposed -= OnDocumentDisposed;
         shown.PropertyChanged -= OnDocumentPropertyChanged;
         CancelLoading();
-        _searchBar?.Detach();
         _view?.Dispose();
         _view = null;
         part.TextArea.TextView.LayoutUpdated -= OnTextViewLayoutUpdated;
@@ -730,12 +738,10 @@ public class CodeEditor : TemplatedControl
     /// </summary>
     private SearchBar? CreatedSearchBar()
     {
-        if (_searchBar is null && _root is { } root && _shown is { } shown && _part is { } part)
+        if (_searchBar is null && _root is { } root && _shown is not null)
         {
-            var bar = new SearchBar { Colors = _colors };
-            root.Children.Add(bar);
-            bar.Attach(this, part.TextArea, shown);
-            _searchBar = bar;
+            _searchBar = new SearchBar();
+            root.Children.Add(_searchBar);
         }
         return _shown is null ? null : _searchBar;
     }
@@ -1010,7 +1016,6 @@ public class CodeEditor : TemplatedControl
             _colors = colors;
             _iconColors = SymbolIconColors.From(theme);
             _view?.SetColors(theme, colors, _iconColors);
-            _searchBar?.Colors = colors;
             TextArea textArea = part.TextArea;
             part.Background = colors.Background;
             part.Foreground = colors.Foreground;
@@ -1033,31 +1038,41 @@ public class CodeEditor : TemplatedControl
             TaskScheduler.Default
         );
 
-    /// <summary>The editor's context menu, in the app's look.</summary>
-    private ContextMenu CreateContextMenu()
+    /// <summary>Runs one of <see cref="CodeEditorCommands"/> from the context menu, on the text.</summary>
+    internal void RunFromMenu(string command)
     {
-        PlatformHotkeyConfiguration? keys = Application.Current?.PlatformSettings?.HotkeyConfiguration;
-        MenuItem cut = Item("Cut", keys?.Cut, Cut);
-        MenuItem paste = Item("Paste", keys?.Paste, Paste);
-        var menu = new ContextMenu
-        {
-            ItemsSource = new Control[]
-            {
-                cut,
-                Item("Copy", keys?.Copy, Copy),
-                paste,
-                new Separator(),
-                Item("Select All", keys?.SelectAll, SelectAll),
-            },
-        };
-        menu.Opening += (_, _) => cut.IsEnabled = paste.IsEnabled = !IsReadOnly && _shown is not null;
-        return menu;
+        _part?.TextArea.Focus();
+        _view?.RunCommand(command);
+    }
 
-        static MenuItem Item(string header, List<KeyGesture>? gestures, Action action)
+    /// <summary>
+    /// A context request in the text, before the menu opens. A right click moves the caret to the click, unless it is
+    /// inside the selection, as in VS Code; a menu opened by key opens at the caret.
+    /// </summary>
+    private void OnContextRequestedTunnel(object? sender, ContextRequestedEventArgs e)
+    {
+        if (
+            _shown is null
+            || _part?.TextArea is not { } area
+            || e.Source is not Visual source
+            || !area.IsVisualAncestorOf(source) && area != source
+        )
+            return;
+        TextView view = area.TextView;
+        if (!e.TryGetPosition(view, out Point point))
         {
-            var item = new MenuItem { Header = header, InputGesture = gestures?.FirstOrDefault() };
-            item.Click += (_, _) => action();
-            return item;
+            Rect caret = area.Caret.CalculateCaretRectangle().Translate(-view.ScrollOffset);
+            _menu.OpenAt(view.TranslatePoint(caret.BottomLeft, this));
+            return;
+        }
+        _menu.OpenAt(null);
+        if (
+            view.GetPosition(point + view.ScrollOffset) is { } clicked
+            && !area.Selection.Contains(area.Document.GetOffset(clicked.Location))
+        )
+        {
+            area.ClearSelection();
+            area.Caret.Position = clicked;
         }
     }
 

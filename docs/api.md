@@ -110,7 +110,7 @@ rather than its view belong to the document, as in Monaco and CodeMirror.
 | `Keymap` | which keys run which of the editor's commands: VS Code's keys by default (below) |
 | `Options` | the settings that apps set differently for different editors or users, as VS Code's settings (below) |
 | `PendingKeys` | the first stroke of a two-stroke sequence while the editor waits for the second, such as Ctrl+K of Ctrl+K Ctrl+I; null otherwise. Read-only and bindable, for status bars |
-| `OpenSearch(replace)` | the search or replace bar, for a Find button; Ctrl+F and Ctrl+H open them too |
+| `OpenSearch(replace)` | the search or replace bar, for a Find button, as Ctrl+F and Ctrl+H open them: the query starts from the text as `Options.Find` says; a read-only editor opens no replace bar |
 | `Cut()`, `Copy()`, `Paste()`, `SelectAll()` | for an app's Edit menu; the keys and the editor's context menu do the same, and the document's `Undo` and `Redo` the rest. Without a selection, Cut and Copy take the caret's line (`EmptySelectionClipboard`) |
 | `SaveViewState()`, `RestoreViewState(state)` | the caret, the selection and the scroll position, for an app that switches one editor between documents |
 
@@ -130,6 +130,8 @@ editor.Options = CodeEditorOptions.Default with
 |---|---|---|
 | `AutoClosing.Brackets`, `AutoClosing.Quotes` | `editor.autoClosingBrackets`, `editor.autoClosingQuotes` | `LanguageDefined`: a typed opening bracket or quote gets its closing one before whitespace, the line's end, another closing character, or a character of the language's `autoCloseBefore`, by default one that can't start an expression; a quote not right after a word. `Always`, `BeforeWhitespace` and `Never` as in VS Code |
 | `EmptySelectionClipboard` | `editor.emptySelectionClipboard` | true: without a selection, Copy and Cut take the caret's line with a line break, the last line too, and Paste puts that line above the caret's line while nothing is selected. Off, they need a selection, so that a stray Ctrl+C keeps the clipboard |
+| `Find.SeedSearchStringFromSelection` | `editor.find.seedSearchStringFromSelection` | `Always`: Ctrl+F's query starts with the selection within one line, or else the word at the caret, escaped while the bar uses a regular expression; `Selection` takes only a selection, `Never` nothing. Ctrl+H takes only a selection, and F3 takes one only for an empty query |
+| `Find.AutoFindInSelection` | `editor.find.autoFindInSelection` | `Never`: Find in Selection turns on only by its toggle and Alt+L; `Always` whenever something is selected as the bar opens, `Multiline` for a selection over several lines |
 
 A setting needs a use case to become an option; VS Code having it is not enough (design.md #124).
 
@@ -145,8 +147,20 @@ also with Ctrl+P and Ctrl+N on macOS; Home on a line of whitespace only to its s
 which take the selected lines, without a last line that the selection only touches, each in a step of its own: moved
 lines at `AutoIndent.Full` take the indentation of their new place by the language's rules for Enter and indentation
 rules, a closing bracket the indentation of the block it closes, and inserted lines Enter's; whitespace shown inside the
-selection, scrolling past the last line, a context menu with Cut, Copy, Paste and Select All, completion's snippets with
-their stops (section 6), and the look of errors, hover and completion below.
+selection, scrolling past the last line, the context menu (below), search as VS Code's find widget does it (below),
+completion's snippets with their stops (section 6), and the look of errors, hover and completion below.
+
+**Search** runs in the background as the user types: text or a .NET regular expression, with Match Case, Match Whole
+Word and, for replacing, VS Code's replace syntax (`$1`, `$&`, `\n`, `\U$1` and the like) and Preserve Case. A query
+that can match a line break, by a line break typed with Ctrl+Enter or by `\n`, `\r` or `\W` in a regular
+expression, finds matches across lines. Find in Selection (Alt+L, or the bar's toggle) searches only the selected
+lines, which show in the theme's `editor.findRangeHighlightBackground` while the bar is open; closing the bar ends it.
+Typing the query selects its first match from the caret; Enter and F3 go round past the last match, and the bar stays
+open. The bar highlights 19,999 matches, and says so in the tip of its count; F3, Shift+F3 and Replace All reach every
+match beyond them, and Replace All replaces all of them in one undo step, or none if its search runs out of time.
+Regular expressions are .NET's, a known difference from VS Code's JavaScript ones with the `u` flag: classes, `.` and
+quantifiers work on UTF-16 units, so `[😀]`, `.` or `\p{L}` meet a character beyond the Basic Multilingual Plane as in
+.NET. No match or group starts or ends inside a surrogate pair, so that a replacement never writes half of one.
 
 **Caret and scroll position** belong to the editor, as in Monaco, and last as long as it does, like a list's scroll
 position. Setting `Document` shows the other document from its start, and a tab control may create a new editor each
@@ -183,7 +197,9 @@ keys to them (design.md #113). A `CodeEditorKeymap` is immutable and can be shar
 - **Not in the keymap:** the keys inside open popups (Up, Down, Page Up, Page Down, Enter and Tab in completion's list,
   Up and Down while signature help shows several signatures), Tab and Shift+Tab between a snippet's stops, except
   Shift+Tab on the first stop, Escape, which closes completion, signature help, a snippet's stops, the hover and the
-  search bar one at a time, and AvaloniaEdit's own editing and clipboard keys. Other keys, such as F5 or Ctrl+S, reach
+  search bar one at a time, the search bar's own keys (Enter and Shift+Enter for the next and the previous match,
+  Ctrl+Enter, also on macOS, for a line break in the query, and Tab between the query and the replacement), and
+  AvaloniaEdit's own editing and clipboard keys. Other keys, such as F5 or Ctrl+S, reach
   the app's key bindings, and so does a key of the keymap whose commands don't apply.
 
 The default keys on Windows and Linux; macOS in brackets where it differs beyond Cmd for Ctrl:
@@ -192,8 +208,9 @@ The default keys on Windows and Linux; macOS in brackets where it differs beyond
 |---|---|---|
 | Ctrl+Space, Ctrl+I (macOS also Alt+Escape) | `editor.action.triggerSuggest` | completion |
 | Ctrl+Shift+Space | `editor.action.triggerParameterHints` | signature help |
-| Ctrl+F, Ctrl+H (macOS: Cmd+Alt+F for replace) | `actions.find`, `editor.action.startFindReplaceAction` | the search and the replace bar; a read-only editor opens the search bar for both |
+| Ctrl+F, Ctrl+H (macOS: Cmd+Alt+F for replace) | `actions.find`, `editor.action.startFindReplaceAction` | the search and the replace bar, not in a read-only editor |
 | F3, Shift+F3 (macOS also Cmd+G, Shift+Cmd+G) | `editor.action.nextMatchFindAction`, `editor.action.previousMatchFindAction` | the next and the previous match |
+| Alt+C, Alt+W, Alt+R, Alt+P, Alt+L (macOS: Cmd+Alt+…) | `toggleFindCaseSensitive`, `toggleFindWholeWord`, `toggleFindRegex`, `togglePreserveCase`, `toggleFindInSelection` | the search bar's options, from the text too, also while the bar is closed |
 | Ctrl+/ | `editor.action.commentLine` | toggles line comments, or block comments in a language without line comments |
 | Shift+Alt+A (Linux: Ctrl+Shift+A) | `editor.action.blockComment` | removes the block comment that the selection is in, or puts one around it; without a selection, an empty one with the caret inside |
 | Ctrl+Z; Ctrl+Y, Ctrl+Shift+Z (macOS: Cmd+Shift+Z only) | `undo`; `redo` | the document's `Undo` and `Redo`; nothing in a read-only editor |
@@ -206,6 +223,11 @@ The default keys on Windows and Linux; macOS in brackets where it differs beyond
 | Ctrl+Enter, Ctrl+Shift+Enter | `editor.action.insertLineAfter`, `editor.action.insertLineBefore` | inserts a line below or above the caret's, indented as Enter would |
 | Ctrl+], Ctrl+[ | `editor.action.indentLines`, `editor.action.outdentLines` | indents and outdents the lines to the next or the previous tab stop |
 | Ctrl+L | `expandLineSelection` | selects the lines whole; again, it takes the next line too |
+
+**Context menu:** the editor's `ContextFlyout`, as in Avalonia's text box, with Cut, Copy, Paste, Select All, Toggle
+Line Comment, Find and Replace, their keys from the keymap and their text in the UI culture's language, English or
+German, as the search bar's. A right click outside the selection moves the caret there first, as in VS Code. An app
+replaces the menu with its own `ContextFlyout` or `ContextMenu`, or removes it by setting `ContextFlyout` to null.
 
 **Indentation** belongs to the document (`CodeDocument.Indentation`), so all editors of one document agree. It starts
 as VS Code's `editor.detectIndentation` guesses it from the initial text; where the text gives no answer, VS Code's
@@ -226,11 +248,13 @@ handler closes the group on the document it opened it on. Text that the app sets
 **Look.** The text and everything around it are styled differently, as in Monaco and CodeMirror:
 
 - **The text area** takes its colors from `ColorTheme`, a VS Code color theme: syntax and language-server colors,
-  background, selection, caret, line numbers, current line, search and bracket matches, squiggles, a snippet's
-  stops. Token colors are made for their theme's background, so they come together.
+  background, selection, caret, line numbers, current line, search and bracket matches, the lines that Find in
+  Selection searches, squiggles, a snippet's stops. Token colors are made for their theme's background, so they come together.
 - **Everything around the text** takes the app's look: completion, hover and signature help look like the app's
-  flyouts and tooltips, and the search bar and scroll bars are the app's controls. They match Avalonia's Fluent
-  theme, FluentAvalonia or any other theme, font, padding and corners included. Code inside popups keeps the editor's
+  flyouts and tooltips, and the search bar, the scroll bars and the context menu are the app's controls. They match
+  Avalonia's Fluent theme, FluentAvalonia or any other theme, font, padding and corners included. Where the app's
+  theme has no `MenuFlyoutPresenter` theme, as FluentAvalonia's, the menu takes one from `CodeEditorStyles`, built
+  from the Fluent themes' menu resources. Code inside popups keeps the editor's
   colors, background and font.
 - **Popups stay inside the window**, as in the prototype (#19).
 
@@ -984,13 +1008,23 @@ with Skia:
 - spaces and tabs show inside the selection only, in the theme's `editorWhitespace.foreground`, in a layer of the text
   view above the selection;
 - search runs in the background, so a regular expression such as `(a+)+$`, which froze the prototype for 21 s, leaves
-  the UI thread free; it stops after the time limit of 1 s with a message. A search keeps 10,000 matches at most. In
-  5,000 lines of JSON, a word on every line takes 1.2 ms and a regular expression with 10,000 matches 2.3 ms, so the
-  time limit leaves about 400 times that; Replace All of 10,000 matches takes the UI thread about 0.1 s with its
-  frame. Tests check that a search at either limit says so, and that Replace All then changes nothing. AvaloniaEdit's
+  the UI thread free; it stops after the time limit of 1 s with a message. A search keeps 19,999 matches at most, as
+  VS Code's; finding the next, the previous and every match beyond them searches the text again. In 5,000 lines of
+  JSON, a word on every line takes 1.3 ms and a regular expression with 10,000 matches 2.3 ms, so the time limit
+  leaves about 400 times that; one across the end of every line takes 1.1 ms, or 1.9 ms in lines apart by `\r\n`,
+  which it reads as `\n`. The edits of Replace All for 50,000 matches in 25,000 lines take 7.9 ms; Replace All of
+  10,000 matches, one change of the text, takes the UI thread about 56 ms with its frame, where 10,000 changes took
+  78 ms. Tests check that a search at either limit says so,
+  and that Replace All after a search that ran out of time changes nothing, while beyond the matches highlighted it
+  finds them all again and replaces them in one undo step; VS Code's own cases of searches across lines; that no
+  match starts or ends inside a surrogate pair, nor a scope inside a `\r\n`; VS Code's replace syntax, with its case
+  changes and Preserve Case; Find in Selection with `AutoFindInSelection`; the query taken from the text as
+  `SeedSearchStringFromSelection` says; and the options' keys from the text and the bar. AvaloniaEdit's
   own search panel could not keep this contract: it creates its search strategy itself, searches on the UI thread at
   every change of the text, and keeps every match. The editor removes it each time AvaloniaEdit's editor is
-  templated, and AvaloniaEdit's search commands open the editor's bar instead.
+  templated, and AvaloniaEdit's search commands open the editor's bar instead;
+- the context menu offers the editor's commands with their keys, in the UI culture's language, also German; a right
+  click outside the selection moves the caret; an app's own menu replaces it.
 
 The client for any language server (sections 4 and 6) is implemented: `LanguageServer`, its documents and their
 diagnostics, on an internal JSON-RPC layer in its own assembly, which the C# server will share. Proven on linux-x64,

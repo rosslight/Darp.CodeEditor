@@ -1,77 +1,98 @@
 using System.Globalization;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
-using Avalonia.Logging;
 using Avalonia.Media;
 using Avalonia.VisualTree;
-using AvaloniaEdit.Document;
-using AvaloniaEdit.Editing;
-using Darp.CodeEditor.Highlighting;
-using Darp.CodeEditor.Loading;
+using Darp.CodeEditor.Localization;
 
 namespace Darp.CodeEditor.Search;
 
+/// <summary>Which text box of the search bar takes the keyboard as it opens.</summary>
+internal enum BarFocus
+{
+    /// <summary>None: the keyboard stays where it is, as for F3.</summary>
+    None,
+    Query,
+    Replacement,
+}
+
+/// <summary>Where the selection goes once a search has its result.</summary>
+internal enum SearchMove
+{
+    None,
+
+    /// <summary>To the first match from where the search started.</summary>
+    First,
+
+    Next,
+    Previous,
+}
+
+/// <summary>One of the search bar's toggles that its keys turn on and off.</summary>
+internal enum SearchOption
+{
+    MatchCase,
+    WholeWord,
+    Regex,
+    PreserveCase,
+}
+
 /// <summary>
-/// The editor's search and replace bar, at the top right of the text: the app's text boxes, toggle buttons and
-/// buttons, in the look of its flyouts and in its font, not the editor's.
+/// The editor's search and replace bar, as VS Code's find widget, at the top right of the text: the app's text boxes,
+/// toggle buttons and buttons, in the look of its flyouts and in its font, not the editor's, with its text in the UI
+/// culture's language and the keymap's keys in its tips.
 /// </summary>
 /// <remarks>
-/// <para>
-/// It searches as the user types, in the background, and again after each change of the text: the UI thread only
-/// shows the matches, which follow the edits until the next result replaces them.
-/// </para>
-/// <para>
-/// A search has a time limit and a limit on the matches it keeps (<see cref="TextSearch"/>), and the bar says so when
-/// it hits one. Replace All acts only on a complete result for the current text, query and replacement: never on a
-/// partial one.
-/// </para>
+/// The editor keeps one bar across the documents it shows: the query, the options and the replacement stay. The
+/// <see cref="DocumentSearch"/> of the shown document searches for what the bar holds and shows the result in it;
+/// the bar tells it what the user changed.
 /// </remarks>
 internal sealed class SearchBar : UserControl
 {
+    /// <summary>The width of the query and the replacement in an editor wide enough for the bar.</summary>
+    private const double BoxWidth = 220;
+
+    /// <summary>The narrowest that they get in a narrow editor, before the rows wrap.</summary>
+    private const double MinBoxWidth = 100;
+
     private static readonly Geometry s_previous = Geometry.Parse("M8,2 L14,9 L10,9 L10,14 L6,14 L6,9 L2,9 Z");
     private static readonly Geometry s_next = Geometry.Parse("M8,14 L14,7 L10,7 L10,2 L6,2 L6,7 L2,7 Z");
     private static readonly Geometry s_close = Geometry.Parse(
         "M3,2 L8,7 L13,2 L14,3 L9,8 L14,13 L13,14 L8,9 L3,14 L2,13 L7,8 L2,3 Z"
     );
 
-    private readonly TextBox _find = new() { PlaceholderText = "Find", Width = 220 };
-    private readonly ToggleButton _matchCase = Toggle("Aa", "Match Case");
-    private readonly ToggleButton _wholeWord = Toggle("ab", "Match Whole Word");
-    private readonly ToggleButton _regex = Toggle(".*", "Use Regular Expression");
+    /// <summary>Lines in a box, the icon of Find in Selection.</summary>
+    private static readonly Geometry s_selection = Geometry.Parse(
+        "F0 M2,2 L14,2 L14,14 L2,14 Z M3,3 L3,13 L13,13 L13,3 Z M5,5 L11,5 L11,6 L5,6 Z M5,7.5 L11,7.5 L11,8.5 L5,8.5 Z "
+            + "M5,10 L9,10 L9,11 L5,11 Z"
+    );
+
+    private readonly TextBox _find = QueryBox();
+    private readonly ToggleButton _matchCase = new() { Content = "Aa" };
+    private readonly ToggleButton _wholeWord = new() { Content = "ab" };
+    private readonly ToggleButton _regex = new() { Content = ".*" };
     private readonly TextBlock _count = new() { MinWidth = 80, VerticalAlignment = VerticalAlignment.Center };
-    private readonly TextBox _replace = new() { PlaceholderText = "Replace", Width = 220 };
-    private readonly Button _replaceOne = new() { Content = "Replace" };
-    private readonly Button _replaceAll = new() { Content = "Replace All" };
-    private readonly StackPanel _replaceRow;
+    private readonly Button _previous = IconButton(s_previous);
+    private readonly Button _next = IconButton(s_next);
+    private readonly ToggleButton _findInSelection = new() { Content = Icon(s_selection) };
+    private readonly Button _close = IconButton(s_close);
+    private readonly TextBox _replace = QueryBox();
+    private readonly ToggleButton _preserveCase = new() { Content = "AB" };
+    private readonly Button _replaceOne = new();
+    private readonly Button _replaceAll = new();
+    private readonly WrapPanel _findRow;
+    private readonly WrapPanel _replaceRow;
+    private readonly FlyoutPresenter _presenter;
     private readonly TextBlock _message = new() { TextWrapping = TextWrapping.Wrap, IsVisible = false };
 
-    /// <summary>Whether the bar shows the replace row, unless the editor is read-only.</summary>
-    private bool _replaceMode;
-
-    /// <summary>The editor and what it shows, while it shows a document.</summary>
-    private Shown? _shown;
-
-    private TextAreaColors? _colors;
-
-    /// <summary>The result of the last search, for the text and the query of then.</summary>
-    private SearchResult? _result;
-
-    /// <summary>The search under way in the background; null for none.</summary>
-    private CancellationTokenSource? _searching;
-
-    /// <summary>
-    /// Where to move once the search under way has its result. A newer search that takes over keeps it: it replaces
-    /// the search, not what the search was for.
-    /// </summary>
-    private Move _move;
-
-    /// <summary>Where a search for a new query looks for its first match.</summary>
-    private int _from;
+    /// <summary>Whether the code, not the user, changes the bar: the search knows already.</summary>
+    private bool _setting;
 
     /// <summary>The bindings to the app's font where the editor is, while the bar is in the visual tree.</summary>
     private IDisposable[] _font = [];
@@ -83,69 +104,76 @@ internal sealed class SearchBar : UserControl
         VerticalAlignment = VerticalAlignment.Top;
         // Clear of the vertical scroll bar.
         Margin = new Thickness(0, 0, 24, 0);
-        _replaceRow = Row(_replace, _replaceOne, _replaceAll);
+        _findRow = Row(_find, _matchCase, _wholeWord, _regex, _count, _previous, _next, _findInSelection, _close);
+        _replaceRow = Row(_replace, _preserveCase, _replaceOne, _replaceAll);
         _replaceRow.IsVisible = false;
         // About the width of the rows, which a longer message wraps to.
         _message.MaxWidth = 520;
-        Content = new FlyoutPresenter
+        _presenter = new FlyoutPresenter
         {
             // Not cut to a flyout's width.
             MaxWidth = double.PositiveInfinity,
-            Content = new StackPanel
-            {
-                Spacing = 4,
-                Children =
-                {
-                    Row(
-                        _find,
-                        _matchCase,
-                        _wholeWord,
-                        _regex,
-                        _count,
-                        IconButton(s_previous, "Previous Match (Shift+F3)", FindPrevious),
-                        IconButton(s_next, "Next Match (F3)", FindNext),
-                        IconButton(s_close, "Close (Escape)", Close)
-                    ),
-                    _replaceRow,
-                    _message,
-                },
-            },
+            Content = new StackPanel { Spacing = 4, Children = { _findRow, _replaceRow, _message } },
         };
+        // Its rows wrap to the editor's width rather than scroll.
+        ScrollViewer.SetHorizontalScrollBarVisibility(_presenter, ScrollBarVisibility.Disabled);
+        Content = _presenter;
         // Raised as soon as the text changed; TextChanged comes later, posted.
-        _find.TextChanging += (_, _) => OnQueryChanged();
-        _matchCase.IsCheckedChanged += (_, _) => OnQueryChanged();
-        _wholeWord.IsCheckedChanged += (_, _) => OnQueryChanged();
-        _regex.IsCheckedChanged += (_, _) => OnQueryChanged();
-        _replace.TextChanging += (_, _) => Search(Move.None);
-        _replaceOne.Click += (_, _) => ReplaceOne();
-        _replaceAll.Click += (_, _) => ReplaceAll();
-        _find.KeyDown += OnFindKeyDown;
-        _replace.KeyDown += OnReplaceKeyDown;
+        _find.TextChanging += (_, _) => OnUserChange(search => search.OnQueryChanged());
+        foreach (ToggleButton option in (ToggleButton[])[_matchCase, _wholeWord, _regex])
+            option.IsCheckedChanged += (_, _) => OnUserChange(search => search.OnQueryChanged());
+        _replace.TextChanging += (_, _) => OnUserChange(search => search.OnReplacementChanged());
+        _preserveCase.IsCheckedChanged += (_, _) => OnUserChange(search => search.OnReplacementChanged());
+        _findInSelection.Click += (_, _) => Search?.FindInSelection(_findInSelection.IsChecked == true);
+        _previous.Click += (_, _) => Search?.Go(SearchMove.Previous);
+        _next.Click += (_, _) => Search?.Go(SearchMove.Next);
+        _close.Click += (_, _) => Close();
+        _replaceOne.Click += (_, _) => Search?.ReplaceOne();
+        _replaceAll.Click += (_, _) => Search?.ReplaceAll();
+        // Ahead of the text boxes' own keys: Enter goes to the next match rather than into the text.
+        _find.AddHandler(KeyDownEvent, OnFindKeyDown, RoutingStrategies.Tunnel);
+        _replace.AddHandler(KeyDownEvent, OnReplaceKeyDown, RoutingStrategies.Tunnel);
     }
 
-    private enum Move
-    {
-        None,
+    /// <summary>
+    /// The search of the document that the editor shows, from the bar's first use; null while it shows none.
+    /// </summary>
+    public DocumentSearch? Search { get; set; }
 
-        /// <summary>To the first match from where the search for a new query started.</summary>
-        First,
-
-        Next,
-        Previous,
-    }
-
-    /// <summary>Whether the bar is open.</summary>
     public bool IsOpen => IsVisible;
 
-    /// <summary>The colors of the color theme, once it is loaded.</summary>
-    public TextAreaColors? Colors
+    /// <summary>
+    /// What the bar searches for, also while it is closed; null for an empty query. A text box takes line breaks as
+    /// they are pasted: the query's are <c>\n</c>.
+    /// </summary>
+    public SearchQuery? Query =>
+        _find.Text is { Length: > 0 } text
+            ? new SearchQuery(
+                text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n'),
+                _matchCase.IsChecked == true,
+                _wholeWord.IsChecked == true,
+                _regex.IsChecked == true
+            )
+            : null;
+
+    public bool UsesRegex => _regex.IsChecked == true;
+
+    /// <summary>What replaces the matches; null while the replace row is hidden.</summary>
+    public SearchReplacement? Replacement =>
+        _replaceRow.IsVisible ? new SearchReplacement(_replace.Text ?? "", _preserveCase.IsChecked == true) : null;
+
+    public bool IsQueryFocused => _find.IsKeyboardFocusWithin;
+
+    /// <summary>Shows Find in Selection on or off.</summary>
+    public bool FindInSelection
     {
-        set
-        {
-            _colors = value;
-            _shown?.Layer.Colors = value;
-        }
+        set => _findInSelection.IsChecked = value;
     }
+
+    /// <summary>
+    /// The search's latest work in the background, also for a document shown before; tests wait for it.
+    /// </summary>
+    internal Task LatestSearch => Search?.LatestSearch ?? Task.CompletedTask;
 
     internal TextBox FindBox => _find;
 
@@ -155,86 +183,143 @@ internal sealed class SearchBar : UserControl
 
     internal ToggleButton RegexToggle => _regex;
 
+    internal ToggleButton PreserveCaseToggle => _preserveCase;
+
+    internal ToggleButton FindInSelectionToggle => _findInSelection;
+
     internal Button ReplaceAllButton => _replaceAll;
 
     /// <summary>The number of matches, and which one is selected.</summary>
     internal string? Count => _count.Text;
 
-    /// <summary>Whether a search runs, whose result is still to show.</summary>
-    internal bool IsSearching => _searching is not null;
-
-    /// <summary>Raised once a search's result shows: its matches, the match it selected and the count.</summary>
-    internal event EventHandler? Searched;
+    internal object? CountTip => ToolTip.GetTip(_count);
 
     /// <summary>Why the result is partial, or the regular expression is invalid; null for neither.</summary>
     internal string? Message => _message.IsVisible ? _message.Text : null;
 
-    /// <summary>Searches the document that <paramref name="editor"/> shows now, until <see cref="Detach"/>.</summary>
-    public void Attach(CodeEditor editor, TextArea textArea, CodeDocument document)
-    {
-        var shown = new Shown(
-            editor,
-            textArea,
-            document,
-            textArea.Document,
-            new SearchMatchLayer(textArea) { Colors = _colors }
-        );
-        _shown = shown;
-        shown.Buffer.Changed += OnBufferChanged;
-        shown.Buffer.TextChanged += OnTextChanged;
-        textArea.SelectionChanged += OnSelectionChanged;
-        ShowReplaceRow();
-        Search(Move.None);
-    }
-
-    /// <summary>Stops searching the document the editor showed: no more searches, and no highlights.</summary>
-    public void Detach()
-    {
-        if (_shown is not { } shown)
-            return;
-        CancelSearch();
-        _move = Move.None;
-        shown.Buffer.Changed -= OnBufferChanged;
-        shown.Buffer.TextChanged -= OnTextChanged;
-        shown.TextArea.SelectionChanged -= OnSelectionChanged;
-        shown.Layer.Dispose();
-        _shown = null;
-        _result = null;
-        UpdateStatus();
-    }
-
     /// <summary>
-    /// Opens the bar, or the bar with its replace row, with <paramref name="text"/> as the query if given, and puts
-    /// the keyboard in the query.
+    /// Opens the bar, with its replace row if <paramref name="replace"/>, and otherwise with the row as it was in an
+    /// open bar. <paramref name="query"/>, if given, becomes the query. The keyboard goes to
+    /// <paramref name="focus"/>, into the replacement only where the row shows. The tips name the keys of
+    /// <paramref name="keymap"/>.
     /// </summary>
-    public void Open(bool replace, string? text) => Open(replace, text, focus: true, Move.None);
+    /// <returns>Whether that changed what to search for: the bar opened, or its query or replace row changed.</returns>
+    public bool Open(bool replace, string? query, BarFocus focus, CodeEditorKeymap keymap)
+    {
+        bool opened = !IsOpen;
+        if (opened)
+            ShowTexts(keymap);
+        bool row = replace || (!opened && _replaceRow.IsVisible);
+        bool changed = opened || row != _replaceRow.IsVisible || (query is not null && query != _find.Text);
+        _replaceRow.IsVisible = row;
+        _setting = true;
+        if (query is not null)
+            _find.Text = query;
+        _setting = false;
+        IsVisible = true;
+        TextBox? box = focus switch
+        {
+            BarFocus.Replacement when _replaceRow.IsVisible => _replace,
+            BarFocus.None => null,
+            _ => _find,
+        };
+        if (box is not null)
+        {
+            // A bar shown for the first time has no text box in the visual tree until it is laid out.
+            UpdateLayout();
+            box.Focus();
+            box.SelectAll();
+        }
+        return changed;
+    }
 
-    /// <summary>Selects the next match, opening the bar if it is closed, without taking the keyboard.</summary>
-    public void FindNext(string? text) => Go(Move.Next, text);
-
-    /// <summary>Selects the previous match, opening the bar if it is closed, without taking the keyboard.</summary>
-    public void FindPrevious(string? text) => Go(Move.Previous, text);
-
-    /// <summary>Closes the bar, and gives the keyboard back to the text.</summary>
+    /// <summary>Closes the bar, which ends the search and gives the keyboard back to the text.</summary>
     public void Close()
     {
+        if (!IsOpen)
+            return;
         IsVisible = false;
-        CancelSearch();
-        _move = Move.None;
-        _result = null;
-        _shown?.Layer.Matches = null;
-        UpdateStatus();
-        _shown?.TextArea.Focus();
+        Search?.OnClosed();
     }
 
-    /// <summary>
-    /// Shows the replace row in replace mode, unless the editor is read-only, and searches again for what replaces
-    /// the matches.
-    /// </summary>
-    public void UpdateReplaceRow()
+    /// <summary>Turns <paramref name="option"/> on or off, as its key does, without searching again.</summary>
+    public void Toggle(SearchOption option)
     {
-        if (ShowReplaceRow())
-            Search(Move.None);
+        ToggleButton toggle = option switch
+        {
+            SearchOption.MatchCase => _matchCase,
+            SearchOption.WholeWord => _wholeWord,
+            SearchOption.Regex => _regex,
+            _ => _preserveCase,
+        };
+        _setting = true;
+        toggle.IsChecked = toggle.IsChecked != true;
+        _setting = false;
+    }
+
+    /// <summary>Hides the replace row, as an editor that became read-only does, until Ctrl+H shows it again.</summary>
+    public void HideReplaceRow() => _replaceRow.IsVisible = false;
+
+    /// <summary>
+    /// Shows how many matches <paramref name="result"/> has, which one is selected, and why it is partial; and whether
+    /// Replace All and Find in Selection can act.
+    /// </summary>
+    public void ShowResult(SearchResult? result, int? index, bool canReplaceAll, bool canFindInSelection)
+    {
+        CultureInfo culture = CultureInfo.CurrentCulture;
+        _count.Text = result switch
+        {
+            null or { Outcome: SearchOutcome.InvalidPattern } => null,
+            { Matches.Count: 0 } => Strings.NoResults,
+            _ => string.Format(
+                culture,
+                Strings.MatchCount,
+                index is { } i ? (i + 1).ToString(culture) : "?",
+                result.Matches.Count,
+                result.Outcome == SearchOutcome.TooManyMatches ? "+" : ""
+            ),
+        };
+        ToolTip.SetTip(
+            _count,
+            result?.Outcome == SearchOutcome.TooManyMatches
+                ? string.Format(culture, Strings.TooManyMatches, TextSearch.MaxMatches)
+                : null
+        );
+        ShowMessage(result?.Outcome == SearchOutcome.InvalidPattern ? result.Error : null, result?.Outcome);
+        _replaceAll.IsEnabled = canReplaceAll;
+        _findInSelection.IsEnabled = canFindInSelection;
+    }
+
+    /// <summary>Says that a search for a match beyond those kept, or Replace All's, stopped after its time.</summary>
+    public void ShowTimedOut() => ShowMessage(null, SearchOutcome.OutOfTime);
+
+    /// <summary>
+    /// As VS Code's find widget in a narrow editor, the query and the replacement give up width, down to
+    /// <see cref="MinBoxWidth"/>, so that the buttons stay beside them and inside the editor; narrower still, the rows
+    /// wrap. Their width follows from the rows' alone, at the boxes' full width, and the presenter's frame: a message
+    /// wraps on its own. It is whole device pixels, rounded down, as the layout rounds the widths that decide where the
+    /// rows wrap: the rows fit as computed, and the width before leaves no fraction behind.
+    /// </summary>
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        double scale = LayoutHelper.GetLayoutScale(this);
+        double rows = Math.Max(Natural(_findRow), _replaceRow.IsVisible ? Natural(_replaceRow) : 0);
+        // The border in device pixels, as the presenter's lays it out.
+        Thickness frame = _presenter.Padding + LayoutHelper.RoundLayoutThickness(_presenter.BorderThickness, scale);
+        double width = Math.Clamp(
+            BoxWidth - (rows + frame.Left + frame.Right - availableSize.Width),
+            MinBoxWidth,
+            BoxWidth
+        );
+        // Rounded to 8 digits first, as the layout rounds: 247 device pixels may come out as 246.99999999999997.
+        _find.Width = _replace.Width = Math.Floor(Math.Round(width * scale, 8)) / scale;
+        return base.MeasureOverride(availableSize);
+
+        double Natural(WrapPanel row)
+        {
+            row.Measure(Size.Infinity);
+            return row.DesiredSize.Width - _find.Width + BoxWidth;
+        }
     }
 
     /// <inheritdoc />
@@ -261,377 +346,114 @@ internal sealed class SearchBar : UserControl
         _font = [];
     }
 
-    private void Open(bool replace, string? text, bool focus, Move move)
+    private void OnUserChange(Action<DocumentSearch> tell)
     {
-        bool wasOpen = IsOpen;
-        _replaceMode = replace;
-        bool rowChanged = ShowReplaceRow();
-        IsVisible = true;
-        if (text is not null && text != _find.Text)
-        {
-            // Searches from the selection, as for any new query; the next or previous match from there if asked.
-            _find.Text = text;
-            if (move != Move.None)
-                _move = move;
-        }
-        else if (!wasOpen || rowChanged)
-            Search(move);
-        else if (move != Move.None)
-            Go(move, null);
-        if (focus)
-        {
-            // A bar shown for the first time has no text box in the visual tree until it is laid out.
-            UpdateLayout();
-            _find.Focus();
-            _find.SelectAll();
-        }
+        if (!_setting && Search is { } search)
+            tell(search);
     }
 
-    /// <summary>
-    /// Shows the replace row in replace mode, unless the editor is read-only.
-    /// </summary>
-    /// <returns>Whether that changed, and with it whether searches find what replaces the matches.</returns>
-    private bool ShowReplaceRow()
+    private void ShowMessage(string? error, SearchOutcome? outcome)
     {
-        bool visible = _replaceMode && _shown?.Editor.IsReadOnly == false;
-        if (visible == _replaceRow.IsVisible)
-            return false;
-        _replaceRow.IsVisible = visible;
-        return true;
-    }
-
-    private void Go(Move move, string? text)
-    {
-        if (!IsOpen)
-        {
-            Open(false, text, focus: false, move);
-            return;
-        }
-        if (_searching is null && _result is not null)
-            Perform(move, _result);
-        else
-            _move = move;
-    }
-
-    private void OnQueryChanged()
-    {
-        _from = SelectionStart();
-        Search(Move.First);
-    }
-
-    /// <summary>
-    /// Starts a search of the current text in the background, in place of the one under way, if the bar is open and
-    /// has a query; it moves the selection as <paramref name="move"/> says once its result is in, or as the search it
-    /// replaces was to.
-    /// </summary>
-    private void Search(Move move)
-    {
-        CancelSearch();
-        if (move != Move.None)
-            _move = move;
-        if (!IsOpen || _shown is not { } shown || _find.Text is not { Length: > 0 } text)
-        {
-            _move = Move.None;
-            _result = null;
-            _shown?.Layer.Matches = null;
-            UpdateStatus();
-            return;
-        }
-        var query = new SearchQuery(
-            text,
-            _matchCase.IsChecked == true,
-            _wholeWord.IsChecked == true,
-            _regex.IsChecked == true
-        );
-        string? replacement = _replaceRow.IsVisible ? _replace.Text ?? "" : null;
-        TextSnapshot snapshot = shown.Document.CurrentSnapshot;
-        var searching = new CancellationTokenSource();
-        _searching = searching;
-        // Cancelled, the task ends as cancelled, not as failed.
-        Task<SearchResult> search = Task.Run(
-            () => TextSearch.Find(snapshot, query, replacement, searching.Token),
-            searching.Token
-        );
-        search.ContinueWith(
-            _ => Dispatcher.Post(() => OnSearched(search, searching)),
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default
-        );
-        UpdateStatus();
-    }
-
-    /// <summary>
-    /// Shows the result of a search, unless a newer search, closing the bar or the editor's document replaced it.
-    /// Its failure goes to the log either way.
-    /// </summary>
-    private void OnSearched(Task<SearchResult> search, CancellationTokenSource searching)
-    {
-        if (search.Exception is { } exception)
-        {
-            Logger
-                .TryGet(LogEventLevel.Error, AssetFiles.LogArea)
-                ?.Log(this, "The search failed: {Exception}", exception);
-        }
-        if (_searching != searching)
-            return;
-        _searching = null;
-        if (search.Exception is not null || _shown is not { } shown)
-            return;
-        SearchResult result = search.Result;
-        _result = result;
-        shown.Layer.Matches = result.Matches;
-        Move move = _move;
-        _move = Move.None;
-        Perform(move, result);
-        UpdateStatus();
-        Searched?.Invoke(this, EventArgs.Empty);
-    }
-
-    private void CancelSearch()
-    {
-        _searching?.Cancel();
-        _searching = null;
-    }
-
-    /// <summary>Selects a match as <paramref name="move"/> says, and scrolls it into view.</summary>
-    private void Perform(Move move, SearchResult result)
-    {
-        if (_shown is not { } shown || result.Matches.Count == 0)
-            return;
-        TextSegmentCollection<SearchMatch> matches = result.Matches;
-        TextRange selection = shown.Editor.Selection.Range;
-        SearchMatch? match = move switch
-        {
-            Move.First => matches.FindFirstSegmentWithStartAfter(_from) ?? matches.FirstSegment,
-            Move.Next => After(selection),
-            Move.Previous => matches.FindFirstSegmentWithStartAfter(selection.Start) is { } after
-                ? matches.GetPreviousSegment(after) ?? matches.LastSegment
-                : matches.LastSegment,
-            _ => null,
-        };
-        if (match is not null)
-            Select(match);
-
-        SearchMatch After(TextRange range)
-        {
-            SearchMatch? next = matches.FindFirstSegmentWithStartAfter(range.End);
-            // An empty match at the caret is the current one.
-            if (next is not null && next.StartOffset == range.Start && next.Length == range.Length)
-                next = matches.GetNextSegment(next);
-            return next ?? matches.FirstSegment;
-        }
-    }
-
-    private void Select(SearchMatch match)
-    {
-        if (_shown is not { } shown)
-            return;
-        shown.Editor.Selection = new TextSelection(match.StartOffset, match.EndOffset);
-        shown.Editor.ScrollTo(new TextRange(match.StartOffset, match.Length));
-    }
-
-    /// <summary>
-    /// Replaces the selected match, and selects the next one; without a selected match, selects the next one.
-    /// </summary>
-    private void ReplaceOne()
-    {
-        if (_shown is not { } shown || CurrentResult() is not { } result)
-            return;
-        if (CurrentMatch(result) is not { } match)
-        {
-            Perform(Move.Next, result);
-            return;
-        }
-        int end = match.StartOffset + match.Replacement.Length;
-        shown.Buffer.Replace(match.StartOffset, match.Length, match.Replacement);
-        // The next search replaces the result; until then, the rest of it.
-        result.Matches.Remove(match);
-        if ((result.Matches.FindFirstSegmentWithStartAfter(end) ?? result.Matches.FirstSegment) is { } next)
-            Select(next);
-    }
-
-    /// <summary>Replaces every match in one step, if the result has them all: never a partial result.</summary>
-    private void ReplaceAll()
-    {
-        if (_shown is not { } shown || CurrentResult() is not { IsComplete: true } result)
-            return;
-        SearchMatch[] matches = [.. result.Matches];
-        using (shown.Buffer.RunUpdate())
-        {
-            // From the end, so that the matches still to replace keep their offsets.
-            for (int i = matches.Length - 1; i >= 0; i--)
-                shown.Buffer.Replace(matches[i].StartOffset, matches[i].Length, matches[i].Replacement);
-        }
-    }
-
-    /// <summary>
-    /// The result to replace with: one for the text as it is, the query and the replacement as they are, in an editor
-    /// that may change the text. Null while a search is under way.
-    /// </summary>
-    private SearchResult? CurrentResult()
-    {
-        if (_result is not { Replacement: { } replacement } result || _searching is not null || !_replaceRow.IsVisible)
-            return null;
-        return
-            _shown is { Editor.IsReadOnly: false } shown
-            && result.Version == shown.Document.CurrentSnapshot.Version
-            && replacement == (_replace.Text ?? "")
-            ? result
-            : null;
-    }
-
-    /// <summary>The match that is selected; null for none.</summary>
-    private SearchMatch? CurrentMatch(SearchResult result)
-    {
-        if (_shown is not { } shown)
-            return null;
-        TextRange selection = shown.Editor.Selection.Range;
-        return
-            result.Matches.FindFirstSegmentWithStartAfter(selection.Start) is { } match
-            && match.StartOffset == selection.Start
-            && match.Length == selection.Length
-            ? match
-            : null;
-    }
-
-    private int SelectionStart() => _shown?.Editor.Selection.Range.Start ?? 0;
-
-    /// <summary>Shows how many matches there are and which one is selected, and why a result is partial.</summary>
-    private void UpdateStatus()
-    {
-        SearchResult? result = _result;
-        int count = result?.Matches.Count ?? 0;
-        CultureInfo culture = CultureInfo.CurrentCulture;
-        _count.Text = result switch
-        {
-            null or { Outcome: SearchOutcome.InvalidPattern } => null,
-            { Matches.Count: 0 } => "No results",
-            _ => string.Format(
-                culture,
-                "{0} of {1:N0}{2}",
-                Index(result) is { } index ? (index + 1).ToString(culture) : "?",
-                count,
-                result.Outcome == SearchOutcome.TooManyMatches ? "+" : ""
-            ),
-        };
-        _message.Text = result?.Outcome switch
-        {
-            SearchOutcome.TooManyMatches => string.Format(
-                culture,
-                "More than {0:N0} matches: only the first {0:N0} show, and Replace All is off.",
-                TextSearch.MaxMatches
-            ),
-            SearchOutcome.OutOfTime => string.Format(
-                culture,
-                "The search stopped after {0:0.#} s: matches may be missing, and Replace All is off.",
-                TextSearch.TimeLimit.TotalSeconds
-            ),
-            SearchOutcome.InvalidPattern => result.Error,
-            _ => null,
-        };
+        _message.Text =
+            outcome == SearchOutcome.OutOfTime
+                ? string.Format(CultureInfo.CurrentCulture, Strings.SearchTimedOut, TextSearch.TimeLimit.TotalSeconds)
+                : error;
         _message.IsVisible = _message.Text is not null;
-        _replaceAll.IsEnabled = CurrentResult() is { IsComplete: true, Matches.Count: > 0 };
-
-        int? Index(SearchResult searched)
-        {
-            if (CurrentMatch(searched) is not { } current)
-                return null;
-            int index = 0;
-            for (
-                SearchMatch? match = searched.Matches.FirstSegment;
-                match != current;
-                match = searched.Matches.GetNextSegment(match)
-            )
-                index++;
-            return index;
-        }
-    }
-
-    /// <summary>Keeps the matches on their text while the text changes.</summary>
-    private void OnBufferChanged(object? sender, DocumentChangeEventArgs e) => _result?.Matches.UpdateOffsets(e);
-
-    private void OnTextChanged(object? sender, EventArgs e)
-    {
-        if (IsOpen)
-            Search(Move.None);
-    }
-
-    private void OnSelectionChanged(object? sender, EventArgs e)
-    {
-        if (IsOpen)
-            UpdateStatus();
     }
 
     /// <summary>
-    /// Enter selects the next match, and Shift+Enter the previous one. Tab goes on to the replacement, as in VS Code.
+    /// Enter selects the next match, and Shift+Enter the previous one; Ctrl+Enter, also on macOS, starts a new line in
+    /// the query. Tab goes on to the replacement.
     /// </summary>
     private void OnFindKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Tab && e.KeyModifiers == KeyModifiers.None && _replaceRow.IsVisible)
             _replace.Focus(NavigationMethod.Tab);
-        else if (e.Key == Key.Enter)
-            Go(e.KeyModifiers == KeyModifiers.Shift ? Move.Previous : Move.Next, null);
-        else
+        else if (e.Key == Key.Enter && e.KeyModifiers == KeyModifiers.Control)
+            _find.SelectedText = "\n";
+        else if (e.Key == Key.Enter && e.KeyModifiers is KeyModifiers.None or KeyModifiers.Shift)
+            Search?.Go(e.KeyModifiers == KeyModifiers.Shift ? SearchMove.Previous : SearchMove.Next);
+        // Other keys with Enter don't break the line either.
+        else if (e.Key != Key.Enter)
             return;
         e.Handled = true;
     }
 
-    /// <summary>Enter replaces the selected match. Shift+Tab goes back to the query, as in VS Code.</summary>
+    /// <summary>
+    /// Enter replaces the selected match; Ctrl+Enter, also on macOS, and Shift+Enter start a new line in the
+    /// replacement. Shift+Tab goes back to the query.
+    /// </summary>
     private void OnReplaceKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Tab && e.KeyModifiers == KeyModifiers.Shift)
             _find.Focus(NavigationMethod.Tab);
-        else if (e.Key == Key.Enter)
-            ReplaceOne();
-        else
+        else if (e.Key == Key.Enter && e.KeyModifiers is KeyModifiers.Control or KeyModifiers.Shift)
+            _replace.SelectedText = "\n";
+        else if (e.Key == Key.Enter && e.KeyModifiers == KeyModifiers.None)
+            Search?.ReplaceOne();
+        else if (e.Key != Key.Enter)
             return;
         e.Handled = true;
     }
 
-    private void FindNext() => Go(Move.Next, null);
-
-    private void FindPrevious() => Go(Move.Previous, null);
-
-    private static StackPanel Row(params Control[] children)
+    /// <summary>
+    /// The bar's texts in the UI culture, as it opens: the names of its icons and toggles for screen readers, and in
+    /// their tips with the keymap's keys.
+    /// </summary>
+    private void ShowTexts(CodeEditorKeymap keymap)
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+        _find.PlaceholderText = Strings.Find;
+        _replace.PlaceholderText = Strings.Replace;
+        _replaceOne.Content = Strings.Replace;
+        _replaceAll.Content = Strings.ReplaceAll;
+        Describe(_matchCase, Strings.MatchCase, CodeEditorCommands.ToggleFindCaseSensitive);
+        Describe(_wholeWord, Strings.MatchWholeWord, CodeEditorCommands.ToggleFindWholeWord);
+        Describe(_regex, Strings.UseRegularExpression, CodeEditorCommands.ToggleFindRegex);
+        Describe(_preserveCase, Strings.PreserveCase, CodeEditorCommands.TogglePreserveCase);
+        Describe(_findInSelection, Strings.FindInSelection, CodeEditorCommands.ToggleFindInSelection);
+        Describe(_previous, Strings.PreviousMatch, CodeEditorCommands.FindPrevious);
+        Describe(_next, Strings.NextMatch, CodeEditorCommands.FindNext);
+        Describe(_close, Strings.CloseSearch, null);
+
+        void Describe(Button button, string name, string? command)
+        {
+            AutomationProperties.SetName(button, name);
+            ToolTip.SetTip(
+                button,
+                command is not null && keymap.GesturesOf(command) is { Count: > 0 } keys
+                    ? $"{name} ({string.Join(' ', keys.Select(key => key.ToString("p", null)))})"
+                    : name
+            );
+        }
+    }
+
+    /// <summary>
+    /// A text box of the query or the replacement: it holds line breaks, as <c>\n</c>, and grows with them up to six
+    /// lines, about the 118 pixels of VS Code's; long lines scroll rather than wrap.
+    /// </summary>
+    private static TextBox QueryBox() =>
+        new()
+        {
+            Width = BoxWidth,
+            AcceptsReturn = true,
+            NewLine = "\n",
+            MaxLines = 6,
+        };
+
+    private static WrapPanel Row(params Control[] children)
+    {
+        var row = new WrapPanel { ItemSpacing = 4, LineSpacing = 4 };
         row.Children.AddRange(children);
         return row;
     }
 
-    private static ToggleButton Toggle(string content, string tip)
-    {
-        var toggle = new ToggleButton { Content = content };
-        ToolTip.SetTip(toggle, tip);
-        return toggle;
-    }
+    private static Button IconButton(Geometry icon) => new() { Content = Icon(icon) };
 
-    private static Button IconButton(Geometry icon, string tip, Action action)
-    {
-        var button = new Button
+    private static PathIcon Icon(Geometry icon) =>
+        new()
         {
-            Content = new PathIcon
-            {
-                Data = icon,
-                Width = 12,
-                Height = 12,
-            },
+            Data = icon,
+            Width = 12,
+            Height = 12,
         };
-        ToolTip.SetTip(button, tip);
-        button.Click += (_, _) => action();
-        return button;
-    }
-
-    /// <summary>
-    /// The editor, its text area, the document it shows, the document's buffer, and the layer that highlights the
-    /// matches.
-    /// </summary>
-    private sealed record Shown(
-        CodeEditor Editor,
-        TextArea TextArea,
-        CodeDocument Document,
-        TextDocument Buffer,
-        SearchMatchLayer Layer
-    );
 }
