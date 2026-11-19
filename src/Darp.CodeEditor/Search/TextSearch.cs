@@ -183,23 +183,17 @@ internal static class TextSearch
             return new SearchResult(snapshot.Version, query, replacement, matches, SearchOutcome.InvalidPattern, error);
         }
         string text = snapshot.GetText();
-        Replacing? replacing = replacement is null ? null : new Replacing(text, query, replacement);
+        Replacing? replacing = replacement is null ? null : new Replacing(query, replacement, snapshot.LineBreak);
         SearchOutcome outcome = Scan(
             text,
             query,
             regex,
             scopes,
-            (start, length, match, lineBreak) =>
+            (start, length, match) =>
             {
                 if (matches.Count == maxMatches)
                     return false;
-                matches.Add(
-                    new SearchMatch(replacing?.Build(start, match, lineBreak) ?? "")
-                    {
-                        StartOffset = start,
-                        Length = length,
-                    }
-                );
+                matches.Add(new SearchMatch(replacing?.Build(match) ?? "") { StartOffset = start, Length = length });
                 return true;
             },
             cancellationToken
@@ -227,7 +221,7 @@ internal static class TextSearch
         if (!TryCreateRegex(query, out Regex? regex, out _))
             return (null, SearchOutcome.InvalidPattern);
         string text = snapshot.GetText();
-        var replacing = new Replacing(text, query, replacement);
+        var replacing = new Replacing(query, replacement, snapshot.LineBreak);
         var replaced = new StringBuilder();
         var map = new OffsetChangeMap();
         int first = -1;
@@ -238,11 +232,11 @@ internal static class TextSearch
             query,
             regex,
             scopes,
-            (start, length, match, lineBreak) =>
+            (start, length, match) =>
             {
                 if (first < 0)
                     first = copied = start;
-                string value = replacing.Build(start, match, lineBreak);
+                string value = replacing.Build(match);
                 // Where the match is once the replacements before it are made.
                 map.Add(new OffsetChangeMapEntry(first + replaced.Length + start - copied, length, value.Length));
                 replaced.Append(text, copied, start - copied).Append(value);
@@ -291,7 +285,7 @@ internal static class TextSearch
             query,
             regex,
             scopes,
-            (start, length, _, _) =>
+            (start, length, _) =>
             {
                 if (start < from || (skipEmpty && length == 0 && start == from))
                     return true;
@@ -337,7 +331,7 @@ internal static class TextSearch
             query,
             regex,
             scopes,
-            (start, length, _, _) =>
+            (start, length, _) =>
             {
                 if (start >= before)
                     return false;
@@ -444,12 +438,9 @@ internal static class TextSearch
         return rewritten.ToString();
     }
 
-    /// <summary>
-    /// Takes a match: its start and length in the text, the regular expression's match, and the line break of its
-    /// line when the search knows it, else null.
-    /// </summary>
+    /// <summary>Takes a match: its start and length in the text, and the regular expression's match.</summary>
     /// <returns>Whether the search goes on.</returns>
-    private delegate bool MatchFound(int start, int length, Match match, string? lineBreak);
+    private delegate bool MatchFound(int start, int length, Match match);
 
     /// <summary>
     /// Finds the matches in <paramref name="text"/>, range by range, in order, from <paramref name="from"/> on: there
@@ -534,8 +525,6 @@ internal static class TextSearch
         Clock clock
     )
     {
-        // As AvaloniaEdit's new lines take it: the line's own, else the line's before, else the system's.
-        string? lineBreak = null;
         int first = text.AsSpan(start, from - start).LastIndexOfAny(s_lineBreaks) is var last and >= 0
             ? start + last + 1
             : start;
@@ -544,10 +533,6 @@ internal static class TextSearch
             int lineEnd = text.AsSpan(lineStart, end - lineStart).IndexOfAny(s_lineBreaks) is var i and >= 0
                 ? lineStart + i
                 : end;
-            // The line's own line break, also where the range ends inside the line.
-            int lineBreakAt = lineEnd < end ? lineEnd : IndexOfLineBreak(text, end);
-            lineBreak =
-                lineBreakAt >= 0 ? LineBreakAt(text, lineBreakAt) : lineBreak ?? LineBreakBefore(text, lineStart);
             SearchOutcome outcome = ScanText(
                 text,
                 lineStart,
@@ -556,7 +541,6 @@ internal static class TextSearch
                 query,
                 regex,
                 found,
-                lineBreak,
                 null,
                 clock
             );
@@ -591,20 +575,9 @@ internal static class TextSearch
     )
     {
         if (!text.AsSpan(start, end - start).Contains('\r'))
-            return ScanText(text, start, end, from, query, regex, found, null, null, clock);
+            return ScanText(text, start, end, from, query, regex, found, null, clock);
         LineFeedText joined = LineFeedText.Of(text, start, end);
-        return ScanText(
-            joined.Text,
-            0,
-            joined.Text.Length,
-            joined.FromText(from),
-            query,
-            regex,
-            found,
-            null,
-            joined,
-            clock
-        );
+        return ScanText(joined.Text, 0, joined.Text.Length, joined.FromText(from), query, regex, found, joined, clock);
     }
 
     /// <summary>
@@ -619,7 +592,6 @@ internal static class TextSearch
     /// <param name="query">The query.</param>
     /// <param name="regex">The query's regular expression.</param>
     /// <param name="found">Takes the matches.</param>
-    /// <param name="lineBreak">The line break of the line searched; null for a search across lines.</param>
     /// <param name="joined">Where <paramref name="input"/> is the range's text with its line breaks as <c>\n</c>.</param>
     /// <param name="clock">The search's time.</param>
     private static SearchOutcome ScanText(
@@ -630,7 +602,6 @@ internal static class TextSearch
         SearchQuery query,
         Regex regex,
         MatchFound found,
-        string? lineBreak,
         LineFeedText? joined,
         Clock clock
     )
@@ -662,8 +633,8 @@ internal static class TextSearch
             )
             {
                 bool goesOn = joined is null
-                    ? found(index, match.Length, match, lineBreak)
-                    : found(joined.ToText(index), joined.ToText(matchEnd) - joined.ToText(index), match, lineBreak);
+                    ? found(index, match.Length, match)
+                    : found(joined.ToText(index), joined.ToText(matchEnd) - joined.ToText(index), match);
                 if (!goesOn)
                     return SearchOutcome.TooManyMatches;
             }
@@ -689,30 +660,11 @@ internal static class TextSearch
         && char.IsHighSurrogate(text[offset - 1])
         && char.IsLowSurrogate(text[offset]);
 
-    /// <summary>Where the first line break at or after <paramref name="offset"/> starts; -1 for none.</summary>
-    private static int IndexOfLineBreak(string text, int offset) =>
-        text.AsSpan(offset).IndexOfAny(s_lineBreaks) is var i and >= 0 ? offset + i : -1;
-
     /// <summary>The line break that starts at <paramref name="offset"/>.</summary>
     private static string LineBreakAt(string text, int offset) =>
         text[offset] == '\n' ? "\n"
         : offset + 1 < text.Length && text[offset + 1] == '\n' ? "\r\n"
         : "\r";
-
-    /// <summary>The line break before the line of <paramref name="offset"/>, else the system's.</summary>
-    private static string LineBreakBefore(string text, int offset)
-    {
-        int last = text.AsSpan(0, offset).LastIndexOfAny(s_lineBreaks);
-        if (last < 0)
-            return Environment.NewLine;
-        return text[last] == '\n' && last > 0 && text[last - 1] == '\r' ? "\r\n" : text[last].ToString();
-    }
-
-    /// <summary>
-    /// The line break of the line of <paramref name="offset"/>: its own, else the line's before, else the system's.
-    /// </summary>
-    private static string LineBreakOfLine(string text, int offset) =>
-        IndexOfLineBreak(text, offset) is var i and >= 0 ? LineBreakAt(text, i) : LineBreakBefore(text, offset);
 
     /// <summary>
     /// Whether a match starts and ends at word boundaries, as VS Code decides: next to whitespace, a word separator or
@@ -746,20 +698,18 @@ internal static class TextSearch
     /// <summary>
     /// Builds the text that replaces each match: the replacement itself, or for a regular expression with its
     /// substitutions in VS Code's syntax (<see cref="ReplacePattern"/>), such as <c>$1</c> or <c>\U$1</c>, in the case of
-    /// the match with Preserve Case. Its line breaks are those of the match's line, as VS Code makes them its text's.
+    /// the match with Preserve Case. Its line breaks are <paramref name="lineBreak"/>, the document's, as VS Code's
+    /// text model makes those of the text that goes in.
     /// </summary>
-    private sealed class Replacing(string text, SearchQuery query, SearchReplacement replacement)
+    private sealed class Replacing(SearchQuery query, SearchReplacement replacement, string lineBreak)
     {
         private readonly ReplacePattern _pattern = query.UseRegex
             ? ReplacePattern.Parse(replacement.Text)
             : ReplacePattern.Static(replacement.Text);
 
-        /// <summary>The text that replaces the match at <paramref name="start"/>.</summary>
-        public string Build(int start, Match match, string? lineBreak) =>
-            TextUtilities.NormalizeNewLines(
-                _pattern.Build(match, replacement.PreserveCase),
-                lineBreak ?? LineBreakOfLine(text, start)
-            );
+        /// <summary>The text that replaces <paramref name="match"/>.</summary>
+        public string Build(Match match) =>
+            TextUtilities.NormalizeNewLines(_pattern.Build(match, replacement.PreserveCase), lineBreak);
     }
 
     /// <summary>

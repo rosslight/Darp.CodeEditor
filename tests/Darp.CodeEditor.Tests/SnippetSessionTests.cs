@@ -280,7 +280,7 @@ public sealed class SnippetSessionTests(UiFixture ui)
             editor.Selection.ShouldBe(new TextSelection(15));
             window.Type(" := '1'");
             window.Press(Key.Tab);
-            document.Text.ShouldBe("clk : std_logic := '1';\n");
+            document.Text.ShouldBe(NewLines.In("clk : std_logic := '1';\n", start: ""));
             editor.Selection.ShouldBe(new TextSelection(document.Text.Length));
 
             // Shift+Tab transforms too; Escape does not.
@@ -706,7 +706,7 @@ public sealed class SnippetSessionTests(UiFixture ui)
             window.Type("r");
             await WaitForLabelsAsync(window, ["try"]);
             window.Press(Key.Enter);
-            document.Text.ShouldBe("try {\n    \n}");
+            document.Text.ShouldBe(NewLines.In("try {\n    \n}", start: "t"));
         });
 
     [Fact]
@@ -735,7 +735,7 @@ public sealed class SnippetSessionTests(UiFixture ui)
             await Clipboard(window).SetTextAsync("one\r\ntwo");
             await OpenAsync(window, 0);
             window.Press(Key.Enter);
-            document.Text.ShouldBe("[one\ntwo|ONE\ntwo|one\ntwo]");
+            document.Text.ShouldBe(NewLines.In("[one\ntwo|ONE\ntwo|one\ntwo]", start: ""));
 
             // None.
             document.Text = "";

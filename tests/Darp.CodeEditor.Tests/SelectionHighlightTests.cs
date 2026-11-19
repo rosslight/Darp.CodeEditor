@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using AvaloniaEdit.Editing;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -94,11 +95,16 @@ public sealed class SelectionHighlightTests(UiFixture ui)
             await Wait.UntilAsync(() => editor.SelectionHighlights.Count == 0);
         });
 
+    /// <summary>
+    /// As in VS Code, at half their color. The pixels are read between the occurrence's characters, where only the
+    /// highlight draws: the characters' edges blend the text's color with the highlight's, which with some fonts comes
+    /// within the tolerance of the full color.
+    /// </summary>
     [Fact]
     public Task Without_the_keyboard_in_the_text_the_highlights_fade() =>
         _ui.Run(async () =>
         {
-            (string text, TextSelection selection) = MarkedText.Parse("«foo»\n\nfoo");
+            (string text, TextSelection selection) = MarkedText.Parse("«a    a»\n\na    a");
             var other = new TextBox();
             var editor = new CodeEditor
             {
@@ -107,14 +113,21 @@ public sealed class SelectionHighlightTests(UiFixture ui)
                 Height = 300,
             };
             using var window = new EditorWindow(editor, new StackPanel { Children = { editor, other } });
+            TextArea textArea = EditorWindow.PartOf(editor).TextArea;
             editor.Selection = selection;
-            await Wait.UntilAsync(() => window.RenderAndCountPixels(s_highlight, new TextRange(5, 3)) > 0);
+            editor.SelectionHighlights.ShouldBe([new TextRange(8, 6)]);
+            // The middle two of the other occurrence's spaces, a space away from its characters.
+            var between = new TextRange(10, 2);
+            // Once the theme is loaded; the full color needs the keyboard in the text all along.
+            await Wait.UntilAsync(() => !textArea.IsFocused || window.RenderAndCountPixels(s_highlight, between) > 0);
+            textArea.IsFocused.ShouldBeTrue();
 
-            other.Focus();
+            other.Focus().ShouldBeTrue();
 
+            textArea.IsFocused.ShouldBeFalse();
+            window.RenderAndCountPixels(s_highlight, between).ShouldBe(0);
             // Half of the color over the white background.
-            await Wait.UntilAsync(() => window.RenderAndCountPixels(s_highlight, new TextRange(5, 3)) == 0);
-            window.RenderAndCountPixels(Color.Parse("#9FBFDF"), new TextRange(5, 3)).ShouldBeGreaterThan(0);
+            window.RenderAndCountPixels(Color.Parse("#9FBFDF"), between).ShouldBeGreaterThan(0);
         });
 
     private static EditorWindow Show(string marked)

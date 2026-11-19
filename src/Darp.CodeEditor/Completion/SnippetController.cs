@@ -154,7 +154,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
         DateTimeOffset now = _document.TimeProvider.GetLocalNow();
         // Each name is resolved once, except the random ones, which VS Code draws for each variable.
         var values = new Dictionary<string, string?>(StringComparer.Ordinal);
-        string lineBreak = TextUtilities.GetNewLineFromDocument(_buffer, line.LineNumber);
+        string lineBreak = _document.LineBreak;
         return snippet.Render(
             new SnippetContext(
                 LineIndentation(start),
@@ -173,7 +173,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
             name switch
             {
                 "SELECTION" or "TM_SELECTED_TEXT" => selected,
-                // As pasted: in the line's line breaks.
+                // As pasted: in the document's line breaks.
                 "CLIPBOARD" => SnippetVariables.Clipboard(clipboard) is { } text
                     ? TextUtilities.NormalizeNewLines(text, lineBreak)
                     : null,
@@ -433,7 +433,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
             if (stop.Transform is not { } transform || stop.IsGone)
                 continue;
             string text = _buffer.GetText(stop.StartOffset, stop.EndOffset - stop.StartOffset);
-            string result = Indented(transform.Resolve(text), session.LineIndentation, stop.StartOffset);
+            string result = Indented(transform.Resolve(text), session.LineIndentation);
             if (result != text)
                 transformed.Add((stop, result));
         }
@@ -463,16 +463,16 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
     }
 
     /// <summary>
-    /// A transformation's <paramref name="text"/> as VS Code puts it in at <paramref name="offset"/>: each line after
-    /// the first starts with <paramref name="lineIndentation"/>, the indentation of the line the snippet went in, the
-    /// whole indentation in the document's; line breaks are those of the line.
+    /// A transformation's <paramref name="text"/> as VS Code puts it in: each line after the first starts with
+    /// <paramref name="lineIndentation"/>, the indentation of the line the snippet went in, the whole indentation in the
+    /// document's; line breaks are the document's.
     /// </summary>
-    private string Indented(string text, string lineIndentation, int offset)
+    private string Indented(string text, string lineIndentation)
     {
         if (text.AsSpan().IndexOfAny('\r', '\n') < 0)
             return text;
         var indenting = new Indenting(_document.Indentation);
-        string lineBreak = TextUtilities.GetNewLineFromDocument(_buffer, _buffer.GetLineByOffset(offset).LineNumber);
+        string lineBreak = _document.LineBreak;
         string[] lines = text.Split(["\r\n", "\r", "\n"], StringSplitOptions.None);
         for (int i = 1; i < lines.Length; i++)
         {

@@ -64,7 +64,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
             await CompletionTests.StartServingAsync(server, document);
             window.Editor.Selection = new TextSelection(5);
 
-            window.Press(Key.Space, KeyModifiers.Control | KeyModifiers.Shift);
+            window.Press(Key.Space, EditorWindow.Command | KeyModifiers.Shift);
 
             await WaitForSignatureAsync(window, "first", "Calls with two.");
             (await fake.WaitForAsync("signatureHelp ")).ShouldContain(" 1 ");
@@ -234,7 +234,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
             await CompletionTests.BarrierAsync(server, fake);
             fake.LinesStartingWith("signatureHelp ").ShouldBeEmpty();
 
-            window.Press(Key.Space, KeyModifiers.Control | KeyModifiers.Shift);
+            window.Press(Key.Space, EditorWindow.Command | KeyModifiers.Shift);
             await WaitForSignatureAsync(window, "first", "Calls with two.");
             editor.ParameterHints = ParameterHintsOptions.Default;
             Popup(window).ShouldNotBeNull();

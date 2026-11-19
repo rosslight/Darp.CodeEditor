@@ -49,7 +49,7 @@ internal sealed partial class EditingHelpers
         }
         bool reversed = anchor > caret;
         (int trackedAnchor, int trackedCaret) = reversed ? (end, start) : (start, end);
-        string lineBreak = TextUtilities.GetNewLineFromDocument(Buffer, first.LineNumber);
+        string lineBreak = _document.LineBreak;
         var edits = new List<(int Offset, int Length, string Text)>();
         bool shrinkEnd = false;
         if (first == last && first.Length == 0)
@@ -382,7 +382,7 @@ internal sealed partial class EditingHelpers
             startLineDelta++;
             endLineDelta++;
         }
-        string lineBreak = TextUtilities.GetNewLineFromDocument(Buffer, first.LineNumber);
+        string lineBreak = _document.LineBreak;
         (int Offset, int Length, string Text) edit = down
             ? (first.Offset, 0, source + lineBreak)
             : (last.EndOffset, 0, lineBreak + source);
@@ -462,7 +462,7 @@ internal sealed partial class EditingHelpers
         {
             if (!CanInsert(0))
                 return;
-            Buffer.Insert(0, TextUtilities.GetNewLineFromDocument(Buffer, 1));
+            Buffer.Insert(0, _document.LineBreak);
             Select(0, 0);
             return;
         }
@@ -470,12 +470,7 @@ internal sealed partial class EditingHelpers
         if (!CanInsert(line.EndOffset))
             return;
         string text = Buffer.GetText(line);
-        NewLine newLine = NewLineAt(
-            line,
-            text,
-            text.Length,
-            TextUtilities.GetNewLineFromDocument(Buffer, line.LineNumber)
-        );
+        NewLine newLine = NewLineAt(line, text, text.Length);
         int caret = line.EndOffset + newLine.Caret;
         Buffer.Insert(line.EndOffset, newLine.Text);
         Select(caret, caret);

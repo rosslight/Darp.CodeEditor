@@ -25,7 +25,7 @@ public sealed class TextSearchTests
     }
 
     [Fact]
-    public void Only_a_regular_expression_reads_its_replacement_and_its_line_breaks_are_the_lines()
+    public void Only_a_regular_expression_reads_its_replacement_and_its_line_breaks_are_the_documents()
     {
         TextSnapshot snapshot = TextSnapshot.FromString("foo\r\nfoo");
         const string replacement = @"\U$1\n";
@@ -46,7 +46,7 @@ public sealed class TextSearchTests
             CancellationToken.None
         );
 
-        // The last line has no line break of its own: it takes the one before.
+        // Also on the last line, which has no line break of its own.
         regex.Matches.Select(match => match.Replacement).ShouldBe(["FOO\r\n", "FOO\r\n"]);
         text.Matches.Select(match => match.Replacement).ShouldBe([replacement, replacement]);
     }
@@ -226,10 +226,11 @@ public sealed class TextSearchTests
     public void A_regular_expression_can_match_a_line_break_as_VS_Code_decides(string pattern, bool multiline) =>
         new SearchQuery(pattern, MatchCase: false, WholeWord: false, UseRegex: true).IsMultiline.ShouldBe(multiline);
 
+    /// <summary>As VS Code's text model makes the line breaks of the text that goes in its own.</summary>
     [Fact]
-    public void A_replacement_across_lines_takes_the_line_break_of_its_line()
+    public void A_replacement_takes_the_documents_line_break_also_on_a_line_with_another()
     {
-        var snapshot = TextSnapshot.FromString("foo\r\nbar\nfoo");
+        var snapshot = TextSnapshot.FromString("foo\r\nbar\r\nfoo\nbar");
 
         SearchResult result = TextSearch.Find(
             snapshot,
@@ -239,7 +240,9 @@ public sealed class TextSearchTests
             CancellationToken.None
         );
 
-        result.Matches.Select(match => (match.StartOffset, match.Length, match.Replacement)).ShouldBe([(2, 3, "\r\n")]);
+        result
+            .Matches.Select(match => (match.StartOffset, match.Length, match.Replacement))
+            .ShouldBe([(2, 3, "\r\n"), (12, 2, "\r\n")]);
     }
 
     /// <summary>

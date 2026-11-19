@@ -10,7 +10,11 @@ namespace Darp.CodeEditor.Tests;
 [Collection(UiFixture.Collection)]
 public sealed class ClipboardTests(UiFixture ui)
 {
-    private static readonly string s_lineBreak = Environment.NewLine;
+    /// <summary>
+    /// The clipboard's line break from the documents here, whose line breaks are <c>\n</c> or none: as VS Code copies,
+    /// <c>\r\n</c> on Windows and else theirs, the system's either way.
+    /// </summary>
+    private static readonly string s_lineBreak = NewLines.OfNewDocuments;
 
     private readonly UiFixture _ui = ui;
 
@@ -81,6 +85,18 @@ public sealed class ClipboardTests(UiFixture ui)
 
             MarkedText.Of(window).ShouldBe(expected);
             (await ClipboardText(window)).ShouldBe(line + s_lineBreak);
+        });
+
+    /// <summary>As VS Code copies: in the document's line breaks, or on Windows in its own, <c>\r\n</c>.</summary>
+    [Fact]
+    public Task Copy_takes_the_documents_line_breaks() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("«a\r\nb»\r\nc", CodeLanguage.PlainText);
+
+            window.Press(Key.C, EditorWindow.Command);
+
+            (await ClipboardText(window)).ShouldBe("a\r\nb");
         });
 
     [Fact]

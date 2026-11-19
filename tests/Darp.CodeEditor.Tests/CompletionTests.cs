@@ -407,7 +407,7 @@ public sealed class CompletionTests(UiFixture ui)
 
             // Opened by typing, the list ends once that filter has run, and Enter makes its new line then.
             await Wait.UntilAsync(() => List(window) is null);
-            document.Text.ShouldBe("prizzz\n");
+            document.Text.ShouldBe(NewLines.In("prizzz\n", start: ""));
         });
 
     [Fact]
@@ -735,8 +735,9 @@ public sealed class CompletionTests(UiFixture ui)
             // Without a list, the keys go on: Enter makes a new line, and Tab indents.
             window.Press(Key.Enter);
             window.Press(Key.Tab);
-            document.Text.ShouldStartWith("println\n");
-            document.Text.Length.ShouldBeGreaterThan("println\n".Length);
+            string newLine = NewLines.In("println\n", start: "pri");
+            document.Text.ShouldStartWith(newLine);
+            document.Text.Length.ShouldBeGreaterThan(newLine.Length);
             document.Text.Trim().ShouldBe("println");
         });
 
@@ -1134,6 +1135,33 @@ public sealed class CompletionTests(UiFixture ui)
                 await OpenAsync(window, document.Text.Length);
                 document.Text.ShouldBe(text);
             }
+        });
+
+    /// <summary>As VS Code's text model takes in text: in its own line breaks.</summary>
+    [Fact]
+    public Task An_items_text_and_additional_edits_go_in_with_the_documents_line_breaks() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [ { "label": "block", "insertText": "{\n}", "additionalTextEdits": [
+                      { "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 0 } },
+                        "newText": "using System;\n" } ] } ] }
+                    """
+                )
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "x\r\nbl");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            await OpenAsync(window, document.Text.Length);
+            window.Press(Key.Enter);
+
+            document.Text.ShouldBe("using System;\r\nx\r\n{\r\n}");
         });
 
     [Fact]

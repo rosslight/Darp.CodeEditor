@@ -736,10 +736,7 @@ internal sealed partial class EditingHelpers : IDisposable
             && CopiedLines.IsLine(text)
             && _textArea.Selection is { IsEmpty: true } and not RectangleSelection
             && text.IndexOf('\n') == text.Length - 1;
-        string pasted = TextUtilities.NormalizeNewLines(
-            text,
-            TextUtilities.GetNewLineFromDocument(Buffer, _textArea.Caret.Line)
-        );
+        string pasted = TextUtilities.NormalizeNewLines(text, _document.LineBreak);
         _undo.Edit(
             EditKind.Other,
             stopBefore: true,
@@ -756,17 +753,18 @@ internal sealed partial class EditingHelpers : IDisposable
     }
 
     /// <summary>
-    /// What copy takes, with the app's line breaks: the selection; without one, with
-    /// <see cref="CodeEditor.EmptySelectionClipboard"/>, the caret's line and a line break, also after the last line;
-    /// otherwise nothing.
+    /// What copy takes, with the clipboard's line breaks (<see cref="LineBreaks.OnClipboard"/>): the selection; without
+    /// one, with <see cref="CodeEditor.EmptySelectionClipboard"/>, the caret's line and a line break, also after the last
+    /// line; otherwise nothing.
     /// </summary>
     private (string Text, bool IsLine)? CopiedText()
     {
+        string lineBreak = LineBreaks.OnClipboard(_document.LineBreak);
         if (!_textArea.Selection.IsEmpty)
-            return (TextUtilities.NormalizeNewLines(_textArea.Selection.GetText(), Environment.NewLine), false);
+            return (TextUtilities.NormalizeNewLines(_textArea.Selection.GetText(), lineBreak), false);
         if (!_editor.EmptySelectionClipboard)
             return null;
-        return (Buffer.GetText(Buffer.GetLineByOffset(_textArea.Caret.Offset)) + Environment.NewLine, true);
+        return (Buffer.GetText(Buffer.GetLineByOffset(_textArea.Caret.Offset)) + lineBreak, true);
     }
 
     /// <summary>
@@ -1305,12 +1303,7 @@ internal sealed partial class EditingHelpers : IDisposable
             _textArea.ClearSelection();
             int caret = _textArea.Caret.Offset;
             DocumentLine line = Buffer.GetLineByOffset(caret);
-            NewLine newLine = NewLineAt(
-                line,
-                Buffer.GetText(line),
-                caret - line.Offset,
-                TextUtilities.GetNewLineFromDocument(Buffer, line.LineNumber)
-            );
+            NewLine newLine = NewLineAt(line, Buffer.GetText(line), caret - line.Offset);
             int replaced = CanChange(caret, newLine.Replaced) ? newLine.Replaced : 0;
             Buffer.Replace(caret, replaced, newLine.Text);
             _textArea.Caret.Offset = caret + newLine.Caret;
@@ -1323,10 +1316,11 @@ internal sealed partial class EditingHelpers : IDisposable
     /// language's <see cref="CodeLanguage.AutoIndent"/> goes: the language's rules for Enter (<see cref="EnterAction"/>),
     /// then its brackets, then its indentation rules, which see the lines without the brackets in their strings,
     /// comments and regular expressions (<see cref="RuleText"/>). Without any of them, the new line keeps the line's
-    /// indentation up to the caret.
+    /// indentation up to the caret. The line break is the document's.
     /// </summary>
-    private NewLine NewLineAt(DocumentLine line, string text, int column, string lineBreak)
+    private NewLine NewLineAt(DocumentLine line, string text, int column)
     {
+        string lineBreak = _document.LineBreak;
         AutoIndent autoIndent = _document.Language.AutoIndent;
         if (autoIndent == AutoIndent.None)
             return new NewLine(lineBreak, lineBreak.Length, 0);
