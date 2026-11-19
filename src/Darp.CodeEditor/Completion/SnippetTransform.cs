@@ -96,8 +96,11 @@ internal sealed class SnippetTransform
         }
     }
 
-    /// <summary><paramref name="value"/> transformed.</summary>
-    public string Resolve(string value)
+    /// <summary>
+    /// <paramref name="value"/> transformed; null when the result would be longer than <paramref name="maxLength"/>,
+    /// which stops the transformation there: a format repeated for each of many matches would take any memory.
+    /// </summary>
+    public string? Resolve(string value, int maxLength)
     {
         var result = new StringBuilder();
         int copied = 0;
@@ -108,7 +111,11 @@ internal sealed class SnippetTransform
             {
                 if (SplitsPair(value, match))
                     continue;
-                result.Append(value, copied, match.Index - copied).Append(Format(match.Groups));
+                if (match.Index - copied > maxLength - result.Length)
+                    return null;
+                result.Append(value, copied, match.Index - copied);
+                if (!Format(match.Groups, result, maxLength))
+                    return null;
                 copied = match.Index + match.Length;
                 matched = true;
                 if (!_global)
@@ -120,8 +127,15 @@ internal sealed class SnippetTransform
             matched = false;
         }
         if (matched)
-            return result.Append(value, copied, value.Length - copied).ToString();
-        return _format.Any(part => part is SnippetFormatGroup { Else.Length: > 0 }) ? Format(null) : value;
+        {
+            return value.Length - copied > maxLength - result.Length
+                ? null
+                : result.Append(value, copied, value.Length - copied).ToString();
+        }
+        if (!_format.Any(part => part is SnippetFormatGroup { Else.Length: > 0 }))
+            return value.Length > maxLength ? null : value;
+        result.Clear();
+        return Format(null, result, maxLength) ? result.ToString() : null;
     }
 
     /// <summary>Whether the match, or a group of it that the format uses, starts or ends inside a surrogate pair.</summary>
@@ -146,22 +160,28 @@ internal sealed class SnippetTransform
         bool Inside(int at) => at > 0 && at < text.Length && char.IsSurrogatePair(text[at - 1], text[at]);
     }
 
-    /// <summary>The format with the groups of a match; with none, each group is empty.</summary>
-    private string Format(GroupCollection? groups)
+    /// <summary>
+    /// Appends the format with the groups of a match to <paramref name="text"/>; with none, each group is empty. False
+    /// once the text is longer than <paramref name="maxLength"/>.
+    /// </summary>
+    private bool Format(GroupCollection? groups, StringBuilder text, int maxLength)
     {
-        var text = new StringBuilder();
         foreach (SnippetFormatPart part in _format)
         {
             if (part is SnippetFormatText { Text: var value })
             {
                 text.Append(value);
-                continue;
             }
-            var group = (SnippetFormatGroup)part;
-            Group? captured = groups is not null && group.Index < groups.Count ? groups[group.Index] : null;
-            text.Append(Resolve(group, captured is { Success: true } ? captured.Value : ""));
+            else
+            {
+                var group = (SnippetFormatGroup)part;
+                Group? captured = groups is not null && group.Index < groups.Count ? groups[group.Index] : null;
+                text.Append(Resolve(group, captured is { Success: true } ? captured.Value : ""));
+            }
+            if (text.Length > maxLength)
+                return false;
         }
-        return text.ToString();
+        return true;
     }
 
     /// <summary>A group's value as the format asks for it: in another case, or as its if or else branch.</summary>

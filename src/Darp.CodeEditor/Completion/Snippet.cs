@@ -803,9 +803,13 @@ internal sealed class Snippet
                         VariableNode source = variable.Source ?? variable;
                         if (!_values.TryGetValue(source, out string? value))
                             _values[source] = value = _context.Variable(variable.Name);
-                        // Transformed, a variable without a value is empty text, as in VS Code.
-                        if (variable.Transform is { } transform)
-                            value = transform.Resolve(value ?? "");
+                        // Transformed, a variable without a value is empty text, as in VS Code; the transformation stops
+                        // once its result is longer than what is left.
+                        if (
+                            variable.Transform is { } transform
+                            && (value = transform.Resolve(value ?? "", _budget)) is null
+                        )
+                            return false;
                         if (value is null ? !Write(variable.Children, parent) : !WriteValue(variable, value))
                             return false;
                         break;
