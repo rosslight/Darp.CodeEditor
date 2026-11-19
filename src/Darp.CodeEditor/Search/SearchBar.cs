@@ -343,13 +343,13 @@ internal sealed class SearchBar : UserControl
             _wholeWord.IsChecked == true,
             _regex.IsChecked == true
         );
-        string? replacement = _replaceRow.IsVisible ? _replace.Text ?? "" : null;
+        SearchReplacement? replacement = _replaceRow.IsVisible ? Replacement() : null;
         TextSnapshot snapshot = shown.Document.CurrentSnapshot;
         var searching = new CancellationTokenSource();
         _searching = searching;
         // Cancelled, the task ends as cancelled, not as failed.
         Task<SearchResult> search = Task.Run(
-            () => TextSearch.Find(snapshot, query, replacement, searching.Token),
+            () => TextSearch.Find(snapshot, query, replacement, null, searching.Token),
             searching.Token
         );
         search.ContinueWith(
@@ -476,7 +476,7 @@ internal sealed class SearchBar : UserControl
         return
             _shown is { Editor.IsReadOnly: false } shown
             && result.Version == shown.Document.CurrentSnapshot.Version
-            && replacement == (_replace.Text ?? "")
+            && replacement == Replacement()
             ? result
             : null;
     }
@@ -496,6 +496,9 @@ internal sealed class SearchBar : UserControl
     }
 
     private int SelectionStart() => _shown?.Editor.Selection.Range.Start ?? 0;
+
+    /// <summary>What replaces the matches, by the replace row as it is.</summary>
+    private SearchReplacement Replacement() => new(_replace.Text ?? "", PreserveCase: false);
 
     /// <summary>Shows how many matches there are and which one is selected, and why a result is partial.</summary>
     private void UpdateStatus()

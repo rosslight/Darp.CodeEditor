@@ -45,6 +45,7 @@ public class SearchBenchmarks
             _snapshot ?? throw new InvalidOperationException("Not set up."),
             query,
             null,
+            null,
             CancellationToken.None
         );
         return result.IsComplete ? result.Matches.Count : throw new InvalidOperationException("The search stopped.");
