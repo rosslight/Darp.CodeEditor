@@ -216,13 +216,7 @@ public sealed class CompletionTests(UiFixture ui)
             {
                 window.Render();
                 return Labels(window).SequenceEqual(["Console", "Convert"])
-                    && Row(window, "Console")
-                        .GetVisualDescendants()
-                        .OfType<TextBlock>()
-                        .Single()
-                        .Inlines?.OfType<Run>()
-                        .First()
-                        .Text == "Con";
+                    && LabelOf(window, "Console").Inlines?.OfType<Run>().First().Text == "Con";
             });
         });
 
@@ -255,6 +249,27 @@ public sealed class CompletionTests(UiFixture ui)
             TypeAlone(window, "v");
             TypeAlone(window, ";");
             document.Text.ShouldBe("Conv;");
+        });
+
+    [Fact]
+    public Task Enter_that_waits_for_a_filter_that_matches_nothing_goes_on_to_a_new_line() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("println"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Type("pri");
+            await WaitForLabelsAsync(window, ["println"]);
+
+            // Typed, and Enter pressed, before the filter of "prizzz" shows: "println" does not match it.
+            TypeAlone(window, "zzz");
+            PressAlone(window, Key.Enter);
+
+            // Opened by typing, the list ends once that filter has run, and Enter makes its new line then.
+            await Wait.UntilAsync(() => List(window) is null);
+            document.Text.ShouldBe(NewLines.In("prizzz\n", start: ""));
         });
 
     [Fact]
@@ -469,7 +484,7 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
-    public Task Edits_replace_their_range_also_with_what_was_typed_since_and_an_insert_replace_edit_inserts() =>
+    public Task Edits_replace_their_range_also_with_what_was_typed_since_and_an_insert_replace_edit_inserts_or_replaces() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
@@ -498,12 +513,23 @@ public sealed class CompletionTests(UiFixture ui)
                 window.Press(Key.Enter);
                 document.Text.ShouldBe("log.writeXYZ");
                 document.Undo();
+                // A text edit's range is also what replacing goes over.
+                await OpenAsync(window, 7);
+                window.Press(Key.Tab);
+                document.Text.ShouldBe("log.writeXYZ");
+                document.Undo();
 
-                // VS Code's default: an insert and replace edit inserts.
+                // An insert and replace edit: Enter inserts over its insert range, Tab replaces its replace range.
                 await OpenAsync(window, 7);
                 window.Press(Key.Down);
                 window.Press(Key.Enter);
                 document.Text.ShouldBe("log.writeAllXYZ");
+                document.Undo();
+                await OpenAsync(window, 7);
+                window.Press(Key.Down);
+                window.Press(Key.Tab);
+                document.Text.ShouldBe("log.writeAll");
+                window.Editor.Selection.ShouldBe(new TextSelection(12));
             }
 
             document.Text = "log.w";
@@ -525,6 +551,109 @@ public sealed class CompletionTests(UiFixture ui)
                 window.Press(Key.Enter);
                 document.Text.ShouldBe("log.write");
             }
+        });
+
+    [Fact]
+    public Task Enter_inserts_before_the_rest_of_the_word_and_Tab_and_Shift_Enter_replace_it() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("println"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "print");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            // Inside a word, Enter inserts and keeps the rest of the word.
+            await OpenAsync(window, 3);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("printlnnt");
+            window.Editor.Selection.ShouldBe(new TextSelection(7));
+            document.Undo();
+
+            // Tab replaces the rest of the word, and so does Shift+Enter, also after typing on.
+            await OpenAsync(window, 3);
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("println");
+            window.Editor.Selection.ShouldBe(new TextSelection(7));
+            document.Text = "print";
+            await OpenAsync(window, 3);
+            window.Type("n");
+            await WaitForLabelsAsync(window, ["println"]);
+            window.Press(Key.Enter, KeyModifiers.Shift);
+            document.Text.ShouldBe("println");
+
+            // At a word's end, both do the same.
+            document.Text = "pri";
+            await OpenAsync(window, 3);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("println");
+            document.Text = "pri";
+            await OpenAsync(window, 3);
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("println");
+
+            // Without a list, the keys go on: Enter makes a new line, and Tab indents.
+            window.Press(Key.Enter);
+            window.Press(Key.Tab);
+            string newLine = NewLines.In("println\n", start: "pri");
+            document.Text.ShouldStartWith(newLine);
+            document.Text.Length.ShouldBeGreaterThan(newLine.Length);
+            document.Text.Trim().ShouldBe("println");
+        });
+
+    [Fact]
+    public Task Replacing_goes_over_the_rest_of_the_word_as_the_edits_since_left_it_and_no_further() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("println"));
+            const string text = "print + tail";
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            // The rest of the word is deleted after the caret, as by another editor: nothing after it is replaced.
+            await OpenAsync(window, 3);
+            document.Replace(new TextRange(3, 2), "");
+            window.Editor.Selection.Caret.ShouldBe(3);
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("println + tail");
+
+            // The caret moved on into the word: the replacement still ends with it.
+            document.Text = text;
+            await OpenAsync(window, 3);
+            window.Press(Key.Right);
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("println + tail");
+
+            // Typed into the rest of the word, the text goes with it.
+            document.Text = text;
+            await OpenAsync(window, 3);
+            document.Replace(new TextRange(4, 0), "xx");
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("println + tail");
+        });
+
+    [Fact]
+    public Task Tab_bound_to_accepting_the_selected_item_inserts_as_in_VS_Code() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("println"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "print");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Editor.Keymap = CodeEditorKeymap.FromJson(
+                """[ { "key": "tab", "command": "acceptSelectedSuggestion" } ]"""
+            );
+
+            await OpenAsync(window, 3);
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("printlnnt");
+            document.Undo();
+            await OpenAsync(window, 3);
+            window.Press(Key.Enter, KeyModifiers.Shift);
+            document.Text.ShouldBe("println");
         });
 
     [Fact]
@@ -619,7 +748,7 @@ public sealed class CompletionTests(UiFixture ui)
 
     [Theory]
     [InlineData(420, "below")]
-    [InlineData(640, "beside, narrower")]
+    [InlineData(720, "beside, narrower")]
     [InlineData(900, "beside")]
     public Task The_details_fit_beside_the_list_where_there_is_room_and_below_it_otherwise(int width, string where) =>
         _ui.Run(async () =>
@@ -660,12 +789,16 @@ public sealed class CompletionTests(UiFixture ui)
             var client = new Rect(window.Window.ClientSize);
             client.Contains(list).ShouldBeTrue($"{list} in {client}");
             client.Contains(details).ShouldBeTrue($"{details} in {client}");
-            // The documentation wraps to the width the details have.
+            // The documentation wraps to the width the details have, and scrolls where it is taller.
             foreach (TextBlock text in Details(window)!.GetVisualDescendants().OfType<TextBlock>())
-                details.Contains(BoundsInWindow(text)).ShouldBeTrue($"{BoundsInWindow(text)} in {details}");
-            // The list stays at the word it completes, where the window has room for it.
+            {
+                Rect bounds = BoundsInWindow(text);
+                (bounds.Left >= details.Left && bounds.Right <= details.Right).ShouldBeTrue($"{bounds} in {details}");
+            }
+            // The list stays at the word it completes, where the window has room for it: its labels line up with it.
             Point word = window.PointAt(4);
-            list.Left.ShouldBeInRange(word.X - 10, word.X);
+            if (width > CompletionView.DefaultWidth + word.X)
+                (list.Left + 1 + CompletionListBox.LabelInset).ShouldBeInRange(word.X - 10, word.X);
             if (where == "below")
             {
                 details.Top.ShouldBeGreaterThanOrEqualTo(list.Bottom);
@@ -1032,6 +1165,72 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_list_with_room_for_fewer_rows_than_its_items_selects_and_pages_among_the_rows_that_fit() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            string[] labels = [.. Enumerable.Range(0, 10).Select(i => $"item{i}")];
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items(labels));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document }, height: 120);
+            var inside = new Rect(window.Window.ClientSize);
+            await OpenAsync(window, 0);
+            CompletionListBox list = List(window).ShouldNotBeNull();
+            int rows = list.VisibleRows;
+            rows.ShouldBeInRange(2, 9);
+            inside.Contains(BoundsInWindow(Flyout(window).ShouldNotBeNull())).ShouldBeTrue();
+
+            // Up wraps to the last item, which scrolls into the rows that show.
+            window.Press(Key.Up);
+            window.Render();
+            list.SelectedIndex.ShouldBe(9);
+            Rect last = BoundsInWindow(list.RowOf(9).ShouldNotBeNull());
+            inside.Contains(last).ShouldBeTrue(last.ToString());
+
+            // A page is as many rows as show, less one.
+            window.Press(Key.PageUp);
+            window.Render();
+            list.SelectedIndex.ShouldBe(9 - (rows - 1));
+            Rect selected = BoundsInWindow(list.RowOf(list.SelectedIndex).ShouldNotBeNull());
+            inside.Contains(selected).ShouldBeTrue(selected.ToString());
+        });
+
+    [Fact]
+    public Task Dragging_the_lists_edges_resizes_it_to_whole_rows_and_it_keeps_that_size() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Items([.. Enumerable.Range(0, 30).Select(i => $"item{i:D2}")])
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await OpenAsync(window, 0);
+            CompletionListBox list = List(window).ShouldNotBeNull();
+            list.VisibleRows.ShouldBe(12);
+            Rect frame = BoundsInWindow(Flyout(window).ShouldNotBeNull());
+
+            // The bottom right corner, a pixel inside the border, 100 pixels and three rows further.
+            var corner = new Point(frame.Right - 2, frame.Bottom - 2);
+            Point to = corner + new Point(100, 3 * list.RowHeight);
+            window.Window.MouseDown(corner, MouseButton.Left);
+            window.Window.MouseMove(to);
+            window.Window.MouseUp(to, MouseButton.Left);
+            window.Layout();
+
+            list.VisibleRows.ShouldBe(15);
+            BoundsInWindow(Flyout(window).ShouldNotBeNull()).Width.ShouldBe(frame.Width + 100, tolerance: 1);
+            // Asked for again, the list keeps its size.
+            window.Press(Key.Escape);
+            await OpenAsync(window, 0);
+            List(window).ShouldNotBeNull().VisibleRows.ShouldBe(15);
+        });
+
+    [Fact]
     public Task Completion_ends_on_Escape_leaving_the_word_focus_loss_scrolling_and_a_server_change() =>
         _ui.Run(async () =>
         {
@@ -1069,6 +1268,182 @@ public sealed class CompletionTests(UiFixture ui)
             await OpenAsync(window, 3);
             using CodeDocument crash = server.CreateDocument(FakeServer.Commands, "exit 3");
             await Wait.UntilAsync(() => List(window) is null);
+        });
+
+    [Theory]
+    [InlineData(Key.Down, 2)]
+    [InlineData(Key.PageDown, 2)]
+    [InlineData(Key.Up, 0)]
+    [InlineData(Key.PageUp, 0)]
+    public Task With_one_item_the_keys_that_select_move_the_caret_and_leaving_the_line_ends_completion(
+        Key key,
+        int line
+    ) =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("ZeroDivisionError"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "above\n\nbelow");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Editor.Selection = new TextSelection(6);
+            window.Type("Zero");
+            await WaitForLabelsAsync(window, ["ZeroDivisionError"]);
+
+            // As in VS Code: selecting needs more than one item, so the key goes on to the text.
+            window.Press(key);
+
+            window.Editor.CaretPosition.Line.ShouldBe(line + 1);
+            List(window).ShouldBeNull();
+            document.Text.ShouldBe("above\nZero\nbelow");
+        });
+
+    [Fact]
+    public Task Asked_by_key_an_empty_answer_says_No_suggestions_until_the_next_key() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items());
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Editor.Selection = new TextSelection(3);
+
+            window.Press(Key.Space, KeyModifiers.Control);
+
+            await Wait.UntilAsync(() => List(window)?.Message == "No suggestions.");
+            Labels(window).ShouldBeEmpty();
+            window.Press(Key.Right);
+            List(window).ShouldBeNull();
+            // Escape closes it too, and goes no further.
+            window.Press(Key.Space, KeyModifiers.Control);
+            await Wait.UntilAsync(() => List(window)?.Message == "No suggestions.");
+            window.Press(Key.Escape);
+            List(window).ShouldBeNull();
+        });
+
+    [Fact]
+    public Task Asked_by_key_a_list_that_typing_filters_empty_stays_frozen_while_the_caret_is_in_a_word() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("print", "property"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "pri");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await OpenAsync(window, 3);
+
+            window.Type("zzzz");
+
+            // As in VS Code: the list stays as it was, without the matched characters in bold.
+            await WaitForFrozenAsync(window, "print");
+            Labels(window).ShouldBe(["print"]);
+            List(window).ShouldNotBeNull().Message.ShouldBeNull();
+            // Typing back to a match shows the matches again; the caret leaving the word ends it.
+            for (int i = 0; i < 4; i++)
+                window.Press(Key.Back);
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return RowRuns(window, "print").SequenceEqual([("pri", true), ("nt", false)]);
+            });
+            window.Type("zz");
+            await WaitForFrozenAsync(window, "print");
+            window.Type(" ");
+            await Wait.UntilAsync(() => List(window) is null);
+            await BarrierAsync(server, fake);
+            fake.LinesStartingWith("completion ").Count.ShouldBe(1);
+        });
+
+    [Fact]
+    public Task Asked_by_key_a_list_with_no_match_for_the_word_says_No_suggestions_and_typing_on_keeps_it() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("alpha", "beta"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "q");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Editor.Selection = new TextSelection(1);
+
+            window.Press(Key.Space, KeyModifiers.Control);
+
+            await Wait.UntilAsync(() => List(window)?.Message == "No suggestions.");
+            window.Type("q");
+            await BarrierAsync(server, fake);
+            window.Layout();
+            List(window).ShouldNotBeNull().Message.ShouldBe("No suggestions.");
+            fake.LinesStartingWith("completion ").Count.ShouldBe(1);
+        });
+
+    [Fact]
+    public Task A_frozen_list_commits_its_item_over_what_was_typed_by_key_and_click_but_not_by_commit_characters() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse("""{ "items": [ { "label": "print", "commitCharacters": ["("] } ] }""")
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "pri");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            await OpenAsync(window, 3);
+            window.Type("zz");
+            await WaitForFrozenAsync(window, "print");
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("print");
+
+            document.Text = "pri";
+            await OpenAsync(window, 3);
+            window.Type("zz");
+            await WaitForFrozenAsync(window, "print");
+            window.Click(RowCenter(window, 0), MouseButton.Left);
+            document.Text.ShouldBe("print");
+
+            // Also while the filter of what was typed last still runs: once it has, the item commits.
+            document.Text = "pri";
+            await OpenAsync(window, 3);
+            TypeAlone(window, "z");
+            PressAlone(window, Key.Enter);
+            await Wait.UntilAsync(() => document.Text == "print");
+
+            // As in VS Code, its commit characters go in as text.
+            document.Text = "pri";
+            await OpenAsync(window, 3);
+            window.Type("zz");
+            await WaitForFrozenAsync(window, "print");
+            window.Type("(");
+            document.Text.ShouldBe("prizz(");
+        });
+
+    [Fact]
+    public Task Ctrl_Space_toggles_the_details_while_the_list_shows() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse("""{ "items": [ { "label": "Console", "detail": "class System.Console" } ] }""")
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "Co");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await OpenAsync(window, 2);
+            await Wait.UntilAsync(() => DetailTexts(window).Contains("class System.Console"));
+
+            window.Press(Key.Space, KeyModifiers.Control);
+
+            Details(window).ShouldBeNull();
+            // The selected row shows the detail instead, and the list stays.
+            await Wait.UntilAsync(() => Row(window, "Console").Right.Text == "class System.Console");
+            await BarrierAsync(server, fake);
+            fake.LinesStartingWith("completion ").Count.ShouldBe(1);
+            window.Press(Key.Space, KeyModifiers.Control);
+            await Wait.UntilAsync(() => DetailTexts(window).Contains("class System.Console"));
         });
 
     /// <summary>Makes the fake server answer completion with <paramref name="result"/>, until the document is disposed.</summary>
@@ -1139,7 +1514,7 @@ public sealed class CompletionTests(UiFixture ui)
         await Wait.UntilAsync(() =>
         {
             window.Render();
-            return List(window) is { ItemCount: > 0 };
+            return List(window) is { Items.Count: > 0 };
         });
         return Labels(window);
     }
@@ -1152,13 +1527,25 @@ public sealed class CompletionTests(UiFixture ui)
             return Labels(window).SequenceEqual(labels);
         });
 
+    /// <summary>Waits until the list shows <paramref name="label"/> frozen: without its matched characters in bold.</summary>
+    private static Task WaitForFrozenAsync(EditorWindow window, string label) =>
+        Wait.UntilAsync(() =>
+        {
+            window.Render();
+            return Labels(window).Contains(label) && RowRuns(window, label).SequenceEqual([(label, false)]);
+        });
+
     /// <summary>The labels of the items that the list shows, in order; none while it is closed.</summary>
     internal static IReadOnlyList<string> Labels(EditorWindow window) =>
-        List(window) is { ItemsSource: IEnumerable<ShownItem> items } ? [.. items.Select(i => i.Item.Label)] : [];
+        List(window) is { Items: var items } ? [.. items.Select(i => i.Item.Label)] : [];
 
     /// <summary>The completion list in the window's overlay layer; null while it is closed.</summary>
-    internal static ListBox? List(EditorWindow window) =>
-        OverlayLayer.GetOverlayLayer(window.Window)?.GetVisualDescendants().OfType<ListBox>().FirstOrDefault();
+    internal static CompletionListBox? List(EditorWindow window) =>
+        OverlayLayer
+            .GetOverlayLayer(window.Window)
+            ?.GetVisualDescendants()
+            .OfType<CompletionListBox>()
+            .FirstOrDefault(list => list.IsEffectivelyVisible);
 
     /// <summary>The frame around the list; null while it is closed.</summary>
     internal static PopupFrame? Flyout(EditorWindow window) => PopupFrames.Find(window, "CompletionList");
@@ -1229,21 +1616,19 @@ public sealed class CompletionTests(UiFixture ui)
                 .Select(run => (run.Text ?? "", run.FontWeight == FontWeight.Bold)),
         ];
 
-    private static TextBlock LabelOf(EditorWindow window, string label) =>
-        Row(window, label).GetVisualDescendants().OfType<TextBlock>().Single();
+    private static TextBlock LabelOf(EditorWindow window, string label) => Row(window, label).Label;
 
-    private static ListBoxItem Row(EditorWindow window, string label) =>
+    private static CompletionListBox.Row Row(EditorWindow window, string label) =>
         List(window)
             .ShouldNotBeNull()
             .GetVisualDescendants()
-            .OfType<ListBoxItem>()
-            .Single(item => item.Content is ShownItem shown && shown.Item.Label == label);
+            .OfType<CompletionListBox.Row>()
+            .Single(row => row.IsVisible && row.Item?.Item.Label == label);
 
     private static Point RowCenter(EditorWindow window, int index)
     {
         window.Render();
-        ListBox list = List(window).ShouldNotBeNull();
-        return BoundsInWindow(list.ContainerFromIndex(index).ShouldNotBeNull()).Center;
+        return BoundsInWindow(List(window).ShouldNotBeNull().RowOf(index).ShouldNotBeNull()).Center;
     }
 
     /// <summary>The pixels of <paramref name="color"/> in the icon column of the row at <paramref name="index"/>.</summary>
@@ -1252,7 +1637,7 @@ public sealed class CompletionTests(UiFixture ui)
         window.Render();
         CompletionIcon icon = List(window)
             .ShouldNotBeNull()
-            .ContainerFromIndex(index)
+            .RowOf(index)
             .ShouldNotBeNull()
             .GetVisualDescendants()
             .OfType<CompletionIcon>()
