@@ -215,8 +215,9 @@ public sealed class SnippetSessionTests(UiFixture ui)
             await OpenAsync(window, 0);
             window.Press(Key.Enter);
             window.Press(Key.Tab);
-            // A stop between the mirrors grows long.
-            string between = new('x', 1_000_000);
+            // A stop between the mirrors grows long, on lines short enough to show whole: a long line's hidden tail takes
+            // no edits.
+            string between = string.Concat(Enumerable.Repeat(new string('x', 99) + "\n", 10_000));
             document.Replace(new TextRange(4, 1), between);
             window.Press(Key.Tab, KeyModifiers.Shift);
             editor.Selection.ShouldBe(new TextSelection(0, 1));
