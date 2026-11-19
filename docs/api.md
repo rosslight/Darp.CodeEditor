@@ -221,6 +221,7 @@ The default keys on Windows and Linux; macOS in brackets where it differs beyond
 | Enter | `acceptSelectedSuggestion`, while the list shows | inserts the item and keeps the rest of the word (design.md #114) |
 | Tab, Shift+Enter | `acceptAlternativeSelectedSuggestion`, while the list shows | replaces the rest of the word with the item; VS Code's Tab inserts |
 | Ctrl+Shift+Space | `editor.action.triggerParameterHints` | signature help |
+| Alt+Up, Alt+Down (macOS also Ctrl+P, Ctrl+N) | `showPrevParameterHint`, `showNextParameterHint`, while signature help shows several signatures | the signature before or after the active one, ahead of the keys' other bindings, such as moving lines, as VS Code weighs them, but after completion's list, which takes Ctrl+N and Ctrl+P first; otherwise the keys go on to those |
 | Ctrl+F, Ctrl+H (macOS: Cmd+Alt+F for replace) | `actions.find`, `editor.action.startFindReplaceAction` | the search and the replace bar, not in a read-only editor |
 | F3, Shift+F3 (macOS also Cmd+G, Shift+Cmd+G) | `editor.action.nextMatchFindAction`, `editor.action.previousMatchFindAction` | the next and the previous match |
 | Alt+C, Alt+W, Alt+R, Alt+P, Alt+L (macOS: Cmd+Alt+…) | `toggleFindCaseSensitive`, `toggleFindWholeWord`, `toggleFindRegex`, `togglePreserveCase`, `toggleFindInSelection` | the search bar's options, from the text too, also while the bar is closed |
@@ -700,7 +701,8 @@ How the client talks to a server, where the protocol leaves a choice:
   parameter is past its parameters cannot match the call, unless it has none and the first is active. A parameter
   labelled by a string is found as a whole word in the signature. The active parameter's documentation shows below,
   then the active signature's; all of it as much as a hover shows, the active signature first, then the others. Up and
-  Down choose the active signature, around the ends, while completion's list is closed. It ends on Escape, after
+  Down choose the active signature, around the ends, while completion's list is closed, and Alt+Up and Alt+Down also
+  while it is open (section 2). It ends on Escape, after
   completion's list, on a click or drag that moves the caret, with no signature, when the editor becomes read-only,
   when the editor loses the keyboard focus, when a server starts or stops serving the document, with new colors, when
   parameter hints are turned off, and when its line scrolls out of view.
