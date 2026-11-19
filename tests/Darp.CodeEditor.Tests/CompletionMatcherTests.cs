@@ -136,14 +136,59 @@ public sealed class CompletionMatcherTests
     }
 
     [Fact]
-    public void Matching_gracefully_takes_a_swap_that_matches_better_than_the_text_as_typed()
+    public void Matching_gracefully_tries_swaps_only_when_the_text_as_typed_does_not_match()
     {
-        // "cno" matches "console" best as "con".
-        _matcher.Match("cno", "console", "console", true).ShouldNotBeNull().Highlights.ShouldBe([0, 2, 4]);
-        _matcher
+        // "cno" matches "console" as typed, if not as well as "con" would.
+        (int score, int[] highlights) = _matcher
             .Match("cno", "console", "console", true, graceful: true)
+            .ShouldNotBeNull();
+        score.ShouldBe(_matcher.Match("cno", "console", "console", true).ShouldNotBeNull().Score);
+        highlights.ShouldBe([0, 2, 4]);
+        _matcher
+            .Match("prnit", "print", "print", true, graceful: true)
             .ShouldNotBeNull()
-            .Highlights.ShouldBe([0, 1, 2]);
+            .Highlights.ShouldBe([0, 1, 2, 3, 4]);
+    }
+
+    [Theory]
+    [InlineData("print", "print")]
+    [InlineData("pri", "print")]
+    [InlineData("Pri", "print")]
+    [InlineData("fb", "FooBar")]
+    [InlineData("lin", "write_line")]
+    [InlineData("ab", "x_ab_cd")]
+    public void Past_its_budget_a_ranking_scores_the_way_that_one_pass_finds_as_the_table_scores_it(
+        string typed,
+        string label
+    )
+    {
+        var spent = new CompletionMatcher(cellsPerRank: 0);
+        CompletionCandidate[] items = [new(typed, label, label, true)];
+
+        List<RankedCompletion> onePass = spent.Rank(items, TestContext.Current.CancellationToken);
+        List<RankedCompletion> table = _matcher.Rank(items, TestContext.Current.CancellationToken);
+
+        onePass.Single().Score.ShouldBe(table.Single().Score);
+        onePass.Single().Highlights.ShouldBe(table.Single().Highlights);
+    }
+
+    [Fact]
+    public void Past_its_budget_a_ranking_still_tolerates_a_typo_and_finds_no_more_than_the_table()
+    {
+        var spent = new CompletionMatcher(cellsPerRank: 0);
+        CompletionCandidate[] items =
+        [
+            new("prnit", "print", "print", true),
+            new("cno", "console", "console", true),
+            new("oo", "FooBar", "FooBar", true),
+        ];
+
+        List<RankedCompletion> onePass = spent.Rank(items, TestContext.Current.CancellationToken);
+        List<RankedCompletion> table = _matcher.Rank(items, TestContext.Current.CancellationToken);
+
+        onePass.Select(r => r.Index).Order().ShouldBe(table.Select(r => r.Index).Order());
+        foreach (RankedCompletion ranked in onePass)
+            ranked.Score.ShouldBeLessThanOrEqualTo(table.Single(r => r.Index == ranked.Index).Score);
     }
 
     [Fact]
