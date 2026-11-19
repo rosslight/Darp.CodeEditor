@@ -250,6 +250,35 @@ public sealed class KeymapTests(UiFixture ui)
             window.Editor.Document.ShouldNotBeNull().Text.ShouldBe("1\n2");
         });
 
+    /// <summary>
+    /// The editor raises <see cref="CodeEditor.PendingKeys"/> once the switch is done, so that it shows one document
+    /// with one set of features, also when a handler sets another document.
+    /// </summary>
+    [Fact]
+    public Task A_document_set_while_a_switch_ends_the_wait_is_the_only_one_the_editor_runs_for() =>
+        _ui.Run(async () =>
+        {
+            await CodeLanguage.Json.Loaded;
+            using EditorWindow window = MarkedText.Show("|", CodeLanguage.Json);
+            CodeEditor editor = window.Editor;
+            editor.Keymap = CodeEditorKeymap.Default.With(
+                new CodeEditorKeyBinding("ctrl+k f", CodeEditorCommands.Find)
+            );
+            CodeDocument third = CodeDocument.Create(CodeLanguage.Json);
+            window.Press(Keys.K, KeyModifiers.Control);
+            editor.PropertyChanged += (_, e) =>
+            {
+                if (e.Property == CodeEditor.PendingKeysProperty && editor.Document != third)
+                    editor.Document = third;
+            };
+
+            editor.Document = CodeDocument.Create(CodeLanguage.Json);
+            window.Type("[");
+
+            editor.Document.ShouldBe(third);
+            third.Text.ShouldBe("[]");
+        });
+
     [Fact]
     public Task A_click_ends_the_wait() =>
         _ui.Run(() =>

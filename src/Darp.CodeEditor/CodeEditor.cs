@@ -603,6 +603,8 @@ public class CodeEditor : TemplatedControl
             }
         }
         UpdateHighlighting();
+        // Last, once the part, the view and the subscriptions agree: a handler may switch the document again.
+        UpdatePendingKeys();
     }
 
     private void Show(TextEditor part, CodeDocument document)
@@ -638,7 +640,6 @@ public class CodeEditor : TemplatedControl
         _searchBar?.Detach();
         _view?.Dispose();
         _view = null;
-        UpdatePendingKeys();
         part.TextArea.TextView.LayoutUpdated -= OnTextViewLayoutUpdated;
         part.TextArea.TextView.VisualLinesChanged -= OnTextViewLaidOut;
         part.TextArea.TextView.ScrollOffsetChanged -= OnTextViewLaidOut;
