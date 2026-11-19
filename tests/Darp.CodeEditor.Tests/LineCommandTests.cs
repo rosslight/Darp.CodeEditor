@@ -204,7 +204,7 @@ public sealed class LineCommandTests(UiFixture ui)
 
             window.Press(down ? Key.Down : Key.Up, CopyLines);
 
-            MarkedText.Of(window).ShouldBe(expected);
+            MarkedText.Of(window).ShouldBe(NewLines.In(expected, start: marked));
             DocumentOf(window).Undo();
             MarkedText.Of(window).ShouldBe(marked);
         });

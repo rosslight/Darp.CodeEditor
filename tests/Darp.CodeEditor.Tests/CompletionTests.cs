@@ -407,7 +407,7 @@ public sealed class CompletionTests(UiFixture ui)
 
             // Opened by typing, the list ends once that filter has run, and Enter makes its new line then.
             await Wait.UntilAsync(() => List(window) is null);
-            document.Text.ShouldBe("prizzz\n");
+            document.Text.ShouldBe(NewLines.In("prizzz\n", start: ""));
         });
 
     [Fact]
@@ -735,8 +735,9 @@ public sealed class CompletionTests(UiFixture ui)
             // Without a list, the keys go on: Enter makes a new line, and Tab indents.
             window.Press(Key.Enter);
             window.Press(Key.Tab);
-            document.Text.ShouldStartWith("println\n");
-            document.Text.Length.ShouldBeGreaterThan("println\n".Length);
+            string newLine = NewLines.In("println\n", start: "pri");
+            document.Text.ShouldStartWith(newLine);
+            document.Text.Length.ShouldBeGreaterThan(newLine.Length);
             document.Text.Trim().ShouldBe("println");
         });
 

@@ -32,7 +32,7 @@ public sealed class AutoIndentTests(UiFixture ui)
 
             window.Press(Key.Enter);
 
-            MarkedText.Of(window).ShouldBe(expected);
+            MarkedText.Of(window).ShouldBe(NewLines.In(expected, start: marked));
         });
 
     [Theory]
@@ -47,7 +47,7 @@ public sealed class AutoIndentTests(UiFixture ui)
 
             window.Press(Key.Enter);
 
-            MarkedText.Of(window).ShouldBe(expected);
+            MarkedText.Of(window).ShouldBe(NewLines.In(expected, start: marked));
         });
 
     [Theory]
@@ -69,7 +69,7 @@ public sealed class AutoIndentTests(UiFixture ui)
 
             window.Press(Key.Enter);
 
-            MarkedText.Of(window).ShouldBe(expected);
+            MarkedText.Of(window).ShouldBe(NewLines.In(expected, start: marked));
         });
 
     [Theory]
@@ -204,7 +204,7 @@ public sealed class AutoIndentTests(UiFixture ui)
 
             window.Press(key);
 
-            MarkedText.Of(window).ShouldBe(expected);
+            MarkedText.Of(window).ShouldBe(NewLines.In(expected, start: marked));
         });
 
     [Fact]

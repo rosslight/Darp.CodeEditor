@@ -10,7 +10,11 @@ namespace Darp.CodeEditor.Tests;
 [Collection(UiFixture.Collection)]
 public sealed class ClipboardTests(UiFixture ui)
 {
-    private static readonly string s_lineBreak = Environment.NewLine;
+    /// <summary>
+    /// The clipboard's line break from the documents here, whose line breaks are <c>\n</c> or none: as VS Code copies,
+    /// <c>\r\n</c> on Windows and else theirs, the system's either way.
+    /// </summary>
+    private static readonly string s_lineBreak = NewLines.OfNewDocuments;
 
     private readonly UiFixture _ui = ui;
 
