@@ -407,25 +407,13 @@ public class CodeEditor : TemplatedControl
         _view?.RunCommand(replace ? CodeEditorCommands.Replace : CodeEditorCommands.Find);
 
     /// <summary>Moves the selection to the clipboard, as Ctrl+X does. No effect in a read-only editor.</summary>
-    public void Cut()
-    {
-        if (_shown is not null)
-            _part?.Cut();
-    }
+    public void Cut() => _view?.Cut();
 
     /// <summary>Copies the selection to the clipboard, as Ctrl+C does.</summary>
-    public void Copy()
-    {
-        if (_shown is not null)
-            _part?.Copy();
-    }
+    public void Copy() => _view?.Copy();
 
     /// <summary>Replaces the selection with the clipboard's text, as Ctrl+V does. No effect in a read-only editor.</summary>
-    public void Paste()
-    {
-        if (_shown is not null)
-            _part?.Paste();
-    }
+    public void Paste() => _view?.Paste();
 
     /// <summary>Selects the whole text, as Ctrl+A does.</summary>
     public void SelectAll() => Selection = new TextSelection(0, Document?.CurrentSnapshot.Length ?? 0);
@@ -622,7 +610,9 @@ public class CodeEditor : TemplatedControl
         _shown = document;
         Select(part, place?.Selection ?? new TextSelection(0));
         TextView textView = part.TextArea.TextView;
-        _view = new EditorView(new EditorContext(this, part.TextArea, document, () => Keymap, CreatedSearchBar));
+        _view = new EditorView(
+            new EditorContext(this, part.TextArea, document, () => Keymap, () => _searchBar, CreatedSearchBar)
+        );
         _view.SetColors(_theme, _colors, _iconColors);
         _searchBar?.Attach(this, part.TextArea, document);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
@@ -668,21 +658,13 @@ public class CodeEditor : TemplatedControl
     /// </summary>
     private void OnDocumentDisposed(object? sender, EventArgs e) => Dispatcher.Post(UpdateShownDocument);
 
-    /// <summary>
-    /// Keys, before AvaloniaEdit's, also in the search bar: the view's (<see cref="EditorView.OnKeyDown"/>), and then
-    /// Escape, which closes the search bar once nothing else is left to dismiss.
-    /// </summary>
+    /// <summary>Keys, before AvaloniaEdit's, also in the search bar: the view's (<see cref="EditorView.OnKeyDown"/>).</summary>
     private void OnKeyDownTunnel(object? sender, KeyEventArgs e)
     {
         if (_view is not { } view)
             return;
         if (view.OnKeyDown(e))
             e.Handled = true;
-        else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && _searchBar is { IsOpen: true } bar)
-        {
-            bar.Close();
-            e.Handled = true;
-        }
         UpdatePendingKeys();
     }
 
