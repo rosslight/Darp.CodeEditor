@@ -1,5 +1,5 @@
 {
-  "comment": "Rules for Enter for tests: doc comments as VS Code's TypeScript has them, an outdent after a one-line if, an indent after a case, and two rules that VS Code skips.",
+  "comment": "Rules for Enter for tests: doc comments as VS Code's TypeScript has them, an outdent after a one-line if, an indent after a case, a rule that appends two lines, and two rules that VS Code skips.",
   "comments": { "lineComment": "//", "blockComment": ["/*", "*/"] },
   "brackets": [["{", "}"], ["(", ")"]],
   "onEnterRules": [
@@ -27,6 +27,7 @@
       "action": { "indent": "outdent" }
     },
     { "beforeText": { "pattern": "^\\s*CASE\\b.*:\\s*$", "flags": "i" }, "action": { "indent": "indent" } },
+    { "beforeText": "^APPEND$", "action": { "indent": "none", "appendText": "x\ny" } },
     { "beforeText": "skipped", "action": { "indent": "sideways", "appendText": "never" } },
     { "beforeText": "(skipped", "action": { "indent": "none", "appendText": "never" } }
   ]

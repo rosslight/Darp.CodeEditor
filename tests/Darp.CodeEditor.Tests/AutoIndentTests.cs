@@ -35,6 +35,30 @@ public sealed class AutoIndentTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe(NewLines.In(expected, start: marked));
         });
 
+    [Fact]
+    public Task Enter_puts_the_documents_line_break_in_the_text_that_a_rule_appends() =>
+        _ui.Run(async () =>
+        {
+            await Rules.Loaded;
+            using EditorWindow window = Show("a\r\nAPPEND|", Rules);
+
+            window.Press(Key.Enter);
+
+            MarkedText.Of(window).ShouldBe("a\r\nAPPEND\r\nx\r\ny|");
+        });
+
+    [Fact]
+    public Task Enter_before_the_text_of_an_indented_line_keeps_the_carets_column() =>
+        _ui.Run(async () =>
+        {
+            await CodeLanguage.Json.Loaded;
+            using EditorWindow window = Show("{\n|    \"a\": 1\n}", CodeLanguage.Json);
+
+            window.Press(Key.Enter);
+
+            MarkedText.Of(window).ShouldBe("{\n\n|    \"a\": 1\n}");
+        });
+
     [Theory]
     [InlineData("  // alpha |beta", "  // alpha \n  // |beta")]
     // At the comment's end, the rule's afterText doesn't match.
