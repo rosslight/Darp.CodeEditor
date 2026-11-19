@@ -78,7 +78,7 @@ internal sealed class EditorView : IDisposable
         _typing = new Typing(area, document, Highlighter, _changes, _pairs);
         _clipboard = new Clipboard(area, document);
         _brackets = new BracketMatching(area, document, Highlighter, _changes, context.Options);
-        _occurrences = new OccurrenceHighlighter(area, document, _changes, context.Options);
+        _occurrences = new OccurrenceHighlighter(area, document, _changes, context.Options, context.Reveal);
         _whitespace = new WhitespaceLayer(area);
         _squiggles = new SquiggleLayer(area, document);
         SemanticHighlighter = new SemanticHighlighter(area.TextView, document, context.Editor.Dispatcher);
