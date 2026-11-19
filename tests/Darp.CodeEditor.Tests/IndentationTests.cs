@@ -67,6 +67,7 @@ public sealed class IndentationTests(UiFixture ui)
             // One level more goes to the next stop of the document's indentation; line breaks stay the document's.
             await CodeLanguage.Json.Loaded;
             using EditorWindow window = MarkedText.Show(marked, CodeLanguage.Json);
+            await window.TokensKnownAsync();
 
             window.Press(Key.Enter);
 
@@ -104,6 +105,7 @@ public sealed class IndentationTests(UiFixture ui)
             CodeLanguage codeLanguage = language == "yaml" ? YamlByIndentationRules : Pascal;
             await codeLanguage.Loaded;
             using EditorWindow window = MarkedText.Show(marked, codeLanguage);
+            await window.TokensKnownAsync();
 
             window.Press(Key.Enter);
 
@@ -116,6 +118,7 @@ public sealed class IndentationTests(UiFixture ui)
         {
             await CodeLanguage.Json.Loaded;
             using EditorWindow window = MarkedText.Show("{\n    \"a\": 1,\n    |\n}", CodeLanguage.Json);
+            await window.TokensKnownAsync();
             CodeDocument document = window.Editor.Document.ShouldNotBeNull();
 
             window.Type("}");

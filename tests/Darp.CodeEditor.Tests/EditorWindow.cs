@@ -12,6 +12,7 @@ using Avalonia.VisualTree;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Rendering;
+using Darp.CodeEditor.Highlighting;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -53,6 +54,27 @@ internal sealed class EditorWindow : IDisposable
     public static TextEditor PartOf(CodeEditor editor) => editor.GetVisualDescendants().OfType<TextEditor>().Single();
 
     public TextView TextView => TextViewOf(Editor);
+
+    /// <summary>
+    /// Waits until the editor has its language's grammar and the tokens of every line, which it loads and tokenizes in
+    /// the background: what keys do by brackets, strings and comments would otherwise depend on how soon that runs. At
+    /// once for a language without a grammar.
+    /// </summary>
+    public Task TokensKnownAsync()
+    {
+        if (Editor.Document?.Language.Grammar is null)
+            return Task.CompletedTask;
+        BackgroundTextMateHighlighter highlighter = TextView
+            .LineTransformers.OfType<BackgroundTextMateHighlighter>()
+            .Single();
+        TextDocument text = TextView.Document;
+        return Wait.UntilAsync(() =>
+            highlighter.Grammar is not null
+            && Enumerable
+                .Range(1, text.LineCount)
+                .All(line => highlighter.ExactTokensOf(line, tokenizeNow: false) is not null)
+        );
+    }
 
     /// <summary>Runs pending jobs and a layout pass, without rendering.</summary>
     public void Layout()

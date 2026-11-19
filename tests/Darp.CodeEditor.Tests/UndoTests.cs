@@ -210,6 +210,7 @@ public sealed class UndoTests(UiFixture ui)
             window.Render();
             return window.RenderedColors().Count > 1;
         });
+        await window.TokensKnownAsync();
         return window;
     }
 }

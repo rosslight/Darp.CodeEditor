@@ -142,6 +142,7 @@ public sealed class PairTests(UiFixture ui)
         {
             await CodeLanguage.Yaml.Loaded;
             using EditorWindow window = MarkedText.Show(marked, CodeLanguage.Yaml);
+            await window.TokensKnownAsync();
 
             window.Type(typed);
 
@@ -460,6 +461,7 @@ public sealed class PairTests(UiFixture ui)
             window.Render();
             return window.RenderedColors().Count > 1;
         });
+        await window.TokensKnownAsync();
         return window;
     }
 }
