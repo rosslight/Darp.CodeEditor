@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -220,20 +219,11 @@ internal readonly record struct AutoClosingPair(string Open, string Close, bool 
 /// </summary>
 internal sealed record OnEnterRule(Regex BeforeText, Regex? AfterText, Regex? PreviousLineText, EnterAction Action)
 {
-    /// <summary>Whether the rule applies to the texts around the caret: a match that runs out of time counts as none.</summary>
-    public bool Matches(string previousLineText, string beforeText, string afterText)
-    {
-        try
-        {
-            return BeforeText.IsMatch(beforeText)
-                && (AfterText?.IsMatch(afterText) ?? true)
-                && (PreviousLineText?.IsMatch(previousLineText) ?? true);
-        }
-        catch (RegexMatchTimeoutException)
-        {
-            return false;
-        }
-    }
+    /// <summary>Whether the rule applies to the texts around the caret, within the time of one indentation.</summary>
+    public bool Matches(IndentationMatching matching, string previousLineText, string beforeText, string afterText) =>
+        matching.Matches(BeforeText, beforeText)
+        && (AfterText is null || matching.Matches(AfterText, afterText))
+        && (PreviousLineText is null || matching.Matches(PreviousLineText, previousLineText));
 }
 
 /// <summary>What a rule for Enter does to the new line.</summary>
@@ -282,55 +272,65 @@ internal sealed record IndentationRules(Regex IncreaseIndentPattern, Regex Decre
     public static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(5);
 
     /// <summary>
-    /// How long one indentation, of a new line or of a line the user types, may match lines: on the UI thread, about
-    /// 10 ms, and with a match that starts just before then, at most 15 ms. A line above it all needs about a
-    /// microsecond per match.
+    /// How long one indentation, of a new line or of a line the user types, may read and match lines, with the rules
+    /// for Enter: on the UI thread, about 10 ms, and with a match that starts just before then, at most 15 ms. A line
+    /// above it all needs about a microsecond per match.
     /// </summary>
     public static readonly TimeSpan TimeLimit = TimeSpan.FromMilliseconds(10);
 
     /// <summary>Starts matching lines for one indentation, which may take <see cref="TimeLimit"/>.</summary>
-    public IndentationMatching StartMatching() =>
-        new(this, Stopwatch.GetTimestamp() + (long)(TimeLimit.TotalSeconds * Stopwatch.Frequency));
+    public IndentationMatching StartMatching() => new(this, TimeProvider.System);
 }
 
 /// <summary>
-/// Reads and matches lines against the indentation rules for one indentation. A line read or a match after its time
-/// limit, or a match that takes longer than <see cref="IndentationRules.MatchTimeout"/>, throws
-/// <see cref="RegexMatchTimeoutException"/>, and the indentation keeps what the line has.
+/// Reads and matches lines for one indentation, against the indentation rules and the rules for Enter. A line read or a
+/// match after <see cref="IndentationRules.TimeLimit"/>, or a match that takes longer than
+/// <see cref="IndentationRules.MatchTimeout"/>, throws <see cref="RegexMatchTimeoutException"/>, and the indentation
+/// keeps what the line has.
 /// </summary>
-internal readonly struct IndentationMatching(IndentationRules rules, long deadline)
+internal readonly struct IndentationMatching
 {
-    private readonly IndentationRules _rules = rules;
+    private readonly IndentationRules? _rules;
+    private readonly TimeProvider _time;
 
-    /// <summary>The <see cref="Stopwatch"/> timestamp after which no match starts.</summary>
-    private readonly long _deadline = deadline;
+    /// <summary>The timestamp of <see cref="_time"/> after which no line is read and no match starts.</summary>
+    private readonly long _deadline;
+
+    /// <summary>Starts the time of one indentation, by <paramref name="time"/>; without indentation rules, none match.</summary>
+    public IndentationMatching(IndentationRules? rules, TimeProvider time)
+    {
+        _rules = rules;
+        _time = time;
+        _deadline = time.GetTimestamp() + (long)(IndentationRules.TimeLimit.TotalSeconds * time.TimestampFrequency);
+    }
 
     /// <summary>
     /// Reads line <paramref name="number"/> with <paramref name="lineText"/>, within the time limit: a scan over
     /// whitespace lines reads many without matching any.
     /// </summary>
     public string Read(Func<int, string> lineText, int number) =>
-        Stopwatch.GetTimestamp() < _deadline
+        _time.GetTimestamp() < _deadline
             ? lineText(number)
             : throw new RegexMatchTimeoutException("", "", IndentationRules.TimeLimit);
 
     /// <summary>Whether lines after <paramref name="line"/> are indented one level more.</summary>
-    public bool Increases(string line) => Matches(_rules.IncreaseIndentPattern, line);
+    public bool Increases(string line) => Matches(_rules?.IncreaseIndentPattern, line);
 
     /// <summary>Whether <paramref name="line"/> is indented one level less than the lines before.</summary>
-    public bool Decreases(string line) => Matches(_rules.DecreaseIndentPattern, line);
+    public bool Decreases(string line) => Matches(_rules?.DecreaseIndentPattern, line);
 
     /// <summary>Whether only the line after <paramref name="line"/> is indented one level more.</summary>
-    public bool IndentsNextLine(string line) => Matches(_rules.IndentNextLinePattern, line);
+    public bool IndentsNextLine(string line) => Matches(_rules?.IndentNextLinePattern, line);
 
     /// <summary>Whether <paramref name="line"/> gives the lines after it no indentation.</summary>
-    public bool IsUnIndented(string line) => Matches(_rules.UnIndentedLinePattern, line);
+    public bool IsUnIndented(string line) => Matches(_rules?.UnIndentedLinePattern, line);
 
-    private bool Matches(Regex? pattern, string line) =>
+    /// <summary>Whether <paramref name="pattern"/> matches <paramref name="text"/>, within the time; none matches nothing.</summary>
+    public bool Matches(Regex? pattern, string text) =>
         pattern is not null
         && (
-            Stopwatch.GetTimestamp() < _deadline
-                ? pattern.IsMatch(line)
-                : throw new RegexMatchTimeoutException(line, pattern.ToString(), IndentationRules.TimeLimit)
+            _time.GetTimestamp() < _deadline
+                ? pattern.IsMatch(text)
+                : throw new RegexMatchTimeoutException(text, pattern.ToString(), IndentationRules.TimeLimit)
         );
 }
