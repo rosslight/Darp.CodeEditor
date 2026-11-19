@@ -13,80 +13,29 @@ namespace Darp.CodeEditor.Completion;
 /// <remarks>
 /// <para>
 /// Stops of one number are mirrors: the first one with text gives every other one its text, as in VS Code, and a
-/// mirror's variables have that text's values. A variable that VS Code does not know, without a default, becomes a
-/// placeholder with its name, as the protocol says. Transformations, such as <c>${1/(.*)/${1:/upcase}/}</c>, are read
-/// and not applied: a variable goes in as its value, and a stop with one is a mirror of its number. A snippet with stops
-/// gets a final stop at its end, unless it has one.
+/// mirror's variables have that text's values. A variable without a value, whether VS Code knows it or not, goes in as
+/// its default, or as nothing, as VS Code's completion inserts it. Transformations, such as
+/// <c>${1/(.*)/${1:/upcase}/}</c>, are read and not applied: a variable goes in as its value, and a stop with one is a
+/// mirror of its number. A snippet with stops gets a final stop at its end, unless it has one.
 /// </para>
 /// <para>
-/// The limits are sized for real snippets, which have a few lines and fewer than about 20 stops, so that the UI thread's
-/// work with a snippet is bounded by small constants, whatever the server sends. Parsing runs where the server's answer
-/// is read, off the UI thread, and reads the characters at most four times over. A snippet that parsing would read more
-/// often, nested deeper than <see cref="MaxNesting"/> levels, with more than <see cref="MaxStops"/> stops, mirrors
-/// included, or whose text would be longer than <see cref="MaxText"/> characters with its mirrors, its variables'
-/// values and its indentation goes in as written, without stops, as a plain item goes in.
+/// A snippet may have as many stops as it likes, as in VS Code. The limits bound the UI thread's work with a snippet,
+/// whatever the server sends (#117). Parsing runs where the server's answer is read, off the UI thread, and reads the
+/// characters at most four times over. A snippet that parsing would read more often, nested deeper than
+/// <see cref="MaxNesting"/> levels, or whose text would be longer than <see cref="MaxText"/> characters with its
+/// mirrors, its indentation and its variables' values goes in as written, without stops, as a plain item goes in.
 /// </para>
 /// </remarks>
 internal sealed class Snippet
 {
-    /// <summary>
-    /// The most stops that a snippet tracks, mirrors included: half again as many as a real snippet has, and few enough
-    /// that each edit and caret move can look at all of them.
-    /// </summary>
-    public const int MaxStops = 30;
-
     /// <summary>How deep placeholders and variables may nest.</summary>
     public const int MaxNesting = 100;
 
     /// <summary>
-    /// The most characters that a snippet's text may have once it is rendered, each part of it counting one too: many
-    /// times a real snippet's few lines.
+    /// The most characters that a snippet's text may have once it is rendered, its variables' values among them and each
+    /// part of it counting one too: far beyond a real snippet's few lines, whose cost it bounds.
     /// </summary>
-    public const int MaxText = 5_000;
-
-    /// <summary>The variables that VS Code knows; others without a default become placeholders.</summary>
-    private static readonly HashSet<string> s_knownVariables =
-    [
-        "CURRENT_YEAR",
-        "CURRENT_YEAR_SHORT",
-        "CURRENT_MONTH",
-        "CURRENT_DATE",
-        "CURRENT_HOUR",
-        "CURRENT_MINUTE",
-        "CURRENT_SECOND",
-        "CURRENT_MILLISECOND",
-        "CURRENT_DAY_NAME",
-        "CURRENT_DAY_NAME_SHORT",
-        "CURRENT_MONTH_NAME",
-        "CURRENT_MONTH_NAME_SHORT",
-        "CURRENT_SECONDS_UNIX",
-        "CURRENT_MILLISECONDS_UNIX",
-        "CURRENT_TIMEZONE_OFFSET",
-        "CURRENT_TIMEZONE_NAME",
-        "SELECTION",
-        "CLIPBOARD",
-        "TM_SELECTED_TEXT",
-        "TM_CURRENT_LINE",
-        "TM_CURRENT_WORD",
-        "TM_LINE_INDEX",
-        "TM_LINE_NUMBER",
-        "TM_FILENAME",
-        "TM_FILENAME_BASE",
-        "TM_DIRECTORY",
-        "TM_DIRECTORY_BASE",
-        "TM_FILEPATH",
-        "CURSOR_INDEX",
-        "CURSOR_NUMBER",
-        "RELATIVE_FILEPATH",
-        "BLOCK_COMMENT_START",
-        "BLOCK_COMMENT_END",
-        "LINE_COMMENT",
-        "WORKSPACE_NAME",
-        "WORKSPACE_FOLDER",
-        "RANDOM",
-        "RANDOM_HEX",
-        "UUID",
-    ];
+    public const int MaxText = 1_000_000;
 
     /// <summary>The snippet as the server wrote it.</summary>
     private readonly string _source;
@@ -107,7 +56,6 @@ internal sealed class Snippet
         List<Node> nodes = parser.Parse();
         if (parser.IsAborted)
             return AsWritten(text);
-        PlaceholdersForUnknownVariables(nodes);
         List<PlaceholderNode> placeholders = Placeholders(nodes);
         if (placeholders.Count > 0 && !placeholders.Exists(p => p.Index == 0))
         {
@@ -115,7 +63,7 @@ internal sealed class Snippet
             nodes.Add(final);
             placeholders.Add(final);
         }
-        if (placeholders.Count > MaxStops || !FillMirrors(placeholders))
+        if (!FillMirrors(placeholders))
             return AsWritten(text);
         JoinTexts(nodes);
         return new Snippet(text, nodes);
@@ -139,39 +87,6 @@ internal sealed class Snippet
 
     /// <summary>A snippet that goes in as written, without stops.</summary>
     private static Snippet AsWritten(string text) => new(text, null);
-
-    /// <summary>
-    /// Turns each variable without a default that VS Code does not know into a placeholder with its name, numbered
-    /// after the highest stop, the same name with the same number, in the order VS Code finds them: level by level. As
-    /// the protocol says, also in a variable's default, where VS Code's own snippets leave them.
-    /// </summary>
-    private static void PlaceholdersForUnknownVariables(List<Node> nodes)
-    {
-        int highest = Placeholders(nodes).Select(p => p.Index).DefaultIfEmpty(0).Max();
-        var numbers = new Dictionary<string, int>(StringComparer.Ordinal);
-        var queue = new Queue<List<Node>>([nodes]);
-        while (queue.TryDequeue(out List<Node>? level))
-        {
-            for (int i = 0; i < level.Count; i++)
-            {
-                if (
-                    level[i] is VariableNode { Children.Count: 0 } variable
-                    && !s_knownVariables.Contains(variable.Name)
-                )
-                {
-                    if (!numbers.TryGetValue(variable.Name, out int index))
-                        numbers[variable.Name] = index = ++highest;
-                    var placeholder = new PlaceholderNode(index);
-                    placeholder.Children.Add(new TextNode(variable.Name));
-                    level[i] = placeholder;
-                }
-                else if (level[i].Children is { } children)
-                {
-                    queue.Enqueue(children);
-                }
-            }
-        }
-    }
 
     /// <summary>The placeholders, also in variables' defaults, in the order of the text: parents before children.</summary>
     private static List<PlaceholderNode> Placeholders(List<Node> nodes)

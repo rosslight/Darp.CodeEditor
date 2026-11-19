@@ -11,12 +11,12 @@ using Darp.CodeEditor.Completion;
 namespace Darp.CodeEditor.Benchmarks;
 
 /// <summary>
-/// The UI thread's time for snippets at the limits, until a rendered frame shows them, in 5,000 lines of JSON, warm:
-/// the most stops, a first stop and its mirrors, each mirror on a line of its own, which the line's indentation starts.
-/// Committing one from the list renders nearly the most text a snippet may have, inserts it and starts its session; a
-/// keystroke at the end of another's first stop has its mirrors copy nearly the most that one change may copy. Each
-/// beside the same work without a snippet: the same text committed as plain text, and a keystroke after the session
-/// ended, so that the difference is the snippet's own. Not in the CI category: no budget names this case.
+/// The UI thread's time for snippets, until a rendered frame shows them, in 5,000 lines of JSON, warm: a first stop and
+/// its 28 mirrors, each mirror on a line of its own, which the line's indentation starts, as many stops as a session
+/// once had. Committing one from the list renders nearly 5,000 characters, inserts them and starts its session; a
+/// keystroke at the end of another's first stop has its mirrors copy nearly 1,000 characters. Each beside the same work
+/// without a snippet: the same text committed as plain text, and a keystroke after the session ended, so that the
+/// difference is the snippet's own. Not in the CI category: no budget names this case.
 /// </summary>
 [NotInBaseline]
 [InvocationCount(1)]
@@ -26,17 +26,17 @@ namespace Darp.CodeEditor.Benchmarks;
 [MaxColumn]
 public class SnippetBenchmarks
 {
-    /// <summary>The mirrors of the first stop, which with it and the final stop are the most stops.</summary>
-    private const int Mirrors = Snippet.MaxStops - 2;
+    /// <summary>The mirrors of the first stop: with it and the final stop, 30 stops.</summary>
+    private const int Mirrors = 28;
 
     /// <summary>The indentation of the line that the snippets go in, which each mirror's line starts with.</summary>
     private const int Indentation = 2;
 
-    /// <summary>The first stop's length that comes nearest the most text a snippet may have, its parts counted.</summary>
-    private const int CommitStop = (Snippet.MaxText - 4 * (Mirrors + 1)) / (Mirrors + 1) - Indentation - 1;
+    /// <summary>The first stop's length that comes nearest 5,000 characters of text, its parts counted.</summary>
+    private const int CommitStop = (5_000 - 4 * (Mirrors + 1)) / (Mirrors + 1) - Indentation - 1;
 
-    /// <summary>The first stop's length that, grown by a keystroke, comes nearest the most that mirrors may copy.</summary>
-    private const int KeystrokeStop = SnippetController.MaxMirrorText / (Mirrors + 1) - 1;
+    /// <summary>The first stop's length that, grown by a keystroke, has the mirrors copy nearly 1,000 characters.</summary>
+    private const int KeystrokeStop = 1_000 / (Mirrors + 1) - 1;
 
     private readonly ConcurrentQueue<string> _serverLines = new();
     private LanguageServer? _server;
@@ -108,7 +108,7 @@ public class SnippetBenchmarks
     [IterationSetup(Target = nameof(CommitTheSnippet))]
     public void OpenTheListOnTheSnippet() => OpenTheList(0);
 
-    /// <summary>The snippet of nearly the most text: rendered, inserted, and its first stop selected.</summary>
+    /// <summary>The snippet of nearly 5,000 characters: rendered, inserted, and its first stop selected.</summary>
     [Benchmark]
     public void CommitTheSnippet()
     {
@@ -142,7 +142,7 @@ public class SnippetBenchmarks
         HeadlessEditor.Render(window);
     }
 
-    /// <summary>A keystroke at the end of the first stop, which its mirrors copy, nearly as much as they may.</summary>
+    /// <summary>A keystroke at the end of the first stop, which its mirrors copy, nearly 1,000 characters.</summary>
     [Benchmark]
     public void KeystrokeThatTheMirrorsCopy() => Type(Mirrors + 1);
 
