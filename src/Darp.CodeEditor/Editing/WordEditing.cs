@@ -12,21 +12,24 @@ namespace Darp.CodeEditor.Editing;
 /// <summary>
 /// VS Code's words (<see cref="WordRules"/>) in one editor's view: a double-click selects a word, also past a line's end,
 /// and a drag that follows grows the selection by words; Ctrl+Left and Ctrl+Right move by words, with Shift to select;
-/// Ctrl+Backspace and Ctrl+Delete delete them, each in a step of its own; Ctrl+D selects the word at the caret. AvaloniaEdit
+/// Ctrl+Backspace and Ctrl+Delete delete them, each in a step of its own, and Ctrl+Backspace an empty pair that the
+/// editor closed as Backspace does; Ctrl+D selects the word at the caret. AvaloniaEdit
 /// keeps the other clicks.
 /// </summary>
 internal sealed class WordEditing : IEditorFeature
 {
     private readonly TextArea _area;
     private readonly TextChanges _changes;
+    private readonly AutoClosingPairs _pairs;
 
     /// <summary>The word that a double-click selected, while its button stays down.</summary>
     private TextRange? _dragStart;
 
-    public WordEditing(TextArea area, TextChanges changes)
+    public WordEditing(TextArea area, TextChanges changes, AutoClosingPairs pairs)
     {
         _area = area;
         _changes = changes;
+        _pairs = pairs;
         // Ahead of AvaloniaEdit's mouse selection, which handles the text area's events as they bubble.
         area.AddHandler(InputElement.PointerPressedEvent, OnPressed, RoutingStrategies.Tunnel);
         area.AddHandler(InputElement.PointerMovedEvent, OnMoved, RoutingStrategies.Tunnel);
@@ -44,8 +47,8 @@ internal sealed class WordEditing : IEditorFeature
         commands.Add(CodeEditorCommands.CursorWordEndRightSelect, () => Move(WordRules.MoveRight, select: true));
         commands.Add(CodeEditorCommands.AddSelectionToNextFindMatch, SelectWord);
         const CommandNeeds writable = CommandNeeds.TextFocus | CommandNeeds.Writable;
-        commands.Add(CodeEditorCommands.DeleteWordLeft, () => Delete(WordRules.DeleteLeft), writable);
-        commands.Add(CodeEditorCommands.DeleteWordRight, () => Delete(WordRules.DeleteRight), writable);
+        commands.Add(CodeEditorCommands.DeleteWordLeft, () => Delete(left: true), writable);
+        commands.Add(CodeEditorCommands.DeleteWordRight, () => Delete(left: false), writable);
     }
 
     public void Dispose()
@@ -82,16 +85,22 @@ internal sealed class WordEditing : IEditorFeature
         return true;
     }
 
-    /// <summary>Deletes the selection, or else what <paramref name="rule"/> gives at the caret, in a step of its own.</summary>
+    /// <summary>
+    /// Deletes the selection, or else the word to the <paramref name="left"/> or right of the caret, in a step of its
+    /// own; to the left, an empty pair that the editor closed first goes as a whole, as Backspace deletes it.
+    /// </summary>
     /// <returns>Whether there was something to delete, and it went.</returns>
-    private bool Delete(Func<TextDocument, int, TextRange?> rule)
+    private bool Delete(bool left)
     {
         if (!_area.Selection.IsEmpty)
         {
             _changes.Run(EditStep.Own, () => _area.Selection.ReplaceSelectionWithText(""));
             return true;
         }
-        if (rule(Buffer, _area.Caret.Offset) is not { } range)
+        if (left && _pairs.DeletePair())
+            return true;
+        int caret = _area.Caret.Offset;
+        if ((left ? WordRules.DeleteLeft(Buffer, caret) : WordRules.DeleteRight(Buffer, caret)) is not { } range)
             return false;
         bool deleted = false;
         _changes.Run(

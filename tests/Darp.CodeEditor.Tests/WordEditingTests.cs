@@ -42,6 +42,21 @@ public sealed class WordEditingTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe("a|");
         });
 
+    /// <summary>As Backspace deletes it.</summary>
+    [Fact]
+    public Task Ctrl_Backspace_deletes_an_empty_pair_that_the_editor_closed_as_a_whole() =>
+        _ui.Run(async () =>
+        {
+            await CodeLanguage.Json.Loaded;
+            using EditorWindow window = MarkedText.Show("a |", CodeLanguage.Json);
+            window.Type("[");
+            MarkedText.Of(window).ShouldBe("a [|]");
+
+            window.Press(Keys.Back, Words);
+
+            MarkedText.Of(window).ShouldBe("a |");
+        });
+
     [Fact]
     public Task Ctrl_D_selects_the_word_at_the_caret_and_deletes_no_line() =>
         _ui.Run(() =>
