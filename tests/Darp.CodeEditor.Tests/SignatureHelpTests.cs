@@ -178,6 +178,31 @@ public sealed class SignatureHelpTests(UiFixture ui)
         });
 
     [Fact]
+    public Task An_answer_to_a_request_that_a_caret_move_outdated_leaves_the_next_request_to_ask() =>
+        _ui.Run(async () =>
+        {
+            var time = new ManualTime();
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "call(");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await CompletionTests.StartServingAsync(server, document);
+            window.Editor.Selection = new TextSelection(0);
+
+            // Asked before the call, where the server has none; the caret moves into the call before the answer comes.
+            window.Press(Key.Space, EditorWindow.Command | KeyModifiers.Shift);
+            window.Press(Key.End);
+            await fake.WaitForAsync("signatureHelp ");
+            await CompletionTests.BarrierAsync(server, fake);
+            await EditorWindow.RunPostedJobsAsync();
+            time.Advance(s_pause);
+
+            // Still under way when the caret moved, so asked again.
+            (await fake.WaitForAsync("signatureHelp ", 2)).ShouldEndWith(" 3 - True - 5");
+            await WaitForSignatureAsync(window, "first", "Calls with two.");
+        });
+
+    [Fact]
     public Task Up_and_Down_choose_the_active_signature_the_server_keeps_the_choice_and_an_open_list_takes_them() =>
         _ui.Run(async () =>
         {
