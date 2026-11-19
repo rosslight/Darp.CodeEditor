@@ -59,7 +59,7 @@ internal sealed class BracketHighlighter : IBackgroundRenderer, IDisposable
         set
         {
             _colors = value;
-            _textArea.TextView.InvalidateLayer(Layer);
+            _textArea.TextView.InvalidateVisual();
         }
     }
 
@@ -89,7 +89,7 @@ internal sealed class BracketHighlighter : IBackgroundRenderer, IDisposable
     public void Refresh()
     {
         _stale = true;
-        _textArea.TextView.InvalidateLayer(Layer);
+        _textArea.TextView.InvalidateVisual();
     }
 
     public void Dispose()
@@ -139,7 +139,8 @@ internal sealed class BracketHighlighter : IBackgroundRenderer, IDisposable
             || IsBracketCharacter(caret)
             || IsBracketCharacter(caret - 1)
         )
-            _textArea.TextView.InvalidateLayer(Layer);
+            // The background is drawn by TextView.Render; the bracket decoration cannot change layout.
+            _textArea.TextView.InvalidateVisual();
     }
 
     /// <summary>The language's brackets; none while they load.</summary>
