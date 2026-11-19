@@ -188,7 +188,8 @@ internal sealed class EditorView : IDisposable
 
     public void Copy() => _clipboard.Copy();
 
-    public void Paste() => _clipboard.Paste();
+    /// <summary>As the key pastes, through the command, whose bindings paste a copied line as a line.</summary>
+    public void Paste() => AvaloniaEdit.ApplicationCommands.Paste.Execute(null, _context.Area);
 
     /// <summary>
     /// Ends the wait for a sequence's second stroke, as a click, the focus leaving or a new keymap does.
