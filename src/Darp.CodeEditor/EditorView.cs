@@ -118,8 +118,8 @@ internal sealed class EditorView : IDisposable
 
     /// <summary>
     /// A key, before AvaloniaEdit's: first the keymap's commands, as <see cref="KeyResolution"/> resolves the key, then
-    /// Escape, which dismisses, and in the text the keys of completion's list, of signature help, of a snippet's stops
-    /// and of typing.
+    /// Escape, which dismisses, and in the text the keys of completion's list, of signature help, of a snippet's stops,
+    /// of typing and of the caret.
     /// </summary>
     /// <returns>Whether the key was the view's.</returns>
     public bool OnKeyDown(KeyEventArgs e)
@@ -158,6 +158,7 @@ internal sealed class EditorView : IDisposable
                 || _signatureHelp.OnKeyDown(e)
                 || _snippets.OnKeyDown(e)
                 || _typing.OnKeyDown(e)
+                || CaretKeys.OnKeyDown(_context.Area, e)
             );
     }
 
