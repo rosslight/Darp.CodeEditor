@@ -100,17 +100,17 @@ internal sealed class CompletionView
     }
 
     /// <summary>
-    /// Shows <paramref name="message"/>, such as "No suggestions.", half as wide as the list, without details, at the word
-    /// that starts at <paramref name="wordStart"/>.
+    /// Says "No suggestions." in the list, half as wide as it, without details, at the word that starts at
+    /// <paramref name="wordStart"/>.
     /// </summary>
-    public void ShowMessage(string message, int wordStart)
+    public void ShowNoSuggestions(int wordStart)
     {
         PopupLook look = Look;
         Paint(look.Colors);
         // A message keeps its size, as in VS Code.
         _listPopup.IsResizable = false;
         _list.Width = DefaultWidth / 2 - 2 * Border;
-        _list.ShowMessage(message, look, _textView.DefaultLineHeight);
+        _list.ShowMessage("No suggestions.", look, _textView.DefaultLineHeight);
         ShowDetails(null);
         Open(wordStart);
     }

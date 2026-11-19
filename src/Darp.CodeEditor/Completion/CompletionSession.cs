@@ -90,4 +90,7 @@ internal sealed class CompletionSession
 
     /// <summary>The selected item's index in <see cref="Items"/>.</summary>
     public int Selected { get; set; }
+
+    /// <summary>Whether completion ended: what is still under way for it is dropped.</summary>
+    public bool HasEnded { get; set; }
 }
