@@ -71,7 +71,8 @@ namespace Darp.CodeEditor;
 /// Backspace or Delete, a line break with what follows, each pair that closes. A double-click selects VS Code's word,
 /// Left and Right end a selection at its start or end, Up on the first row goes to the text's start and Down on the last
 /// to its end, and Home on a line of whitespace only to its start. Without a selection, Cut and Copy take the caret's
-/// line, as far as <see cref="Options"/> lets them.
+/// line, as far as <see cref="Options"/> lets them. Moved lines take the indentation of their new place by the language's
+/// rules when its <see cref="CodeLanguage.AutoIndent"/> is <see cref="AutoIndent.Full"/>.
 /// Hover shows the server's Markdown, with code blocks highlighted by the document's grammar, below the messages of
 /// the diagnostics under the pointer. Completion items show VS Code's codicons, in the color theme's symbol colors. An
 /// item in the snippet syntax goes in as VS Code inserts it: its first stop is selected, and Tab and Shift+Tab move
@@ -88,7 +89,10 @@ namespace Darp.CodeEditor;
 /// <see cref="Keymap"/> binds keys to the editor's commands, by default VS Code's: completion (Ctrl+Space, Ctrl+I),
 /// signature help (Ctrl+Shift+Space), search (Ctrl+F, Ctrl+H, F3, Shift+F3), comments (Ctrl+/), undo and redo
 /// (Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z), moving and deleting by words (Ctrl+Left, Ctrl+Right, Ctrl+Backspace, Ctrl+Delete,
-/// with Alt on macOS) and the word at the caret (Ctrl+D), with Cmd for Ctrl on macOS but for Ctrl+Space. Open popups have keys of their own,
+/// with Alt on macOS), the word at the caret (Ctrl+D), the block comment (Shift+Alt+A), and whole lines: moving them
+/// (Alt+Up, Alt+Down), copying them (Shift+Alt+Up, Shift+Alt+Down), deleting them (Ctrl+Shift+K), inserting one
+/// (Ctrl+Enter, Ctrl+Shift+Enter), indenting them (Ctrl+], Ctrl+[) and selecting them (Ctrl+L), with Cmd for Ctrl on
+/// macOS but for Ctrl+Space, and Linux's own keys where its desktops take these. Open popups have keys of their own,
 /// and editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation and indentation (Tab, Shift+Tab) are
 /// AvaloniaEdit's. Other keys, such as F5 or Ctrl+S, go on to the app's key bindings, and so does a key of the keymap
 /// whose command does not apply, such as Ctrl+Z in a read-only editor. A right click opens the editor's context menu:

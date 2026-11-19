@@ -77,8 +77,9 @@ environments are not part of it.
   compiles itself. `CodeDocument.Create` creates documents without a server. Apps don't derive from `CodeDocument`. Headless compiling
   takes the environment, and needs no grammar.
 - **How far the editor indents by itself,** VS Code's `editor.autoIndent`, which VS Code sets per language, so it is
-  the language's `AutoIndent` (design.md #116): on Enter, on Tab on a blank line, and when a typed character makes a
-  line match the decrease pattern. `None` starts new lines at the line's start, `Keep` keeps the line's indentation,
+  the language's `AutoIndent` (design.md #116): on Enter, on Tab on a blank line, when a typed character makes a
+  line match the decrease pattern, and when lines move to another place. `None` starts new lines at the line's start,
+  `Keep` keeps the line's indentation,
   `Brackets` indents after an opening bracket, `Advanced` also applies the language's rules for Enter (`onEnterRules`),
   and `Full`, the default, also its indentation rules. `CodeLanguage.Yaml` is at `Advanced`, as VS Code's YAML
   extension sets it, so Enter after `key:` does not indent. It is an `init` property; to change a built-in language's,
@@ -140,9 +141,12 @@ it; VS Code's words for double-click, which also selects past a line's end and g
 moving by words and for deleting them: runs of word characters and runs of separators, by its default word separators,
 not the language's word pattern; Left and Right that end a selection at its start or end, and Up and Down that go on
 from them; Up on the first row to the text's start and Down on the last to its end, coming back to the column they left;
-Home on a line of whitespace only to its start; whitespace shown inside the selection, scrolling past the last line, a context menu with Cut, Copy, Paste
-and Select All, completion's snippets with their stops (section 6), and the look of errors, hover and completion
-below.
+Home on a line of whitespace only to its start; the commands on whole lines below, which take the selected lines,
+without a last line that the selection only touches, each in a step of its own: moved lines at `AutoIndent.Full` take
+the indentation of their new place by the language's rules for Enter and indentation rules, a closing bracket the
+indentation of the block it closes, and inserted lines Enter's; whitespace shown inside the selection, scrolling past
+the last line, a context menu with Cut, Copy, Paste and Select All, completion's snippets with their stops (section 6),
+and the look of errors, hover and completion below.
 
 **Caret and scroll position** belong to the editor, as in Monaco, and last as long as it does, like a list's scroll
 position. Setting `Document` shows the other document from its start, and a tab control may create a new editor each
@@ -191,10 +195,17 @@ The default keys on Windows and Linux; macOS in brackets where it differs beyond
 | Ctrl+F, Ctrl+H (macOS: Cmd+Alt+F for replace) | `actions.find`, `editor.action.startFindReplaceAction` | the search and the replace bar; a read-only editor opens the search bar for both |
 | F3, Shift+F3 (macOS also Cmd+G, Shift+Cmd+G) | `editor.action.nextMatchFindAction`, `editor.action.previousMatchFindAction` | the next and the previous match |
 | Ctrl+/ | `editor.action.commentLine` | toggles line comments, or block comments in a language without line comments |
+| Shift+Alt+A (Linux: Ctrl+Shift+A) | `editor.action.blockComment` | removes the block comment that the selection is in, or puts one around it; without a selection, an empty one with the caret inside |
 | Ctrl+Z; Ctrl+Y, Ctrl+Shift+Z (macOS: Cmd+Shift+Z only) | `undo`; `redo` | the document's `Undo` and `Redo`; nothing in a read-only editor |
 | Ctrl+Left, Ctrl+Right, with Shift to select (macOS: Alt) | `cursorWordLeft`, `cursorWordEndRight`, `cursorWordLeftSelect`, `cursorWordEndRightSelect` | to the start of the word before the caret and the end of the word after it |
 | Ctrl+Backspace, Ctrl+Delete (macOS: Alt) | `deleteWordLeft`, `deleteWordRight` | deletes the selection, or by words; two or more spaces before the caret, or spaces after it, go alone |
 | Ctrl+D | `editor.action.addSelectionToNextFindMatch` | selects the word at the caret; with a selection it does not apply, as the editor has one caret (design.md #119) |
+| Alt+Up, Alt+Down | `editor.action.moveLinesUpAction`, `editor.action.moveLinesDownAction` | moves the lines past the line above or below them, with the selection |
+| Shift+Alt+Up, Shift+Alt+Down (Linux: with Ctrl) | `editor.action.copyLinesUpAction`, `editor.action.copyLinesDownAction` | copies the lines above or below them; going down, the selection goes with the copy |
+| Ctrl+Shift+K | `editor.action.deleteLines` | deletes the lines; the caret keeps its column |
+| Ctrl+Enter, Ctrl+Shift+Enter | `editor.action.insertLineAfter`, `editor.action.insertLineBefore` | inserts a line below or above the caret's, indented as Enter would |
+| Ctrl+], Ctrl+[ | `editor.action.indentLines`, `editor.action.outdentLines` | indents and outdents the lines to the next or the previous tab stop |
+| Ctrl+L | `expandLineSelection` | selects the lines whole; again, it takes the next line too |
 
 **Indentation** belongs to the document (`CodeDocument.Indentation`), so all editors of one document agree. It starts
 as VS Code's `editor.detectIndentation` guesses it from the initial text; where the text gives no answer, VS Code's
