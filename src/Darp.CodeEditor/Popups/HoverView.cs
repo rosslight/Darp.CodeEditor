@@ -24,7 +24,7 @@ internal static class HoverView
 
     public static Control Create(IReadOnlyList<HoverBlock> blocks, PopupLook look)
     {
-        var panel = new StackPanel { Spacing = 6 };
+        var panel = new PopupStack { Spacing = 6 };
         foreach (HoverBlock block in blocks)
         {
             panel.Children.Add(
@@ -32,7 +32,7 @@ internal static class HoverView
                 {
                     HoverParagraph paragraph => Paragraph(paragraph, look),
                     HoverCode codeBlock => Code(codeBlock, look),
-                    HoverRule => new Border { Height = 1, Background = look.Colors.HoverBorder },
+                    HoverRule => new PopupLine { Height = 1, Background = look.Colors.HoverBorder },
                     _ => throw new UnreachableException(),
                 }
             );
@@ -42,7 +42,7 @@ internal static class HoverView
 
     /// <summary>Code in the editor's font, size and token colors, on the popup's background.</summary>
     public static TextBlock Code(InlineCollection inlines, PopupLook look) =>
-        new()
+        new PopupText
         {
             Inlines = inlines,
             FontFamily = look.CodeFont,
@@ -77,7 +77,7 @@ internal static class HoverView
             inlines.Add(run);
             length += span.Text.Length;
         }
-        var text = new TextBlock { Inlines = inlines, TextWrapping = TextWrapping.Wrap };
+        var text = new PopupText { Inlines = inlines, TextWrapping = TextWrapping.Wrap };
         if (links.Count > 0)
             OpenLinks(text, links);
         if (paragraph.Marker is not { } marker)
@@ -85,8 +85,8 @@ internal static class HoverView
             text.Margin = new Thickness(ListIndent * paragraph.Level, 0, 0, 0);
             return text;
         }
-        var item = new DockPanel { Margin = new Thickness(ListIndent * (paragraph.Level - 1), 0, 0, 0) };
-        var markerText = new TextBlock { Text = marker, Margin = new Thickness(0, 0, 6, 0) };
+        var item = new PopupDock { Margin = new Thickness(ListIndent * (paragraph.Level - 1), 0, 0, 0) };
+        var markerText = new PopupText { Text = marker, Margin = new Thickness(0, 0, 6, 0) };
         DockPanel.SetDock(markerText, Dock.Left);
         item.Children.Add(markerText);
         item.Children.Add(text);
