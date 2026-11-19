@@ -44,6 +44,7 @@ internal sealed class EditorView : IDisposable
     private readonly IDisposable[] _features;
 
     private readonly EditingHelpers _helpers;
+    private readonly Typing _typing;
     private readonly Clipboard _clipboard;
     private readonly BracketHighlighter _brackets;
     private readonly WhitespaceLayer _whitespace;
@@ -63,7 +64,9 @@ internal sealed class EditorView : IDisposable
         TextArea area = context.Area;
         CodeDocument document = context.Document;
         Highlighter = new BackgroundTextMateHighlighter(area.TextView, area.Document, context.Editor.Dispatcher, null);
-        _helpers = new EditingHelpers(area, document, Highlighter);
+        var changes = new TextChanges(area);
+        _helpers = new EditingHelpers(area, document, changes);
+        _typing = new Typing(area, document, Highlighter, changes);
         _clipboard = new Clipboard(area, document);
         _brackets = new BracketHighlighter(area, document, Highlighter);
         _whitespace = new WhitespaceLayer(area);
@@ -71,7 +74,7 @@ internal sealed class EditorView : IDisposable
         SemanticHighlighter = new SemanticHighlighter(area.TextView, document, context.Editor.Dispatcher);
         _hover = new HoverController(context.Editor, area, document, _squiggles, Highlighter);
         _snippets = new SnippetController(area, document);
-        // After the editing helpers: they see typed text first, so that a typed "(" has its ")" when it asks.
+        // After typing: it sees typed text first, so that a typed "(" has its ")" when completion asks.
         _completion = new CompletionController(context.Editor, area, document, Highlighter, _snippets);
         _signatureHelp = new SignatureHelpController(context.Editor, area, document, Highlighter);
         _search = new FindCommands(area, context.SearchBar, context.CreateSearchBar);
@@ -79,6 +82,7 @@ internal sealed class EditorView : IDisposable
         [
             Highlighter,
             _helpers,
+            _typing,
             _clipboard,
             _brackets,
             _whitespace,
@@ -107,7 +111,7 @@ internal sealed class EditorView : IDisposable
     /// <summary>
     /// A key, before AvaloniaEdit's: first the keymap's commands, as <see cref="KeyResolution"/> resolves the key, then
     /// Escape, which dismisses, and in the text the keys of completion's list, of signature help, of a snippet's stops
-    /// and of the editing helpers.
+    /// and of typing.
     /// </summary>
     /// <returns>Whether the key was the view's.</returns>
     public bool OnKeyDown(KeyEventArgs e)
@@ -145,17 +149,21 @@ internal sealed class EditorView : IDisposable
                 _completion.OnKeyDown(e)
                 || _signatureHelp.OnKeyDown(e)
                 || _snippets.OnKeyDown(e)
-                || _helpers.OnKeyDown(e)
+                || _typing.OnKeyDown(e)
             );
     }
 
     /// <summary>
-    /// Typed text, before AvaloniaEdit's text area takes it: a commit character commits completion's item.
+    /// Typed text, before AvaloniaEdit's text area takes it: a commit character commits completion's item, and the text
+    /// goes in by the rules of typing.
     /// </summary>
     public void OnTextInput(TextInputEventArgs e)
     {
-        if (_context.Area.IsFocused)
-            _completion.OnTextInput(e);
+        if (!_context.Area.IsFocused)
+            return;
+        _completion.OnTextInput(e);
+        if (!e.Handled)
+            _typing.OnTextInput(e);
     }
 
     /// <summary>Runs a command, as its key does, where it applies.</summary>
