@@ -30,8 +30,8 @@ namespace Darp.CodeEditor.Completion;
 /// while signature help shows, waits for an answer or for the pause; each edit and caret move meanwhile restarts the
 /// pause. Once it passes, signature help asks again, for the trigger character typed last, or by the command, and tells
 /// the server the signature that shows. A newer request cancels the one under way, and an answer about older text, or
-/// to a request that something asked after, is dropped. Up and Down choose the active signature, while completion's
-/// list is closed.
+/// to a request that something asked after, is dropped. Up and Down choose the active signature while the popup shows
+/// and completion's list is closed.
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends it, for every reason it ends: Escape, leaving the call, a click or drag that moves the
@@ -58,6 +58,7 @@ internal sealed class SignatureHelpController : IEditorFeature
     private readonly CodeDocument _document;
     private readonly BackgroundTextMateHighlighter _highlighter;
     private readonly CaretMoves _caretMoves;
+    private readonly TaskScheduler _background;
     private readonly Func<CodeEditorOptions> _options;
     private readonly PopupScroller _content = new();
     private readonly EditorPopup _popup;
@@ -90,11 +91,13 @@ internal sealed class SignatureHelpController : IEditorFeature
         CodeDocument document,
         BackgroundTextMateHighlighter highlighter,
         CaretMoves caretMoves,
+        TaskScheduler background,
         Func<CodeEditorOptions> options
     )
     {
         _editor = editor;
         _caretMoves = caretMoves;
+        _background = background;
         _options = options;
         _textArea = textArea;
         _textView = textArea.TextView;
@@ -159,7 +162,7 @@ internal sealed class SignatureHelpController : IEditorFeature
     /// <returns>Whether more than one signature shows: otherwise the key goes on.</returns>
     private bool Cycle(bool forward)
     {
-        if (_shown is not { Signatures.Count: > 1 } shown)
+        if (!_popup.IsOpen || _shown is not { Signatures.Count: > 1 } shown)
             return false;
         int count = shown.Signatures.Count;
         Show(shown with { ActiveSignature = (shown.ActiveSignature + (forward ? 1 : count - 1)) % count });
@@ -366,9 +369,11 @@ internal sealed class SignatureHelpController : IEditorFeature
             IReadOnlyList<HoverBlock> blocks =
                 documentation.Length == 0
                     ? []
-                    : await Task.Run(
+                    : await Task.Factory.StartNew(
                         () => HoverBlocks.Of(new HoverInfo(documentation, null), grammar, budget, reading.Token),
-                        reading.Token
+                        reading.Token,
+                        TaskCreationOptions.DenyChildAttach,
+                        _background
                     );
             if (_reading != reading)
                 return;

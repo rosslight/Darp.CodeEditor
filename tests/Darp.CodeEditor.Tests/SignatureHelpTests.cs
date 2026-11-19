@@ -203,6 +203,29 @@ public sealed class SignatureHelpTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Up_and_Down_move_the_caret_until_the_signatures_show() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "\ncall(");
+            var reading = new HeldScheduler();
+            using var window = new EditorWindow(new CodeEditor { Document = document, BackgroundScheduler = reading });
+            await CompletionTests.StartServingAsync(server, document);
+            window.Editor.Selection = new TextSelection(6);
+
+            // The answer of two signatures is in; their documentation is still read, so nothing shows yet.
+            reading.Hold();
+            window.Press(Key.Space, EditorWindow.Command | KeyModifiers.Shift);
+            await Wait.UntilAsync(() => reading.Held > 0);
+            Popup(window).ShouldBeNull();
+
+            window.Press(Key.Up);
+
+            window.Editor.Selection.ShouldBe(new TextSelection(0));
+        });
+
+    [Fact]
     public Task Up_and_Down_choose_the_active_signature_the_server_keeps_the_choice_and_an_open_list_takes_them() =>
         _ui.Run(async () =>
         {
