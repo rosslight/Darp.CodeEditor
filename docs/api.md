@@ -40,11 +40,11 @@ if (compilation.Succeeded)
 
 | Package | Public types |
 |---|---|
-| `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorColorTheme`, `CodeEditorViewState`, `CodeEditorStyles`, `TextSnapshot`, `TextRange`, `TextPosition`, `TextSelection`, `Indentation`, `Diagnostic`, `DiagnosticRelatedInformation`, `DiagnosticSeverity`; the keymap: `CodeEditorKeymap`, `CodeEditorKeyBinding`, `CodeEditorCommands`; VS Code's settings: `AutoIndent`, `QuickSuggestions`, `SmartSelectOptions`, `OccurrencesHighlight`, `SelectedTextMatchMode`, `SeedSearchString`, `AutoFindInSelection`, `SearchHistory`, `MatchBrackets`, `AutoClosing`, `AutoClosingEdit`, `AutoSurround`, `DiagnosticOrder` |
+| `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorColorTheme`, `CodeEditorViewState`, `CodeEditorStyles`, `TextSnapshot`, `TextRange`, `TextPosition`, `TextSelection`, `Indentation`, `Diagnostic`, `DiagnosticRelatedInformation`, `DiagnosticSeverity`; the keymap: `CodeEditorKeymap`, `CodeEditorKeyBinding`, `CodeEditorCommands`; VS Code's settings: `AutoIndent`, `QuickSuggestions`, `SmartSelectOptions`, `OccurrencesHighlight`, `SelectedTextMatchMode`, `SeedSearchString`, `AutoFindInSelection`, `SearchHistory`, `MatchBrackets`, `AutoClosing`, `AutoClosingEdit`, `AutoSurround`, `ParameterHintsOptions`, `DiagnosticOrder` |
 | `Darp.CodeEditor.CSharpScript` | `CSharpScriptServer`, `CSharpScriptServerOptions`, `CSharpScriptEnvironment<TGlobals>`, `CSharpScriptDocument<TGlobals>`, `CSharpScriptCompilation<TGlobals>`, `CSharpScriptAssembly<TGlobals>`, `CSharpCodeLanguage` (adds `CodeLanguage.CSharp`) |
 | `Darp.CodeEditor.CSharpScript.Runner` | `CSharpScriptSession` (starts sessions, and scripts in them), `CSharpScriptSession<TSessionSide, TSessionObject>`, `CSharpScriptSessionOptions`, `CSharpScriptRun`, `CSharpScriptException`, `CSharpScriptSessionExit`, `CSharpScriptSessionExitReason`, and the contracts that runner-side script APIs implement: `IScriptSessionObject<TSelf, TAppSide>`, `IScriptGlobalsFactory<TGlobals, TInput>`, `IScriptGlobalsFactory<TGlobals>` |
 
-51 public types in all. Three more things are public without being types of ours:
+52 public types in all. Three more things are public without being types of ours:
 
 - **The project file.**
   - `CSharpScriptReference="true"` on a package or project reference: scripts may use its assemblies. Publishing copies their DLLs next to the app, NativeAOT apps included, with their XML docs, which hover and completion show.
@@ -138,6 +138,7 @@ rather than its view belong to the document, as in Monaco and CodeMirror.
 | `AutoClosingOvertype`, `AutoClosingDelete` | `editor.autoClosingOvertype`, `editor.autoClosingDelete` | `Auto`: typing a closing character steps over one, and Backspace between a pair deletes both, only where the editor closed it |
 | `AutoSurround` | `editor.autoSurround` | `LanguageDefined`: an opening bracket or quote typed over a selection surrounds it with the language's pairs |
 | `CommentsInsertSpace` | `editor.comments.insertSpace` | true: toggling a comment adds a space after the comment's start |
+| `ParameterHints` | `editor.parameterHints` | `ParameterHintsOptions.Default`: signature help opens on the server's trigger characters, and Up and Down go round its signatures |
 | `DiagnosticOrder` | `problems.sortOrder` | `Severity`: F8 goes to errors first, then warnings and information, each by position |
 
 A `SearchHistory` keeps up to 100 entries, the latest last; the bar adds the query and the replacement once the user
@@ -1178,8 +1179,8 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   the screen of a 4K window: preparing it takes the server's thread 0.9 ms, 4.0 ms when it is about text 100 edits
   old; taking it in takes the UI thread 13 µs, 79 µs after 100 edits since; drawing the squiggles 2.9 ms, and 3.2 ms
   with each error over all of the text; and the
-  headless frame, which also rasterizes, 107 ms against 92 ms without diagnostics. Finding what a hover shows among
-  10,000 on one character, each one found beating those before, takes 0.75 ms. Taking a server's tokens on every
+  headless frame, which also rasterizes, 107 ms against 92 ms without diagnostics. Finding the first part that a hover shows,
+  a hundred of 10,000 on one character, takes 0.72 ms; it builds the rest a part per frame. Taking a server's tokens on every
   character of the 32 lines on screen of an 800 by 600 window, 3,000 a line, and drawing the frame after it takes
   57 ms, and 300 a line 45 ms; taking them and laying out the lines alone, 35 ms and 28 ms. One error over 100
   unwrapped lines of 3,000 characters in an 800 by 2,160 window takes 3.7 ms to draw. Showing the
