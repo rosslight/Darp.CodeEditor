@@ -103,11 +103,15 @@ internal sealed class IndentRules
                 string indentation = Indentation(inherited);
                 return indentation.Length > 0 ? _indenting.Normalize(indentation) : null;
             }
-            return
-                EnterAtEnd(matching, lines, lineNumber - 1) is (_, var kept, var append)
-                && kept.Length + append.Length > 0
-                ? kept + append
-                : null;
+            int above = lineNumber - 1;
+            string text = "";
+            while (above >= 1 && string.IsNullOrWhiteSpace(text = matching.Read(lines.Text, above)))
+                above--;
+            string previous = above > 1 ? matching.Read(lines.Masked, above - 1) : "";
+            if (above < 1 || ActionFor(matching, previous, matching.Read(lines.Masked, above), "") is not { } action)
+                return null;
+            (string kept, string append) = Resolved(action, text[..Leading(text)]);
+            return kept.Length + append.Length > 0 ? kept + append : null;
         }
         catch (RegexMatchTimeoutException)
         {
@@ -271,8 +275,7 @@ internal sealed class IndentRules
     }
 
     /// <summary>
-    /// The indentation that the lines above give line <paramref name="lineNumber"/>, whether it is one level more, and
-    /// the line it is from.
+    /// The indentation that the lines above give line <paramref name="lineNumber"/>, and whether it is one level more.
     /// Lines of whitespace only, and those that match the unindented pattern, give none. A line that matches the
     /// increase pattern, or the pattern that indents only the next line, gives one level more, and a line below one that
     /// indents only it gives the indentation from before. With <paramref name="honorIntentional"/>, a line that neither
@@ -296,7 +299,7 @@ internal sealed class IndentRules
         InheritedIndentation From(int number, bool increases)
         {
             string text = Read(number);
-            return new InheritedIndentation(text[..Leading(text)], increases, number);
+            return new InheritedIndentation(text[..Leading(text)], increases);
         }
         // The first line with text, above empty lines, takes no indentation.
         for (int prior = lineNumber - 1; prior > 0; prior--)
@@ -345,32 +348,11 @@ internal sealed class IndentRules
     }
 
     /// <summary>
-    /// What Enter at the end of line <paramref name="above"/>, or of the closest line with text above it, does: the rule
-    /// for Enter or the bracket that applies there, the indentation it keeps and the text it appends. Null when none
-    /// applies, or no line above has text.
-    /// </summary>
-    internal (EnterAction Action, string Indentation, string Append)? EnterAtEnd(
-        IndentationMatching matching,
-        RuleLines lines,
-        int above
-    )
-    {
-        string text = "";
-        while (above >= 1 && string.IsNullOrWhiteSpace(text = matching.Read(lines.Text, above)))
-            above--;
-        string previous = above > 1 ? matching.Read(lines.Masked, above - 1) : "";
-        if (above < 1 || ActionFor(matching, previous, matching.Read(lines.Masked, above), "") is not { } action)
-            return null;
-        (string indentation, string append) = Resolved(action, text[..Leading(text)]);
-        return (action, indentation, append);
-    }
-
-    /// <summary>
     /// What Enter does by the rules for Enter, at <see cref="AutoIndent.Advanced"/>: the first rule whose expressions
     /// match the texts; and by the brackets: between an opening and a closing bracket, indent and outdent, and after an
     /// opening bracket, indent. Null when none applies.
     /// </summary>
-    internal EnterAction? ActionFor(IndentationMatching matching, string previous, string before, string after)
+    private EnterAction? ActionFor(IndentationMatching matching, string previous, string before, string after)
     {
         if (_autoIndent >= AutoIndent.Advanced)
         {
@@ -448,15 +430,10 @@ internal sealed class IndentRules
         return matching.Decreases(after) ? _indenting.Unshift(Indentation(inherited)) : Indentation(inherited);
     }
 
-    internal string Indentation(InheritedIndentation inherited) =>
+    private string Indentation(InheritedIndentation inherited) =>
         inherited.Increases ? _indenting.Shift(inherited.Indentation) : inherited.Indentation;
 
-    internal IndentationMatching StartMatching() => new(_configuration.IndentationRules, _time);
-
-    /// <summary>Whether the language's indentation rules apply in full, at <see cref="AutoIndent.Full"/>.</summary>
-    internal bool IndentsByRules => _autoIndent == AutoIndent.Full && _configuration.IndentationRules is not null;
-
-    internal Indenting Indenting => _indenting;
+    private IndentationMatching StartMatching() => new(_configuration.IndentationRules, _time);
 
     /// <summary>
     /// Line <paramref name="lineNumber"/>, and its parts before <paramref name="from"/> and after <paramref name="to"/>
@@ -518,8 +495,5 @@ internal sealed class IndentRules
 /// <summary>What Enter inserts at the caret: the text, where the caret goes in it, and how much after the caret it replaces.</summary>
 internal readonly record struct NewLine(string Text, int Caret, int Replaced);
 
-/// <summary>
-/// An indentation that the lines above give, whether it is one level more, and the line it is from; none for the
-/// indentation of a first line.
-/// </summary>
-internal readonly record struct InheritedIndentation(string Indentation, bool Increases, int? Line = null);
+/// <summary>An indentation that the lines above give, and whether it is one level more.</summary>
+internal readonly record struct InheritedIndentation(string Indentation, bool Increases);
