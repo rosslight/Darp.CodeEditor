@@ -109,6 +109,7 @@ internal sealed class CompletionList
                 Detail = ServerJson.String(result, "detail") ?? item.Detail,
                 Documentation = ServerJson.Documentation(result) ?? item.Documentation,
                 AdditionalEdits = AdditionalEdits(result, snapshot) ?? item.AdditionalEdits,
+                Command = Command(result) ?? item.Command,
             };
 
     /// <summary>
@@ -174,8 +175,17 @@ internal sealed class CompletionList
                 ? ServerFeatures.Characters(item, "commitCharacters")
                 : commitCharacters,
             item
-        );
+        )
+        {
+            Command = Command(item),
+        };
     }
+
+    /// <summary>The id of the command that committing an item runs after; null for none.</summary>
+    private static string? Command(JsonElement item) =>
+        item.TryGetProperty("command", out JsonElement command) && command.ValueKind == JsonValueKind.Object
+            ? ServerJson.String(command, "command")
+            : null;
 
     /// <summary>
     /// An item's <c>textEdit</c>, with the range it inserts over and the one it replaces: an <c>InsertReplaceEdit</c>'s
@@ -297,7 +307,13 @@ internal sealed record CompletionItem(
     IReadOnlyList<CompletionEdit>? AdditionalEdits,
     string CommitCharacters,
     JsonElement Source
-);
+)
+{
+    /// <summary>
+    /// The id of the command that committing it runs after, such as <c>editor.action.triggerSuggest</c>; null for none.
+    /// </summary>
+    public string? Command { get; init; }
+}
 
 /// <summary>A change of the text: <paramref name="Range"/> becomes <paramref name="NewText"/>.</summary>
 internal readonly record struct CompletionEdit(TextRange Range, string NewText);
