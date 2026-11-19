@@ -51,8 +51,8 @@ internal sealed record SearchResult(
 
 /// <summary>
 /// Finds the matches of a query in a snapshot, as VS Code's <c>TextModelSearch</c> does, and its <c>findNextMatch</c>,
-/// <c>findPreviousMatch</c> and Replace All beyond the matches it keeps: by code points, so that no
-/// match starts or ends inside a surrogate pair. A query that can't match a line break is searched line by line, so
+/// <c>findPreviousMatch</c> and Replace All beyond the matches it keeps, without a match or group that starts or ends
+/// inside a surrogate pair. A query that can't match a line break is searched line by line, so
 /// that <c>^</c> and <c>$</c> match at every line's start and end, whatever its line break. One that can
 /// (<see cref="SearchQuery.IsMultiline"/>) is searched across lines, in the text with its line breaks as <c>\n</c>.
 /// Runs in the background.
@@ -104,7 +104,7 @@ internal static class TextSearch
     {
         var matches = new TextSegmentCollection<SearchMatch>();
         string text = snapshot.GetText();
-        if (!query.TryCreateRegex(HasSurrogates(text), out Regex? regex, out string? error))
+        if (!query.TryCreateRegex(out Regex? regex, out string? error))
             return new SearchResult(snapshot.Version, query, replacement, matches, SearchOutcome.InvalidPattern, error);
         Replacing? replacing = replacement is null ? null : new Replacing(query, replacement, snapshot.LineBreak);
         SearchOutcome outcome = new SearchScan(
@@ -144,7 +144,7 @@ internal static class TextSearch
     )
     {
         string text = snapshot.GetText();
-        if (!query.TryCreateRegex(HasSurrogates(text), out Regex? regex, out _))
+        if (!query.TryCreateRegex(out Regex? regex, out _))
             return (null, SearchOutcome.InvalidPattern);
         var replacing = new Replacing(query, replacement, snapshot.LineBreak);
         var edits = new List<TextEdit>();
@@ -186,7 +186,7 @@ internal static class TextSearch
     )
     {
         string text = snapshot.GetText();
-        if (!query.TryCreateRegex(HasSurrogates(text), out Regex? regex, out _))
+        if (!query.TryCreateRegex(out Regex? regex, out _))
             return (null, SearchOutcome.InvalidPattern);
         from = Math.Clamp(from, 0, text.Length);
         if (SearchScan.IsInsideLineBreak(text, from))
@@ -228,7 +228,7 @@ internal static class TextSearch
     )
     {
         string text = snapshot.GetText();
-        if (!query.TryCreateRegex(HasSurrogates(text), out Regex? regex, out _))
+        if (!query.TryCreateRegex(out Regex? regex, out _))
             return (null, SearchOutcome.InvalidPattern);
         TextRange? last = null;
         SearchOutcome outcome = new SearchScan(
@@ -250,9 +250,6 @@ internal static class TextSearch
             : null;
         return (previous, outcome == SearchOutcome.OutOfTime ? outcome : SearchOutcome.Complete);
     }
-
-    /// <summary>Whether the text has surrogates, which a regular expression's atoms must not split.</summary>
-    private static bool HasSurrogates(string text) => text.AsSpan().IndexOfAnyInRange('\uD800', '\uDFFF') >= 0;
 
     /// <summary>
     /// Builds the text that replaces each match: the replacement itself, or for a regular expression with its

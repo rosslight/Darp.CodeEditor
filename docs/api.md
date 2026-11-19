@@ -158,6 +158,9 @@ lines, which show in the theme's `editor.findRangeHighlightBackground` while the
 Typing the query selects its first match from the caret; Enter and F3 go round past the last match, and the bar stays
 open. The bar highlights 19,999 matches, and says so in the tip of its count; F3, Shift+F3 and Replace All reach every
 match beyond them, and Replace All replaces all of them in one undo step, or none if its search runs out of time.
+Regular expressions are .NET's, a known difference from VS Code's JavaScript ones with the `u` flag: classes, `.` and
+quantifiers work on UTF-16 units, so `[😀]`, `.` or `\p{L}` meet a character beyond the Basic Multilingual Plane as in
+.NET. No match or group starts or ends inside a surrogate pair, so that a replacement never writes half of one.
 
 **Caret and scroll position** belong to the editor, as in Monaco, and last as long as it does, like a list's scroll
 position. Setting `Document` shows the other document from its start, and a tab control may create a new editor each
