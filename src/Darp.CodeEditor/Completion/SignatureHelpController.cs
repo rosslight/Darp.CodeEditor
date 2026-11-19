@@ -297,7 +297,7 @@ internal sealed class SignatureHelpController : IEditorFeature
                 signature,
                 label,
                 blocks,
-                new PopupLook(_editor.FontFamily, _editor.FontSize, _colors)
+                PopupLook.Of(_editor, _colors, _colors.HoverForeground)
             );
             _popup.Show(
                 _textView,
@@ -355,12 +355,10 @@ internal sealed class SignatureHelpController : IEditorFeature
         var line = new PopupDock();
         if (help.Signatures.Count > 1)
         {
-            var counter = new PopupText
-            {
-                Text = $"{help.ActiveSignature + 1}/{help.Signatures.Count}",
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Avalonia.Thickness(0, 0, 6, 0),
-            };
+            PopupText counter = HoverView.Prose(look);
+            counter.Text = $"{help.ActiveSignature + 1}/{help.Signatures.Count}";
+            counter.VerticalAlignment = VerticalAlignment.Center;
+            counter.Margin = new Avalonia.Thickness(0, 0, 6, 0);
             DockPanel.SetDock(counter, Dock.Left);
             line.Children.Add(counter);
         }

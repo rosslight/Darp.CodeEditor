@@ -1,18 +1,16 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Styling;
-using Avalonia.VisualTree;
 
 namespace Darp.CodeEditor.Popups;
 
 /// <summary>
 /// Content in a <see cref="PopupFrame"/> next to a place in an editor's text, or beside another popup, in the window's
 /// overlay layer: it stays inside the window, and opens without an OS window. It takes the editor's theme variant, so
-/// that a <c>ThemeVariantScope</c> around the editor reaches it, and the app's font where the editor is, not the
-/// editor's monospace one. <see cref="PopupPlacement"/> decides where it goes.
+/// that a <c>ThemeVariantScope</c> around the editor reaches it; its content takes its fonts from
+/// <see cref="PopupLook"/>. <see cref="PopupPlacement"/> decides where it goes.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -33,8 +31,8 @@ internal sealed class EditorPopup
     private readonly PopupSide _side;
     private OverlayLayer? _layer;
 
-    /// <summary>The bindings to the editor's theme variant and to the font around it, while open.</summary>
-    private IDisposable[] _bindings = [];
+    /// <summary>The binding to the editor's theme variant, while open.</summary>
+    private IDisposable? _variant;
 
     /// <summary>The visual of the place, and the place: a character's box in it, read again at each placing.</summary>
     private (Visual RelativeTo, Func<Rect> Anchor)? _line;
@@ -120,9 +118,8 @@ internal sealed class EditorPopup
         _layer = null;
         layer.LayoutUpdated -= OnLayoutUpdated;
         layer.Children.Remove(_root);
-        foreach (IDisposable binding in _bindings)
-            binding.Dispose();
-        _bindings = [];
+        _variant?.Dispose();
+        _variant = null;
     }
 
     /// <summary>Adds the popup to the overlay layer, unless it is there.</summary>
@@ -134,21 +131,10 @@ internal sealed class EditorPopup
         if (OverlayLayer.GetOverlayLayer(_editor) is not { } layer)
             return false;
         _layer = layer;
-        var bindings = new List<IDisposable>
-        {
-            _root.Bind(
-                ThemeVariantScope.RequestedThemeVariantProperty,
-                _editor.GetObservable(ThemeVariantScope.ActualThemeVariantProperty)
-            ),
-        };
-        if (_editor.GetVisualParent() is AvaloniaObject around)
-        {
-            bindings.Add(
-                _root.Bind(TextElement.FontFamilyProperty, around.GetObservable(TextElement.FontFamilyProperty))
-            );
-            bindings.Add(_root.Bind(TextElement.FontSizeProperty, around.GetObservable(TextElement.FontSizeProperty)));
-        }
-        _bindings = [.. bindings];
+        _variant = _root.Bind(
+            ThemeVariantScope.RequestedThemeVariantProperty,
+            _editor.GetObservable(ThemeVariantScope.ActualThemeVariantProperty)
+        );
         layer.Children.Add(_root);
         layer.LayoutUpdated += OnLayoutUpdated;
         return true;

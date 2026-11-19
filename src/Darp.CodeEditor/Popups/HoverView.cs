@@ -2,15 +2,17 @@ using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
+using Avalonia.VisualTree;
 
 namespace Darp.CodeEditor.Popups;
 
 /// <summary>
-/// The controls that show a hover's blocks, as VS Code's hover shows Markdown: text in the popup's font and foreground,
+/// The controls that show a hover's blocks, as VS Code's hover shows Markdown: prose in the popup's font and foreground,
 /// links in <c>textLink.foreground</c>, code spans on <c>textCodeBlock.background</c>, code blocks on the popup's
 /// background in the editor's font and token colors, and a line between parts in the hover's border color.
 /// </summary>
@@ -39,6 +41,18 @@ internal static class HoverView
         }
         return panel;
     }
+
+    /// <summary>
+    /// Prose in the app's font and the popup's foreground, set on the text itself: an app's styles for text would beat
+    /// what it inherits.
+    /// </summary>
+    public static PopupText Prose(PopupLook look) =>
+        new()
+        {
+            FontFamily = look.TextFont,
+            FontSize = look.TextSize,
+            Foreground = look.Foreground,
+        };
 
     /// <summary>Code in the editor's font, size and token colors, on the popup's background.</summary>
     public static TextBlock Code(InlineCollection inlines, PopupLook look) =>
@@ -77,7 +91,9 @@ internal static class HoverView
             inlines.Add(run);
             length += span.Text.Length;
         }
-        var text = new PopupText { Inlines = inlines, TextWrapping = TextWrapping.Wrap };
+        PopupText text = Prose(look);
+        text.Inlines = inlines;
+        text.TextWrapping = TextWrapping.Wrap;
         if (links.Count > 0)
             OpenLinks(text, links);
         if (paragraph.Marker is not { } marker)
@@ -86,7 +102,9 @@ internal static class HoverView
             return text;
         }
         var item = new PopupDock { Margin = new Thickness(ListIndent * (paragraph.Level - 1), 0, 0, 0) };
-        var markerText = new PopupText { Text = marker, Margin = new Thickness(0, 0, 6, 0) };
+        PopupText markerText = Prose(look);
+        markerText.Text = marker;
+        markerText.Margin = new Thickness(0, 0, 6, 0);
         DockPanel.SetDock(markerText, Dock.Left);
         item.Children.Add(markerText);
         item.Children.Add(text);
@@ -146,8 +164,37 @@ internal static class HoverView
     private static async void Open(TopLevel topLevel, Uri uri) => await topLevel.Launcher.LaunchUriAsync(uri);
 }
 
-/// <summary>How a popup looks: code in the editor's font, and the color theme's popup colors.</summary>
+/// <summary>
+/// How a popup looks: code in the editor's font, prose in the app's font where the editor is, and the color theme's
+/// popup colors.
+/// </summary>
 /// <param name="CodeFont">The editor's font.</param>
 /// <param name="CodeSize">The editor's font size.</param>
 /// <param name="Colors">The popups' colors.</param>
-internal sealed record PopupLook(FontFamily CodeFont, double CodeSize, PopupColors Colors);
+/// <param name="TextFont">The app's font where the editor is, not the editor's monospace one.</param>
+/// <param name="TextSize">The app's font size there.</param>
+/// <param name="Foreground">The popup's foreground, for prose.</param>
+internal sealed record PopupLook(
+    FontFamily CodeFont,
+    double CodeSize,
+    PopupColors Colors,
+    FontFamily TextFont,
+    double TextSize,
+    IBrush Foreground
+)
+{
+    /// <summary>The look of <paramref name="editor"/>'s popups, with prose in <paramref name="foreground"/>.</summary>
+    public static PopupLook Of(TemplatedControl editor, PopupColors colors, IBrush foreground)
+    {
+        // Outside a window, where no popup opens, the editor's own.
+        AvaloniaObject around = editor.GetVisualParent() ?? (Visual)editor;
+        return new PopupLook(
+            editor.FontFamily,
+            editor.FontSize,
+            colors,
+            around.GetValue(TextElement.FontFamilyProperty),
+            around.GetValue(TextElement.FontSizeProperty),
+            foreground
+        );
+    }
+}

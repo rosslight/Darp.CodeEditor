@@ -61,7 +61,14 @@ public class HoverBenchmarks
         // The largest that a hover shows: nothing of it is cut.
         if (new HoverBudget().Fit(_blocks) is not [HoverCode { Runs.Count: var count }] || count != runs.Count)
             throw new InvalidOperationException("The hover is larger than a hover shows.");
-        _look = new PopupLook(new FontFamily("DejaVu Sans Mono"), 14, PopupColors.Default);
+        _look = new PopupLook(
+            new FontFamily("DejaVu Sans Mono"),
+            14,
+            PopupColors.Default,
+            FontFamily.Default,
+            14,
+            PopupColors.Default.HoverForeground
+        );
     }
 
     [Benchmark]
