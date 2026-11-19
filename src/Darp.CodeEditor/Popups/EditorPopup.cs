@@ -30,7 +30,6 @@ internal sealed class EditorPopup
     private readonly TemplatedControl _editor;
     private readonly ThemeVariantScope _root;
     private readonly PopupSide _side;
-    private readonly bool _resizable;
     private OverlayLayer? _layer;
 
     /// <summary>The bindings to the editor's theme variant and to the font around it, while open.</summary>
@@ -49,21 +48,13 @@ internal sealed class EditorPopup
     /// <param name="content">What the popup shows, inside its frame.</param>
     /// <param name="name">The frame's name, for tests.</param>
     /// <param name="side">The side of its line it opens on where both have room.</param>
-    /// <param name="resizable">Whether its edges away from what it is next to resize it.</param>
-    public EditorPopup(
-        TemplatedControl editor,
-        Control content,
-        string name,
-        PopupSide side = PopupSide.Above,
-        bool resizable = false
-    )
+    public EditorPopup(TemplatedControl editor, Control content, string name, PopupSide side = PopupSide.Above)
     {
         _editor = editor;
         Frame = new PopupFrame { Name = name, Child = content };
         Frame.Resized += size => Resized?.Invoke(size);
         _root = new ThemeVariantScope { Child = Frame };
         _side = side;
-        _resizable = resizable;
     }
 
     /// <summary>Raised when the popup closed because its place's line left the view.</summary>
@@ -71,6 +62,9 @@ internal sealed class EditorPopup
 
     /// <summary>Raised while the user drags an edge, with the size the popup would have.</summary>
     public event Action<Size>? Resized;
+
+    /// <summary>Whether its edges away from what it is next to resize it, from its next placing on; false by default.</summary>
+    public bool IsResizable { get; set; }
 
     /// <summary>The frame around the content, which the popup's owner paints.</summary>
     public PopupFrame Frame { get; }
@@ -219,7 +213,7 @@ internal sealed class EditorPopup
             _root.ClearValue(Canvas.BottomProperty);
             Canvas.SetTop(_root, placed.Bounds.Top);
         }
-        Frame.ResizableEdges = _resizable ? EdgesAway(placed) : Edges.None;
+        Frame.ResizableEdges = IsResizable ? EdgesAway(placed) : Edges.None;
     }
 
     /// <summary>The popup's height at <paramref name="width"/>.</summary>

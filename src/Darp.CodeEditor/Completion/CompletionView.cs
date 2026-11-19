@@ -46,8 +46,8 @@ internal sealed class CompletionView
 
     public CompletionView(TemplatedControl editor)
     {
-        _listPopup = new EditorPopup(editor, _list, "CompletionList", PopupSide.Below, resizable: true);
-        _detailsPopup = new EditorPopup(editor, _details, "CompletionDetails", resizable: true);
+        _listPopup = new EditorPopup(editor, _list, "CompletionList", PopupSide.Below);
+        _detailsPopup = new EditorPopup(editor, _details, "CompletionDetails") { IsResizable = true };
         _detailsPopup.Frame.Padding = new Thickness(6, 4, 2, 4);
         _list.Clicked += index => Clicked?.Invoke(index);
         _listPopup.Resized += OnListResized;
@@ -83,6 +83,7 @@ internal sealed class CompletionView
     )
     {
         Paint(look.Colors);
+        _listPopup.IsResizable = true;
         _list.Width = _width - 2 * Border;
         _list.MaxRows = _rows;
         _list.Show(items, selected, look, icons, rowHeight);
@@ -92,6 +93,8 @@ internal sealed class CompletionView
     public void ShowMessage(string message, PopupLook look, double rowHeight)
     {
         Paint(look.Colors);
+        // A message keeps its size, as in VS Code.
+        _listPopup.IsResizable = false;
         _list.Width = DefaultWidth / 2 - 2 * Border;
         _list.ShowMessage(message, look, rowHeight);
         ShowDetails(null);
@@ -136,7 +139,7 @@ internal sealed class CompletionView
     /// <summary>The list takes the width dragged to, and as many whole rows as fit the height.</summary>
     private void OnListResized(Size size)
     {
-        if (_list.Message is not null || _place is not var (relativeTo, word))
+        if (_place is not var (relativeTo, word))
             return;
         _width = Math.Max(MinWidth, size.Width);
         _rows = Math.Max(1, (int)Math.Round((size.Height - 2 * Border) / _list.RowHeight));
