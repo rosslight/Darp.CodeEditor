@@ -304,7 +304,11 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
                 }
                 if (!session.ByKey && list is not { IsIncomplete: true })
                 {
+                    // An accept that waits for the text and caret that this answer is for goes on: there is nothing
+                    // to commit from, as when the list that showed matched nothing.
+                    Action? goOn = _filter.TakeWaitingKey();
                     Close();
+                    goOn?.Invoke();
                     return;
                 }
                 list ??= new CompletionList([], isIncomplete: false, resolve: null);
