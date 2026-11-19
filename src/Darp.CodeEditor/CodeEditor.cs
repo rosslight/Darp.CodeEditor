@@ -1417,7 +1417,7 @@ public class CodeEditor : TemplatedControl
             case CodeEditorCommands.TriggerParameterHints when inText && !IsReadOnly:
                 _signatureHelp?.Trigger();
                 return true;
-            case CodeEditorCommands.CommentLine when inText:
+            case CodeEditorCommands.CommentLine when inText && !IsReadOnly:
                 _helpers?.ToggleComment();
                 return true;
             // From the text or the search bar.
@@ -1447,8 +1447,8 @@ public class CodeEditor : TemplatedControl
                             or CodeEditorCommands.CursorWordEndRightSelect
                 );
                 return true;
-            // Typing, Enter, Tab and caret movement.
-            case CodeEditorCommands.Undo or CodeEditorCommands.Redo when inText:
+            // Typing, Enter, Tab and caret movement; as in VS Code, no undo in a read-only editor.
+            case CodeEditorCommands.Undo or CodeEditorCommands.Redo when inText && !IsReadOnly:
                 UndoOrRedo(redo: command == CodeEditorCommands.Redo);
                 return true;
             // Lines and selections.
@@ -1523,12 +1523,11 @@ public class CodeEditor : TemplatedControl
     }
 
     /// <summary>
-    /// Undoes or redoes a step of the shown document, as the keymap's undo and redo do, and brings the caret into view:
-    /// nothing in a read-only editor, as in VS Code.
+    /// Undoes or redoes a step of the shown document, as the keymap's undo and redo do, and brings the caret into view.
     /// </summary>
     private void UndoOrRedo(bool redo)
     {
-        if (IsReadOnly || _shown is not { } shown || _part is not { } part)
+        if (_shown is not { } shown || _part is not { } part)
             return;
         if (redo)
             shown.Redo();

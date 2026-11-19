@@ -180,6 +180,26 @@ public sealed class KeymapTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe("«one\n»two");
         });
 
+    [Theory]
+    [InlineData(CodeEditorCommands.CommentLine)]
+    [InlineData(CodeEditorCommands.Undo)]
+    [InlineData(CodeEditorCommands.Redo)]
+    public Task An_edit_that_a_read_only_editor_refuses_leaves_its_key_to_the_binding_before(string command) =>
+        _ui.Run(async () =>
+        {
+            await CodeLanguage.Json.Loaded;
+            using EditorWindow window = MarkedText.Show("1|\n2", CodeLanguage.Json);
+            window.Editor.IsReadOnly = true;
+            window.Editor.Keymap = CodeEditorKeymap.Default.With(
+                new CodeEditorKeyBinding("f2", CodeEditorCommands.ExpandLineSelection),
+                new CodeEditorKeyBinding("f2", command)
+            );
+
+            window.Press(Keys.F2);
+
+            MarkedText.Of(window).ShouldBe("«1\n»2");
+        });
+
     [Fact]
     public Task A_click_ends_the_wait() =>
         _ui.Run(() =>
