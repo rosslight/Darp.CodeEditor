@@ -81,6 +81,8 @@ public sealed class ReplacePatternTests
     // By Unicode's full case mappings.
     [InlineData("FOO", "straße", "STRASSE")]
     [InlineData("Foo", "ßar", "SSar")]
+    // A capital sigma at the end of a word is ς in lower case.
+    [InlineData("ab", "ΟΣ ΣΑ ΟΣ.", "ος σα ος.")]
     public void With_Preserve_Case_a_replacement_takes_the_case_of_the_match(
         string match,
         string replacement,
