@@ -83,8 +83,7 @@ internal sealed class CompletionController : IEditorFeature
     /// <summary>Whether the selected item's details show beside the list; the user toggles them.</summary>
     private bool _showsDetails = true;
 
-    /// <summary>Cancels the resolve of the item committed last, whose additional edits are still to come.</summary>
-    private CancellationTokenSource? _lateEdits;
+    private readonly CompletionCommit _commit;
 
     private readonly CompletionRanking _ranking = new();
 
@@ -104,6 +103,7 @@ internal sealed class CompletionController : IEditorFeature
         _highlighter = highlighter;
         _snippets = snippets;
         _view = new CompletionView(editor);
+        _commit = new CompletionCommit(textArea, document, snippets);
         _view.Clicked += OnClicked;
         _buffer.Changing += OnBufferChanging;
         _buffer.TextChanged += OnBufferTextChanged;
@@ -261,7 +261,7 @@ internal sealed class CompletionController : IEditorFeature
     public void Dispose()
     {
         Close();
-        _lateEdits?.Cancel();
+        _commit.Dispose();
         _view.Clicked -= OnClicked;
         _buffer.Changing -= OnBufferChanging;
         _buffer.TextChanged -= OnBufferTextChanged;
@@ -695,12 +695,9 @@ internal sealed class CompletionController : IEditorFeature
     }
 
     /// <summary>
-    /// Commits an item: its edit, from where it starts to where its insert range, or its replace range for
-    /// <paramref name="replace"/>, ends as the edits since completion was asked moved it, or to the caret where that is
-    /// further, and its additional edits, in one step that the user undoes; the caret goes after the item's text. A
-    /// snippet goes in as its text, with its variables' values for the text before the commit, and its first stop is
-    /// selected. Additional edits that overlap others are left out, and stay plain text. Additional edits that a resolve
-    /// still under way brings come later.
+    /// Commits the item at <paramref name="index"/>, as it was resolved, with <see cref="CompletionCommit"/>: completion
+    /// ends first. The resolve of an item whose additional edits are still to come is taken out of the session, so that
+    /// ending it does not cancel it.
     /// </summary>
     private void Commit(CompletionSession session, int index, bool replace = false)
     {
@@ -713,129 +710,14 @@ internal sealed class CompletionController : IEditorFeature
         }
         CompletionItem selected = session.Items[index].Item;
         CompletionItem item = session.ResolvedOf(selected) ?? selected;
-        CompletionRequest request = answer.Request;
-        int caret = _textArea.Caret.Offset;
-        // Text typed at the caret goes in the range, and once the rest of the word is deleted, also by another editor or
-        // code, the text after it stays out.
-        TextRange since = TextRange.FromBounds(request.Offset, replace ? item.ReplaceRange.End : item.Edit.Range.End);
-        int end = _document.MapToCurrent(request.Snapshot, since).End;
-        var range = TextRange.FromBounds(
-            item.Edit.Range.Start,
-            Math.Min(_buffer.GetLineByOffset(caret).EndOffset, Math.Max(caret, end))
-        );
-        RenderedSnippet? snippet = item.Snippet is { } source ? _snippets.Render(source, range.Start) : null;
-        var main = new CompletionEdit(range, snippet?.Text ?? InLineBreaks(item.Edit.NewText));
         ItemResolve? late = null;
-        if (item.AdditionalEdits is null && answer.List.Resolves)
+        if (item.AdditionalEdits is null && answer.List.Resolves && !session.Resolves.Remove(selected, out late))
         {
-            // Taken out of the session, so that ending it does not cancel it.
-            if (!session.Resolves.Remove(selected, out late))
-            {
-                var cancellation = new CancellationTokenSource();
-                late = new ItemResolve(answer.List.ResolveAsync(selected, cancellation.Token), cancellation);
-            }
+            var cancellation = new CancellationTokenSource();
+            late = new ItemResolve(answer.List.ResolveAsync(selected, cancellation.Token), cancellation);
         }
         Close();
-        var step = new object();
-        var mark = new SnippetMark();
-        List<CompletionEdit> edits = WithoutOverlaps([main], Mapped(request.Snapshot, item.AdditionalEdits ?? []));
-        Apply(step, continued: false, edits, snippet is null ? null : mark);
-        // The item's text moved by the additional edits before it.
-        int start =
-            main.Range.Start
-            + edits.Skip(1).Where(e => e.Range.End <= main.Range.Start).Sum(e => e.NewText.Length - e.Range.Length);
-        _textArea.ClearSelection();
-        _textArea.Caret.Offset = start + main.NewText.Length;
-        _textArea.Caret.BringCaretToView();
-        if (snippet is not null)
-            _snippets.Start(snippet, start, mark);
-        if (late is not null)
-            ApplyLateEdits(late, step, request.Snapshot);
-    }
-
-    /// <summary>
-    /// Applies the additional edits that a committed item's resolve brings, in the commit's undo step, if that step is
-    /// still the last one; drops them otherwise.
-    /// </summary>
-    private async void ApplyLateEdits(ItemResolve late, object step, TextSnapshot snapshot)
-    {
-        _lateEdits?.Cancel();
-        _lateEdits = late.Cancellation;
-        try
-        {
-            CompletionItem? item = await late.Task;
-            if (
-                late.Cancellation.IsCancellationRequested
-                || item?.AdditionalEdits is not { Count: > 0 } additional
-                || _buffer.UndoStack.LastGroupDescriptor != step
-                || !_textArea.ReadOnlySectionProvider.CanInsert(_textArea.Caret.Offset)
-            )
-            {
-                return;
-            }
-            Apply(step, continued: true, WithoutOverlaps([], Mapped(snapshot, additional)), mark: null);
-        }
-        catch (Exception e)
-        {
-            Logger
-                .TryGet(LogEventLevel.Error, AssetFiles.LogArea)
-                ?.Log(this, "Applying an item's additional edits failed: {Exception}", e);
-        }
-        finally
-        {
-            if (_lateEdits == late.Cancellation)
-                _lateEdits = null;
-        }
-    }
-
-    /// <summary>
-    /// Applies edits, from the last to the first, in the undo step <paramref name="step"/>: a new one, or the last one
-    /// continued. A snippet's <paramref name="mark"/> goes in first, so that undoing the step reaches it last, once
-    /// the text is back.
-    /// </summary>
-    private void Apply(object step, bool continued, List<CompletionEdit> edits, SnippetMark? mark)
-    {
-        UndoStack undo = _buffer.UndoStack;
-        if (continued)
-            undo.StartContinuedUndoGroup(step);
-        else
-            undo.StartUndoGroup(step);
-        try
-        {
-            if (mark is not null)
-                undo.Push(mark);
-            using (_buffer.RunUpdate())
-            {
-                foreach (CompletionEdit edit in edits.OrderByDescending(e => e.Range.Start))
-                    _buffer.Replace(edit.Range.Start, edit.Range.Length, edit.NewText);
-            }
-        }
-        finally
-        {
-            undo.EndUndoGroup();
-        }
-    }
-
-    /// <summary>
-    /// Edits in the text of <paramref name="snapshot"/>, moved to the current text, with the document's line breaks.
-    /// </summary>
-    private IEnumerable<CompletionEdit> Mapped(TextSnapshot snapshot, IEnumerable<CompletionEdit> edits) =>
-        edits.Select(edit => new CompletionEdit(
-            _document.MapToCurrent(snapshot, edit.Range),
-            InLineBreaks(edit.NewText)
-        ));
-
-    private string InLineBreaks(string text) => TextUtilities.NormalizeNewLines(text, _document.LineBreak);
-
-    /// <summary><paramref name="first"/> and the edits that overlap none before them.</summary>
-    private static List<CompletionEdit> WithoutOverlaps(List<CompletionEdit> first, IEnumerable<CompletionEdit> more)
-    {
-        foreach (CompletionEdit edit in more)
-        {
-            if (first.TrueForAll(other => edit.Range.End <= other.Range.Start || edit.Range.Start >= other.Range.End))
-                first.Add(edit);
-        }
-        return first;
+        _commit.Commit(item, answer.Request, replace, late);
     }
 
     private void OnClicked(int index)
