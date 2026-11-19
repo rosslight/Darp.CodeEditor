@@ -402,12 +402,7 @@ internal sealed class EditingHelpers : IDisposable
             _textArea.ClearSelection();
             int caret = _textArea.Caret.Offset;
             DocumentLine line = Buffer.GetLineByOffset(caret);
-            NewLine newLine = NewLineAt(
-                line,
-                Buffer.GetText(line),
-                caret - line.Offset,
-                TextUtilities.GetNewLineFromDocument(Buffer, line.LineNumber)
-            );
+            NewLine newLine = NewLineAt(line, Buffer.GetText(line), caret - line.Offset, _document.LineBreak);
             int replaced = CanChange(caret, newLine.Replaced) ? newLine.Replaced : 0;
             Buffer.Replace(caret, replaced, newLine.Text);
             _textArea.Caret.Offset = caret + newLine.Caret;

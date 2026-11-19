@@ -86,7 +86,7 @@ internal static class TextSearch
     /// <summary>
     /// Finds the matches of <paramref name="query"/> in <paramref name="snapshot"/>, with the text that replaces each
     /// one when <paramref name="replacement"/> is given: itself, or for a regular expression with its substitutions,
-    /// such as <c>$1</c>.
+    /// such as <c>$1</c>, with the document's line breaks.
     /// </summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
     public static SearchResult Find(
@@ -121,7 +121,17 @@ internal static class TextSearch
             query,
             replacement,
             matches,
-            FindAll(snapshot.GetText(), query, regex, replacement, matches, cancellationToken),
+            FindAll(
+                snapshot.GetText(),
+                query,
+                regex,
+                // Matches don't span lines, so the substitutions bring no line breaks.
+                replacement is null
+                    ? null
+                    : TextUtilities.NormalizeNewLines(replacement, snapshot.LineBreak),
+                matches,
+                cancellationToken
+            ),
             null
         );
     }
