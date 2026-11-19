@@ -5,6 +5,7 @@ using Avalonia.Input.Platform;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
+using Darp.CodeEditor.Editing;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -229,6 +230,49 @@ public sealed class ClipboardTests(UiFixture ui)
             await EditorWindow.RunPostedJobsAsync();
 
             window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(line);
+        });
+
+    /// <summary>
+    /// The editor's check before a paste stands in for AvaloniaEdit's, which is internal: AvaloniaEdit's own paste binding
+    /// answers the same for each caret, so that a change of its rule fails here instead of drifting.
+    /// </summary>
+    [Fact]
+    public Task The_check_before_a_paste_answers_as_AvaloniaEdits_paste_binding() =>
+        _ui.Run(() =>
+        {
+            const int longLine = 6;
+            var buffer = new TextDocument("short\n" + new string('a', 3_500) + "\nend");
+            var textArea = new TextArea { Document = buffer };
+            textArea.Options.LongLineLimit = VisibleText.LineLimit;
+            var protectedText = new TextSegmentReadOnlySectionProvider<TextSegment>(buffer);
+            protectedText.Segments.Add(new TextSegment { StartOffset = 1, Length = 3 });
+            textArea.ReadOnlySectionProvider = protectedText;
+            int[] carets =
+            [
+                0,
+                1,
+                2,
+                4,
+                longLine,
+                longLine + VisibleText.LineLimit - 1,
+                longLine + VisibleText.LineLimit,
+                longLine + VisibleText.LineLimit + 1,
+                longLine + 3_500,
+                buffer.TextLength,
+            ];
+            var answers = new List<bool>();
+
+            foreach (int caret in carets)
+            {
+                textArea.Caret.Offset = caret;
+                bool avaloniaEdit = ApplicationCommands.Paste.CanExecute(null, textArea);
+                VisibleText.CanInsert(textArea, caret).ShouldBe(avaloniaEdit, $"at {caret}");
+                answers.Add(avaloniaEdit);
+            }
+
+            // Both answers occur, so that the comparison means something.
+            answers.ShouldContain(true);
+            answers.ShouldContain(false);
         });
 
     /// <summary>Menus ask the command whether it can run.</summary>
