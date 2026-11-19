@@ -38,9 +38,6 @@ namespace Darp.CodeEditor.Editing;
 /// </remarks>
 internal sealed partial class EditingHelpers : IDisposable
 {
-    /// <summary>The characters before which a pair closes, as VS Code's default <c>autoCloseBefore</c>.</summary>
-    private const string CloseBefore = ";:.,=}])> \n\t";
-
     private readonly CodeEditor _editor;
     private readonly TextArea _textArea;
     private readonly CodeDocument _document;
@@ -1022,18 +1019,28 @@ internal sealed partial class EditingHelpers : IDisposable
     }
 
     /// <summary>
-    /// Whether typing the closing character that the editor typed, right before it, steps over it, as in VS Code: only
-    /// a single character, and not a quote that a backslash escapes. In a rectangle selection, on every line or none.
+    /// Whether typing a closing character right before the same one steps over it, as VS Code's
+    /// <c>autoClosingOvertype</c>: one of a pair of single characters, by <see cref="CodeEditor.AutoClosingOvertype"/>
+    /// any or only one that the editor typed, and not a quote that a backslash escapes. In a rectangle selection, on
+    /// every line or none.
     /// </summary>
     private bool CanTypeOver(char typed, int[] offsets)
     {
-        return Array.TrueForAll(offsets, IsClosedBefore);
+        AutoClosingEdit overtype = _editor.AutoClosingOvertype;
+        return overtype != AutoClosingEdit.Never
+            && Configuration.AutoClosingPairs.Any(pair =>
+                pair is { Open.Length: 1, Close: [char close] } && close == typed
+            )
+            && Array.TrueForAll(offsets, IsClosedBefore);
 
         bool IsClosedBefore(int offset) =>
             offset < Buffer.TextLength
             && Buffer.GetCharAt(offset) == typed
             && !(IsQuote(typed) && IsEscaped(offset))
-            && _autoClosed.Exists(pair => pair.Close.Offset == offset && pair.CloseText.Length == 1);
+            && (
+                overtype == AutoClosingEdit.Always
+                || _autoClosed.Exists(pair => pair.Close.Offset == offset && pair.CloseText.Length == 1)
+            );
     }
 
     /// <summary>
@@ -1060,9 +1067,10 @@ internal sealed partial class EditingHelpers : IDisposable
 
     /// <summary>
     /// The pair to close when <paramref name="typed"/> goes in at <paramref name="caret"/>: the one with the longest
-    /// opening that the character completes. As in VS Code, it closes only before whitespace, a character of
-    /// <see cref="CloseBefore"/> or another closing character; a quote not right after a word; and a pair not closed
-    /// in strings or comments only where the tokens before the caret and of the typed text are neither.
+    /// opening that the character completes. As in VS Code, it closes where <see cref="CodeEditor.AutoClosingQuotes"/>
+    /// or <see cref="CodeEditor.AutoClosingBrackets"/> lets it (<see cref="ClosesBefore"/>) or before another closing
+    /// character; a quote not right after a word, unless they always close; and a pair not closed in strings or
+    /// comments only where the tokens before the caret and of the typed text are neither.
     /// </summary>
     private AutoClosingPair? PairToClose(char typed, int caret)
     {
@@ -1082,11 +1090,22 @@ internal sealed partial class EditingHelpers : IDisposable
         }
         if (found is not { } candidate)
             return null;
+        LanguageConfiguration configuration = Configuration;
+        bool quote = IsQuote(typed);
+        AutoClosing autoClosing =
+            quote ? _editor.AutoClosingQuotes
+            // VS Code's autoClosingComments, which the editor keeps at its default.
+            : configuration.BlockComment is { } block && candidate.Open.Contains(block.Open, StringComparison.Ordinal)
+                ? AutoClosing.LanguageDefined
+            : _editor.AutoClosingBrackets;
+        if (autoClosing == AutoClosing.Never)
+            return null;
         string after = Buffer.GetText(caret, line.EndOffset - caret);
-        if (after.Length > 0 && !CloseBefore.Contains(after[0]) && !StartsWithClosingOnly(after))
+        if (after.Length > 0 && !ClosesBefore(autoClosing, quote, after[0]) && !StartsWithClosingOnly(after))
             return null;
         if (
             candidate.Open is ['\'' or '"']
+            && autoClosing != AutoClosing.Always
             && caret > line.Offset
             && WordCharacters.IsWordCharacter(Buffer.GetCharAt(caret - 1))
         )
@@ -1103,6 +1122,19 @@ internal sealed partial class EditingHelpers : IDisposable
         static bool Excludes(AutoClosingPair pair, TokenType type) =>
             (pair.NotInString && type == TokenType.String) || (pair.NotInComment && type == TokenType.Comment);
     }
+
+    /// <summary>
+    /// Whether a quote, or else a bracket, closes before <paramref name="next"/> by <paramref name="autoClosing"/>, as
+    /// VS Code's <c>shouldAutoCloseBefore</c>.
+    /// </summary>
+    private bool ClosesBefore(AutoClosing autoClosing, bool quote, char next) =>
+        autoClosing switch
+        {
+            AutoClosing.Always => true,
+            AutoClosing.LanguageDefined => Configuration.AutoCloseBeforeSet(forQuotes: quote).Contains(next),
+            AutoClosing.BeforeWhitespace => next is ' ' or '\t',
+            _ => false,
+        };
 
     /// <summary>
     /// Whether <paramref name="after"/> starts with the closing characters of a pair, and not with the opening ones of
@@ -1160,19 +1192,28 @@ internal sealed partial class EditingHelpers : IDisposable
             MoveTyping(-1);
     }
 
-    /// <summary>Whether Backspace deletes empty pairs at <paramref name="offsets"/>: at all of them, or none.</summary>
+    /// <summary>
+    /// Whether Backspace deletes empty pairs at <paramref name="offsets"/>, at all of them or none, as VS Code's
+    /// <c>autoClosingDelete</c>: pairs of single characters, by <see cref="CodeEditor.AutoClosingDelete"/> any or only
+    /// those that the editor closed, of a kind that closes by <see cref="CodeEditor.AutoClosingQuotes"/> or
+    /// <see cref="CodeEditor.AutoClosingBrackets"/>.
+    /// </summary>
     private bool CanDeletePairs(int[] offsets)
     {
-        return Array.TrueForAll(offsets, IsInEmptyPair);
+        AutoClosingEdit delete = _editor.AutoClosingDelete;
+        return delete != AutoClosingEdit.Never && Array.TrueForAll(offsets, IsInEmptyPair);
 
         bool IsInEmptyPair(int offset)
         {
             if (offset == 0 || offset >= Buffer.TextLength)
                 return false;
-            string open = Buffer.GetCharAt(offset - 1).ToString();
-            string close = Buffer.GetCharAt(offset).ToString();
-            return Configuration.AutoClosingPairs.Any(pair => pair.Open == open && pair.Close == close)
-                && _autoClosed.Exists(pair => pair.Close.Offset == offset)
+            char open = Buffer.GetCharAt(offset - 1);
+            char close = Buffer.GetCharAt(offset);
+            return (IsQuote(open) ? _editor.AutoClosingQuotes : _editor.AutoClosingBrackets) != AutoClosing.Never
+                && Configuration.AutoClosingPairs.Any(pair =>
+                    pair is { Open: [char o], Close: [char c] } && o == open && c == close
+                )
+                && (delete == AutoClosingEdit.Always || _autoClosed.Exists(pair => pair.Close.Offset == offset))
                 && CanChange(offset - 1, 2);
         }
     }
@@ -1219,12 +1260,19 @@ internal sealed partial class EditingHelpers : IDisposable
     }
 
     /// <summary>
-    /// The pair whose opening character <paramref name="typed"/> surrounds the selection with, as in VS Code: not
-    /// around whitespace only, and a quote typed over a single quote replaces it. In a rectangle selection, only when
-    /// it surrounds every line's part. Null when it surrounds nothing.
+    /// The pair whose opening character <paramref name="typed"/> surrounds the selection with, as in VS Code: a quote
+    /// or a bracket as <see cref="CodeEditor.AutoSurround"/> lets it, not around whitespace only, and a quote typed over
+    /// a single quote replaces it. In a rectangle selection, only when it surrounds every line's part. Null when it
+    /// surrounds nothing.
     /// </summary>
     private CharacterPair? SurroundingPair(char typed)
     {
+        AutoSurround surround = _editor.AutoSurround;
+        if (
+            surround != AutoSurround.LanguageDefined
+            && surround != (IsQuote(typed) ? AutoSurround.Quotes : AutoSurround.Brackets)
+        )
+            return null;
         CharacterPair? found = null;
         foreach (CharacterPair pair in Configuration.SurroundingPairs)
         {
@@ -1610,9 +1658,9 @@ internal sealed partial class EditingHelpers : IDisposable
         );
 
     /// <summary>
-    /// Comments the lines at their smallest indentation, by its width in columns, with a space after the token, or
-    /// uncomments them when every line is commented, as in VS Code. Lines of whitespace only take no part, unless all
-    /// lines are.
+    /// Comments the lines at their smallest indentation, by its width in columns, with a space after the token by
+    /// <see cref="CodeEditor.CommentsInsertSpace"/>, or uncomments them when every line is commented, as in VS Code.
+    /// Lines of whitespace only take no part, unless all lines are.
     /// </summary>
     private void ToggleLineComment(string token, int first, int last)
     {
@@ -1633,18 +1681,19 @@ internal sealed partial class EditingHelpers : IDisposable
         // The smallest indentation by its width, so that tabs and spaces line up.
         var indenting = new Indenting(_document.Indentation);
         int column = changed.Min(l => indenting.Width(l.Text.AsSpan(0, l.Indent)));
+        bool insertSpace = _editor.CommentsInsertSpace;
         var edits = new List<(int Offset, int Length, string Text)>(changed.Count);
         foreach ((DocumentLine line, string text, int indent) in changed)
         {
             if (!uncomment)
             {
-                edits.Add((line.Offset + (blank ? indent : indenting.OffsetOf(text, column)), 0, token + " "));
+                int offset = line.Offset + (blank ? indent : indenting.OffsetOf(text, column));
+                edits.Add((offset, 0, insertSpace ? token + " " : token));
                 continue;
             }
             int end = indent + token.Length;
-            edits.Add(
-                (line.Offset + indent, end < text.Length && text[end] == ' ' ? token.Length + 1 : token.Length, "")
-            );
+            bool space = insertSpace && end < text.Length && text[end] == ' ';
+            edits.Add((line.Offset + indent, space ? token.Length + 1 : token.Length, ""));
         }
         ReplaceInOneChange(edits);
     }

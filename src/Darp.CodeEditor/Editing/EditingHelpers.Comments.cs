@@ -7,18 +7,15 @@ namespace Darp.CodeEditor.Editing;
 // as VS Code's lineCommentCommand falls back to it. Both share the edits that add and remove the comment.
 internal sealed partial class EditingHelpers
 {
-    /// <summary>
-    /// Whether comments get a space inside their tokens, as VS Code's <c>editor.comments.insertSpace</c> does at its
-    /// default. The editor has no such option yet: Ctrl+/ puts a space after the line comment too.
-    /// </summary>
-    private static bool CommentsInsertSpace => true;
+    /// <summary>Whether comments get a space inside their tokens: <see cref="CodeEditor.CommentsInsertSpace"/>.</summary>
+    private bool CommentsInsertSpace => _editor.CommentsInsertSpace;
 
     /// <summary>
     /// Toggles the language's block comment around the selection, as VS Code's <c>blockComment</c> does, in a step of
     /// its own: removes the comment that the selection is in, from the start token before its start to the end token
-    /// after its end, or else puts one around it, with a space inside each token, and keeps the commented text
-    /// selected. Without a selection, an empty comment goes in at the caret, and the caret inside it. Nothing for a
-    /// language without a block comment.
+    /// after its end, or else puts one around it, with a space inside each token by
+    /// <see cref="CodeEditor.CommentsInsertSpace"/>, and keeps the commented text selected. Without a selection, an
+    /// empty comment goes in at the caret, and the caret inside it. Nothing for a language without a block comment.
     /// </summary>
     public void BlockComment()
     {
