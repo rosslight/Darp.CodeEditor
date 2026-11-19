@@ -120,6 +120,7 @@ internal sealed class Typing : IDisposable
         // Text of several characters, as from an input method.
         else if (text.AsSpan().IndexOfAny('\r', '\n') >= 0)
             e.Text = TextUtilities.NormalizeNewLines(text, _document.LineBreak);
+        TextDocument typedInto = Buffer;
         try
         {
             _changes.Run(step, () => _area.PerformTextInput(e));
@@ -129,11 +130,10 @@ internal sealed class Typing : IDisposable
             _indentation = null;
             _closing = null;
         }
-        if (_closeAfter is { } longPair)
-        {
-            _closeAfter = null;
+        // Not once a handler of the typed text showed another document.
+        if (_closeAfter is { } longPair && Buffer == typedInto)
             _changes.Run(new EditStep(EditKind.TypingOther, StartsStep: true), () => _pairs.Close(longPair));
-        }
+        _closeAfter = null;
         e.Handled = true;
     }
 
