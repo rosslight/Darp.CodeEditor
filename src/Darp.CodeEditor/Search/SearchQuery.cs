@@ -39,11 +39,17 @@ internal sealed record SearchQuery(string Text, bool MatchCase, bool WholeWord, 
 
     /// <summary>
     /// The query as a regular expression with the search's time limit: <c>^</c> and <c>$</c> match at the line breaks
-    /// inside the text searched where the query can match a line break, and <c>.</c> matches a code point.
+    /// inside the text searched where the query can match a line break, and in a text with surrogate pairs its atoms
+    /// take a code point whole (<see cref="AtomsMatchCodePoints"/>).
     /// </summary>
+    /// <param name="codePoints">Whether the text searched has surrogates, which atoms must not split.</param>
     /// <param name="regex">The regular expression; null where the query is an invalid one.</param>
     /// <param name="error">Why the query is invalid, for the user, in the words of .NET's message.</param>
-    public bool TryCreateRegex([NotNullWhen(true)] out Regex? regex, [NotNullWhen(false)] out string? error)
+    public bool TryCreateRegex(
+        bool codePoints,
+        [NotNullWhen(true)] out Regex? regex,
+        [NotNullWhen(false)] out string? error
+    )
     {
         RegexOptions options = RegexOptions.CultureInvariant;
         if (!MatchCase)
@@ -61,7 +67,7 @@ internal sealed record SearchQuery(string Text, bool MatchCase, bool WholeWord, 
             error = e.Message;
             return false;
         }
-        if (UseRegex && DotsMatchCodePoints(Text) is var rewritten && rewritten != Text)
+        if (codePoints && UseRegex && AtomsMatchCodePoints(Text) is var rewritten && rewritten != Text)
         {
             // The query as the user wrote it is valid, and its errors read as written: the rewritten one should be.
             try
@@ -74,61 +80,76 @@ internal sealed record SearchQuery(string Text, bool MatchCase, bool WholeWord, 
     }
 
     /// <summary>
-    /// The pattern with each <c>.</c> outside a character class matching a code point, not half of a surrogate pair:
-    /// an emoji is one match of <c>.</c>, not two. Character classes, such as <c>[^a]</c> or <c>\W</c>, still match
-    /// half of a pair, which the search then rejects.
+    /// The pattern with each atom that can match half of a surrogate pair taking a code point whole instead: <c>.</c>,
+    /// a character class such as <c>[^a]</c>, and <c>\W</c>, <c>\S</c>, <c>\D</c>, <c>\p{…}</c> and <c>\P{…}</c>. At a
+    /// pair, such an atom takes the pair where it takes its first half, and nothing otherwise: <c>[^b]</c> matches an
+    /// emoji once, and <c>(.)(.)</c> doesn't match it.
     /// </summary>
-    internal static string DotsMatchCodePoints(string pattern)
+    internal static string AtomsMatchCodePoints(string pattern)
     {
-        const string CodePoint = @"(?:[\uD800-\uDBFF][\uDC00-\uDFFF]|.)";
-        if (!pattern.Contains('.', StringComparison.Ordinal))
-            return pattern;
-        var rewritten = new StringBuilder(pattern.Length + CodePoint.Length);
-        // How deep in character classes, with .NET's subtractions, such as [a-z-[aeiou]], inside.
-        int depth = 0;
-        bool dash = false;
+        var rewritten = new StringBuilder(pattern.Length);
         for (int i = 0; i < pattern.Length; i++)
+        {
+            int end = AtomEnd(pattern, i);
+            if (end > i)
+                rewritten.Append(CodePoint(pattern[i..end]));
+            else
+            {
+                // Other escapes and comments as they are: neither holds an atom.
+                end =
+                    pattern[i] == '\\' ? Math.Min(i + 2, pattern.Length)
+                    : pattern.AsSpan(i).StartsWith("(?#", StringComparison.Ordinal)
+                        ? (pattern.IndexOf(')', i) is var close and >= 0 ? close + 1 : pattern.Length)
+                    : i + 1;
+                rewritten.Append(pattern, i, end - i);
+            }
+            i = end - 1;
+        }
+        return rewritten.ToString();
+    }
+
+    /// <summary><paramref name="atom"/>, taking a surrogate pair whole where it takes its first half.</summary>
+    internal static string CodePoint(string atom)
+    {
+        const string Pair = @"[\uD800-\uDBFF][\uDC00-\uDFFF]";
+        return $@"(?:(?={Pair}){atom}[\uDC00-\uDFFF]|(?!{Pair}){atom})";
+    }
+
+    /// <summary>The end of the atom that can match half of a surrogate pair at <paramref name="i"/>; i for none.</summary>
+    private static int AtomEnd(string pattern, int i) =>
+        pattern[i] switch
+        {
+            '.' => i + 1,
+            '[' => ClassEnd(pattern, i),
+            '\\' when i + 1 < pattern.Length && pattern[i + 1] is 'W' or 'S' or 'D' => i + 2,
+            '\\' when i + 1 < pattern.Length && pattern[i + 1] is 'p' or 'P' => pattern.IndexOf('}', i) + 1,
+            _ => i,
+        };
+
+    /// <summary>The end of the character class that starts at <paramref name="start"/>.</summary>
+    private static int ClassEnd(string pattern, int start)
+    {
+        int i = start + 1;
+        // A ] first in the class, also after ^, is one of its characters.
+        if (i < pattern.Length && pattern[i] == '^')
+            i++;
+        if (i < pattern.Length && pattern[i] == ']')
+            i++;
+        // How deep in classes, with .NET's subtractions, such as [a-z-[aeiou]], inside.
+        int depth = 1;
+        bool dash = false;
+        for (; i < pattern.Length; i++)
         {
             char c = pattern[i];
             if (c == '\\')
-            {
-                rewritten.Append(pattern.AsSpan(i, Math.Min(2, pattern.Length - i)));
                 i++;
-                dash = false;
-                continue;
-            }
-            if (depth > 0)
-            {
-                if (c == '[' && dash)
-                    depth++;
-                else if (c == ']')
-                    depth--;
-                dash = c == '-';
-                rewritten.Append(c);
-            }
-            else if (c == '[')
-            {
-                depth = 1;
-                rewritten.Append(c);
-                // A ] first in the class, also after ^, is one of its characters.
-                if (i + 1 < pattern.Length && pattern[i + 1] == '^')
-                    rewritten.Append(pattern[++i]);
-                if (i + 1 < pattern.Length && pattern[i + 1] == ']')
-                    rewritten.Append(pattern[++i]);
-            }
-            else if (pattern.AsSpan(i).StartsWith("(?#", StringComparison.Ordinal))
-            {
-                // A comment, to its first ).
-                int end = pattern.IndexOf(')', i) is var close and >= 0 ? close + 1 : pattern.Length;
-                rewritten.Append(pattern, i, end - i);
-                i = end - 1;
-            }
-            else if (c == '.')
-                rewritten.Append(CodePoint);
-            else
-                rewritten.Append(c);
+            else if (c == '[' && dash)
+                depth++;
+            else if (c == ']' && --depth == 0)
+                return i + 1;
+            dash = c == '-';
         }
-        return rewritten.ToString();
+        return pattern.Length;
     }
 
     private static bool IsMultilineRegex(string pattern)
