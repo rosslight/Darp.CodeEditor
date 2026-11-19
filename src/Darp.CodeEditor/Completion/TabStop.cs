@@ -21,6 +21,9 @@ internal sealed class TabStop(TextAnchor start, TextAnchor end, TabStop? parent,
 
     public bool IsFinal { get; } = isFinal;
 
+    /// <summary>Its place among the session's stops, in the order of the text.</summary>
+    public int Order { get; set; }
+
     /// <summary>The stops of its number, itself included: its mirrors.</summary>
     public List<TabStop> Group { get; set; } = [];
 
