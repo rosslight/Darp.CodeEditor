@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Avalonia.Input;
 
 namespace Darp.CodeEditor;
 
@@ -63,6 +64,7 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+f (cmd+f)</term><description><see cref="CodeEditorCommands.Find"/></description></item>
     /// <item><term>ctrl+h (alt+cmd+f)</term><description><see cref="CodeEditorCommands.Replace"/></description></item>
     /// <item><term>f3, shift+f3 (also cmd+g, shift+cmd+g)</term><description><see cref="CodeEditorCommands.FindNext"/>, <see cref="CodeEditorCommands.FindPrevious"/></description></item>
+    /// <item><term>alt+c, alt+w, alt+r, alt+p, alt+l (alt+cmd+c, …)</term><description><see cref="CodeEditorCommands.ToggleFindCaseSensitive"/>, <see cref="CodeEditorCommands.ToggleFindWholeWord"/>, <see cref="CodeEditorCommands.ToggleFindRegex"/>, <see cref="CodeEditorCommands.TogglePreserveCase"/>, <see cref="CodeEditorCommands.ToggleFindInSelection"/></description></item>
     /// <item><term>ctrl+/ (cmd+/)</term><description><see cref="CodeEditorCommands.CommentLine"/></description></item>
     /// <item><term>ctrl+z (cmd+z)</term><description><see cref="CodeEditorCommands.Undo"/></description></item>
     /// <item><term>ctrl+y, ctrl+shift+z (shift+cmd+z)</term><description><see cref="CodeEditorCommands.Redo"/></description></item>
@@ -89,6 +91,17 @@ public sealed class CodeEditorKeymap
 
     /// <summary>The bindings that remain once the removals applied, in order.</summary>
     internal IReadOnlyList<CodeEditorKeyBinding> Effective { get; }
+
+    /// <summary>
+    /// The strokes of <paramref name="command"/>'s latest binding, which a menu or a tip shows as its keys; none
+    /// without a binding.
+    /// </summary>
+    internal IReadOnlyList<KeyGesture> GesturesOf(string command) =>
+        Effective.LastOrDefault(binding => binding.Command == command) is { First: { } first } binding
+            ? binding.Second is { } second
+                ? [first.ToGesture(), second.ToGesture()]
+                : [first.ToGesture()]
+            : [];
 
     /// <summary>This keymap with <paramref name="bindings"/> applied after its own.</summary>
     public CodeEditorKeymap With(params IEnumerable<CodeEditorKeyBinding> bindings) => new([.. Bindings, .. bindings]);
@@ -148,6 +161,13 @@ public sealed class CodeEditorKeymap
             yield return new("cmd+g", CodeEditorCommands.FindNext);
             yield return new("shift+cmd+g", CodeEditorCommands.FindPrevious);
         }
+        // Cmd joins Alt on macOS, where Alt with a letter types a character.
+        string toggle = mac ? "alt+cmd" : "alt";
+        yield return new($"{toggle}+c", CodeEditorCommands.ToggleFindCaseSensitive);
+        yield return new($"{toggle}+w", CodeEditorCommands.ToggleFindWholeWord);
+        yield return new($"{toggle}+r", CodeEditorCommands.ToggleFindRegex);
+        yield return new($"{toggle}+p", CodeEditorCommands.TogglePreserveCase);
+        yield return new($"{toggle}+l", CodeEditorCommands.ToggleFindInSelection);
         yield return new($"{command}+/", CodeEditorCommands.CommentLine);
         yield return new($"{command}+z", CodeEditorCommands.Undo);
         if (!mac)
