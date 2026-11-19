@@ -50,6 +50,9 @@ internal sealed class DocumentSearch : IDisposable
     /// <summary>Whether a match is being selected, which leaves <see cref="_from"/> where it is.</summary>
     private bool _selecting;
 
+    /// <summary>Whether the view ended, as a handler of the selection can end it by showing another document.</summary>
+    private bool _ended;
+
     public DocumentSearch(EditorContext context, TextChanges changes, SearchBar bar, TextAreaColors? colors)
     {
         _context = context;
@@ -295,6 +298,8 @@ internal sealed class DocumentSearch : IDisposable
     /// <summary>Shows in the bar the matches, the one selected, and what its buttons can do.</summary>
     public void UpdateStatus()
     {
+        if (_ended)
+            return;
         int? index = null;
         if (_result is { } result && CurrentMatch(result) is { } current)
         {
@@ -317,6 +322,7 @@ internal sealed class DocumentSearch : IDisposable
 
     public void Dispose()
     {
+        _ended = true;
         CancelWork();
         _buffer.Changed -= OnBufferChanged;
         _buffer.TextChanged -= OnTextChanged;
@@ -418,8 +424,11 @@ internal sealed class DocumentSearch : IDisposable
     {
         _selecting = true;
         Area.Selection = EditorSelection.Create(Area, match.StartOffset, match.EndOffset);
-        Area.Caret.Offset = match.EndOffset;
+        if (!_ended)
+            Area.Caret.Offset = match.EndOffset;
         _selecting = false;
+        if (_ended)
+            return;
         _context.Reveal(new TextRange(match.StartOffset, match.Length));
         // Its number, now that the selection is all set.
         UpdateStatus();
