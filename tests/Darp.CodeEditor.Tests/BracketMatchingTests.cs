@@ -2,6 +2,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using AvaloniaEdit.Document;
 using Darp.CodeEditor.Editing;
+using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.Loading;
 
 namespace Darp.CodeEditor.Tests;
@@ -210,9 +211,23 @@ public sealed class BracketMatchingTests(UiFixture ui)
             window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)).ShouldBeGreaterThan(0);
 
             CodeDocument document = window.Editor.Document.ShouldNotBeNull();
-            document.Replace(new TextRange(document.CurrentSnapshot.GetOffset(new TextPosition(2, 2)), 1), "*");
-            // Drawn with the lines out of view as last tokenized, before the background tokenized them again.
-            window.Render();
+            // While the test holds the grammar, the background tokenizes nothing: drawn after the edit, the lines out of
+            // view keep their tokens as last tokenized, and the pair its closing brace.
+            TextMateGrammar grammar = EditorWindow
+                .TextViewOf(window.Editor)
+                .LineTransformers.OfType<BackgroundTextMateHighlighter>()
+                .Single()
+                .Grammar.ShouldNotBeNull();
+            grammar.TryEnterOnUiThread(TimeSpan.FromSeconds(30)).ShouldBeTrue();
+            try
+            {
+                document.Replace(new TextRange(document.CurrentSnapshot.GetOffset(new TextPosition(2, 2)), 1), "*");
+                window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)).ShouldBeGreaterThan(0);
+            }
+            finally
+            {
+                grammar.ExitOnUiThread();
+            }
 
             await Wait.UntilAsync(() => window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)) == 0);
         });
