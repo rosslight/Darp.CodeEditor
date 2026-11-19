@@ -12,7 +12,7 @@ namespace Darp.CodeEditor.Benchmarks;
 
 /// <summary>
 /// The UI thread's cost of showing the largest part of a hover that the editor builds at a time, in its worst shape: its
-/// content's controls built and laid out in a tooltip 320 pixels wide that scrolls, and the frame after it. The shape: a
+/// content's controls built and laid out in a popup 320 pixels wide that scrolls, and the frame after it. The shape: a
 /// code block of as many lines, runs of one color, and characters as a part takes (<see cref="HoverParts"/>), the runs
 /// alternating between two colors. The frame alone takes about 5 ms of it.
 /// </summary>

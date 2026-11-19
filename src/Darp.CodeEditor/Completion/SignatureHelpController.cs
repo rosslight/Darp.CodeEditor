@@ -18,7 +18,7 @@ namespace Darp.CodeEditor.Completion;
 
 /// <summary>
 /// Signature help in one editor's view of a document: the signature of the call around the caret, with the parameter
-/// at the caret in bold and its documentation, in a popup that looks like the app's tooltips, above the caret's line,
+/// at the caret in bold and its documentation, in the editor's own popup, in the colors of its theme, above the caret's line,
 /// so that completion's list below it shows too.
 /// </summary>
 /// <remarks>

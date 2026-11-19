@@ -20,7 +20,7 @@ namespace Darp.CodeEditor.Popups;
 
 /// <summary>
 /// The hover of one editor's view of a document: resting the pointer over text shows the messages of the diagnostics
-/// there, above the server's hover, in a popup that looks like the app's tooltips.
+/// there, above the server's hover, in the editor's own popup, in the colors of its theme.
 /// </summary>
 /// <remarks>
 /// <para>
