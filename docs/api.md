@@ -168,9 +168,10 @@ completion's items and their additional edits, snippets and the search bar's Rep
 on Windows. A paste waits for the clipboard before it changes anything, and goes in as one undo step only if the editor
 still shows the document and is not read-only; as before, tabs become spaces in a document that indents with spaces,
 and a rectangle takes a line of the text on each row. Drops are AvaloniaEdit's, their line breaks corrected in the
-same undo step; a rectangle dropped on a row that ends in a lone `\r` still goes in as AvaloniaEdit puts it, on one
-row, as it counts rows by `\n` once it gave the text that row's line break. Text that the app sets or replaces goes in
-as it is.
+same undo step. Not covered, as both are in AvaloniaEdit's drop handler: a rectangle dropped on a row that ends in a
+lone `\r` goes in on one row, as AvaloniaEdit counts rows by `\n` once it gave the text that row's line break; and a
+document switch during a drop's first text change leaves AvaloniaEdit's undo group open, until AvaloniaEdit's drop
+handler closes the group on the document it opened it on. Text that the app sets or replaces goes in as it is.
 
 **Look.** The text and everything around it are styled differently, as in Monaco and CodeMirror:
 
