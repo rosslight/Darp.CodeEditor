@@ -73,6 +73,8 @@ namespace Darp.CodeEditor;
 /// to its end, and Home on a line of whitespace only to its start. Without a selection, Cut and Copy take the caret's
 /// line, as far as <see cref="Options"/> lets them. Moved lines take the indentation of their new place by the language's
 /// rules when its <see cref="CodeLanguage.AutoIndent"/> is <see cref="AutoIndent.Full"/>.
+/// The occurrences of the symbol at the caret are highlighted, the server's or else the word's, as far as
+/// <see cref="Options"/> lets them.
 /// Hover shows the server's Markdown, with code blocks highlighted by the document's grammar, below the messages of
 /// the diagnostics under the pointer. Completion items show VS Code's codicons, in the color theme's symbol colors. An
 /// item in the snippet syntax goes in as VS Code inserts it: its first stop is selected, and Tab and Shift+Tab move
@@ -94,7 +96,8 @@ namespace Darp.CodeEditor;
 /// with Alt on macOS), the word at the caret (Ctrl+D), the block comment (Shift+Alt+A), and whole lines: moving them
 /// (Alt+Up, Alt+Down), copying them (Shift+Alt+Up, Shift+Alt+Down), deleting them (Ctrl+Shift+K), inserting one
 /// (Ctrl+Enter, Ctrl+Shift+Enter), indenting them (Ctrl+], Ctrl+[) and selecting them (Ctrl+L), the matching bracket
-/// (Ctrl+Shift+\) and expanding and shrinking the selection (Shift+Alt+Right, Shift+Alt+Left), with Cmd for Ctrl on
+/// (Ctrl+Shift+\), expanding and shrinking the selection (Shift+Alt+Right, Shift+Alt+Left) and the occurrences of the
+/// symbol at the caret (F7, Shift+F7), with Cmd for Ctrl on
 /// macOS but for Ctrl+Space, and Linux's own keys where its desktops take these. Open popups have keys of their own,
 /// and editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation and indentation (Tab, Shift+Tab) are
 /// AvaloniaEdit's. Other keys, such as F5 or Ctrl+S, go on to the app's key bindings, and so does a key of the keymap
