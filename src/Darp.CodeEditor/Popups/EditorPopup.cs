@@ -22,7 +22,8 @@ namespace Darp.CodeEditor.Popups;
 /// </para>
 /// <para>
 /// A resizable popup resizes by its edges away from what it is next to: its outer side and the edge away from the
-/// line. <see cref="Resized"/> reports the size dragged to, and its owner shows it again at that size.
+/// line. <see cref="Resized"/> reports the size dragged to and the edges dragged, and its owner shows it again at that
+/// size.
 /// </para>
 /// </remarks>
 internal sealed class EditorPopup
@@ -52,7 +53,7 @@ internal sealed class EditorPopup
     {
         _editor = editor;
         Frame = new PopupFrame { Name = name, Child = content };
-        Frame.Resized += size => Resized?.Invoke(size);
+        Frame.Resized += (size, edges) => Resized?.Invoke(size, edges);
         _root = new ThemeVariantScope { Child = Frame };
         _side = side;
     }
@@ -61,7 +62,7 @@ internal sealed class EditorPopup
     public event EventHandler? LeftView;
 
     /// <summary>Raised while the user drags an edge, with the size the popup would have.</summary>
-    public event Action<Size>? Resized;
+    public event Action<Size, Edges>? Resized;
 
     /// <summary>Whether its edges away from what it is next to resize it, from its next placing on; false by default.</summary>
     public bool IsResizable { get; set; }
