@@ -9,6 +9,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
+using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using Darp.CodeEditor.Completion;
 using Darp.CodeEditor.Popups;
@@ -447,9 +448,9 @@ public sealed class CompletionTests(UiFixture ui)
             PressAlone(window, Key.Enter);
             long committing = GC.GetAllocatedBytesForCurrentThread() - before;
 
-            document.Text.ShouldBe("word");
-            // A copy of the line takes two bytes a character, 4 MB; what matching reads, a few hundred bytes. The
-            // commit's edit of the line takes the editor about a third of a byte a character.
+            // The edit would go over the line's hidden tail, which the editor does not edit: nothing goes in.
+            document.Text.Length.ShouldBe(length + 1);
+            // A copy of the line takes two bytes a character, 4 MB; what matching reads, a few hundred bytes.
             moving.ShouldBeLessThan(1_000_000);
             committing.ShouldBeLessThan(length);
         });
@@ -462,15 +463,17 @@ public sealed class CompletionTests(UiFixture ui)
             await using var server = new LanguageServer(fake.Options);
             string label = new string('a', 200) + "bc";
             using CodeDocument answer = await SetCompletionAsync(server, fake, Items(label));
-            // A word of two million characters: as a hovered word, it reaches back from the caret 1,000 of them.
+            // A word of two million characters: as a hovered word, it reaches back from the caret 1,000 of them. The
+            // caret is in the part of the line that the editor shows and edits.
             const int length = 2_000_000;
+            const int caret = 2_500;
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, new string('a', length));
             using var window = new EditorWindow(new CodeEditor { Document = document });
-            await OpenAsync(window, length);
+            await OpenAsync(window, caret);
 
             window.Press(Key.Enter);
 
-            document.Text.ShouldBe(new string('a', length - 1_000) + label);
+            document.Text.ShouldBe(new string('a', caret - 1_000) + label + new string('a', length - caret));
         });
 
     [Fact]
@@ -678,6 +681,31 @@ public sealed class CompletionTests(UiFixture ui)
             document.Text.ShouldStartWith(newLine);
             document.Text.Length.ShouldBeGreaterThan(newLine.Length);
             document.Text.Trim().ShouldBe("println");
+        });
+
+    [Fact]
+    public Task A_commit_whose_text_would_touch_protected_text_does_not_go_in() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("println"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "printXYZ");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            // The word's end, "XYZ", is protected; the caret, inside the word, can insert.
+            TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+            var protectedText = new TextSegmentReadOnlySectionProvider<TextSegment>(textArea.Document);
+            protectedText.Segments.Add(new TextSegment { StartOffset = 5, Length = 3 });
+            textArea.ReadOnlySectionProvider = protectedText;
+
+            // Replacing goes over the whole word, into the protected text: nothing goes in.
+            await OpenAsync(window, 3);
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("printXYZ");
+            // Inserting goes over the word up to the caret only.
+            await OpenAsync(window, 3);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("printlnntXYZ");
         });
 
     [Fact]

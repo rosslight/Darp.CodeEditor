@@ -68,6 +68,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         CodeDocument document,
         BackgroundTextMateHighlighter highlighter,
         SnippetController snippets,
+        TextChanges changes,
         TaskScheduler background
     )
     {
@@ -76,7 +77,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         _document = document;
         _highlighter = highlighter;
         _view = new CompletionView(editor, textArea.TextView);
-        _commit = new CompletionCommit(textArea, document, snippets);
+        _commit = new CompletionCommit(textArea, document, snippets, changes);
         _resolver = new CompletionResolver(_view, highlighter);
         _filter = new CompletionFilter(
             _view,
@@ -375,11 +376,6 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
     {
         if (_filter.ShownAnswer is not { } answer)
             return;
-        if (!_textArea.ReadOnlySectionProvider.CanInsert(_textArea.Caret.Offset))
-        {
-            Close();
-            return;
-        }
         CompletionItem selected = _filter.Items[index].Item;
         CompletionItem item = _resolver.ResolvedOf(selected) ?? selected;
         ItemResolve? late =
