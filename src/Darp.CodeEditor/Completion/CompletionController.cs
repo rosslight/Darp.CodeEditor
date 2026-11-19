@@ -32,21 +32,32 @@ namespace Darp.CodeEditor.Completion;
 /// is left, as VS Code does when the caret moves back: the list's positions no longer fit the text.
 /// </para>
 /// <para>
-/// Up, Down, Page Up and Page Down select, and Enter, Tab, a click or one of the selected item's commit characters
-/// commit it: its edit, or its text over the word, and its additional edits, such as an import, in one step that the
-/// user undoes. While the filter of the current text still runs, they commit the item that shows if it matches the
-/// current text, checked on the UI thread for that item alone; otherwise Enter and Tab commit what that filter selects
-/// once it has run, unless the text, by any editor or code, or the caret changes before, and a commit character goes in
-/// as text, as it does when nothing matches: deciding later would hold back or reorder what the user types. A read-only
-/// editor neither completes nor commits. The server resolves the selected item, so that its detail and documentation
-/// show beside the list. An item whose additional edits are still to come when it is committed gets them when they
-/// come, in its step, if that step is still the last one: otherwise they are dropped, as the user moved on.
+/// When nothing matches what is typed, a list opened by typing ends. One asked for by key stays, as VS Code's does:
+/// frozen, as its items showed last, without their matched characters in bold, while the caret is in a word; or, when
+/// none of the answer's items showed, as when nothing matched where it was asked, it says "No suggestions.", and so
+/// does an empty answer, until the next key or caret move.
+/// </para>
+/// <para>
+/// Up, Down, Page Up and Page Down select among the rows that show, while there is more than one item; with one, they
+/// go on to the text, as in VS Code. The keymap's accept commands, a click or one of the selected item's commit
+/// characters commit it: its edit, or its text over the word, and its additional edits, such as an import, in one step
+/// that the user undoes. <see cref="Accept"/> inserts, over the word up to the caret, or replaces, over the rest of the
+/// word too; a click and a commit character insert. While the filter of the current text still runs, they commit the
+/// item that shows if it matches the current text, checked on the UI thread for that item alone; otherwise accepting
+/// commits what that filter selects once it has run, unless the text, by any editor or code, or the caret changes
+/// before, and when nothing matches then, the key that accepted goes on, as Enter to a new line; a commit character goes
+/// in as text, as it does when nothing matches: deciding later would hold back or reorder what the user types. A frozen
+/// list commits by accepting and by a click, over what was typed, but not by commit characters. A read-only editor
+/// neither completes nor commits. The server resolves the selected item, so that its detail and documentation show
+/// beside the list, unless the user hid them (<see cref="ToggleDetails"/>): the selected row shows its detail then. An
+/// item whose additional edits are still to come when it is committed gets them when they come, in its step, if that
+/// step is still the last one: otherwise they are dropped, as the user moved on.
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends completion, for every reason it ends: Escape, the caret leaving the line or moving back
 /// past the word, a selection, the editor becoming read-only, the list scrolling out of view, the editor losing the
 /// keyboard focus, a server that starts or stops serving the document, new colors, the list running out of matches, and
-/// the editor no longer showing the document. Ending it cancels the request still under way with
+/// the editor no longer showing the document. Ending it hides "No suggestions." too, and cancels the request still under way with
 /// <c>$/cancelRequest</c>, and so does a newer request; a late answer is dropped.
 /// </para>
 /// </remarks>
@@ -65,6 +76,12 @@ internal sealed class CompletionController : IEditorFeature
 
     /// <summary>Completion from its first request until it ends; null while there is none.</summary>
     private Session? _session;
+
+    /// <summary>Whether "No suggestions." shows for an empty answer to a request by key, with no completion open.</summary>
+    private bool _showsEmpty;
+
+    /// <summary>Whether the selected item's details show beside the list; the user toggles them.</summary>
+    private bool _showsDetails = true;
 
     /// <summary>Cancels the resolve of the item committed last, whose additional edits are still to come.</summary>
     private CancellationTokenSource? _lateEdits;
@@ -133,8 +150,14 @@ internal sealed class CompletionController : IEditorFeature
         }
     }
 
-    public void AddCommands(CommandTable commands) =>
-        commands.Add(CodeEditorCommands.TriggerSuggest, Trigger, CommandNeeds.TextFocus | CommandNeeds.Writable);
+    public void AddCommands(CommandTable commands)
+    {
+        const CommandNeeds needs = CommandNeeds.TextFocus | CommandNeeds.Writable;
+        commands.Add(CodeEditorCommands.TriggerSuggest, Trigger, needs);
+        commands.Add(CodeEditorCommands.ToggleSuggestionDetails, ToggleDetails);
+        commands.Add(CodeEditorCommands.AcceptSelectedSuggestion, key => Accept(replace: false, key), needs);
+        commands.Add(CodeEditorCommands.AcceptAlternativeSelectedSuggestion, key => Accept(replace: true, key), needs);
+    }
 
     /// <summary>Asks for completion, where the server completes and the user can type.</summary>
     private bool Trigger()
@@ -144,21 +167,54 @@ internal sealed class CompletionController : IEditorFeature
             || !_textArea.ReadOnlySectionProvider.CanInsert(_textArea.Caret.Offset)
         )
             return false;
-        Ask(new CompletionTrigger(CompletionTriggerKind.Invoked));
+        Ask(new CompletionTrigger(CompletionTriggerKind.Invoked), byKey: true);
         return true;
     }
 
     /// <summary>
-    /// The keys of completion's list while it shows, from the editor's key handler while the text area has the
-    /// keyboard: those that select and commit.
+    /// Commits the selected item while the list shows: inserting, its text goes over the word up to the caret, and the
+    /// rest of the word stays after it; replacing, it goes over the rest of the word too, or as far as the item's
+    /// replace range reaches.
+    /// </summary>
+    /// <param name="replace">Whether to replace.</param>
+    /// <param name="key">The key that accepts, which goes on if the filter it waits for finds nothing.</param>
+    /// <returns>Whether the list showed: otherwise the key goes on, as to a new line or an indent.</returns>
+    private bool Accept(bool replace, PressedKey? key)
+    {
+        if (_session is not { IsShowing: true } session)
+            return false;
+        if (CanCommit(session, session.Selected))
+            Commit(session, session.Selected, replace);
+        else
+            CommitWhenFiltered(session, replace, key);
+        return true;
+    }
+
+    /// <summary>Shows or hides the selected item's details while the list shows.</summary>
+    /// <returns>Whether the list showed.</returns>
+    private bool ToggleDetails()
+    {
+        if (_session is not { IsShowing: true } session)
+            return false;
+        _showsDetails = !_showsDetails;
+        session.DetailsOf = null;
+        ResolveSelected(session);
+        return true;
+    }
+
+    /// <summary>
+    /// The keys of completion's list while it shows more than one item, from the editor's key handler while the text area
+    /// has the keyboard: those that select. Any key ends "No suggestions." of an empty answer.
     /// </summary>
     /// <returns>Whether the key was completion's.</returns>
     public bool OnKeyDown(KeyEventArgs e)
     {
-        if (_session is not { IsShowing: true } session || e.KeyModifiers != KeyModifiers.None)
+        if (_session is null)
+            HideEmpty();
+        if (_session is not { IsShowing: true, Items.Count: > 1 } session || e.KeyModifiers != KeyModifiers.None)
             return false;
         int count = session.Items.Count;
-        int page = CompletionView.VisibleItems - 1;
+        int page = Math.Max(1, _view.List.VisibleRows - 1);
         switch (e.Key)
         {
             case Key.Down:
@@ -173,12 +229,6 @@ internal sealed class CompletionController : IEditorFeature
             case Key.PageUp:
                 Select(session, Math.Max(0, session.Selected - page));
                 return true;
-            case Key.Enter or Key.Tab:
-                if (CanCommit(session, session.Selected))
-                    Commit(session, session.Selected);
-                else
-                    CommitWhenFiltered(session);
-                return true;
             default:
                 return false;
         }
@@ -186,12 +236,12 @@ internal sealed class CompletionController : IEditorFeature
 
     /// <summary>
     /// Text the user types, before it goes in: one of the selected item's commit characters commits it, and then goes in
-    /// after it, if the item is known to match the current text.
+    /// after it, if the item is known to match the current text. A frozen list commits nothing so, as in VS Code.
     /// </summary>
     public void OnTextInput(TextInputEventArgs e)
     {
         if (
-            _session is { IsShowing: true } session
+            _session is { IsShowing: true, FrozenAt: null } session
             && e.Text is [char typed]
             && session.Items[session.Selected].Item.CommitCharacters.Contains(typed)
             && CanCommit(session, session.Selected)
@@ -204,11 +254,12 @@ internal sealed class CompletionController : IEditorFeature
     /// <summary>
     /// Ends completion: closes the list, cancels the server's requests still under way, and drops what they would show.
     /// </summary>
-    /// <returns>Whether the list showed.</returns>
+    /// <returns>Whether the list or a message showed.</returns>
     public bool Close()
     {
+        bool showedEmpty = HideEmpty();
         if (_session is not { } session)
-            return false;
+            return showedEmpty;
         _session = null;
         session.Pending?.Cancellation.Cancel();
         session.Filtering?.Cancellation.Cancel();
@@ -217,7 +268,7 @@ internal sealed class CompletionController : IEditorFeature
         session.Details?.Cancel();
         _view.Hide();
         _view.ShowDetails(null);
-        return session.IsShowing;
+        return session.IsShowing || session.ShowsNoMatch;
     }
 
     public void Dispose()
@@ -235,15 +286,17 @@ internal sealed class CompletionController : IEditorFeature
 
     /// <summary>
     /// Asks the server for completion at the caret. While completion is open, the request replaces the one under way,
-    /// and the items that show stay until it answers.
+    /// and the items that show stay until it answers. Asked <paramref name="byKey"/>, it says when nothing matches.
     /// </summary>
-    private void Ask(CompletionTrigger trigger)
+    private void Ask(CompletionTrigger trigger, bool byKey = false)
     {
         int caret = _textArea.Caret.Offset;
         if (!_textArea.ReadOnlySectionProvider.CanInsert(caret))
             return;
         var request = new Request(_document.CurrentSnapshot, WordBefore(caret));
+        HideEmpty();
         Session session = _session ??= new Session();
+        session.ByKey |= byKey;
         session.Pending?.Cancellation.Cancel();
         session.Pending = request;
         AskAsync(session, request, trigger);
@@ -263,10 +316,23 @@ internal sealed class CompletionController : IEditorFeature
             if (_session != session || session.Pending != request)
                 return;
             session.Pending = null;
-            if (list is null || (list.Items.Count == 0 && !list.IsIncomplete))
+            if (list is null || list.Items.Count == 0)
             {
-                Close();
-                return;
+                // Asked by key, the user learns that there is nothing; once a list showed, it says that nothing
+                // matches. Otherwise a complete list without items ends completion.
+                if (session is { ByKey: true, Answer: null })
+                {
+                    Close();
+                    _showsEmpty = true;
+                    ShowMessage(request.Word.Start);
+                    return;
+                }
+                if (!session.ByKey && list is not { IsIncomplete: true })
+                {
+                    Close();
+                    return;
+                }
+                list ??= new CompletionList([], isIncomplete: false, resolve: null);
             }
             session.Answer = new Answer(list, request);
             Update();
@@ -281,7 +347,11 @@ internal sealed class CompletionController : IEditorFeature
     private void Update()
     {
         if (_session is not { } session)
+        {
+            // "No suggestions." of an empty answer shows until the caret moves.
+            HideEmpty();
             return;
+        }
         int caret = _textArea.Caret.Offset;
         Request latest = session.Latest;
         if (
@@ -409,29 +479,53 @@ internal sealed class CompletionController : IEditorFeature
         );
     }
 
-    /// <summary>Shows a filter's items, or ends completion when none match a complete list.</summary>
+    /// <summary>
+    /// Shows a filter's items. When none match, a list opened by typing ends, unless more may come; one asked for by key
+    /// freezes, or says that nothing matches.
+    /// </summary>
     private void Show(Session session, FilterKey key, Filtered filtered)
     {
         if (filtered.Items.Count == 0)
         {
+            PressedKey? waiting = session.CommitAt == key ? session.CommitKey : null;
             // An incomplete list may have more for what is typed, and a newer request, as for a trigger character typed
             // while the list showed, brings a list of its own: its answer shows, or ends completion when it has nothing.
-            if (key.Answer.List.IsIncomplete || session.Pending is not null)
+            if (!session.ByKey)
+            {
+                if (key.Answer.List.IsIncomplete || session.Pending is not null)
+                    Hide(session);
+                else
+                    Close();
+            }
+            else if (session.Shown?.Answer != key.Answer)
+            {
                 Hide(session);
-            else
+                session.ShowsNoMatch = true;
+                ShowMessage(key.Answer.Request.Word.Start);
+            }
+            else if (WordBefore(key.Caret).Length == 0)
                 Close();
+            else
+            {
+                Freeze(session, key);
+                return;
+            }
+            if (waiting is { } pressed)
+                Replay(pressed);
             return;
         }
+        session.FrozenAt = null;
+        session.ShowsNoMatch = false;
         session.Items = filtered.Items;
         session.Selected = filtered.Selected;
         session.Shown = key;
         if (session.CommitAt == key)
         {
-            Commit(session, session.Selected);
+            Commit(session, session.Selected, session.CommitReplaces);
             return;
         }
         int wordStart = key.Answer.Request.Word.Start;
-        _view.Show(session.Items, session.Selected, Look(), _icons, Math.Ceiling(_textView.DefaultLineHeight) + 4);
+        _view.Show(session.Items, session.Selected, Look(), _icons, _textView.DefaultLineHeight);
         _view.Open(_textView, () => TextViewBoxes.CharacterAt(_textView, Math.Min(wordStart, _buffer.TextLength)));
         // Placing it may have ended completion, as its line is out of view.
         if (_session == session)
@@ -439,14 +533,69 @@ internal sealed class CompletionController : IEditorFeature
     }
 
     /// <summary>
+    /// The list keeps showing its items for the text that <paramref name="key"/> is for, which none of them matches, as
+    /// VS Code's frozen list: without their matched characters in bold. An accept that waited for this filter commits
+    /// the selected item over what was typed now.
+    /// </summary>
+    private void Freeze(Session session, FilterKey key)
+    {
+        bool wasFrozen = session.FrozenAt is not null;
+        session.FrozenAt = key;
+        if (session.CommitAt == key)
+            Commit(session, session.Selected, session.CommitReplaces);
+        else if (!wasFrozen)
+        {
+            ShownItem[] items = [.. session.Items.Select(shown => shown with { Highlights = [] })];
+            _view.Show(items, session.Selected, Look(), _icons, _textView.DefaultLineHeight);
+        }
+    }
+
+    /// <summary>Shows "No suggestions." at the word that starts at <paramref name="wordStart"/>.</summary>
+    private void ShowMessage(int wordStart)
+    {
+        _view.ShowMessage("No suggestions.", Look(), _textView.DefaultLineHeight);
+        _view.Open(_textView, () => TextViewBoxes.CharacterAt(_textView, Math.Min(wordStart, _buffer.TextLength)));
+    }
+
+    /// <summary>Hides "No suggestions." of an empty answer, if it shows.</summary>
+    /// <returns>Whether it showed.</returns>
+    private bool HideEmpty()
+    {
+        if (!_showsEmpty)
+            return false;
+        _showsEmpty = false;
+        _view.Hide();
+        return true;
+    }
+
+    /// <summary>
+    /// Presses <paramref name="key"/> again, now that the list no longer takes it: an accept that waited for a filter
+    /// that found nothing goes on as it would have without the list, as Enter to a new line. In VS Code, which filters
+    /// as the user types, the list is gone before such a key.
+    /// </summary>
+    private void Replay(PressedKey key) =>
+        _textArea.RaiseEvent(
+            new KeyEventArgs
+            {
+                RoutedEvent = InputElement.KeyDownEvent,
+                Source = _textArea,
+                Key = key.Key,
+                KeyModifiers = key.Modifiers,
+                KeySymbol = key.Symbol,
+            }
+        );
+
+    /// <summary>
     /// Whether the item at <paramref name="index"/> may be committed now: the list shows the filter of the current
-    /// text, or the item matches it, which is checked for that item alone.
+    /// text, frozen or not, or the item matches it, which is checked for that item alone.
     /// </summary>
     private bool CanCommit(Session session, int index)
     {
         if (session.Shown is not { } shown)
             return false;
         if (session.Answer is { } answer && shown == CurrentKey(answer))
+            return true;
+        if (session.FrozenAt is { } frozen && frozen == CurrentKey(frozen.Answer))
             return true;
         CompletionItem item = session.Items[index].Item;
         int caret = _textArea.Caret.Offset;
@@ -462,14 +611,17 @@ internal sealed class CompletionController : IEditorFeature
     }
 
     /// <summary>
-    /// Commits what the filter of the current text selects once it has run, for Enter or Tab, unless the text or the
-    /// caret changes before; starts that filter if none runs.
+    /// Commits what the filter of the current text selects once it has run, for <see cref="Accept"/>, unless the text or
+    /// the caret changes before; starts that filter if none runs. When that filter finds nothing to commit,
+    /// <paramref name="key"/>, the key that accepted, does what it does without a list.
     /// </summary>
-    private void CommitWhenFiltered(Session session)
+    private void CommitWhenFiltered(Session session, bool replace, PressedKey? key)
     {
         if (session.Answer is not { } answer)
             return;
         session.CommitAt = CurrentKey(answer);
+        session.CommitReplaces = replace;
+        session.CommitKey = key;
         Filter(session, answer, _textArea.Caret.Offset);
     }
 
@@ -496,6 +648,8 @@ internal sealed class CompletionController : IEditorFeature
     /// <summary>Hides the list while completion waits for an answer; a filter of the old one under way stops.</summary>
     private void Hide(Session session)
     {
+        session.ShowsNoMatch = false;
+        session.FrozenAt = null;
         session.Filtering?.Cancellation.Cancel();
         session.Filtering = null;
         session.CommitAt = null;
@@ -560,7 +714,7 @@ internal sealed class CompletionController : IEditorFeature
         session.DetailsOf = item;
         session.Details?.Cancel();
         session.Details = null;
-        if (item.Detail is null && item.Documentation is null)
+        if (!_showsDetails || (item.Detail is null && item.Documentation is null))
         {
             _view.ShowDetails(null);
             return;
@@ -612,13 +766,14 @@ internal sealed class CompletionController : IEditorFeature
     }
 
     /// <summary>
-    /// Commits an item: its edit, from where it starts to as far past the caret as it reached past where completion was
-    /// asked, and its additional edits, in one step that the user undoes; the caret goes after the item's text. A
+    /// Commits an item: its edit, from where it starts to where its insert range, or its replace range for
+    /// <paramref name="replace"/>, ends as the edits since completion was asked moved it, or to the caret where that is
+    /// further, and its additional edits, in one step that the user undoes; the caret goes after the item's text. A
     /// snippet goes in as its text, with its variables' values for the text before the commit, and its first stop is
     /// selected. Additional edits that overlap others are left out, and stay plain text. Additional edits that a resolve
     /// still under way brings come later.
     /// </summary>
-    private void Commit(Session session, int index)
+    private void Commit(Session session, int index, bool replace = false)
     {
         if (session.Shown?.Answer is not { } answer)
             return;
@@ -631,9 +786,13 @@ internal sealed class CompletionController : IEditorFeature
         CompletionItem item = session.ResolvedOf(selected) ?? selected;
         Request request = answer.Request;
         int caret = _textArea.Caret.Offset;
+        // Text typed at the caret goes in the range, and once the rest of the word is deleted, also by another editor or
+        // code, the text after it stays out.
+        TextRange since = TextRange.FromBounds(request.Offset, replace ? item.ReplaceRange.End : item.Edit.Range.End);
+        int end = _document.MapToCurrent(request.Snapshot, since).End;
         var range = TextRange.FromBounds(
             item.Edit.Range.Start,
-            Math.Min(_buffer.GetLineByOffset(caret).EndOffset, caret + (item.Edit.Range.End - request.Offset))
+            Math.Min(_buffer.GetLineByOffset(caret).EndOffset, Math.Max(caret, end))
         );
         RenderedSnippet? snippet = item.Snippet is { } source ? _snippets.Render(source, range.Start) : null;
         var main = new CompletionEdit(range, snippet?.Text ?? InLineBreaks(item.Edit.NewText));
@@ -878,6 +1037,21 @@ internal sealed class CompletionController : IEditorFeature
 
         /// <summary>The request under way; null for none.</summary>
         public Request? Pending { get; set; }
+
+        /// <summary>Whether the user asked by key: when nothing matches, the list freezes or says so.</summary>
+        public bool ByKey { get; set; }
+
+        /// <summary>What the frozen list's text is: its items show as they were, none of them matching; null otherwise.</summary>
+        public FilterKey? FrozenAt { get; set; }
+
+        /// <summary>Whether the list says "No suggestions." instead of showing items.</summary>
+        public bool ShowsNoMatch { get; set; }
+
+        /// <summary>Whether the commit that waits for a filter replaces.</summary>
+        public bool CommitReplaces { get; set; }
+
+        /// <summary>The key that accepted for the commit that waits for a filter; null when none did.</summary>
+        public PressedKey? CommitKey { get; set; }
 
         /// <summary>The request asked last: the one under way, or the one whose answer shows.</summary>
         public Request Latest =>
