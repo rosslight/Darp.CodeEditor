@@ -339,6 +339,17 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     ) => Task.FromResult<SignatureHelpInfo?>(null);
 
     /// <summary>
+    /// The server's selection ranges at <paramref name="offset"/> of <paramref name="snapshot"/>, the current text, for
+    /// an editor: the innermost range and its parents, from the inside out. Null when the server offers none, and when
+    /// <paramref name="cancellationToken"/> cancelled them. Never waits on the calling thread.
+    /// </summary>
+    internal virtual Task<IReadOnlyList<TextRange>?> SelectionRangesAsync(
+        TextSnapshot snapshot,
+        int offset,
+        CancellationToken cancellationToken
+    ) => Task.FromResult<IReadOnlyList<TextRange>?>(null);
+
+    /// <summary>
     /// What the server that serves the document offers its editors now, such as the characters that ask for
     /// completion; null without a running server.
     /// </summary>
