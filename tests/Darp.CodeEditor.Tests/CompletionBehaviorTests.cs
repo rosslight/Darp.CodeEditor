@@ -328,6 +328,41 @@ public sealed class CompletionBehaviorTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Additional_edits_that_come_late_leave_alone_a_document_that_a_handler_of_the_commit_showed() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, ItemWithImport());
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "x\nCon");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            using CodeDocument other = CodeDocument.Create(CodeLanguage.PlainText, "x\nunrelated text");
+            bool switched = false;
+            document.TextChanged += (_, _) =>
+            {
+                if (!switched)
+                    window.Editor.Document = other;
+                switched = true;
+            };
+
+            using (await CommandAsync(server, fake, "hold-resolve", "holding resolve"))
+            {
+                await OpenAsync(window, 5);
+                await fake.WaitForAsync("resolve ");
+                window.Press(Key.Enter);
+                window.Editor.Document.ShouldBe(other);
+            }
+            using (await CommandAsync(server, fake, "release-resolve", "released resolve"))
+            {
+                // A list shows after the late answer: the client has read it by then.
+                window.Editor.Document = document;
+                await OpenAsync(window, document.Text.Length);
+                other.Text.ShouldBe("x\nunrelated text");
+                document.Text.ShouldBe("x\nConsole");
+            }
+        });
+
+    [Fact]
     public Task An_items_command_runs_after_the_commit_when_it_is_one_of_the_editors() =>
         _ui.Run(async () =>
         {
