@@ -40,11 +40,11 @@ if (compilation.Succeeded)
 
 | Package | Public types |
 |---|---|
-| `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorColorTheme`, `CodeEditorViewState`, `CodeEditorStyles`, `TextSnapshot`, `TextRange`, `TextPosition`, `TextSelection`, `Indentation`, `Diagnostic`, `DiagnosticRelatedInformation`, `DiagnosticSeverity`; the keymap: `CodeEditorKeymap`, `CodeEditorKeyBinding`, `CodeEditorCommands`; VS Code's settings: `AutoIndent`, `QuickSuggestions`, `SmartSelectOptions`, `OccurrencesHighlight`, `SelectedTextMatchMode`, `SeedSearchString`, `AutoFindInSelection`, `SearchHistory`, `DiagnosticOrder` |
+| `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorColorTheme`, `CodeEditorViewState`, `CodeEditorStyles`, `TextSnapshot`, `TextRange`, `TextPosition`, `TextSelection`, `Indentation`, `Diagnostic`, `DiagnosticRelatedInformation`, `DiagnosticSeverity`; the keymap: `CodeEditorKeymap`, `CodeEditorKeyBinding`, `CodeEditorCommands`; VS Code's settings: `AutoIndent`, `QuickSuggestions`, `SmartSelectOptions`, `OccurrencesHighlight`, `SelectedTextMatchMode`, `SeedSearchString`, `AutoFindInSelection`, `SearchHistory`, `MatchBrackets`, `AutoClosing`, `AutoClosingEdit`, `AutoSurround`, `DiagnosticOrder` |
 | `Darp.CodeEditor.CSharpScript` | `CSharpScriptServer`, `CSharpScriptServerOptions`, `CSharpScriptEnvironment<TGlobals>`, `CSharpScriptDocument<TGlobals>`, `CSharpScriptCompilation<TGlobals>`, `CSharpScriptAssembly<TGlobals>`, `CSharpCodeLanguage` (adds `CodeLanguage.CSharp`) |
 | `Darp.CodeEditor.CSharpScript.Runner` | `CSharpScriptSession` (starts sessions, and scripts in them), `CSharpScriptSession<TSessionSide, TSessionObject>`, `CSharpScriptSessionOptions`, `CSharpScriptRun`, `CSharpScriptException`, `CSharpScriptSessionExit`, `CSharpScriptSessionExitReason`, and the contracts that runner-side script APIs implement: `IScriptSessionObject<TSelf, TAppSide>`, `IScriptGlobalsFactory<TGlobals, TInput>`, `IScriptGlobalsFactory<TGlobals>` |
 
-47 public types in all. Three more things are public without being types of ours:
+51 public types in all. Three more things are public without being types of ours:
 
 - **The project file.**
   - `CSharpScriptReference="true"` on a package or project reference: scripts may use its assemblies. Publishing copies their DLLs next to the app, NativeAOT apps included, with their XML docs, which hover and completion show.
@@ -132,14 +132,19 @@ rather than its view belong to the document, as in Monaco and CodeMirror.
 | `SeedSearchStringFromSelection` | `editor.find.seedSearchStringFromSelection` | `Always`: the search takes the selection within one line, or else the word at the caret |
 | `AutoFindInSelection` | `editor.find.autoFindInSelection` | `Never`: Find in Selection turns on only by its toggle and Alt+L |
 | `FindHistory`, `ReplaceHistory` | `editor.find.history`, `editor.find.replaceHistory` | one `SearchHistory` for the query and one for the replacement, which all editors share; null gives the editor's bar its own, which nothing keeps, as VS Code's `never` |
+| `FindLoop`, `FindCursorMoveOnType`, `FindCloseOnResult` | `editor.find.loop`, `editor.find.cursorMoveOnType`, `editor.find.closeOnResult` | true, true, false: Enter and F3 go round after the last match, the caret goes to the first match as the query changes, and the bar stays open after Enter |
+| `MatchBrackets` | `editor.matchBrackets` | `Always`: the brackets around the caret are boxed, also when it is not next to one; `Near` only next to one |
+| `AutoClosingBrackets`, `AutoClosingQuotes` | `editor.autoClosingBrackets`, `editor.autoClosingQuotes` | `LanguageDefined`: a typed opening bracket or quote gets its closing one before the characters of the language's `autoCloseBefore` and whitespace |
+| `AutoClosingOvertype`, `AutoClosingDelete` | `editor.autoClosingOvertype`, `editor.autoClosingDelete` | `Auto`: typing a closing character steps over one, and Backspace between a pair deletes both, only where the editor closed it |
+| `AutoSurround` | `editor.autoSurround` | `LanguageDefined`: an opening bracket or quote typed over a selection surrounds it with the language's pairs |
+| `CommentsInsertSpace` | `editor.comments.insertSpace` | true: toggling a comment adds a space after the comment's start |
 | `DiagnosticOrder` | `problems.sortOrder` | `Severity`: F8 goes to errors first, then warnings and information, each by position |
 
 A `SearchHistory` keeps up to 100 entries, the latest last; the bar adds the query and the replacement once the user
 paused for half a second. An app that keeps them across runs saves `Entries`, for example on `Changed`, and creates
 the history with them the next time.
 
-**Built in, with no settings,** as VS Code does it: current-line highlight; bracket matching without a selection;
-auto-closing brackets and quotes; whitespace shown inside the selection; scrolling past the last line; the document's
+**Built in, with no settings,** as VS Code does it: current-line highlight; whitespace shown inside the selection; scrolling past the last line; the document's
 indentation guessed from its text; VS Code's words for double-click, for moving by words and for deleting them; undo in
 VS Code's steps; Home on a blank line to its start; Up on the first line to the document's start and Down on the last to
 its end; Left and Right that collapse a selection to its start or end (#118); commands on lines, block comments, the
@@ -1049,7 +1054,7 @@ with Skia:
 - a document's `Indentation` is guessed from its first 10,000 lines as VS Code guesses it, with VS Code's default where
   the text gives no answer, and reaches every editor that shows it at once: Tab, Shift+Tab, new lines and the width
   of tabs;
-- the bracket next to the caret and its match are boxed in the theme's colors, without a selection, ignoring brackets in
+- the brackets around the caret, as `MatchBrackets` says, are boxed in the theme's colors, without a selection, ignoring brackets in
   strings and comments by the lines' tokens, also when an edit changes them out of view. The search for a match reads at
   most 100,000 characters, in blocks without a string per line: about 0.5 ms with six brackets on every line, the most a
   caret move or keystroke spends on it (BenchmarkDotNet). In 5,000 lines, from text that an undo just changed and with
