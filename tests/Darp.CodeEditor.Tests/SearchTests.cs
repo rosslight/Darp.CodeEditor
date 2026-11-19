@@ -269,6 +269,42 @@ public sealed class SearchTests(UiFixture ui)
         });
 
     /// <summary>
+    /// As in VS Code, every match stays within reach beyond those highlighted: F3 and Shift+F3 search the text for
+    /// the next and the previous one, and go round only past the last match of all.
+    /// </summary>
+    [Fact]
+    public Task F3_and_Shift_F3_reach_the_matches_beyond_those_highlighted() =>
+        _ui.Run(async () =>
+        {
+            const int Count = TextSearch.MaxMatches + 2;
+            using EditorWindow window = MarkedText.Show(
+                "|" + string.Concat(Enumerable.Repeat("a\n", Count)),
+                CodeLanguage.PlainText
+            );
+            // The query is the word at the caret.
+            window.Editor.OpenSearch();
+            SearchBar bar = BarOf(window);
+            await Wait.UntilAsync(() => bar.Count == "? of 19,999+");
+
+            // The last match highlighted, then the two after it, and round to the first.
+            window.Editor.Selection = Match(TextSearch.MaxMatches - 1);
+            foreach (int next in (int[])[TextSearch.MaxMatches, Count - 1, 0])
+            {
+                window.Press(Key.F3);
+                await Wait.UntilAsync(() => window.Editor.Selection == Match(next));
+            }
+            // Back round to the last match of all, and on back to the last one highlighted.
+            foreach (int previous in (int[])[Count - 1, TextSearch.MaxMatches, TextSearch.MaxMatches - 1])
+            {
+                window.Press(Key.F3, KeyModifiers.Shift);
+                await Wait.UntilAsync(() => window.Editor.Selection == Match(previous));
+            }
+            bar.Count.ShouldBe("19999 of 19,999+");
+
+            static TextSelection Match(int index) => new(index * 2, index * 2 + 1);
+        });
+
+    /// <summary>
     /// As in VS Code, a regular expression that can match a line break searches across lines, and the match shows over
     /// both lines.
     /// </summary>

@@ -77,6 +77,12 @@ internal sealed class SearchBar : UserControl
     private CancellationTokenSource? _searching;
 
     /// <summary>
+    /// The search for the match to select beyond those that the result keeps, under way in the background; null for
+    /// none.
+    /// </summary>
+    private CancellationTokenSource? _seeking;
+
+    /// <summary>
     /// Where to move once the search under way has its result. A newer search that takes over keeps it: it replaces
     /// the search, not what the search was for.
     /// </summary>
@@ -640,51 +646,176 @@ internal sealed class SearchBar : UserControl
     {
         _searching?.Cancel();
         _searching = null;
+        _seeking?.Cancel();
+        _seeking = null;
     }
 
-    /// <summary>Selects a match as <paramref name="move"/> says, and scrolls it into view.</summary>
+    /// <summary>
+    /// Selects a match as <paramref name="move"/> says, and scrolls it into view. Where the match may be beyond those
+    /// that the result keeps, it searches the text for it in the background, as VS Code does beyond the matches it
+    /// highlights: every match stays within reach.
+    /// </summary>
     private void Perform(Move move, SearchResult result)
     {
-        if (_shown is not { } shown || result.Matches.Count == 0)
+        if (_shown is not { } shown || result.Matches is not { Count: > 0, LastSegment: { } last } matches)
             return;
-        TextSegmentCollection<SearchMatch> matches = result.Matches;
         TextRange selection = shown.Editor.Selection.Range;
-        SearchMatch? match = move switch
+        bool capped = result.Outcome == SearchOutcome.TooManyMatches;
+        switch (move)
         {
-            Move.First => matches.FindFirstSegmentWithStartAfter(_from) ?? matches.FirstSegment,
-            Move.Next => After(selection),
-            Move.Previous => matches.FindFirstSegmentWithStartAfter(selection.Start) is { } after
-                ? matches.GetPreviousSegment(after) ?? matches.LastSegment
-                : matches.LastSegment,
-            _ => null,
-        };
-        if (match is not null)
-            Select(match);
+            case Move.First when matches.FindFirstSegmentWithStartAfter(_from) is { } first:
+                Select(first);
+                break;
+            case Move.First when capped:
+                int from = _from;
+                Seek(
+                    result,
+                    selection,
+                    wrapToFirst: true,
+                    (snapshot, scopes, cancellation) =>
+                        TextSearch.FindNext(snapshot, result.Query, scopes, from, skipEmpty: false, cancellation)
+                );
+                break;
+            case Move.Next when After(selection) is { } next:
+                Select(next);
+                break;
+            case Move.Next when capped:
+                Seek(
+                    result,
+                    selection,
+                    wrapToFirst: true,
+                    (snapshot, scopes, cancellation) =>
+                        TextSearch.FindNext(
+                            snapshot,
+                            result.Query,
+                            scopes,
+                            selection.End,
+                            skipEmpty: selection.Length == 0,
+                            cancellation
+                        )
+                );
+                break;
+            case Move.Previous
+                when matches.FindFirstSegmentWithStartAfter(selection.Start) is { } after
+                    && matches.GetPreviousSegment(after) is { } previous:
+                Select(previous);
+                break;
+            case Move.Previous when capped:
+                // The last match before the selection, which may be beyond the last kept, or the last of all.
+                int before = matches.FindFirstSegmentWithStartAfter(selection.Start) is null
+                    ? selection.Start
+                    : int.MaxValue;
+                int known = last.StartOffset;
+                Seek(
+                    result,
+                    selection,
+                    wrapToFirst: false,
+                    (snapshot, scopes, cancellation) =>
+                        TextSearch.FindPrevious(snapshot, result.Query, scopes, known, before, cancellation)
+                );
+                break;
+            case Move.First or Move.Next:
+                Select(matches.FirstSegment ?? last);
+                break;
+            case Move.Previous:
+                Select(last);
+                break;
+        }
 
-        SearchMatch After(TextRange range)
+        // The first match after the range; an empty match at the caret is the current one.
+        SearchMatch? After(TextRange range)
         {
             SearchMatch? next = matches.FindFirstSegmentWithStartAfter(range.End);
-            // An empty match at the caret is the current one.
             if (next is not null && next.StartOffset == range.Start && next.Length == range.Length)
                 next = matches.GetNextSegment(next);
-            return next ?? matches.FirstSegment;
+            return next;
         }
     }
 
-    private void Select(SearchMatch match)
+    /// <summary>
+    /// Searches the text in the background for the match that <paramref name="find"/> finds, and selects it unless
+    /// the result, the text or the selection changed meanwhile; without one, the result's first match if
+    /// <paramref name="wrapToFirst"/>.
+    /// </summary>
+    private void Seek(
+        SearchResult result,
+        TextRange selection,
+        bool wrapToFirst,
+        Func<TextSnapshot, IReadOnlyList<TextRange>?, CancellationToken, (TextRange? Match, SearchOutcome Outcome)> find
+    )
+    {
+        if (_shown is not { } shown || shown.Document.CurrentSnapshot is not { } snapshot)
+            return;
+        if (snapshot.Version != result.Version)
+            return;
+        List<TextRange>? scopes = Scopes();
+        _seeking?.Cancel();
+        var seeking = new CancellationTokenSource();
+        _seeking = seeking;
+        Task<(TextRange? Match, SearchOutcome Outcome)> seek = Task.Run(
+            () => find(snapshot, scopes, seeking.Token),
+            seeking.Token
+        );
+        seek.ContinueWith(
+            _ => Dispatcher.Post(() => OnSought(seek, seeking, result, selection, wrapToFirst)),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default
+        );
+    }
+
+    private void OnSought(
+        Task<(TextRange? Match, SearchOutcome Outcome)> seek,
+        CancellationTokenSource seeking,
+        SearchResult result,
+        TextRange selection,
+        bool wrapToFirst
+    )
+    {
+        if (seek.Exception is { } exception)
+        {
+            Logger
+                .TryGet(LogEventLevel.Error, AssetFiles.LogArea)
+                ?.Log(this, "The search for the next match failed: {Exception}", exception);
+        }
+        if (_seeking != seeking)
+            return;
+        _seeking = null;
+        if (
+            !seek.IsCompletedSuccessfully
+            || _result != result
+            || _shown is not { } shown
+            || shown.Document.CurrentSnapshot.Version != result.Version
+            || shown.Editor.Selection.Range != selection
+        )
+            return;
+        (TextRange? match, SearchOutcome outcome) = seek.Result;
+        if (match is { } found)
+            Select(found);
+        else if (outcome == SearchOutcome.OutOfTime)
+            ShowMessage(outcome, null);
+        else if (wrapToFirst && result.Matches.FirstSegment is { } first)
+            Select(first);
+    }
+
+    private void Select(SearchMatch match) => Select(new TextRange(match.StartOffset, match.Length));
+
+    private void Select(TextRange match)
     {
         if (_shown is not { } shown)
             return;
         _selecting = true;
         try
         {
-            shown.Editor.Selection = new TextSelection(match.StartOffset, match.EndOffset);
+            shown.Editor.Selection = new TextSelection(match.Start, match.End);
         }
         finally
         {
             _selecting = false;
         }
-        shown.Editor.ScrollTo(new TextRange(match.StartOffset, match.Length));
+        shown.Editor.ScrollTo(match);
+        // Its number, now that the selection is all set.
+        UpdateStatus();
     }
 
     /// <summary>
