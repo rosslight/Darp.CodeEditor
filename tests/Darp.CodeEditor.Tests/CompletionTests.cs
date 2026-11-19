@@ -740,6 +740,39 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Replacing_goes_over_the_rest_of_the_word_as_the_edits_since_left_it_and_no_further() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("println"));
+            const string text = "print + tail";
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            // The rest of the word is deleted after the caret, as by another editor: nothing after it is replaced.
+            await OpenAsync(window, 3);
+            document.Replace(new TextRange(3, 2), "");
+            window.Editor.Selection.Caret.ShouldBe(3);
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("println + tail");
+
+            // The caret moved on into the word: the replacement still ends with it.
+            document.Text = text;
+            await OpenAsync(window, 3);
+            window.Press(Key.Right);
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("println + tail");
+
+            // Typed into the rest of the word, the text goes with it.
+            document.Text = text;
+            await OpenAsync(window, 3);
+            document.Replace(new TextRange(4, 0), "xx");
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("println + tail");
+        });
+
+    [Fact]
     public Task Tab_bound_to_accepting_the_selected_item_inserts_as_in_VS_Code() =>
         _ui.Run(async () =>
         {

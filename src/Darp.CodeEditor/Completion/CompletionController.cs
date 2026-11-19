@@ -888,9 +888,10 @@ internal sealed class CompletionController : IDisposable
     }
 
     /// <summary>
-    /// Commits an item: its edit, from where it starts to as far past the caret as its insert range, or its replace
-    /// range for <paramref name="replace"/>, reached past where completion was asked, and its additional edits, in one
-    /// step that the user undoes; the caret goes after the item's text. A snippet goes in as its text, with its
+    /// Commits an item: its edit, from where it starts to where its insert range, or its replace range for
+    /// <paramref name="replace"/>, ends after the edits since completion was asked, or to the caret where that is
+    /// further, and its additional edits, in one step that the user undoes; the caret goes after the item's text. A
+    /// snippet goes in as its text, with its
     /// variables' values for the text before the commit, and its first stop is selected. Additional edits that overlap
     /// others are left out, and stay plain text. Additional edits that a resolve still under way brings come later.
     /// </summary>
@@ -907,10 +908,17 @@ internal sealed class CompletionController : IDisposable
         CompletionItem item = session.ResolvedOf(selected) ?? selected;
         Request request = answer.Request;
         int caret = _textArea.Caret.Offset;
-        int end = replace ? item.ReplaceRange.End : item.Edit.Range.End;
+        // Where the range ends now, as the edits since moved it: text typed at the caret goes in it, and once the rest of
+        // the word is deleted, also by another editor or code, the text after it stays out.
+        int end = _document
+            .MapToCurrent(
+                request.Snapshot,
+                TextRange.FromBounds(request.Offset, replace ? item.ReplaceRange.End : item.Edit.Range.End)
+            )
+            .End;
         var range = TextRange.FromBounds(
             item.Edit.Range.Start,
-            Math.Min(_buffer.GetLineByOffset(caret).EndOffset, caret + (end - request.Offset))
+            Math.Min(_buffer.GetLineByOffset(caret).EndOffset, Math.Max(caret, end))
         );
         RenderedSnippet? snippet = item.Snippet is { } source
             ? _snippets.Render(source, range.Start, answer.Clipboard)
