@@ -22,6 +22,12 @@ public sealed record CodeEditorOptions
 
     /// <summary>What the search bar starts with as it opens: <c>editor.find.*</c>.</summary>
     public FindOptions Find { get; init; } = new();
+
+    /// <summary>
+    /// Which brackets are boxed at a caret without a selection: <c>editor.matchBrackets</c>.
+    /// <see cref="MatchBrackets.Near"/> is the cheaper, quieter mode.
+    /// </summary>
+    public MatchBrackets MatchBrackets { get; init; } = MatchBrackets.Always;
 }
 
 /// <summary>
@@ -100,4 +106,17 @@ public enum AutoFindInSelection
 
     /// <summary>When the selection spans several lines.</summary>
     Multiline,
+}
+
+/// <summary>Which brackets are boxed at the caret, as VS Code's <c>editor.matchBrackets</c> values.</summary>
+public enum MatchBrackets
+{
+    /// <summary>The bracket next to the caret and its match, or else the innermost pair around the caret.</summary>
+    Always,
+
+    /// <summary>Only the bracket next to the caret and its match.</summary>
+    Near,
+
+    /// <summary>None.</summary>
+    Never,
 }

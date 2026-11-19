@@ -53,7 +53,7 @@ internal sealed class EditorView : IDisposable
     private readonly AutoClosingPairs _pairs;
     private readonly Typing _typing;
     private readonly Clipboard _clipboard;
-    private readonly BracketHighlighter _brackets;
+    private readonly BracketMatching _brackets;
     private readonly WhitespaceLayer _whitespace;
     private readonly SquiggleLayer _squiggles;
     private readonly HoverController _hover;
@@ -75,7 +75,7 @@ internal sealed class EditorView : IDisposable
         _pairs = new AutoClosingPairs(area, document, Highlighter, _changes, context.Options);
         _typing = new Typing(area, document, Highlighter, _changes, _pairs);
         _clipboard = new Clipboard(area, document);
-        _brackets = new BracketHighlighter(area, document, Highlighter);
+        _brackets = new BracketMatching(area, document, Highlighter, _changes, context.Options);
         _whitespace = new WhitespaceLayer(area);
         _squiggles = new SquiggleLayer(area, document);
         SemanticHighlighter = new SemanticHighlighter(area.TextView, document, context.Editor.Dispatcher);
@@ -181,8 +181,11 @@ internal sealed class EditorView : IDisposable
             _typing.OnTextInput(e);
     }
 
-    public void OnOptionsChanged(CodeEditorOptions old, CodeEditorOptions now) =>
+    public void OnOptionsChanged(CodeEditorOptions old, CodeEditorOptions now)
+    {
         _pairs.OnOptionsChanged(old.AutoClosing, now.AutoClosing);
+        _brackets.OnOptionsChanged(old.MatchBrackets, now.MatchBrackets);
+    }
 
     /// <summary>Runs a command, as its key does, where it applies.</summary>
     /// <returns>Whether it applied.</returns>

@@ -167,4 +167,16 @@ public static class CodeEditorCommands
     /// Redoes the last step undone, as <see cref="CodeDocument.Redo"/> does, and brings the caret into view.
     /// </summary>
     public const string Redo = "redo";
+
+    /// <summary>
+    /// Moves the caret to the bracket that matches the one at the start of the selection; elsewhere to the closing
+    /// bracket of the pair around it, or else to the next bracket. Brackets in strings and comments don't count.
+    /// </summary>
+    public const string JumpToBracket = "editor.action.jumpToBracket";
+
+    /// <summary>
+    /// Selects the pair at the start of the selection, or else the pair around it, or else the next pair, with the text
+    /// between its brackets; backward from a closing bracket. Without a pair it does not apply. No key by default.
+    /// </summary>
+    public const string SelectToBracket = "editor.action.selectToBracket";
 }
