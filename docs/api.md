@@ -196,7 +196,7 @@ keys to them (design.md #113). A `CodeEditorKeymap` is immutable and can be shar
   read-only editor, and each only with something to act on, such as undo with a step to undo, comments in a language
   that has them, or completion with a server that completes. Otherwise the key goes on to the binding before it, and
   then as an ordinary key. A key that starts several sequences waits for the second stroke of any of them.
-- **Not in the keymap:** the keys inside open popups (Up, Down, Page Up, Page Down, Enter and Tab in completion's list,
+- **Not in the keymap:** the keys inside open popups (Up, Down, Page Up and Page Down in completion's list,
   Up and Down while signature help shows several signatures), Tab and Shift+Tab between a snippet's stops, except
   Shift+Tab on the first stop, Escape, which closes completion, signature help, a snippet's stops, the hover and the
   search bar one at a time, the search bar's own keys (Enter and Shift+Enter for the next and the previous match,
@@ -208,7 +208,11 @@ The default keys on Windows and Linux; macOS in brackets where it differs beyond
 
 | Keys | Commands | What they do |
 |---|---|---|
-| Ctrl+Space, Ctrl+I (macOS also Alt+Escape) | `editor.action.triggerSuggest` | completion |
+| Ctrl+Space, Ctrl+I | `editor.action.triggerSuggest`; `toggleSuggestionDetails` while the list shows | completion; while its list shows, its details |
+| Alt+Escape (macOS only) | `editor.action.triggerSuggest` | completion only; it does not toggle the details |
+| Ctrl+N, Ctrl+P (macOS only) | `selectNextSuggestion`, `selectPrevSuggestion`, while the list shows more than one item | the next and the previous item, as Down and Up; otherwise the caret's keys |
+| Enter | `acceptSelectedSuggestion`, while the list shows | inserts the item and keeps the rest of the word (design.md #114) |
+| Tab, Shift+Enter | `acceptAlternativeSelectedSuggestion`, while the list shows | replaces the rest of the word with the item; VS Code's Tab inserts |
 | Ctrl+Shift+Space | `editor.action.triggerParameterHints` | signature help |
 | Ctrl+F, Ctrl+H (macOS: Cmd+Alt+F for replace) | `actions.find`, `editor.action.startFindReplaceAction` | the search and the replace bar, not in a read-only editor |
 | F3, Shift+F3 (macOS also Cmd+G, Shift+Cmd+G) | `editor.action.nextMatchFindAction`, `editor.action.previousMatchFindAction` | the next and the previous match |
@@ -259,15 +263,19 @@ handler closes the group on the document it opened it on. Text that the app sets
   background, selection, caret, line numbers, current line, search and bracket matches, the lines that Find in
   Selection searches, the occurrences of the symbol at the caret, squiggles, a snippet's stops. Token colors are made
   for their theme's background, so they come together.
-- **Everything around the text** takes the app's look: completion, hover and signature help look like the app's
-  flyouts and tooltips, and the search bar, the scroll bars and the context menu are the app's controls. They match
-  Avalonia's Fluent theme, FluentAvalonia or any other theme, font, padding and corners included. Where the app's
-  theme has no `MenuFlyoutPresenter` theme, as FluentAvalonia's, the menu takes one from `CodeEditorStyles`, built
-  from the Fluent themes' menu resources. Code inside popups keeps the editor's
-  colors, background and font.
+- **The popups,** completion, hover and signature help, belong to the editor, as in VS Code (design.md #112): its
+  own frame, a background, a 1-pixel border, small corners and a shadow, with their colors from `ColorTheme` by VS
+  Code's keys, such as `editorSuggestWidget.background`, `editorHoverWidget.border` and `editorWidget.foreground`, and
+  VS Code's defaults where a theme sets none. So a theme made for VS Code looks as it does there, and the popups look
+  the same under Avalonia's Fluent and Simple themes, light or dark: an app's styles for flyouts, tooltips and lists
+  don't reach them. Prose shows in the app's font; code in the editor's font and colors.
+- **The search bar, the scroll bars and the context menu** are the app's controls, in the app's look, Fluent,
+  FluentAvalonia or any other theme. Where the app's theme has no `MenuFlyoutPresenter` theme, as FluentAvalonia's,
+  the menu takes one from `CodeEditorStyles`, built from the Fluent themes' menu resources.
 - **Popups stay inside the window**, as in the prototype (#19).
 
-Apps add one line to `App.axaml`, after their theme. It brings AvaloniaEdit's styles along:
+Apps add one line to `App.axaml`, after their theme, Fluent, Simple or any other. It brings AvaloniaEdit's control
+templates along, and none of its theme styles, which would need the resources of one app theme:
 
 ```xml
 <Application.Styles>
@@ -293,21 +301,28 @@ theme variants and Dark+ for dark ones. An app with its own colors overrides it 
 So editors follow the app's theme variant through Avalonia's resource lookup, inside a `ThemeVariantScope` too. A
 custom variant gets the colors of the variant it inherits from, unless the app adds an entry for it: FluentAvalonia's
 high contrast inherits from Light, so it shows Light+ without one. To make one editor dark in a light app, wrap it in a
-`ThemeVariantScope`: its popups turn dark too. Setting `ColorTheme` on the editor changes only the text area.
+`ThemeVariantScope`: its popups turn dark too. Setting `ColorTheme` on the editor changes its text area and its
+popups; the search bar and the scroll bars follow the theme variant.
 
 - **Errors:** squiggles in the theme's error, warning and info colors. Hovering shows the messages above the
   server's information.
 - **Hover:** Markdown, with emphasis, inline code, lists and links. Code blocks are highlighted with the editor's
-  grammar and colors.
-- **Completion:** a list of up to 12 items at once below the word, or above it when only that side has room, in the
-  app's flyout, with rows in the app's look of list items as dense as the editor's lines and labels in the editor's
-  font; the selected item's details in a flyout of their own, beside the list where the window has room for them
-  right of the word, narrower if need be, and below the list otherwise, so that the list stays at the word.
+  grammar and colors, on the hover's background; inline code is on `textCodeBlock.background`, and links are in
+  `textLink.foreground`.
+- **Completion:** a list as VS Code's suggest widget, below the word, or above it when only that side has room: 12
+  rows at once, each exactly the editor's line height, with the icon and the label in the editor's font lined up with
+  the word; the selected row shows its detail while the details are closed. A window with room for fewer rows shows
+  fewer, and selecting and paging stay among them. The selected item's details show in a popup of their own beside
+  the list, right of it, else left of it, else narrower, else below or above it, or on the line's other side when the
+  list leaves no room there, so that the list stays at the word. Ctrl+Space shows or hides them, and dragging the edges
+  away from the word resizes the list's width or rows and the details' width or height, as far as the edges dragged
+  change them, while the editor shows the document. Asked for by key, the list says "No suggestions." when the
+  server has none, in the UI culture's language, English or German, as the search bar's.
 - **Completion icons:** VS Code's codicons, drawn as vector shapes in the theme's `symbolIcon.*` colors, as in VS
   Code, and in VS Code's colors where the theme sets none. Their designs are licensed CC BY 4.0: the package lists
   them in its third-party notices, and apps that show notices of their own include that entry.
-- **Signature help:** in the app's tooltip above the caret's line, so that completion's list shows below it; the
-  signature as code, in the editor's font, colors and background.
+- **Signature help:** in the editor's popup in the hover's colors, above the caret's line, so that completion's list
+  shows below it; the signature as code, in the editor's font and colors.
 
 **Before v1, additive:** marks beside the scroll bar for errors, warnings and search matches, as Monaco's overview
 ruler shows them. Scripts of 5,000 lines need them to find errors outside the view. They add to the API without
@@ -442,13 +457,14 @@ How the client talks to a server, where the protocol leaves a choice:
   waits for its answer. Ending it cancels the request still under way with `$/cancelRequest`, stops reading the
   answer between lines and paragraphs and highlighting its code between lines, and drops what they would show. The
   popup is placed again when the window or the text it is next to moves, as when the window narrows.
-- **The hover's look:** text in the app's tooltip; code blocks in the editor's font, colors and background,
-  highlighted with the document's grammar; inline code as a small span in the editor's font family, foreground and
-  background, at the size of the text around it, so that it fits its line.
+- **The hover's look:** the editor's popup in the theme's hover colors (section 2), up to 500 pixels wide; code blocks
+  in the editor's font and colors on its background, highlighted with the document's grammar; inline code as a small
+  span in the editor's font family on `textCodeBlock.background`, at the size of the text around it, so that it fits
+  its line.
 - **The hover's size:** a hover shows at most 2,000 characters on 50 lines, in 250 runs of one style or color, the
   diagnostics' messages first, the most severe first and at most 50 of them; "…" marks where it was cut. The UI thread builds and lays out every run one by one, at
   about 10 µs a run and 1 µs a character, so the largest hover takes it about 2 ms, with the frame about 7 ms
-  (BenchmarkDotNet, i7-13700), and a tooltip that scrolls gains nothing from more. Every piece of a hover's text, a
+  (BenchmarkDotNet, i7-13700), and a popup that scrolls gains nothing from more. Every piece of a hover's text, a
   diagnostic's message and code as much as the server's answer, is cut in one place before anything else reads it,
   so the work, in the background too, is bounded by these limits and not by what the server sends. Lines are counted
   at `\r\n`, `\n` and `\r`, and also where the layout of text breaks them, such as the Unicode line separator; a cut
@@ -529,26 +545,45 @@ How the client talks to a server, where the protocol leaves a choice:
     dropped. An answer that comes after typing is filtered with what was typed since. A trigger character asks again
     also while a list shows, as in VS Code, and the new answer's list replaces it; meanwhile the list shows what still
     matches, and nothing left to show ends completion only once the new answer has nothing either.
-  - **Committing:** Enter, Tab, a click, or one of the item's commit characters, or the server's `allCommitCharacters`
-    for an item that names none, which then goes in, and asks again if it is a trigger character, as in VS Code. While
-    the filter of the current text still runs, they commit the item that shows if it matches the current text, which
-    is checked for that item alone, on the first 128 characters of its typed text; otherwise Enter and Tab commit what
-    that filter selects once it has run, unless the text, by any editor of the document or by code, or the caret
-    changes before, and a commit character goes in as text, as when nothing matches: deciding later would hold back or
-    reorder what the user types. A read-only editor neither completes nor commits. The item's `textEdit` applies: a
-    text edit, or the insert range of an insert and replace edit, as VS Code's default insert mode; its range grows by
-    what was typed since it was asked, as in VS Code. Its `additionalTextEdits`, such as an import, apply with it, as
-    one step that the user undoes; ones that overlap another edit are left out.
+  - **Selecting:** Up, Down, Page Up and Page Down select among the rows that show, while the list has more than one
+    item; with one, they go on to the text, as in VS Code. On macOS, Ctrl+N and Ctrl+P select as Down and Up. As VS
+    Code's lists page, Page Down first selects the last row that shows, and then goes a page of rows on; Page Up the
+    same upwards.
+  - **Committing:** the keymap's accept commands, Enter, Tab and Shift+Enter by default, a click, or one of the item's
+    commit characters, or the server's `allCommitCharacters` for an item that names none, which then goes in, and asks
+    again if it is a trigger character, as in VS Code. While the filter of the current text still runs, they commit the
+    item that shows if it matches the current text, which is checked for that item alone, on the first 128 characters
+    of its typed text; otherwise accepting commits what that filter selects once it has run, unless the text, by any
+    editor of the document or by code, or the caret changes before, and when nothing matches then, the key that
+    accepted goes on, as Enter to a new line; a commit character goes in as text, as when nothing matches: deciding
+    later would hold back or reorder what the user types. A read-only editor neither completes nor commits. Inserting
+    (`acceptSelectedSuggestion`, a click, a commit character), the item's text goes over its `textEdit`'s range, or the
+    insert range of an insert and replace edit, or the word up to the caret for an item without an edit, and the rest
+    of the word stays after it; replacing (`acceptAlternativeSelectedSuggestion`), it goes over the replace range, or
+    the whole word (design.md #114). The range grows by what was typed since it was asked, as in VS Code, and shrinks by
+    what was deleted after the caret. An item whose text would go over read-only text, such as protected text or a
+    long line's hidden tail, does not go in. Its `additionalTextEdits`, such as an import, apply with it, as one step
+    that the user undoes; ones that overlap another edit are left out. As VS Code applies them together, when one
+    would go over read-only text, none does, and the item's own text still goes in.
   - **Resolving:** the selected item is resolved when it is selected, and the resolve of an item that is no longer
     selected is cancelled. Its detail, as code highlighted with the document's grammar, and its documentation show
-    beside the list, as much of both as a hover shows: they share one budget of the hover's size, cut before anything
+    beside the list, unless Ctrl+Space hid them, as much of both as a hover shows: they share one budget of the hover's size, cut before anything
     reads them. A row shows at most 256 characters of a label, with "…". Additional edits that the resolve brings only
     after the item was committed join the commit's undo step while it is the last one; once the user moved on, they
     are dropped. Items resolve only in the process that sent them, while the document stays open there as it was.
+  - **Nothing to show:** asked for by key, an empty answer says "No suggestions." until the next key, caret move or
+    Escape. A list asked for by key that typing filters empty stays, frozen as VS Code's: its items as they showed
+    last, without the matched characters in bold, while the caret is in a word; accepting or a click commits the
+    selected one over what was typed, and commit characters go in as text. When none of its items showed, it says "No
+    suggestions." and stays while typing finds nothing. A list opened by typing freezes so too while a newer list may
+    still come, as for a list marked incomplete. A key that accepted while the filter of the current text ran goes on,
+    when it finds nothing, to the binding before accepting's, to the second key of a sequence it starts, or as an
+    ordinary key, also when a newer list for the same text has nothing. What ends the wait for a sequence's second
+    stroke, such as another keymap, drops where it would go on to.
   - **Ending:** Escape, the caret leaving the line or moving back past the word, a selection, the editor becoming
     read-only, the list's line scrolling out of view, the editor losing the keyboard focus, a server that starts or
-    stops serving the document, new colors, nothing left that matches a complete list while no newer request is under
-    way, and the editor no longer showing the document.
+    stops serving the document, new colors, nothing left that matches a complete list opened by typing while no newer
+    request is under way, and the editor no longer showing the document.
 - **Snippets** in completion items, with `insertTextFormat` 2 in a `textEdit` or an `insertText`, go in as VS Code
   inserts them. The client parses them with VS Code's grammar where it reads the answer, off the UI thread: stops `$1`
   and `${1}`, placeholders `${1:text}`, also nested, choices `${1|a,b|}`, the final stop `$0`, variables `$NAME` and
@@ -894,7 +929,7 @@ StreamJsonRpc's error hook, and maps a refused call to `ConnectionLostException`
 - **AvaloniaEdit.** `CodeEditor` wraps AvaloniaEdit's editor instead of deriving from it, so AvaloniaEdit's API is not
   part of ours. `CodeEditorStyles` includes its styles.
 - **Popups and policies.** Completion, hover and signature help have no settings yet, and their parts have no style
-  classes for apps to restyle. They take the app's look instead. Restart and hang timeouts keep the prototype's
+  classes for apps to restyle. They take the editor's color theme instead (design.md #112). Restart and hang timeouts keep the prototype's
   defaults: a restart waits 0.5 s, doubling up to 30 s; a request unanswered for 30 s counts as a hang, a new server
   gets twice that before its first answer, and each hang doubles the limit; no start or request waits longer than 2
   minutes. 30 s of running forgives
@@ -1120,10 +1155,10 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   a frame with 10,000 errors over all of the text allocates under 1 MB more than one with one such error, where
   reading them for each line in view took 8.4 MB;
 - hover: the diagnostics' messages, with their codes, above the server's Markdown, whose code block is highlighted with
-  the document's grammar in the editor's font, colors and background; in the app's tooltip, in the window's overlay
-  layer, inside a window narrower than the tooltip. An editor in a dark `ThemeVariantScope` of a light window shows a
-  dark popup, in its pixels. Inline code shows in the editor's font, foreground and background, and code without a color
-  of its own in the editor's foreground, in the pixels. The popup stays while the pointer is over its word or over the
+  the document's grammar in the editor's font and colors on the popup's background; in the editor's popup, in the
+  window's overlay layer, inside a window narrower than the popup. An editor in a dark `ThemeVariantScope` of a light
+  window shows Dark+'s hover background, in its pixels. Inline code shows in the editor's font on Dark+'s
+  `textCodeBlock.background`, and code without a color of its own in the editor's foreground, in the pixels. The popup stays while the pointer is over its word or over the
   popup, and closes when the
   pointer leaves both, rests on another word under the same diagnostic, and on typing, Escape, scrolling and focus
   loss. Resting on another word cancels the request still under way with `$/cancelRequest`, and so does Escape
@@ -1190,8 +1225,11 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   newest result. The matched characters show in bold, and a preselected item is selected among the best;
 - Enter, Tab, a click, the item's own commit character and the server's commit the selected item, each as one step
   that the user undoes, and a commit character then goes in; an item's own commit characters replace the server's.
-  A text edit replaces its range, also grown by what was typed since; an insert and replace edit inserts; `insertText`
-  replaces the word. While a filter runs, Enter commits the item that shows at once when it still matches, otherwise
+  A text edit replaces its range, also grown by what was typed since; Enter inserts an insert and replace edit over
+  its insert range and an item without an edit over the word up to the caret, keeping the rest of the word, and Tab
+  and Shift+Enter replace its replace range or the whole word, as far as edits since left it; Tab bound to
+  `acceptSelectedSuggestion` inserts. Without a list, Enter makes a new line and Tab indents, also when a filter that
+  Enter waited for finds nothing; While a filter runs, Enter commits the item that shows at once when it still matches, otherwise
   what the filter selects; a commit character then goes in as text. An edit before that filter has run drops the
   commit, also one that leaves the caret where it was, by code or by another editor of the document. With an item
   whose edit starts at the start of a line of two million characters, moving the caret on in the line's collapsed
@@ -1207,8 +1245,14 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   5,000 characters shows 256 with "…"; a signature of 5,000 characters shows 2,000 with "…", and its documentation
   not;
 - the selected item's resolved detail, as code in the editor's foreground, and its Markdown show beside the list, or
-  below it in a window of 420 pixels, narrower beside it in one of 640, wrapped inside the window, with the list at
-  the word it completes;
+  below it in a window of 420 pixels, narrower beside it in one of 720, wrapped inside the window, with the list's
+  labels lined up with the word it completes; Ctrl+Space hides them, and the selected row shows the detail instead;
+- a window with room for fewer rows than the items shows fewer, and Up and Page Up keep the selection among them;
+  with one item, Up, Down, Page Up and Page Down move the caret; dragging the list's corner gives it more width and
+  whole rows, which it keeps when asked for again;
+- asked for by key, an empty answer says "No suggestions." until the next key, and a list with no match for the word
+  says it while typing on; a list that typing filters empty stays frozen while the caret is in a word, and commits
+  over what was typed by Enter and a click, but not by a commit character;
   additional edits apply with the item in one step, and ones that come after the commit join its step, and are
   dropped once the user typed on;
 - an incomplete list is asked for again on each character typed, for incomplete completions; a newer request and
@@ -1219,7 +1263,7 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
 - documents that no editor shows ask for nothing, and an editor that loses the keyboard focus cancels its request,
   while the editor that has it gets its list;
 - icons in Light+ and Dark+ in VS Code's light and dark colors, and in a theme's own `symbolIcon.methodForeground`, in
-  the rendered pixels; the list in a dark `ThemeVariantScope` of a light window as a dark flyout, in its pixels,
+  the rendered pixels; the list in a dark `ThemeVariantScope` of a light window in Dark+'s suggest colors, in its pixels,
   inside a small window, and above its line when there is no room below;
 - completion ends on Escape, on leaving the word, on focus loss, when its line scrolls out of view, and when the
   server stops serving the document;
@@ -1270,10 +1314,10 @@ Still open:
   editor no longer needs and asks for nothing that no editor shows, but cannot put one document's request ahead of
   another's in the server. The C# server will take the shown document first;
 - the list itself moves left of the word it completes when the word is within the list's width of the window's right
-  edge; VS Code would show its details on the list's other side too;
+  edge;
 - opening a link through the app's launcher: headless windows have none, so tests check only which links open;
-- code blocks are highlighted with the document's grammar whatever language their fence names, and the hover is as
-  wide as the app's tooltips allow, 320 pixels in Fluent; both wait for a use case that needs more;
+- code blocks are highlighted with the document's grammar whatever language their fence names, and the hover is at
+  most 500 pixels wide, VS Code's narrowest limit; both wait for a use case that needs more;
 
 - runner-side dependencies on arm64 and macOS, the real bridge and contracts loaded once for both sides, two versions
   of one package in the app and the runner side, and the build step that deploys them;

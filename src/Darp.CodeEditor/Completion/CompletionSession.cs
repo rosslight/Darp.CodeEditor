@@ -1,0 +1,60 @@
+using Darp.CodeEditor.Commands;
+using Darp.CodeEditor.LanguageClient;
+
+namespace Darp.CodeEditor.Completion;
+
+/// <summary>A request for completion.</summary>
+/// <param name="snapshot">The text it was asked for.</param>
+/// <param name="word">The word before the caret then: what items without an edit replace.</param>
+internal sealed class CompletionRequest(TextSnapshot snapshot, TextRange word)
+{
+    public TextSnapshot Snapshot { get; } = snapshot;
+
+    public TextRange Word { get; } = word;
+
+    /// <summary>
+    /// Where the caret was, in <see cref="Snapshot"/>; also in the current text, while the request is not stale.
+    /// </summary>
+    public int Offset => Word.End;
+
+    /// <summary>Cancels the request.</summary>
+    public CancellationTokenSource Cancellation { get; } = new();
+
+    /// <summary>
+    /// Whether the text before <see cref="Offset"/> changed since: then the answer's positions no longer fit the
+    /// current text.
+    /// </summary>
+    public bool IsStale { get; set; }
+}
+
+/// <summary>A server's list, with the request it answered.</summary>
+internal sealed record CompletionAnswer(CompletionList List, CompletionRequest Request);
+
+/// <summary>An item's resolve, under way or done.</summary>
+internal sealed record ItemResolve(Task<CompletionItem?> Task, CancellationTokenSource Cancellation);
+
+/// <summary>What a list is filtered for: an answer, at a version of the text and a caret.</summary>
+internal readonly record struct FilterKey(CompletionAnswer Answer, int Version, int Caret);
+
+/// <summary>A filter under way.</summary>
+internal sealed record FilterRun(FilterKey Key, CancellationTokenSource Cancellation);
+
+/// <summary>A filter's result: the items that match, in order, and the one to select.</summary>
+internal sealed record RankedItems(List<ShownItem> Items, int Selected);
+
+/// <summary>Completion from its first request until it ends.</summary>
+internal sealed class CompletionSession
+{
+    /// <summary>The answer whose items show; null until the first one.</summary>
+    public CompletionAnswer? Answer { get; set; }
+
+    /// <summary>The request under way; null for none.</summary>
+    public CompletionRequest? Pending { get; set; }
+
+    /// <summary>Whether the user asked by key: when nothing matches, the list freezes or says so.</summary>
+    public bool ByKey { get; set; }
+
+    /// <summary>The request asked last: the one under way, or the one whose answer shows.</summary>
+    public CompletionRequest Latest =>
+        Pending ?? Answer?.Request ?? throw new InvalidOperationException("Completion was not asked for.");
+}

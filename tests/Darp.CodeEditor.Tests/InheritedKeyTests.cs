@@ -13,6 +13,12 @@ public sealed class InheritedKeyTests(UiFixture ui)
     private readonly UiFixture _ui = ui;
 
     [Fact]
+    public void By_default_Ctrl_I_asks_for_completion_and_toggles_its_details_as_Ctrl_Space_does() =>
+        KeyResolution
+            .Of(CodeEditorKeymap.Default, null, KeymapTests.Key(Key.I, EditorWindow.Command))
+            .Commands.ShouldBe([CodeEditorCommands.ToggleSuggestionDetails, CodeEditorCommands.TriggerSuggest]);
+
+    [Fact]
     public void By_default_Ctrl_Z_undoes_and_Ctrl_Shift_Z_redoes_and_outside_macOS_Ctrl_Y_too()
     {
         CodeEditorKeymap keymap = CodeEditorKeymap.Default;

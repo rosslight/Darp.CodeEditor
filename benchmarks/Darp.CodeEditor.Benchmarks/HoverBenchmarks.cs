@@ -2,7 +2,6 @@
 #if !BENCHMARK_BASELINE
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
 using BenchmarkDotNet.Attributes;
@@ -12,7 +11,7 @@ namespace Darp.CodeEditor.Benchmarks;
 
 /// <summary>
 /// The UI thread's cost of showing the largest hover that the editor shows, in its worst shape: its content's controls
-/// built and laid out in a tooltip 320 pixels wide that scrolls, and the frame after it. The shape: a code block of as
+/// built and laid out in a popup's scroller 320 pixels wide, and the frame after it. The shape: a code block of as
 /// many lines, runs of one color, and characters as a hover shows (<see cref="HoverBudget"/>), the runs alternating
 /// between two colors. The frame alone takes about 5 ms of it.
 /// </summary>
@@ -22,15 +21,15 @@ namespace Darp.CodeEditor.Benchmarks;
 public class HoverBenchmarks
 {
     private Window? _window;
-    private ScrollViewer? _content;
+    private PopupScroller? _content;
     private IReadOnlyList<HoverBlock> _blocks = [];
-    private CodeLook? _look;
+    private PopupLook? _look;
 
     [GlobalSetup]
     public void SetUp()
     {
         HeadlessEditor.SetUpApp();
-        _content = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        _content = new PopupScroller();
         _window = new Window
         {
             Width = 800,
@@ -62,19 +61,21 @@ public class HoverBenchmarks
         // The largest that a hover shows: nothing of it is cut.
         if (new HoverBudget().Fit(_blocks) is not [HoverCode { Runs.Count: var count }] || count != runs.Count)
             throw new InvalidOperationException("The hover is larger than a hover shows.");
-        _look = new CodeLook(
+        _look = new PopupLook(
             new FontFamily("DejaVu Sans Mono"),
             14,
-            new ImmutableSolidColorBrush(Colors.White),
-            new ImmutableSolidColorBrush(Colors.Black)
+            PopupColors.Default,
+            FontFamily.Default,
+            14,
+            PopupColors.Default.HoverForeground
         );
     }
 
     [Benchmark]
     public void ShowTheLargestHover()
     {
-        ScrollViewer content = _content ?? throw new InvalidOperationException("Not set up.");
-        content.Content = HoverView.Create(_blocks, _look ?? throw new InvalidOperationException("Not set up."));
+        PopupScroller content = _content ?? throw new InvalidOperationException("Not set up.");
+        content.Child = HoverView.Create(_blocks, _look ?? throw new InvalidOperationException("Not set up."));
         HeadlessEditor.Render(_window ?? throw new InvalidOperationException("Not set up."));
     }
 

@@ -32,6 +32,7 @@ internal static class Strings
     public static string MatchCount => Get();
     public static string TooManyMatches => Get();
     public static string SearchTimedOut => Get();
+    public static string NoSuggestions => Get();
 
     private static string Get([CallerMemberName] string name = "") =>
         s_resources.GetString(name, CultureInfo.CurrentUICulture) ?? name;

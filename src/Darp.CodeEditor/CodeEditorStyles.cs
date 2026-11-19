@@ -15,9 +15,9 @@ namespace Darp.CodeEditor;
 /// </summary>
 /// <remarks>
 /// <para>
-/// They hold the editor's control theme, AvaloniaEdit's styles, and the <c>CodeEditorColorTheme</c> resource:
-/// <see cref="CodeEditorColorTheme.LightPlus"/> for light theme variants and <see cref="CodeEditorColorTheme.DarkPlus"/> for dark
-/// ones. Override that resource in the app's theme dictionaries to give every editor other colors.
+/// They hold the editor's control theme, AvaloniaEdit's control templates, and the <c>CodeEditorColorTheme</c>
+/// resource: <see cref="CodeEditorColorTheme.LightPlus"/> for light theme variants and
+/// <see cref="CodeEditorColorTheme.DarkPlus"/> for dark ones. Override that resource in the app's theme dictionaries to give every editor other colors.
 /// </para>
 /// <para>
 /// Popups, the search bar and scroll bars take their look from the app's theme, whichever it is: completion, hover and

@@ -27,6 +27,7 @@ namespace Darp.CodeEditor;
 /// <param name="Reveal">
 /// Brings a range into view as <see cref="CodeEditor.ScrollTo"/> does: centered unless visible.
 /// </param>
+/// <param name="Background">Where work off the UI thread runs: the thread pool, or what a test holds.</param>
 internal sealed record EditorContext(
     TemplatedControl Editor,
     TextArea Area,
@@ -35,7 +36,8 @@ internal sealed record EditorContext(
     Func<CodeEditorOptions> Options,
     Func<SearchBar?> SearchBar,
     Func<SearchBar?> CreateSearchBar,
-    Action<TextRange> Reveal
+    Action<TextRange> Reveal,
+    TaskScheduler Background
 );
 
 /// <summary>
@@ -67,6 +69,15 @@ internal sealed class EditorView : IDisposable
     /// <summary>The key that started a sequence while the view waits for its second stroke; null otherwise.</summary>
     private PressedKey? _pending;
 
+    /// <summary>
+    /// What is left of a key's resolution after a command that decided later to do nothing, while that key is raised
+    /// again: the commands after that one, and whether the key starts a sequence; null otherwise.
+    /// </summary>
+    private KeyResolution? _resumed;
+
+    /// <summary>How many waits ended, so that a key that would go on after one, by an earlier keymap, does not.</summary>
+    private int _waitsEnded;
+
     public EditorView(EditorContext context)
     {
         _context = context;
@@ -83,9 +94,17 @@ internal sealed class EditorView : IDisposable
         _squiggles = new SquiggleLayer(area, document);
         SemanticHighlighter = new SemanticHighlighter(area.TextView, document, context.Editor.Dispatcher);
         _hover = new HoverController(context.Editor, area, document, _squiggles, Highlighter);
-        _snippets = new SnippetController(area, document);
+        _snippets = new SnippetController(area, document, _changes);
         // After typing: it sees typed text first, so that a typed "(" has its ")" when completion asks.
-        _completion = new CompletionController(context.Editor, area, document, Highlighter, _snippets);
+        _completion = new CompletionController(
+            context.Editor,
+            area,
+            document,
+            Highlighter,
+            _snippets,
+            _changes,
+            context.Background
+        );
         _signatureHelp = new SignatureHelpController(context.Editor, area, document, Highlighter);
         _search = new FindController(context, _changes);
         _features =
@@ -149,11 +168,14 @@ internal sealed class EditorView : IDisposable
         )
             return false;
         var key = PressedKey.Of(e);
-        KeyResolution resolution = KeyResolution.Of(_context.Keymap(), _pending, key);
+        KeyResolution resolution = _resumed ?? KeyResolution.Of(_context.Keymap(), _pending, key);
         _pending = null;
-        foreach (string command in resolution.Commands)
+        _resumed = null;
+        int waitsEnded = _waitsEnded;
+        for (int i = 0; i < resolution.Commands.Count; i++)
         {
-            if (_commands.TryRun(command))
+            var rest = new KeyResolution([.. resolution.Commands.Skip(i + 1)], resolution.Waits);
+            if (Run(resolution.Commands[i], () => GoOn(key, rest, waitsEnded)))
                 return true;
         }
         if (resolution.Waits)
@@ -171,6 +193,35 @@ internal sealed class EditorView : IDisposable
                 || _typing.OnKeyDown(e)
                 || CaretKeys.OnKeyDown(_context.Area, e)
             );
+    }
+
+    /// <summary>
+    /// Raises <paramref name="key"/> again, as it goes on after a command that decided later to do nothing: by
+    /// <paramref name="rest"/>, to the commands after that one, then to the second stroke of a sequence it starts, or
+    /// as an ordinary key, as it would have gone on at once. A wait that ended since, as by a new keymap, drops it.
+    /// </summary>
+    private void GoOn(PressedKey key, KeyResolution rest, int waitsEnded)
+    {
+        if (waitsEnded != _waitsEnded)
+            return;
+        _resumed = rest;
+        try
+        {
+            _context.Area.RaiseEvent(
+                new KeyEventArgs
+                {
+                    RoutedEvent = InputElement.KeyDownEvent,
+                    Source = _context.Area,
+                    Key = key.Key,
+                    KeyModifiers = key.Modifiers,
+                    KeySymbol = key.Symbol,
+                }
+            );
+        }
+        finally
+        {
+            _resumed = null;
+        }
     }
 
     /// <summary>
@@ -195,7 +246,24 @@ internal sealed class EditorView : IDisposable
 
     /// <summary>Runs a command, as its key does, where it applies.</summary>
     /// <returns>Whether it applied.</returns>
-    public bool RunCommand(string id) => _commands.TryRun(id);
+    public bool RunCommand(string id) => Run(id);
+
+    /// <summary>
+    /// Runs a command where it applies. One that moves the caret or the selection ends completion, as in VS Code, such
+    /// as F7 or a jump to a bracket: its list was for the word at the caret. Completion's own end it as they commit.
+    /// </summary>
+    /// <param name="id">The command.</param>
+    /// <param name="goOn">What the key goes on to after a command that decided later to do nothing.</param>
+    /// <returns>Whether it applied.</returns>
+    private bool Run(string id, Action? goOn = null)
+    {
+        TextSelection before = _changes.Selection;
+        if (!_commands.TryRun(id, goOn))
+            return false;
+        if (_changes.Selection != before)
+            _completion.Close();
+        return true;
+    }
 
     public void Cut() => _clipboard.Cut();
 
@@ -205,9 +273,14 @@ internal sealed class EditorView : IDisposable
     public void Paste() => AvaloniaEdit.ApplicationCommands.Paste.Execute(null, _context.Area);
 
     /// <summary>
-    /// Ends the wait for a sequence's second stroke, as a click, the focus leaving or a new keymap does.
+    /// Ends the wait for a sequence's second stroke, as a click, the focus leaving or a new keymap does, and drops what
+    /// a key that waits for a command, as for completion's filter, would go on to.
     /// </summary>
-    public void EndWait() => _pending = null;
+    public void EndWait()
+    {
+        _pending = null;
+        _waitsEnded++;
+    }
 
     /// <summary>
     /// What Escape closes, one at a time: completion, signature help, a snippet's stops while the text area has the
@@ -252,15 +325,17 @@ internal sealed class EditorView : IDisposable
     /// <summary>The colors of the color theme, once it is loaded.</summary>
     public void SetColors(ColorThemeFile? theme, TextAreaColors? colors, SymbolIconColors? icons)
     {
-        _completion.Colors = colors;
+        PopupColors popups =
+            theme is not null && colors is not null ? PopupColors.From(theme, colors) : PopupColors.Default;
+        _completion.Colors = popups;
         _completion.Icons = icons;
         _snippets.Colors = colors;
-        _signatureHelp.Colors = colors;
+        _signatureHelp.Colors = popups;
         _brackets.Colors = colors;
         _occurrences.Colors = colors;
         _whitespace.Colors = colors;
         _squiggles.Colors = colors;
-        _hover.Colors = colors;
+        _hover.Colors = popups;
         _search.Colors = colors;
         SemanticHighlighter.Theme = theme;
     }
