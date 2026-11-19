@@ -37,7 +37,7 @@ internal sealed class DocumentSearch : IDisposable
     private readonly LatestJob<SearchResult> _search;
 
     /// <summary>The search for a match beyond those that the result keeps.</summary>
-    private readonly LatestJob<(TextRange? Match, SearchOutcome Outcome)> _seek;
+    private readonly LatestJob<(SearchMatch? Match, SearchOutcome Outcome)> _seek;
 
     /// <summary>The search of Replace All beyond the matches that the result keeps.</summary>
     private readonly LatestJob<(IReadOnlyList<TextEdit>? Edits, SearchOutcome Outcome)> _replaceAll;
@@ -231,29 +231,41 @@ internal sealed class DocumentSearch : IDisposable
         if (next is not null)
             Select(next);
         else if (capped)
-            Seek(result, move, (text, scope, c) => TextSearch.FindNext(text, query, scope, start, skipEmpty, c));
+            Seek(result, move, (text, scope, c) => TextSearch.FindNext(text, query, null, scope, start, skipEmpty, c));
         else
             Select(first);
     }
 
     /// <summary>
-    /// Replaces the selected match, and selects the next one; without a selected match, selects the next one.
+    /// Replaces the selected match, as VS Code does: the next match from the selection's start, beyond the matches
+    /// that the result keeps found again in the background, is replaced where it is the selection, and selected
+    /// otherwise. The search that the change starts goes on from the end of the replacement.
     /// </summary>
     public void ReplaceOne()
     {
-        if (CurrentResult() is not { } result)
+        if (CurrentResult() is not { Replacement: { } replacement } result)
             return;
-        if (CurrentMatch(result) is not { } match)
-        {
+        if (CurrentMatch(result) is { } match)
+            Replace(match);
+        else if (result.Outcome != SearchOutcome.TooManyMatches)
             Go(SearchMove.Next);
-            return;
+        else
+        {
+            TextRange selection = _changes.Selection.Range;
+            Seek(
+                result,
+                SearchMove.Next,
+                (text, scope, c) =>
+                    TextSearch.FindNext(text, result.Query, replacement, scope, selection.Start, false, c),
+                found =>
+                {
+                    if (found.StartOffset == selection.Start && found.Length == selection.Length)
+                        Replace(found);
+                    else
+                        Select(found);
+                }
+            );
         }
-        int end = match.StartOffset + match.Replacement.Length;
-        Apply([new TextEdit(match.StartOffset, match.Length, match.Replacement)]);
-        // The next search replaces the result; until then, the rest of it.
-        result.Matches.Remove(match);
-        if ((result.Matches.FindFirstSegmentWithStartAfter(end) ?? result.Matches.FirstSegment) is { } next)
-            Select(next);
     }
 
     /// <summary>
@@ -367,14 +379,16 @@ internal sealed class DocumentSearch : IDisposable
     }
 
     /// <summary>
-    /// Searches the text in the background for the match that <paramref name="find"/> finds, and selects it unless the
-    /// result or the selection changed meanwhile; without one, going forward, the result's first match. The result is
-    /// of the text as it is: a change of the text searches again, and the move waits for that.
+    /// Searches the text in the background for the match that <paramref name="find"/> finds, and selects it, or gives
+    /// it to <paramref name="found"/>, unless the result or the selection changed meanwhile; without one, going
+    /// forward, the result's first match. The result is of the text as it is: a change of the text searches again, and
+    /// the move waits for that.
     /// </summary>
     private void Seek(
         SearchResult result,
         SearchMove move,
-        Func<TextSnapshot, List<TextRange>?, CancellationToken, (TextRange? Match, SearchOutcome Outcome)> find
+        Func<TextSnapshot, List<TextRange>?, CancellationToken, (SearchMatch? Match, SearchOutcome Outcome)> find,
+        Action<SearchMatch>? found = null
     )
     {
         TextSnapshot snapshot = _context.Document.CurrentSnapshot;
@@ -387,7 +401,7 @@ internal sealed class DocumentSearch : IDisposable
                 if (_result != result || _changes.Selection.Range != selection)
                     return;
                 if (sought.Match is { } match)
-                    Select(match);
+                    (found ?? Select)(match);
                 else if (sought.Outcome == SearchOutcome.OutOfTime)
                     _bar.ShowTimedOut();
                 else if (move != SearchMove.Previous && result.Matches.FirstSegment is { } first)
@@ -397,6 +411,16 @@ internal sealed class DocumentSearch : IDisposable
     }
 
     private void Select(SearchMatch match) => Select(new TextRange(match.StartOffset, match.Length));
+
+    /// <summary>Replaces <paramref name="match"/>; the search that the change starts goes on from its end.</summary>
+    private void Replace(SearchMatch match)
+    {
+        int end = match.StartOffset + match.Replacement.Length;
+        if (!Apply([new TextEdit(match.StartOffset, match.Length, match.Replacement)]))
+            return;
+        _from = end;
+        _move = SearchMove.First;
+    }
 
     private void Select(TextRange match)
     {
@@ -410,7 +434,13 @@ internal sealed class DocumentSearch : IDisposable
     }
 
     /// <summary>Makes <paramref name="edits"/> as one change of the text, in an undo step of its own.</summary>
-    private void Apply(IReadOnlyList<TextEdit> edits) => _changes.Run(EditStep.Own, () => _changes.Apply(edits));
+    /// <returns>Whether they went in.</returns>
+    private bool Apply(IReadOnlyList<TextEdit> edits)
+    {
+        bool applied = false;
+        _changes.Run(EditStep.Own, () => applied = _changes.Apply(edits));
+        return applied;
+    }
 
     /// <summary>
     /// The result to replace with: one for the text as it is, the query and the replacement as they are, in an editor

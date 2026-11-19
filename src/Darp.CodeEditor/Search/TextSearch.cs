@@ -159,10 +159,11 @@ internal static class TextSearch
 
     /// <summary>
     /// The first match that starts at <paramref name="from"/> or after it, searched from there, also beyond those that
-    /// a search keeps (<see cref="MaxMatches"/>). It does not go round to the start.
+    /// a search keeps (<see cref="MaxMatches"/>), with what replaces it. It does not go round to the start.
     /// </summary>
     /// <param name="snapshot">The text.</param>
     /// <param name="query">What to search for.</param>
+    /// <param name="replacement">What replaces the match; null when the search is not for replacing.</param>
     /// <param name="scope">The ranges to search in, as for <see cref="Find"/>; null for all of the text.</param>
     /// <param name="from">Where the search starts.</param>
     /// <param name="skipEmpty">
@@ -171,9 +172,10 @@ internal static class TextSearch
     /// <param name="cancellationToken">Stops the search.</param>
     /// <returns>The match, null for none, and whether the search ran out of time.</returns>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
-    public static (TextRange? Match, SearchOutcome Outcome) FindNext(
+    public static (SearchMatch? Match, SearchOutcome Outcome) FindNext(
         TextSnapshot snapshot,
         SearchQuery query,
+        SearchReplacement? replacement,
         IReadOnlyList<TextRange>? scope,
         int from,
         bool skipEmpty,
@@ -186,16 +188,17 @@ internal static class TextSearch
         from = Math.Clamp(from, 0, text.Length);
         if (SearchScan.IsInsideLineBreak(text, from))
             from++;
-        TextRange? next = null;
+        Replacing? replacing = replacement is null ? null : new Replacing(query, replacement, snapshot.LineBreak);
+        SearchMatch? next = null;
         SearchOutcome outcome = new SearchScan(
             text,
             query,
             regex,
-            (start, length, _) =>
+            (start, length, match) =>
             {
                 if (start < from || (skipEmpty && length == 0 && start == from))
                     return true;
-                next = new TextRange(start, length);
+                next = new SearchMatch(replacing?.Build(match) ?? "") { StartOffset = start, Length = length };
                 return false;
             },
             cancellationToken
@@ -210,7 +213,7 @@ internal static class TextSearch
     /// </summary>
     /// <returns>The match, null for none, and whether the search ran out of time.</returns>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
-    public static (TextRange? Match, SearchOutcome Outcome) FindPrevious(
+    public static (SearchMatch? Match, SearchOutcome Outcome) FindPrevious(
         TextSnapshot snapshot,
         SearchQuery query,
         IReadOnlyList<TextRange>? scope,
@@ -236,7 +239,10 @@ internal static class TextSearch
             },
             cancellationToken
         ).Scan(scope, Math.Clamp(from, 0, text.Length));
-        return (last, outcome == SearchOutcome.OutOfTime ? outcome : SearchOutcome.Complete);
+        SearchMatch? previous = last is { } found
+            ? new SearchMatch("") { StartOffset = found.Start, Length = found.Length }
+            : null;
+        return (previous, outcome == SearchOutcome.OutOfTime ? outcome : SearchOutcome.Complete);
     }
 
     /// <summary>Whether the text has surrogates, which a regular expression's atoms must not split.</summary>
