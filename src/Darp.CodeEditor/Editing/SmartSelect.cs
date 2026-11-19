@@ -33,6 +33,12 @@ internal sealed class SmartSelect : IEditorFeature
     /// </summary>
     private int _session;
 
+    /// <summary>
+    /// The commands since the session asked for its ranges, expanding or not, in the order of their keys; null while it
+    /// asks for none. A session asks once: the commands go through the ranges in order once they come.
+    /// </summary>
+    private List<bool>? _waiting;
+
     /// <summary>Whether a range is selected, which changes the selection within the session.</summary>
     private bool _selecting;
 
@@ -74,19 +80,24 @@ internal sealed class SmartSelect : IEditorFeature
     {
         if (_area.Selection is RectangleSelection)
             return false;
-        if (_ranges is null)
-            Start(expand);
-        else
+        if (_ranges is not null)
             Select(expand);
+        else if (_waiting is not null)
+            _waiting.Add(expand);
+        else
+        {
+            _waiting = [expand];
+            Start();
+        }
         return true;
     }
 
     /// <summary>
-    /// Finds the ranges around the selection, from the server where it offers them, and selects the next one: only
-    /// while the session lasts, as the text and the selection stay but for the feature's own changes. An expansion
-    /// meanwhile in the session may have found them first. Failures go to the log.
+    /// Finds the ranges around the selection, from the server where it offers them, and goes through them as the
+    /// commands since say: only while the session lasts, as the text and the selection stay but for the feature's own
+    /// changes. Failures go to the log.
     /// </summary>
-    private async void Start(bool expand)
+    private async void Start()
     {
         CancellationToken cancellation = _disposed.Token;
         int session = _session;
@@ -97,10 +108,12 @@ internal sealed class SmartSelect : IEditorFeature
             IReadOnlyList<TextRange>? server = _document.Features is { SelectionRange: true }
                 ? await _document.SelectionRangesAsync(_document.CurrentSnapshot, selection.Caret, cancellation) ?? []
                 : null;
-            if (cancellation.IsCancellationRequested || session != _session)
+            if (cancellation.IsCancellationRequested || session != _session || _waiting is not { } waiting)
                 return;
-            _ranges ??= (Ranges(selection, server), 0);
-            Select(expand);
+            _waiting = null;
+            _ranges = (Ranges(selection, server), 0);
+            foreach (bool expand in waiting)
+                Select(expand);
         }
         catch (Exception e)
         {
@@ -169,5 +182,6 @@ internal sealed class SmartSelect : IEditorFeature
     {
         _session++;
         _ranges = null;
+        _waiting = null;
     }
 }
