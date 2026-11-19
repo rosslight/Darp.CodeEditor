@@ -2,6 +2,14 @@ using Avalonia.Input;
 
 namespace Darp.CodeEditor.Commands;
 
+/// <summary>A key as the user pressed it: the key, the modifiers held, and the character it types, if any.</summary>
+internal readonly record struct PressedKey(Key Key, KeyModifiers Modifiers, string? Symbol)
+{
+    public static PressedKey Of(KeyEventArgs e) => new(e.Key, e.KeyModifiers, e.KeySymbol);
+
+    public KeyGesture ToGesture() => new(Key, Modifiers);
+}
+
 /// <summary>One stroke of a key sequence: a key and the modifiers held with it, read from VS Code's syntax.</summary>
 /// <param name="Key">The key; for a character key, its place on a US layout.</param>
 /// <param name="Modifiers">The modifiers, all of which must be held, and no others.</param>
@@ -71,19 +79,20 @@ internal readonly record struct KeyStroke(Key Key, KeyModifiers Modifiers, strin
     }
 
     /// <summary>
-    /// Whether <paramref name="e"/> is this stroke: its key with exactly its modifiers. A punctuation stroke also
-    /// matches the key that types its character, with Shift where the layout needs it, and the number pad's key.
+    /// Whether <paramref name="key"/> is this stroke: its key with exactly its modifiers. A punctuation stroke also
+    /// matches the key that types its character, with the Shift that the layout needs for it unless the stroke has
+    /// Shift itself, and the number pad's key.
     /// </summary>
-    public bool Matches(KeyEventArgs e)
+    public bool Matches(PressedKey key)
     {
         if (Symbol is null)
-            return e.Key == Key && e.KeyModifiers == Modifiers;
-        if (e.KeySymbol == Symbol)
-            return (e.KeyModifiers & ~KeyModifiers.Shift) == (Modifiers & ~KeyModifiers.Shift);
-        return e.KeyModifiers == Modifiers && (e.Key == Key || e.Key == s_symbols[Symbol].NumPad);
+            return key.Key == Key && key.Modifiers == Modifiers;
+        if (key.Symbol == Symbol)
+            return Modifiers.HasFlag(KeyModifiers.Shift)
+                ? key.Modifiers == Modifiers
+                : (key.Modifiers & ~KeyModifiers.Shift) == Modifiers;
+        return key.Modifiers == Modifiers && (key.Key == Key || key.Key == s_symbols[Symbol].NumPad);
     }
-
-    public KeyGesture ToGesture() => new(Key, Modifiers);
 
     /// <summary>Reads one stroke, such as <c>ctrl+k</c> or <c>shift+cmd+space</c>, in any case.</summary>
     private static KeyStroke Parse(string stroke)

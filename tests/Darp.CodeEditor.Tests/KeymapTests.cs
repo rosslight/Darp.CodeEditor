@@ -73,6 +73,30 @@ public sealed class KeymapTests(UiFixture ui)
     }
 
     [Fact]
+    public void A_punctuation_key_bound_with_Shift_needs_Shift()
+    {
+        CodeEditorKeymap keymap = Keymap("ctrl+shift+/");
+
+        Resolve(keymap, Key(Keys.OemQuestion, KeyModifiers.Control, "/")).Commands.ShouldBeEmpty();
+        Resolve(keymap, Key(Keys.OemQuestion, KeyModifiers.Control | KeyModifiers.Shift))
+            .Commands.ShouldBe(["command"]);
+    }
+
+    [Fact]
+    public void A_key_that_starts_several_sequences_waits_for_the_second_stroke_of_each()
+    {
+        CodeEditorKeymap keymap = CodeEditorKeymap.Empty.With(
+            new CodeEditorKeyBinding("ctrl+/ f", "slash"),
+            new CodeEditorKeyBinding("ctrl+numpad_divide g", "divide")
+        );
+        PressedKey divide = Key(Keys.Divide, KeyModifiers.Control);
+
+        KeyResolution.Of(keymap, null, divide).Waits.ShouldBeTrue();
+        KeyResolution.Of(keymap, divide, Key(Keys.F, KeyModifiers.None)).Commands.ShouldBe(["slash"]);
+        KeyResolution.Of(keymap, divide, Key(Keys.G, KeyModifiers.None)).Commands.ShouldBe(["divide"]);
+    }
+
+    [Fact]
     public Task A_sequence_waits_for_its_second_key_and_says_so() =>
         _ui.Run(() =>
         {
@@ -210,15 +234,16 @@ public sealed class KeymapTests(UiFixture ui)
         });
 
     /// <summary>Whether the strokes run the command of a keymap with only <paramref name="keys"/>.</summary>
-    private static void Runs(string keys, params KeyEventArgs[] strokes)
+    private static void Runs(string keys, params PressedKey[] strokes)
     {
         CodeEditorKeymap keymap = Keymap(keys);
-        KeyStroke? pending = null;
-        foreach (KeyEventArgs stroke in strokes[..^1])
+        PressedKey? pending = null;
+        foreach (PressedKey stroke in strokes[..^1])
         {
             KeyResolution first = KeyResolution.Of(keymap, pending, stroke);
             first.Commands.ShouldBeEmpty();
-            pending = first.Sequence.ShouldNotBeNull();
+            first.Waits.ShouldBeTrue();
+            pending = stroke;
         }
         KeyResolution.Of(keymap, pending, strokes[^1]).Commands.ShouldBe(["command"]);
     }
@@ -226,16 +251,11 @@ public sealed class KeymapTests(UiFixture ui)
     private static CodeEditorKeymap Keymap(string keys) =>
         CodeEditorKeymap.Empty.With(new CodeEditorKeyBinding(keys, "command"));
 
-    private static KeyResolution Resolve(CodeEditorKeymap keymap, KeyEventArgs key) =>
+    private static KeyResolution Resolve(CodeEditorKeymap keymap, PressedKey key) =>
         KeyResolution.Of(keymap, pending: null, key);
 
-    internal static KeyEventArgs Key(Keys key, KeyModifiers modifiers, string? symbol = null) =>
-        new()
-        {
-            Key = key,
-            KeyModifiers = modifiers,
-            KeySymbol = symbol,
-        };
+    internal static PressedKey Key(Keys key, KeyModifiers modifiers, string? symbol = null) =>
+        new(key, modifiers, symbol);
 
     private static SearchBar BarOf(EditorWindow window) =>
         window.Editor.GetVisualDescendants().OfType<SearchBar>().Single();
