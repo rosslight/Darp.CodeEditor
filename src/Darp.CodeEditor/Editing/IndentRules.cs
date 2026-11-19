@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using AvaloniaEdit.Document;
 using Darp.CodeEditor.Loading;
 
 namespace Darp.CodeEditor.Editing;
@@ -67,11 +68,18 @@ internal sealed class IndentRules
                 if (IndentForEnter(matching, lines, lineNumber, before, after) is { } byRules)
                 {
                     // The new line replaces the indentation of the text it takes along; on a line of whitespace only,
-                    // all of the rest.
+                    // all of the rest. A caret before the line's text keeps its column, within the new indentation.
                     int firstText = Leading(text);
-                    int replaced = firstText == text.Length ? text.Length - column : Math.Max(0, firstText - column);
-                    string inserted = lineBreak + _indenting.Normalize(byRules);
-                    return new NewLine(inserted, inserted.Length, replaced);
+                    string indented = _indenting.Normalize(byRules);
+                    string inserted = lineBreak + indented;
+                    if (firstText == text.Length)
+                        return new NewLine(inserted, inserted.Length, text.Length - column);
+                    int caret = _indenting.Length(_indenting.Width(text.AsSpan(0, Math.Min(column, firstText))));
+                    return new NewLine(
+                        inserted,
+                        column <= firstText ? lineBreak.Length + Math.Min(caret, indented.Length) : inserted.Length,
+                        Math.Max(0, firstText - column)
+                    );
                 }
             }
             catch (RegexMatchTimeoutException) { }
@@ -354,11 +362,13 @@ internal sealed class IndentRules
 
     /// <summary>
     /// The new line for <paramref name="action"/> after a line indented by <paramref name="indentation"/> up to the
-    /// caret: between brackets, the text after the caret goes on a line of its own, at that indentation.
+    /// caret: between brackets, the text after the caret goes on a line of its own, at that indentation. Text that the
+    /// action appends breaks lines with the document's line break.
     /// </summary>
     private NewLine NewLineFor(EnterAction action, string indentation, string lineBreak)
     {
         (indentation, string append) = Resolved(action, indentation);
+        append = TextUtilities.NormalizeNewLines(append, lineBreak);
         if (action.Indent == IndentAction.IndentOutdent)
         {
             string inner = lineBreak + _indenting.Normalize(indentation + append);
