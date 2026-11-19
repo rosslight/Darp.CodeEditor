@@ -230,6 +230,9 @@ internal sealed class LineCommands : IEditorFeature
         TextEdit copy = down
             ? new TextEdit(first.Offset, 0, lines + lineBreak)
             : new TextEdit(last.EndOffset, 0, lineBreak + lines);
+        // An LF right after a lone CR would make one line break of them, and no line of the copy: the CR goes too.
+        if (copy.Text.StartsWith('\n') && copy.Offset > 0 && Buffer.GetCharAt(copy.Offset - 1) == '\r')
+            copy = new TextEdit(copy.Offset - 1, 1, lineBreak + copy.Text);
         int moved = down ? last.LineNumber - first.LineNumber + 1 : 0;
         (Place anchor, Place caret) = (PlaceOf(selection.Anchor), PlaceOf(selection.Caret));
         bool copied = false;
