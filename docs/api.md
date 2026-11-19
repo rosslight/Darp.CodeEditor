@@ -574,7 +574,8 @@ How the client talks to a server, where the protocol leaves a choice:
     suggestions." and stays while typing finds nothing. A list opened by typing freezes so too while a newer list may
     still come, as for a list marked incomplete. A key that accepted while the filter of the current text ran goes on,
     when it finds nothing, to the binding before accepting's, to the second key of a sequence it starts, or as an
-    ordinary key, also when a newer list for the same text has nothing.
+    ordinary key, also when a newer list for the same text has nothing. What ends the wait for a sequence's second
+    stroke, such as another keymap, drops where it would go on to.
   - **Ending:** Escape, the caret leaving the line or moving back past the word, a selection, the editor becoming
     read-only, the list's line scrolling out of view, the editor losing the keyboard focus, a server that starts or
     stops serving the document, new colors, nothing left that matches a complete list opened by typing while no newer
