@@ -161,10 +161,53 @@ internal sealed class IndentRules
     }
 
     /// <summary>
+    /// The indentation of line <paramref name="lineNumber"/> once <paramref name="typed"/>, the last character of an
+    /// auto-closing pair's opening, replaces its text from <paramref name="from"/> to <paramref name="to"/>, first on the
+    /// line, if that opens a block by the increase pattern under a line that indents only the next one, as
+    /// <c>{</c> under <c>if (x)</c> does: the statement's indentation, at <see cref="AutoIndent.Full"/>. Null otherwise,
+    /// also when the user indented the line otherwise.
+    /// </summary>
+    public string? Opened(RuleLines lines, int lineNumber, int from, int to, char typed)
+    {
+        if (
+            _autoIndent < AutoIndent.Full
+            || _configuration.IndentationRules is null
+            || lineNumber <= 1
+            || !_configuration.AutoClosingPairs.Any(pair => pair.Open[^1] == typed)
+        )
+            return null;
+        string text = lines.Text(lineNumber);
+        string before = lines.Masked(lineNumber, 0, from);
+        string after = lines.Masked(lineNumber, to, text.Length);
+        if (!string.IsNullOrWhiteSpace(before + after))
+            return null;
+        IndentationMatching matching = StartMatching();
+        try
+        {
+            if (
+                !matching.IndentsNextLine(matching.Read(lines.Masked, lineNumber - 1))
+                || !matching.Increases(before + lines.Typed(lineNumber, from, typed) + after)
+                || Inherited(matching, lines, lineNumber, honorIntentional: false) is not { } inherited
+            )
+                return null;
+            string statement = _indenting.Normalize(inherited.Indentation);
+            bool indentedByStatement =
+                _indenting.Normalize(_indenting.Shift(inherited.Indentation))
+                == _indenting.Normalize(text[..Leading(text)]);
+            return indentedByStatement && statement != _indenting.Normalize(text[..Leading(text)]) ? statement : null;
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// The indentation of line <paramref name="lineNumber"/> once <paramref name="typed"/> goes in at
     /// <paramref name="column"/> and completes a closing bracket first on the line: that of the line of the opening
     /// bracket it matches, by <paramref name="openingLine"/>, when that is a line above with other indentation. Null
-    /// otherwise. Only brackets of one character each are matched.
+    /// otherwise, and for a bracket typed into a string, comment or regular expression. Only brackets of one character
+    /// each are matched.
     /// </summary>
     public string? LinedUp(
         RuleLines lines,
@@ -178,6 +221,8 @@ internal sealed class IndentRules
             _configuration.BracketPattern is not { } brackets
             || !_configuration.Brackets.Any(b => b.Close.EndsWith(typed))
         )
+            return null;
+        if (lines.Typed(lineNumber, column, typed).Length == 0)
             return null;
         string text = lines.Text(lineNumber);
         string before = text[..column] + typed;

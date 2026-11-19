@@ -208,6 +208,27 @@ public sealed class AutoIndentTests(UiFixture ui)
         });
 
     [Fact]
+    public Task An_opening_brace_under_a_statement_goes_to_the_statements_indentation_and_closes_in_one_undo_step() =>
+        _ui.Run(async () =>
+        {
+            var language = new CodeLanguage(
+                "indent-next",
+                configuration: new Uri(
+                    "avares://Darp.CodeEditor.Tests/Languages/indent-next.language-configuration.json"
+                )
+            );
+            await language.Loaded;
+            using EditorWindow window = Show("if (x)\n    |", language);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+
+            window.Type("{");
+            MarkedText.Of(window).ShouldBe("if (x)\n{|}");
+
+            document.Undo();
+            MarkedText.Of(window).ShouldBe("if (x)\n    |");
+        });
+
+    [Fact]
     public Task Tab_on_a_blank_line_is_an_undo_step_of_its_own() =>
         _ui.Run(async () =>
         {
