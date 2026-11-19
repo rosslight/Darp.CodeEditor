@@ -102,7 +102,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         _document = document;
         _changes = changes;
         _view = new CompletionView(editor, textArea.TextView);
-        _commit = new CompletionCommit(textArea, document, snippets, changes);
+        _commit = new CompletionCommit(textArea, document, snippets, changes, RunCommand);
         _resolver = new CompletionResolver(_view, highlighter);
         _filter = new CompletionFilter(
             _view,
@@ -403,16 +403,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         ItemResolve? late =
             item.AdditionalEdits is null && answer.List.Resolves ? _resolver.Take(selected, answer.List) : null;
         Close();
-        if (!_commit.Commit(item, answer, replace, late, _overtyping.Last))
-            return false;
-        // Once the key that committed is handled: its command ends completion where the commit moved the caret.
-        if (item.Command is { } command)
-            _textArea.Dispatcher.Post(() =>
-            {
-                if (_changes.IsShown)
-                    RunCommand(command);
-            });
-        return true;
+        return _commit.Commit(item, answer, replace, late, _overtyping.Last);
     }
 
     /// <summary>

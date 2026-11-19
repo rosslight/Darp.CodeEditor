@@ -28,16 +28,31 @@ internal sealed class CompletionCommit : IDisposable
     private readonly SnippetController _snippets;
     private readonly TextChanges _changes;
 
+    /// <summary>Runs a committed item's command.</summary>
+    private readonly Action<string> _runCommand;
+
     /// <summary>Cancels the resolve of the item committed last, whose additional edits are still to come.</summary>
     private CancellationTokenSource? _lateEdits;
 
-    public CompletionCommit(TextArea textArea, CodeDocument document, SnippetController snippets, TextChanges changes)
+    /// <param name="textArea">The text area of the view.</param>
+    /// <param name="document">The view's document.</param>
+    /// <param name="snippets">The view's snippets.</param>
+    /// <param name="changes">How the view edits its document.</param>
+    /// <param name="runCommand">Runs a committed item's command, once the key that committed is handled.</param>
+    public CompletionCommit(
+        TextArea textArea,
+        CodeDocument document,
+        SnippetController snippets,
+        TextChanges changes,
+        Action<string> runCommand
+    )
     {
         _textArea = textArea;
         _buffer = textArea.Document;
         _document = document;
         _snippets = snippets;
         _changes = changes;
+        _runCommand = runCommand;
     }
 
     /// <summary>
@@ -46,7 +61,8 @@ internal sealed class CompletionCommit : IDisposable
     /// further, and its additional edits, in one step that the user undoes; the caret goes after the item's text. A
     /// snippet goes in as its text, with its variables' values for the text before the commit, and its first stop is
     /// selected. Additional edits that overlap others are left out, and stay plain text. Additional edits that a resolve
-    /// still under way brings come later.
+    /// still under way brings come later. Once the item went in, and the key that committed it is handled, its command
+    /// runs, while the editor shows the document: it ends completion where the commit moved the caret.
     /// </summary>
     /// <param name="item">The item, as it was resolved.</param>
     /// <param name="answer">The answer that its list is.</param>
@@ -132,6 +148,14 @@ internal sealed class CompletionCommit : IDisposable
         // As VS Code's choices go on to the next stop.
         if (answer.IsChoice)
             _snippets.Next();
+        if (item.Command is { } command)
+        {
+            _textArea.Dispatcher.Post(() =>
+            {
+                if (_changes.IsShown)
+                    _runCommand(command);
+            });
+        }
         return true;
     }
 
