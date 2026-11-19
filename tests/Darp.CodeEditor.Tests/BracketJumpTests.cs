@@ -123,12 +123,19 @@ public sealed class BracketJumpTests(UiFixture ui)
     }
 
     /// <summary>
-    /// Shows <paramref name="marked"/> as JSON once the editor has every line's tokens, for brackets in strings: not by
-    /// the colors of the text, as under load the background may give up on a line's tokens.
+    /// Shows <paramref name="marked"/> as JSON once the editor has every line's tokens, for brackets in strings. Its
+    /// grammar's clock stands still, so that the background never gives up on a line's tokens on a busy machine.
     /// </summary>
     private static async Task<EditorWindow> ShowAsync(string marked)
     {
-        EditorWindow window = MarkedText.Show(marked, CodeLanguage.Json);
+        (string text, TextSelection selection) = MarkedText.Parse(marked);
+        var editor = new CodeEditor
+        {
+            Document = CodeDocument.Create(CodeLanguage.Json, text),
+            GrammarClock = new ManualTime(),
+        };
+        var window = new EditorWindow(editor);
+        editor.Selection = selection;
         await window.TokensKnownAsync();
         return window;
     }
