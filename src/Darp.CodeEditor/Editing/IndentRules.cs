@@ -120,8 +120,8 @@ internal sealed class IndentRules
     /// The indentation that line <paramref name="lineNumber"/> should have where it stands, as a moved line: what the
     /// lines above give it by the indentation rules, or, right below the line that gives it, what Enter at that line's
     /// end gives, without the text that Enter appends; one level less when the line itself matches the decrease
-    /// pattern. Null below <see cref="AutoIndent.Full"/>, without indentation rules, when no line above gives one, or
-    /// when matching runs out of time.
+    /// pattern. Null below <see cref="AutoIndent.Full"/>, without indentation rules, when no line above gives one, when
+    /// matching runs out of time, or when a line it read is <see cref="RuleLines.Unclassified"/>.
     /// </summary>
     public string? IndentationInPlace(RuleLines lines, int lineNumber)
     {
@@ -147,8 +147,10 @@ internal sealed class IndentRules
                     _ => indentation,
                 };
                 string entered = (decreases ? _indenting.Unshift(indentation) : indentation) + action.AppendText;
-                return entered[..Leading(entered)];
+                return lines.Unclassified ? null : entered[..Leading(entered)];
             }
+            if (lines.Unclassified)
+                return null;
             if (decreases)
                 return inherited.Increases ? inherited.Indentation : _indenting.Unshift(inherited.Indentation);
             return Indentation(inherited);
@@ -164,7 +166,7 @@ internal sealed class IndentRules
     /// it, gives line <paramref name="lineNumber"/> as a moved line: that of the new line, one level less when the line
     /// matches the decrease pattern. Null below <see cref="AutoIndent.Full"/>, without indentation rules, when no rule
     /// for Enter or bracket applies there, when the line lacks the text that Enter puts on the new line, such as a doc
-    /// comment's <c>*</c>, or when matching runs out of time.
+    /// comment's <c>*</c>, when matching runs out of time, or when a line it read is <see cref="RuleLines.Unclassified"/>.
     /// </summary>
     public string? EnteredIndentation(RuleLines lines, int lineNumber, int above)
     {
@@ -190,7 +192,10 @@ internal sealed class IndentRules
             )
                 return null;
             string entered = prefix[..Leading(prefix)];
-            return matching.Decreases(matching.Read(lines.Masked, lineNumber)) ? _indenting.Unshift(entered) : entered;
+            bool decreases = matching.Decreases(matching.Read(lines.Masked, lineNumber));
+            return lines.Unclassified ? null
+                : decreases ? _indenting.Unshift(entered)
+                : entered;
         }
         catch (RegexMatchTimeoutException)
         {
