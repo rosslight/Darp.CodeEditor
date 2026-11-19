@@ -89,7 +89,9 @@ public class SearchBenchmarks
             null,
             CancellationToken.None
         );
-        return result.IsComplete ? result.Matches.Count : throw new InvalidOperationException("The search stopped.");
+        return result.Outcome == SearchOutcome.Complete
+            ? result.Matches.Count
+            : throw new InvalidOperationException("The search stopped.");
     }
 }
 

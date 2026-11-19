@@ -267,7 +267,6 @@ internal sealed class SearchScan
     /// </summary>
     private sealed class LineFeedText
     {
-        /// <summary>Where the range starts in the text.</summary>
         private readonly int _start;
 
         /// <summary>The offsets in <see cref="Text"/> of the <c>\n</c> of each <c>\r\n</c>, in order.</summary>

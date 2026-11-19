@@ -27,7 +27,6 @@ internal sealed class ReplacePattern
 
     private static readonly FrozenDictionary<char, string> s_upperExpansions = UpperExpansions();
 
-    /// <summary>The replacement's parts, in order.</summary>
     private readonly IReadOnlyList<Piece> _pieces;
 
     private ReplacePattern(IReadOnlyList<Piece> pieces) => _pieces = pieces;

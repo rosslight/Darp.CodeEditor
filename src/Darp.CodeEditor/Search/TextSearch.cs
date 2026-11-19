@@ -43,11 +43,7 @@ internal sealed record SearchResult(
     TextSegmentCollection<SearchMatch> Matches,
     SearchOutcome Outcome,
     string? Error
-)
-{
-    /// <summary>Whether the search found every match.</summary>
-    public bool IsComplete => Outcome == SearchOutcome.Complete;
-}
+);
 
 /// <summary>
 /// Finds the matches of a query in a snapshot, as VS Code's <c>TextModelSearch</c> does, and its <c>findNextMatch</c>,
