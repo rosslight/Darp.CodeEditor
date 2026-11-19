@@ -58,8 +58,25 @@ public sealed class KeymapTests(UiFixture ui)
         Resolve(keymap, Key(Keys.F, EditorWindow.Command)).Commands.ShouldBeEmpty();
         // The defaults stay otherwise; the latest binding of a key comes first.
         Resolve(keymap, Key(Keys.Space, KeyModifiers.Control))
-            .Commands.ShouldBe([CodeEditorCommands.TriggerParameterHints, CodeEditorCommands.TriggerSuggest]);
+            .Commands.ShouldBe([
+                CodeEditorCommands.TriggerParameterHints,
+                CodeEditorCommands.ToggleSuggestionDetails,
+                CodeEditorCommands.TriggerSuggest,
+            ]);
         keymap.Bindings.Count.ShouldBe(CodeEditorKeymap.Default.Bindings.Count + 4);
+    }
+
+    [Fact]
+    public void By_default_Enter_accepts_completions_item_inserting_and_Tab_and_Shift_Enter_replacing()
+    {
+        CodeEditorKeymap keymap = CodeEditorKeymap.Default;
+
+        Resolve(keymap, Key(Keys.Enter, KeyModifiers.None))
+            .Commands.ShouldBe([CodeEditorCommands.AcceptSelectedSuggestion]);
+        Resolve(keymap, Key(Keys.Tab, KeyModifiers.None))
+            .Commands.ShouldBe([CodeEditorCommands.AcceptAlternativeSelectedSuggestion]);
+        Resolve(keymap, Key(Keys.Enter, KeyModifiers.Shift))
+            .Commands.ShouldBe([CodeEditorCommands.AcceptAlternativeSelectedSuggestion]);
     }
 
     [Fact]
