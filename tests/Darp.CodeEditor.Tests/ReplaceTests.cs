@@ -77,6 +77,31 @@ public sealed class ReplaceTests(UiFixture ui)
         });
 
     /// <summary>
+    /// As in VS Code, Replace looks for the match from the start of the selection: one that is partly selected is
+    /// selected first, and replaced next.
+    /// </summary>
+    [Fact]
+    public Task Replace_selects_a_partly_selected_match_and_then_replaces_it() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("|abc abc", CodeLanguage.PlainText);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            window.Editor.OpenSearch(replace: true);
+            SearchBar bar = BarOf(window);
+            bar.ReplaceBox.Text = "x";
+            bar.FindBox.Text = "abc";
+            await SearchedAsync(bar);
+            window.Editor.Selection = new TextSelection(0, 2);
+
+            Click(bar, "Replace");
+
+            window.Editor.Selection.ShouldBe(new TextSelection(0, 3));
+            document.Text.ShouldBe("abc abc");
+            Click(bar, "Replace");
+            document.Text.ShouldBe("x abc");
+        });
+
+    /// <summary>
     /// Replace replaces a match that F3 reached beyond those highlighted, with its own captures, and goes on to the
     /// next one.
     /// </summary>

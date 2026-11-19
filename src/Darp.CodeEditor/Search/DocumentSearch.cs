@@ -236,32 +236,33 @@ internal sealed class DocumentSearch : IDisposable
     /// <summary>
     /// Replaces the selected match, as VS Code does: the next match from the selection's start, beyond the matches
     /// that the result keeps found again in the background, is replaced where it is the selection, and selected
-    /// otherwise. The search that the change starts goes on from the end of the replacement.
+    /// otherwise; past the last match, the first is selected. The search that the change starts goes on from the end of
+    /// the replacement.
     /// </summary>
     public void ReplaceOne()
     {
         if (CurrentResult() is not { Replacement: { } replacement } result)
             return;
-        if (CurrentMatch(result) is { } match)
-            Replace(match);
-        else if (result.Outcome != SearchOutcome.TooManyMatches)
-            Go(SearchMove.Next);
-        else
-        {
-            TextRange selection = _changes.Selection.Range;
+        TextRange selection = _changes.Selection.Range;
+        if (result.Matches.FindFirstSegmentWithStartAfter(selection.Start) is { } next)
+            ReplaceOrSelect(next);
+        else if (result.Outcome == SearchOutcome.TooManyMatches)
             Seek(
                 result,
                 SearchMove.Next,
                 (text, scope, c) =>
                     TextSearch.FindNext(text, result.Query, replacement, scope, selection.Start, false, c, _clock),
-                found =>
-                {
-                    if (found.StartOffset == selection.Start && found.Length == selection.Length)
-                        Replace(found);
-                    else
-                        Select(found);
-                }
+                ReplaceOrSelect
             );
+        else if (result.Matches.FirstSegment is { } first)
+            Select(first);
+
+        void ReplaceOrSelect(SearchMatch match)
+        {
+            if (match.StartOffset == selection.Start && match.Length == selection.Length)
+                Replace(match);
+            else
+                Select(match);
         }
     }
 
