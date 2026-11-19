@@ -6,7 +6,8 @@ namespace Darp.CodeEditor.Loading;
 
 /// <summary>
 /// The editing rules of a language, from VS Code's <c>language-configuration.json</c>: comments, brackets,
-/// auto-closing and surrounding pairs, and indentation rules. Other settings of the file are not read.
+/// auto-closing and surrounding pairs, indentation rules and the rules for Enter. Other settings of the file are not
+/// read.
 /// </summary>
 internal sealed record LanguageConfiguration(
     string? LineComment,
@@ -19,6 +20,26 @@ internal sealed record LanguageConfiguration(
 {
     /// <summary>No editing rules.</summary>
     public static LanguageConfiguration None { get; } = new(null, null, [], [], [], null);
+
+    /// <summary>The rules for Enter, <c>onEnterRules</c>, in their order: the first that matches applies.</summary>
+    public IReadOnlyList<OnEnterRule> OnEnterRules { get; init; } = [];
+
+    /// <summary>
+    /// Finds the brackets, opening and closing, in any case, and a bracket of letters, such as <c>begin</c>, as a whole
+    /// word. Null without brackets.
+    /// </summary>
+    public Regex? BracketPattern { get; } = BracketPatternOf(Brackets);
+
+    private static Regex? BracketPatternOf(IReadOnlyList<CharacterPair> pairs)
+    {
+        string[] brackets = [.. pairs.SelectMany(p => new[] { p.Open, p.Close }).Where(b => b.Length > 0).Distinct()];
+        if (brackets.Length == 0)
+            return null;
+        IEnumerable<string> alternatives = brackets.Select(b =>
+            b.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or ' ') ? $@"\b{Regex.Escape(b)}\b" : Regex.Escape(b)
+        );
+        return new Regex(string.Join('|', alternatives), RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
 
     /// <summary>Reads a <c>language-configuration.json</c> file.</summary>
     public static LanguageConfiguration Read(Uri file)
@@ -52,8 +73,62 @@ internal sealed record LanguageConfiguration(
                     Pattern(rules.GetProperty("increaseIndentPattern")),
                     Pattern(rules.GetProperty("decreaseIndentPattern"))
                 )
+                {
+                    IndentNextLinePattern = Property(rules, "indentNextLinePattern") is { } next ? Pattern(next) : null,
+                    UnIndentedLinePattern = Property(rules, "unIndentedLinePattern") is { } un ? Pattern(un) : null,
+                }
                 : null
-        );
+        )
+        {
+            OnEnterRules = Property(root, "onEnterRules") is { ValueKind: JsonValueKind.Array } onEnterRules
+                ? [.. onEnterRules.EnumerateArray().Select(OnEnter).OfType<OnEnterRule>()]
+                : [],
+        };
+    }
+
+    /// <summary>
+    /// A rule of <c>onEnterRules</c>; null for one to skip: without an action of a known kind, or with a regular
+    /// expression that is missing or that .NET can't read.
+    /// </summary>
+    private static OnEnterRule? OnEnter(JsonElement rule)
+    {
+        if (Property(rule, "action") is not { ValueKind: JsonValueKind.Object } action)
+            return null;
+        IndentAction? indent = Property(action, "indent") is { ValueKind: JsonValueKind.String } kind
+            ? kind.GetString() switch
+            {
+                "none" => IndentAction.None,
+                "indent" => IndentAction.Indent,
+                "indentOutdent" => IndentAction.IndentOutdent,
+                "outdent" => IndentAction.Outdent,
+                _ => null,
+            }
+            : null;
+        if (indent is not { } indentAction || Property(rule, "beforeText") is not { } beforeText)
+            return null;
+        try
+        {
+            return new OnEnterRule(
+                Pattern(beforeText),
+                Property(rule, "afterText") is { } afterText ? Pattern(afterText) : null,
+                Property(rule, "previousLineText") is { } previousLineText ? Pattern(previousLineText) : null,
+                new EnterAction(
+                    indentAction,
+                    Property(action, "appendText") is { ValueKind: JsonValueKind.String } append
+                        ? append.GetString() ?? ""
+                        : "",
+                    Property(action, "removeText") is { ValueKind: JsonValueKind.Number } remove
+                    && remove.TryGetInt32(out int removed)
+                        ? Math.Max(0, removed)
+                        : 0
+                )
+            );
+        }
+        catch (Exception e)
+            when (e is ArgumentException or InvalidDataException or InvalidOperationException or KeyNotFoundException)
+        {
+            return null;
+        }
     }
 
     private static JsonElement? Property(JsonElement? element, string name) =>
@@ -123,11 +198,70 @@ internal readonly record struct CharacterPair(string Open, string Close);
 /// <param name="NotInComment">Not closed automatically inside a comment.</param>
 internal readonly record struct AutoClosingPair(string Open, string Close, bool NotInString, bool NotInComment);
 
+/// <summary>
+/// A rule for Enter: when the text before the caret matches <paramref name="BeforeText"/>, and the text after it and the
+/// line above match the others if given, the new line takes <paramref name="Action"/>.
+/// </summary>
+internal sealed record OnEnterRule(Regex BeforeText, Regex? AfterText, Regex? PreviousLineText, EnterAction Action)
+{
+    /// <summary>Whether the rule applies to the texts around the caret: a match that runs out of time counts as none.</summary>
+    public bool Matches(string previousLineText, string beforeText, string afterText)
+    {
+        try
+        {
+            return BeforeText.IsMatch(beforeText)
+                && (AfterText?.IsMatch(afterText) ?? true)
+                && (PreviousLineText?.IsMatch(previousLineText) ?? true);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return false;
+        }
+    }
+}
+
+/// <summary>What a rule for Enter does to the new line.</summary>
+/// <param name="Indent">How the new line is indented, from the indentation of the caret's line.</param>
+/// <param name="AppendText">Text that goes in after the new line's indentation, such as <c>// </c>.</param>
+/// <param name="RemoveText">How many characters of indentation the new line takes off.</param>
+internal readonly record struct EnterAction(IndentAction Indent, string AppendText, int RemoveText);
+
+/// <summary>How a rule for Enter indents the new line.</summary>
+internal enum IndentAction
+{
+    /// <summary>As the caret's line.</summary>
+    None,
+
+    /// <summary>One level more than the caret's line.</summary>
+    Indent,
+
+    /// <summary>
+    /// Two new lines: the caret goes on the first, one level more, and the text after the caret on the second, at the
+    /// caret's line's indentation, as between brackets.
+    /// </summary>
+    IndentOutdent,
+
+    /// <summary>One level less than the caret's line.</summary>
+    Outdent,
+}
+
 /// <summary>When a line indents or outdents: regular expressions on its text, with the flags the file gives.</summary>
 /// <param name="IncreaseIndentPattern">The lines after a matching line are indented one level more.</param>
 /// <param name="DecreaseIndentPattern">A matching line is indented one level less than the lines before.</param>
 internal sealed record IndentationRules(Regex IncreaseIndentPattern, Regex DecreaseIndentPattern)
 {
+    /// <summary>
+    /// Only the line after a matching line is indented one level more, as after <c>if (x)</c> without a brace; null
+    /// for none.
+    /// </summary>
+    public Regex? IndentNextLinePattern { get; init; }
+
+    /// <summary>
+    /// A matching line, such as a comment that may stand at any indentation, gives the lines after it no indentation:
+    /// they take theirs from the lines above it. Null for none.
+    /// </summary>
+    public Regex? UnIndentedLinePattern { get; init; }
+
     /// <summary>How long one match may take. Some patterns backtrack on long lines, as JSON's does on nested objects.</summary>
     public static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(5);
 
@@ -170,8 +304,17 @@ internal readonly struct IndentationMatching(IndentationRules rules, long deadli
     /// <summary>Whether <paramref name="line"/> is indented one level less than the lines before.</summary>
     public bool Decreases(string line) => Matches(_rules.DecreaseIndentPattern, line);
 
-    private bool Matches(Regex pattern, string line) =>
-        Stopwatch.GetTimestamp() < _deadline
-            ? pattern.IsMatch(line)
-            : throw new RegexMatchTimeoutException(line, pattern.ToString(), IndentationRules.TimeLimit);
+    /// <summary>Whether only the line after <paramref name="line"/> is indented one level more.</summary>
+    public bool IndentsNextLine(string line) => Matches(_rules.IndentNextLinePattern, line);
+
+    /// <summary>Whether <paramref name="line"/> gives the lines after it no indentation.</summary>
+    public bool IsUnIndented(string line) => Matches(_rules.UnIndentedLinePattern, line);
+
+    private bool Matches(Regex? pattern, string line) =>
+        pattern is not null
+        && (
+            Stopwatch.GetTimestamp() < _deadline
+                ? pattern.IsMatch(line)
+                : throw new RegexMatchTimeoutException(line, pattern.ToString(), IndentationRules.TimeLimit)
+        );
 }
