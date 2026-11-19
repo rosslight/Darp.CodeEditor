@@ -186,7 +186,7 @@ public sealed class SearchTests(UiFixture ui)
 
             Click(bar, "Replace");
             document.Text.ShouldBe("1:one two=2 three=3");
-            window.Editor.Selection.ShouldBe(new TextSelection(6, 11));
+            await Wait.UntilAsync(() => window.Editor.Selection == new TextSelection(6, 11));
 
             await Wait.UntilAsync(() => bar.ReplaceAllButton.IsEnabled);
             Click(bar, "Replace All");
@@ -194,6 +194,58 @@ public sealed class SearchTests(UiFixture ui)
 
             document.Undo();
             document.Text.ShouldBe("1:one two=2 three=3");
+        });
+
+    /// <summary>
+    /// As in VS Code, Replace goes on from the end of the replacement, in the text as it is after it: a match that the
+    /// replacement ended, such as one that a lookbehind found, is not selected.
+    /// </summary>
+    [Fact]
+    public Task Replace_goes_on_from_the_end_of_the_replacement_in_the_text_as_it_is_now() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("|aaa aa", CodeLanguage.PlainText);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            window.Editor.OpenSearch(replace: true);
+            SearchBar bar = BarOf(window);
+            bar.RegexToggle.IsChecked = true;
+            bar.ReplaceBox.Text = "b";
+            bar.FindBox.Text = "(?<=a)a";
+            await Wait.UntilAsync(() => bar.Count == "1 of 3" && bar.ReplaceAllButton.IsEnabled);
+
+            Click(bar, "Replace");
+
+            document.Text.ShouldBe("aba aa");
+            await Wait.UntilAsync(() => bar.Count == "1 of 1");
+            window.Editor.Selection.ShouldBe(new TextSelection(5, 6));
+        });
+
+    /// <summary>
+    /// Replace replaces a match that F3 reached beyond those highlighted, with its own captures, and goes on to the
+    /// next one.
+    /// </summary>
+    [Fact]
+    public Task Replace_replaces_a_selected_match_beyond_those_highlighted() =>
+        _ui.Run(async () =>
+        {
+            const int Count = TextSearch.MaxMatches + 2;
+            string text = string.Concat(Enumerable.Repeat("a1\n", Count));
+            using EditorWindow window = MarkedText.Show("|" + text, CodeLanguage.PlainText);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            window.Editor.OpenSearch(replace: true);
+            SearchBar bar = BarOf(window);
+            bar.RegexToggle.IsChecked = true;
+            bar.ReplaceBox.Text = "$2$1";
+            bar.FindBox.Text = @"(a)(\d)";
+            await Wait.UntilAsync(() => bar.Count == "1 of 19,999+" && bar.ReplaceAllButton.IsEnabled);
+            window.Editor.Selection = Match(TextSearch.MaxMatches);
+
+            Click(bar, "Replace");
+
+            await Wait.UntilAsync(() => window.Editor.Selection == Match(TextSearch.MaxMatches + 1));
+            document.Text.Substring(TextSearch.MaxMatches * 3, 5).ShouldBe("1a\na1");
+
+            static TextSelection Match(int index) => new(index * 3, index * 3 + 2);
         });
 
     /// <summary>
