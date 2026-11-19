@@ -790,6 +790,26 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_snippets_choice_goes_in_with_the_documents_line_breaks_and_selected_whole() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse("""{ "items": [ { "label": "pair", "insertTextFormat": 2, "insertText": "${1|a\nb,c|}" } ] }""")
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "x\r\ny\r\npa\nz");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            await OpenAsync(window, 8);
+            window.Press(Key.Enter);
+
+            MarkedText.Of(window).ShouldBe("x\r\ny\r\n«a\r\nb»\nz");
+        });
+
+    [Fact]
     public Task Additional_edits_that_come_after_the_commit_join_its_step_while_it_is_the_last_one() =>
         _ui.Run(async () =>
         {

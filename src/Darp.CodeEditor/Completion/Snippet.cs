@@ -1,4 +1,5 @@
 using System.Text;
+using AvaloniaEdit.Document;
 using Darp.CodeEditor.Editing;
 
 namespace Darp.CodeEditor.Completion;
@@ -805,7 +806,9 @@ internal sealed class Snippet
                             return false;
                         break;
                     case ChoiceNode choice:
-                        if (!Append(choice.Value))
+                        // Its lines keep their indentation; its line breaks, as everything's that goes in, are the
+                        // document's.
+                        if (!Append(TextUtilities.NormalizeNewLines(choice.Value, _context.LineBreak)))
                             return false;
                         break;
                     case VariableNode variable:
