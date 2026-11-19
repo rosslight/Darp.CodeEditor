@@ -197,6 +197,27 @@ public sealed class BracketMatchingTests(UiFixture ui)
         });
 
     /// <summary>
+    /// The pair around a caret inside it, found again once the background has tokenized the lines out of view as
+    /// comments: their tokens changed, the text and the caret did not.
+    /// </summary>
+    [Fact]
+    public Task A_pair_around_the_caret_whose_closing_bracket_becomes_a_comment_out_of_view_is_no_longer_boxed() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = await ShowColored(
+                "{ \"a\": |1,\n// b\n" + string.Concat(Enumerable.Repeat("// padding\n", 50)) + "}"
+            );
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)).ShouldBeGreaterThan(0);
+
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            document.Replace(new TextRange(document.CurrentSnapshot.GetOffset(new TextPosition(2, 2)), 1), "*");
+            // Drawn with the lines out of view as last tokenized, before the background tokenized them again.
+            window.Render();
+
+            await Wait.UntilAsync(() => window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)) == 0);
+        });
+
+    /// <summary>
     /// Brackets pair as VS Code's parser nests them: a closing bracket that closes no open bracket of its kind is no
     /// bracket, and one that closes an outer pair leaves the brackets opened inside it unclosed. The array after them
     /// holds a number, whose color says that the lines are tokenized.
