@@ -29,6 +29,9 @@ internal sealed class Typing : IDisposable
     /// <summary>The pair to close once the character being typed is in; null for none.</summary>
     private AutoClosingPair? _closing;
 
+    /// <summary>A pair with a longer opening, whose last character went in: it closes in a step of its own.</summary>
+    private AutoClosingPair? _closeAfter;
+
     public Typing(
         TextArea area,
         CodeDocument document,
@@ -121,7 +124,6 @@ internal sealed class Typing : IDisposable
         // Text of several characters, as from an input method.
         else if (text.AsSpan().IndexOfAny('\r', '\n') >= 0)
             e.Text = TextUtilities.NormalizeNewLines(text, _document.LineBreak);
-        AutoClosingPair? closing = _closing;
         try
         {
             _changes.Run(step, () => _area.PerformTextInput(e));
@@ -131,8 +133,11 @@ internal sealed class Typing : IDisposable
             _indentation = null;
             _closing = null;
         }
-        if (closing is { Open.Length: > 1 } longPair)
+        if (_closeAfter is { } longPair)
+        {
+            _closeAfter = null;
             _changes.Run(new EditStep(EditKind.TypingOther, StartsStep: true), () => _pairs.Close(longPair));
+        }
         e.Handled = true;
     }
 
@@ -146,6 +151,8 @@ internal sealed class Typing : IDisposable
         }
         if (_closing is { Open.Length: 1 } pair)
             _pairs.Close(pair);
+        else
+            _closeAfter = _closing;
     }
 
     /// <summary>Enter: the selection's text goes, a rectangle selection ends, and the rules' new line goes in.</summary>
