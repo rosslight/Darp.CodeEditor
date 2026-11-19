@@ -235,17 +235,22 @@ internal sealed class AutoClosingPairs : IDisposable
     }
 
     /// <summary>
-    /// Whether the closing brackets of <paramref name="pair"/> after <paramref name="caret"/> that nothing after it opens
-    /// outnumber the opening ones before it that nothing before it closes: one of them closes the bracket typed there.
+    /// Whether a closing bracket of <paramref name="pair"/> after <paramref name="caret"/> closes nothing, among the
+    /// language's brackets: the bracket typed there takes it.
     /// </summary>
     private bool UnmatchedClosingAhead(AutoClosingPair pair, int caret)
     {
-        if (pair is not { Open: [char open], Close: [char close] } || open == close)
-            return false;
-        var brackets = new CharacterPair(pair.Open, pair.Close);
-        int closing = BracketMatcher.Unmatched(Buffer, caret, brackets, _highlighter.TokensOf, after: true);
-        return closing > 0
-            && closing > BracketMatcher.Unmatched(Buffer, caret, brackets, _highlighter.TokensOf, after: false);
+        CharacterPair[] brackets = [.. Configuration.Brackets.Where(b => b is { Open.Length: 1, Close.Length: 1 })];
+        return pair is { Open: [char open], Close: [char close] }
+            && open != close
+            && brackets.Contains(new CharacterPair(pair.Open, pair.Close))
+            && BracketMatcher.UnmatchedClosing(
+                Buffer,
+                caret,
+                new(pair.Open, pair.Close),
+                brackets,
+                _highlighter.TokensOf
+            );
     }
 
     /// <summary>

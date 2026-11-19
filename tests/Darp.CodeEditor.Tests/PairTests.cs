@@ -212,6 +212,8 @@ public sealed class PairTests(UiFixture ui)
     [InlineData("{\n    \"a\": |]\n}", "{\n    \"a\": [|]\n}")]
     // The first ] closes the [ before it, and the second is the new one's.
     [InlineData("{\n    \"a\": [|]]\n}", "{\n    \"a\": [[|]]\n}")]
+    // The } closes the {, so that the [ before the caret stays unclosed and the ] closes nothing.
+    [InlineData("{[|}]", "{[[|}]")]
     public Task An_opening_bracket_doesnt_close_before_a_closing_one_that_no_opening_one_matches(
         string marked,
         string expected
