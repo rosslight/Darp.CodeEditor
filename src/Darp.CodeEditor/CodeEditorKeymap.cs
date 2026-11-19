@@ -104,10 +104,15 @@ public sealed class CodeEditorKeymap
                 || command.ValueKind != JsonValueKind.String
             )
                 throw new JsonException("A binding needs a command.");
-            string keys =
-                item.TryGetProperty("key", out JsonElement key) && key.ValueKind == JsonValueKind.String
-                    ? key.GetString() ?? ""
-                    : "";
+            string keys = "";
+            if (item.TryGetProperty("key", out JsonElement key))
+            {
+                // A removal without keys removes every binding of its command, so a key of another type is no omission.
+                keys =
+                    key.ValueKind == JsonValueKind.String
+                        ? key.GetString() ?? ""
+                        : throw new JsonException("A binding's key is a string.");
+            }
             bindings.Add(new CodeEditorKeyBinding(keys, command.GetString() ?? ""));
         }
         return (basedOn ?? Default).With(bindings);
