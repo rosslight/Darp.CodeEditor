@@ -1,8 +1,12 @@
+using AvaloniaEdit.Document;
+using Darp.CodeEditor.Editing;
+
 namespace Darp.CodeEditor;
 
 /// <summary>
 /// The line break that a document gives new text, one per document, as VS Code's text model has one with
-/// <c>files.eol</c> at <c>auto</c>: detected from the text, else the system's (<see cref="CodeDocument.LineBreak"/>).
+/// <c>files.eol</c> at <c>auto</c>: detected from the text, else the system's (<see cref="CodeDocument.LineBreak"/>);
+/// and the edits that put it in next to the document's other line breaks.
 /// </summary>
 internal static class LineBreaks
 {
@@ -41,4 +45,34 @@ internal static class LineBreaks
     /// <c>\r\n</c> where the system's is, as on Windows, else the document's.
     /// </summary>
     public static string OnClipboard(string lineBreak) => System == "\r\n" ? "\r\n" : lineBreak;
+
+    /// <summary>
+    /// <paramref name="edits"/> of <paramref name="text"/>, in order and apart, so that none puts an LF right after a
+    /// lone CR, or a CR right before a lone LF, which would make one line break of two and lose a line: the CR goes
+    /// along with the edit, as <paramref name="lineBreak"/>.
+    /// </summary>
+    public static IReadOnlyList<TextEdit> Apart(ITextSource text, IReadOnlyList<TextEdit> edits, string lineBreak)
+    {
+        TextEdit[] apart = [.. edits];
+        // By runs of edits that each start where the one before ends, with no text between them.
+        for (int first = 0, last = 0; first < apart.Length; first = ++last)
+        {
+            while (last + 1 < apart.Length && apart[last + 1].Offset == End(apart[last]))
+                last++;
+            (int start, int end) = (apart[first].Offset, End(apart[last]));
+            string inserted = string.Concat(apart[first..(last + 1)].Select(edit => edit.Text));
+            char after = inserted.Length > 0 ? inserted[0] : CharAt(end);
+            if (CharAt(start - 1) == '\r' && CharAt(start) != '\n' && after == '\n')
+                apart[first] = new TextEdit(start - 1, apart[first].Length + 1, lineBreak + apart[first].Text);
+            if (inserted.EndsWith('\r') && CharAt(end) == '\n' && CharAt(end - 1) != '\r')
+            {
+                int ending = Array.FindLastIndex(apart, last, last - first + 1, edit => edit.Text.Length > 0);
+                apart[ending] = apart[ending] with { Text = apart[ending].Text[..^1] + lineBreak };
+            }
+        }
+        return apart;
+
+        char CharAt(int offset) => offset >= 0 && offset < text.TextLength ? text.GetCharAt(offset) : '\0';
+        static int End(TextEdit edit) => edit.Offset + edit.Length;
+    }
 }

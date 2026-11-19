@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using AvaloniaEdit.Document;
@@ -23,6 +24,9 @@ internal sealed class RuleLines
     /// <summary>The tokens of the line asked for last, and whether it was tokenized now if need be; 0 for none.</summary>
     private (int Number, int[]? Tokens, bool Now) _tokens;
 
+    /// <summary><see cref="Unclassified"/>, shared with the lines made from these.</summary>
+    private readonly StrongBox<bool> _unclassified;
+
     /// <summary>
     /// Lines by their number: their text, their exact TextMate tokens, tokenized now if asked, or null, and whether text
     /// typed at a column of one goes in as code, and not into a string, comment or regular expression, by default yes.
@@ -33,11 +37,21 @@ internal sealed class RuleLines
         Regex? brackets,
         Func<int, int, bool>? typesCode = null
     )
+        : this(text, exactTokens, brackets, typesCode, new StrongBox<bool>()) { }
+
+    private RuleLines(
+        Func<int, string> text,
+        Func<int, bool, int[]?> exactTokens,
+        Regex? brackets,
+        Func<int, int, bool>? typesCode,
+        StrongBox<bool> unclassified
+    )
     {
         _text = text;
         _exactTokens = exactTokens;
         _brackets = brackets;
         _typesCode = typesCode;
+        _unclassified = unclassified;
     }
 
     /// <summary>
@@ -53,6 +67,13 @@ internal sealed class RuleLines
                 highlighter.ContextAt(document.GetLineByNumber(number).Offset + column)
                     is not { At: not TokenType.Other }
         );
+
+    /// <summary>
+    /// Whether a line with brackets was read as it is, here or in lines made from these, because its tokens are unknown,
+    /// so that a bracket in a string or a comment may have counted. Empty tokens, as of a language without a grammar,
+    /// say that a line is as it is.
+    /// </summary>
+    public bool Unclassified => _unclassified.Value;
 
     /// <summary>The text of line <paramref name="number"/>, as it is.</summary>
     public string Text(int number) => _text(number);
@@ -81,7 +102,42 @@ internal sealed class RuleLines
 
     /// <summary>These lines, with line <paramref name="number"/> as <paramref name="text"/>, which the rules see as it is.</summary>
     public RuleLines With(int number, string text) =>
-        new(n => n == number ? text : _text(n), (n, now) => n == number ? null : Tokens(n, now), _brackets, _typesCode);
+        new(
+            n => n == number ? text : _text(n),
+            (n, now) => n == number ? [] : Tokens(n, now),
+            _brackets,
+            _typesCode,
+            _unclassified
+        );
+
+    /// <summary>These lines in other places: each line is the line that <paramref name="source"/> gives for its number.</summary>
+    public RuleLines Moved(Func<int, int> source) =>
+        new(n => _text(source(n)), (n, now) => _exactTokens(source(n), now), _brackets, null, _unclassified);
+
+    /// <summary>
+    /// These lines, with line <paramref name="number"/> indented by <paramref name="indentation"/> instead, its tokens
+    /// moving with its text.
+    /// </summary>
+    public RuleLines Reindented(int number, string indentation)
+    {
+        string text = _text(number);
+        int indent = IndentRules.Leading(text);
+        string reindented = indentation + text[indent..];
+        int shift = indentation.Length - indent;
+        return new(n => n == number ? reindented : _text(n), Shifted, _brackets, _typesCode, _unclassified);
+
+        int[]? Shifted(int n, bool now)
+        {
+            int[]? tokens = _exactTokens(n, now);
+            if (n != number || shift == 0 || tokens is null)
+                return tokens;
+            // The first token starts the line, its indentation in it; the others start that much further.
+            int[] shifted = (int[])tokens.Clone();
+            for (int i = 2; i < shifted.Length; i += 2)
+                shifted[i] = Math.Max(0, shifted[i] + shift);
+            return shifted;
+        }
+    }
 
     private int[]? Tokens(int number, bool tokenizeNow)
     {
@@ -93,13 +149,13 @@ internal sealed class RuleLines
     private string Masked(int number, string text, int from, int to, bool tokenizeNow)
     {
         // Most lines have no brackets, and need no tokens.
-        if (
-            _brackets is not { } brackets
-            || from >= to
-            || !brackets.IsMatch(text)
-            || Tokens(number, tokenizeNow) is not { } tokens
-        )
+        if (_brackets is not { } brackets || from >= to || !brackets.IsMatch(text))
             return text[from..to];
+        if (Tokens(number, tokenizeNow) is not { } tokens)
+        {
+            _unclassified.Value = true;
+            return text[from..to];
+        }
         StringBuilder? masked = null;
         int copied = from;
         for (int i = 0; i < tokens.Length; i += 2)

@@ -36,6 +36,91 @@ public static class CodeEditorCommands
     public const string CommentLine = "editor.action.commentLine";
 
     /// <summary>
+    /// Moves the caret to the start of the word before it, past a single separator right after a word character, such
+    /// as the dot of <c>foo.</c>. At a line's start, it goes on from the end of the line before.
+    /// </summary>
+    public const string CursorWordLeft = "cursorWordLeft";
+
+    /// <summary>Selects from the caret to where <see cref="CursorWordLeft"/> moves it.</summary>
+    public const string CursorWordLeftSelect = "cursorWordLeftSelect";
+
+    /// <summary>
+    /// Moves the caret to the end of the word after it; a single separator right before a word goes with the word. At a
+    /// line's end, it goes on from the start of the line after.
+    /// </summary>
+    public const string CursorWordEndRight = "cursorWordEndRight";
+
+    /// <summary>Selects from the caret to where <see cref="CursorWordEndRight"/> moves it.</summary>
+    public const string CursorWordEndRightSelect = "cursorWordEndRightSelect";
+
+    /// <summary>
+    /// Deletes the selection, or else back to the start of the word before the caret; an empty pair that the editor
+    /// closed goes as a whole, two or more spaces before the caret go alone, and at a line's start, the line break.
+    /// </summary>
+    public const string DeleteWordLeft = "deleteWordLeft";
+
+    /// <summary>
+    /// Deletes the selection, or else up to the end of the word after the caret; spaces after it go alone, and at a
+    /// line's end, the line break and the next line's indentation.
+    /// </summary>
+    public const string DeleteWordRight = "deleteWordRight";
+
+    /// <summary>
+    /// Without a selection, selects the word at the caret: the command's first step. Its next steps add a caret at each
+    /// next match; the editor has one caret, so with a selection it does not apply.
+    /// </summary>
+    public const string AddSelectionToNextFindMatch = "editor.action.addSelectionToNextFindMatch";
+
+    /// <summary>
+    /// Toggles the language's block comment: removes the one that the selection is in, or else puts one around the
+    /// selection, which stays on the commented text; without a selection, an empty comment goes in, with the caret in
+    /// it.
+    /// </summary>
+    public const string BlockComment = "editor.action.blockComment";
+
+    /// <summary>
+    /// Moves the selected lines, or the caret's, above the line before them, with the selection. With the language's
+    /// indentation rules and its <see cref="CodeLanguage.AutoIndent"/> at <see cref="AutoIndent.Full"/>, they take the
+    /// indentation of their new place.
+    /// </summary>
+    public const string MoveLinesUp = "editor.action.moveLinesUpAction";
+
+    /// <summary>Moves the selected lines, or the caret's, below the line after them, as <see cref="MoveLinesUp"/>.</summary>
+    public const string MoveLinesDown = "editor.action.moveLinesDownAction";
+
+    /// <summary>Copies the selected lines, or the caret's, above them; the selection stays on the lines above.</summary>
+    public const string CopyLinesUp = "editor.action.copyLinesUpAction";
+
+    /// <summary>Copies the selected lines, or the caret's, below them; the selection goes to the lines below.</summary>
+    public const string CopyLinesDown = "editor.action.copyLinesDownAction";
+
+    /// <summary>
+    /// Deletes the selected lines, or the caret's; the caret keeps its column on the line that comes up in their place.
+    /// </summary>
+    public const string DeleteLines = "editor.action.deleteLines";
+
+    /// <summary>
+    /// Inserts a line below the caret's, indented as Enter at the end of the caret's line indents, and puts the caret
+    /// on it.
+    /// </summary>
+    public const string InsertLineAfter = "editor.action.insertLineAfter";
+
+    /// <summary>Inserts a line above the caret's, as <see cref="InsertLineAfter"/> inserts one below.</summary>
+    public const string InsertLineBefore = "editor.action.insertLineBefore";
+
+    /// <summary>Indents the selected lines, or the caret's, to their next tab stop.</summary>
+    public const string IndentLines = "editor.action.indentLines";
+
+    /// <summary>Outdents the selected lines, or the caret's, to their previous tab stop.</summary>
+    public const string OutdentLines = "editor.action.outdentLines";
+
+    /// <summary>
+    /// Selects the selected lines, or the caret's, whole, up to the start of the next line; again, it takes the next
+    /// line too.
+    /// </summary>
+    public const string ExpandLineSelection = "expandLineSelection";
+
+    /// <summary>
     /// Undoes the document's last step, as <see cref="CodeDocument.Undo"/> does, and brings the caret into view.
     /// </summary>
     public const string Undo = "undo";

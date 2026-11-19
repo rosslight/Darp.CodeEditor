@@ -1,0 +1,21 @@
+{
+  "comment": "Editing rules for tests: indentation rules, and rules for Enter that moved lines follow too: doc comments as VS Code's TypeScript continues them, and an indent after a case.",
+  "brackets": [["{", "}"]],
+  "indentationRules": {
+    "increaseIndentPattern": "\\{\\s*$",
+    "decreaseIndentPattern": "^\\s*\\}",
+    "unIndentedLinePattern": "^(\\t|[ ])*[ ]\\*([ ]([^\\*]|\\*(?!/))*)?$"
+  },
+  "onEnterRules": [
+    {
+      "beforeText": { "pattern": "^\\s*/\\*\\*(?!/)([^\\*]|\\*(?!/))*$" },
+      "action": { "indent": "none", "appendText": " * " }
+    },
+    {
+      "beforeText": { "pattern": "^(\\t|[ ])*[ ]\\*([ ]([^\\*]|\\*(?!/))*)?$" },
+      "previousLineText": { "pattern": "(?=^(\\s*(/\\*\\*|\\*)).*)(?=(?!(\\s*\\*/)))" },
+      "action": { "indent": "none", "appendText": "* " }
+    },
+    { "beforeText": "^\\s*case\\b.*:\\s*$", "action": { "indent": "indent" } }
+  ]
+}

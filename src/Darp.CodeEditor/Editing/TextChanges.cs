@@ -61,12 +61,16 @@ internal sealed class TextChanges : IDisposable
             ReplaceInOneChange(edits);
         // A handler of the change may show another document, which the offsets are not of.
         if (select is { } selection && Buffer == edited)
-        {
-            _area.Selection = EditorSelection.Create(_area, selection.Anchor, selection.Caret);
-            _area.Caret.Offset = selection.Caret;
-            _area.Caret.BringCaretToView();
-        }
+            Select(selection);
         return true;
+    }
+
+    /// <summary>Selects <paramref name="selection"/>, by offsets, and brings the caret into view.</summary>
+    public void Select(TextSelection selection)
+    {
+        _area.Selection = EditorSelection.Create(_area, selection.Anchor, selection.Caret);
+        _area.Caret.Offset = selection.Caret;
+        _area.Caret.BringCaretToView();
     }
 
     /// <summary>

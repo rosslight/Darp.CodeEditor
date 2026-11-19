@@ -1,0 +1,9 @@
+{
+  "comment": "Editing rules for tests: the indentation rules and brackets that VS Code's tests of moving lines use.",
+  "comments": { "lineComment": "//", "blockComment": ["/*", "*/"] },
+  "brackets": [["{", "}"], ["[", "]"], ["(", ")"]],
+  "indentationRules": {
+    "decreaseIndentPattern": "^\\s*((?!\\S.*/[*]).*[*]/\\s*)?[})\\]]|^\\s*(case\\b.*|default):\\s*(//.*|/[*].*[*]/\\s*)?$",
+    "increaseIndentPattern": "(\\{[^}\"'`]*|\\([^)\"']*|\\[[^\\]\"']*|^\\s*(\\{\\}|\\(\\)|\\[\\]|(case\\b.*|default):))\\s*(//.*|/[*].*[*]/\\s*)?$"
+  }
+}

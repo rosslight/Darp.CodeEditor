@@ -7,9 +7,10 @@ namespace Darp.CodeEditor.Editing;
 /// <summary>
 /// The indentation of lines by a language's editing rules, as far as its <see cref="AutoIndent"/> goes, ported from VS
 /// Code's <c>enterAction.ts</c>, <c>autoIndent.ts</c> and the electric characters of <c>typeOperations.ts</c>: what
-/// Enter inserts, the indentation that a line should have, a line that outdents as the user types, and a closing
-/// bracket typed first on its line that lines up with its opening one. It sees the lines as <see cref="RuleLines"/>
-/// gives them, so its callers may ask about lines that are not, or not yet, in the document.
+/// Enter inserts, by what <see cref="EnterActions"/> gives, the indentation that a line should have, a line that
+/// outdents as the user types, and a closing bracket typed first on its line that lines up with its opening one. It
+/// sees the lines as <see cref="RuleLines"/> gives them, so its callers may ask about lines that are not, or not yet,
+/// in the document.
 /// </summary>
 /// <remarks>
 /// One call reads and matches lines, with the indentation rules and the rules for Enter, for at most
@@ -20,6 +21,7 @@ internal sealed class IndentRules
 {
     private readonly LanguageConfiguration _configuration;
     private readonly AutoIndent _autoIndent;
+    private readonly EnterActions _enter;
     private readonly Indenting _indenting;
     private readonly string _lineBreak;
     private readonly TimeProvider _time;
@@ -35,6 +37,7 @@ internal sealed class IndentRules
     {
         _configuration = configuration;
         _autoIndent = autoIndent;
+        _enter = new EnterActions(configuration, autoIndent, lineBreak);
         _indenting = new Indenting(indentation);
         _lineBreak = lineBreak;
         _time = time ?? IndentationRules.Clock;
@@ -43,14 +46,14 @@ internal sealed class IndentRules
     /// <summary>
     /// What Enter inserts at the caret, <paramref name="column"/> characters into line <paramref name="lineNumber"/>: the
     /// rules for Enter, then the brackets, then the indentation rules, each as far as <see cref="AutoIndent"/> goes.
-    /// Without any of them, the new line keeps the line's indentation up to the caret.
+    /// Without any of them, the new line keeps the line's indentation up to the caret, in its own time or a larger one.
     /// </summary>
-    public NewLine Enter(RuleLines lines, int lineNumber, int column)
+    public NewLine Enter(RuleLines lines, int lineNumber, int column, IndentationMatching? larger = null)
     {
         if (_autoIndent == AutoIndent.None)
             return new NewLine(_lineBreak, _lineBreak.Length, 0);
         // The line is read out of time too, for its indentation to keep, but its time counts.
-        IndentationMatching matching = StartMatching();
+        IndentationMatching matching = larger ?? StartMatching();
         string text = lines.Text(lineNumber);
         string indentation = text[..Math.Min(column, Leading(text))];
         if (_autoIndent >= AutoIndent.Brackets)
@@ -59,8 +62,8 @@ internal sealed class IndentRules
             {
                 (_, string before, string after) = Around(matching, lines, lineNumber, column, column);
                 string previous = lineNumber > 1 ? matching.Read(lines.Masked, lineNumber - 1) : "";
-                if (ActionFor(matching, previous, before, after) is { } action)
-                    return NewLineFor(action, indentation);
+                if (_enter.For(matching, previous, before, after, indentation) is { } enter)
+                    return NewLineFor(enter);
                 if (IndentForEnter(matching, lines, lineNumber, before, after) is { } byRules)
                 {
                     // The new line replaces the indentation of the text it takes along; on a line of whitespace only,
@@ -103,19 +106,102 @@ internal sealed class IndentRules
                 string indentation = Indentation(inherited);
                 return indentation.Length > 0 ? _indenting.Normalize(indentation) : null;
             }
-            int above = lineNumber - 1;
-            string text = "";
-            while (above >= 1 && string.IsNullOrWhiteSpace(text = matching.Read(lines.Text, above)))
-                above--;
-            string previous = above > 1 ? matching.Read(lines.Masked, above - 1) : "";
-            if (above < 1 || ActionFor(matching, previous, matching.Read(lines.Masked, above), "") is not { } action)
+            if (EnterAbove(matching, lines, lineNumber - 1) is not { } enter)
                 return null;
-            (string kept, string append) = Resolved(action, text[..Leading(text)]);
-            return kept.Length + append.Length > 0 ? kept + append : null;
+            string good = enter.Indentation + enter.Append;
+            return good.Length > 0 ? good : null;
         }
         catch (RegexMatchTimeoutException)
         {
             return null;
+        }
+    }
+
+    /// <summary>
+    /// The indentation of lines moved past the next one, as VS Code's <c>moveLinesCommand.ts</c> gives it, in one time
+    /// limit. Down, the line after <paramref name="first"/> to <paramref name="last"/> takes the first's place, they the
+    /// next; up, they take the place of the line before. A moved line takes the indentation of what Enter inserts at the
+    /// end of the closest line with text above its new place, if its text holds what Enter appends; else the one that
+    /// its new place should have. Null keeps it: for none, out of time, or where a line read was unclassified.
+    /// </summary>
+    public (string? Past, string? First) Move(RuleLines lines, int first, int last, bool down)
+    {
+        if (_autoIndent < AutoIndent.Full || _configuration.IndentationRules is null)
+            return (null, null);
+        IndentationMatching matching = StartMatching();
+        try
+        {
+            if (!down)
+                return Checked(
+                    null,
+                    Entered(first, first - 2) ?? Placed(lines.Moved(n => n == first - 1 ? first : n), first - 1)
+                );
+            int moving = last + 1;
+            string? past = Entered(moving, first - 1) ?? Placed(lines.Moved(n => n == first ? moving : n), first);
+            string text = matching.Read(lines.Text, moving);
+            RuleLines below = lines
+                .Moved(n => n == first ? moving : n - (n > first && n <= moving ? 1 : 0))
+                .Reindented(first, _indenting.Normalize(past ?? text[..Leading(text)]));
+            // Below a line of whitespace only, Enter is at the closest line with text above it.
+            int above = Leading(text) == text.Length ? first - 1 : moving;
+            return Checked(past, Entered(first, above) ?? Placed(below, first + 1));
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return (null, null);
+        }
+
+        // In the document's indentation, as the lines' new indentation goes in.
+        (string?, string?) Checked(string? past, string? moved) =>
+            lines.Unclassified ? (null, null) : (Normalized(past), Normalized(moved));
+        string? Normalized(string? indentation) => indentation is null ? null : _indenting.Normalize(indentation);
+
+        // If line `line`, as it was, holds what Enter appends at the closest line with text from `above` up, the
+        // indentation of the line that Enter inserts.
+        string? Entered(int line, int above)
+        {
+            if (EnterAbove(matching, lines, above) is not { } enter)
+                return null;
+            string prefix = enter.Action.Indent switch
+            {
+                IndentAction.IndentOutdent => enter.Indentation,
+                IndentAction.Outdent => _indenting.Unshift(enter.Indentation) + enter.Append,
+                _ => enter.Indentation + enter.Append,
+            };
+            if (!matching.Read(lines.Text, line).TrimStart().Contains(prefix.TrimStart(), StringComparison.Ordinal))
+                return null;
+            string indentation = prefix[..Leading(prefix)];
+            return matching.Decreases(matching.Read(lines.Masked, line))
+                ? _indenting.Unshift(indentation)
+                : indentation;
+        }
+
+        // The indentation that line `number` should have, by the line it inherits from and, right below it, its Enter.
+        string? Placed(RuleLines placed, int number)
+        {
+            if (Inherited(matching, placed, number, honorIntentional: true) is not { } inherited)
+                return null;
+            bool decreases = matching.Decreases(matching.Read(placed.Masked, number));
+            if (
+                inherited.Line is { } line
+                && Enumerable
+                    .Range(line, Math.Max(0, number - 1 - line))
+                    .All(n => string.IsNullOrWhiteSpace(matching.Read(placed.Text, n)))
+                && _enter.For(matching, "", matching.Read(placed.Masked, line), "", inherited.Indentation) is { } enter
+            )
+            {
+                string indentation = enter.Action.Indent switch
+                {
+                    IndentAction.Indent or IndentAction.IndentOutdent => _indenting.Shift(enter.Indentation),
+                    IndentAction.Outdent => _indenting.Unshift(enter.Indentation),
+                    _ => enter.Indentation,
+                };
+                indentation = (decreases ? _indenting.Unshift(indentation) : indentation) + enter.Action.AppendText;
+                return indentation[..Leading(indentation)];
+            }
+            if (!decreases)
+                return Indentation(inherited);
+            return inherited.Increases ? inherited.Indentation : _indenting.Unshift(inherited.Indentation);
         }
     }
 
@@ -263,7 +349,7 @@ internal sealed class IndentRules
         InheritedIndentation From(int number, bool increases)
         {
             string text = Read(number);
-            return new InheritedIndentation(text[..Leading(text)], increases);
+            return new InheritedIndentation(text[..Leading(text)], increases, number);
         }
         // The first line with text, above empty lines, takes no indentation.
         for (int prior = lineNumber - 1; prior > 0; prior--)
@@ -312,64 +398,36 @@ internal sealed class IndentRules
     }
 
     /// <summary>
-    /// What Enter does by the rules for Enter, at <see cref="AutoIndent.Advanced"/>: the first rule whose expressions
-    /// match the texts; and by the brackets: between an opening and a closing bracket, indent and outdent, and after an
-    /// opening bracket, indent. Null when none applies.
+    /// The new line for <paramref name="enter"/>: between brackets, the text after the caret goes on a line of its own,
+    /// at the indentation that Enter keeps.
     /// </summary>
-    private EnterAction? ActionFor(IndentationMatching matching, string previous, string before, string after)
+    private NewLine NewLineFor(CompleteEnterAction enter)
     {
-        if (_autoIndent >= AutoIndent.Advanced)
+        string indentation = enter.Indentation;
+        if (enter.Action.Indent == IndentAction.IndentOutdent)
         {
-            foreach (OnEnterRule rule in _configuration.OnEnterRules)
-            {
-                if (rule.Matches(matching, previous, before, after))
-                    return rule.Action;
-            }
-        }
-        if (_autoIndent < AutoIndent.Brackets || before.Length == 0)
-            return null;
-        IReadOnlyList<CharacterPair> brackets = _configuration.Brackets;
-        if (after.Length > 0 && brackets.Any(b => EndsWithOpening(before, b.Open) && StartsWithClosing(after, b.Close)))
-            return new EnterAction(IndentAction.IndentOutdent, "", 0);
-        if (brackets.Any(b => EndsWithOpening(before, b.Open)))
-            return new EnterAction(IndentAction.Indent, "", 0);
-        return null;
-    }
-
-    /// <summary>
-    /// The new line for <paramref name="action"/> after a line indented by <paramref name="indentation"/> up to the
-    /// caret: between brackets, the text after the caret goes on a line of its own, at that indentation.
-    /// </summary>
-    private NewLine NewLineFor(EnterAction action, string indentation)
-    {
-        (indentation, string append) = Resolved(action, indentation);
-        if (action.Indent == IndentAction.IndentOutdent)
-        {
-            string inner = _lineBreak + _indenting.Normalize(indentation + append);
+            string inner = _lineBreak + _indenting.Normalize(indentation + enter.Append);
             return new NewLine(inner + _lineBreak + _indenting.Normalize(indentation), inner.Length, 0);
         }
-        if (action.Indent == IndentAction.Outdent)
+        if (enter.Action.Indent == IndentAction.Outdent)
             indentation = _indenting.Unshift(indentation);
-        string inserted = _lineBreak + _indenting.Normalize(indentation + append);
+        string inserted = _lineBreak + _indenting.Normalize(indentation + enter.Append);
         return new NewLine(inserted, inserted.Length, 0);
     }
 
     /// <summary>
-    /// The indentation for <paramref name="action"/> after a line indented by <paramref name="indentation"/>, without
-    /// the characters it removes, and the text to append: a tab first to indent, which the document's indentation turns
-    /// into its own, and the document's line breaks.
+    /// What Enter does at the end of the closest line with text from line <paramref name="above"/> up, which lines of
+    /// spaces and tabs only are not. Null when there is none, or no rule or bracket applies.
     /// </summary>
-    private (string Indentation, string Append) Resolved(EnterAction action, string indentation)
+    private CompleteEnterAction? EnterAbove(IndentationMatching matching, RuleLines lines, int above)
     {
-        if (action.RemoveText > 0)
-            indentation = indentation[..Math.Max(0, indentation.Length - action.RemoveText)];
-        string append = action.Indent switch
-        {
-            IndentAction.Indent => "\t" + action.AppendText,
-            IndentAction.IndentOutdent when action.AppendText.Length == 0 => "\t",
-            _ => action.AppendText,
-        };
-        return (indentation, TextUtilities.NormalizeNewLines(append, _lineBreak));
+        string text = "";
+        while (above >= 1 && Leading(text = matching.Read(lines.Text, above)) == text.Length)
+            above--;
+        if (above < 1)
+            return null;
+        string previous = above > 1 ? matching.Read(lines.Masked, above - 1) : "";
+        return _enter.For(matching, previous, matching.Read(lines.Masked, above), "", text[..Leading(text)]);
     }
 
     /// <summary>
@@ -419,33 +477,6 @@ internal sealed class IndentRules
         );
     }
 
-    /// <summary>
-    /// Whether <paramref name="text"/> ends with <paramref name="open"/> and whitespace: a bracket that starts with a
-    /// word character, such as <c>begin</c>, starts a word.
-    /// </summary>
-    private static bool EndsWithOpening(string text, string open)
-    {
-        string trimmed = text.TrimEnd();
-        int start = trimmed.Length - open.Length;
-        return trimmed.EndsWith(open, StringComparison.Ordinal)
-            && (!IsAsciiWordCharacter(open[0]) || start == 0 || !IsAsciiWordCharacter(trimmed[start - 1]));
-    }
-
-    /// <summary>Whether <paramref name="text"/> starts with whitespace and <paramref name="close"/>, likewise.</summary>
-    private static bool StartsWithClosing(string text, string close)
-    {
-        string trimmed = text.TrimStart();
-        return trimmed.StartsWith(close, StringComparison.Ordinal)
-            && (
-                !IsAsciiWordCharacter(close[^1])
-                || close.Length == trimmed.Length
-                || !IsAsciiWordCharacter(trimmed[close.Length])
-            );
-    }
-
-    /// <summary>A word character of JavaScript's regular expressions, as the rules' <c>\b</c> means it.</summary>
-    private static bool IsAsciiWordCharacter(char c) => char.IsAsciiLetterOrDigit(c) || c == '_';
-
     /// <summary>The length of the whitespace that <paramref name="text"/> starts with.</summary>
     internal static int Leading(string text)
     {
@@ -459,5 +490,7 @@ internal sealed class IndentRules
 /// <summary>What Enter inserts at the caret: the text, where the caret goes in it, and how much after the caret it replaces.</summary>
 internal readonly record struct NewLine(string Text, int Caret, int Replaced);
 
-/// <summary>An indentation that the lines above give, and whether it is one level more.</summary>
-internal readonly record struct InheritedIndentation(string Indentation, bool Increases);
+/// <summary>
+/// An indentation that the lines above give, whether it is one level more, and the line that gives it, if one does.
+/// </summary>
+internal readonly record struct InheritedIndentation(string Indentation, bool Increases, int? Line = null);

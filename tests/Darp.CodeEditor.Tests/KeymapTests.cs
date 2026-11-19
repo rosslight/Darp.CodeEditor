@@ -1,7 +1,6 @@
 using Avalonia.Input;
 using Avalonia.VisualTree;
 using Darp.CodeEditor.Commands;
-using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.Search;
 using Keys = Avalonia.Input.Key;
 
@@ -281,10 +280,7 @@ public sealed class KeymapTests(UiFixture ui)
             using EditorWindow window = MarkedText.Show("|", CodeLanguage.Json);
             // The editor loads the grammar in the background, once; a switch before it is ready loads it again, and
             // until then the [ pair, which stays out of strings, doesn't close.
-            BackgroundTextMateHighlighter highlighter = window
-                .TextView.LineTransformers.OfType<BackgroundTextMateHighlighter>()
-                .Single();
-            await Wait.UntilAsync(() => highlighter.Grammar is not null);
+            await window.TokensKnownAsync();
             CodeEditor editor = window.Editor;
             editor.Keymap = CodeEditorKeymap.Default.With(
                 new CodeEditorKeyBinding("ctrl+k f", CodeEditorCommands.Find)

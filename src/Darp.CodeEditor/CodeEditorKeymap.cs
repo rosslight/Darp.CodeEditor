@@ -66,6 +66,17 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+/ (cmd+/)</term><description><see cref="CodeEditorCommands.CommentLine"/></description></item>
     /// <item><term>ctrl+z (cmd+z)</term><description><see cref="CodeEditorCommands.Undo"/></description></item>
     /// <item><term>ctrl+y, ctrl+shift+z (shift+cmd+z)</term><description><see cref="CodeEditorCommands.Redo"/></description></item>
+    /// <item><term>ctrl+left, ctrl+shift+left (alt+left, shift+alt+left)</term><description><see cref="CodeEditorCommands.CursorWordLeft"/>, <see cref="CodeEditorCommands.CursorWordLeftSelect"/></description></item>
+    /// <item><term>ctrl+right, ctrl+shift+right (alt+right, shift+alt+right)</term><description><see cref="CodeEditorCommands.CursorWordEndRight"/>, <see cref="CodeEditorCommands.CursorWordEndRightSelect"/></description></item>
+    /// <item><term>ctrl+backspace, ctrl+delete (alt+backspace, alt+delete)</term><description><see cref="CodeEditorCommands.DeleteWordLeft"/>, <see cref="CodeEditorCommands.DeleteWordRight"/></description></item>
+    /// <item><term>ctrl+d (cmd+d)</term><description><see cref="CodeEditorCommands.AddSelectionToNextFindMatch"/></description></item>
+    /// <item><term>alt+up, alt+down</term><description><see cref="CodeEditorCommands.MoveLinesUp"/>, <see cref="CodeEditorCommands.MoveLinesDown"/></description></item>
+    /// <item><term>shift+alt+up, shift+alt+down (Linux: ctrl+shift+alt+up, ctrl+shift+alt+down)</term><description><see cref="CodeEditorCommands.CopyLinesUp"/>, <see cref="CodeEditorCommands.CopyLinesDown"/></description></item>
+    /// <item><term>ctrl+shift+k (shift+cmd+k)</term><description><see cref="CodeEditorCommands.DeleteLines"/></description></item>
+    /// <item><term>ctrl+enter, ctrl+shift+enter (cmd+enter, shift+cmd+enter)</term><description><see cref="CodeEditorCommands.InsertLineAfter"/>, <see cref="CodeEditorCommands.InsertLineBefore"/></description></item>
+    /// <item><term>ctrl+], ctrl+[ (cmd+], cmd+[)</term><description><see cref="CodeEditorCommands.IndentLines"/>, <see cref="CodeEditorCommands.OutdentLines"/></description></item>
+    /// <item><term>ctrl+l (cmd+l)</term><description><see cref="CodeEditorCommands.ExpandLineSelection"/></description></item>
+    /// <item><term>shift+alt+a (Linux: ctrl+shift+a)</term><description><see cref="CodeEditorCommands.BlockComment"/></description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default { get; } = new(DefaultBindings(OperatingSystem.IsMacOS()));
@@ -142,5 +153,36 @@ public sealed class CodeEditorKeymap
         if (!mac)
             yield return new("ctrl+y", CodeEditorCommands.Redo);
         yield return new($"{command}+shift+z", CodeEditorCommands.Redo);
+        string words = mac ? "alt" : "ctrl";
+        yield return new($"{words}+left", CodeEditorCommands.CursorWordLeft);
+        yield return new($"{words}+shift+left", CodeEditorCommands.CursorWordLeftSelect);
+        yield return new($"{words}+right", CodeEditorCommands.CursorWordEndRight);
+        yield return new($"{words}+shift+right", CodeEditorCommands.CursorWordEndRightSelect);
+        yield return new($"{words}+backspace", CodeEditorCommands.DeleteWordLeft);
+        yield return new($"{words}+delete", CodeEditorCommands.DeleteWordRight);
+        yield return new($"{command}+d", CodeEditorCommands.AddSelectionToNextFindMatch);
+        foreach (CodeEditorKeyBinding binding in LineBindings(mac, linux: !mac && OperatingSystem.IsLinux()))
+            yield return binding;
+    }
+
+    /// <summary>
+    /// The keys of the commands on whole lines and of the block comment: Linux has keys of its own where its desktops
+    /// take the others.
+    /// </summary>
+    internal static IEnumerable<CodeEditorKeyBinding> LineBindings(bool mac, bool linux)
+    {
+        string command = mac ? "cmd" : "ctrl";
+        string copy = linux ? "ctrl+shift+alt" : "shift+alt";
+        yield return new("alt+up", CodeEditorCommands.MoveLinesUp);
+        yield return new("alt+down", CodeEditorCommands.MoveLinesDown);
+        yield return new($"{copy}+up", CodeEditorCommands.CopyLinesUp);
+        yield return new($"{copy}+down", CodeEditorCommands.CopyLinesDown);
+        yield return new($"{command}+shift+k", CodeEditorCommands.DeleteLines);
+        yield return new($"{command}+enter", CodeEditorCommands.InsertLineAfter);
+        yield return new($"{command}+shift+enter", CodeEditorCommands.InsertLineBefore);
+        yield return new($"{command}+]", CodeEditorCommands.IndentLines);
+        yield return new($"{command}+[", CodeEditorCommands.OutdentLines);
+        yield return new($"{command}+l", CodeEditorCommands.ExpandLineSelection);
+        yield return new(linux ? "ctrl+shift+a" : "shift+alt+a", CodeEditorCommands.BlockComment);
     }
 }

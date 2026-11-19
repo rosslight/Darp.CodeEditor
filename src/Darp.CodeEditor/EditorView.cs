@@ -46,7 +46,6 @@ internal sealed class EditorView : IDisposable
     private readonly IDisposable[] _features;
 
     private readonly TextChanges _changes;
-    private readonly EditingHelpers _helpers;
     private readonly AutoClosingPairs _pairs;
     private readonly Typing _typing;
     private readonly Clipboard _clipboard;
@@ -69,7 +68,6 @@ internal sealed class EditorView : IDisposable
         CodeDocument document = context.Document;
         Highlighter = new BackgroundTextMateHighlighter(area.TextView, area.Document, context.Editor.Dispatcher, null);
         _changes = new TextChanges(area);
-        _helpers = new EditingHelpers(area, document, _changes);
         _pairs = new AutoClosingPairs(area, document, Highlighter, _changes, context.Options);
         _typing = new Typing(area, document, Highlighter, _changes, _pairs);
         _clipboard = new Clipboard(area, document);
@@ -87,10 +85,15 @@ internal sealed class EditorView : IDisposable
         [
             Highlighter,
             _changes,
-            _helpers,
+            new UndoCommands(area, document),
+            new Comments(area, document, _changes),
+            new LineCommands(area, document, Highlighter, _changes),
             _pairs,
             _typing,
             _clipboard,
+            // After the clipboard: its commands run first.
+            new LineClipboard(area, document, _changes, _clipboard, context.Options),
+            new WordEditing(area, _changes, _pairs),
             _brackets,
             _whitespace,
             _squiggles,
@@ -117,8 +120,8 @@ internal sealed class EditorView : IDisposable
 
     /// <summary>
     /// A key, before AvaloniaEdit's: first the keymap's commands, as <see cref="KeyResolution"/> resolves the key, then
-    /// Escape, which dismisses, and in the text the keys of completion's list, of signature help, of a snippet's stops
-    /// and of typing.
+    /// Escape, which dismisses, and in the text the keys of completion's list, of signature help, of a snippet's stops,
+    /// of typing and of the caret.
     /// </summary>
     /// <returns>Whether the key was the view's.</returns>
     public bool OnKeyDown(KeyEventArgs e)
@@ -157,6 +160,7 @@ internal sealed class EditorView : IDisposable
                 || _signatureHelp.OnKeyDown(e)
                 || _snippets.OnKeyDown(e)
                 || _typing.OnKeyDown(e)
+                || CaretKeys.OnKeyDown(_context.Area, e)
             );
     }
 
@@ -184,7 +188,8 @@ internal sealed class EditorView : IDisposable
 
     public void Copy() => _clipboard.Copy();
 
-    public void Paste() => _clipboard.Paste();
+    /// <summary>As the key pastes, through the command, whose bindings paste a copied line as a line.</summary>
+    public void Paste() => AvaloniaEdit.ApplicationCommands.Paste.Execute(null, _context.Area);
 
     /// <summary>
     /// Ends the wait for a sequence's second stroke, as a click, the focus leaving or a new keymap does.
