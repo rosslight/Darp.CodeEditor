@@ -74,7 +74,9 @@ internal sealed class TextChanges : IDisposable
     /// <summary>
     /// Makes <paramref name="edits"/> as <see cref="Apply(IReadOnlyList{TextEdit}, TextSelection?)"/> does, then puts
     /// back the selection as it was before them, <paramref name="moved"/> characters further: the caret, the
-    /// selection's ends, or each line of a rectangle selection; brought into view when it moved.
+    /// selection's ends, or each line of a rectangle selection; brought into view when it moved forward. Moved back, as
+    /// over a deleted pair, it stays in view, and bringing it there would lay out the view again: it took Backspace on a
+    /// pair from 13 to 22 ms.
     /// </summary>
     /// <returns>Whether they went in.</returns>
     public bool Apply(IReadOnlyList<TextEdit> edits, int moved)
@@ -101,7 +103,7 @@ internal sealed class TextChanges : IDisposable
             _area.Selection = EditorSelection.Create(_area, anchor + moved, caret + moved);
             _area.Caret.Offset = caret + moved;
         }
-        if (moved != 0)
+        if (moved > 0)
             _area.Caret.BringCaretToView();
         return true;
     }
