@@ -136,8 +136,10 @@ keys to them (design.md #113). A `CodeEditorKeymap` is immutable and can be shar
   shows the first; a second stroke that completes nothing counts as an ordinary key. A click, the keyboard leaving
   the editor, another document or another keymap ends the wait.
 - **Where several bindings share a key,** the latest binding whose command applies runs. A command applies only where
-  it can act: those on the text while the text has the keyboard, and those that change the text or ask a server not
-  in a read-only editor. Otherwise the key goes on to the binding before it, and then as an ordinary key.
+  it can act: those on the text while the text has the keyboard, those that change the text or ask a server not in a
+  read-only editor, and each only with something to act on, such as undo with a step to undo, comments in a language
+  that has them, or completion with a server that completes. Otherwise the key goes on to the binding before it, and
+  then as an ordinary key. A key that starts several sequences waits for the second stroke of any of them.
 - **Not in the keymap:** the keys inside open popups (Up, Down, Page Up, Page Down, Enter and Tab in completion's list,
   Up and Down while signature help shows several signatures), Tab and Shift+Tab between a snippet's stops, except
   Shift+Tab on the first stop, Escape, which closes completion, signature help, a snippet's stops, the hover and the
@@ -151,7 +153,7 @@ The default keys on Windows and Linux; macOS in brackets where it differs beyond
 | Ctrl+Space, Ctrl+I (macOS also Alt+Escape) | `editor.action.triggerSuggest` | completion |
 | Ctrl+Shift+Space | `editor.action.triggerParameterHints` | signature help |
 | Ctrl+F, Ctrl+H (macOS: Cmd+Alt+F for replace) | `actions.find`, `editor.action.startFindReplaceAction` | the search and the replace bar; a read-only editor opens the search bar for both |
-| F3, Shift+F3 | `editor.action.nextMatchFindAction`, `editor.action.previousMatchFindAction` | the next and the previous match |
+| F3, Shift+F3 (macOS also Cmd+G, Shift+Cmd+G) | `editor.action.nextMatchFindAction`, `editor.action.previousMatchFindAction` | the next and the previous match |
 | Ctrl+/ | `editor.action.commentLine` | toggles line comments, or block comments in a language without line comments |
 | Ctrl+Z; Ctrl+Y, Ctrl+Shift+Z (macOS: Cmd+Shift+Z only) | `undo`; `redo` | the document's `Undo` and `Redo`; nothing in a read-only editor |
 
@@ -161,9 +163,11 @@ default applies: 2 spaces for YAML and 4 otherwise.
 
 **Line breaks** belong to the document too, one per document, as a VS Code text model has its EOL: `\r\n` when most of
 the initial text's line breaks are, `\n` otherwise, and the operating system's in a text without one, as VS Code's
-`files.eol` of `auto`. Setting `Text` detects it again; other edits keep it. Enter, paste, completion's items and their
-additional edits, snippets and the search bar's Replace put it in; Copy and Cut use `\r\n` on Windows. Text that the
-app sets or replaces goes in as it is.
+`files.eol` of `auto`. Setting `Text` detects it again; other edits keep it. Enter, typed text, paste, drops,
+completion's items and their additional edits, snippets and the search bar's Replace put it in; Copy and Cut use `\r\n`
+on Windows. Paste and drops keep AvaloniaEdit's own conversions, such as tabs that become spaces in a document that
+indents with spaces, and its clipboard events; the line breaks are corrected after it, in the same undo step. Text
+that the app sets or replaces goes in as it is.
 
 **Look.** The text and everything around it are styled differently, as in Monaco and CodeMirror:
 
@@ -901,9 +905,10 @@ with Skia:
   whose commands don't apply, as in a read-only editor, reaches the app; AvaloniaEdit's Ctrl+I and undo keys give way
   to the keymap's. A caret move by an arrow key resolves through the keymap first: in 5,000 lines, with the frame
   after it, it takes 10.1 ms, as before the keymap (BenchmarkDotNet, `CaretMoveBenchmarks`);
-- one line break per document, detected from the text when it is created or set: Enter, paste, completion's text and
-  additional edits, snippets and Replace put it in, also on a line that ends in another, and Copy and Cut take it, or
-  `\r\n` on Windows. The tests run with either line break as the system's (CONTRIBUTING.md);
+- one line break per document, detected from the text when it is created or set, also when that changes no text:
+  Enter, typed text, paste, drops, completion's text and additional edits, snippets and Replace put it in, also on a
+  line that ends in another and from a regular expression's substitutions, and Copy and Cut take it, or `\r\n` on
+  Windows. The tests run with either line break as the system's (CONTRIBUTING.md);
 - the bracket next to the caret and its match are boxed in the theme's colors, ignoring brackets in strings and
   comments by the lines' tokens, also when an edit changes them out of view. The search for a match reads at most
   100,000 characters, in blocks without a string per line: about 0.5 ms with six brackets on every line, the most a
