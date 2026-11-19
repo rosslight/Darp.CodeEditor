@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using Avalonia.Input;
 using AvaloniaEdit;
+using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using Darp.CodeEditor.Commands;
 using Darp.CodeEditor.Editing;
@@ -173,9 +174,11 @@ public sealed class LineCommandTests(UiFixture ui)
             );
             DocumentOf(window).Indentation = Indentation.Spaces(4);
 
+            await TokensKnownAsync(window);
             window.Press(Keys.Down, KeyModifiers.Alt);
             MarkedText.Of(window).ShouldBe("{\n    \"b\": {\n        \"a\": |1,\n        \"c\": 2\n    }\n}");
 
+            await TokensKnownAsync(window);
             window.Press(Keys.Up, KeyModifiers.Alt);
             MarkedText.Of(window).ShouldBe("{\n    \"a\": |1,\n    \"b\": {\n        \"c\": 2\n    }\n}");
         });
@@ -210,11 +213,8 @@ public sealed class LineCommandTests(UiFixture ui)
             await CodeLanguage.Json.Loaded;
             using EditorWindow window = MarkedText.Show("{\n    |\"a\": 1,\n    \"b\": 2 // {\n}", CodeLanguage.Json);
             DocumentOf(window).Indentation = Indentation.Spaces(4);
-            BackgroundTextMateHighlighter highlighter = window
-                .TextView.LineTransformers.OfType<BackgroundTextMateHighlighter>()
-                .Single();
             // The comment is known by the line's tokens.
-            await Wait.UntilAsync(() => highlighter.ExactTokensOf(3, tokenizeNow: false) is not null);
+            await TokensKnownAsync(window);
 
             window.Press(Keys.Down, KeyModifiers.Alt);
 
@@ -522,6 +522,23 @@ public sealed class LineCommandTests(UiFixture ui)
 
     internal static IReadOnlyList<string> Commands(CodeEditorKeymap keymap, Keys key, KeyModifiers modifiers) =>
         KeyResolution.Of(keymap, null, KeymapTests.Key(key, modifiers)).Commands;
+
+    /// <summary>
+    /// Waits until the tokens of every line are known, so that a move reads them as they are, not by tokenizing them in
+    /// the short time it has, which a slow machine runs out of: the lines would keep their indentation.
+    /// </summary>
+    private static Task TokensKnownAsync(EditorWindow window)
+    {
+        BackgroundTextMateHighlighter highlighter = window
+            .TextView.LineTransformers.OfType<BackgroundTextMateHighlighter>()
+            .Single();
+        TextDocument text = window.TextView.Document;
+        return Wait.UntilAsync(() =>
+            Enumerable
+                .Range(1, text.LineCount)
+                .All(line => highlighter.ExactTokensOf(line, tokenizeNow: false) is not null)
+        );
+    }
 
     private static CodeDocument DocumentOf(EditorWindow window) =>
         window.Editor.Document ?? throw new InvalidOperationException("No document.");
