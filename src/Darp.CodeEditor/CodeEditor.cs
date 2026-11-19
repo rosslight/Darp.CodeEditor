@@ -218,6 +218,12 @@ public class CodeEditor : TemplatedControl
         nameof(FindCloseOnResult)
     );
 
+    /// <summary>Defines the <see cref="MatchBrackets"/> property.</summary>
+    public static readonly StyledProperty<MatchBrackets> MatchBracketsProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        MatchBrackets
+    >(nameof(MatchBrackets), defaultValue: MatchBrackets.Always);
+
     /// <summary>Defines the <see cref="FindHistory"/> property.</summary>
     public static readonly StyledProperty<SearchHistory?> FindHistoryProperty = AvaloniaProperty.Register<
         CodeEditor,
@@ -673,6 +679,18 @@ public class CodeEditor : TemplatedControl
     }
 
     /// <summary>
+    /// Which brackets the editor highlights at the caret, while nothing is selected, as VS Code's
+    /// <c>editor.matchBrackets</c>: the bracket next to the caret and its match, and with
+    /// <see cref="MatchBrackets.Always"/>, elsewhere the innermost pair around the caret. Default:
+    /// <see cref="MatchBrackets.Always"/>, as in VS Code.
+    /// </summary>
+    public MatchBrackets MatchBrackets
+    {
+        get => GetValue(MatchBracketsProperty);
+        set => SetValue(MatchBracketsProperty, value);
+    }
+
+    /// <summary>
     /// What the search bar's query recalls with Up and Down, as VS Code's find history: it takes the query once the user
     /// has paused for half a second. Default: one history that every editor shares, as VS Code's
     /// <c>editor.find.history</c> by default keeps one for the editors of a workspace. Set a history of the app's own to
@@ -1101,6 +1119,8 @@ public class CodeEditor : TemplatedControl
             _selectionHighlights?.Update();
         else if (change.Property == OccurrencesHighlightProperty && OccurrencesHighlight == OccurrencesHighlight.Off)
             _occurrences?.Stop();
+        else if (change.Property == MatchBracketsProperty)
+            _brackets?.Refresh();
     }
 
     /// <summary>
@@ -1208,7 +1228,7 @@ public class CodeEditor : TemplatedControl
         TextView textView = part.TextArea.TextView;
         _highlighter = new BackgroundTextMateHighlighter(textView, buffer, Dispatcher, null);
         _helpers = new EditingHelpers(this, part.TextArea, document, _highlighter);
-        _brackets = new BracketHighlighter(part.TextArea, document, _highlighter) { Colors = _colors };
+        _brackets = new BracketHighlighter(this, part.TextArea, document, _highlighter) { Colors = _colors };
         _whitespace = new WhitespaceLayer(part.TextArea) { Colors = _colors };
         _squiggles = new SquiggleLayer(part.TextArea, document) { Colors = _colors };
         _semantic = new SemanticHighlighter(textView, document, Dispatcher) { Theme = _theme };

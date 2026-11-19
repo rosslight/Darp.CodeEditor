@@ -6,7 +6,10 @@ using Darp.CodeEditor.Loading;
 
 namespace Darp.CodeEditor.Tests;
 
-/// <summary>The bracket next to the caret and its match, boxed in the color theme's bracket match colors.</summary>
+/// <summary>
+/// The bracket next to the caret and its match, or else the pair around the caret, boxed in the color theme's bracket
+/// match colors.
+/// </summary>
 [Collection(UiFixture.Collection)]
 public sealed class BracketMatchingTests(UiFixture ui)
 {
@@ -40,13 +43,33 @@ public sealed class BracketMatchingTests(UiFixture ui)
             window.RenderAndCountPixels(s_bracketMatch, new TextRange(other, 1)).ShouldBe(0);
         });
 
-    [Fact]
-    public Task Away_from_brackets_nothing_is_boxed() =>
+    /// <summary>
+    /// Away from brackets, the innermost pair around the caret is boxed, as VS Code's <c>editor.matchBrackets</c> does
+    /// by default; with <see cref="MatchBrackets.Near"/> only a bracket next to the caret, and with
+    /// <see cref="MatchBrackets.Never"/> none.
+    /// </summary>
+    [Theory]
+    [InlineData(MatchBrackets.Always, true, true)]
+    [InlineData(MatchBrackets.Near, false, true)]
+    [InlineData(MatchBrackets.Never, false, false)]
+    public Task Away_from_brackets_the_pair_around_the_caret_is_boxed_as_the_option_says(
+        MatchBrackets match,
+        bool around,
+        bool next
+    ) =>
         _ui.Run(async () =>
         {
-            using EditorWindow window = await ShowColored("[1, 2|, 3]");
+            using EditorWindow window = await ShowColored("[1, [2], |3]");
+            window.Editor.MatchBrackets.ShouldBe(MatchBrackets.Always);
 
-            window.RenderAndCountPixels(s_bracketMatch).ShouldBe(0);
+            window.Editor.MatchBrackets = match;
+
+            (window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)) > 0).ShouldBe(around);
+            (window.RenderAndCountPixels(s_bracketMatch, new TextRange(10, 1)) > 0).ShouldBe(around);
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(4, 1)).ShouldBe(0);
+            window.Editor.Selection = new TextSelection(4);
+            (window.RenderAndCountPixels(s_bracketMatch, new TextRange(6, 1)) > 0).ShouldBe(next);
+            window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)).ShouldBe(0);
         });
 
     /// <summary>The search for a match reads a bounded number of characters, so it can't stall the UI thread.</summary>
