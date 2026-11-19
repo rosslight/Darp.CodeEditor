@@ -1,6 +1,8 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using AvaloniaEdit.Rendering;
+using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.LanguageClient;
 using Darp.CodeEditor.Popups;
 
@@ -11,7 +13,8 @@ namespace Darp.CodeEditor.Completion;
 /// line, its labels lined up with the word; and the selected item's details in a popup of their own beside it, as
 /// <see cref="PopupPlacement.Beside"/> places them. Both are in the color theme's suggest colors, and neither takes the
 /// keyboard focus. Their edges away from the word resize them: the list to whole rows, and both keep the size the user
-/// gave them while the editor shows the document.
+/// gave them while the editor shows the document. Rows are as high as the text view's lines, and labels and code take
+/// the editor's font.
 /// </summary>
 internal sealed class CompletionView
 {
@@ -30,6 +33,8 @@ internal sealed class CompletionView
     /// <summary>The frames' border, on each side.</summary>
     private const double Border = 1;
 
+    private readonly TemplatedControl _editor;
+    private readonly TextView _textView;
     private readonly CompletionListBox _list = new();
     private readonly PopupScroller _details = new();
     private readonly EditorPopup _listPopup;
@@ -41,11 +46,13 @@ internal sealed class CompletionView
     /// <summary>The details' most height, as the user resized them; null for as tall as the list's rows.</summary>
     private double? _detailsHeight;
 
-    /// <summary>Where the list is: the text view, and the box of the word's first character in it; null while closed.</summary>
-    private (Visual RelativeTo, Func<Rect> Word)? _place;
+    /// <summary>Where the word that the list completes starts; null while the list is closed.</summary>
+    private int? _wordStart;
 
-    public CompletionView(TemplatedControl editor)
+    public CompletionView(TemplatedControl editor, TextView textView)
     {
+        _editor = editor;
+        _textView = textView;
         _listPopup = new EditorPopup(editor, _list, "CompletionList", PopupSide.Below);
         _detailsPopup = new EditorPopup(editor, _details, "CompletionDetails") { IsResizable = true };
         _detailsPopup.Frame.Padding = new Thickness(6, 4, 2, 4);
@@ -68,51 +75,49 @@ internal sealed class CompletionView
     /// <summary>The list, for the rows that show.</summary>
     public CompletionListBox List => _list;
 
-    /// <summary>Shows <paramref name="items"/>, with <paramref name="selected"/> selected and in view.</summary>
-    /// <param name="items">The items.</param>
-    /// <param name="selected">The selected item's index.</param>
-    /// <param name="look">The editor's font, for the labels, and the popups' colors.</param>
-    /// <param name="icons">The icons' colors; none while the color theme loads.</param>
-    /// <param name="rowHeight">The height of a row: the editor's line height.</param>
-    public void Show(
-        IReadOnlyList<ShownItem> items,
-        int selected,
-        PopupLook look,
-        SymbolIconColors? icons,
-        double rowHeight
-    )
+    /// <summary>The popups' colors, from the color theme once it is loaded.</summary>
+    public PopupColors Colors { get; set; } = PopupColors.Default;
+
+    /// <summary>The icons' colors; none while the color theme loads.</summary>
+    public SymbolIconColors? Icons { get; set; }
+
+    /// <summary>How the popups look: the editor's font for code, and their colors.</summary>
+    public PopupLook Look => new(_editor.FontFamily, _editor.FontSize, Colors);
+
+    /// <summary>
+    /// Shows <paramref name="items"/>, with <paramref name="selected"/> selected and in view, at the word that starts at
+    /// <paramref name="wordStart"/>.
+    /// </summary>
+    public void Show(IReadOnlyList<ShownItem> items, int selected, int wordStart)
     {
+        PopupLook look = Look;
         Paint(look.Colors);
         _listPopup.IsResizable = true;
         _list.Width = _width - 2 * Border;
         _list.MaxRows = _rows;
-        _list.Show(items, selected, look, icons, rowHeight);
+        _list.Show(items, selected, look, Icons, _textView.DefaultLineHeight);
+        Open(wordStart);
     }
 
-    /// <summary>Shows <paramref name="message"/>, such as "No suggestions.", half as wide as the list, without details.</summary>
-    public void ShowMessage(string message, PopupLook look, double rowHeight)
+    /// <summary>
+    /// Shows <paramref name="message"/>, such as "No suggestions.", half as wide as the list, without details, at the word
+    /// that starts at <paramref name="wordStart"/>.
+    /// </summary>
+    public void ShowMessage(string message, int wordStart)
     {
+        PopupLook look = Look;
         Paint(look.Colors);
         // A message keeps its size, as in VS Code.
         _listPopup.IsResizable = false;
         _list.Width = DefaultWidth / 2 - 2 * Border;
-        _list.ShowMessage(message, look, rowHeight);
+        _list.ShowMessage(message, look, _textView.DefaultLineHeight);
         ShowDetails(null);
-    }
-
-    /// <summary>Opens the list at <paramref name="word"/>, the box of the word's first character, or moves it there.</summary>
-    public void Open(Visual relativeTo, Func<Rect> word)
-    {
-        _place = (relativeTo, word);
-        // Left of the word by the frame's border and a row's icon, so that the labels line up with the word.
-        _listPopup.Show(relativeTo, () => word().Translate(new Vector(-(Border + CompletionListBox.LabelInset), 0)));
-        if (_details.Child is not null)
-            _detailsPopup.ShowBeside(_listPopup, _detailsWidth);
+        Open(wordStart);
     }
 
     public void Hide()
     {
-        _place = null;
+        _wordStart = null;
         _detailsPopup.Hide();
         _listPopup.Hide();
     }
@@ -136,16 +141,32 @@ internal sealed class CompletionView
             _detailsPopup.ShowBeside(_listPopup, _detailsWidth);
     }
 
+    /// <summary>Opens the list at the word that starts at <paramref name="wordStart"/>, or moves it there.</summary>
+    private void Open(int wordStart)
+    {
+        _wordStart = wordStart;
+        // Left of the word by the frame's border and a row's icon, so that the labels line up with the word.
+        _listPopup.Show(
+            _textView,
+            () =>
+                TextViewBoxes
+                    .CharacterAt(_textView, Math.Min(wordStart, _textView.Document.TextLength))
+                    .Translate(new Vector(-(Border + CompletionListBox.LabelInset), 0))
+        );
+        if (_details.Child is not null)
+            _detailsPopup.ShowBeside(_listPopup, _detailsWidth);
+    }
+
     /// <summary>The list takes the width dragged to, and as many whole rows as fit the height.</summary>
     private void OnListResized(Size size)
     {
-        if (_place is not var (relativeTo, word))
+        if (_wordStart is not { } wordStart)
             return;
         _width = Math.Max(MinWidth, size.Width);
         _rows = Math.Max(1, (int)Math.Round((size.Height - 2 * Border) / _list.RowHeight));
         _list.Width = _width - 2 * Border;
         _list.MaxRows = _rows;
-        Open(relativeTo, word);
+        Open(wordStart);
     }
 
     private void OnDetailsResized(Size size)
