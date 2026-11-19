@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Input;
 using AvaloniaEdit;
+using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using Darp.CodeEditor.Commands;
 using Keys = Avalonia.Input.Key;
@@ -131,6 +132,28 @@ public sealed class WordEditingTests(UiFixture ui)
             window.Press(Keys.Right, Words | KeyModifiers.Shift);
 
             textArea.Selection.ShouldBeOfType<RectangleSelection>();
+        });
+
+    /// <summary>As a command that does not apply, it leaves its key to the binding before it.</summary>
+    [Fact]
+    public Task Ctrl_Backspace_on_a_read_only_selection_lets_its_key_go_on() =>
+        _ui.Run(async () =>
+        {
+            await CodeLanguage.Json.Loaded;
+            using EditorWindow window = MarkedText.Show("a«bc»d", CodeLanguage.Json);
+            TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+            var protectedText = new TextSegmentReadOnlySectionProvider<TextSegment>(textArea.Document);
+            protectedText.Segments.Add(new TextSegment { StartOffset = 1, Length = 2 });
+            textArea.ReadOnlySectionProvider = protectedText;
+            string words = OperatingSystem.IsMacOS() ? "alt" : "ctrl";
+            window.Editor.Keymap = new CodeEditorKeymap([
+                new CodeEditorKeyBinding($"{words}+backspace", CodeEditorCommands.CommentLine),
+                .. CodeEditorKeymap.Default.Bindings,
+            ]);
+
+            window.Press(Keys.Back, Words);
+
+            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe("// abcd");
         });
 
     [Fact]

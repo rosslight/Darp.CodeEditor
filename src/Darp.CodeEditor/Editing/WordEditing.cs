@@ -98,8 +98,10 @@ internal sealed class WordEditing : IEditorFeature
     {
         if (!_area.Selection.IsEmpty)
         {
+            // AvaloniaEdit leaves read-only parts of the selection.
+            int length = Buffer.TextLength;
             _changes.Run(EditStep.Own, () => _area.Selection.ReplaceSelectionWithText(""));
-            return true;
+            return Buffer.TextLength != length;
         }
         if (left && _pairs.DeletePair())
             return true;
