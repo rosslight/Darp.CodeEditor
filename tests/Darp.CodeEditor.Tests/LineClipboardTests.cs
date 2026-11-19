@@ -142,6 +142,21 @@ public sealed class LineClipboardTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe("ab\ncdab\n|");
         });
 
+    /// <summary>The editor shows and edits a long line's first part only: its key goes on, and cuts nothing.</summary>
+    [Fact]
+    public Task Cut_without_a_selection_leaves_a_line_with_a_hidden_tail() =>
+        _ui.Run(async () =>
+        {
+            string line = new('x', VisibleTextLimit + 500);
+            using EditorWindow window = MarkedText.Show("a\n|" + line, CodeLanguage.PlainText);
+            await Clipboard(window).SetTextAsync("kept");
+
+            window.Press(Key.X, EditorWindow.Command);
+
+            DocumentOf(window).Text.ShouldBe("a\n" + line);
+            (await ClipboardText(window)).ShouldBe("kept");
+        });
+
     [Fact]
     public Task Without_EmptySelectionClipboard_copy_and_cut_need_a_selection_and_lines_paste_as_text() =>
         _ui.Run(async () =>
@@ -184,6 +199,8 @@ public sealed class LineClipboardTests(UiFixture ui)
             changed.TrySetResult();
         }
     }
+
+    private const int VisibleTextLimit = Darp.CodeEditor.Editing.VisibleText.LineLimit;
 
     private static Task<string?> ClipboardText(EditorWindow window) => Clipboard(window).TryGetTextAsync();
 
