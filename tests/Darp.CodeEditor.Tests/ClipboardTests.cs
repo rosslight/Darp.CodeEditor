@@ -208,6 +208,40 @@ public sealed class ClipboardTests(UiFixture ui)
             window.Editor.Document.ShouldNotBeNull().Text.ShouldBe("abcdef");
         });
 
+    /// <summary>A handler of the change that the line breaks make may show another, shorter document.</summary>
+    [Fact]
+    public Task A_drop_whose_change_switches_the_document_leaves_the_other_one_alone() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("a\r\nb\r\n|c\nd", CodeLanguage.PlainText);
+            CodeDocument dropped = window.Editor.Document.ShouldNotBeNull();
+            CodeDocument other = CodeDocument.Create(CodeLanguage.PlainText, "z");
+            int changes = 0;
+            // The drop's insertion, then the change of its line breaks.
+            dropped.TextChanged += (_, _) =>
+            {
+                if (++changes == 2)
+                    window.Editor.Document = other;
+            };
+            using var data = new DataTransfer();
+            var item = new DataTransferItem();
+            item.Set(DataFormat.Text, "x\ny");
+            data.Add(item);
+            Point at = window.PointAt(6) - new Point(window.TextView.WideSpaceWidth / 2, 0);
+
+            EditorWindow
+                .PartOf(window.Editor)
+                .TextArea.RaiseEvent(
+                    new DragEventArgs(DragDrop.DropEvent, data, window.Window, at, KeyModifiers.None)
+                    {
+                        DragEffects = DragDropEffects.Copy,
+                    }
+                );
+
+            window.Editor.Document.ShouldBe(other);
+            MarkedText.Of(window).ShouldBe("|z");
+        });
+
     /// <summary>Completes once the text of the editor's document changes.</summary>
     private static Task NextChangeAsync(EditorWindow window)
     {
