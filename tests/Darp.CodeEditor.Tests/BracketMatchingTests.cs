@@ -40,7 +40,7 @@ public sealed class BracketMatchingTests(UiFixture ui)
     ) =>
         _ui.Run(async () =>
         {
-            using EditorWindow window = await ShowAsync(marked, tokens: true);
+            using EditorWindow window = await ShowAsync(marked);
 
             window.RenderAndCountPixels(s_bracketMatch, new TextRange(open, 1)).ShouldBeGreaterThan(0);
             window.RenderAndCountPixels(s_bracketMatch, new TextRange(close, 1)).ShouldBeGreaterThan(0);
@@ -208,8 +208,7 @@ public sealed class BracketMatchingTests(UiFixture ui)
         {
             // The closing brace below the view.
             using EditorWindow window = await ShowAsync(
-                "|{ \"a\": 1,\n// b\n" + string.Concat(Enumerable.Repeat("// padding\n", 50)) + "}",
-                tokens: true
+                "|{ \"a\": 1,\n// b\n" + string.Concat(Enumerable.Repeat("// padding\n", 50)) + "}"
             );
             window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)).ShouldBeGreaterThan(0);
 
@@ -230,8 +229,7 @@ public sealed class BracketMatchingTests(UiFixture ui)
         _ui.Run(async () =>
         {
             using EditorWindow window = await ShowAsync(
-                "{ \"a\": |1,\n// b\n" + string.Concat(Enumerable.Repeat("// padding\n", 50)) + "}",
-                tokens: true
+                "{ \"a\": |1,\n// b\n" + string.Concat(Enumerable.Repeat("// padding\n", 50)) + "}"
             );
             window.RenderAndCountPixels(s_bracketMatch, new TextRange(0, 1)).ShouldBeGreaterThan(0);
 
@@ -274,18 +272,11 @@ public sealed class BracketMatchingTests(UiFixture ui)
                 + "\n{ ab ] }";
             int caret = text.IndexOf("ab", StringComparison.Ordinal) + 1;
             caret.ShouldBe(BracketMatcher.MaxDistance + 1);
-            var editor = new CodeEditor
-            {
-                Document = CodeDocument.Create(CodeLanguage.Json, text),
-                ColorTheme = new CodeEditorColorTheme
-                {
-                    Source = new Uri("avares://Darp.CodeEditor.Tests/Themes/marks.json"),
-                },
-            };
+            var editor = Editor(text);
             using var window = new EditorWindow(editor);
             editor.Selection = new TextSelection(caret);
             editor.ScrollTo(new TextRange(caret, 0));
-            await GrammarInstalledAsync(window);
+            await window.TokensKnownAsync();
             (int brace, int square, int closingBrace) = (caret - 3, caret + 2, caret + 4);
             window.RenderAndCountPixels(s_bracketMatch, new TextRange(brace, 1)).ShouldBeGreaterThan(0);
             window.RenderAndCountPixels(s_bracketMatch, new TextRange(closingBrace, 1)).ShouldBeGreaterThan(0);
@@ -326,36 +317,31 @@ public sealed class BracketMatchingTests(UiFixture ui)
         });
 
     /// <summary>
-    /// Shows <paramref name="marked"/> as JSON in the tests' theme, once the editor has its grammar, which comes with
-    /// the theme's colors; with <paramref name="tokens"/>, once it has every line's tokens too, for brackets in strings
-    /// and comments. Not by the colors of the text: under load, the background may give up on a line's tokens.
+    /// Shows <paramref name="marked"/> as JSON in the tests' theme, once the editor has its grammar and every line's
+    /// tokens: not by the colors of the text.
     /// </summary>
-    private static async Task<EditorWindow> ShowAsync(string marked, bool tokens = false)
+    private static async Task<EditorWindow> ShowAsync(string marked)
     {
         (string text, TextSelection selection) = MarkedText.Parse(marked);
-        var editor = new CodeEditor
+        CodeEditor editor = Editor(text);
+        var window = new EditorWindow(editor);
+        editor.Selection = selection;
+        await window.TokensKnownAsync();
+        return window;
+    }
+
+    /// <summary>
+    /// An editor of JSON in the tests' theme. Its grammar's clock stands still, so that the background never gives up
+    /// on a line's tokens, as it may in 50 ms on a busy machine.
+    /// </summary>
+    private static CodeEditor Editor(string text) =>
+        new()
         {
             Document = CodeDocument.Create(CodeLanguage.Json, text),
             ColorTheme = new CodeEditorColorTheme
             {
                 Source = new Uri("avares://Darp.CodeEditor.Tests/Themes/marks.json"),
             },
+            GrammarClock = new ManualTime(),
         };
-        var window = new EditorWindow(editor);
-        editor.Selection = selection;
-        await (tokens ? window.TokensKnownAsync() : GrammarInstalledAsync(window));
-        return window;
-    }
-
-    /// <summary>
-    /// Waits until the editor has its grammar. The editor puts the theme's colors in place first, as the grammar is
-    /// loaded with them.
-    /// </summary>
-    private static Task GrammarInstalledAsync(EditorWindow window)
-    {
-        BackgroundTextMateHighlighter highlighter = window
-            .TextView.LineTransformers.OfType<BackgroundTextMateHighlighter>()
-            .Single();
-        return Wait.UntilAsync(() => highlighter.Grammar is not null);
-    }
 }
