@@ -1,27 +1,22 @@
 using Avalonia.Controls;
 using Avalonia.Input;
-using Avalonia.Interactivity;
 using Avalonia.Media;
-using Avalonia.Threading;
 using Avalonia.VisualTree;
 using AvaloniaEdit;
 using AvaloniaEdit.Search;
 using Darp.CodeEditor.Search;
+using static Darp.CodeEditor.Tests.SearchBars;
 
 namespace Darp.CodeEditor.Tests;
 
 /// <summary>
-/// Search and replace: the bar, its keys, its query from the text, and its limits, which it reports, and beyond which
-/// F3 and Replace All still reach every match.
+/// The search bar: its keys, its query from the text, its matches and their colors, and its limits, which it reports,
+/// and beyond which F3 still reaches every match.
 /// </summary>
 [Collection(UiFixture.Collection)]
 public sealed class SearchTests(UiFixture ui)
 {
     private readonly UiFixture _ui = ui;
-
-    /// <summary>The modifiers of the search bar's toggles: Alt, and Alt+Cmd on macOS.</summary>
-    private static KeyModifiers Toggle =>
-        OperatingSystem.IsMacOS() ? KeyModifiers.Alt | KeyModifiers.Meta : KeyModifiers.Alt;
 
     [Fact]
     public Task OpenSearch_searches_for_the_selection_and_selects_matches_as_the_user_types() =>
@@ -35,17 +30,19 @@ public sealed class SearchTests(UiFixture ui)
             bar.IsOpen.ShouldBeTrue();
             bar.FindBox.Text.ShouldBe("two");
             bar.FindBox.IsFocused.ShouldBeTrue();
-            await Wait.UntilAsync(() => bar.Count == "1 of 1");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("1 of 1");
 
-            // The first match from where the search started. "on" also has three matches, and its result may still be
-            // shown, so wait for the selection of "one".
+            // The first match from where the search started.
             window.Type("one");
-            await Wait.UntilAsync(() => window.Editor.Selection == new TextSelection(8, 11));
+            await SearchedAsync(bar);
+            window.Editor.Selection.ShouldBe(new TextSelection(8, 11));
             bar.Count.ShouldBe("2 of 3");
 
             // The text changed: the bar searches again.
             window.Editor.Document.ShouldNotBeNull().Replace(new TextRange(0, 0), "one ");
-            await Wait.UntilAsync(() => bar.Count == "3 of 4");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("3 of 4");
         });
 
     /// <summary>
@@ -63,7 +60,8 @@ public sealed class SearchTests(UiFixture ui)
             SearchBar bar = BarOf(window);
 
             window.Type("b");
-            await Wait.UntilAsync(() => bar.Count == "1 of 2");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("1 of 2");
             editor.Selection.ShouldBe(new TextSelection(2, 3));
 
             window.Press(Key.Enter);
@@ -108,7 +106,8 @@ public sealed class SearchTests(UiFixture ui)
 
             window.Press(Key.F3);
 
-            await Wait.UntilAsync(() => window.Editor.Selection == new TextSelection(6, 7));
+            await SearchedAsync(BarOf(window));
+            window.Editor.Selection.ShouldBe(new TextSelection(6, 7));
             BarOf(window).IsOpen.ShouldBeTrue();
         });
 
@@ -125,7 +124,8 @@ public sealed class SearchTests(UiFixture ui)
             SearchBar bar = BarOf(window);
             bar.IsOpen.ShouldBeTrue();
             bar.ReplaceBox.IsEffectivelyVisible.ShouldBeFalse();
-            await Wait.UntilAsync(() => bar.Count == "? of 3");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("? of 3");
 
             window.Press(Key.F3);
             window.Editor.Selection.ShouldBe(new TextSelection(0, 1));
@@ -146,7 +146,8 @@ public sealed class SearchTests(UiFixture ui)
             // F3 opens the bar again for its query, and goes to the next match, with the keyboard in the text.
             window.Editor.Selection = new TextSelection(2, 3);
             window.Press(Key.F3);
-            await Wait.UntilAsync(() => window.Editor.Selection == new TextSelection(4, 5));
+            await SearchedAsync(bar);
+            window.Editor.Selection.ShouldBe(new TextSelection(4, 5));
             bar.FindBox.Text.ShouldBe("a");
             EditorWindow.PartOf(window.Editor).TextArea.IsFocused.ShouldBeTrue();
         });
@@ -161,92 +162,14 @@ public sealed class SearchTests(UiFixture ui)
             ApplicationCommands.Find.Execute(null, part.TextArea);
             SearchBar bar = BarOf(window);
             bar.IsOpen.ShouldBeTrue();
-            await Wait.UntilAsync(() => bar.Count == "? of 2");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("? of 2");
             SearchCommands.FindNext.Execute(null, part.TextArea);
             window.Editor.Selection.ShouldBe(new TextSelection(0, 1));
             ApplicationCommands.Replace.Execute(null, part.TextArea);
             bar.ReplaceBox.IsEffectivelyVisible.ShouldBeTrue();
 
             part.SearchPanel.IsOpened.ShouldBeFalse();
-        });
-
-    [Fact]
-    public Task Replace_replaces_the_selected_match_and_Replace_All_the_rest_in_one_undo_step() =>
-        _ui.Run(async () =>
-        {
-            using EditorWindow window = MarkedText.Show("|one=1 two=2 three=3", CodeLanguage.PlainText);
-            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
-
-            window.Editor.OpenSearch(replace: true);
-            SearchBar bar = BarOf(window);
-            bar.RegexToggle.IsChecked = true;
-            window.Type("(\\w+)=(\\d)");
-            bar.ReplaceBox.Text = "$2:$1";
-            await Wait.UntilAsync(() => bar.Count == "1 of 3" && bar.ReplaceAllButton.IsEnabled);
-
-            Click(bar, "Replace");
-            document.Text.ShouldBe("1:one two=2 three=3");
-            await Wait.UntilAsync(() => window.Editor.Selection == new TextSelection(6, 11));
-
-            await Wait.UntilAsync(() => bar.ReplaceAllButton.IsEnabled);
-            Click(bar, "Replace All");
-            await SearchedAsync(bar);
-            document.Text.ShouldBe("1:one 2:two 3:three");
-
-            document.Undo();
-            document.Text.ShouldBe("1:one two=2 three=3");
-        });
-
-    /// <summary>
-    /// As in VS Code, Replace goes on from the end of the replacement, in the text as it is after it: a match that the
-    /// replacement ended, such as one that a lookbehind found, is not selected.
-    /// </summary>
-    [Fact]
-    public Task Replace_goes_on_from_the_end_of_the_replacement_in_the_text_as_it_is_now() =>
-        _ui.Run(async () =>
-        {
-            using EditorWindow window = MarkedText.Show("|aaa aa", CodeLanguage.PlainText);
-            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
-            window.Editor.OpenSearch(replace: true);
-            SearchBar bar = BarOf(window);
-            bar.RegexToggle.IsChecked = true;
-            bar.ReplaceBox.Text = "b";
-            bar.FindBox.Text = "(?<=a)a";
-            await Wait.UntilAsync(() => bar.Count == "1 of 3" && bar.ReplaceAllButton.IsEnabled);
-
-            Click(bar, "Replace");
-
-            document.Text.ShouldBe("aba aa");
-            await Wait.UntilAsync(() => bar.Count == "1 of 1");
-            window.Editor.Selection.ShouldBe(new TextSelection(5, 6));
-        });
-
-    /// <summary>
-    /// Replace replaces a match that F3 reached beyond those highlighted, with its own captures, and goes on to the
-    /// next one.
-    /// </summary>
-    [Fact]
-    public Task Replace_replaces_a_selected_match_beyond_those_highlighted() =>
-        _ui.Run(async () =>
-        {
-            const int Count = TextSearch.MaxMatches + 2;
-            string text = string.Concat(Enumerable.Repeat("a1\n", Count));
-            using EditorWindow window = MarkedText.Show("|" + text, CodeLanguage.PlainText);
-            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
-            window.Editor.OpenSearch(replace: true);
-            SearchBar bar = BarOf(window);
-            bar.RegexToggle.IsChecked = true;
-            bar.ReplaceBox.Text = "$2$1";
-            bar.FindBox.Text = @"(a)(\d)";
-            await Wait.UntilAsync(() => bar.Count == "1 of 19,999+" && bar.ReplaceAllButton.IsEnabled);
-            window.Editor.Selection = Match(TextSearch.MaxMatches);
-
-            Click(bar, "Replace");
-
-            await Wait.UntilAsync(() => window.Editor.Selection == Match(TextSearch.MaxMatches + 1));
-            document.Text.Substring(TextSearch.MaxMatches * 3, 5).ShouldBe("1a\na1");
-
-            static TextSelection Match(int index) => new(index * 3, index * 3 + 2);
         });
 
     /// <summary>
@@ -269,36 +192,10 @@ public sealed class SearchTests(UiFixture ui)
                 bar.ReplaceBox.Text = "c";
             else
                 document.Replace(new TextRange(7, 0), " b");
-            await Wait.UntilAsync(() => bar.ReplaceAllButton.IsEnabled);
+            await SearchedAsync(bar);
+            bar.ReplaceAllButton.IsEnabled.ShouldBeTrue();
 
             window.Editor.Selection.ShouldBe(new TextSelection(2, 3));
-        });
-
-    /// <summary>
-    /// As in VS Code, the replace bar doesn't open in a read-only editor, and an editor that becomes read-only hides
-    /// the replace row, which stays hidden once the editor can be edited again.
-    /// </summary>
-    [Fact]
-    public Task A_read_only_editor_never_shows_the_replace_row() =>
-        _ui.Run(() =>
-        {
-            using EditorWindow window = MarkedText.Show("|one", CodeLanguage.PlainText);
-            KeyGesture replace = ApplicationCommands.Replace.Gesture;
-            window.Editor.IsReadOnly = true;
-
-            window.Press(replace.Key, replace.KeyModifiers);
-            window.Editor.OpenSearch(replace: true);
-            window.Editor.GetVisualDescendants().OfType<SearchBar>().ShouldBeEmpty();
-
-            window.Editor.IsReadOnly = false;
-            window.Press(replace.Key, replace.KeyModifiers);
-            SearchBar bar = BarOf(window);
-            bar.ReplaceBox.IsEffectivelyVisible.ShouldBeTrue();
-            window.Editor.IsReadOnly = true;
-            bar.IsOpen.ShouldBeTrue();
-            bar.ReplaceBox.IsEffectivelyVisible.ShouldBeFalse();
-            window.Editor.IsReadOnly = false;
-            bar.ReplaceBox.IsEffectivelyVisible.ShouldBeFalse();
         });
 
     [Fact]
@@ -317,76 +214,14 @@ public sealed class SearchTests(UiFixture ui)
             editor.Selection = new TextSelection(0, 3);
 
             editor.OpenSearch();
-            await Wait.UntilAsync(() => BarOf(window).Count == "1 of 2");
+            await SearchedAsync(BarOf(window));
+            BarOf(window).Count.ShouldBe("1 of 2");
 
             // The selected match in the current match's color, once the theme is loaded, the other in the highlight
             // color.
             await Wait.UntilAsync(() => window.RenderAndCountPixels(Color.Parse("#00C000"), new TextRange(0, 3)) > 0);
             window.RenderAndCountPixels(Color.Parse("#0000FF"), new TextRange(8, 3)).ShouldBeGreaterThan(0);
             window.RenderAndCountPixels(Color.Parse("#0000FF"), new TextRange(4, 3)).ShouldBe(0);
-        });
-
-    /// <summary>
-    /// As VS Code, the bar highlights only so many matches, and says so in the tip of the count, but Replace All
-    /// replaces all of them, in one undo step.
-    /// </summary>
-    [Fact]
-    public Task Replace_All_replaces_also_the_matches_beyond_those_highlighted() =>
-        _ui.Run(async () =>
-        {
-            string text = string.Concat(Enumerable.Repeat("a\n", TextSearch.MaxMatches + 2));
-            using EditorWindow window = MarkedText.Show("|" + text, CodeLanguage.PlainText);
-            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
-
-            window.Editor.OpenSearch(replace: true);
-            SearchBar bar = BarOf(window);
-            bar.ReplaceBox.Text = "b";
-            window.Type("a");
-            await Wait.UntilAsync(() => bar.ReplaceAllButton.IsEnabled);
-
-            bar.Count.ShouldBe("1 of 19,999+");
-            bar.CountTip.ShouldBe(
-                "Only the first 19,999 matches are highlighted, but Replace All replaces all of them."
-            );
-            bar.Message.ShouldBeNull();
-            Click(bar, "Replace All");
-            await SearchedAsync(bar);
-            document.Text.ShouldBe(string.Concat(Enumerable.Repeat("b\n", TextSearch.MaxMatches + 2)));
-            document.Undo();
-            document.Text.ShouldBe(text);
-        });
-
-    /// <summary>
-    /// Replace All beyond the matches highlighted searches the rest of the text in the background, as the search does,
-    /// so that a costly expression there leaves the UI thread free; out of time, it replaces nothing.
-    /// </summary>
-    [Fact]
-    public Task Replace_All_beyond_the_matches_highlighted_searches_in_the_background() =>
-        _ui.Run(async () =>
-        {
-            string text = string.Concat(Enumerable.Repeat("x\n", TextSearch.MaxMatches + 1));
-            // Still for the search; then running out at Replace All's first look at it.
-            var clock = new SteppingTime { UiThread = Environment.CurrentManagedThreadId };
-            using var window = new EditorWindow(
-                new CodeEditor { Document = new StandaloneDocument(CodeLanguage.PlainText, text, clock) }
-            );
-            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
-            window.Editor.OpenSearch(replace: true);
-            SearchBar bar = BarOf(window);
-            bar.ReplaceBox.Text = "y";
-            bar.FindBox.Text = "x";
-            await SearchedAsync(bar);
-            bar.ReplaceAllButton.IsEnabled.ShouldBeTrue();
-            clock.Step = TextSearch.TimeLimit;
-
-            Click(bar, "Replace All");
-
-            // The click returns before the search ends, whose result the UI thread takes later.
-            bar.Message.ShouldBeNull();
-            await SearchedAsync(bar);
-            bar.Message.ShouldNotBeNull().ShouldContain("stopped");
-            document.Text.ShouldBe(text);
-            clock.ReadOnUiThread.ShouldBeFalse();
         });
 
     /// <summary>
@@ -405,20 +240,23 @@ public sealed class SearchTests(UiFixture ui)
             // The query is the word at the caret.
             window.Editor.OpenSearch();
             SearchBar bar = BarOf(window);
-            await Wait.UntilAsync(() => bar.Count == "? of 19,999+");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("? of 19,999+");
 
             // The last match highlighted, then the two after it, and round to the first.
             window.Editor.Selection = Match(TextSearch.MaxMatches - 1);
             foreach (int next in (int[])[TextSearch.MaxMatches, Count - 1, 0])
             {
                 window.Press(Key.F3);
-                await Wait.UntilAsync(() => window.Editor.Selection == Match(next));
+                await SearchedAsync(bar);
+                window.Editor.Selection.ShouldBe(Match(next));
             }
             // Back round to the last match of all, and on back to the last one highlighted.
             foreach (int previous in (int[])[Count - 1, TextSearch.MaxMatches, TextSearch.MaxMatches - 1])
             {
                 window.Press(Key.F3, KeyModifiers.Shift);
-                await Wait.UntilAsync(() => window.Editor.Selection == Match(previous));
+                await SearchedAsync(bar);
+                window.Editor.Selection.ShouldBe(Match(previous));
             }
             bar.Count.ShouldBe("19999 of 19,999+");
 
@@ -448,7 +286,8 @@ public sealed class SearchTests(UiFixture ui)
 
             bar.FindBox.Text = @"foo\nbar";
 
-            await Wait.UntilAsync(() => bar.Count == "1 of 1");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("1 of 1");
             editor.Selection.ShouldBe(new TextSelection(0, 8));
             await Wait.UntilAsync(() => window.RenderAndCountPixels(Color.Parse("#00C000"), new TextRange(0, 3)) > 0);
             window.RenderAndCountPixels(Color.Parse("#00C000"), new TextRange(5, 3)).ShouldBeGreaterThan(0);
@@ -474,7 +313,8 @@ public sealed class SearchTests(UiFixture ui)
             window.Type("bar");
 
             bar.FindBox.Text.ShouldBe("foo\nbar");
-            await Wait.UntilAsync(() => bar.Count == "1 of 2");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("1 of 2");
             window.Layout();
             bar.FindBox.Bounds.Height.ShouldBeGreaterThan(height);
             window.Press(Key.Enter);
@@ -518,7 +358,8 @@ public sealed class SearchTests(UiFixture ui)
 
             // The whole query at once: "(" alone is invalid too, and its message would end the wait early.
             bar.FindBox.Text = "(b";
-            await Wait.UntilAsync(() => bar.Message is not null);
+            await SearchedAsync(bar);
+            bar.Message.ShouldNotBeNull();
 
             bar.Count.ShouldBeNull();
             bar.ReplaceAllButton.IsEnabled.ShouldBeFalse();
@@ -532,38 +373,13 @@ public sealed class SearchTests(UiFixture ui)
             using EditorWindow window = MarkedText.Show("|a b a", CodeLanguage.PlainText);
             window.Editor.OpenSearch();
             SearchBar bar = BarOf(window);
-            await Wait.UntilAsync(() => bar.Count == "? of 2");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("? of 2");
 
             window.Press(Key.Back);
 
             bar.Count.ShouldBeNull();
             bar.Message.ShouldBeNull();
-        });
-
-    [Fact]
-    public Task Empty_matches_are_found_gone_through_and_replaced() =>
-        _ui.Run(async () =>
-        {
-            // ^ matches the start of every line, whatever its line break.
-            using EditorWindow window = MarkedText.Show("|a\nb\r\nc", CodeLanguage.PlainText);
-            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
-            window.Editor.OpenSearch(replace: true);
-            SearchBar bar = BarOf(window);
-            bar.RegexToggle.IsChecked = true;
-            bar.ReplaceBox.Text = "> ";
-            bar.FindBox.Text = "^";
-            await Wait.UntilAsync(() => bar.Count == "1 of 3" && bar.ReplaceAllButton.IsEnabled);
-
-            window.Press(Key.F3);
-            window.Editor.Selection.ShouldBe(new TextSelection(2));
-            window.Press(Key.F3);
-            window.Editor.Selection.ShouldBe(new TextSelection(5));
-            window.Press(Key.F3);
-            window.Editor.Selection.ShouldBe(new TextSelection(0));
-
-            Click(bar, "Replace All");
-            await SearchedAsync(bar);
-            document.Text.ShouldBe("> a\n> b\r\n> c");
         });
 
     [Fact]
@@ -619,15 +435,19 @@ public sealed class SearchTests(UiFixture ui)
                 .GetTip(bar.MatchCaseToggle)
                 .ShouldBe($"Match Case ({new KeyGesture(Key.C, Toggle).ToString("p", null)})");
             window.Type("a.b");
-            await Wait.UntilAsync(() => bar.Count == "1 of 1");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("1 of 1");
 
             // From the query, which keeps its text.
             window.Press(Key.C, Toggle);
-            await Wait.UntilAsync(() => bar.Count == "1 of 2");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("1 of 2");
             window.Press(Key.R, Toggle);
-            await Wait.UntilAsync(() => bar.Count == "1 of 4");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("1 of 4");
             window.Press(Key.W, Toggle);
-            await Wait.UntilAsync(() => bar.Count == "1 of 3");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("1 of 3");
             bar.FindBox.Text.ShouldBe("a.b");
             bar.FindBox.IsFocused.ShouldBeTrue();
             window.Editor.Selection.ShouldBe(new TextSelection(0, 3));
@@ -644,7 +464,8 @@ public sealed class SearchTests(UiFixture ui)
             SearchBar bar = BarOf(window);
             bar.FindBox.Text.ShouldBe("two");
             bar.FindBox.SelectedText.ShouldBe("two");
-            await Wait.UntilAsync(() => bar.Count == "? of 2");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("? of 2");
             window.Editor.Selection.ShouldBe(new TextSelection(5));
 
             // Only a selection.
@@ -683,7 +504,8 @@ public sealed class SearchTests(UiFixture ui)
 
             SearchBar bar = BarOf(window);
             bar.FindBox.Text.ShouldBe(@"a\.b\+\(c\)");
-            await Wait.UntilAsync(() => bar.Count == "1 of 1");
+            await SearchedAsync(bar);
+            bar.Count.ShouldBe("1 of 1");
         });
 
     [Fact]
@@ -723,71 +545,28 @@ public sealed class SearchTests(UiFixture ui)
 
             window.Press(Key.F3);
             SearchBar bar = BarOf(window);
-            await Wait.UntilAsync(() => window.Editor.Selection == new TextSelection(6, 7));
+            await SearchedAsync(bar);
+            window.Editor.Selection.ShouldBe(new TextSelection(6, 7));
             bar.FindBox.Text.ShouldBe("b");
 
             // With the bar closed and a selection, the query stays.
             window.Press(Key.Escape);
             window.Editor.Selection = new TextSelection(0, 1);
             window.Press(Key.F3);
-            await Wait.UntilAsync(() => window.Editor.Selection == new TextSelection(2, 3));
+            await SearchedAsync(bar);
+            window.Editor.Selection.ShouldBe(new TextSelection(2, 3));
             bar.FindBox.Text.ShouldBe("b");
 
             // So it does with the bar open; an empty query takes the selection.
             window.Editor.Selection = new TextSelection(4, 5);
             window.Press(Key.F3, KeyModifiers.Shift);
-            await Wait.UntilAsync(() => window.Editor.Selection == new TextSelection(2, 3));
+            await SearchedAsync(bar);
+            window.Editor.Selection.ShouldBe(new TextSelection(2, 3));
             bar.FindBox.Text = "";
             window.Editor.Selection = new TextSelection(4, 5);
             window.Press(Key.F3);
-            await Wait.UntilAsync(() => window.Editor.Selection == new TextSelection(8, 9));
+            await SearchedAsync(bar);
+            window.Editor.Selection.ShouldBe(new TextSelection(8, 9));
             bar.FindBox.Text.ShouldBe("a");
         });
-
-    [Fact]
-    public Task Alt_P_preserves_the_case_of_each_match_that_it_replaces() =>
-        _ui.Run(async () =>
-        {
-            using EditorWindow window = MarkedText.Show("|Foo FOO foo", CodeLanguage.PlainText);
-            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
-            window.Editor.OpenSearch(replace: true);
-            SearchBar bar = BarOf(window);
-            window.Type("foo");
-            bar.ReplaceBox.Text = "bar";
-
-            window.Press(Key.P, Toggle);
-
-            bar.PreserveCaseToggle.IsChecked.ShouldBe(true);
-            ToolTip
-                .GetTip(bar.PreserveCaseToggle)
-                .ShouldBe($"Preserve Case ({new KeyGesture(Key.P, Toggle).ToString("p", null)})");
-            await Wait.UntilAsync(() => bar.ReplaceAllButton.IsEnabled);
-            Click(bar, "Replace All");
-            await SearchedAsync(bar);
-            document.Text.ShouldBe("Bar BAR bar");
-        });
-
-    /// <summary>
-    /// Completes once the search's latest work in the background, and any it started, has shown its result, or at once
-    /// without work under way.
-    /// </summary>
-    internal static async Task SearchedAsync(SearchBar bar)
-    {
-        Task latest;
-        do
-        {
-            latest = bar.LatestSearch;
-            await Wait.ForAsync(latest);
-        } while (latest != bar.LatestSearch);
-    }
-
-    private static SearchBar BarOf(EditorWindow window) =>
-        window.Editor.GetVisualDescendants().OfType<SearchBar>().Single();
-
-    /// <summary>Clicks a button of the bar, also a disabled one, as a command could.</summary>
-    private static void Click(SearchBar bar, string content) =>
-        bar.GetVisualDescendants()
-            .OfType<Button>()
-            .Single(button => button.Content as string == content)
-            .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
 }

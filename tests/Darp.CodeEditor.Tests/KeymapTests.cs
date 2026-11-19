@@ -2,6 +2,7 @@ using Avalonia.Input;
 using Avalonia.VisualTree;
 using Darp.CodeEditor.Commands;
 using Darp.CodeEditor.Search;
+using static Darp.CodeEditor.Tests.SearchBars;
 using Keys = Avalonia.Input.Key;
 
 namespace Darp.CodeEditor.Tests;
@@ -137,11 +138,11 @@ public sealed class KeymapTests(UiFixture ui)
             window.Editor.Keymap = new CodeEditorKeymap(CodeEditorKeymap.DefaultBindings(mac: true));
 
             window.Press(Keys.G, KeyModifiers.Meta);
-            await SearchTests.SearchedAsync(BarOf(window));
+            await SearchedAsync(BarOf(window));
             window.Editor.Selection.ShouldBe(new TextSelection(16, 19));
 
             window.Press(Keys.G, KeyModifiers.Meta | KeyModifiers.Shift);
-            await SearchTests.SearchedAsync(BarOf(window));
+            await SearchedAsync(BarOf(window));
             window.Editor.Selection.ShouldBe(new TextSelection(8, 11));
         });
 
@@ -176,7 +177,7 @@ public sealed class KeymapTests(UiFixture ui)
 
             window.Press(Keys.K, KeyModifiers.Control);
             window.Press(Keys.F3);
-            await SearchTests.SearchedAsync(BarOf(window));
+            await SearchedAsync(BarOf(window));
 
             window.Editor.PendingKeys.ShouldBeNull();
             // F3 ran as it does alone: the next match of the selection.
@@ -360,7 +361,4 @@ public sealed class KeymapTests(UiFixture ui)
 
     internal static PressedKey Key(Keys key, KeyModifiers modifiers, string? symbol = null) =>
         new(key, modifiers, symbol);
-
-    private static SearchBar BarOf(EditorWindow window) =>
-        window.Editor.GetVisualDescendants().OfType<SearchBar>().Single();
 }
