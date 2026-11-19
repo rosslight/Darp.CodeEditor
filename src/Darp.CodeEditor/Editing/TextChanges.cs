@@ -123,11 +123,13 @@ internal sealed class TextChanges : IDisposable
     /// </summary>
     /// <returns>
     /// Whether it went in: not when one of its edits may not change, as for <see cref="Apply(IReadOnlyList{TextEdit},
-    /// TextSelection?)"/>. The whole range is asked first, and each edit only where some of it may not.
+    /// TextSelection?)"/>. The whole range is asked first, and each edit that deletes only where some of it may not;
+    /// each one that only inserts is asked always, as a point inside text that may change can still refuse it.
     /// </returns>
     public bool Apply(CombinedEdit edit)
     {
-        if (!CanChange(edit.Offset, edit.Length) && !edit.Edits.All(part => CanChange(part.Offset, part.Length)))
+        bool whole = CanChange(edit.Offset, edit.Length);
+        if (!edit.Edits.All(part => (whole && part.Length > 0) || CanChange(part.Offset, part.Length)))
             return false;
         Replace(edit);
         return true;
