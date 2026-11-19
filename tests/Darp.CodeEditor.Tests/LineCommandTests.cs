@@ -179,10 +179,12 @@ public sealed class LineCommandTests(UiFixture ui)
         });
 
     [Theory]
-    // After a case, by the rule for Enter.
+    // After a case, by the rule for Enter, also below lines of whitespace only, which a moved one takes too.
     [InlineData("case 1:\nx();\n|y();", Keys.Up, "case 1:\n    |y();\nx();")]
-    // After a doc comment's start, a line with its star keeps the space before it.
-    [InlineData("/**\n|x\n * a", Keys.Down, "/**\n * a\n |x")]
+    [InlineData("case 1:\n\nw();\n«x();\ny();»", Keys.Up, "case 1:\n\n    «x();\n    y();»\nw();")]
+    [InlineData("case 1:\n|x();\n\ny();", Keys.Down, "case 1:\n    \n    |x();\ny();")]
+    // A line with a doc comment's star keeps the space before it after the comment's start, and gives none below it.
+    [InlineData("/**\n|x\n * a", Keys.Down, "/**\n * a\n|x")]
     public Task Moved_lines_take_the_indentation_that_the_rules_for_Enter_give_their_new_place(
         string marked,
         Keys key,

@@ -3,12 +3,18 @@
   "brackets": [["{", "}"]],
   "indentationRules": {
     "increaseIndentPattern": "\\{\\s*$",
-    "decreaseIndentPattern": "^\\s*\\}"
+    "decreaseIndentPattern": "^\\s*\\}",
+    "unIndentedLinePattern": "^(\\t|[ ])*[ ]\\*([ ]([^\\*]|\\*(?!/))*)?$"
   },
   "onEnterRules": [
     {
       "beforeText": { "pattern": "^\\s*/\\*\\*(?!/)([^\\*]|\\*(?!/))*$" },
       "action": { "indent": "none", "appendText": " * " }
+    },
+    {
+      "beforeText": { "pattern": "^(\\t|[ ])*[ ]\\*([ ]([^\\*]|\\*(?!/))*)?$" },
+      "previousLineText": { "pattern": "(?=^(\\s*(/\\*\\*|\\*)).*)(?=(?!(\\s*\\*/)))" },
+      "action": { "indent": "none", "appendText": "* " }
     },
     { "beforeText": "^\\s*case\\b.*:\\s*$", "action": { "indent": "indent" } }
   ]
