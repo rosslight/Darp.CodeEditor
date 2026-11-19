@@ -49,6 +49,7 @@ internal sealed class TextChanges : IDisposable
     /// <returns>Whether they went in: not when one touches read-only text.</returns>
     public bool Apply(IReadOnlyList<TextEdit> edits, TextSelection? select = null)
     {
+        TextDocument edited = Buffer;
         foreach (TextEdit edit in edits)
         {
             if (!CanChange(edit.Offset, edit.Length))
@@ -58,7 +59,8 @@ internal sealed class TextChanges : IDisposable
             Buffer.Replace(edits[0].Offset, edits[0].Length, edits[0].Text);
         else if (edits.Count > 1)
             ReplaceInOneChange(edits);
-        if (select is { } selection)
+        // A handler of the change may show another document, which the offsets are not of.
+        if (select is { } selection && Buffer == edited)
         {
             _area.Selection = EditorSelection.Create(_area, selection.Anchor, selection.Caret);
             _area.Caret.Offset = selection.Caret;
@@ -77,8 +79,11 @@ internal sealed class TextChanges : IDisposable
         EditorSelection selection = _area.Selection;
         int caret = _area.Caret.Offset;
         int anchor = selection.IsEmpty ? caret : Buffer.GetOffset(selection.StartPosition.Location);
+        TextDocument edited = Buffer;
         if (!Apply(edits))
             return false;
+        if (Buffer != edited)
+            return true;
         if (selection is RectangleSelection rectangle)
         {
             TextViewPosition start = rectangle.StartPosition;

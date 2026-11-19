@@ -227,6 +227,20 @@ public sealed class IndentationTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe(expected);
         });
 
+    [Fact]
+    public Task Tab_whose_change_switches_the_document_leaves_the_other_one_alone() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("abc\n    x\n|", CodeLanguage.PlainText);
+            CodeDocument other = CodeDocument.Create(CodeLanguage.PlainText, "z");
+            window.Editor.Document.ShouldNotBeNull().TextChanged += (_, _) => window.Editor.Document = other;
+
+            window.Press(Key.Tab);
+
+            window.Editor.Document.ShouldBe(other);
+            MarkedText.Of(window).ShouldBe("|z");
+        });
+
     [Theory]
     [InlineData(Key.Enter)]
     [InlineData(Key.Tab)]

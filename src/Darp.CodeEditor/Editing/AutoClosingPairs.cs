@@ -127,7 +127,10 @@ internal sealed class AutoClosingPairs : IDisposable
         // Text can be refused after it was typed, and the opening not go in.
         if (TypingOffsets() is not { } offsets || !Array.TrueForAll(offsets, HasOpening))
             return;
+        TextDocument edited = Buffer;
         if (!_changes.Apply([.. offsets.Select(offset => new TextEdit(offset, 0, pair.Close))], moved: 0))
+            return;
+        if (Buffer != edited)
             return;
         for (int i = 0; i < offsets.Length; i++)
         {
