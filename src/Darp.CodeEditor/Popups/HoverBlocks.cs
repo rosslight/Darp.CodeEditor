@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Text;
 using Avalonia.Media;
 using Darp.CodeEditor.Highlighting;
@@ -33,10 +34,11 @@ internal sealed record HoverRule : HoverBlock;
 /// <summary>
 /// A diagnostic, as VS Code's hover shows it, in the editor's font: the icon of its severity beside its message, which
 /// keeps its line breaks, then its source and code, dimmed, the code as a link to its web page where it has one, and
-/// below them the other places it concerns, each as a link to the place where the editor can go there.
+/// below them the other places it concerns, each as a link to the place where the editor can go there. A piece that
+/// goes on from the one before with nothing on its message's line, only with places, shows no such line.
 /// </summary>
 /// <param name="Severity">Its severity, for its icon.</param>
-/// <param name="Message">Its message, or a piece of it.</param>
+/// <param name="Message">Its message, or a piece of it; empty for none.</param>
 /// <param name="Source">What reported it; null for none, as in a piece that more pieces follow.</param>
 /// <param name="Code">Its code; null for none.</param>
 /// <param name="CodeLink">The web page of its code; null for none.</param>
@@ -69,7 +71,14 @@ internal enum HoverIcon
 /// <param name="Place">Where it is, as VS Code writes it: <c>file.py(3, 5): </c>.</param>
 /// <param name="Message">What it has to do with the problem.</param>
 /// <param name="Open">Goes there; null where the editor cannot, as in another document.</param>
-internal sealed record HoverRelated(string Place, string Message, Action? Open);
+internal sealed record HoverRelated(string Place, string Message, Action? Open)
+{
+    /// <summary>
+    /// Whether it goes on from the place before, as a piece of a place larger than a part does: without a place of its
+    /// own, and no space between them.
+    /// </summary>
+    public bool Continues { get; init; }
+}
 
 /// <summary>
 /// The heading of the problem that a key went to, as VS Code's widget for it shows it: the icon of its severity, the
@@ -109,15 +118,17 @@ internal static class HoverBlocks
     /// <summary>
     /// <paramref name="diagnostics"/>, as VS Code's hover shows them (<see cref="HoverDiagnostic"/>):
     /// <paramref name="open"/> makes what goes to a related place, or null where the editor cannot go there. A code's
-    /// web page is a link only when it is one, an <c>http</c> or <c>https</c> URI.
+    /// web page is a link only when it is one, an <c>http</c> or <c>https</c> URI. Each is made as it is read, so that
+    /// a hover that builds thousands a part at a time reads them a part at a time.
     /// </summary>
-    public static IReadOnlyList<HoverBlock> Of(
-        IEnumerable<Diagnostic> diagnostics,
+    public static IReadOnlyCollection<HoverBlock> Of(
+        IReadOnlyCollection<Diagnostic> diagnostics,
         Func<Diagnostic, DiagnosticRelatedInformation, Action?>? open = null,
         HoverIcon icon = HoverIcon.Shown
     ) =>
-        [
-            .. diagnostics.Select(diagnostic => new HoverDiagnostic(
+        new DiagnosticBlocks(
+            diagnostics,
+            diagnostic => new HoverDiagnostic(
                 diagnostic.Severity,
                 diagnostic.Message,
                 diagnostic.Source,
@@ -131,8 +142,8 @@ internal static class HoverBlocks
                     )),
                 ],
                 icon
-            )),
-        ];
+            )
+        );
 
     /// <summary>The name of a document by its URI, as VS Code's <c>basename</c> takes it: the last part of its path.</summary>
     public static string Name(Uri uri)
@@ -220,6 +231,19 @@ internal static class HoverBlocks
                 runs.Add(new CodeRun(text, foreground));
         }
     }
+
+    /// <summary>A block for each diagnostic, made as it is read.</summary>
+    private sealed class DiagnosticBlocks(
+        IReadOnlyCollection<Diagnostic> diagnostics,
+        Func<Diagnostic, HoverBlock> block
+    ) : IReadOnlyCollection<HoverBlock>
+    {
+        public int Count => diagnostics.Count;
+
+        public IEnumerator<HoverBlock> GetEnumerator() => diagnostics.Select(block).GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
 }
 
 /// <summary>
@@ -261,34 +285,7 @@ internal static class HoverParts
                         }
                 );
             case HoverDiagnostic diagnostic when !Fits(Size(diagnostic)):
-                // The message in pieces, the icon beside the first, its source, code and places after the last.
-                List<HoverBlock> pieces =
-                [
-                    .. Pieces(
-                        [(diagnostic.Message, 0)],
-                        (texts, first) =>
-                            new HoverDiagnostic(
-                                diagnostic.Severity,
-                                string.Concat(texts.Select(t => t.Text)),
-                                null,
-                                null,
-                                null,
-                                [],
-                                first || diagnostic.Icon == HoverIcon.None ? diagnostic.Icon : HoverIcon.Room
-                            )
-                            {
-                                Continues = !first || diagnostic.Continues,
-                            }
-                    ),
-                ];
-                pieces[^1] = (HoverDiagnostic)pieces[^1] with
-                {
-                    Source = diagnostic.Source,
-                    Code = diagnostic.Code,
-                    CodeLink = diagnostic.CodeLink,
-                    Related = diagnostic.Related,
-                };
-                return pieces;
+                return DiagnosticPieces(diagnostic);
             case HoverParagraph { Marker: null } paragraph when !Fits(Size(paragraph)):
                 return Pieces(
                     paragraph.Spans.Select(span => (span.Text, span)),
@@ -318,17 +315,113 @@ internal static class HoverParts
                 (characters, lines) = Count(code.Runs.Select(run => run.Text));
                 return (characters, lines, code.Runs.Count);
             case HoverDiagnostic diagnostic:
-                (characters, lines) = Count([
-                    diagnostic.Message,
-                    diagnostic.Source ?? "",
-                    diagnostic.Code ?? "",
-                    .. diagnostic.Related.SelectMany(related => (string[])[related.Place, related.Message]),
-                ]);
-                return (characters, lines + diagnostic.Related.Count, 5 + 2 * diagnostic.Related.Count);
+                (characters, lines) = Count([diagnostic.Message, diagnostic.Source ?? "", diagnostic.Code ?? ""]);
+                (int Characters, int Lines, int Runs) size = (characters, lines, 5);
+                foreach (HoverRelated related in diagnostic.Related)
+                    size = Add(size, Size(related));
+                return size;
             default:
                 return (0, 1, 1);
         }
     }
+
+    /// <summary>The size of a related place as a part counts it: on a line of its own, in two runs.</summary>
+    private static (int Characters, int Lines, int Runs) Size(HoverRelated related)
+    {
+        (int characters, int lines) = Count([related.Place, related.Message]);
+        return (characters, lines, 2);
+    }
+
+    private static (int Characters, int Lines, int Runs) Add(
+        (int Characters, int Lines, int Runs) a,
+        (int Characters, int Lines, int Runs) b
+    ) => (a.Characters + b.Characters, a.Lines + b.Lines, a.Runs + b.Runs);
+
+    /// <summary>
+    /// A diagnostic larger than a part in pieces of at most a part each, each going on from the one before: its
+    /// message, also an empty one, with the icon beside the first piece and its source and code after the last; then
+    /// its related places, with that piece while they fit it and then in pieces of their own, a place larger than a
+    /// part in pieces too.
+    /// </summary>
+    private static IEnumerable<HoverBlock> DiagnosticPieces(HoverDiagnostic diagnostic)
+    {
+        HoverIcon room = diagnostic.Icon == HoverIcon.None ? HoverIcon.None : HoverIcon.Room;
+        HoverDiagnostic? current = null;
+        foreach (
+            HoverDiagnostic piece in Pieces(
+                [(diagnostic.Message, 0)],
+                (texts, first) =>
+                    new HoverDiagnostic(
+                        diagnostic.Severity,
+                        string.Concat(texts.Select(t => t.Text)),
+                        null,
+                        null,
+                        null,
+                        [],
+                        first ? diagnostic.Icon : room
+                    )
+                    {
+                        Continues = !first || diagnostic.Continues,
+                    }
+            )
+        )
+        {
+            if (current is not null)
+                yield return current;
+            current = piece;
+        }
+        current = (current ?? diagnostic with { Message = "" }) with
+        {
+            Source = diagnostic.Source,
+            Code = diagnostic.Code,
+            CodeLink = diagnostic.CodeLink,
+            Related = [],
+        };
+        var related = new List<HoverRelated>();
+        (int Characters, int Lines, int Runs) size = Size(current);
+        foreach (HoverRelated place in diagnostic.Related.SelectMany(RelatedPieces))
+        {
+            (int Characters, int Lines, int Runs) with = Add(size, Size(place));
+            if (Fits(with))
+            {
+                related.Add(place);
+                size = with;
+                continue;
+            }
+            yield return current with
+            {
+                Related = related,
+            };
+            // A piece of related places alone: no line of its own for the message.
+            current = new HoverDiagnostic(diagnostic.Severity, "", null, null, null, [], room) { Continues = true };
+            related = [place];
+            size = Add(Size(current), Size(place));
+        }
+        yield return current with
+        {
+            Related = related,
+        };
+    }
+
+    /// <summary>
+    /// <paramref name="related"/>, or when it is larger than a part, its pieces: the place, which opens it, with the
+    /// first, and each next going on from the one before.
+    /// </summary>
+    private static IEnumerable<HoverRelated> RelatedPieces(HoverRelated related) =>
+        Fits(Size(related))
+            ? [related]
+            : Pieces(
+                [(related.Place, true), (related.Message, false)],
+                (texts, first) =>
+                    new HoverRelated(
+                        string.Concat(texts.Where(t => t.Run).Select(t => t.Text)),
+                        string.Concat(texts.Where(t => !t.Run).Select(t => t.Text)),
+                        first ? related.Open : null
+                    )
+                    {
+                        Continues = !first,
+                    }
+            );
 
     /// <summary>Whether something of <paramref name="size"/> fits a part.</summary>
     public static bool Fits((int Characters, int Lines, int Runs) size) =>
@@ -339,9 +432,9 @@ internal static class HoverParts
     /// next piece starts on a line of its own; within a line too long for a part, after its last space in the run that
     /// fills the part, or where the part is full, but never inside a surrogate pair; and after the most runs.
     /// </summary>
-    private static IEnumerable<HoverBlock> Pieces<T>(
+    private static IEnumerable<TPiece> Pieces<T, TPiece>(
         IEnumerable<(string Text, T Run)> runs,
-        Func<List<(string Text, T Run)>, bool, HoverBlock> piece
+        Func<List<(string Text, T Run)>, bool, TPiece> piece
     )
     {
         var current = new List<(string Text, T Run)>();
@@ -366,7 +459,7 @@ internal static class HoverParts
                     }
                     // The next line starts the next piece.
                     Add(start, i);
-                    foreach (HoverBlock done in Flush())
+                    foreach (TPiece done in Flush())
                         yield return done;
                     start = i += length;
                     continue;
@@ -381,14 +474,14 @@ internal static class HoverParts
                 if (cut > start && char.IsHighSurrogate(text[cut - 1]))
                     cut--;
                 Add(start, cut);
-                foreach (HoverBlock done in Flush())
+                foreach (TPiece done in Flush())
                     yield return done;
                 start = i = cut;
             }
             Add(start, text.Length);
             if (current.Count >= MaxRuns)
             {
-                foreach (HoverBlock done in Flush())
+                foreach (TPiece done in Flush())
                     yield return done;
             }
 
@@ -400,10 +493,10 @@ internal static class HoverParts
                 characters += to - from;
             }
         }
-        foreach (HoverBlock done in Flush())
+        foreach (TPiece done in Flush())
             yield return done;
 
-        IEnumerable<HoverBlock> Flush()
+        IEnumerable<TPiece> Flush()
         {
             List<(string Text, T Run)> done = current;
             current = [];

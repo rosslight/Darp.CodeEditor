@@ -47,12 +47,13 @@ namespace Darp.CodeEditor.Completion;
 /// inserts, over the word up to the caret, or replaces, over the rest of the word too; a click and a commit character
 /// insert. While the filter of the current text still runs, they commit the item that shows if it matches the current
 /// text, checked on the UI thread for that item alone; otherwise accepting commits what that filter selects once it has
-/// run, unless the text, by any editor or code, or the caret changes before, and a commit character goes in as text, as
-/// it does when nothing matches: deciding later would hold back or reorder what the user types. A read-only editor
+/// run, unless the text, by any editor or code, or the caret changes before, and when nothing matches then, the key that
+/// accepted goes on, as Enter to a new line; a commit character goes in as text, as it does when nothing matches:
+/// deciding later would hold back or reorder what the user types. A read-only editor
 /// neither completes nor commits. The server resolves the selected item, so that its detail and documentation show
 /// beside the list. An item whose additional edits are still to come when it is committed gets them when they come, as
-/// in VS Code, unless the text changed before where they start since: in its step while that is the last one, and
-/// otherwise in a step of their own.
+/// in VS Code, unless the text changed before where they start since, or the commit was undone: in its step while that
+/// is the last one, and otherwise in a step of their own.
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends completion, for every reason it ends: Escape, the caret leaving the line or moving back
@@ -216,7 +217,7 @@ internal sealed class CompletionController : IDisposable
         if (CanCommit(session, session.Selected))
             Commit(session, session.Selected, replace);
         else
-            CommitWhenFiltered(session, replace);
+            CommitWhenFiltered(session, replace, _editor.KeymapKey is { } key ? new PressedKey(key) : null);
         return true;
     }
 
@@ -543,6 +544,7 @@ internal sealed class CompletionController : IDisposable
     {
         if (filtered.Items.Count == 0)
         {
+            PressedKey? waiting = session.CommitAt == key ? session.CommitKey : null;
             // As in VS Code: asked by key, the items of the answer that showed last stay, frozen, while the caret is in
             // a word; when none of its items showed, the list says that nothing matches. Otherwise, an incomplete list
             // may have more for what is typed, and a newer request, as for a trigger character typed while the list
@@ -559,7 +561,13 @@ internal sealed class CompletionController : IDisposable
             else if (WordBefore(key.Caret).Length == 0)
                 Close();
             else
+            {
                 Freeze(session, key);
+                return;
+            }
+            // The key that waited for this filter to accept goes on, as it would have without the list.
+            if (waiting is { } pressed)
+                Press(pressed);
             return;
         }
         session.ShowsNoMatch = false;
@@ -709,16 +717,37 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>
     /// Commits what the filter of the current text selects once it has run, for <see cref="Accept"/>, unless the text
-    /// or the caret changes before; starts that filter if none runs.
+    /// or the caret changes before; starts that filter if none runs. When that filter finds nothing to commit,
+    /// <paramref name="key"/>, the key that accepted, does what it does without a list.
     /// </summary>
-    private void CommitWhenFiltered(Session session, bool replace)
+    private void CommitWhenFiltered(Session session, bool replace, PressedKey? key)
     {
         if (session.Answer is not { } answer)
             return;
         session.CommitAt = CurrentKey(answer);
         session.CommitReplaces = replace;
+        session.CommitKey = key;
         Filter(session, answer, _textArea.Caret.Offset);
     }
+
+    /// <summary>
+    /// Presses <paramref name="key"/> again, now that the list no longer takes it, as the key that waited for a filter
+    /// that found nothing: it goes on as it would have without a list, as Enter to a new line. In VS Code, which filters
+    /// as the user types, the list is gone before such a key.
+    /// </summary>
+    private void Press(PressedKey key) =>
+        _textArea.RaiseEvent(
+            new KeyEventArgs
+            {
+                RoutedEvent = InputElement.KeyDownEvent,
+                Source = _textArea,
+                Key = key.Key,
+                KeyModifiers = key.Modifiers,
+                PhysicalKey = key.PhysicalKey,
+                KeySymbol = key.Symbol,
+                KeyDeviceType = key.DeviceType,
+            }
+        );
 
     /// <summary>
     /// The text typed from <paramref name="start"/> up to <paramref name="caret"/>, as far as the matcher reads it: an
@@ -859,9 +888,10 @@ internal sealed class CompletionController : IDisposable
     }
 
     /// <summary>
-    /// Commits an item: its edit, from where it starts to as far past the caret as its insert range, or its replace
-    /// range for <paramref name="replace"/>, reached past where completion was asked, and its additional edits, in one
-    /// step that the user undoes; the caret goes after the item's text. A snippet goes in as its text, with its
+    /// Commits an item: its edit, from where it starts to where its insert range, or its replace range for
+    /// <paramref name="replace"/>, ends after the edits since completion was asked, or to the caret where that is
+    /// further, and its additional edits, in one step that the user undoes; the caret goes after the item's text. A
+    /// snippet goes in as its text, with its
     /// variables' values for the text before the commit, and its first stop is selected. Additional edits that overlap
     /// others are left out, and stay plain text. Additional edits that a resolve still under way brings come later.
     /// </summary>
@@ -878,10 +908,17 @@ internal sealed class CompletionController : IDisposable
         CompletionItem item = session.ResolvedOf(selected) ?? selected;
         Request request = answer.Request;
         int caret = _textArea.Caret.Offset;
-        int end = replace ? item.ReplaceRange.End : item.Edit.Range.End;
+        // Where the range ends now, as the edits since moved it: text typed at the caret goes in it, and once the rest of
+        // the word is deleted, also by another editor or code, the text after it stays out.
+        int end = _document
+            .MapToCurrent(
+                request.Snapshot,
+                TextRange.FromBounds(request.Offset, replace ? item.ReplaceRange.End : item.Edit.Range.End)
+            )
+            .End;
         var range = TextRange.FromBounds(
             item.Edit.Range.Start,
-            Math.Min(_buffer.GetLineByOffset(caret).EndOffset, caret + (end - request.Offset))
+            Math.Min(_buffer.GetLineByOffset(caret).EndOffset, Math.Max(caret, end))
         );
         RenderedSnippet? snippet = item.Snippet is { } source
             ? _snippets.Render(source, range.Start, answer.Clipboard)
@@ -901,8 +938,13 @@ internal sealed class CompletionController : IDisposable
         TextSnapshot before = _document.CurrentSnapshot;
         var step = new object();
         var mark = new SnippetMark();
+        var marks = new List<IUndoableOperation>();
+        if (snippet is not null)
+            marks.Add(mark);
+        if (late is not null)
+            marks.Add(new LateEditsMark(late.Cancellation));
         List<CompletionEdit> edits = WithoutOverlaps([main], Mapped(request.Snapshot, item.AdditionalEdits ?? []));
-        Apply(step, continued: false, edits, snippet is null ? null : mark);
+        Apply(step, continued: false, edits, marks);
         // The item's text moved by the additional edits before it.
         int start =
             main.Range.Start
@@ -938,8 +980,9 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>
     /// Applies the additional edits that a committed item's resolve brings, as VS Code does: unless the text changed
-    /// before where one of them starts since the commit, the commit's own edit included, as by typing above an import.
-    /// They go in the commit's undo step while it is the last one, and otherwise in a step of their own.
+    /// before where one of them starts since the commit, the commit's own edit included, as by typing above an import,
+    /// or the commit was undone, which cancels the resolve. They go in the commit's undo step while it is the last one,
+    /// and otherwise in a step of their own.
     /// </summary>
     /// <param name="late">The resolve.</param>
     /// <param name="step">The commit's undo step.</param>
@@ -973,9 +1016,11 @@ internal sealed class CompletionController : IDisposable
                 _buffer.UndoStack.LastGroupDescriptor == step ? step : new object(),
                 continued: _buffer.UndoStack.LastGroupDescriptor == step,
                 WithoutOverlaps([], Mapped(snapshot, additional)),
-                mark: null
+                marks: []
             );
         }
+        // Undone, or replaced by a newer commit's.
+        catch (OperationCanceledException) when (late.Cancellation.IsCancellationRequested) { }
         catch (Exception e)
         {
             Logger
@@ -991,10 +1036,10 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>
     /// Applies edits, from the last to the first, in the undo step <paramref name="step"/>: a new one, or the last one
-    /// continued. A snippet's <paramref name="mark"/> goes in first, so that undoing the step reaches it last, once
-    /// the text is back.
+    /// continued. The <paramref name="marks"/>, as a snippet's, go in first, so that undoing the step reaches them
+    /// last, once the text is back.
     /// </summary>
-    private void Apply(object step, bool continued, List<CompletionEdit> edits, SnippetMark? mark)
+    private void Apply(object step, bool continued, List<CompletionEdit> edits, List<IUndoableOperation> marks)
     {
         UndoStack undo = _buffer.UndoStack;
         if (continued)
@@ -1003,7 +1048,7 @@ internal sealed class CompletionController : IDisposable
             undo.StartUndoGroup(step);
         try
         {
-            if (mark is not null)
+            foreach (IUndoableOperation mark in marks)
                 undo.Push(mark);
             using (_buffer.RunUpdate())
             {
@@ -1250,6 +1295,30 @@ internal sealed class CompletionController : IDisposable
     /// <summary>An item's resolve, under way or done.</summary>
     private sealed record Resolve(Task<CompletionItem?> Task, CancellationTokenSource Cancellation);
 
+    /// <summary>A key that was pressed, to press it again.</summary>
+    private readonly record struct PressedKey(
+        Key Key,
+        KeyModifiers Modifiers,
+        PhysicalKey PhysicalKey,
+        string? Symbol,
+        KeyDeviceType DeviceType
+    )
+    {
+        public PressedKey(KeyEventArgs e)
+            : this(e.Key, e.KeyModifiers, e.PhysicalKey, e.KeySymbol, e.KeyDeviceType) { }
+    }
+
+    /// <summary>
+    /// Marks a commit's undo step for the additional edits still to come: undoing the step cancels them, as the commit
+    /// they belong to is gone. Redoing it brings back the commit alone.
+    /// </summary>
+    private sealed class LateEditsMark(CancellationTokenSource lateEdits) : IUndoableOperation
+    {
+        public void Undo() => lateEdits.Cancel();
+
+        public void Redo() { }
+    }
+
     /// <summary>What a list is filtered for: an answer, at a version of the text and a caret.</summary>
     private readonly record struct FilterKey(Answer Answer, int Version, int Caret);
 
@@ -1310,6 +1379,12 @@ internal sealed class CompletionController : IDisposable
 
         /// <summary>Whether the commit that waits for <see cref="CommitAt"/> replaces the rest of the word.</summary>
         public bool CommitReplaces { get; set; }
+
+        /// <summary>
+        /// The key that accepted for <see cref="CommitAt"/>, to press again when its filter finds nothing to commit;
+        /// null for none, as when the context menu accepted.
+        /// </summary>
+        public PressedKey? CommitKey { get; set; }
 
         /// <summary>The items that show, in order.</summary>
         public List<ShownItem> Items { get; set; } = [];

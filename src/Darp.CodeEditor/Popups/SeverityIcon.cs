@@ -34,6 +34,7 @@ internal sealed class SeverityIcon : Control
 
     public SeverityIcon(DiagnosticSeverity severity, PopupColors colors)
     {
+        Severity = severity;
         Width = 16;
         Height = 16;
         (_shape, _brush) = severity switch
@@ -43,6 +44,9 @@ internal sealed class SeverityIcon : Control
             _ => (s_info ??= Geometry.Parse(InfoPath), colors.InfoIcon),
         };
     }
+
+    /// <summary>The severity it shows, for tests.</summary>
+    public DiagnosticSeverity Severity { get; }
 
     public override void Render(DrawingContext context) => context.DrawGeometry(_brush, null, _shape);
 }

@@ -232,19 +232,43 @@ internal sealed class HoverController : IDisposable
         Hovered hovered = Begin(offset, fromKeyboard: true);
         hovered.IsProblem = true;
         hovered.IsAnswered = true;
+        hovered.Messages = ProblemBlocks(diagnostic, index, count);
+        Due(hovered);
+    }
+
+    /// <summary>Whether the server's answer to the hover that waits or shows is in, its Markdown read.</summary>
+    internal bool IsAnswered => _hovered is { IsAnswered: true };
+
+    /// <summary>Where the problem that a key went to shows, while it shows; null otherwise.</summary>
+    public int? ProblemOffset => _hovered is { IsProblem: true } hovered && _popup.IsOpen ? hovered.Offset : null;
+
+    /// <summary>
+    /// Shows <paramref name="diagnostic"/> as the problem that shows, as new diagnostics replaced the one before: its
+    /// severity, which it is of how many, and its message, source, code and related places.
+    /// </summary>
+    public void UpdateProblem(Diagnostic diagnostic, int index, int count)
+    {
+        if (ProblemOffset is null || _hovered is not { } hovered)
+            return;
+        hovered.Messages = ProblemBlocks(diagnostic, index, count);
+        Render(hovered);
+    }
+
+    /// <summary>What the problem that a key went to shows, as <see cref="ShowProblem"/> says.</summary>
+    private IReadOnlyCollection<HoverBlock> ProblemBlocks(Diagnostic diagnostic, int index, int count)
+    {
         string of = string.Format(
             CultureInfo.CurrentCulture,
             count > 1 ? Strings.Default.ProblemOfProblems : Strings.Default.ProblemOfProblem,
             index,
             count
         );
-        hovered.Messages =
+        return
         [
             new HoverHeading(diagnostic.Severity, DocumentName(), of),
             new HoverRule(),
             .. HoverBlocks.Of([diagnostic], Opener, HoverIcon.None),
         ];
-        Due(hovered);
     }
 
     public void Dispose()
@@ -355,7 +379,7 @@ internal sealed class HoverController : IDisposable
     {
         hovered.IsDue = true;
         if (!hovered.IsProblem)
-            hovered.Messages = HoverBlocks.Of(_squiggles.At(hovered.Offset, int.MaxValue), Opener);
+            hovered.Messages = HoverBlocks.Of(_squiggles.At(hovered.Offset), Opener);
         Render(hovered);
     }
 
@@ -431,11 +455,12 @@ internal sealed class HoverController : IDisposable
                     ? [new HoverParagraph([new HoverSpan(Strings.Default.HoverLoading)])]
                     : []
             );
-        IReadOnlyList<HoverBlock> blocks =
+        // Not read here: the diagnostics' blocks are made as the hover's parts read them.
+        IEnumerable<HoverBlock> blocks =
             hovered.Messages.Count == 0 ? below
             : below.Count == 0 ? hovered.Messages
-            : [.. hovered.Messages, new HoverRule(), .. below];
-        if (blocks.Count == 0)
+            : hovered.Messages.Append(new HoverRule()).Concat(below);
+        if (hovered.Messages.Count == 0 && below.Count == 0)
         {
             StayOpen();
             _popup.Hide();
@@ -444,7 +469,7 @@ internal sealed class HoverController : IDisposable
         Show(hovered, blocks);
     }
 
-    private void Show(Hovered hovered, IReadOnlyList<HoverBlock> blocks)
+    private void Show(Hovered hovered, IEnumerable<HoverBlock> blocks)
     {
         PopupColors colors = _colors?.Popups ?? PopupColors.Default;
         _frame.Paint(
@@ -783,8 +808,10 @@ internal sealed class HoverController : IDisposable
 
         public TextSnapshot Snapshot { get; } = snapshot;
 
-        /// <summary>The diagnostics' messages, once the delay is over.</summary>
-        public IReadOnlyList<HoverBlock> Messages { get; set; } = [];
+        /// <summary>
+        /// The diagnostics' messages, once the delay is over: made as the hover's parts are built, the most severe first.
+        /// </summary>
+        public IReadOnlyCollection<HoverBlock> Messages { get; set; } = [];
 
         /// <summary>Whether the user asked for it by key, at the caret, rather than by resting the pointer.</summary>
         public bool FromKeyboard { get; init; }

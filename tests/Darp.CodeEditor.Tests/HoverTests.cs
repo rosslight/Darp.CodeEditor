@@ -216,7 +216,8 @@ public sealed class HoverTests(UiFixture ui)
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
-            await using var server = new LanguageServer(fake.Options);
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             const string text = "one two\nthree";
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
             var outside = new Border { Width = 100, Background = Brushes.Gray };
@@ -229,27 +230,32 @@ public sealed class HoverTests(UiFixture ui)
             PopupFrame popup = await HoverAsync(
                 window,
                 text.IndexOf("three", StringComparison.Ordinal),
-                "three is a word in"
+                "three is a word in",
+                time
             );
             window.MoveMouse(window.PointAt(text.IndexOf("three", StringComparison.Ordinal) + 3));
             Popup(window).ShouldBeSameAs(popup);
             window.MoveMouse(BoundsInWindow(popup).Center);
             Popup(window).ShouldBeSameAs(popup);
 
-            // Out of the popup to the side of the editor: it closes after a moment.
+            // Out of the popup to the side of the editor: it closes after a moment, VS Code's 300 ms.
             window.MoveMouse(outside.TranslatePoint(new Point(50, 50), window.Window)!.Value);
-            await Wait.UntilAsync(() => Popup(window) is null);
+            Pass(window, time, TimeSpan.FromMilliseconds(299));
+            Popup(window).ShouldBeSameAs(popup);
+            Pass(window, time, TimeSpan.FromMilliseconds(1));
+            Popup(window).ShouldBeNull();
 
             // Over another word, though under the same diagnostic: it stays a moment, so that the pointer can cross
             // other text on its way into the popup, and keeps it then.
-            popup = await HoverAsync(window, 0, "one is a word in");
+            popup = await HoverAsync(window, 0, "one is a word in", time);
             window.MoveMouse(window.PointAt(text.IndexOf("two", StringComparison.Ordinal)));
             Popup(window).ShouldBeSameAs(popup);
             window.MoveMouse(BoundsInWindow(popup).Center);
-            await Task.Delay(TimeSpan.FromMilliseconds(500));
+            Pass(window, time, TimeSpan.FromMilliseconds(500));
             Popup(window).ShouldBeSameAs(popup);
             window.MoveMouse(window.PointAt(text.IndexOf("two", StringComparison.Ordinal)));
-            await Wait.UntilAsync(() => Popup(window) is null);
+            Pass(window, time, TimeSpan.FromMilliseconds(300));
+            Popup(window).ShouldBeNull();
         });
 
     [Fact]
@@ -257,14 +263,15 @@ public sealed class HoverTests(UiFixture ui)
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
-            await using var server = new LanguageServer(fake.Options);
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             const string text = "one two\nthree";
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
             var editor = new CodeEditor { Document = document };
             using var window = new EditorWindow(editor);
             await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
             int three = text.IndexOf("three", StringComparison.Ordinal);
-            SelectableTextBlock paragraph = Paragraph(await HoverAsync(window, three, "three is a word in"));
+            SelectableTextBlock paragraph = Paragraph(await HoverAsync(window, three, "three is a word in", time));
             Rect box = BoundsInWindow(paragraph);
             var from = new Point(box.Left + 1, box.Center.Y);
             var to = new Point(box.Left + 40, box.Center.Y);
@@ -275,7 +282,7 @@ public sealed class HoverTests(UiFixture ui)
             window.Window.MouseDown(from, MouseButton.Left);
             window.Window.MouseMove(to, RawInputModifiers.LeftMouseButton);
             window.Window.MouseMove(window.PointAt(0), RawInputModifiers.LeftMouseButton);
-            await Task.Delay(TimeSpan.FromMilliseconds(500));
+            Pass(window, time, TimeSpan.FromMilliseconds(500));
             window.Window.MouseMove(to, RawInputModifiers.LeftMouseButton);
             window.Window.MouseUp(to, MouseButton.Left);
             window.Layout();
@@ -284,8 +291,7 @@ public sealed class HoverTests(UiFixture ui)
 
             // Clicked into, it stays also over other text, which shows no hover of its own, as in VS Code.
             window.MoveMouse(window.PointAt(0));
-            await Task.Delay(TimeSpan.FromMilliseconds(500));
-            window.Layout();
+            Pass(window, time, TimeSpan.FromMilliseconds(500));
             IsShown(paragraph).ShouldBeTrue();
             paragraph.SelectedText.ShouldNotBeEmpty();
 
@@ -295,12 +301,12 @@ public sealed class HoverTests(UiFixture ui)
             EditorWindow.PartOf(editor).TextArea.IsFocused.ShouldBeTrue();
 
             // So does typing, which goes into the text.
-            paragraph = Paragraph(await HoverAsync(window, three, "three is a word in"));
+            paragraph = Paragraph(await HoverAsync(window, three, "three is a word in", time));
             box = BoundsInWindow(paragraph);
             window.MoveMouse(box.Center);
             window.Click(box.Center, MouseButton.Left);
             window.MoveMouse(window.PointAt(0));
-            await Task.Delay(TimeSpan.FromMilliseconds(500));
+            Pass(window, time, TimeSpan.FromMilliseconds(500));
             IsShown(paragraph).ShouldBeTrue();
             int caret = editor.Selection.Caret;
             window.Type("x");
@@ -313,7 +319,8 @@ public sealed class HoverTests(UiFixture ui)
         _ui.Run(async () =>
         {
             var fake = new FakeServer("--no-diagnostics");
-            await using var server = new LanguageServer(fake.Options);
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             const string text = "one two three";
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
             var editor = new CodeEditor { Document = document };
@@ -322,21 +329,21 @@ public sealed class HoverTests(UiFixture ui)
             int two = text.IndexOf("two", StringComparison.Ordinal);
 
             // A click, also on the hovered word; until the pointer moves, it shows no other.
-            await HoverAsync(window, two, "two is a word in");
+            await HoverAsync(window, two, "two is a word in", time);
             int asked = fake.LinesStartingWith("hover ").Count;
             window.Click(window.PointAt(two), MouseButton.Left);
             Popup(window).ShouldBeNull();
-            await Task.Delay(TimeSpan.FromMilliseconds(500));
-            window.Layout();
+            Pass(window, time, TimeSpan.FromMilliseconds(500));
+            await CompletionTests.BarrierAsync(server, fake);
             fake.LinesStartingWith("hover ").Count.ShouldBe(asked);
 
             // An arrow key, which moves no caret of a hover the mouse opened.
-            await HoverAsync(window, two, "two is a word in");
+            await HoverAsync(window, two, "two is a word in", time);
             window.Press(Key.Right);
             Popup(window).ShouldBeNull();
 
             // Not the first key of a sequence, which may show the hover.
-            await HoverAsync(window, two, "two is a word in");
+            await HoverAsync(window, two, "two is a word in", time);
             window.Press(Key.K, EditorWindow.Command);
             Popup(window).ShouldNotBeNull();
         });
@@ -346,7 +353,8 @@ public sealed class HoverTests(UiFixture ui)
         _ui.Run(async () =>
         {
             var fake = new FakeServer("--no-diagnostics");
-            await using var server = new LanguageServer(fake.Options);
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             const string text = "one two three";
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
             var editor = new CodeEditor { Document = document };
@@ -358,15 +366,15 @@ public sealed class HoverTests(UiFixture ui)
             window.MoveMouse(window.PointAt(0));
             window.Window.MouseDown(window.PointAt(0), MouseButton.Left);
             window.Window.MouseMove(window.PointAt(three), RawInputModifiers.LeftMouseButton);
-            await Task.Delay(TimeSpan.FromMilliseconds(500));
+            Pass(window, time, TimeSpan.FromMilliseconds(500));
             window.Window.MouseUp(window.PointAt(three), MouseButton.Left);
-            await Task.Delay(TimeSpan.FromMilliseconds(500));
-            window.Layout();
+            Pass(window, time, TimeSpan.FromMilliseconds(500));
+            await CompletionTests.BarrierAsync(server, fake);
             fake.LinesStartingWith("hover ").ShouldBeEmpty();
             editor.Selection.IsEmpty.ShouldBeFalse();
 
             // Once the pointer moves on, resting it starts one again.
-            await HoverAsync(window, three, "three is a word in");
+            await HoverAsync(window, three, "three is a word in", time);
         });
 
     [Fact]
@@ -470,12 +478,13 @@ public sealed class HoverTests(UiFixture ui)
         _ui.Run(async () =>
         {
             var fake = new FakeServer("--no-diagnostics");
-            await using var server = new LanguageServer(fake.Options);
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two");
             var editor = new CodeEditor { Document = document };
             using var window = new EditorWindow(editor);
             await server.StartAsync();
-            await HoverAsync(window, 4, "two is a word in");
+            await HoverAsync(window, 4, "two is a word in", time);
 
             window.Press(Key.K, EditorWindow.Command);
             window.Press(Key.I, EditorWindow.Command);
@@ -486,8 +495,7 @@ public sealed class HoverTests(UiFixture ui)
             Texts(popup).ShouldContain(t => t.Contains("two is a word in", StringComparison.Ordinal));
             window.MoveMouse(window.PointAt(0) + new Point(0, 200));
             // Longer than the hover waits for the pointer to come back.
-            await Task.Delay(TimeSpan.FromMilliseconds(500));
-            window.Layout();
+            Pass(window, time, TimeSpan.FromMilliseconds(500));
             Popup(window).ShouldNotBeNull().IsKeyboardFocusWithin.ShouldBeTrue();
             window.Press(Key.Escape);
             Popup(window).ShouldBeNull();
@@ -544,13 +552,13 @@ public sealed class HoverTests(UiFixture ui)
             editor.HoverDelay.ShouldBe(TimeSpan.FromMilliseconds(300));
 
             window.MoveMouse(window.PointAt(1));
-            time.Advance(TimeSpan.FromMilliseconds(149));
-            window.Layout();
+            Pass(window, time, TimeSpan.FromMilliseconds(149));
+            await CompletionTests.BarrierAsync(server, fake);
             fake.LinesStartingWith("hover ").ShouldBeEmpty();
             time.Advance(TimeSpan.FromMilliseconds(1));
             await fake.WaitForAsync("hover ");
             // Answered, but the delay is not over: nothing shows yet.
-            await Task.Delay(TimeSpan.FromMilliseconds(300), TestContext.Current.CancellationToken);
+            await Wait.UntilAsync(() => editor.HoverIsAnswered);
             window.Render();
             Popup(window).ShouldBeNull();
 
@@ -578,8 +586,8 @@ public sealed class HoverTests(UiFixture ui)
             window.MoveMouse(window.PointAt(1) + new Point(1, 0));
             time.Advance(TimeSpan.FromMilliseconds(100));
             window.MoveMouse(window.PointAt(2));
-            time.Advance(TimeSpan.FromMilliseconds(499));
-            window.Layout();
+            Pass(window, time, TimeSpan.FromMilliseconds(499));
+            await CompletionTests.BarrierAsync(server, fake);
             fake.LinesStartingWith("hover ").ShouldBeEmpty();
             time.Advance(TimeSpan.FromMilliseconds(1));
             string id = (await fake.WaitForAsync("hover "))["hover ".Length..].Split(' ')[0];
@@ -780,6 +788,79 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_hover_over_thousands_of_diagnostics_reads_them_a_part_at_a_time_the_most_severe_first() =>
+        _ui.Run(() =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "a word here");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            TextSnapshot snapshot = document.CurrentSnapshot;
+            // 10,000 on one word, their severities taking turns from hints to errors.
+            document.SetDiagnostics([
+                .. Enumerable
+                    .Range(0, DiagnosticsBatch.MaxShown)
+                    .Select(i => new Diagnostic(
+                        snapshot,
+                        new TextRange(2, 4),
+                        (DiagnosticSeverity)(i % 4),
+                        null,
+                        $"{i}"
+                    )),
+            ]);
+            window.Layout();
+            using var squiggles = new SquiggleLayer(EditorWindow.PartOf(editor).TextArea, document);
+            var read = new ReadCount(squiggles.At(3));
+            read.Count.ShouldBe(DiagnosticsBatch.MaxShown);
+
+            HoverContent content = HoverView.Create(
+                HoverBlocks.Of(read),
+                new PopupLook(new FontFamily("DejaVu Sans Mono"), 13, PopupColors.Default)
+            );
+
+            // As it opens, the first part, and the one that did not fit it.
+            content.IsComplete.ShouldBeFalse();
+            read.Read.ShouldBe(content.Children.Count + 1);
+            Texts(content).Take(2).ShouldBe(["3", "7"]);
+            // Each next part reads its own.
+            content.AddNextPart();
+            read.Read.ShouldBe(content.Children.Count + 1);
+            while (!content.IsComplete)
+                content.AddNextPart();
+            read.Read.ShouldBe(DiagnosticsBatch.MaxShown);
+            Texts(content).Skip(DiagnosticsBatch.MaxShown / 4).First().ShouldBe("2");
+            Texts(content).Last().ShouldBe($"{DiagnosticsBatch.MaxShown - 4}");
+
+            static IEnumerable<string> Texts(HoverContent content) =>
+                content.GetVisualDescendants().OfType<TextBlock>().Select(TextOf);
+        });
+
+    [Fact]
+    public Task A_diagnostic_without_a_message_shows_its_code_and_a_related_place_longer_than_a_part_in_parts() =>
+        _ui.Run(() =>
+        {
+            string related = string.Join(' ', Enumerable.Repeat("word", 1_020));
+            var diagnostic = new Diagnostic(TextSnapshot.FromString(""), default, DiagnosticSeverity.Warning, "W1", "")
+            {
+                RelatedInformation = [new DiagnosticRelatedInformation(new Uri("file:///a.py"), new(2, 4), related)],
+            };
+            IReadOnlyCollection<HoverBlock> blocks = HoverBlocks.Of([diagnostic]);
+            blocks.SelectMany(HoverParts.Split).ShouldAllBe(piece => HoverParts.Fits(HoverParts.Size(piece)));
+            var look = new PopupLook(new FontFamily("DejaVu Sans Mono"), 13, PopupColors.Default);
+            var host = new Border();
+            using var window = new EditorWindow(new CodeEditor(), host);
+
+            HoverContent content = HoverView.Create(blocks, look);
+            host.Child = content;
+            window.Render();
+
+            content.IsComplete.ShouldBeTrue();
+            content.GetVisualDescendants().OfType<SeverityIcon>().ShouldHaveSingleItem();
+            string[] texts = [.. content.GetVisualDescendants().OfType<TextBlock>().Select(TextOf)];
+            texts[0].ShouldBe(" (W1)");
+            string.Concat(texts.Skip(1)).ShouldBe("a.py(2, 4): " + related);
+        });
+
+    [Fact]
     public Task The_popup_stays_inside_a_window_that_narrows() =>
         _ui.Run(async () =>
         {
@@ -864,9 +945,9 @@ public sealed class HoverTests(UiFixture ui)
             window.Layout();
             using var squiggles = new SquiggleLayer(EditorWindow.PartOf(editor).TextArea, document);
 
-            IReadOnlyList<Diagnostic> shown = squiggles.At(1, 120);
+            IReadOnlyList<Diagnostic> shown = [.. squiggles.At(1).Take(120)];
 
-            // The errors, which come every fourth, in the server's order; no more than asked for.
+            // First the errors, which come every fourth, in the server's order.
             shown.Select(d => d.Message).ShouldBe(Enumerable.Range(0, 120).Select(i => $"{4 * i + 3}"));
         });
 
@@ -958,6 +1039,16 @@ public sealed class HoverTests(UiFixture ui)
         return WaitForPopupAsync(window, text);
     }
 
+    /// <summary>
+    /// Moves the clock of <paramref name="time"/> on by <paramref name="span"/>, and runs the UI thread's work that its
+    /// timers posted, so that what they do has happened.
+    /// </summary>
+    private static void Pass(EditorWindow window, ManualTime time, TimeSpan span)
+    {
+        time.Advance(span);
+        window.Layout();
+    }
+
     private static async Task<PopupFrame> WaitForPopupAsync(EditorWindow window, string text)
     {
         PopupFrame? popup = null;
@@ -1012,4 +1103,23 @@ public sealed class HoverTests(UiFixture ui)
 
     private static string TextOf(Control control) =>
         control is TextBlock { Inlines: { } inlines } ? inlines.Text ?? "" : ((TextBlock)control).Text ?? "";
+
+    /// <summary>Diagnostics that count how many of them were read.</summary>
+    private sealed class ReadCount(IReadOnlyCollection<Diagnostic> diagnostics) : IReadOnlyCollection<Diagnostic>
+    {
+        public int Read { get; private set; }
+
+        public int Count => diagnostics.Count;
+
+        public IEnumerator<Diagnostic> GetEnumerator()
+        {
+            foreach (Diagnostic diagnostic in diagnostics)
+            {
+                Read++;
+                yield return diagnostic;
+            }
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
 }

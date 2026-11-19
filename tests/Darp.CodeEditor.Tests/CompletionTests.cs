@@ -288,6 +288,7 @@ public sealed class CompletionTests(UiFixture ui)
             List(window).ShouldNotBeNull().SelectedIndex.ShouldBe(1);
             window.Render();
             RowRuns(window, "readConsole").ShouldBe([("read", false), ("Con", true), ("sole", false)]);
+            await BarrierAsync(server, fake);
             fake.LinesStartingWith("completion ").Count.ShouldBe(1);
         });
 
@@ -386,6 +387,27 @@ public sealed class CompletionTests(UiFixture ui)
             TypeAlone(window, "v");
             TypeAlone(window, ";");
             document.Text.ShouldBe("Conv;");
+        });
+
+    [Fact]
+    public Task Enter_that_waits_for_a_filter_that_matches_nothing_goes_on_to_a_new_line() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("println"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Type("pri");
+            await WaitForLabelsAsync(window, ["println"]);
+
+            // Typed, and Enter pressed, before the filter of "prizzz" shows: "println" does not match it.
+            TypeAlone(window, "zzz");
+            PressAlone(window, Key.Enter);
+
+            // Opened by typing, the list ends once that filter has run, and Enter makes its new line then.
+            await Wait.UntilAsync(() => List(window) is null);
+            document.Text.ShouldBe("prizzz\n");
         });
 
     [Fact]
@@ -716,6 +738,39 @@ public sealed class CompletionTests(UiFixture ui)
             document.Text.ShouldStartWith("println\n");
             document.Text.Length.ShouldBeGreaterThan("println\n".Length);
             document.Text.Trim().ShouldBe("println");
+        });
+
+    [Fact]
+    public Task Replacing_goes_over_the_rest_of_the_word_as_the_edits_since_left_it_and_no_further() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("println"));
+            const string text = "print + tail";
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            // The rest of the word is deleted after the caret, as by another editor: nothing after it is replaced.
+            await OpenAsync(window, 3);
+            document.Replace(new TextRange(3, 2), "");
+            window.Editor.Selection.Caret.ShouldBe(3);
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("println + tail");
+
+            // The caret moved on into the word: the replacement still ends with it.
+            document.Text = text;
+            await OpenAsync(window, 3);
+            window.Press(Key.Right);
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("println + tail");
+
+            // Typed into the rest of the word, the text goes with it.
+            document.Text = text;
+            await OpenAsync(window, 3);
+            document.Replace(new TextRange(4, 0), "xx");
+            window.Press(Key.Tab);
+            document.Text.ShouldBe("println + tail");
         });
 
     [Fact]
@@ -1054,6 +1109,34 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Additional_edits_that_come_late_are_dropped_once_the_commit_is_undone() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, ItemWithImport());
+            const string text = "x\nCon";
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            using (await CommandAsync(server, fake, "hold-resolve", "holding resolve"))
+            {
+                await OpenAsync(window, 5);
+                await fake.WaitForAsync("resolve ");
+                window.Press(Key.Enter);
+                document.Text.ShouldBe("x\nConsole");
+                window.Press(Key.Z, EditorWindow.Command);
+                document.Text.ShouldBe(text);
+            }
+            using (await CommandAsync(server, fake, "release-resolve", "released resolve"))
+            {
+                // A list shows after the late answer: the client has read it by then.
+                await OpenAsync(window, document.Text.Length);
+                document.Text.ShouldBe(text);
+            }
+        });
+
+    [Fact]
     public Task Additional_edits_that_come_late_are_dropped_after_a_change_before_where_they_go() =>
         _ui.Run(async () =>
         {
@@ -1323,6 +1406,38 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_list_with_room_for_fewer_rows_than_its_items_selects_and_pages_among_the_rows_that_fit() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            string[] labels = [.. Enumerable.Range(0, 10).Select(i => $"item{i}")];
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items(labels));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document }, height: 120);
+            var inside = new Rect(window.Window.ClientSize);
+            await OpenAsync(window, 0);
+            CompletionListBox list = List(window).ShouldNotBeNull();
+            int rows = list.VisibleRows;
+            rows.ShouldBeInRange(2, 9);
+            inside.Contains(BoundsInWindow(Flyout(window).ShouldNotBeNull())).ShouldBeTrue();
+
+            // Up wraps to the last item, which scrolls into the rows that show.
+            window.Press(Key.Up);
+            window.Render();
+            list.SelectedIndex.ShouldBe(9);
+            Rect last = BoundsInWindow(list.RowOf(9).ShouldNotBeNull());
+            inside.Contains(last).ShouldBeTrue(last.ToString());
+
+            // A page is as many rows as show, less one.
+            window.Press(Key.PageUp);
+            window.Render();
+            list.SelectedIndex.ShouldBe(9 - (rows - 1));
+            Rect selected = BoundsInWindow(list.RowOf(list.SelectedIndex).ShouldNotBeNull());
+            inside.Contains(selected).ShouldBeTrue(selected.ToString());
+        });
+
+    [Fact]
     public Task Completion_ends_on_Escape_leaving_the_word_focus_loss_scrolling_and_a_server_change() =>
         _ui.Run(async () =>
         {
@@ -1503,6 +1618,7 @@ public sealed class CompletionTests(UiFixture ui)
             await WaitForFrozenAsync(window, "print");
             window.Type(" ");
             await Wait.UntilAsync(() => List(window) is null);
+            await BarrierAsync(server, fake);
             fake.LinesStartingWith("completion ").Count.ShouldBe(1);
         });
 
@@ -1591,6 +1707,7 @@ public sealed class CompletionTests(UiFixture ui)
             Details(window).ShouldBeNull();
             // The selected row shows the detail instead, and the list stays.
             await Wait.UntilAsync(() => Row(window, "Console").Right.Text == "class System.Console");
+            await BarrierAsync(server, fake);
             fake.LinesStartingWith("completion ").Count.ShouldBe(1);
             window.Press(Key.Space, KeyModifiers.Control);
             await Wait.UntilAsync(() => DetailTexts(window).Contains("class System.Console"));

@@ -12,7 +12,8 @@ namespace Darp.CodeEditor.Completion;
 
 /// <summary>
 /// Completion's list, as VS Code's suggest widget draws it: rows exactly as high as the editor's lines with no gaps,
-/// at most <see cref="MaxRows"/> of them at once, each <c>[icon][label][labelDetails.detail]</c> on the left and
+/// at most <see cref="MaxRows"/> of them at once, and no more than fit the room it gets beside the line (see
+/// <see cref="VisibleRows"/>), each <c>[icon][label][labelDetails.detail]</c> on the left and
 /// <c>labelDetails.description</c> right-aligned, in the editor's font and the color theme's suggest colors. The
 /// selected row shows the item's detail on the right while the details beside the list are closed. It takes no
 /// keyboard focus: the editor keeps it. It is the editor's own control, so app themes don't restyle it.
@@ -46,6 +47,12 @@ internal sealed class CompletionListBox : Control
 
     /// <summary>Where a drag of the slider started: the pointer's y and the first row then; null while none runs.</summary>
     private (double Pointer, int Top)? _drag;
+
+    /// <summary>
+    /// How many whole rows fit the height that the list got when it was last laid out within a limit, as the popup lays
+    /// it out with the room beside the line; unlimited before.
+    /// </summary>
+    private int _fitRows = int.MaxValue;
 
     public CompletionListBox()
     {
@@ -104,8 +111,14 @@ internal sealed class CompletionListBox : Control
         }
     }
 
-    /// <summary>How many rows show: the items up to <see cref="MaxRows"/>, or one for a message.</summary>
-    public int VisibleRows => _message is not null ? 1 : Math.Min(_items.Count, Math.Max(1, MaxRows));
+    /// <summary>
+    /// How many rows show: the items up to <see cref="MaxRows"/>, and as many as fit the height the list gets, at least
+    /// one; or one for a message. Selecting, paging and scrolling go by them.
+    /// </summary>
+    public int VisibleRows => Math.Min(PreferredRows, Math.Max(1, _fitRows));
+
+    /// <summary>How many rows show where the list has room for them all: the items up to <see cref="MaxRows"/>.</summary>
+    private int PreferredRows => _message is not null ? 1 : Math.Min(_items.Count, Math.Max(1, MaxRows));
 
     /// <summary>Shows <paramref name="items"/> in the look of <paramref name="look"/>, with <paramref name="selected"/> selected and in view.</summary>
     public void Show(
@@ -205,14 +218,27 @@ internal sealed class CompletionListBox : Control
         InvalidateArrange();
     }
 
+    /// <summary>
+    /// As tall as its rows: all that it would show, without a limit, as the popup first asks to place it; within one,
+    /// the whole rows that fit, and the selected item stays among them.
+    /// </summary>
     protected override Size MeasureOverride(Size availableSize)
     {
         double width = Math.Min(PreferredWidth, availableSize.Width);
+        bool limited = !double.IsPositiveInfinity(availableSize.Height);
+        // Within half a pixel, as rounding the layout may take that much off.
+        int fit = limited ? (int)Math.Floor((availableSize.Height + 0.5) / RowHeight) : _fitRows;
+        if (fit != _fitRows)
+        {
+            _fitRows = fit;
+            ScrollIntoView(_selected);
+            Refresh();
+        }
         var rowSize = new Size(width, RowHeight);
         foreach (Row row in _rows)
             row.Measure(rowSize);
         _slider.Measure(availableSize);
-        return new Size(width, VisibleRows * RowHeight);
+        return new Size(width, (limited ? VisibleRows : PreferredRows) * RowHeight);
     }
 
     protected override Size ArrangeOverride(Size finalSize)

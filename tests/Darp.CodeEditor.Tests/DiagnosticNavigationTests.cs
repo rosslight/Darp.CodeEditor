@@ -86,6 +86,40 @@ public sealed class DiagnosticNavigationTests(UiFixture ui)
         });
 
     [Fact]
+    public Task New_diagnostics_show_in_the_problem_that_shows_or_close_it_without_one_there() =>
+        _ui.Run(async () =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, Text);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            SetDiagnostics(document);
+            (await GoAsync(window, Key.F8)).ShouldBe((17, "delta is wrong"));
+
+            // A warning replaces the error at the same range: it shows, as the second of two now.
+            TextSnapshot snapshot = document.CurrentSnapshot;
+            var beta = new Diagnostic(
+                snapshot,
+                new TextRange(6, 4),
+                DiagnosticSeverity.Warning,
+                null,
+                "beta looks odd"
+            );
+            document.SetDiagnostics([
+                beta,
+                new Diagnostic(snapshot, new TextRange(17, 5), DiagnosticSeverity.Warning, null, "delta looks odd"),
+            ]);
+            window.Layout();
+            PopupFrame hover = Hover(window).ShouldNotBeNull();
+            Texts(hover).ShouldBe(["2 of 2 problems", "delta looks odd"]);
+            hover.GetVisualDescendants().OfType<SeverityIcon>().Single().Severity.ShouldBe(DiagnosticSeverity.Warning);
+
+            // None is there any more: it closes, as the caret stays.
+            document.SetDiagnostics([beta]);
+            window.Layout();
+            Hover(window).ShouldBeNull();
+            window.Editor.Selection.ShouldBe(new TextSelection(17));
+        });
+
+    [Fact]
     public Task Without_diagnostics_F8_does_nothing() =>
         _ui.Run(() =>
         {

@@ -313,6 +313,12 @@ public class CodeEditor : TemplatedControl
         TimeSpan
     >(nameof(HoverDelay), defaultValue: TimeSpan.FromMilliseconds(300), coerce: CoerceHoverDelay);
 
+    /// <summary>Defines the <see cref="ParameterHints"/> property.</summary>
+    public static readonly StyledProperty<ParameterHintsOptions> ParameterHintsProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        ParameterHintsOptions
+    >(nameof(ParameterHints), defaultValue: ParameterHintsOptions.Default);
+
     /// <summary>AvaloniaEdit's editor, from the template. The editor wraps it, so that its API stays out of ours.</summary>
     private TextEditor? _part;
 
@@ -889,6 +895,9 @@ public class CodeEditor : TemplatedControl
     /// <summary>The other occurrences of the selection that the editor highlights, for tests.</summary>
     internal IReadOnlyList<TextRange> SelectionHighlights => _selectionHighlights?.Highlights ?? [];
 
+    /// <summary>Whether the server's answer to the hover that waits or shows is in, for tests.</summary>
+    internal bool HoverIsAnswered => _hover?.IsAnswered == true;
+
     /// <summary>
     /// How long the pointer rests on a character before its hover shows, VS Code's <c>editor.hover.delay</c>. The
     /// server is asked halfway through, so that its answer can show with the diagnostics once the delay is over; while
@@ -899,6 +908,18 @@ public class CodeEditor : TemplatedControl
     {
         get => GetValue(HoverDelayProperty);
         set => SetValue(HoverDelayProperty, value);
+    }
+
+    /// <summary>
+    /// How signature help shows the parameters of the call around the caret, VS Code's <c>editor.parameterHints</c>:
+    /// whether it opens as the user types, and whether Up and Down go around its signatures at either end. Turning it
+    /// off closes signature help that shows, as in VS Code. Default: <see cref="ParameterHintsOptions.Default"/>, both,
+    /// as in VS Code.
+    /// </summary>
+    public ParameterHintsOptions ParameterHints
+    {
+        get => GetValue(ParameterHintsProperty);
+        set => SetValue(ParameterHintsProperty, value);
     }
 
     /// <summary>The semantic colors of the shown document, for benchmarks; null while it shows none.</summary>
@@ -916,6 +937,12 @@ public class CodeEditor : TemplatedControl
     /// while it pastes. Completion ends on any other caret move, as in VS Code.
     /// </summary>
     internal bool KeyboardMovesCaret { get; private set; }
+
+    /// <summary>
+    /// The key whose commands the keymap runs now; null otherwise, as for a command from the context menu. Completion
+    /// presses it again when the item it waited to accept matches nothing.
+    /// </summary>
+    internal KeyEventArgs? KeymapKey { get; private set; }
 
     /// <summary>
     /// Scrolls <paramref name="range"/> into view: not at all when it is visible, centered when it is not. A range
@@ -1228,6 +1255,8 @@ public class CodeEditor : TemplatedControl
             _occurrences?.Stop();
         else if (change.Property == MatchBracketsProperty)
             _brackets?.Refresh();
+        else if (change.Property == ParameterHintsProperty && !ParameterHints.Enabled)
+            _signatureHelp?.Close();
     }
 
     /// <summary>
@@ -1348,7 +1377,7 @@ public class CodeEditor : TemplatedControl
             Icons = _iconColors,
         };
         _signatureHelp = new SignatureHelpController(this, part.TextArea, document, _highlighter) { Colors = _colors };
-        _diagnosticNavigation = new DiagnosticNavigation(part.TextArea, document);
+        _diagnosticNavigation = new DiagnosticNavigation(part.TextArea, document, _hover);
         _cursorHistory = new CursorHistory(part.TextArea, Dispatcher);
         _smartSelection = new SmartSelection(this, part.TextArea, document, _highlighter);
         _columnSelection = new ColumnSelection(part.TextArea);
@@ -1456,7 +1485,10 @@ public class CodeEditor : TemplatedControl
             return;
         bool closedHover = CloseHoverOnKey(e);
         KeyboardMovesCaret = false;
-        if (RunKeymap(e))
+        KeymapKey = e;
+        bool ran = RunKeymap(e);
+        KeymapKey = null;
+        if (ran)
             e.Handled = true;
         else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && (Dismiss() || closedHover))
             e.Handled = true;
