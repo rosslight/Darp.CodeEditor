@@ -187,7 +187,7 @@ internal sealed class HoverController : IDisposable
     {
         _popup.Frame.Paint(_colors.HoverBackground, _colors.HoverBorder, _colors.HoverForeground, _colors.Shadow);
         _content.SliderBrushes = _colors.Slider;
-        _content.Child = HoverView.Create(blocks, new PopupLook(_editor.FontFamily, _editor.FontSize, _colors));
+        _content.Child = HoverView.Create(blocks, PopupLook.Of(_editor, _colors, _colors.HoverForeground));
         // Above the hovered word, where the pointer comes from.
         _popup.Show(_textView, () => TextViewBoxes.CharacterAt(_textView, hovered.Word.Start));
     }

@@ -85,8 +85,8 @@ internal sealed class CompletionView
     /// <summary>The icons' colors; none while the color theme loads.</summary>
     public SymbolIconColors? Icons { get; set; }
 
-    /// <summary>How the popups look: the editor's font for code, and their colors.</summary>
-    public PopupLook Look => new(_editor.FontFamily, _editor.FontSize, Colors);
+    /// <summary>How the popups look: the editor's font for code, the app's for prose, and their colors.</summary>
+    public PopupLook Look => PopupLook.Of(_editor, Colors, Colors.SuggestForeground);
 
     /// <summary>
     /// Shows <paramref name="items"/>, with <paramref name="selected"/> selected and in view, at the word that starts at

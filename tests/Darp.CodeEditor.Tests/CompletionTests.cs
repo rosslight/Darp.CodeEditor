@@ -1662,6 +1662,9 @@ public sealed class CompletionTests(UiFixture ui)
                     {
                         new Setter(TextBlock.FontWeightProperty, FontWeight.Black),
                         new Setter(Layoutable.MarginProperty, new Thickness(20)),
+                        new Setter(TextBlock.ForegroundProperty, Brushes.Red),
+                        new Setter(TextBlock.FontFamilyProperty, new FontFamily("Serif")),
+                        new Setter(TextBlock.FontSizeProperty, 30.0),
                     },
                 }
             );
@@ -1690,12 +1693,16 @@ public sealed class CompletionTests(UiFixture ui)
                 .GetVisualDescendants()
                 .OfType<StackPanel>()
                 .ShouldAllBe(panel => panel.Spacing == 6 && panel.Margin == default);
-            // As VS Code's details: in editorSuggestWidget.foreground, Light+'s editor foreground.
-            details
-                .GetValue(TextElement.ForegroundProperty)
-                .ShouldBeAssignableTo<ISolidColorBrush>()
-                .ShouldNotBeNull()
-                .Color.ShouldBe(Colors.Black);
+            // As VS Code's details: in editorSuggestWidget.foreground, Light+'s editor foreground, in the app's font.
+            TextBlock prose = details
+                .GetVisualDescendants()
+                .OfType<TextBlock>()
+                .Single(text => text.Inlines?.Text == "Writes text to the output.");
+            prose.Foreground.ShouldBeAssignableTo<ISolidColorBrush>().ShouldNotBeNull().Color.ShouldBe(Colors.Black);
+            Visual around = window.Editor.GetVisualParent().ShouldNotBeNull();
+            prose.FontFamily.ShouldBe(around.GetValue(TextElement.FontFamilyProperty));
+            prose.FontSize.ShouldBe(around.GetValue(TextElement.FontSizeProperty));
+            window.RenderAndCountPixels(Colors.Red, BoundsInWindow(details)).ShouldBe(0);
         });
 
     [Fact]
