@@ -46,7 +46,6 @@ internal sealed class EditorView : IDisposable
     private readonly IDisposable[] _features;
 
     private readonly TextChanges _changes;
-    private readonly EditingHelpers _helpers;
     private readonly AutoClosingPairs _pairs;
     private readonly Typing _typing;
     private readonly Clipboard _clipboard;
@@ -69,7 +68,6 @@ internal sealed class EditorView : IDisposable
         CodeDocument document = context.Document;
         Highlighter = new BackgroundTextMateHighlighter(area.TextView, area.Document, context.Editor.Dispatcher, null);
         _changes = new TextChanges(area);
-        _helpers = new EditingHelpers(area, document, _changes);
         _pairs = new AutoClosingPairs(area, document, Highlighter, _changes, context.Options);
         _typing = new Typing(area, document, Highlighter, _changes, _pairs);
         _clipboard = new Clipboard(area, document);
@@ -87,7 +85,8 @@ internal sealed class EditorView : IDisposable
         [
             Highlighter,
             _changes,
-            _helpers,
+            new UndoCommands(area, document),
+            new Comments(area, document, _changes),
             _pairs,
             _typing,
             _clipboard,
