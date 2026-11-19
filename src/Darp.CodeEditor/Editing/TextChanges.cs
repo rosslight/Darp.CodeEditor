@@ -121,10 +121,13 @@ internal sealed class TextChanges : IDisposable
     /// Makes <paramref name="edit"/>, combined beforehand, such as off the UI thread, as one change of the text, which
     /// AvaloniaEdit's anchors such as the caret follow as they would each edit.
     /// </summary>
-    /// <returns>Whether it went in: not when it touches read-only text.</returns>
+    /// <returns>
+    /// Whether it went in: not when one of its edits may not change, as for <see cref="Apply(IReadOnlyList{TextEdit},
+    /// TextSelection?)"/>. The whole range is asked first, and each edit only where some of it may not.
+    /// </returns>
     public bool Apply(CombinedEdit edit)
     {
-        if (!CanChange(edit.Offset, edit.Length))
+        if (!CanChange(edit.Offset, edit.Length) && !edit.Edits.All(part => CanChange(part.Offset, part.Length)))
             return false;
         Replace(edit);
         return true;
@@ -142,7 +145,13 @@ internal sealed class TextChanges : IDisposable
 /// Edits made as one change of the text from the first to the last: the text that replaces that range, and a map of
 /// the edits, so that anchors such as the caret move as they would for each edit.
 /// </summary>
-internal sealed record CombinedEdit(int Offset, int Length, string Text, OffsetChangeMap Map)
+internal sealed record CombinedEdit(
+    int Offset,
+    int Length,
+    string Text,
+    OffsetChangeMap Map,
+    IReadOnlyList<TextEdit> Edits
+)
 {
     /// <summary>
     /// Combines <paramref name="edits"/>, in order and apart, of <paramref name="text"/>; on any thread.
@@ -164,7 +173,7 @@ internal sealed record CombinedEdit(int Offset, int Length, string Text, OffsetC
         }
         replaced.Append(replacedText, copied, replacedText.Length - copied);
         map.Freeze();
-        return new CombinedEdit(start, replacedText.Length, replaced.ToString(), map);
+        return new CombinedEdit(start, replacedText.Length, replaced.ToString(), map, edits);
     }
 }
 
