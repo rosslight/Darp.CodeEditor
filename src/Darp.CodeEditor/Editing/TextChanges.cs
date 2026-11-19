@@ -38,17 +38,13 @@ internal sealed class TextChanges : IDisposable
     /// <inheritdoc cref="UndoSteps.Deleting"/>
     public EditStep Deleting(bool left) => _steps.Deleting(left);
 
-    /// <summary>
-    /// Runs <paramref name="edit"/>, AvaloniaEdit's own or <see cref="Apply(IReadOnlyList{TextEdit}, TextSelection?)"/>'s,
-    /// in <paramref name="step"/>.
-    /// </summary>
+    /// <summary>Runs <paramref name="edit"/>, AvaloniaEdit's own or this one's, in <paramref name="step"/>.</summary>
     public void Run(EditStep step, Action edit) => _steps.Run(step, edit);
 
     /// <summary>
-    /// Makes <paramref name="edits"/>, in order and apart, as one change of the text, then selects
-    /// <paramref name="select"/>, by offsets in the new text, and brings the caret into view. Without one, AvaloniaEdit's
-    /// anchors carry the caret and the selection through the change, and the view stays: bringing the caret into view
-    /// lays out its line again, and after Ctrl+/ on every line, a screen of lines elsewhere.
+    /// Makes <paramref name="edits"/>, in order and apart, as one change, then selects <paramref name="select"/> and
+    /// brings the caret into view; without it, AvaloniaEdit's anchors carry the selection, and the view stays, as
+    /// bringing the caret into view lays out its line again, and after Ctrl+/ on every line a screen elsewhere.
     /// </summary>
     /// <returns>Whether they went in: not when one touches read-only text.</returns>
     public bool Apply(IReadOnlyList<TextEdit> edits, TextSelection? select = null)
@@ -72,13 +68,10 @@ internal sealed class TextChanges : IDisposable
     }
 
     /// <summary>
-    /// Makes <paramref name="edits"/> as <see cref="Apply(IReadOnlyList{TextEdit}, TextSelection?)"/> does, then puts
-    /// back the selection as it was before them, <paramref name="moved"/> characters further: the caret, the
-    /// selection's ends, or each line of a rectangle selection; brought into view when it moved forward. Moved back, as
-    /// over a deleted pair, it stays in view, and bringing it there would lay out the view again: it took Backspace on a
-    /// pair from 13 to 22 ms.
+    /// Makes <paramref name="edits"/>, then puts back the selection as it was, <paramref name="moved"/> characters
+    /// further, also each line of a rectangle selection; in view when it moved forward. Moved back, as over a deleted
+    /// pair, it stays in view, and bringing it there laid out the view again: Backspace on a pair took 22 ms, not 13.
     /// </summary>
-    /// <returns>Whether they went in.</returns>
     public bool Apply(IReadOnlyList<TextEdit> edits, int moved)
     {
         EditorSelection selection = _area.Selection;
@@ -117,10 +110,8 @@ internal sealed class TextChanges : IDisposable
                 .Sum(segment => segment.Length) == length;
 
     /// <summary>
-    /// Makes <paramref name="edits"/> as one change of the text from the first to the last, with a map of them, so that
-    /// anchors such as the caret move as they would for each edit. AvaloniaEdit raises a change per edit also within
-    /// one update, so the editor's work per change, such as the highlighter's and the view's, happens once instead of
-    /// once per edit.
+    /// One change from the first edit to the last, with a map of them for the anchors: AvaloniaEdit raises a change per
+    /// edit also within an update, and the editor's work per change, such as the highlighter's, would run each time.
     /// </summary>
     private void ReplaceInOneChange(IReadOnlyList<TextEdit> edits)
     {
@@ -142,8 +133,5 @@ internal sealed class TextChanges : IDisposable
     }
 }
 
-/// <summary>
-/// An edit of the text: <paramref name="Length"/> characters from <paramref name="Offset"/> on replaced by
-/// <paramref name="Text"/>.
-/// </summary>
+/// <summary><paramref name="Length"/> characters from <paramref name="Offset"/> on replaced by <paramref name="Text"/>.</summary>
 internal readonly record struct TextEdit(int Offset, int Length, string Text);

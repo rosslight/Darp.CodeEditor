@@ -27,10 +27,7 @@ internal sealed record LanguageConfiguration(
     /// <summary>The rules for Enter, <c>onEnterRules</c>, in their order: the first that matches applies.</summary>
     public IReadOnlyList<OnEnterRule> OnEnterRules { get; init; } = [];
 
-    /// <summary>
-    /// The characters before which a pair closes, <c>autoCloseBefore</c>, also none; null without one in the file, for
-    /// the defaults.
-    /// </summary>
+    /// <summary><c>autoCloseBefore</c>, also empty; null without one, for the defaults.</summary>
     public string? AutoCloseBefore { get; init; }
 
     /// <summary>
@@ -40,10 +37,7 @@ internal sealed record LanguageConfiguration(
     public string AutoCloseBeforeSet(bool forQuotes) =>
         AutoCloseBefore ?? (forQuotes ? ";:.,=}])> \n\t" : "'\"`;:.,=}])> \n\t");
 
-    /// <summary>
-    /// Finds the brackets, opening and closing, in any case, and a bracket of letters, such as <c>begin</c>, as a whole
-    /// word. Null without brackets.
-    /// </summary>
+    /// <summary>Finds the brackets in any case, those of letters, such as <c>begin</c>, as words; null for none.</summary>
     public Regex? BracketPattern { get; } = BracketPatternOf(Brackets);
 
     private static Regex? BracketPatternOf(IReadOnlyList<CharacterPair> pairs)
@@ -282,9 +276,6 @@ internal sealed record IndentationRules(Regex IncreaseIndentPattern, Regex Decre
     /// above it all needs about a microsecond per match.
     /// </summary>
     public static readonly TimeSpan TimeLimit = TimeSpan.FromMilliseconds(10);
-
-    /// <summary>Starts matching lines for one indentation, which may take <see cref="TimeLimit"/>.</summary>
-    public IndentationMatching StartMatching() => new(this, TimeProvider.System);
 }
 
 /// <summary>
@@ -314,13 +305,7 @@ internal readonly struct IndentationMatching
     /// takes it all, as masking a line that needs tokenizing, uses up too: a scan over whitespace lines reads many
     /// without matching any.
     /// </summary>
-    public string Read(Func<int, string> lineText, int number)
-    {
-        ThrowIfOutOfTime();
-        string text = lineText(number);
-        ThrowIfOutOfTime();
-        return text;
-    }
+    public string Read(Func<int, string> lineText, int number) => Read(() => lineText(number));
 
     /// <inheritdoc cref="Read(Func{int, string}, int)"/>
     public string Read(Func<string> read)
@@ -331,16 +316,12 @@ internal readonly struct IndentationMatching
         return text;
     }
 
-    /// <summary>Whether lines after <paramref name="line"/> are indented one level more.</summary>
     public bool Increases(string line) => Matches(_rules?.IncreaseIndentPattern, line);
 
-    /// <summary>Whether <paramref name="line"/> is indented one level less than the lines before.</summary>
     public bool Decreases(string line) => Matches(_rules?.DecreaseIndentPattern, line);
 
-    /// <summary>Whether only the line after <paramref name="line"/> is indented one level more.</summary>
     public bool IndentsNextLine(string line) => Matches(_rules?.IndentNextLinePattern, line);
 
-    /// <summary>Whether <paramref name="line"/> gives the lines after it no indentation.</summary>
     public bool IsUnIndented(string line) => Matches(_rules?.UnIndentedLinePattern, line);
 
     /// <summary>Whether <paramref name="pattern"/> matches <paramref name="text"/>, within the time; none matches nothing.</summary>
