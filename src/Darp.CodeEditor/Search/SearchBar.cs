@@ -82,6 +82,9 @@ internal sealed class SearchBar : UserControl
     /// </summary>
     private CancellationTokenSource? _seeking;
 
+    /// <summary>The search of Replace All beyond the matches that the result keeps, under way; null for none.</summary>
+    private CancellationTokenSource? _replacing;
+
     /// <summary>
     /// Where to move once the search under way has its result. A newer search that takes over keeps it: it replaces
     /// the search, not what the search was for.
@@ -648,6 +651,8 @@ internal sealed class SearchBar : UserControl
         _searching = null;
         _seeking?.Cancel();
         _seeking = null;
+        _replacing?.Cancel();
+        _replacing = null;
     }
 
     /// <summary>
@@ -849,7 +854,7 @@ internal sealed class SearchBar : UserControl
             return;
         if (result.Outcome == SearchOutcome.TooManyMatches)
         {
-            ReplaceAllBeyondTheResult(shown, result.Query, replacement);
+            ReplaceAllBeyondTheResult(shown, result, replacement);
             return;
         }
         if (!result.IsComplete)
@@ -865,22 +870,62 @@ internal sealed class SearchBar : UserControl
 
     /// <summary>
     /// Replaces every match of the text as it is, however many, as VS Code's Replace All does beyond the matches it
-    /// highlights: found on the UI thread, within the search's time limit, and replaced in one change of the text from
-    /// the first match to the last, which moves anchors, markers and the selection as separate replacements would.
+    /// highlights: found in the background, within the search's time limit, and replaced in one change of the text
+    /// from the first match to the last, which moves anchors, markers and the selection as separate replacements
+    /// would; only while the text, the query, the replacement, the scope and the editor's writability stay as they were.
     /// </summary>
-    private void ReplaceAllBeyondTheResult(Shown shown, SearchQuery query, SearchReplacement replacement)
+    private void ReplaceAllBeyondTheResult(Shown shown, SearchResult result, SearchReplacement replacement)
     {
-        (SearchEdit? edit, SearchOutcome outcome) = TextSearch.ReplaceAll(
-            shown.Document.CurrentSnapshot,
-            query,
-            replacement,
-            Scopes(),
-            CancellationToken.None
+        TextSnapshot snapshot = shown.Document.CurrentSnapshot;
+        List<TextRange>? scopes = Scopes();
+        _replacing?.Cancel();
+        var replacing = new CancellationTokenSource();
+        _replacing = replacing;
+        Task<(SearchEdit? Edit, SearchOutcome Outcome)> replace = Task.Run(
+            () => TextSearch.ReplaceAll(snapshot, result.Query, replacement, scopes, replacing.Token),
+            replacing.Token
         );
+        replace.ContinueWith(
+            _ => Dispatcher.Post(() => OnReplacedAll(replace, replacing, result, snapshot, scopes)),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default
+        );
+    }
+
+    private void OnReplacedAll(
+        Task<(SearchEdit? Edit, SearchOutcome Outcome)> replace,
+        CancellationTokenSource replacing,
+        SearchResult result,
+        TextSnapshot snapshot,
+        List<TextRange>? scopes
+    )
+    {
+        if (replace.Exception is { } exception)
+        {
+            Logger
+                .TryGet(LogEventLevel.Error, AssetFiles.LogArea)
+                ?.Log(this, "Replace All failed: {Exception}", exception);
+        }
+        if (_replacing != replacing)
+            return;
+        _replacing = null;
+        if (
+            !replace.IsCompletedSuccessfully
+            || _shown is not { } shown
+            || CurrentResult() != result
+            || shown.Document.CurrentSnapshot != snapshot
+            || !SameScopes(Scopes(), scopes)
+        )
+            return;
+        (SearchEdit? edit, SearchOutcome outcome) = replace.Result;
         if (edit is not null)
             shown.Buffer.Replace(edit.Start, edit.Length, edit.Text, edit.Map);
         else if (outcome == SearchOutcome.OutOfTime)
             ShowMessage(SearchOutcome.OutOfTime, null);
+
+        static bool SameScopes(List<TextRange>? now, List<TextRange>? then) =>
+            now is null ? then is null : then is not null && now.SequenceEqual(then);
     }
 
     /// <summary>

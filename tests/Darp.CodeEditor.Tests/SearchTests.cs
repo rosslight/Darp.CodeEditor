@@ -263,8 +263,37 @@ public sealed class SearchTests(UiFixture ui)
             );
             bar.Message.ShouldBeNull();
             Click(bar, "Replace All");
+            await Wait.UntilAsync(() => document.Text != text);
             document.Text.ShouldBe(string.Concat(Enumerable.Repeat("b\n", TextSearch.MaxMatches + 2)));
             document.Undo();
+            document.Text.ShouldBe(text);
+        });
+
+    /// <summary>
+    /// Replace All beyond the matches highlighted searches the rest of the text in the background, as the search does,
+    /// so that a costly expression there leaves the UI thread free; out of time, it replaces nothing.
+    /// </summary>
+    [Fact]
+    public Task Replace_All_beyond_the_matches_highlighted_searches_in_the_background() =>
+        _ui.Run(async () =>
+        {
+            // The search stops at the matches it keeps, before the line on which (a+)+$ backtracks.
+            string text =
+                string.Concat(Enumerable.Repeat("x\n", TextSearch.MaxMatches + 1)) + new string('a', 29) + "!";
+            using EditorWindow window = MarkedText.Show("|" + text, CodeLanguage.PlainText);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            window.Editor.OpenSearch(replace: true);
+            SearchBar bar = BarOf(window);
+            bar.RegexToggle.IsChecked = true;
+            bar.ReplaceBox.Text = "y";
+            bar.FindBox.Text = "x|(a+)+$";
+            await Wait.UntilAsync(() => bar.ReplaceAllButton.IsEnabled);
+
+            Click(bar, "Replace All");
+
+            // The click returns before the search ends: it has no outcome yet.
+            bar.Message.ShouldBeNull();
+            await Wait.UntilAsync(() => bar.Message?.Contains("stopped", StringComparison.Ordinal) == true);
             document.Text.ShouldBe(text);
         });
 
