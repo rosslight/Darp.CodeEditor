@@ -11,13 +11,17 @@ internal sealed class FindCommands : IEditorFeature
 {
     private readonly TextArea _textArea;
 
-    /// <summary>The editor's search bar, made the first time it is asked for; null without a place for it.</summary>
+    /// <summary>The editor's search bar; null until it is first needed.</summary>
     private readonly Func<SearchBar?> _bar;
 
-    public FindCommands(TextArea textArea, Func<SearchBar?> bar)
+    /// <summary>The editor's search bar, made the first time it is needed; null without a place for it.</summary>
+    private readonly Func<SearchBar?> _createBar;
+
+    public FindCommands(TextArea textArea, Func<SearchBar?> bar, Func<SearchBar?> createBar)
     {
         _textArea = textArea;
         _bar = bar;
+        _createBar = createBar;
     }
 
     public void AddCommands(CommandTable commands)
@@ -31,9 +35,19 @@ internal sealed class FindCommands : IEditorFeature
 
     public void Dispose() { }
 
+    /// <summary>Closes the search bar, as Escape does.</summary>
+    /// <returns>Whether it was open.</returns>
+    public bool Close()
+    {
+        if (_bar() is not { IsOpen: true } bar)
+            return false;
+        bar.Close();
+        return true;
+    }
+
     private bool Open(bool replace)
     {
-        if (_bar() is not { } bar)
+        if (_createBar() is not { } bar)
             return false;
         bar.Open(replace && !_textArea.IsReadOnly, SelectedLineText());
         return true;
@@ -42,7 +56,7 @@ internal sealed class FindCommands : IEditorFeature
     /// <summary>Selects the next or previous match, opening the bar for the selection if it is closed.</summary>
     private bool FindNext(bool previous)
     {
-        if (_bar() is not { } bar)
+        if (_createBar() is not { } bar)
             return false;
         string? text = bar.IsOpen ? null : SelectedLineText();
         if (previous)

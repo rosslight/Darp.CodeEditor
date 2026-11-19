@@ -17,16 +17,18 @@ namespace Darp.CodeEditor;
 /// <param name="Area">AvaloniaEdit's text area, which shows <paramref name="Document"/>.</param>
 /// <param name="Document">The document shown.</param>
 /// <param name="Keymap">The editor's keymap, as it is now.</param>
-/// <param name="SearchBar">
-/// The editor's search bar, made the first time it is asked for, and kept across documents; null without a place for
-/// it in the template.
+/// <param name="SearchBar">The editor's search bar, kept across documents; null until it is first needed.</param>
+/// <param name="CreateSearchBar">
+/// The editor's search bar, made the first time it is needed, as few editors are searched; null without a place for it
+/// in the template.
 /// </param>
 internal sealed record EditorContext(
     TemplatedControl Editor,
     TextArea Area,
     CodeDocument Document,
     Func<CodeEditorKeymap> Keymap,
-    Func<SearchBar?> SearchBar
+    Func<SearchBar?> SearchBar,
+    Func<SearchBar?> CreateSearchBar
 );
 
 /// <summary>
@@ -37,6 +39,10 @@ internal sealed class EditorView : IDisposable
 {
     private readonly EditorContext _context;
     private readonly CommandTable _commands;
+
+    /// <summary>Everything the view made, in the order it made them: disposed the other way round.</summary>
+    private readonly IDisposable[] _features;
+
     private readonly EditingHelpers _helpers;
     private readonly Clipboard _clipboard;
     private readonly BracketHighlighter _brackets;
@@ -68,9 +74,24 @@ internal sealed class EditorView : IDisposable
         // After the editing helpers: they see typed text first, so that a typed "(" has its ")" when it asks.
         _completion = new CompletionController(context.Editor, area, document, Highlighter, _snippets);
         _signatureHelp = new SignatureHelpController(context.Editor, area, document, Highlighter);
-        _search = new FindCommands(area, context.SearchBar);
+        _search = new FindCommands(area, context.SearchBar, context.CreateSearchBar);
+        _features =
+        [
+            Highlighter,
+            _helpers,
+            _clipboard,
+            _brackets,
+            _whitespace,
+            _squiggles,
+            SemanticHighlighter,
+            _hover,
+            _snippets,
+            _completion,
+            _signatureHelp,
+            _search,
+        ];
         _commands = new CommandTable(area);
-        foreach (IEditorFeature feature in (IEditorFeature[])[_helpers, _completion, _signatureHelp, _search])
+        foreach (IEditorFeature feature in _features.OfType<IEditorFeature>())
             feature.AddCommands(_commands);
     }
 
@@ -141,6 +162,12 @@ internal sealed class EditorView : IDisposable
     /// <returns>Whether it applied.</returns>
     public bool RunCommand(string id) => _commands.TryRun(id);
 
+    public void Cut() => _clipboard.Cut();
+
+    public void Copy() => _clipboard.Copy();
+
+    public void Paste() => _clipboard.Paste();
+
     /// <summary>
     /// Ends the wait for a sequence's second stroke, as a click, the focus leaving or a new keymap does.
     /// </summary>
@@ -148,11 +175,16 @@ internal sealed class EditorView : IDisposable
 
     /// <summary>
     /// What Escape closes, one at a time: completion, signature help, a snippet's stops while the text area has the
-    /// keyboard, and the hover, in the order of VS Code's keys. Each also ends what still waits for its server.
+    /// keyboard, the hover and the search bar, in the order of VS Code's keys. Each also ends what still waits for its
+    /// server.
     /// </summary>
     /// <returns>Whether it closed something the user saw.</returns>
     public bool Dismiss() =>
-        _completion.Close() || _signatureHelp.Close() || (_context.Area.IsFocused && _snippets.End()) || _hover.Close();
+        _completion.Close()
+        || _signatureHelp.Close()
+        || (_context.Area.IsFocused && _snippets.End())
+        || _hover.Close()
+        || _search.Close();
 
     /// <summary>Closes the popups, once the keyboard has left the editor.</summary>
     public void OnFocusLeft()
@@ -186,17 +218,7 @@ internal sealed class EditorView : IDisposable
 
     public void Dispose()
     {
-        _helpers.Dispose();
-        _clipboard.Dispose();
-        _brackets.Dispose();
-        _whitespace.Dispose();
-        _hover.Dispose();
-        _completion.Dispose();
-        _snippets.Dispose();
-        _signatureHelp.Dispose();
-        _search.Dispose();
-        _squiggles.Dispose();
-        SemanticHighlighter.Dispose();
-        Highlighter.Dispose();
+        for (int i = _features.Length - 1; i >= 0; i--)
+            _features[i].Dispose();
     }
 }
