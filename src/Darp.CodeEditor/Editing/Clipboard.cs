@@ -70,7 +70,14 @@ internal sealed class Clipboard : IDisposable
                 ?.Log(this, "Reading the clipboard failed: {Exception}", e);
             return;
         }
-        if (_disposed || !CanPaste() || string.IsNullOrEmpty(text))
+        if (!_disposed && text is not null)
+            Paste(text);
+    }
+
+    /// <summary>Pastes <paramref name="text"/>, read from the clipboard already, as <see cref="Paste()"/> does.</summary>
+    public void Paste(string text)
+    {
+        if (!CanPaste() || text.Length == 0)
             return;
         text = TextUtilities.NormalizeNewLines(text, _document.LineBreak);
         TextEditorOptions options = _textArea.Options;
