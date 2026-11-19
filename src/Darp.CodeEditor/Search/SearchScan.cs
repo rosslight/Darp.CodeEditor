@@ -10,8 +10,8 @@ namespace Darp.CodeEditor.Search;
 internal delegate bool MatchFound(int start, int length, Match match);
 
 /// <summary>
-/// One search of a text for a query, for <see cref="TextSearch"/>: it finds the matches range by range, in order, by
-/// code points, and stops once it takes its time (<see cref="TextSearch.TimeLimit"/>) or is cancelled.
+/// One search of a text for a query, for <see cref="TextSearch"/>: it finds the matches range by range, in order, and
+/// stops once it takes its time (<see cref="TextSearch.TimeLimit"/>) or is cancelled.
 /// </summary>
 internal sealed class SearchScan
 {
@@ -25,8 +25,8 @@ internal sealed class SearchScan
     private readonly TimeProvider _clock;
     private readonly long _start;
 
-    /// <summary>Whether the regular expression has groups, whose bounds a match must not put inside a pair.</summary>
-    private readonly bool _hasGroups;
+    /// <summary>Whether the text has surrogates, between whose halves no match or group may start or end.</summary>
+    private readonly bool _surrogates;
 
     public SearchScan(
         string text,
@@ -44,7 +44,7 @@ internal sealed class SearchScan
         _regex = regex;
         _found = found;
         _cancellationToken = cancellationToken;
-        _hasGroups = regex.GetGroupNumbers().Length > 1;
+        _surrogates = text.AsSpan().IndexOfAnyInRange('\uD800', '\uDFFF') >= 0;
     }
 
     /// <summary>
@@ -168,9 +168,9 @@ internal sealed class SearchScan
                 return SearchOutcome.OutOfTime;
             int index = shift + match.Index;
             int matchEnd = index + match.Length;
-            // By code points: no match starts inside a surrogate pair, and the next try starts after it, as VS
-            // Code steps past an empty match.
-            if (IsInsideSurrogatePair(input, index))
+            // No match starts inside a surrogate pair, and the next try starts after it, as VS Code steps past an
+            // empty match.
+            if (_surrogates && IsInsideSurrogatePair(input, index))
             {
                 if (index >= end)
                     break;
@@ -178,7 +178,7 @@ internal sealed class SearchScan
                 continue;
             }
             if (
-                !SplitsAPair(input, shift, match)
+                !(_surrogates && SplitsAPair(input, shift, match))
                 && (!_query.WholeWord || IsWholeWord(input, start, end, index, match.Length))
             )
             {
@@ -215,15 +215,11 @@ internal sealed class SearchScan
         offset > 0 && offset < text.Length && text[offset - 1] == '\r' && text[offset] == '\n';
 
     /// <summary>
-    /// Whether the match ends, or one of its groups starts or ends, between the two halves of a surrogate pair, where a
-    /// replacement would split it.
+    /// Whether the match or one of its groups starts or ends between the two halves of a surrogate pair, where a
+    /// replacement would split it: .NET's classes and quantifiers work on UTF-16 units.
     /// </summary>
-    private bool SplitsAPair(string input, int shift, Match match)
+    private static bool SplitsAPair(string input, int shift, Match match)
     {
-        if (IsInsideSurrogatePair(input, shift + match.Index + match.Length))
-            return true;
-        if (!_hasGroups)
-            return false;
         foreach (Group group in match.Groups)
         {
             int groupStart = shift + group.Index;
