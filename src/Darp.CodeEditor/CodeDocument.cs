@@ -345,8 +345,8 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     internal virtual ServerFeatures? Features => null;
 
     /// <summary>
-    /// The clock of the editors' pauses before they ask the server: its options' <c>TimeProvider</c>, so that tests can
-    /// pass their own.
+    /// The clock of the editors' pauses before they ask the server, and of the search's time limit: the server options'
+    /// <c>TimeProvider</c>, so that tests can pass their own.
     /// </summary>
     internal virtual TimeProvider TimeProvider => TimeProvider.System;
 
@@ -579,4 +579,8 @@ internal sealed class DiagnosticsBatch
 }
 
 /// <summary>A document without a language server, from <see cref="CodeDocument.Create"/>.</summary>
-internal sealed class StandaloneDocument(CodeLanguage language, string text) : CodeDocument(language, text);
+internal sealed class StandaloneDocument(CodeLanguage language, string text, TimeProvider? time = null)
+    : CodeDocument(language, text)
+{
+    internal override TimeProvider TimeProvider { get; } = time ?? TimeProvider.System;
+}

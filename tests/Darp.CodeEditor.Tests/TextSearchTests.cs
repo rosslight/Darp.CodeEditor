@@ -11,20 +11,27 @@ namespace Darp.CodeEditor.Tests;
 /// </summary>
 public sealed class TextSearchTests
 {
-    /// <summary>
-    /// A line on which <c>(a+)+$</c> backtracks at every position, and the alternative <c>a</c> then matches inside a
-    /// word: Match Whole Word rejects every match, each one after milliseconds.
-    /// </summary>
-    private static readonly TextSnapshot s_slowForEveryMatch = TextSnapshot.FromString(
-        string.Join(' ', Enumerable.Repeat(new string('a', 18) + "!", 100))
+    /// <summary>A line of 100 matches of <c>a</c> that Match Whole Word rejects, each inside a word.</summary>
+    private static readonly TextSnapshot s_rejectedOnOneLine = TextSnapshot.FromString(
+        string.Join(' ', Enumerable.Repeat("ba", 100))
     );
 
-    private static readonly SearchQuery s_slowQuery = new("(a+)+$|a", MatchCase: true, WholeWord: true, UseRegex: true);
+    private static readonly SearchQuery s_wholeWordA = new("a", MatchCase: true, WholeWord: true, UseRegex: false);
 
+    /// <summary>Each match may have taken long to find, also one that Match Whole Word rejects.</summary>
     [Fact]
     public void Rejected_matches_count_against_the_time_limit()
     {
-        SearchResult result = TextSearch.Find(s_slowForEveryMatch, s_slowQuery, null, null, CancellationToken.None);
+        var clock = new SteppingTime { Step = TextSearch.TimeLimit / 50 };
+
+        SearchResult result = TextSearch.Find(
+            s_rejectedOnOneLine,
+            s_wholeWordA,
+            null,
+            null,
+            CancellationToken.None,
+            clock
+        );
 
         result.Outcome.ShouldBe(SearchOutcome.OutOfTime);
     }
@@ -88,7 +95,7 @@ public sealed class TextSearchTests
         cancelled.Cancel();
 
         Should.Throw<OperationCanceledException>(() =>
-            TextSearch.Find(s_slowForEveryMatch, s_slowQuery, null, null, cancelled.Token)
+            TextSearch.Find(s_rejectedOnOneLine, s_wholeWordA, null, null, cancelled.Token)
         );
     }
 

@@ -157,7 +157,7 @@ internal sealed class SearchBar : UserControl
         set => _findInSelection.IsChecked = value;
     }
 
-    /// <summary>The latest search, also of a document shown before; tests wait for it.</summary>
+    /// <summary>The search's latest work in the background, also for a document shown before; tests wait for it.</summary>
     internal Task LatestSearch => Search?.LatestSearch ?? Task.CompletedTask;
 
     internal TextBox FindBox => _find;

@@ -91,13 +91,15 @@ internal static class TextSearch
     /// counts as its whole text: <c>^</c> matches at its start.
     /// </param>
     /// <param name="cancellationToken">Stops the search.</param>
+    /// <param name="clock">The clock of the time limit, the document's; the system's for null.</param>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
     public static SearchResult Find(
         TextSnapshot snapshot,
         SearchQuery query,
         SearchReplacement? replacement,
         IReadOnlyList<TextRange>? scope,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        TimeProvider? clock = null
     )
     {
         var matches = new TextSegmentCollection<SearchMatch>();
@@ -116,6 +118,7 @@ internal static class TextSearch
                 matches.Add(new SearchMatch(replacing?.Build(match) ?? "") { StartOffset = start, Length = length });
                 return true;
             },
+            clock ?? TimeProvider.System,
             cancellationToken
         ).Scan(scope);
         return new SearchResult(snapshot.Version, query, replacement, matches, outcome, null);
@@ -136,7 +139,8 @@ internal static class TextSearch
         SearchQuery query,
         SearchReplacement replacement,
         IReadOnlyList<TextRange>? scope,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        TimeProvider? clock = null
     )
     {
         string text = snapshot.GetText();
@@ -153,6 +157,7 @@ internal static class TextSearch
                 edits.Add(new TextEdit(start, length, replacing.Build(match)));
                 return true;
             },
+            clock ?? TimeProvider.System,
             cancellationToken
         ).Scan(scope);
         CombinedEdit? edit =
@@ -175,6 +180,7 @@ internal static class TextSearch
     /// Whether an empty match at <paramref name="from"/> is the current one, which it skips.
     /// </param>
     /// <param name="cancellationToken">Stops the search.</param>
+    /// <param name="clock">The clock of the time limit, as for <see cref="Find"/>.</param>
     /// <returns>The match, null for none, and whether the search ran out of time.</returns>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
     public static (SearchMatch? Match, SearchOutcome Outcome) FindNext(
@@ -184,7 +190,8 @@ internal static class TextSearch
         IReadOnlyList<TextRange>? scope,
         int from,
         bool skipEmpty,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        TimeProvider? clock = null
     )
     {
         string text = snapshot.GetText();
@@ -206,6 +213,7 @@ internal static class TextSearch
                 next = new SearchMatch(replacing?.Build(match) ?? "") { StartOffset = start, Length = length };
                 return false;
             },
+            clock ?? TimeProvider.System,
             cancellationToken
         ).Scan(scope, from);
         return (next, outcome == SearchOutcome.OutOfTime ? outcome : SearchOutcome.Complete);
@@ -224,7 +232,8 @@ internal static class TextSearch
         IReadOnlyList<TextRange>? scope,
         int from,
         int before,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        TimeProvider? clock = null
     )
     {
         string text = snapshot.GetText();
@@ -242,6 +251,7 @@ internal static class TextSearch
                 last = new TextRange(start, length);
                 return true;
             },
+            clock ?? TimeProvider.System,
             cancellationToken
         ).Scan(scope, Math.Clamp(from, 0, text.Length));
         SearchMatch? previous = last is { } found
