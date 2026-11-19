@@ -44,7 +44,7 @@ namespace Darp.CodeEditor.Completion;
 /// under way with <c>$/cancelRequest</c>, and so does a newer request; a late answer is dropped.
 /// </para>
 /// </remarks>
-internal sealed class CompletionController : IEditorFeature
+internal sealed class CompletionController : IEditorFeature, ICompletionOwner
 {
     private readonly TextArea _textArea;
     private readonly TextDocument _buffer;
@@ -85,9 +85,7 @@ internal sealed class CompletionController : IEditorFeature
             textArea,
             document,
             WordBefore,
-            () => Close(),
-            Update,
-            Commit
+            this
         );
         _view.Clicked += OnClicked;
         _buffer.Changing += OnBufferChanging;
@@ -160,12 +158,12 @@ internal sealed class CompletionController : IEditorFeature
     /// <returns>Whether the list showed: otherwise the key goes on, as to a new line or an indent.</returns>
     private bool Accept(bool replace, Action? goOn)
     {
-        if (_session is not { IsShowing: true } session)
+        if (_session is not { } session || !_filter.IsShowing)
             return false;
-        if (_filter.CanCommit(session, session.Selected))
-            Commit(session, session.Selected, replace);
-        else
-            _filter.CommitWhenFiltered(session, replace, goOn);
+        if (_filter.CanCommit(_filter.Selected, session.Answer))
+            Commit(_filter.Selected, replace);
+        else if (session.Answer is { } answer)
+            _filter.CommitWhenFiltered(answer, replace, goOn);
         return true;
     }
 
@@ -173,7 +171,7 @@ internal sealed class CompletionController : IEditorFeature
     /// <returns>Whether the list showed.</returns>
     private bool ToggleDetails()
     {
-        if (_session is not { IsShowing: true } session)
+        if (_session is null || !_filter.IsShowing)
             return false;
         _resolver.ToggleDetails();
         return true;
@@ -188,26 +186,24 @@ internal sealed class CompletionController : IEditorFeature
     {
         if (_session is null)
             HideEmpty();
-        if (_session is not { IsShowing: true, Items.Count: > 1 } session || e.KeyModifiers != KeyModifiers.None)
+        if (_session is null || !_filter.IsShowing || _filter.Items.Count < 2 || e.KeyModifiers != KeyModifiers.None)
             return false;
-        int count = session.Items.Count;
+        int count = _filter.Items.Count;
+        int selected = _filter.Selected;
         CompletionListBox list = _view.List;
         switch (e.Key)
         {
             case Key.Down:
-                _filter.Select(session, (session.Selected + 1) % count);
+                _filter.Select((selected + 1) % count);
                 return true;
             case Key.Up:
-                _filter.Select(session, (session.Selected + count - 1) % count);
+                _filter.Select((selected + count - 1) % count);
                 return true;
             case Key.PageDown:
-                _filter.Select(
-                    session,
-                    CompletionPaging.Down(session.Selected, list.FirstRow, list.VisibleRows, count)
-                );
+                _filter.Select(CompletionPaging.Down(selected, list.FirstRow, list.VisibleRows, count));
                 return true;
             case Key.PageUp:
-                _filter.Select(session, CompletionPaging.Up(session.Selected, list.FirstRow, list.VisibleRows));
+                _filter.Select(CompletionPaging.Up(selected, list.FirstRow, list.VisibleRows));
                 return true;
             default:
                 return false;
@@ -221,13 +217,14 @@ internal sealed class CompletionController : IEditorFeature
     public void OnTextInput(TextInputEventArgs e)
     {
         if (
-            _session is { IsShowing: true, FrozenAt: null } session
+            _session is { } session
+            && _filter is { IsShowing: true, IsFrozen: false }
             && e.Text is [char typed]
-            && session.Items[session.Selected].Item.CommitCharacters.Contains(typed)
-            && _filter.CanCommit(session, session.Selected)
+            && _filter.Items[_filter.Selected].Item.CommitCharacters.Contains(typed)
+            && _filter.CanCommit(_filter.Selected, session.Answer)
         )
         {
-            Commit(session, session.Selected);
+            Commit(_filter.Selected);
         }
     }
 
@@ -240,13 +237,12 @@ internal sealed class CompletionController : IEditorFeature
         bool showedEmpty = HideEmpty();
         if (_session is not { } session)
             return showedEmpty;
+        bool showed = _filter.IsShowing || _filter.ShowsNoMatch;
         _session = null;
-        session.HasEnded = true;
         session.Pending?.Cancellation.Cancel();
-        session.Filtering?.Cancellation.Cancel();
+        _filter.Hide();
         _resolver.Clear();
-        _view.Hide();
-        return session.IsShowing || session.ShowsNoMatch;
+        return showed;
     }
 
     public void Dispose()
@@ -348,7 +344,7 @@ internal sealed class CompletionController : IEditorFeature
                 Close();
                 return;
             }
-            _filter.Hide(session);
+            _filter.Hide();
             Ask(new CompletionTrigger(CompletionTriggerKind.Invoked));
             return;
         }
@@ -356,7 +352,7 @@ internal sealed class CompletionController : IEditorFeature
             return;
         if (answer.List.IsIncomplete && caret > latest.Offset && WordBefore(caret).Length > 0)
             Ask(new CompletionTrigger(CompletionTriggerKind.TriggerForIncompleteCompletions));
-        _filter.Run(session, answer, caret);
+        _filter.Run(answer);
     }
 
     /// <summary>Hides "No suggestions." of an empty answer, if it shows.</summary>
@@ -371,20 +367,20 @@ internal sealed class CompletionController : IEditorFeature
     }
 
     /// <summary>
-    /// Commits the item at <paramref name="index"/>, as it was resolved, with <see cref="CompletionCommit"/>: completion
-    /// ends first. The resolve of an item whose additional edits are still to come is taken out of the session, so that
-    /// ending it does not cancel it.
+    /// Commits the item at <paramref name="index"/> of the list, as it was resolved, with
+    /// <see cref="CompletionCommit"/>: completion ends first. The resolve of an item whose additional edits are still to
+    /// come is taken out of the resolver, so that ending completion does not cancel it.
     /// </summary>
-    private void Commit(CompletionSession session, int index, bool replace = false)
+    private void Commit(int index, bool replace = false)
     {
-        if (session.Shown?.Answer is not { } answer)
+        if (_filter.ShownAnswer is not { } answer)
             return;
         if (!_textArea.ReadOnlySectionProvider.CanInsert(_textArea.Caret.Offset))
         {
             Close();
             return;
         }
-        CompletionItem selected = session.Items[index].Item;
+        CompletionItem selected = _filter.Items[index].Item;
         CompletionItem item = _resolver.ResolvedOf(selected) ?? selected;
         ItemResolve? late =
             item.AdditionalEdits is null && answer.List.Resolves ? _resolver.Take(selected, answer.List) : null;
@@ -395,15 +391,24 @@ internal sealed class CompletionController : IEditorFeature
     private void OnClicked(int index)
     {
         if (
-            _session is { IsShowing: true } session
+            _session is { } session
+            && _filter.IsShowing
             && index >= 0
-            && index < session.Items.Count
-            && _filter.CanCommit(session, index)
+            && index < _filter.Items.Count
+            && _filter.CanCommit(index, session.Answer)
         )
         {
-            Commit(session, index);
+            Commit(index);
         }
     }
+
+    bool ICompletionOwner.ByKey => _session?.ByKey == true;
+
+    bool ICompletionOwner.Asking => _session?.Pending is not null;
+
+    void ICompletionOwner.End() => Close();
+
+    void ICompletionOwner.Commit(int index, bool replace) => Commit(index, replace);
 
     /// <summary>Opens completion on the server's trigger characters, and when typing starts a word.</summary>
     private void OnTextEntered(object? sender, TextInputEventArgs e)
