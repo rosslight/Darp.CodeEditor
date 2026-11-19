@@ -1478,10 +1478,16 @@ internal sealed partial class EditingHelpers : IDisposable
             return false;
         // The typed character as it is, as VS Code adds it to the text around it.
         int[]? tokens = RuleTokens(line.LineNumber, text, tokenizeNow: true);
-        Regex? brackets = Configuration.BracketPattern;
-        string before = RuleText.Of(text, tokens, brackets, 0, typed);
-        string around = before + text[typed] + RuleText.Of(text, tokens, brackets, typed + 1, text.Length);
-        if (OutdentedIndentation(rules, line.LineNumber, around, before.Length) is not { } outdented)
+        string around = text;
+        int character = typed;
+        if (tokens is not null)
+        {
+            Regex? brackets = Configuration.BracketPattern;
+            string before = RuleText.Of(text, tokens, brackets, 0, typed);
+            around = before + text[typed] + RuleText.Of(text, tokens, brackets, typed + 1, text.Length);
+            character = before.Length;
+        }
+        if (OutdentedIndentation(rules, line.LineNumber, around, character) is not { } outdented)
             return false;
         string indentation = new Indenting(_document.Indentation).Normalize(outdented);
         int current = LeadingWhitespace(text);
@@ -1509,11 +1515,17 @@ internal sealed partial class EditingHelpers : IDisposable
         int column = caret - line.Offset;
         string old = Buffer.GetText(line);
         int[]? tokens = RuleTokens(line.LineNumber, old + typed, tokenizeNow: true);
-        Regex? brackets = Configuration.BracketPattern;
-        string before = RuleText.Of(old, tokens, brackets, 0, column);
-        string around = before + typed + RuleText.Of(old, tokens, brackets, column, old.Length);
-        string text = old.Insert(column, typed.ToString());
-        return OutdentedIndentation(rules, line.LineNumber, around, before.Length) is { } outdented
+        string text = string.Concat(old.AsSpan(0, column), new ReadOnlySpan<char>(in typed), old.AsSpan(column));
+        string around = text;
+        int character = column;
+        if (tokens is not null)
+        {
+            Regex? brackets = Configuration.BracketPattern;
+            string before = RuleText.Of(old, tokens, brackets, 0, column);
+            around = before + typed + RuleText.Of(old, tokens, brackets, column, old.Length);
+            character = before.Length;
+        }
+        return OutdentedIndentation(rules, line.LineNumber, around, character) is { } outdented
             && new Indenting(_document.Indentation).Normalize(outdented) != text[..LeadingWhitespace(text)];
     }
 
@@ -1528,7 +1540,7 @@ internal sealed partial class EditingHelpers : IDisposable
         IndentationMatching matching = rules.StartMatching();
         try
         {
-            if (matching.Decreases(text.Remove(typed, 1)) || !matching.Decreases(text))
+            if (!matching.Decreases(text) || matching.Decreases(text.Remove(typed, 1)))
                 return null;
             if (
                 InheritedIndentation(matching, lineNumber, honorIntentional: false, LineText, RuleLine)
