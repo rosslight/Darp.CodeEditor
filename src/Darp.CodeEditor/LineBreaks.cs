@@ -8,8 +8,8 @@ internal static class LineBreaks
 {
     /// <summary>
     /// The operating system's line break, <see cref="Environment.NewLine"/>: a document's whose text has none, as with
-    /// VS Code's default <c>files.eol</c>, <c>auto</c>. Tests set it before they create a document, to run as on
-    /// another system.
+    /// VS Code's default <c>files.eol</c>, <c>auto</c>, and the clipboard's on Windows. Tests set it before they create
+    /// a document, to run as on another system.
     /// </summary>
     internal static string System { get; set; } = Environment.NewLine;
 
@@ -37,4 +37,11 @@ internal static class LineBreaks
             return System;
         return withCarriageReturn * 2 > count ? "\r\n" : "\n";
     }
+
+    /// <summary>
+    /// The line break of the text that copy and cut put on the clipboard from a document whose line break is
+    /// <paramref name="lineBreak"/>: as in VS Code, <c>\r\n</c> on Windows, whose line break it is, else the
+    /// document's.
+    /// </summary>
+    public static string OnClipboard(string lineBreak) => System == "\r\n" ? "\r\n" : lineBreak;
 }

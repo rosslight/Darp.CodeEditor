@@ -83,6 +83,18 @@ public sealed class ClipboardTests(UiFixture ui)
             (await ClipboardText(window)).ShouldBe(line + s_lineBreak);
         });
 
+    /// <summary>As VS Code copies: in the document's line breaks, or on Windows in its own, <c>\r\n</c>.</summary>
+    [Fact]
+    public Task Copy_takes_the_documents_line_breaks() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("«a\r\nb»\r\nc", CodeLanguage.PlainText);
+
+            window.Press(Key.C, EditorWindow.Command);
+
+            (await ClipboardText(window)).ShouldBe("a\r\nb");
+        });
+
     [Fact]
     public Task A_copied_line_replaces_a_selection_as_text() =>
         _ui.Run(async () =>

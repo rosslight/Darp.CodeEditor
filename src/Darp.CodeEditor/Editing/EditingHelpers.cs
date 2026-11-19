@@ -753,17 +753,18 @@ internal sealed partial class EditingHelpers : IDisposable
     }
 
     /// <summary>
-    /// What copy takes, with the app's line breaks: the selection; without one, with
-    /// <see cref="CodeEditor.EmptySelectionClipboard"/>, the caret's line and a line break, also after the last line;
-    /// otherwise nothing.
+    /// What copy takes, with the clipboard's line breaks (<see cref="LineBreaks.OnClipboard"/>): the selection; without
+    /// one, with <see cref="CodeEditor.EmptySelectionClipboard"/>, the caret's line and a line break, also after the last
+    /// line; otherwise nothing.
     /// </summary>
     private (string Text, bool IsLine)? CopiedText()
     {
+        string lineBreak = LineBreaks.OnClipboard(_document.LineBreak);
         if (!_textArea.Selection.IsEmpty)
-            return (TextUtilities.NormalizeNewLines(_textArea.Selection.GetText(), Environment.NewLine), false);
+            return (TextUtilities.NormalizeNewLines(_textArea.Selection.GetText(), lineBreak), false);
         if (!_editor.EmptySelectionClipboard)
             return null;
-        return (Buffer.GetText(Buffer.GetLineByOffset(_textArea.Caret.Offset)) + Environment.NewLine, true);
+        return (Buffer.GetText(Buffer.GetLineByOffset(_textArea.Caret.Offset)) + lineBreak, true);
     }
 
     /// <summary>
