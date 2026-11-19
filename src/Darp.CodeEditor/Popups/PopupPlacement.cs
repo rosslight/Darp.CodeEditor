@@ -36,20 +36,31 @@ internal static class PopupPlacement
     /// <param name="size">The popup's size.</param>
     /// <param name="window">The window.</param>
     /// <param name="preferred">The side it opens on where both have room.</param>
+    /// <param name="keepSide">
+    /// Whether it stays on <paramref name="preferred"/> even where only the other side has room, as while the user
+    /// resizes it.
+    /// </param>
     /// <returns>
     /// Where it goes; null when the window does not show the line, as of an editor beyond its edge: the popup would
     /// point at nothing.
     /// </returns>
-    public static PopupBounds? Place(Rect line, double left, Size size, Rect window, PopupSide preferred)
+    public static PopupBounds? Place(
+        Rect line,
+        double left,
+        Size size,
+        Rect window,
+        PopupSide preferred,
+        bool keepSide = false
+    )
     {
         if (!line.Intersects(window))
             return null;
         double above = line.Top - window.Top;
         double below = window.Bottom - line.Bottom;
         bool placeAbove =
-            preferred == PopupSide.Below
-                ? size.Height > below && above > below
-                : size.Height <= above || (size.Height > below && above >= below);
+            keepSide ? preferred == PopupSide.Above
+            : preferred == PopupSide.Below ? size.Height > below && above > below
+            : size.Height <= above || (size.Height > below && above >= below);
         // In whole pixels, so that rounding the layout cannot take it past the window's edge.
         double room = Math.Max(0, Math.Floor(placeAbove ? above : below));
         double width = Math.Min(size.Width, window.Width);

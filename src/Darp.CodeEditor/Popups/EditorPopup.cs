@@ -21,7 +21,7 @@ namespace Darp.CodeEditor.Popups;
 /// <para>
 /// A resizable popup resizes by its edges away from what it is next to: its outer side and the edge away from the
 /// line. <see cref="Resized"/> reports the size dragged to and the edges dragged, and its owner shows it again at that
-/// size.
+/// size, on the same side of its line until the user lets go.
 /// </para>
 /// </remarks>
 internal sealed class EditorPopup
@@ -180,8 +180,14 @@ internal sealed class EditorPopup
             _placedBy = (space, line, left);
             _root.MaxHeight = double.PositiveInfinity;
             _root.Measure(new Size(space.Width, double.PositiveInfinity));
+            // While the user drags an edge, it stays on its side of the line rather than jump from under the pointer;
+            // it takes a side again at its first placing after they let go.
+            (PopupSide side, bool keepSide) =
+                Frame.IsDragging && Placed is { } shown
+                    ? (shown.Above ? PopupSide.Above : PopupSide.Below, true)
+                    : (_side, false);
             // Out of the window, as in an editor beyond its edge, the line shows nowhere for the popup to point at.
-            if (PopupPlacement.Place(line, left, _root.DesiredSize, window, _side) is not { } next)
+            if (PopupPlacement.Place(line, left, _root.DesiredSize, window, side, keepSide) is not { } next)
             {
                 LeaveView();
                 return;

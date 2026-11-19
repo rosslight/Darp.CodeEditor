@@ -62,6 +62,9 @@ internal sealed class PopupFrame : Border
     /// <summary>The edges that resize the frame now; none by default.</summary>
     public Edges ResizableEdges { get; set; }
 
+    /// <summary>Whether the user is dragging an edge.</summary>
+    public bool IsDragging => _drag is not null;
+
     /// <summary>Raised while the user drags an edge, with the size that the frame would have, and the edges dragged.</summary>
     public event Action<Size, Edges>? Resized;
 
