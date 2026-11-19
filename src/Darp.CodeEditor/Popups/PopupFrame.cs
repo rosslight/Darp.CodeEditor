@@ -25,7 +25,8 @@ internal enum Edges
 /// </summary>
 /// <remarks>
 /// Dragging one of its <see cref="ResizableEdges"/>, or a corner between two, within a few pixels inside its border,
-/// reports the size dragged to through <see cref="Resized"/>, within the window; its owner applies it.
+/// reports the size dragged to through <see cref="Resized"/>, within the window, with the edges dragged: its owner
+/// applies what they change.
 /// </remarks>
 internal sealed class PopupFrame : Border
 {
@@ -58,8 +59,8 @@ internal sealed class PopupFrame : Border
     /// <summary>The edges that resize the frame now; none by default.</summary>
     public Edges ResizableEdges { get; set; }
 
-    /// <summary>Raised while the user drags an edge, with the size that the frame would have.</summary>
-    public event Action<Size>? Resized;
+    /// <summary>Raised while the user drags an edge, with the size that the frame would have, and the edges dragged.</summary>
+    public event Action<Size, Edges>? Resized;
 
     /// <summary>Paints the frame, and gives its text <paramref name="foreground"/>.</summary>
     public void Paint(IBrush background, IBrush border, IBrush foreground, BoxShadows shadow)
@@ -102,7 +103,7 @@ internal sealed class PopupFrame : Border
             edges.HasFlag(Edges.Bottom) ? Math.Min(bounds.Height + delta.Y, room.Height - bounds.Top)
             : edges.HasFlag(Edges.Top) ? Math.Min(bounds.Height - delta.Y, bounds.Bottom)
             : bounds.Height;
-        Resized?.Invoke(new Size(Math.Max(0, width), Math.Max(0, height)));
+        Resized?.Invoke(new Size(Math.Max(0, width), Math.Max(0, height)), edges);
         e.Handled = true;
     }
 

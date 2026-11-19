@@ -1340,6 +1340,37 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Dragging_only_the_lists_side_keeps_its_rows() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            using (await SetCompletionAsync(server, fake, Items("one")))
+                await OpenAsync(window, 0);
+            Rect frame = BoundsInWindow(Flyout(window).ShouldNotBeNull());
+
+            // The right edge of a list of one row, in the middle of its height.
+            var edge = new Point(frame.Right - 2, frame.Center.Y);
+            window.Window.MouseDown(edge, MouseButton.Left);
+            window.Window.MouseMove(edge + new Point(100, 0));
+            window.Window.MouseUp(edge + new Point(100, 0), MouseButton.Left);
+            window.Layout();
+            window.Press(Key.Escape);
+
+            // Wider, and as many rows as before for a longer list.
+            using CodeDocument longer = await SetCompletionAsync(
+                server,
+                fake,
+                Items([.. Enumerable.Range(0, 20).Select(i => $"item{i:D2}")])
+            );
+            await OpenAsync(window, 0);
+            List(window).ShouldNotBeNull().VisibleRows.ShouldBe(CompletionView.DefaultRows);
+            BoundsInWindow(Flyout(window).ShouldNotBeNull()).Width.ShouldBe(frame.Width + 100, tolerance: 1);
+        });
+
+    [Fact]
     public Task Completion_ends_on_Escape_leaving_the_word_focus_loss_scrolling_and_a_server_change() =>
         _ui.Run(async () =>
         {

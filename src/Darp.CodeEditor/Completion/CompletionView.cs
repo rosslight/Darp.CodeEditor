@@ -157,23 +157,32 @@ internal sealed class CompletionView
             _detailsPopup.ShowBeside(_listPopup, _detailsWidth);
     }
 
-    /// <summary>The list takes the width dragged to, and as many whole rows as fit the height.</summary>
-    private void OnListResized(Size size)
+    /// <summary>
+    /// The list takes the width dragged to, and as many whole rows as fit the height, each only when the user dragged an
+    /// edge that changes it: a list of one row that is made wider still shows more rows when it has more items.
+    /// </summary>
+    private void OnListResized(Size size, Edges edges)
     {
         if (_wordStart is not { } wordStart)
             return;
-        _width = Math.Max(MinWidth, size.Width);
-        _rows = Math.Max(1, (int)Math.Round((size.Height - 2 * Border) / _list.RowHeight));
+        if ((edges & (Edges.Left | Edges.Right)) != 0)
+            _width = Math.Max(MinWidth, size.Width);
+        if ((edges & (Edges.Top | Edges.Bottom)) != 0)
+            _rows = Math.Max(1, (int)Math.Round((size.Height - 2 * Border) / _list.RowHeight));
         _list.Width = _width - 2 * Border;
         _list.MaxRows = _rows;
         Open(wordStart);
     }
 
-    private void OnDetailsResized(Size size)
+    private void OnDetailsResized(Size size, Edges edges)
     {
-        _detailsWidth = Math.Max(PopupPlacement.MinBesideWidth, size.Width);
-        _detailsHeight = Math.Max(3 * _list.RowHeight, size.Height);
-        _detailsPopup.Frame.MaxHeight = _detailsHeight.Value;
+        if ((edges & (Edges.Left | Edges.Right)) != 0)
+            _detailsWidth = Math.Max(PopupPlacement.MinBesideWidth, size.Width);
+        if ((edges & (Edges.Top | Edges.Bottom)) != 0)
+        {
+            _detailsHeight = Math.Max(3 * _list.RowHeight, size.Height);
+            _detailsPopup.Frame.MaxHeight = _detailsHeight.Value;
+        }
         _detailsPopup.ShowBeside(_listPopup, _detailsWidth);
     }
 
