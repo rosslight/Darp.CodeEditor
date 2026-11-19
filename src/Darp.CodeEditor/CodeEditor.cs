@@ -1307,8 +1307,9 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>
     /// Runs the keymap's command for <paramref name="e"/>: the second stroke of the sequence that waits, or a stroke of
-    /// its own; or starts waiting for a sequence's second stroke. A second stroke that completes nothing is an ordinary
-    /// key.
+    /// its own; or starts waiting for a sequence's second stroke. As VS Code resolves a key, the latest of its bindings
+    /// that applies wins, and a sequence's first stroke always applies. A second stroke that completes nothing is an
+    /// ordinary key.
     /// </summary>
     /// <returns>Whether the key was the keymap's.</returns>
     private bool RunKeymap(KeyEventArgs e)
@@ -1320,12 +1321,17 @@ public class CodeEditor : TemplatedControl
             if (keymap.CommandsFor(e, pending).Any(Run))
                 return true;
         }
-        if (keymap.ChordStartedBy(e) is { } first)
+        foreach (CodeEditorKeyBinding binding in keymap.BindingsStartedBy(e))
         {
-            SetPending(first);
-            return true;
+            if (binding.Strokes is [var first, _])
+            {
+                SetPending(first);
+                return true;
+            }
+            if (Run(binding.Command))
+                return true;
         }
-        return keymap.CommandsFor(e, null).Any(Run);
+        return false;
     }
 
     /// <summary>
@@ -1349,8 +1355,9 @@ public class CodeEditor : TemplatedControl
     {
         CodeEditorKeymap keymap = Keymap;
         return (_pending is { } pending && keymap.CommandsFor(e, pending).Contains(CodeEditorCommands.ShowHover))
-            || keymap.ChordStartedBy(e) is not null
-            || keymap.CommandsFor(e, null).Contains(CodeEditorCommands.ShowHover);
+            || keymap
+                .BindingsStartedBy(e)
+                .Any(binding => binding.Strokes.Count == 2 || binding.Command == CodeEditorCommands.ShowHover);
     }
 
     private void SetPending(KeyStroke? stroke)

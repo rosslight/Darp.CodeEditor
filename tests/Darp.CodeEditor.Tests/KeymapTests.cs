@@ -46,7 +46,7 @@ public sealed class KeymapTests(UiFixture ui)
         );
 
         keymap.CommandsFor(Key(Keys.Q, KeyModifiers.Control), null).ShouldBe([CodeEditorCommands.ShowHover]);
-        keymap.ChordStartedBy(Key(Keys.K, KeyModifiers.Control)).ShouldBeNull();
+        keymap.BindingsStartedBy(Key(Keys.K, KeyModifiers.Control)).ShouldBeEmpty();
         keymap.CommandsFor(Key(Keys.F, KeyModifiers.Control), null).ShouldBeEmpty();
         // The defaults stay otherwise; the latest binding of a key comes first.
         keymap
@@ -153,6 +153,31 @@ public sealed class KeymapTests(UiFixture ui)
             window.Editor.PendingKeys.ShouldBeNull();
             // F3 ran as it does alone: the next match of the selection.
             window.Editor.Selection.ShouldBe(new TextSelection(8, 11));
+        });
+
+    [Fact]
+    public Task A_later_binding_of_a_key_wins_over_an_earlier_sequence_that_starts_with_it_where_it_applies() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("o|ne\ntwo", CodeLanguage.PlainText);
+            CodeEditorKeymap sequence = CodeEditorKeymap.Empty.With(
+                new CodeEditorKeyBinding("ctrl+k ctrl+i", CodeEditorCommands.ShowHover)
+            );
+
+            // The search history's key applies in the search bar only: the sequence goes on to wait.
+            window.Editor.Keymap = sequence.With(
+                new CodeEditorKeyBinding("ctrl+k", CodeEditorCommands.HistoryShowPrevious)
+            );
+            window.Press(Keys.K, KeyModifiers.Control);
+            window.Editor.PendingKeys.ShouldBe(new KeyGesture(Keys.K, KeyModifiers.Control));
+
+            window.Editor.Keymap = sequence.With(
+                new CodeEditorKeyBinding("ctrl+k", CodeEditorCommands.ExpandLineSelection)
+            );
+            window.Press(Keys.K, KeyModifiers.Control);
+
+            window.Editor.PendingKeys.ShouldBeNull();
+            MarkedText.Of(window).ShouldBe("«one\n»two");
         });
 
     [Fact]
