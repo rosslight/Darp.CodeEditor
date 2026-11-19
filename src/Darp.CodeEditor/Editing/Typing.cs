@@ -10,14 +10,11 @@ namespace Darp.CodeEditor.Editing;
 /// <summary>
 /// Typed text and the keys Enter, Tab, Shift+Tab, Backspace and Delete in one editor's view, as VS Code's <c>type</c>,
 /// <c>tab</c>, <c>outdent</c>, <c>deleteLeft</c> and <c>deleteRight</c> take them: each goes to the rules that apply,
-/// in VS Code's order, and into the undo step that <see cref="UndoSteps"/> gives it. The rules are
-/// <see cref="IndentRules"/>, <see cref="TabStops"/> and <see cref="AutoClosingPairs"/>; every edit goes through
-/// <see cref="TextChanges"/>. Shift+Enter and Shift+Backspace do as Enter and Backspace.
+/// in VS Code's order (<see cref="IndentRules"/>, <see cref="TabStops"/>, <see cref="AutoClosingPairs"/>), and through
+/// <see cref="TextChanges"/> into its undo step. Shift+Enter and Shift+Backspace do as Enter and Backspace. A typed
+/// character goes in as AvaloniaEdit types it, so that the other handlers of typed text see it; what the rules add goes
+/// in before they do.
 /// </summary>
-/// <remarks>
-/// A typed character still goes in as AvaloniaEdit types it, so that the other handlers of typed text see it. What
-/// the rules add, a closing character or a new indentation, goes in once it is in, before those handlers see it.
-/// </remarks>
 internal sealed class Typing : IDisposable
 {
     private readonly TextArea _area;
@@ -153,10 +150,7 @@ internal sealed class Typing : IDisposable
             _pairs.Close(pair);
     }
 
-    /// <summary>
-    /// Enter: the selection's text goes, and an empty rectangle selection ends, and the new line that the rules give goes
-    /// in at the caret.
-    /// </summary>
+    /// <summary>Enter: the selection's text goes, a rectangle selection ends, and the rules' new line goes in.</summary>
     private bool Enter()
     {
         _changes.Run(
@@ -182,96 +176,53 @@ internal sealed class Typing : IDisposable
         return true;
     }
 
-    /// <summary>
-    /// Tab and Shift+Tab by tab stops, each a step of its own; Tab without a selection on a line of whitespace only
-    /// first goes to the indentation that the rules give the line, or one level. A rectangle selection is AvaloniaEdit's.
-    /// </summary>
+    /// <summary>Tab and Shift+Tab, each a step of its own; in a rectangle selection, AvaloniaEdit's.</summary>
     private bool Tab(bool outdent)
     {
         if (_area.Selection is RectangleSelection)
             return false;
-        TextSelection selection = _changes.Selection;
-        Indentation indentation = _document.Indentation;
-        DocumentLine line = Buffer.GetLineByOffset(selection.Caret);
-        string text = Buffer.GetText(line);
-        if (!outdent && selection.Range.Length == 0 && IndentRules.Leading(text) == text.Length)
-        {
-            string good = new Indenting(indentation).Normalize(Rules.GoodIndentation(Lines, line.LineNumber) ?? "\t");
-            if (!text.StartsWith(good, StringComparison.Ordinal))
-            {
-                _changes.Run(
-                    EditStep.Own,
-                    () =>
-                        _changes.Apply(
-                            [new TextEdit(line.Offset, line.Length, good)],
-                            new TextSelection(line.Offset + good.Length)
-                        )
-                );
-                return true;
-            }
-        }
         TabEdit edit = outdent
-            ? TabStops.Outdent(Buffer, selection, indentation)
-            : TabStops.Tab(Buffer, selection, indentation);
+            ? TabStops.Outdent(Buffer, _changes.Selection, _document.Indentation)
+            : TabStops.Tab(Buffer, _changes.Selection, _document.Indentation, n => Rules.GoodIndentation(Lines, n));
         _changes.Run(EditStep.Own, () => _changes.Apply(edit.Edits, edit.Selection));
         return true;
     }
 
-    /// <summary>
-    /// Backspace: an empty pair that the editor closed goes; in a line's indentation, back to the tab stop before the
-    /// caret; otherwise AvaloniaEdit's Backspace. Unless it deletes a pair, it goes on in the step of the Backspace before
-    /// it, unless it joins lines.
-    /// </summary>
+    /// <summary>Backspace: an empty pair that the editor closed, or else back to the tab stop, or AvaloniaEdit's.</summary>
     private bool DeleteLeft()
     {
         if (_pairs.DeletePair())
             return true;
-        int caret = _area.Caret.Offset;
-        Selection selection = _area.Selection;
-        if (
-            selection is { IsEmpty: true } and not RectangleSelection
-            && TabStops.DeleteLeft(Buffer, caret, _document.Indentation) is { } range
-        )
-        {
-            _changes.Run(
-                _changes.Deleting(EditKind.DeletingLeft, joinsLines: false),
-                () => _changes.Apply([new TextEdit(range.Start, range.Length, "")])
-            );
-            return true;
-        }
-        bool joinsLines = selection.IsEmpty
-            ? caret > 0 && caret == Buffer.GetLineByOffset(caret).Offset
-            : selection is not RectangleSelection && selection.IsMultiline;
+        TextRange? range = _area.Selection is { IsEmpty: true } and not RectangleSelection
+            ? TabStops.DeleteLeft(Buffer, _area.Caret.Offset, _document.Indentation)
+            : null;
         _changes.Run(
-            _changes.Deleting(EditKind.DeletingLeft, joinsLines),
-            () => EditingCommands.Backspace.Execute(null, _area)
+            _changes.Deleting(left: true),
+            () =>
+            {
+                if (range is { } whitespace)
+                    _changes.Apply([new TextEdit(whitespace.Start, whitespace.Length, "")]);
+                else
+                    EditingCommands.Backspace.Execute(null, _area);
+            }
         );
         return true;
     }
 
-    /// <summary>Delete: AvaloniaEdit's, in the step of the Delete before it, unless it joins lines.</summary>
     private bool DeleteRight()
     {
-        int caret = _area.Caret.Offset;
-        Selection selection = _area.Selection;
-        bool joinsLines = selection.IsEmpty
-            ? caret < Buffer.TextLength && caret == Buffer.GetLineByOffset(caret).EndOffset
-            : selection is not RectangleSelection && selection.IsMultiline;
-        _changes.Run(
-            _changes.Deleting(EditKind.DeletingRight, joinsLines),
-            () => EditingCommands.Delete.Execute(null, _area)
-        );
+        _changes.Run(_changes.Deleting(left: false), () => EditingCommands.Delete.Execute(null, _area));
         return true;
     }
 
     /// <summary>The new indentation of the line once <paramref name="typed"/> replaces the selection on it, if it outdents.</summary>
     private string? Outdented(char typed)
     {
-        if (_area.Selection is RectangleSelection || _area.Selection.IsMultiline)
-            return null;
         TextRange range = _changes.Selection.Range;
         DocumentLine line = Buffer.GetLineByOffset(range.Start);
-        return Rules.Outdented(Lines, line.LineNumber, range.Start - line.Offset, range.End - line.Offset, typed);
+        return _area.Selection is RectangleSelection || range.End > line.EndOffset
+            ? null
+            : Rules.Outdented(Lines, line.LineNumber, range.Start - line.Offset, range.End - line.Offset, typed);
     }
 
     /// <summary>

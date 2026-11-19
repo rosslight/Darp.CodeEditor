@@ -36,7 +36,7 @@ internal sealed class TextChanges : IDisposable
     public EditStep Typing(string text) => _steps.Typing(text);
 
     /// <inheritdoc cref="UndoSteps.Deleting"/>
-    public EditStep Deleting(EditKind kind, bool joinsLines) => _steps.Deleting(kind, joinsLines);
+    public EditStep Deleting(bool left) => _steps.Deleting(left);
 
     /// <summary>
     /// Runs <paramref name="edit"/>, AvaloniaEdit's own or <see cref="Apply(IReadOnlyList{TextEdit}, TextSelection?)"/>'s,

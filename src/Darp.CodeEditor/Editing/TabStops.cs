@@ -10,13 +10,30 @@ namespace Darp.CodeEditor.Editing;
 internal static class TabStops
 {
     /// <summary>
-    /// Tab: with a selection inside one line, short of the whole line, or without one, whitespace up to the next tab
-    /// stop from its start replaces it; whole lines, one or more, go to their next tab stop (<see cref="Shift"/>).
+    /// Tab: without a selection on a line of whitespace only, the line takes the indentation that
+    /// <paramref name="goodIndentation"/> gives it by its number, or one level, unless it starts with it already.
+    /// Otherwise, with a selection inside one line, short of the whole line, or without one, whitespace up to the next
+    /// tab stop from its start replaces it; whole lines, one or more, go to their next tab stop (<see cref="Shift"/>).
     /// </summary>
-    public static TabEdit Tab(TextDocument text, TextSelection selection, Indentation indentation)
+    public static TabEdit Tab(
+        TextDocument text,
+        TextSelection selection,
+        Indentation indentation,
+        Func<int, string?> goodIndentation
+    )
     {
         TextRange range = selection.Range;
         DocumentLine line = text.GetLineByOffset(range.Start);
+        string lineText = text.GetText(line);
+        if (range.Length == 0 && IndentRules.Leading(lineText) == lineText.Length)
+        {
+            string good = new Indenting(indentation).Normalize(goodIndentation(line.LineNumber) ?? "\t");
+            if (!lineText.StartsWith(good, StringComparison.Ordinal))
+                return new TabEdit(
+                    [new TextEdit(line.Offset, line.Length, good)],
+                    new TextSelection(line.Offset + good.Length)
+                );
+        }
         if (
             range.Length > 0
             && (range.End > line.EndOffset || (range.Start == line.Offset && range.End == line.EndOffset))

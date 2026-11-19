@@ -63,8 +63,19 @@ internal sealed class UndoSteps : IDisposable
         return new EditStep(kind, starts);
     }
 
-    /// <summary>The step of Backspace or Delete, <paramref name="kind"/>, after the edits before it.</summary>
-    public EditStep Deleting(EditKind kind, bool joinsLines) => new(kind, StartsStep: _previous != kind || joinsLines);
+    /// <summary>The step of Backspace, to the <paramref name="left"/>, or Delete, at the caret or the selection.</summary>
+    public EditStep Deleting(bool left)
+    {
+        EditKind kind = left ? EditKind.DeletingLeft : EditKind.DeletingRight;
+        int caret = _area.Caret.Offset;
+        Selection selection = _area.Selection;
+        bool joinsLines = selection.IsEmpty
+            ? caret == (left ? Line().Offset : Line().EndOffset) && caret != (left ? 0 : _buffer.TextLength)
+            : selection is not RectangleSelection && selection.IsMultiline;
+        return new EditStep(kind, StartsStep: _previous != kind || joinsLines);
+
+        DocumentLine Line() => _buffer.GetLineByOffset(caret);
+    }
 
     /// <summary>Runs <paramref name="edit"/> in <paramref name="step"/>.</summary>
     public void Run(EditStep step, Action edit)
