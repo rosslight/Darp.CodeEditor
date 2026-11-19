@@ -297,14 +297,22 @@ internal sealed class SearchBar : UserControl
     /// As VS Code's find widget in a narrow editor, the query and the replacement give up width, down to
     /// <see cref="MinBoxWidth"/>, so that the buttons stay beside them and inside the editor; narrower still, the rows
     /// wrap. Their width follows from the rows' alone, at the boxes' full width, and the presenter's frame: a message
-    /// wraps on its own.
+    /// wraps on its own. It is whole device pixels, rounded down, as the layout rounds the widths that decide where the
+    /// rows wrap: the rows fit as computed, and the width before leaves no fraction behind.
     /// </summary>
     protected override Size MeasureOverride(Size availableSize)
     {
+        double scale = LayoutHelper.GetLayoutScale(this);
         double rows = Math.Max(Natural(_findRow), _replaceRow.IsVisible ? Natural(_replaceRow) : 0);
-        Thickness frame = _presenter.Padding + _presenter.BorderThickness;
-        double overflow = rows + frame.Left + frame.Right - availableSize.Width;
-        _find.Width = _replace.Width = Math.Clamp(BoxWidth - overflow, MinBoxWidth, BoxWidth);
+        // The border in device pixels, as the presenter's lays it out.
+        Thickness frame = _presenter.Padding + LayoutHelper.RoundLayoutThickness(_presenter.BorderThickness, scale);
+        double width = Math.Clamp(
+            BoxWidth - (rows + frame.Left + frame.Right - availableSize.Width),
+            MinBoxWidth,
+            BoxWidth
+        );
+        // Rounded to 8 digits first, as the layout rounds: 247 device pixels may come out as 246.99999999999997.
+        _find.Width = _replace.Width = Math.Floor(Math.Round(width * scale, 8)) / scale;
         return base.MeasureOverride(availableSize);
 
         double Natural(WrapPanel row)

@@ -1,6 +1,8 @@
+using System.Globalization;
 using Avalonia;
 using Avalonia.Automation.Peers;
 using Avalonia.Controls;
+using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.VisualTree;
@@ -379,35 +381,63 @@ public sealed class SearchTests(UiFixture ui)
         });
 
     /// <summary>
-    /// The query's width follows the editor's alone, not the width it had before, also beside a message wider than the
-    /// rows, which wraps on its own.
+    /// The query's width, and so which row each button is on, follow the editor's width alone, not the width before,
+    /// growing or shrinking to it: beside a message wider than the rows, which wraps on its own, and at a scaling where
+    /// widths round to device pixels, with the German labels, at a width where Close just stays on the first row.
     /// </summary>
-    [Fact]
-    public Task The_query_has_the_same_width_in_an_editor_of_a_width_from_a_narrower_or_a_wider_one() =>
+    [Theory]
+    [InlineData(1.0, "", 550, true)]
+    [InlineData(1.75, "de-DE", 527, false)]
+    public Task The_bar_has_the_same_rows_in_an_editor_of_a_width_from_a_narrower_or_a_wider_one(
+        double scaling,
+        string culture,
+        double width,
+        bool error
+    ) =>
         _ui.Run(async () =>
         {
-            using EditorWindow window = MarkedText.Show("|a", CodeLanguage.PlainText);
-            window.Editor.OpenSearch(replace: true);
-            SearchBar bar = BarOf(window);
-            bar.RegexToggle.IsChecked = true;
-            // .NET's message names the pattern.
-            bar.FindBox.Text = "(" + new string('a', 100);
-            await SearchedAsync(bar);
-            bar.Message.ShouldNotBeNull();
-
-            double[] widths = [.. ((int[])[300, 550, 800, 550]).Select(width => QueryWidthAt(width))];
-
-            widths[3].ShouldBe(widths[1]);
-
-            double QueryWidthAt(double width)
+            CultureInfo before = CultureInfo.CurrentUICulture;
+            CultureInfo.CurrentUICulture = new CultureInfo(culture);
+            try
             {
-                window.Window.Width = width;
-                window.Layout();
-                return bar.FindBox.Bounds.Width;
+                using EditorWindow window = MarkedText.Show("|a", CodeLanguage.PlainText);
+                window.Window.SetRenderScaling(scaling);
+                window.Editor.OpenSearch(replace: true);
+                SearchBar bar = BarOf(window);
+                bar.RegexToggle.IsChecked = true;
+                // .NET's message names the pattern.
+                bar.FindBox.Text = error ? "(" + new string('a', 100) : "a";
+                await SearchedAsync(bar);
+                (bar.Message is not null).ShouldBe(error);
+
+                // From each of 30 widths below and above it: each leaves the query a width of its own before.
+                string[] grown = [.. Enumerable.Range(0, 30).Select(step => LayoutAt(width - 30 + step, width))];
+                string[] shrunk = [.. Enumerable.Range(0, 30).Select(step => LayoutAt(width + 30 - step, width))];
+
+                shrunk.Concat(grown).Distinct().ShouldBe([grown[0]]);
+
+                // The query's width and the row of each button, at width after from.
+                string LayoutAt(double from, double to)
+                {
+                    window.Window.Width = from;
+                    window.Layout();
+                    window.Window.Width = to;
+                    window.Layout();
+                    return string.Join(
+                            " ",
+                            ButtonsOf(bar).Select(button => button.TranslatePoint(default, bar).ShouldNotBeNull().Y)
+                        ) + $" / {bar.FindBox.Bounds.Width}";
+                }
+            }
+            finally
+            {
+                CultureInfo.CurrentUICulture = before;
             }
         });
 
-    /// <summary>Every button and toggle of the bar has a name for screen readers: its tip's, without its keys.</summary>
+    /// <summary>
+    /// Every button and toggle of the bar has a name for screen readers: its tip's, without its keys.
+    /// </summary>
     [Fact]
     public Task The_buttons_of_the_bar_have_names_for_screen_readers() =>
         _ui.Run(() =>
