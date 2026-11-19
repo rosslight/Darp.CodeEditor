@@ -341,14 +341,14 @@ public sealed class SnippetSessionTests(UiFixture ui)
             window.Press(Key.Enter);
             window.Type("call(");
             document.Text.ShouldBe("call(;");
-            await Wait.UntilAsync(() => ToolTip(window) is not null);
+            await Wait.UntilAsync(() => PopupFrames.Find(window, "SignatureHelp") is not null);
             await OpenAsync(window, 5);
 
             window.Press(Key.Escape);
             List(window).ShouldBeNull();
-            ToolTip(window).ShouldNotBeNull();
+            PopupFrames.Find(window, "SignatureHelp").ShouldNotBeNull();
             window.Press(Key.Escape);
-            ToolTip(window).ShouldBeNull();
+            PopupFrames.Find(window, "SignatureHelp").ShouldBeNull();
             // The session runs: Tab goes to the second stop, and Shift+Tab back to the first.
             window.Press(Key.Tab);
             editor.Selection.ShouldBe(new TextSelection(5));
@@ -371,16 +371,16 @@ public sealed class SnippetSessionTests(UiFixture ui)
             await Wait.UntilAsync(() =>
             {
                 window.Render();
-                return ToolTip(window) is { } hover
+                return PopupFrames.Find(window, "Hover") is { } hover
                     && hover
                         .GetVisualDescendants()
                         .OfType<TextBlock>()
                         .Any(t => (t.Inlines?.Text ?? t.Text ?? "").Contains("is a word in", StringComparison.Ordinal));
             });
             window.Press(Key.Escape);
-            ToolTip(window).ShouldNotBeNull();
+            PopupFrames.Find(window, "Hover").ShouldNotBeNull();
             window.Press(Key.Escape);
-            ToolTip(window).ShouldBeNull();
+            PopupFrames.Find(window, "Hover").ShouldBeNull();
             bar.IsOpen.ShouldBeTrue();
             window.Press(Key.Escape);
             bar.IsOpen.ShouldBeFalse();
@@ -536,8 +536,4 @@ public sealed class SnippetSessionTests(UiFixture ui)
         int start = text.IndexOf(word, StringComparison.Ordinal);
         return new TextSelection(start, start + word.Length);
     }
-
-    /// <summary>Signature help's popup; null while it is closed.</summary>
-    private static ToolTip? ToolTip(EditorWindow window) =>
-        OverlayLayer.GetOverlayLayer(window.Window)?.GetVisualDescendants().OfType<ToolTip>().FirstOrDefault();
 }
