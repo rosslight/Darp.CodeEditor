@@ -125,6 +125,12 @@ public class CodeEditor : TemplatedControl
         CodeEditorKeymap
     >(nameof(Keymap), defaultValue: CodeEditorKeymap.Default);
 
+    /// <summary>Defines the <see cref="Options"/> property.</summary>
+    public static readonly StyledProperty<CodeEditorOptions> OptionsProperty = AvaloniaProperty.Register<
+        CodeEditor,
+        CodeEditorOptions
+    >(nameof(Options), defaultValue: CodeEditorOptions.Default);
+
     /// <summary>Defines the <see cref="PendingKeys"/> property.</summary>
     public static readonly DirectProperty<CodeEditor, KeyGesture?> PendingKeysProperty =
         AvaloniaProperty.RegisterDirect<CodeEditor, KeyGesture?>(nameof(PendingKeys), editor => editor.PendingKeys);
@@ -327,6 +333,16 @@ public class CodeEditor : TemplatedControl
     {
         get => GetValue(KeymapProperty);
         set => SetValue(KeymapProperty, value);
+    }
+
+    /// <summary>
+    /// The editor's settings. Default: <see cref="CodeEditorOptions.Default"/>. A change applies from the next keystroke
+    /// on.
+    /// </summary>
+    public CodeEditorOptions Options
+    {
+        get => GetValue(OptionsProperty);
+        set => SetValue(OptionsProperty, value);
     }
 
     /// <summary>
@@ -614,7 +630,15 @@ public class CodeEditor : TemplatedControl
         Select(part, place?.Selection ?? new TextSelection(0));
         TextView textView = part.TextArea.TextView;
         _view = new EditorView(
-            new EditorContext(this, part.TextArea, document, () => Keymap, () => _searchBar, CreatedSearchBar)
+            new EditorContext(
+                this,
+                part.TextArea,
+                document,
+                () => Keymap,
+                () => Options,
+                () => _searchBar,
+                CreatedSearchBar
+            )
         );
         _view.SetColors(_theme, _colors, _iconColors);
         _searchBar?.Attach(this, part.TextArea, document);

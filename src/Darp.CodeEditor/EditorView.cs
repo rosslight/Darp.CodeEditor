@@ -17,6 +17,7 @@ namespace Darp.CodeEditor;
 /// <param name="Area">AvaloniaEdit's text area, which shows <paramref name="Document"/>.</param>
 /// <param name="Document">The document shown.</param>
 /// <param name="Keymap">The editor's keymap, as it is now.</param>
+/// <param name="Options">The editor's settings, as they are now.</param>
 /// <param name="SearchBar">The editor's search bar, kept across documents; null until it is first needed.</param>
 /// <param name="CreateSearchBar">
 /// The editor's search bar, made the first time it is needed, as few editors are searched; null without a place for it
@@ -27,6 +28,7 @@ internal sealed record EditorContext(
     TextArea Area,
     CodeDocument Document,
     Func<CodeEditorKeymap> Keymap,
+    Func<CodeEditorOptions> Options,
     Func<SearchBar?> SearchBar,
     Func<SearchBar?> CreateSearchBar
 );
@@ -66,7 +68,7 @@ internal sealed class EditorView : IDisposable
         Highlighter = new BackgroundTextMateHighlighter(area.TextView, area.Document, context.Editor.Dispatcher, null);
         var changes = new TextChanges(area);
         _helpers = new EditingHelpers(area, document, changes);
-        _typing = new Typing(area, document, Highlighter, changes);
+        _typing = new Typing(area, document, Highlighter, changes, context.Options);
         _clipboard = new Clipboard(area, document);
         _brackets = new BracketHighlighter(area, document, Highlighter);
         _whitespace = new WhitespaceLayer(area);

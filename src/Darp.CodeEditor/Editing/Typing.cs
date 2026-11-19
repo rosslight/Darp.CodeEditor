@@ -30,13 +30,19 @@ internal sealed class Typing : IDisposable
     /// <summary>The pair to close once the character being typed is in; null for none.</summary>
     private AutoClosingPair? _closing;
 
-    public Typing(TextArea area, CodeDocument document, BackgroundTextMateHighlighter highlighter, TextChanges changes)
+    public Typing(
+        TextArea area,
+        CodeDocument document,
+        BackgroundTextMateHighlighter highlighter,
+        TextChanges changes,
+        Func<CodeEditorOptions> options
+    )
     {
         _area = area;
         _document = document;
         _highlighter = highlighter;
         _changes = changes;
-        _pairs = new AutoClosingPairs(area, document, highlighter, changes);
+        _pairs = new AutoClosingPairs(area, document, highlighter, changes, options);
         area.TextEntered += OnTextEntered;
     }
 
