@@ -984,10 +984,15 @@ with Skia:
 - spaces and tabs show inside the selection only, in the theme's `editorWhitespace.foreground`, in a layer of the text
   view above the selection;
 - search runs in the background, so a regular expression such as `(a+)+$`, which froze the prototype for 21 s, leaves
-  the UI thread free; it stops after the time limit of 1 s with a message. A search keeps 10,000 matches at most. In
-  5,000 lines of JSON, a word on every line takes 1.2 ms and a regular expression with 10,000 matches 2.3 ms, so the
-  time limit leaves about 400 times that; Replace All of 10,000 matches takes the UI thread about 0.1 s with its
-  frame. Tests check that a search at either limit says so, and that Replace All then changes nothing. AvaloniaEdit's
+  the UI thread free; it stops after the time limit of 1 s with a message. A search keeps 19,999 matches at most, as
+  VS Code's; finding the next, the previous and every match beyond them searches the text again. In 5,000 lines of
+  JSON, a word on every line takes 1.3 ms and a regular expression with 10,000 matches 2.3 ms, so the time limit
+  leaves about 400 times that; one across the end of every line takes 1.1 ms, or 1.9 ms in lines apart by `\r\n`,
+  which it reads as `\n`. The edits of Replace All for 50,000 matches in 25,000 lines take 7.9 ms; Replace All of
+  10,000 matches takes the UI thread about 0.1 s with its frame. Tests check that a search at either limit says so,
+  and that Replace All then changes nothing; VS Code's own cases of searches across lines; that no match starts or
+  ends inside a surrogate pair, nor a scope inside a `\r\n`; and VS Code's replace syntax, with its case changes and
+  Preserve Case. AvaloniaEdit's
   own search panel could not keep this contract: it creates its search strategy itself, searches on the UI thread at
   every change of the text, and keeps every match. The editor removes it each time AvaloniaEdit's editor is
   templated, and AvaloniaEdit's search commands open the editor's bar instead.
