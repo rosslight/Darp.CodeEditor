@@ -162,7 +162,7 @@ internal static class TextSearch
         ).Scan(scope);
         CombinedEdit? edit =
             outcome == SearchOutcome.Complete && edits.Count > 0
-                ? CombinedEdit.Of(new StringTextSource(text), edits)
+                ? CombinedEdit.Of(new StringTextSource(text), edits, cancellationToken)
                 : null;
         return (edit, outcome);
     }

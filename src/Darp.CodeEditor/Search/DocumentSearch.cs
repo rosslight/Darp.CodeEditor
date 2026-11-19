@@ -266,22 +266,19 @@ internal sealed class DocumentSearch : IDisposable
     }
 
     /// <summary>
-    /// Replaces every match in one change, one undo step: those of a complete result, or beyond the matches that a
-    /// result keeps, all of them found again in the background, and replaced unless something changed meanwhile. Never
-    /// only some: a search that ran out of time replaces nothing.
+    /// Replaces every match in one change, one undo step: all of them, also beyond the matches that the result keeps,
+    /// found again and combined into that change in the background, and replaced unless something changed meanwhile.
+    /// Never only some: a search that ran out of time replaces nothing.
     /// </summary>
     public void ReplaceAll()
     {
-        if (CurrentResult() is not { Replacement: { } replacement } result)
-            return;
-        if (result.IsComplete)
-        {
-            Apply([
-                .. result.Matches.Select(match => new TextEdit(match.StartOffset, match.Length, match.Replacement)),
-            ]);
-            return;
-        }
-        if (result.Outcome != SearchOutcome.TooManyMatches)
+        if (
+            CurrentResult()
+            is not {
+                Outcome: SearchOutcome.Complete or SearchOutcome.TooManyMatches,
+                Replacement: { } replacement
+            } result
+        )
             return;
         TextSnapshot snapshot = _context.Document.CurrentSnapshot;
         List<TextRange>? scope = Scope();
