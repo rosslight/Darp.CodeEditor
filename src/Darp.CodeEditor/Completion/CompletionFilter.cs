@@ -11,7 +11,8 @@ namespace Darp.CodeEditor.Completion;
 /// Filters a completion session's answer as the user types, and shows the result. Each change of the text or the caret
 /// filters anew off the UI thread (<see cref="CompletionRanking"/>), the filter under way stops, and the list shows the
 /// newest result, the previous one meanwhile. When nothing matches, a list opened by typing ends, unless more may
-/// come; one asked for by key freezes, or says "No suggestions.". An accept that the current text's filter has to
+/// come, as from a list asked for again: it freezes meanwhile. One asked for by key freezes, or says "No
+/// suggestions.". An accept that the current text's filter has to
 /// decide commits what it selects once it has run, unless the text or the caret changes before.
 /// </summary>
 internal sealed class CompletionFilter
@@ -126,26 +127,23 @@ internal sealed class CompletionFilter
             Action? goOn = session.CommitAt == key ? session.CommitGoOn : null;
             // An incomplete list may have more for what is typed, and a newer request, as for a trigger character typed
             // while the list showed, brings a list of its own: its answer shows, or ends completion when it has nothing.
-            if (!session.ByKey)
-            {
-                if (key.Answer.List.IsIncomplete || session.Pending is not null)
-                    Hide(session);
-                else
-                    _close();
-            }
-            else if (session.Shown?.Answer != key.Answer)
+            bool more = key.Answer.List.IsIncomplete || session.Pending is not null;
+            if (session.ByKey && session.Shown?.Answer != key.Answer)
             {
                 Hide(session);
                 session.ShowsNoMatch = true;
                 _view.ShowNoSuggestions(key.Answer.Request.Word.Start);
             }
-            else if (_wordBefore(key.Caret).Length == 0)
-                _close();
-            else
+            // Meanwhile, as when asked for by key, the list keeps its rows, frozen, while the caret is in a word.
+            else if (session.IsShowing && (session.ByKey || more) && _wordBefore(key.Caret).Length > 0)
             {
                 Freeze(session, key);
                 return;
             }
+            else if (!session.ByKey && more)
+                Hide(session);
+            else
+                _close();
             // The key that waited for this filter goes on as it would have without the list: in VS Code, which
             // filters as the user types, the list is gone before such a key.
             goOn?.Invoke();
