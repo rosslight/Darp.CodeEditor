@@ -5,9 +5,9 @@ using Darp.CodeEditor.Loading;
 namespace Darp.CodeEditor.Editing;
 
 /// <summary>
-/// Finds the bracket next to the caret and its match, among the language's brackets of one character each. As in VS
-/// Code, brackets in strings, comments and regular expressions do not count, by the tokens of their lines as last
-/// tokenized; lines without tokens count as code.
+/// Finds the bracket next to the caret and its match, and the pairs around an offset, among the language's brackets of
+/// one character each. As in VS Code, brackets in strings, comments and regular expressions do not count, by the tokens
+/// of their lines as last tokenized; lines without tokens count as code.
 /// </summary>
 internal static class BracketMatcher
 {
@@ -185,6 +185,76 @@ internal static class BracketMatcher
             );
         }
         return next;
+    }
+
+    /// <summary>
+    /// The pairs of brackets around <paramref name="offset"/>, from the innermost out, as VS Code's bracket selection
+    /// ranges pair them, each kind on its own: the closing brackets from the offset on that close none of their kind
+    /// after it, in order, with the opening brackets before it that none of their kind before it closes, within
+    /// <see cref="MaxDistance"/> characters on each side.
+    /// </summary>
+    public static List<(int Open, int Close)> PairsAround(
+        TextDocument document,
+        int offset,
+        IReadOnlyList<CharacterPair> brackets,
+        Func<int, int[]?> tokensOf
+    )
+    {
+        (string opens, string closes) = Characters(brackets);
+        string characters = opens + closes;
+        var pairs = new List<(int Open, int Close)>();
+        if (opens.Length == 0)
+            return pairs;
+        // Per kind, the brackets passed that wait for their match, and the closing brackets that wait for an opening one.
+        int[] waiting = new int[opens.Length];
+        Queue<int>[] closings = [.. opens.Select(_ => new Queue<int>())];
+        int unpaired = 0;
+        Scan(
+            document,
+            offset,
+            Math.Min(document.TextLength, offset + MaxDistance),
+            forward: true,
+            characters,
+            tokensOf,
+            (c, at) =>
+            {
+                if (opens.IndexOf(c) is var kind and >= 0)
+                    waiting[kind]++;
+                else if (waiting[kind = closes.IndexOf(c)] > 0)
+                    waiting[kind]--;
+                else
+                {
+                    closings[kind].Enqueue(at);
+                    unpaired++;
+                }
+                return false;
+            }
+        );
+        if (unpaired == 0)
+            return pairs;
+        Array.Clear(waiting);
+        Scan(
+            document,
+            Math.Max(0, offset - MaxDistance),
+            offset,
+            forward: false,
+            characters,
+            tokensOf,
+            (c, at) =>
+            {
+                if (closes.IndexOf(c) is var kind and >= 0)
+                    waiting[kind]++;
+                else if (waiting[kind = opens.IndexOf(c)] > 0)
+                    waiting[kind]--;
+                else if (closings[kind].TryDequeue(out int close))
+                {
+                    pairs.Add((at, close));
+                    unpaired--;
+                }
+                return unpaired == 0;
+            }
+        );
+        return pairs;
     }
 
     /// <summary>The opening and the closing characters of the brackets of one character each, by kind.</summary>

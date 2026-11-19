@@ -80,6 +80,7 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+l (cmd+l)</term><description><see cref="CodeEditorCommands.ExpandLineSelection"/></description></item>
     /// <item><term>shift+alt+a (Linux: ctrl+shift+a)</term><description><see cref="CodeEditorCommands.BlockComment"/></description></item>
     /// <item><term>ctrl+shift+\ (shift+cmd+\)</term><description><see cref="CodeEditorCommands.JumpToBracket"/></description></item>
+    /// <item><term>shift+alt+right, shift+alt+left (ctrl+shift+cmd+right, ctrl+shift+cmd+left)</term><description><see cref="CodeEditorCommands.SmartSelectExpand"/>, <see cref="CodeEditorCommands.SmartSelectShrink"/></description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default { get; } = new(DefaultBindings(OperatingSystem.IsMacOS()));
@@ -185,6 +186,9 @@ public sealed class CodeEditorKeymap
         foreach (CodeEditorKeyBinding binding in LineBindings(mac, linux: !mac && OperatingSystem.IsLinux()))
             yield return binding;
         yield return new($"{command}+shift+\\", CodeEditorCommands.JumpToBracket);
+        string smartSelect = mac ? "ctrl+shift+cmd" : "shift+alt";
+        yield return new($"{smartSelect}+right", CodeEditorCommands.SmartSelectExpand);
+        yield return new($"{smartSelect}+left", CodeEditorCommands.SmartSelectShrink);
     }
 
     /// <summary>

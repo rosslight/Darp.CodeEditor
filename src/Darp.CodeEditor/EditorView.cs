@@ -99,6 +99,7 @@ internal sealed class EditorView : IDisposable
             new LineClipboard(area, document, _changes, _clipboard, context.Options),
             new WordEditing(area, _changes, _pairs),
             _brackets,
+            new SmartSelect(area, document, Highlighter, _changes),
             _whitespace,
             _squiggles,
             SemanticHighlighter,
