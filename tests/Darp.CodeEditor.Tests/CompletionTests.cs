@@ -1486,6 +1486,32 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Opened_by_typing_an_incomplete_list_that_typing_filters_empty_stays_frozen_while_it_is_asked_for_again() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse("""{ "isIncomplete": true, "items": [ { "label": "print", "commitCharacters": ["("] } ] }""")
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Type("pri");
+            await WaitForLabelsAsync(window, ["print"]);
+            using CodeDocument hold = await CommandAsync(server, fake, "hold-completion", "holding completion");
+
+            // Typed on, the list is asked for again, and the server holds the answer: "print" does not match "priz".
+            window.Type("z");
+            await WaitForFrozenAsync(window, "print");
+            // Frozen, its commit characters go in as text.
+            window.Type("(");
+            document.Text.ShouldBe("priz(");
+            using CodeDocument release = await CommandAsync(server, fake, "release-completion", "released completion");
+        });
+
+    [Fact]
     public Task A_frozen_list_commits_its_item_over_what_was_typed_by_key_and_click_but_not_by_commit_characters() =>
         _ui.Run(async () =>
         {
