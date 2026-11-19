@@ -944,7 +944,7 @@ with Skia:
   closing bracket typed first on its line, in code, lines up with its opening bracket's line. Tab and Shift+Tab move
   the indentation of the selected lines to the next or the previous tab stop, Tab with part of a line selected
   replaces it with whitespace up to the next stop, and Backspace in indentation deletes back to the tab stop before
-  the caret. Enter in 5,000 lines of JSON takes the UI thread 21 ms with the layout and the frame after it;
+  the caret. Enter in 5,000 lines of JSON takes the UI thread 24 ms with the layout and the frame after it;
 - the document's `Indentation` reaches every editor that shows it at once: Tab, Shift+Tab, new lines and the width of
   tabs. It starts as VS Code guesses it from the first 10,000 lines, with VS Code's default where they give no answer;
 - the keymap: VS Code's syntax for keys, also two-stroke sequences and punctuation where the keyboard layout types
