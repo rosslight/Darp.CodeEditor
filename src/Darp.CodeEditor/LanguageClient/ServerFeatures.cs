@@ -13,12 +13,14 @@ namespace Darp.CodeEditor.LanguageClient;
 /// <param name="Completion">How it answers completion; null when it does not.</param>
 /// <param name="SignatureHelp">When it answers signature help; null when it does not.</param>
 /// <param name="SelectionRange">Whether it answers <c>textDocument/selectionRange</c>.</param>
+/// <param name="DocumentHighlight">Whether it answers <c>textDocument/documentHighlight</c>.</param>
 internal sealed record ServerFeatures(
     bool Hover,
     SemanticTokensProvider? SemanticTokens,
     CompletionProvider? Completion,
     SignatureHelpProvider? SignatureHelp,
-    bool SelectionRange
+    bool SelectionRange,
+    bool DocumentHighlight
 )
 {
     public static ServerFeatures Read(ServerCapabilities capabilities) =>
@@ -27,7 +29,8 @@ internal sealed record ServerFeatures(
             SemanticTokensProvider.Read(capabilities.SemanticTokensProvider),
             CompletionProvider.Read(capabilities.CompletionProvider),
             SignatureHelpProvider.Read(capabilities.SignatureHelpProvider),
-            capabilities.SelectionRangeProvider is { ValueKind: JsonValueKind.True or JsonValueKind.Object }
+            capabilities.SelectionRangeProvider is { ValueKind: JsonValueKind.True or JsonValueKind.Object },
+            capabilities.DocumentHighlightProvider is { ValueKind: JsonValueKind.True or JsonValueKind.Object }
         );
 
     /// <summary>
