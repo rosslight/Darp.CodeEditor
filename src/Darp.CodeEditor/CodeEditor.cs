@@ -80,10 +80,12 @@ namespace Darp.CodeEditor;
 /// The font defaults to a monospace one; set <c>FontFamily</c> and <c>FontSize</c> as for any control.
 /// </para>
 /// <para>
-/// The search bar searches as the user types, in the background: plain text or a .NET regular expression, line by
-/// line, with Match Case and Match Whole Word. A search stops after 1 second, as a regular expression such as
-/// <c>(a+)+$</c> can take far longer, and keeps 10,000 matches at most. The bar says so when a search stops early, and
-/// Replace All then does nothing: it never replaces only some of the matches.
+/// The search bar searches as the user types, in the background, as VS Code's does: plain text or a .NET regular
+/// expression, across lines where the query can match a line break, with Match Case, Match Whole Word, Preserve Case
+/// and VS Code's replace syntax, and only in the selected lines with Find in Selection. Its query starts from the text
+/// as <see cref="Options"/> says. A search stops after 1 second, as a regular expression such as <c>(a+)+$</c> can
+/// take far longer, and the bar says so. It highlights 19,999 matches, and F3 and Replace All reach those beyond:
+/// Replace All never replaces only some of the matches.
 /// </para>
 /// <para>
 /// <see cref="Keymap"/> binds keys to the editor's commands, by default VS Code's: completion (Ctrl+Space, Ctrl+I),
@@ -428,8 +430,9 @@ public class CodeEditor : TemplatedControl
     }
 
     /// <summary>
-    /// Opens the search bar, as Ctrl+F does, or the replace bar, as Ctrl+H does, and puts the keyboard in its query. A
-    /// selection within one line becomes the search text. A read-only editor opens the search bar either way.
+    /// Opens the search bar, as Ctrl+F does, or the replace bar, as Ctrl+H does: their commands,
+    /// <see cref="CodeEditorCommands.Find"/> and <see cref="CodeEditorCommands.Replace"/>, say what the query starts
+    /// with and where the keyboard goes. A read-only editor opens no replace bar, as in VS Code.
     /// </summary>
     public void OpenSearch(bool replace = false) =>
         _view?.RunCommand(replace ? CodeEditorCommands.Replace : CodeEditorCommands.Find);
@@ -561,7 +564,6 @@ public class CodeEditor : TemplatedControl
         else if (change.Property == IsReadOnlyProperty)
         {
             _part?.IsReadOnly = IsReadOnly || _shown is null;
-            _searchBar?.UpdateReplaceRow();
             if (IsReadOnly)
                 _view?.OnReadOnly();
         }
@@ -655,11 +657,11 @@ public class CodeEditor : TemplatedControl
                 () => Keymap,
                 () => Options,
                 () => _searchBar,
-                CreatedSearchBar
+                CreatedSearchBar,
+                ScrollTo
             )
         );
         _view.SetColors(_theme, _colors, _iconColors);
-        _searchBar?.Attach(this, part.TextArea, document);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
         _waitingForLayout = true;
         textView.LayoutUpdated += OnTextViewLayoutUpdated;
@@ -672,7 +674,6 @@ public class CodeEditor : TemplatedControl
         shown.Disposed -= OnDocumentDisposed;
         shown.PropertyChanged -= OnDocumentPropertyChanged;
         CancelLoading();
-        _searchBar?.Detach();
         _view?.Dispose();
         _view = null;
         part.TextArea.TextView.LayoutUpdated -= OnTextViewLayoutUpdated;
@@ -730,12 +731,10 @@ public class CodeEditor : TemplatedControl
     /// </summary>
     private SearchBar? CreatedSearchBar()
     {
-        if (_searchBar is null && _root is { } root && _shown is { } shown && _part is { } part)
+        if (_searchBar is null && _root is { } root && _shown is not null)
         {
-            var bar = new SearchBar { Colors = _colors };
-            root.Children.Add(bar);
-            bar.Attach(this, part.TextArea, shown);
-            _searchBar = bar;
+            _searchBar = new SearchBar();
+            root.Children.Add(_searchBar);
         }
         return _shown is null ? null : _searchBar;
     }
@@ -1010,7 +1009,6 @@ public class CodeEditor : TemplatedControl
             _colors = colors;
             _iconColors = SymbolIconColors.From(theme);
             _view?.SetColors(theme, colors, _iconColors);
-            _searchBar?.Colors = colors;
             TextArea textArea = part.TextArea;
             part.Background = colors.Background;
             part.Foreground = colors.Foreground;

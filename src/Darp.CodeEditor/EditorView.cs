@@ -23,6 +23,9 @@ namespace Darp.CodeEditor;
 /// The editor's search bar, made the first time it is needed, as few editors are searched; null without a place for it
 /// in the template.
 /// </param>
+/// <param name="Reveal">
+/// Brings a range into view as <see cref="CodeEditor.ScrollTo"/> does: centered unless visible.
+/// </param>
 internal sealed record EditorContext(
     TemplatedControl Editor,
     TextArea Area,
@@ -30,7 +33,8 @@ internal sealed record EditorContext(
     Func<CodeEditorKeymap> Keymap,
     Func<CodeEditorOptions> Options,
     Func<SearchBar?> SearchBar,
-    Func<SearchBar?> CreateSearchBar
+    Func<SearchBar?> CreateSearchBar,
+    Action<TextRange> Reveal
 );
 
 /// <summary>
@@ -56,7 +60,7 @@ internal sealed class EditorView : IDisposable
     private readonly SnippetController _snippets;
     private readonly CompletionController _completion;
     private readonly SignatureHelpController _signatureHelp;
-    private readonly FindCommands _search;
+    private readonly FindController _search;
 
     /// <summary>The key that started a sequence while the view waits for its second stroke; null otherwise.</summary>
     private PressedKey? _pending;
@@ -80,7 +84,7 @@ internal sealed class EditorView : IDisposable
         // After typing: it sees typed text first, so that a typed "(" has its ")" when completion asks.
         _completion = new CompletionController(context.Editor, area, document, Highlighter, _snippets);
         _signatureHelp = new SignatureHelpController(context.Editor, area, document, Highlighter);
-        _search = new FindCommands(area, context.SearchBar, context.CreateSearchBar);
+        _search = new FindController(context, _changes);
         _features =
         [
             Highlighter,
@@ -217,12 +221,16 @@ internal sealed class EditorView : IDisposable
         _signatureHelp.Close();
     }
 
-    /// <summary>Nothing completes, asks for signatures or tabs through a snippet where the user cannot type.</summary>
+    /// <summary>
+    /// Nothing completes, asks for signatures or tabs through a snippet where the user cannot type, and the search bar
+    /// hides its replace row.
+    /// </summary>
     public void OnReadOnly()
     {
         _completion.Close();
         _signatureHelp.Close();
         _snippets.End();
+        _search.OnReadOnly();
     }
 
     /// <summary>The colors of the color theme, once it is loaded.</summary>
@@ -236,6 +244,7 @@ internal sealed class EditorView : IDisposable
         _whitespace.Colors = colors;
         _squiggles.Colors = colors;
         _hover.Colors = colors;
+        _search.Colors = colors;
         SemanticHighlighter.Theme = theme;
     }
 
