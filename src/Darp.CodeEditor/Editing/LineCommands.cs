@@ -11,9 +11,8 @@ namespace Darp.CodeEditor.Editing;
 /// and <c>copyLinesCommand.ts</c> run them, with their tracked selections: moving, copying, deleting and inserting
 /// lines, indenting and outdenting them, and selecting them whole. They take the selected lines,
 /// or the caret's, without a last line that the selection touches only at its start. Each edit is a step of its own
-/// for undo. Moved lines take the indentation of their new place by the language's rules
-/// (<see cref="MovedIndentation"/>), as far as its <see cref="AutoIndent"/> goes, and inserted lines the indentation
-/// that Enter gives them (<see cref="IndentRules"/>).
+/// for undo. Moved lines take the indentation of their new place by the language's rules, as far as its
+/// <see cref="AutoIndent"/> goes, and inserted lines the indentation that Enter gives them (<see cref="IndentRules"/>).
 /// </summary>
 internal sealed class LineCommands : IEditorFeature
 {
@@ -147,37 +146,14 @@ internal sealed class LineCommands : IEditorFeature
 
     /// <summary>
     /// The edits that move <paramref name="moving"/> above the lines from <paramref name="first"/> to
-    /// <paramref name="last"/>: it takes the indentation that the rules for Enter at the end of the line above them
-    /// give it, or else the indentation rules, in their first line's place; they take the indentation that Enter at its
-    /// end gives their first line, or else the indentation rules, below it.
+    /// <paramref name="last"/>, with the indentation of its new place, and they with that of theirs below it.
     /// </summary>
     /// <returns>The edits, and the columns that the lines' indentation changes by.</returns>
     private (List<TextEdit> Edits, int Delta) MovedDown(DocumentLine first, DocumentLine last, DocumentLine moving)
     {
-        IndentRules rules = Rules;
-        RuleLines lines = MoveLines;
-        int top = first.LineNumber;
-        string text = Buffer.GetText(moving);
-        string? indentation =
-            MovedIndentation.Entered(rules, lines, moving.LineNumber, top - 1)
-            ?? MovedIndentation.InPlace(rules, lines.Moved(n => n == top ? moving.LineNumber : n), top);
-        string inserting = Indented(text, indentation);
-        RuleLines afterMove = lines
-            .Moved(n =>
-                n == top ? moving.LineNumber
-                : n > top && n <= moving.LineNumber ? n - 1
-                : n
-            )
-            .Reindented(top, inserting[..IndentRules.Leading(inserting)]);
-        int delta = Delta(
-            first,
-            MovedIndentation.Entered(
-                rules,
-                lines,
-                top,
-                string.IsNullOrWhiteSpace(inserting) ? top - 1 : moving.LineNumber
-            ) ?? MovedIndentation.InPlace(rules, afterMove, top + 1)
-        );
+        (string? past, string? moved) = Rules.Move(MoveLines, first.LineNumber, last.LineNumber, down: true);
+        string inserting = Indented(Buffer.GetText(moving), past);
+        int delta = Delta(first, moved);
         List<TextEdit> edits = [new TextEdit(first.Offset, 0, inserting + _document.LineBreak)];
         AddIndentation(edits, first, last, delta);
         edits.Add(new TextEdit(last.EndOffset, moving.EndOffset - last.EndOffset, ""));
@@ -186,23 +162,12 @@ internal sealed class LineCommands : IEditorFeature
 
     /// <summary>
     /// The edits that move <paramref name="moving"/> below the lines from <paramref name="first"/> to
-    /// <paramref name="last"/>, as it is: they take the indentation that the rules for Enter at the end of the line
-    /// above it give their first line, or else the indentation rules, in its place.
+    /// <paramref name="last"/>, as it is, and they with the indentation of their new place.
     /// </summary>
     /// <returns>The edits, and the columns that the lines' indentation changes by.</returns>
     private (List<TextEdit> Edits, int Delta) MovedUp(DocumentLine first, DocumentLine last, DocumentLine moving)
     {
-        IndentRules rules = Rules;
-        RuleLines lines = MoveLines;
-        int delta = Delta(
-            first,
-            MovedIndentation.Entered(rules, lines, first.LineNumber, first.LineNumber - 2)
-                ?? MovedIndentation.InPlace(
-                    rules,
-                    lines.Moved(n => n == moving.LineNumber ? first.LineNumber : n),
-                    moving.LineNumber
-                )
-        );
+        int delta = Delta(first, Rules.Move(MoveLines, first.LineNumber, last.LineNumber, down: false).First);
         List<TextEdit> edits = [new TextEdit(moving.Offset, first.Offset - moving.Offset, "")];
         AddIndentation(edits, first, last, delta);
         // After the indentation of an empty last line, which goes in at the same offset.
