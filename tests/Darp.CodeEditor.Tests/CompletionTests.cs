@@ -288,6 +288,7 @@ public sealed class CompletionTests(UiFixture ui)
             List(window).ShouldNotBeNull().SelectedIndex.ShouldBe(1);
             window.Render();
             RowRuns(window, "readConsole").ShouldBe([("read", false), ("Con", true), ("sole", false)]);
+            await BarrierAsync(server, fake);
             fake.LinesStartingWith("completion ").Count.ShouldBe(1);
         });
 
@@ -1617,6 +1618,7 @@ public sealed class CompletionTests(UiFixture ui)
             await WaitForFrozenAsync(window, "print");
             window.Type(" ");
             await Wait.UntilAsync(() => List(window) is null);
+            await BarrierAsync(server, fake);
             fake.LinesStartingWith("completion ").Count.ShouldBe(1);
         });
 
@@ -1705,6 +1707,7 @@ public sealed class CompletionTests(UiFixture ui)
             Details(window).ShouldBeNull();
             // The selected row shows the detail instead, and the list stays.
             await Wait.UntilAsync(() => Row(window, "Console").Right.Text == "class System.Console");
+            await BarrierAsync(server, fake);
             fake.LinesStartingWith("completion ").Count.ShouldBe(1);
             window.Press(Key.Space, KeyModifiers.Control);
             await Wait.UntilAsync(() => DetailTexts(window).Contains("class System.Console"));

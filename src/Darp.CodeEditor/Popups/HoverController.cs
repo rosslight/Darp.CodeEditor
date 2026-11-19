@@ -236,6 +236,9 @@ internal sealed class HoverController : IDisposable
         Due(hovered);
     }
 
+    /// <summary>Whether the server's answer to the hover that waits or shows is in, its Markdown read.</summary>
+    internal bool IsAnswered => _hovered is { IsAnswered: true };
+
     /// <summary>Where the problem that a key went to shows, while it shows; null otherwise.</summary>
     public int? ProblemOffset => _hovered is { IsProblem: true } hovered && _popup.IsOpen ? hovered.Offset : null;
 

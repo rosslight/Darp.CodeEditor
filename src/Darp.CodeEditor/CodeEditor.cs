@@ -722,6 +722,9 @@ public class CodeEditor : TemplatedControl
     /// <summary>The other occurrences of the selection that the editor highlights, for tests.</summary>
     internal IReadOnlyList<TextRange> SelectionHighlights => _selectionHighlights?.Highlights ?? [];
 
+    /// <summary>Whether the server's answer to the hover that waits or shows is in, for tests.</summary>
+    internal bool HoverIsAnswered => _hover?.IsAnswered == true;
+
     /// <summary>
     /// How long the pointer rests on a character before its hover shows, VS Code's <c>editor.hover.delay</c>. The
     /// server is asked halfway through, so that its answer can show with the diagnostics once the delay is over; while
