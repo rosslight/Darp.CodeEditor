@@ -685,10 +685,11 @@ How the client talks to a server, where the protocol leaves a choice:
       touches, so a keystroke's work grows with the mirrors and the text they copy, and never with the text between
       them; each edit and caret move looks at each stop, and each frame draws those in view.
     - Measured (BenchmarkDotNet, i7-13700, warm, until a rendered frame shows it, in 5,000 lines of JSON), with a first
-      stop and its 28 mirrors each on a line of its own: committing a snippet of 4,800 characters takes as long as
-      committing the same text as plain text, and a keystroke whose mirrors copy 1,000 characters about twice as long
-      as one without a session, the editor's work for the lines that change; a keystroke that 500 mirrors copy, and a
-      commit of nearly 1,000,000 characters, are measured beside them (see the pull request's benchmarks).
+      stop and its mirrors each on a line of its own: committing a snippet of 4,800 characters with 28 mirrors takes
+      26 ms, as long as committing the same text as plain text (25 ms); a keystroke whose 28 mirrors copy 1,000
+      characters takes 22 ms, where one without a session takes 11.5 ms, the rest being the editor's work for the lines
+      that change; a keystroke that 500 mirrors copy takes 19.5 ms; and committing a snippet of nearly 1,000,000
+      characters, on 29 lines, takes 34 ms.
 - **Signature help** is asked for as VS Code asks: at once by its command, and 120 ms after the user types one of the
   server's trigger characters, or one of its retrigger characters while signature help shows, waits for an answer or
   for the pause, unless `Options.ParameterHints.Enabled` is off. Meanwhile, and while it shows, each edit and caret
@@ -1269,8 +1270,9 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   newest result. The matched characters show in bold, and a preselected item is selected among the best. A typo of
   two neighbouring characters finds the item in lists of up to 2,000, also in a longer one once typing on shortened
   what shows, and Ctrl+Space there ranks the long list strictly; ranking 2,000 items of 128 characters against 63
-  typed characters that each label holds, the worst case, takes the background thread
-  (see the pull request's benchmarks);
+  typed characters that each label holds, the worst case, takes the background thread 355 ms, where matching them
+  strictly took 49 ms, as each item is matched with up to six swaps too (BenchmarkDotNet, i7-13700); a list longer
+  than 2,000 items costs no more than before;
 - Enter, Tab, a click, the item's own commit character and the server's commit the selected item, each as one step
   that the user undoes, and a commit character then goes in; an item's own commit characters replace the server's.
   A text edit replaces its range, also grown by what was typed since; Enter inserts an insert and replace edit over
