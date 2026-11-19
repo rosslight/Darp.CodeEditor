@@ -375,7 +375,7 @@ internal static class TextSearch
         var clock = new Clock(Stopwatch.GetTimestamp(), cancellationToken);
         try
         {
-            foreach ((int start, int end) in Ranges(text.Length, scopes))
+            foreach ((int start, int end) in Ranges(text, scopes))
             {
                 SearchOutcome outcome = query.IsMultiline
                     ? ScanAcrossLines(text, start, end, query, regex, found, clock)
@@ -393,10 +393,12 @@ internal static class TextSearch
 
     /// <summary>
     /// The ranges to search: all of the text, or the scopes within it, in order, those that overlap merged, as in
-    /// VS Code.
+    /// VS Code. A scope that an edit left starting or ending between a <c>\r</c> and its <c>\n</c> starts after the
+    /// line break, or ends before it.
     /// </summary>
-    private static List<(int Start, int End)> Ranges(int length, IReadOnlyList<TextRange>? scopes)
+    private static List<(int Start, int End)> Ranges(string text, IReadOnlyList<TextRange>? scopes)
     {
+        int length = text.Length;
         if (scopes is null)
             return [(0, length)];
         var ranges = new List<(int Start, int End)>();
@@ -404,6 +406,11 @@ internal static class TextSearch
         {
             int start = Math.Clamp(scope.Start, 0, length);
             int end = Math.Clamp(scope.End, start, length);
+            if (IsInsideLineBreak(text, start))
+                start++;
+            if (IsInsideLineBreak(text, end))
+                end--;
+            end = Math.Max(start, end);
             if (ranges.Count > 0 && ranges[^1].End > start)
                 ranges[^1] = (ranges[^1].Start, Math.Max(ranges[^1].End, end));
             else
@@ -441,9 +448,14 @@ internal static class TextSearch
                 return SearchOutcome.OutOfTime;
             if (lineEnd == end)
                 return SearchOutcome.Complete;
-            lineStart = lineEnd + LineBreakAt(text, lineEnd).Length;
+            // Within the range, also where it ends inside the line break.
+            lineStart = Math.Min(lineEnd + LineBreakAt(text, lineEnd).Length, end);
         }
     }
+
+    /// <summary>Whether <paramref name="offset"/> is between a <c>\r</c> and its <c>\n</c>.</summary>
+    private static bool IsInsideLineBreak(string text, int offset) =>
+        offset > 0 && offset < text.Length && text[offset - 1] == '\r' && text[offset] == '\n';
 
     /// <summary>
     /// Finds the matches across lines, as VS Code does: in the range's text with its line breaks as <c>\n</c>, so that

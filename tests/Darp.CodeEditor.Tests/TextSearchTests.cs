@@ -176,6 +176,29 @@ public sealed class TextSearchTests
         all.Text.ShouldBe(expected);
     }
 
+    /// <summary>
+    /// A scope that starts or ends between a <c>\r</c> and its <c>\n</c>, as an edit can leave one, starts after the
+    /// line break or ends before it.
+    /// </summary>
+    [Theory]
+    [InlineData(0, 2, "a", "0-1")]
+    [InlineData(0, 2, "^", "0-0")]
+    [InlineData(2, 4, "[ab]", "3-4")]
+    [InlineData(2, 2, "^", "3-3")]
+    public void A_scope_inside_a_line_break_leaves_it_out(int start, int end, string query, string expected)
+    {
+        SearchResult result = TextSearch.Find(
+            TextSnapshot.FromString("a\r\nb"),
+            new SearchQuery(query, MatchCase: true, WholeWord: false, UseRegex: true),
+            null,
+            [TextRange.FromBounds(start, end)],
+            CancellationToken.None
+        );
+
+        result.Outcome.ShouldBe(SearchOutcome.Complete);
+        string.Join(' ', result.Matches.Select(match => $"{match.StartOffset}-{match.EndOffset}")).ShouldBe(expected);
+    }
+
     [Theory]
     [InlineData("a.b", "a~b")]
     [InlineData(@"\.\\.", @"\.\\~")]
