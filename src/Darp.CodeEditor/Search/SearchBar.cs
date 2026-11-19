@@ -86,7 +86,9 @@ internal sealed class SearchBar : UserControl
     private readonly ToggleButton _preserveCase = new() { Content = "AB" };
     private readonly Button _replaceOne = new();
     private readonly Button _replaceAll = new();
+    private readonly WrapPanel _findRow;
     private readonly WrapPanel _replaceRow;
+    private readonly FlyoutPresenter _presenter;
     private readonly TextBlock _message = new() { TextWrapping = TextWrapping.Wrap, IsVisible = false };
 
     /// <summary>Whether the code, not the user, changes the bar: the search knows already.</summary>
@@ -102,28 +104,20 @@ internal sealed class SearchBar : UserControl
         VerticalAlignment = VerticalAlignment.Top;
         // Clear of the vertical scroll bar.
         Margin = new Thickness(0, 0, 24, 0);
+        _findRow = Row(_find, _matchCase, _wholeWord, _regex, _count, _previous, _next, _findInSelection, _close);
         _replaceRow = Row(_replace, _preserveCase, _replaceOne, _replaceAll);
         _replaceRow.IsVisible = false;
         // About the width of the rows, which a longer message wraps to.
         _message.MaxWidth = 520;
-        var presenter = new FlyoutPresenter
+        _presenter = new FlyoutPresenter
         {
             // Not cut to a flyout's width.
             MaxWidth = double.PositiveInfinity,
-            Content = new StackPanel
-            {
-                Spacing = 4,
-                Children =
-                {
-                    Row(_find, _matchCase, _wholeWord, _regex, _count, _previous, _next, _findInSelection, _close),
-                    _replaceRow,
-                    _message,
-                },
-            },
+            Content = new StackPanel { Spacing = 4, Children = { _findRow, _replaceRow, _message } },
         };
         // Its rows wrap to the editor's width rather than scroll.
-        ScrollViewer.SetHorizontalScrollBarVisibility(presenter, ScrollBarVisibility.Disabled);
-        Content = presenter;
+        ScrollViewer.SetHorizontalScrollBarVisibility(_presenter, ScrollBarVisibility.Disabled);
+        Content = _presenter;
         // Raised as soon as the text changed; TextChanged comes later, posted.
         _find.TextChanging += (_, _) => OnUserChange(search => search.OnQueryChanged());
         foreach (ToggleButton option in (ToggleButton[])[_matchCase, _wholeWord, _regex])
@@ -302,14 +296,22 @@ internal sealed class SearchBar : UserControl
     /// <summary>
     /// As VS Code's find widget in a narrow editor, the query and the replacement give up width, down to
     /// <see cref="MinBoxWidth"/>, so that the buttons stay beside them and inside the editor; narrower still, the rows
-    /// wrap.
+    /// wrap. Their width follows from the rows' alone, at the boxes' full width, and the presenter's frame: a message
+    /// wraps on its own.
     /// </summary>
     protected override Size MeasureOverride(Size availableSize)
     {
-        Size natural = base.MeasureOverride(availableSize.WithWidth(double.PositiveInfinity));
-        double overflow = natural.Width - _find.Width + BoxWidth - availableSize.Width;
+        double rows = Math.Max(Natural(_findRow), _replaceRow.IsVisible ? Natural(_replaceRow) : 0);
+        Thickness frame = _presenter.Padding + _presenter.BorderThickness;
+        double overflow = rows + frame.Left + frame.Right - availableSize.Width;
         _find.Width = _replace.Width = Math.Clamp(BoxWidth - overflow, MinBoxWidth, BoxWidth);
         return base.MeasureOverride(availableSize);
+
+        double Natural(WrapPanel row)
+        {
+            row.Measure(Size.Infinity);
+            return row.DesiredSize.Width - _find.Width + BoxWidth;
+        }
     }
 
     /// <inheritdoc />
