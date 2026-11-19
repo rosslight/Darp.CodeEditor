@@ -20,8 +20,8 @@ namespace Darp.CodeEditor.Completion;
 
 /// <summary>
 /// Signature help in one editor's view of a document: the signature of the call around the caret, with the parameter
-/// at the caret in bold and its documentation, in a popup that looks like the app's tooltips, above the caret's line,
-/// so that completion's list below it shows too.
+/// at the caret in bold and its documentation, in the editor's own popup in the color theme's hover colors, above the
+/// caret's line, so that completion's list below it shows too.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -48,9 +48,9 @@ internal sealed class SignatureHelpController : IEditorFeature
     private readonly TextDocument _buffer;
     private readonly CodeDocument _document;
     private readonly BackgroundTextMateHighlighter _highlighter;
-    private readonly ContentControl _content = new();
+    private readonly PopupScroller _content = new();
     private readonly EditorPopup _popup;
-    private TextAreaColors? _colors;
+    private PopupColors _colors = PopupColors.Default;
 
     /// <summary>The signature help that shows; null while none does.</summary>
     private SignatureHelpInfo? _shown;
@@ -77,7 +77,10 @@ internal sealed class SignatureHelpController : IEditorFeature
         _buffer = textArea.Document;
         _document = document;
         _highlighter = highlighter;
-        _popup = new EditorPopup(editor, new AppToolTip { Content = _content });
+        _popup = new EditorPopup(editor, _content, "SignatureHelp");
+        // VS Code's padding and most width of signature help.
+        _popup.Frame.Padding = new Avalonia.Thickness(8, 4);
+        _popup.Frame.MaxWidth = 440;
         _textArea.TextEntered += OnTextEntered;
         _textArea.Caret.PositionChanged += OnEditOrCaretMove;
         _buffer.Changed += OnEditOrCaretMove;
@@ -85,8 +88,8 @@ internal sealed class SignatureHelpController : IEditorFeature
         _popup.LeftView += OnClosingChange;
     }
 
-    /// <summary>The colors of the color theme, for the signature, once it is loaded. New colors end signature help.</summary>
-    public TextAreaColors? Colors
+    /// <summary>The popup's colors, from the color theme once it is loaded. New colors end signature help.</summary>
+    public PopupColors Colors
     {
         set
         {
@@ -287,8 +290,15 @@ internal sealed class SignatureHelpController : IEditorFeature
                     );
             if (_reading != reading)
                 return;
-            var look = new CodeLook(_editor.FontFamily, _editor.FontSize, _colors?.Background, _colors?.Foreground);
-            _content.Content = View(help, signature, label, blocks, look);
+            _popup.Frame.Paint(_colors.HoverBackground, _colors.HoverBorder, _colors.HoverForeground, _colors.Shadow);
+            _content.SliderBrushes = _colors.Slider;
+            _content.Child = View(
+                help,
+                signature,
+                label,
+                blocks,
+                new PopupLook(_editor.FontFamily, _editor.FontSize, _colors)
+            );
             _popup.Show(
                 _textView,
                 () =>
@@ -308,8 +318,8 @@ internal sealed class SignatureHelpController : IEditorFeature
     }
 
     /// <summary>
-    /// The signature as code, in the editor's font, colors and background, with the active parameter in bold; before
-    /// it which signature of how many, when there are more; below it the documentation.
+    /// The signature as code, in the editor's font and colors, with the active parameter in bold; before it which
+    /// signature of how many, when there are more; below it the documentation.
     /// </summary>
     /// <param name="help">The signature help.</param>
     /// <param name="signature">The signature that shows.</param>
@@ -321,7 +331,7 @@ internal sealed class SignatureHelpController : IEditorFeature
         SignatureInfo signature,
         string label,
         IReadOnlyList<HoverBlock> documentation,
-        CodeLook look
+        PopupLook look
     )
     {
         var inlines = new InlineCollection();
@@ -341,19 +351,7 @@ internal sealed class SignatureHelpController : IEditorFeature
         {
             inlines.Add(new Run(label));
         }
-        var code = new Border
-        {
-            Background = look.Background,
-            Padding = new Avalonia.Thickness(6, 4),
-            Child = new TextBlock
-            {
-                Inlines = inlines,
-                FontFamily = look.FontFamily,
-                FontSize = look.FontSize,
-                Foreground = look.Foreground,
-                TextWrapping = TextWrapping.Wrap,
-            },
-        };
+        TextBlock code = HoverView.Code(inlines, look);
         var line = new DockPanel();
         if (help.Signatures.Count > 1)
         {

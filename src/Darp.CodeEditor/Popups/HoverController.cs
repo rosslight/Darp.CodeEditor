@@ -16,7 +16,7 @@ namespace Darp.CodeEditor.Popups;
 
 /// <summary>
 /// The hover of one editor's view of a document: resting the pointer over text shows the messages of the diagnostics
-/// there, above the server's hover, in a popup that looks like the app's tooltips.
+/// there, above the server's hover, in the editor's own popup, in the color theme's hover colors.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -44,9 +44,9 @@ internal sealed class HoverController : IDisposable
     private readonly CodeDocument _document;
     private readonly SquiggleLayer _squiggles;
     private readonly BackgroundTextMateHighlighter _highlighter;
-    private readonly ScrollViewer _content = new() { HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+    private readonly PopupScroller _content = new();
     private readonly EditorPopup _popup;
-    private TextAreaColors? _colors;
+    private PopupColors _colors = PopupColors.Default;
 
     /// <summary>The text hovered now, from the pointer's rest until the popup closes; null for none.</summary>
     private Hovered? _hovered;
@@ -65,7 +65,10 @@ internal sealed class HoverController : IDisposable
         _document = document;
         _squiggles = squiggles;
         _highlighter = highlighter;
-        _popup = new EditorPopup(editor, new AppToolTip { Content = _content });
+        _popup = new EditorPopup(editor, _content, "Hover");
+        // VS Code's padding, and its narrowest limit of a hover's width.
+        _popup.Frame.Padding = new Thickness(8, 4);
+        _popup.Frame.MaxWidth = 500;
         _textView.PointerHover += OnPointerHover;
         _textView.PointerMoved += OnPointerMoved;
         _textView.PointerExited += OnPointerExited;
@@ -75,8 +78,8 @@ internal sealed class HoverController : IDisposable
         _popup.Root.PointerExited += OnPointerExited;
     }
 
-    /// <summary>The colors of the color theme, for code in the popup, once it is loaded. New colors end the hover.</summary>
-    public TextAreaColors? Colors
+    /// <summary>The popup's colors, from the color theme once it is loaded. New colors end the hover.</summary>
+    public PopupColors Colors
     {
         set
         {
@@ -182,8 +185,9 @@ internal sealed class HoverController : IDisposable
 
     private void Show(Hovered hovered, IReadOnlyList<HoverBlock> blocks)
     {
-        var code = new CodeLook(_editor.FontFamily, _editor.FontSize, _colors?.Background, _colors?.Foreground);
-        _content.Content = HoverView.Create(blocks, code);
+        _popup.Frame.Paint(_colors.HoverBackground, _colors.HoverBorder, _colors.HoverForeground, _colors.Shadow);
+        _content.SliderBrushes = _colors.Slider;
+        _content.Child = HoverView.Create(blocks, new PopupLook(_editor.FontFamily, _editor.FontSize, _colors));
         // Above the hovered word, where the pointer comes from.
         _popup.Show(_textView, () => TextViewBoxes.CharacterAt(_textView, hovered.Word.Start));
     }

@@ -59,9 +59,8 @@ internal sealed class CompletionController : IEditorFeature
     private readonly CodeDocument _document;
     private readonly BackgroundTextMateHighlighter _highlighter;
     private readonly SnippetController _snippets;
-    private readonly CompletionView _view = new();
-    private readonly EditorPopup _popup;
-    private TextAreaColors? _colors;
+    private readonly CompletionView _view;
+    private PopupColors _colors = PopupColors.Default;
     private SymbolIconColors? _icons;
 
     /// <summary>Completion from its first request until it ends; null while there is none.</summary>
@@ -100,18 +99,18 @@ internal sealed class CompletionController : IEditorFeature
         _document = document;
         _highlighter = highlighter;
         _snippets = snippets;
-        _popup = new EditorPopup(editor, _view.Root, below: true);
+        _view = new CompletionView(editor);
         _view.Clicked += OnClicked;
         _buffer.Changing += OnBufferChanging;
         _buffer.TextChanged += OnBufferTextChanged;
         _textArea.TextEntered += OnTextEntered;
         _textArea.Caret.PositionChanged += OnCaretPositionChanged;
         _document.LanguageFeaturesChanged += OnClosingChange;
-        _popup.LeftView += OnClosingChange;
+        _view.LeftView += OnClosingChange;
     }
 
-    /// <summary>The colors of the color theme, for code in the details, once it is loaded. New colors end completion.</summary>
-    public TextAreaColors? Colors
+    /// <summary>The popups' colors, from the color theme once it is loaded. New colors end completion.</summary>
+    public PopupColors Colors
     {
         set
         {
@@ -216,7 +215,7 @@ internal sealed class CompletionController : IEditorFeature
         foreach (Resolve resolve in session.Resolves.Values)
             resolve.Cancellation.Cancel();
         session.Details?.Cancel();
-        _popup.Hide();
+        _view.Hide();
         _view.ShowDetails(null);
         return session.IsShowing;
     }
@@ -231,7 +230,7 @@ internal sealed class CompletionController : IEditorFeature
         _textArea.TextEntered -= OnTextEntered;
         _textArea.Caret.PositionChanged -= OnCaretPositionChanged;
         _document.LanguageFeaturesChanged -= OnClosingChange;
-        _popup.LeftView -= OnClosingChange;
+        _view.LeftView -= OnClosingChange;
     }
 
     /// <summary>
@@ -432,11 +431,8 @@ internal sealed class CompletionController : IEditorFeature
             return;
         }
         int wordStart = key.Answer.Request.Word.Start;
-        Func<Rect> place = () => TextViewBoxes.CharacterAt(_textView, Math.Min(wordStart, _buffer.TextLength));
-        session.Place = place;
-        _view.Room = () => RoomFrom(place);
         _view.Show(session.Items, session.Selected, Look(), _icons, Math.Ceiling(_textView.DefaultLineHeight) + 4);
-        _popup.Show(_textView, session.Place);
+        _view.Open(_textView, () => TextViewBoxes.CharacterAt(_textView, Math.Min(wordStart, _buffer.TextLength)));
         // Placing it may have ended completion, as its line is out of view.
         if (_session == session)
             ResolveSelected(session);
@@ -478,15 +474,6 @@ internal sealed class CompletionController : IEditorFeature
     }
 
     /// <summary>
-    /// The width from <paramref name="place"/>, where the popup starts, to the window's right edge; the popup moves left
-    /// of it only when even the list does not fit there.
-    /// </summary>
-    private double RoomFrom(Func<Rect> place) =>
-        OverlayLayer.GetOverlayLayer(_editor) is { } layer && _textView.TranslatePoint(place().TopLeft, layer) is { } at
-            ? layer.Bounds.Width - Math.Max(0, at.X)
-            : double.PositiveInfinity;
-
-    /// <summary>
     /// The text typed from <paramref name="start"/> up to <paramref name="caret"/>, as far as the matcher reads it: an
     /// edit that starts far before the caret, also in a line's collapsed tail, costs no more than one near it, and
     /// matches by its first characters, as in VS Code. When they are all spaces and tabs, nothing counts as typed;
@@ -516,7 +503,7 @@ internal sealed class CompletionController : IEditorFeature
         session.Items = [];
         session.DetailsOf = null;
         session.Details?.Cancel();
-        _popup.Hide();
+        _view.Hide();
         _view.ShowDetails(null);
     }
 
@@ -587,11 +574,9 @@ internal sealed class CompletionController : IEditorFeature
                 () => DetailBlocks(item, grammar, cancellation.Token),
                 cancellation.Token
             );
-            if (_session != session || cancellation.IsCancellationRequested || session.Place is not { } place)
+            if (_session != session || cancellation.IsCancellationRequested || !session.IsShowing)
                 return;
             _view.ShowDetails(HoverView.Create(blocks, Look()));
-            // The popup is wider now: placed again, so that it stays inside the window.
-            _popup.Show(_textView, place);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception e)
@@ -844,7 +829,7 @@ internal sealed class CompletionController : IEditorFeature
         return TextRange.FromBounds(start, caret);
     }
 
-    private CodeLook Look() => new(_editor.FontFamily, _editor.FontSize, _colors?.Background, _colors?.Foreground);
+    private PopupLook Look() => new(_editor.FontFamily, _editor.FontSize, _colors);
 
     /// <summary>A request for completion.</summary>
     /// <param name="snapshot">The text it was asked for.</param>
@@ -918,9 +903,6 @@ internal sealed class CompletionController : IEditorFeature
 
         /// <summary>The selected item's index in <see cref="Items"/>.</summary>
         public int Selected { get; set; }
-
-        /// <summary>Where the list is: the box of the first character of the word it completes.</summary>
-        public Func<Rect>? Place { get; set; }
 
         /// <summary>The resolves of the items, under way or done.</summary>
         public Dictionary<CompletionItem, Resolve> Resolves { get; } = new(ReferenceEqualityComparer.Instance);

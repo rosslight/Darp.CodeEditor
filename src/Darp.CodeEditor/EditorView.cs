@@ -252,15 +252,17 @@ internal sealed class EditorView : IDisposable
     /// <summary>The colors of the color theme, once it is loaded.</summary>
     public void SetColors(ColorThemeFile? theme, TextAreaColors? colors, SymbolIconColors? icons)
     {
-        _completion.Colors = colors;
+        PopupColors popups =
+            theme is not null && colors is not null ? PopupColors.From(theme, colors) : PopupColors.Default;
+        _completion.Colors = popups;
         _completion.Icons = icons;
         _snippets.Colors = colors;
-        _signatureHelp.Colors = colors;
+        _signatureHelp.Colors = popups;
         _brackets.Colors = colors;
         _occurrences.Colors = colors;
         _whitespace.Colors = colors;
         _squiggles.Colors = colors;
-        _hover.Colors = colors;
+        _hover.Colors = popups;
         _search.Colors = colors;
         SemanticHighlighter.Theme = theme;
     }

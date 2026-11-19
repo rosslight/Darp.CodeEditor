@@ -15,11 +15,10 @@ using Darp.CodeEditor.Popups;
 namespace Darp.CodeEditor.Completion;
 
 /// <summary>
-/// What the completion popup shows: the items in a list in the app's flyout look, each with its icon and its label in
-/// the editor's font, the characters that matched in bold and deprecated items struck through; and in a flyout of its
-/// own the selected item's details, beside the list where the window has room for them, narrower if need be, and below
-/// it otherwise, as VS Code places them. Neither takes the keyboard focus, so the editor keeps it; clicking an item
-/// commits it.
+/// What completion shows: the items in a list below the word, each with its icon and its label in the editor's font,
+/// the characters that matched in bold and deprecated items struck through; and in a popup of its own the selected
+/// item's details, beside the list, as <see cref="PopupPlacement.Beside"/> places them. Both are in the color theme's
+/// suggest colors. Neither takes the keyboard focus, so the editor keeps it; clicking an item commits it.
 /// </summary>
 internal sealed class CompletionView
 {
@@ -35,31 +34,22 @@ internal sealed class CompletionView
     /// </summary>
     private const int MaxLabelLength = 256;
 
-    /// <summary>The narrowest the details get beside the list; with less room, they go below it.</summary>
-    private const double MinDetailsWidth = 200;
-
-    private const double Gap = 2;
-
     private readonly ListBox _list;
-    private readonly FlyoutPresenter _details;
-    private readonly Layout _layout;
+    private readonly PopupScroller _details = new();
+    private readonly EditorPopup _listPopup;
+    private readonly EditorPopup _detailsPopup;
 
-    private readonly ScrollViewer _detailsContent = new()
-    {
-        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-        MaxWidth = DetailsWidth,
-    };
-
-    private CodeLook? _look;
+    private PopupLook? _look;
     private SymbolIconColors? _icons;
     private double _rowHeight;
 
-    public CompletionView()
+    public CompletionView(TemplatedControl editor)
     {
         _list = new ListBox
         {
             Focusable = false,
             Width = ListWidth,
+            Background = Brushes.Transparent,
             // Each row is reused for the items it shows as the list changes: only its icon and text change.
             ItemTemplate = new FuncDataTemplate<ShownItem>((_, _) => new Row(this), supportsRecycling: true),
         };
@@ -75,49 +65,64 @@ internal sealed class CompletionView
             }
         );
         _list.AddHandler(InputElement.PointerPressedEvent, OnPointerPressed, RoutingStrategies.Tunnel);
-        _details = new FlyoutPresenter { Content = _detailsContent, IsVisible = false };
-        var listFlyout = new FlyoutPresenter { Content = _list };
-        // A theme's flyout may scroll across, as Fluent's does: its content then takes no width from it, and the
-        // details would not wrap.
-        ScrollViewer.SetHorizontalScrollBarVisibility(listFlyout, ScrollBarVisibility.Disabled);
-        ScrollViewer.SetHorizontalScrollBarVisibility(_details, ScrollBarVisibility.Disabled);
-        _layout = new Layout(listFlyout, _details);
-    }
-
-    /// <summary>The view's outermost control.</summary>
-    public Control Root => _layout;
-
-    /// <summary>
-    /// The width from where the popup starts to the window's right edge, as it is placed now: the room for the list and
-    /// the details beside it. By default, the width the popup is measured with.
-    /// </summary>
-    public Func<double> Room
-    {
-        set => _layout.Room = value;
+        _detailsPopup = new EditorPopup(editor, _details, "CompletionDetails");
+        _detailsPopup.Frame.Padding = new Thickness(6, 4, 2, 4);
+        _listPopup = new EditorPopup(editor, _list, "CompletionList", PopupSide.Below);
+        _listPopup.LeftView += (_, _) =>
+        {
+            _detailsPopup.Hide();
+            LeftView?.Invoke(this, EventArgs.Empty);
+        };
     }
 
     /// <summary>Raised when an item is clicked, with its index.</summary>
     public event Action<int>? Clicked;
 
+    /// <summary>Raised when the list closed because its line left the view.</summary>
+    public event EventHandler? LeftView;
+
     /// <summary>Shows <paramref name="items"/>, with <paramref name="selected"/> selected and in view.</summary>
     /// <param name="items">The items.</param>
     /// <param name="selected">The selected item's index.</param>
-    /// <param name="look">The editor's font, for the labels.</param>
+    /// <param name="look">The editor's font, for the labels, and the popups' colors.</param>
     /// <param name="icons">The icons' colors; none while the color theme loads.</param>
     /// <param name="rowHeight">The height of an item.</param>
     public void Show(
         IReadOnlyList<ShownItem> items,
         int selected,
-        CodeLook look,
+        PopupLook look,
         SymbolIconColors? icons,
         double rowHeight
     )
     {
         (_look, _icons, _rowHeight) = (look, icons, rowHeight);
+        PopupColors colors = look.Colors;
+        _listPopup.Frame.Paint(colors.SuggestBackground, colors.SuggestBorder, colors.SuggestForeground, colors.Shadow);
+        _detailsPopup.Frame.Paint(
+            colors.SuggestBackground,
+            colors.SuggestBorder,
+            colors.WidgetForeground,
+            colors.Shadow
+        );
+        _details.SliderBrushes = colors.Slider;
         _list.MaxHeight = rowHeight * VisibleItems;
-        _detailsContent.MaxHeight = rowHeight * VisibleItems;
+        _details.MaxHeight = rowHeight * VisibleItems;
         _list.ItemsSource = items;
         Select(selected);
+    }
+
+    /// <summary>Opens the list at <paramref name="place"/>, the box of the word's first character, or moves it there.</summary>
+    public void Open(Visual relativeTo, Func<Rect> place)
+    {
+        _listPopup.Show(relativeTo, place);
+        if (_details.Child is not null)
+            _detailsPopup.ShowBeside(_listPopup, DetailsWidth);
+    }
+
+    public void Hide()
+    {
+        _detailsPopup.Hide();
+        _listPopup.Hide();
     }
 
     /// <summary>Selects the item at <paramref name="index"/>, and scrolls it into view.</summary>
@@ -130,8 +135,11 @@ internal sealed class CompletionView
     /// <summary>Shows the selected item's details beside the list; null hides them.</summary>
     public void ShowDetails(Control? details)
     {
-        _detailsContent.Content = details;
-        _details.IsVisible = details is not null;
+        _details.Child = details;
+        if (details is null)
+            _detailsPopup.Hide();
+        else if (_listPopup.IsOpen)
+            _detailsPopup.ShowBeside(_listPopup, DetailsWidth);
     }
 
     /// <summary>
@@ -171,63 +179,6 @@ internal sealed class CompletionView
     }
 
     /// <summary>
-    /// Places the details beside the list when the room right of where the popup starts takes them at least
-    /// <see cref="MinDetailsWidth"/> wide, narrowed to that room; otherwise below the list, at least as wide as it.
-    /// </summary>
-    private sealed class Layout : Panel
-    {
-        private readonly Control _list;
-        private readonly Control _details;
-        private bool _beside;
-
-        public Layout(Control list, Control details)
-        {
-            _list = list;
-            _details = details;
-            Children.Add(list);
-            Children.Add(details);
-        }
-
-        public Func<double>? Room { get; set; }
-
-        protected override Size MeasureOverride(Size availableSize)
-        {
-            _list.Measure(availableSize);
-            Size list = _list.DesiredSize;
-            if (!_details.IsVisible)
-                return list;
-            double room = Math.Min(availableSize.Width, Room?.Invoke() ?? double.PositiveInfinity);
-            double beside = room - list.Width - Gap;
-            _beside = beside >= MinDetailsWidth;
-            if (_beside)
-            {
-                _details.Measure(availableSize.WithWidth(beside));
-                Size details = _details.DesiredSize;
-                return new Size(list.Width + Gap + details.Width, Math.Max(list.Height, details.Height));
-            }
-            double below = Math.Max(0, availableSize.Height - list.Height - Gap);
-            _details.Measure(new Size(Math.Max(list.Width, Math.Min(room, DetailsWidth)), below));
-            Size under = _details.DesiredSize;
-            return new Size(Math.Max(list.Width, under.Width), list.Height + Gap + under.Height);
-        }
-
-        protected override Size ArrangeOverride(Size finalSize)
-        {
-            Size list = _list.DesiredSize;
-            _list.Arrange(new Rect(list));
-            if (!_details.IsVisible)
-                return finalSize;
-            Size details = _details.DesiredSize;
-            _details.Arrange(
-                _beside
-                    ? new Rect(list.Width + Gap, 0, details.Width, details.Height)
-                    : new Rect(0, list.Height + Gap, details.Width, details.Height)
-            );
-            return finalSize;
-        }
-    }
-
-    /// <summary>
     /// A row of the list: the item's icon, and its label in the editor's font with the characters that matched in bold,
     /// struck through when it is deprecated. The list reuses it for other items.
     /// </summary>
@@ -262,8 +213,8 @@ internal sealed class CompletionView
             if (DataContext is not ShownItem { Item: var item } shown)
                 return;
             Height = _view._rowHeight;
-            _label.FontFamily = _view._look?.FontFamily ?? FontFamily.Default;
-            _label.FontSize = _view._look?.FontSize ?? 12;
+            _label.FontFamily = _view._look?.CodeFont ?? FontFamily.Default;
+            _label.FontSize = _view._look?.CodeSize ?? 12;
             _label.Inlines = Label(Shortened(item.Label), shown.Highlights);
             _label.TextDecorations = item.IsDeprecated ? TextDecorations.Strikethrough : null;
             _icon.IsVisible = _view._icons is not null;

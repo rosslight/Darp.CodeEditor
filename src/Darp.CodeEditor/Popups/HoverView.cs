@@ -10,8 +10,9 @@ using Avalonia.Media.TextFormatting;
 namespace Darp.CodeEditor.Popups;
 
 /// <summary>
-/// The controls that show a hover's blocks: text in the popup's look, with the app's link and separator looks, and code
-/// in the editor's font, colors and background.
+/// The controls that show a hover's blocks, as VS Code's hover shows Markdown: text in the popup's font and foreground,
+/// links in <c>textLink.foreground</c>, code spans on <c>textCodeBlock.background</c>, code blocks on the popup's
+/// background in the editor's font and token colors, and a line between parts in the hover's border color.
 /// </summary>
 internal static class HoverView
 {
@@ -21,7 +22,7 @@ internal static class HoverView
     /// <summary>The hand over links, made the first time it is needed.</summary>
     private static Cursor? s_hand;
 
-    public static Control Create(IReadOnlyList<HoverBlock> blocks, CodeLook code)
+    public static Control Create(IReadOnlyList<HoverBlock> blocks, PopupLook look)
     {
         var panel = new StackPanel { Spacing = 6 };
         foreach (HoverBlock block in blocks)
@@ -29,9 +30,9 @@ internal static class HoverView
             panel.Children.Add(
                 block switch
                 {
-                    HoverParagraph paragraph => Paragraph(paragraph, code),
-                    HoverCode codeBlock => Code(codeBlock, code),
-                    HoverRule => new Separator(),
+                    HoverParagraph paragraph => Paragraph(paragraph, look),
+                    HoverCode codeBlock => Code(codeBlock, look),
+                    HoverRule => new Border { Height = 1, Background = look.Colors.HoverBorder },
                     _ => throw new UnreachableException(),
                 }
             );
@@ -39,7 +40,18 @@ internal static class HoverView
         return panel;
     }
 
-    private static Control Paragraph(HoverParagraph paragraph, CodeLook code)
+    /// <summary>Code in the editor's font, size and token colors, on the popup's background.</summary>
+    public static TextBlock Code(InlineCollection inlines, PopupLook look) =>
+        new()
+        {
+            Inlines = inlines,
+            FontFamily = look.CodeFont,
+            FontSize = look.CodeSize,
+            Foreground = look.Colors.CodeForeground,
+            TextWrapping = TextWrapping.Wrap,
+        };
+
+    private static Control Paragraph(HoverParagraph paragraph, PopupLook look)
     {
         var inlines = new InlineCollection();
         var links = new List<(int Start, int End, Uri Uri)>();
@@ -51,17 +63,15 @@ internal static class HoverView
                 run.FontWeight = FontWeight.Bold;
             if (span.Style.HasFlag(SpanStyle.Italic))
                 run.FontStyle = FontStyle.Italic;
-            // A small code span, in the editor's look at the paragraph's size, so that it fits its line.
+            // A small code span, in the editor's font at the paragraph's size, so that it fits its line.
             if (span.Style.HasFlag(SpanStyle.Code))
             {
-                run.FontFamily = code.FontFamily;
-                run.Background = code.Background;
-                if (code.Foreground is { } foreground)
-                    run.Foreground = foreground;
+                run.FontFamily = look.CodeFont;
+                run.Background = look.Colors.CodeSpanBackground;
             }
             if (span.Link is { } uri)
             {
-                run.TextDecorations = TextDecorations.Underline;
+                run.Foreground = look.Colors.Link;
                 links.Add((length, length + span.Text.Length, uri));
             }
             inlines.Add(run);
@@ -83,7 +93,7 @@ internal static class HoverView
         return item;
     }
 
-    private static Control Code(HoverCode block, CodeLook look)
+    private static TextBlock Code(HoverCode block, PopupLook look)
     {
         var inlines = new InlineCollection();
         foreach (CodeRun run in block.Runs)
@@ -94,19 +104,7 @@ internal static class HoverView
                 text.Foreground = foreground;
             inlines.Add(text);
         }
-        return new Border
-        {
-            Background = look.Background,
-            Padding = new Thickness(6, 4),
-            Child = new TextBlock
-            {
-                Inlines = inlines,
-                FontFamily = look.FontFamily,
-                FontSize = look.FontSize,
-                Foreground = look.Foreground,
-                TextWrapping = TextWrapping.Wrap,
-            },
-        };
+        return Code(inlines, look);
     }
 
     /// <summary>
@@ -148,9 +146,8 @@ internal static class HoverView
     private static async void Open(TopLevel topLevel, Uri uri) => await topLevel.Launcher.LaunchUriAsync(uri);
 }
 
-/// <summary>How code looks in a popup: as in the editor.</summary>
-/// <param name="FontFamily">The editor's font.</param>
-/// <param name="FontSize">The editor's font size.</param>
-/// <param name="Background">The text area's background; null while the color theme loads.</param>
-/// <param name="Foreground">The text area's foreground; null while the color theme loads.</param>
-internal sealed record CodeLook(FontFamily FontFamily, double FontSize, IBrush? Background, IBrush? Foreground);
+/// <summary>How a popup looks: code in the editor's font, and the color theme's popup colors.</summary>
+/// <param name="CodeFont">The editor's font.</param>
+/// <param name="CodeSize">The editor's font size.</param>
+/// <param name="Colors">The popups' colors.</param>
+internal sealed record PopupLook(FontFamily CodeFont, double CodeSize, PopupColors Colors);

@@ -9,34 +9,34 @@ public sealed class PopupPlacementTests
     private static readonly Rect s_window = new(0, 0, 400, 300);
 
     [Theory]
-    [InlineData(PopupSide.Above, 100, true)]
-    [InlineData(PopupSide.Below, 100, false)]
+    [InlineData("above", 100, true)]
+    [InlineData("below", 100, false)]
     // Only the other side has room for its 60 pixels.
-    [InlineData(PopupSide.Above, 20, false)]
-    [InlineData(PopupSide.Below, 260, true)]
+    [InlineData("above", 20, false)]
+    [InlineData("below", 260, true)]
     public void A_popup_opens_on_its_side_of_the_line_or_on_the_other_where_only_that_has_room(
-        PopupSide preferred,
+        string side,
         double lineTop,
         bool above
     )
     {
         var line = new Rect(50, lineTop, 8, 18);
 
-        PopupBounds placed = PopupPlacement.Place(line, new Size(100, 60), s_window, preferred);
+        PopupBounds placed = PopupPlacement.Place(line, new Size(100, 60), s_window, Side(side));
 
         placed.Above.ShouldBe(above);
         placed.Bounds.ShouldBe(new Rect(50, above ? line.Top - 60 : line.Bottom, 100, 60));
     }
 
     [Theory]
-    [InlineData(PopupSide.Above)]
-    [InlineData(PopupSide.Below)]
-    public void Where_neither_side_has_room_it_takes_the_larger_one_in_whole_pixels(PopupSide preferred)
+    [InlineData("above")]
+    [InlineData("below")]
+    public void Where_neither_side_has_room_it_takes_the_larger_one_in_whole_pixels(string side)
     {
         // 40 pixels above the line, 42.5 below it.
         var line = new Rect(50, 40, 8, 18);
 
-        PopupBounds placed = PopupPlacement.Place(line, new Size(100, 80), new Rect(0, 0, 400, 100.5), preferred);
+        PopupBounds placed = PopupPlacement.Place(line, new Size(100, 80), new Rect(0, 0, 400, 100.5), Side(side));
 
         placed.Above.ShouldBeFalse();
         placed.MaxHeight.ShouldBe(42);
@@ -97,4 +97,6 @@ public sealed class PopupPlacementTests
         above.Above.ShouldBeTrue();
         above.Bounds.ShouldBe(new Rect(100, 0, 150, 200));
     }
+
+    private static PopupSide Side(string side) => side == "above" ? PopupSide.Above : PopupSide.Below;
 }
