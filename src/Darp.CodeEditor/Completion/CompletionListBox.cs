@@ -37,9 +37,6 @@ internal sealed class CompletionListBox : Control
     private SymbolIconColors? _icons;
     private bool _detailsOpen;
 
-    /// <summary>The index of the item in the first row that shows.</summary>
-    private int _top;
-
     /// <summary>The index of the item under the pointer; -1 for none.</summary>
     private int _hovered = -1;
 
@@ -64,6 +61,9 @@ internal sealed class CompletionListBox : Control
 
     /// <summary>The selected item's index.</summary>
     public int SelectedIndex { get; private set; }
+
+    /// <summary>The index of the item in the first row that shows.</summary>
+    public int FirstRow { get; private set; }
 
     /// <summary>The message that shows instead of items, such as "No suggestions."; null while items show.</summary>
     public string? Message { get; private set; }
@@ -107,7 +107,7 @@ internal sealed class CompletionListBox : Control
     )
     {
         (Items, Message, _look, _icons, RowHeight) = (items, null, look, icons, rowHeight);
-        (_top, _hovered, SelectedIndex) = (0, -1, selected);
+        (FirstRow, _hovered, SelectedIndex) = (0, -1, selected);
         ScrollIntoView(selected);
         InvalidateMeasure();
         Refresh();
@@ -117,7 +117,7 @@ internal sealed class CompletionListBox : Control
     public void ShowMessage(string message, PopupLook look, double rowHeight)
     {
         (Items, Message, _look, RowHeight) = ([], message, look, rowHeight);
-        (_top, _hovered) = (0, -1);
+        (FirstRow, _hovered) = (0, -1);
         InvalidateMeasure();
         Refresh();
     }
@@ -139,7 +139,7 @@ internal sealed class CompletionListBox : Control
 
     /// <summary>The row that shows the item at <paramref name="index"/>; null while it is out of view.</summary>
     public Row? RowOf(int index) =>
-        Message is null && index >= _top && index < _top + VisibleRows ? _rows[index - _top] : null;
+        Message is null && index >= FirstRow && index < FirstRow + VisibleRows ? _rows[index - FirstRow] : null;
 
     /// <summary>
     /// As tall as its rows: all that it would show, without a limit, as the popup first asks to place it; within one,
@@ -203,25 +203,25 @@ internal sealed class CompletionListBox : Control
         _wheel -= e.Delta.Y * WheelRows;
         int rows = (int)_wheel;
         _wheel -= rows;
-        ScrollTo(_top + rows);
+        ScrollTo(FirstRow + rows);
     }
 
     private void ScrollIntoView(int index)
     {
         int visible = VisibleRows;
-        if (index < _top)
-            _top = index;
-        else if (index >= _top + visible)
-            _top = index - visible + 1;
-        _top = Math.Clamp(_top, 0, Math.Max(0, Items.Count - visible));
+        if (index < FirstRow)
+            FirstRow = index;
+        else if (index >= FirstRow + visible)
+            FirstRow = index - visible + 1;
+        FirstRow = Math.Clamp(FirstRow, 0, Math.Max(0, Items.Count - visible));
     }
 
     private void ScrollTo(int top)
     {
         top = Math.Clamp(top, 0, Math.Max(0, Items.Count - VisibleRows));
-        if (top == _top)
+        if (top == FirstRow)
             return;
-        _top = top;
+        FirstRow = top;
         Refresh();
     }
 
@@ -236,8 +236,8 @@ internal sealed class CompletionListBox : Control
     /// <summary>The index of the item at <paramref name="point"/>; -1 outside the rows.</summary>
     private int IndexAt(Point point)
     {
-        int index = _top + (int)Math.Floor(point.Y / RowHeight);
-        return Message is null && point.Y >= 0 && index < Math.Min(Items.Count, _top + VisibleRows) ? index : -1;
+        int index = FirstRow + (int)Math.Floor(point.Y / RowHeight);
+        return Message is null && point.Y >= 0 && index < Math.Min(Items.Count, FirstRow + VisibleRows) ? index : -1;
     }
 
     /// <summary>Gives the rows in view their items again, as the items, the selection or the scrolling changed.</summary>
@@ -262,12 +262,12 @@ internal sealed class CompletionListBox : Control
                 row.ShowMessage(message, look);
             else
             {
-                int index = _top + i;
+                int index = FirstRow + i;
                 row.Show(Items[index], look, index == SelectedIndex, index == _hovered);
             }
         }
         _slider.BarBrushes = _look?.Colors.Slider;
-        _slider.Show(visible, Items.Count, _top);
+        _slider.Show(visible, Items.Count, FirstRow);
         InvalidateArrange();
     }
 

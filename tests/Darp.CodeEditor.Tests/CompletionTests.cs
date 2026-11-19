@@ -1275,6 +1275,37 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Page_Down_and_Page_Up_go_to_the_edge_of_the_rows_that_show_and_then_a_page_on() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            string[] labels = [.. Enumerable.Range(0, 30).Select(i => $"item{i:D2}")];
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items(labels));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document }, height: 160);
+            await OpenAsync(window, 0);
+            CompletionListBox list = List(window).ShouldNotBeNull();
+            int rows = list.VisibleRows;
+            rows.ShouldBeInRange(3, 12);
+
+            // As VS Code's lists: from the second row, Page Down goes to the last row that shows, and then a page on.
+            window.Press(Key.Down);
+            window.Press(Key.PageDown);
+            list.SelectedIndex.ShouldBe(rows - 1);
+            list.FirstRow.ShouldBe(0);
+            window.Press(Key.PageDown);
+            list.SelectedIndex.ShouldBe(2 * rows - 1);
+            list.FirstRow.ShouldBe(rows);
+            // Page Up goes to the first row that shows, and then a page back.
+            window.Press(Key.PageUp);
+            list.SelectedIndex.ShouldBe(rows);
+            window.Press(Key.PageUp);
+            list.SelectedIndex.ShouldBe(0);
+            list.FirstRow.ShouldBe(0);
+        });
+
+    [Fact]
     public Task Dragging_the_lists_edges_resizes_it_to_whole_rows_and_it_keeps_that_size() =>
         _ui.Run(async () =>
         {

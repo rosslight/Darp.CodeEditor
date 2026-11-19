@@ -191,7 +191,7 @@ internal sealed class CompletionController : IEditorFeature
         if (_session is not { IsShowing: true, Items.Count: > 1 } session || e.KeyModifiers != KeyModifiers.None)
             return false;
         int count = session.Items.Count;
-        int page = Math.Max(1, _view.List.VisibleRows - 1);
+        CompletionListBox list = _view.List;
         switch (e.Key)
         {
             case Key.Down:
@@ -201,10 +201,13 @@ internal sealed class CompletionController : IEditorFeature
                 _filter.Select(session, (session.Selected + count - 1) % count);
                 return true;
             case Key.PageDown:
-                _filter.Select(session, Math.Min(count - 1, session.Selected + page));
+                _filter.Select(
+                    session,
+                    CompletionPaging.Down(session.Selected, list.FirstRow, list.VisibleRows, count)
+                );
                 return true;
             case Key.PageUp:
-                _filter.Select(session, Math.Max(0, session.Selected - page));
+                _filter.Select(session, CompletionPaging.Up(session.Selected, list.FirstRow, list.VisibleRows));
                 return true;
             default:
                 return false;
