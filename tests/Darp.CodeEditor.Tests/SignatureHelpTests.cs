@@ -237,40 +237,36 @@ public sealed class SignatureHelpTests(UiFixture ui)
         });
 
     [Fact]
-    public Task Alt_Up_and_Alt_Down_choose_the_signature_while_several_show_and_otherwise_go_on_to_their_other_binding() =>
+    public Task Alt_Up_and_Alt_Down_choose_the_signature_while_several_show_and_otherwise_move_lines() =>
         _ui.Run(async () =>
         {
             var time = new ManualTime();
             var fake = new FakeServer();
             await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
-            using CodeDocument document = server.CreateDocument(CodeLanguage.Json, "call");
-            await document.Language.Loaded;
-            // Commenting the line stands in for Alt+Up's and Alt+Down's line moves, bound before the defaults.
-            var keymap = new CodeEditorKeymap([
-                new("alt+up", CodeEditorCommands.CommentLine),
-                new("alt+down", CodeEditorCommands.CommentLine),
-                .. CodeEditorKeymap.Default.Bindings,
-            ]);
-            using var window = new EditorWindow(new CodeEditor { Document = document, Keymap = keymap });
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "first\ncall");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
             await CompletionTests.StartServingAsync(server, document);
 
-            // Closed: the other binding.
-            window.Editor.Selection = new TextSelection(4);
+            // Closed: the lines move.
+            window.Editor.Selection = new TextSelection(10);
             window.Press(Key.Up, KeyModifiers.Alt);
-            document.Text.ShouldBe("// call");
+            document.Text.ShouldBe("call\nfirst");
+            window.Press(Key.Down, KeyModifiers.Alt);
+            document.Text.ShouldBe("first\ncall");
 
-            // Two signatures: around them, and the text stays.
-            await OpenAsync(window, document, time);
-            string open = document.Text;
+            // Two signatures: around them, and the lines stay.
+            window.Type("(");
+            time.Advance(s_pause);
+            await WaitForSignatureAsync(window, "first", "Calls with two.");
             window.Press(Key.Down, KeyModifiers.Alt);
             await WaitForSignatureAsync(window, "first", "Calls with three.");
             window.Press(Key.Down, KeyModifiers.Alt);
             await WaitForSignatureAsync(window, "first", "Calls with two.");
             window.Press(Key.Up, KeyModifiers.Alt);
             await WaitForSignatureAsync(window, "first", "Calls with three.");
-            document.Text.ShouldBe(open);
+            document.Text.ShouldBe("first\ncall(");
 
-            // One signature: the other binding.
+            // One signature: the lines move.
             var one = new JsonArray(
                 new JsonObject
                 {
@@ -281,13 +277,10 @@ public sealed class SignatureHelpTests(UiFixture ui)
             );
             using CodeDocument command = server.CreateDocument(FakeServer.Commands, $"signatures {one.ToJsonString()}");
             await fake.WaitForAsync("set signatures");
-            document.Text = "call";
-            window.Editor.Selection = new TextSelection(4);
-            window.Type("(");
-            time.Advance(s_pause);
+            window.Press(Key.Space, EditorWindow.Command | KeyModifiers.Shift);
             await WaitForSignatureAsync(window, "first", "Calls with one.");
-            window.Press(Key.Down, KeyModifiers.Alt);
-            document.Text.ShouldStartWith("// call(");
+            window.Press(Key.Up, KeyModifiers.Alt);
+            document.Text.ShouldBe("call(\nfirst");
         });
 
     [Fact]
