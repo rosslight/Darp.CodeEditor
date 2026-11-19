@@ -86,20 +86,7 @@ internal sealed class CompletionController : IEditorFeature
     /// <summary>Cancels the resolve of the item committed last, whose additional edits are still to come.</summary>
     private CancellationTokenSource? _lateEdits;
 
-    /// <summary>
-    /// Ranks lists off the UI thread, for one filter at a time; made the first time a list is filtered, as it takes
-    /// about 150 KB.
-    /// </summary>
-    private CompletionMatcher? _filterMatcher;
-
-    /// <summary>Checks a single item on the UI thread; made the first time one is checked.</summary>
-    private CompletionMatcher? _itemMatcher;
-
-    /// <summary>
-    /// The filter given <see cref="_filterMatcher"/> last: the next one runs after it, so that the matcher serves one
-    /// thread at a time.
-    /// </summary>
-    private Task _matching = Task.CompletedTask;
+    private readonly CompletionRanking _ranking = new();
 
     public CompletionController(
         TemplatedControl editor,
@@ -412,14 +399,12 @@ internal sealed class CompletionController : IEditorFeature
         try
         {
             CancellationToken cancellationToken = filtering.Cancellation.Token;
-            Task<RankedItems?> ranking = _matching.ContinueWith(
-                _ => Rank(filtering.Key.Answer.List.Items, snapshot, filtering.Key.Caret, cancellationToken),
-                CancellationToken.None,
-                TaskContinuationOptions.DenyChildAttach,
-                TaskScheduler.Default
+            RankedItems? filtered = await _ranking.RankAsync(
+                filtering.Key.Answer.List.Items,
+                snapshot,
+                filtering.Key.Caret,
+                cancellationToken
             );
-            _matching = ranking;
-            RankedItems? filtered = await ranking;
             if (filtered is null || _session != session || session.Filtering != filtering)
                 return;
             session.Filtering = null;
@@ -436,47 +421,6 @@ internal sealed class CompletionController : IEditorFeature
         {
             Logger.TryGet(LogEventLevel.Error, AssetFiles.LogArea)?.Log(this, "Filtering failed: {Exception}", e);
         }
-    }
-
-    /// <summary>
-    /// Off the UI thread, after the filter before: the items that match the text typed for each, from where its edit
-    /// starts up to <paramref name="caret"/>, best first, and the one to select; null once cancelled. Of each typed
-    /// text only what the matcher reads is read, however far before the caret the edit starts.
-    /// </summary>
-    private RankedItems? Rank(
-        IReadOnlyList<CompletionItem> items,
-        TextSnapshot snapshot,
-        int caret,
-        CancellationToken cancellationToken
-    )
-    {
-        if (cancellationToken.IsCancellationRequested)
-            return null;
-        var typed = new Dictionary<int, string>();
-        var candidates = new CompletionCandidate[items.Count];
-        for (int i = 0; i < items.Count; i++)
-        {
-            CompletionItem item = items[i];
-            int start = item.Edit.Range.Start;
-            if (!typed.TryGetValue(start, out string? text))
-                typed[start] = text = Typed(snapshot, start, caret);
-            candidates[i] = new CompletionCandidate(text, item.Label, item.FilterText, item.FilterTextIsLabel);
-        }
-        List<RankedCompletion> ranked;
-        try
-        {
-            ranked = (_filterMatcher ??= new CompletionMatcher()).Rank(candidates, cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            return null;
-        }
-        // As VS Code: the first item, or the first that the server preselects among those that match best.
-        int preselected = ranked.FindIndex(r => r.Score == ranked[0].Score && items[r.Index].IsPreselected);
-        return new RankedItems(
-            [.. ranked.Select(r => new ShownItem(items[r.Index], r.Highlights))],
-            Math.Max(0, preselected)
-        );
     }
 
     /// <summary>
@@ -601,13 +545,7 @@ internal sealed class CompletionController : IEditorFeature
         int caret = _textArea.Caret.Offset;
         if (shown.Answer.Request.IsStale || caret < shown.Answer.Request.Offset)
             return false;
-        return (_itemMatcher ??= new CompletionMatcher()).Match(
-            Typed(_document.CurrentSnapshot, item.Edit.Range.Start, caret),
-            item.Label,
-            item.FilterText,
-            item.FilterTextIsLabel
-        )
-            is not null;
+        return _ranking.Matches(item, _document.CurrentSnapshot, caret);
     }
 
     /// <summary>
@@ -624,15 +562,6 @@ internal sealed class CompletionController : IEditorFeature
         session.CommitKey = key;
         Filter(session, answer, _textArea.Caret.Offset);
     }
-
-    /// <summary>
-    /// The text typed from <paramref name="start"/> up to <paramref name="caret"/>, as far as the matcher reads it: an
-    /// edit that starts far before the caret, also in a line's collapsed tail, costs no more than one near it, and
-    /// matches by its first characters, as in VS Code. When they are all spaces and tabs, nothing counts as typed;
-    /// VS Code reads on, and leaves the item out if anything else follows.
-    /// </summary>
-    private static string Typed(TextSnapshot snapshot, int start, int caret) =>
-        snapshot.GetText(TextRange.FromBounds(start, Math.Min(caret, start + CompletionMatcher.MaxLength)));
 
     /// <summary>What filtering <paramref name="answer"/> now would filter for.</summary>
     private FilterKey CurrentKey(CompletionAnswer answer) =>
