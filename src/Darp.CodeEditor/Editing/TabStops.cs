@@ -47,6 +47,10 @@ internal static class TabStops
         );
     }
 
+    /// <summary>Ctrl+]: the selected lines, or the caret's, go to their next tab stop (<see cref="Shift"/>).</summary>
+    public static TabEdit Indent(TextDocument text, TextSelection selection, Indentation indentation) =>
+        Shift(text, selection, indentation, outdent: false);
+
     /// <summary>Shift+Tab: the selected lines, or the caret's, go to their previous tab stop (<see cref="Shift"/>).</summary>
     public static TabEdit Outdent(TextDocument text, TextSelection selection, Indentation indentation) =>
         Shift(text, selection, indentation, outdent: true);
