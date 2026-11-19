@@ -1,0 +1,9 @@
+{
+	"$schema": "vscode://schemas/color-theme",
+	"name": "Highlights (tests)",
+	"comment": "The marks of the tests, with an opaque, distinct color for the lines that Find in Selection searches too.",
+	"include": "avares://Darp.CodeEditor.Tests/Themes/marks.json",
+	"colors": {
+		"editor.findRangeHighlightBackground": "#C08040"
+	}
+}
