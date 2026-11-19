@@ -469,8 +469,26 @@ public class CodeEditor : TemplatedControl
             part.TemplateApplied += OnPartTemplateApplied;
             foreach (RoutedCommandBinding binding in _searchCommands)
                 part.TextArea.CommandBindings.Add(binding);
+            RemoveInheritedKeys(part.TextArea);
         }
         UpdateShownDocument();
+    }
+
+    /// <summary>
+    /// Removes AvaloniaEdit's Ctrl+I, which indents the selected lines, and its undo and redo keys: the keymap binds
+    /// them, Ctrl+I to completion, and an app that unbinds them gets them.
+    /// </summary>
+    private static void RemoveInheritedKeys(TextArea textArea)
+    {
+        Remove(textArea.DefaultInputHandler.Editing.CommandBindings, AvaloniaEditCommands.IndentSelection);
+        Remove(textArea.DefaultInputHandler.CommandBindings, ApplicationCommands.Undo);
+        Remove(textArea.DefaultInputHandler.CommandBindings, ApplicationCommands.Redo);
+
+        static void Remove(ICollection<RoutedCommandBinding> bindings, RoutedCommand command)
+        {
+            foreach (RoutedCommandBinding binding in bindings.Where(b => b.Command == command).ToList())
+                bindings.Remove(binding);
+        }
     }
 
     /// <inheritdoc />
