@@ -2284,18 +2284,20 @@ public sealed class CompletionTests(UiFixture ui)
                 Parse("""{ "items": [ { "label": "print", "commitCharacters": ["("] } ] }""")
             );
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "pri");
-            using var window = new EditorWindow(new CodeEditor { Document = document });
+            var ranking = new HeldScheduler();
+            using var window = new EditorWindow(new CodeEditor { Document = document, BackgroundScheduler = ranking });
 
+            // Frozen for what was typed last: Enter commits at once, rather than wait for a filter still under way.
             await OpenAsync(window, 3);
             window.Type("zz");
-            await WaitForFrozenAsync(window, "print");
+            await FrozenForTextAsync(window, ranking, "print");
             window.Press(Key.Enter);
             document.Text.ShouldBe("print");
 
             document.Text = "pri";
             await OpenAsync(window, 3);
             window.Type("zz");
-            await WaitForFrozenAsync(window, "print");
+            await FrozenForTextAsync(window, ranking, "print");
             window.Click(RowCenter(window, 0), MouseButton.Left);
             document.Text.ShouldBe("print");
 
@@ -2424,6 +2426,18 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     /// <summary>Waits until the list shows <paramref name="label"/> frozen: without its matched characters in bold.</summary>
+    /// <summary>
+    /// Waits until the filters of what was typed have run and shown, and checks that the list then shows
+    /// <paramref name="label"/> frozen: for the text typed last, without its matched characters in bold.
+    /// </summary>
+    private static async Task FrozenForTextAsync(EditorWindow window, HeldScheduler ranking, string label)
+    {
+        await ranking.RanAsync();
+        await EditorWindow.RunPostedJobsAsync();
+        window.Render();
+        RowRuns(window, label).ShouldBe([(label, false)]);
+    }
+
     private static Task WaitForFrozenAsync(EditorWindow window, string label) =>
         Wait.UntilAsync(() =>
         {
