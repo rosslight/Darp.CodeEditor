@@ -101,11 +101,19 @@ internal sealed class SignatureHelpController : IEditorFeature
     private bool IsActive => _shown is not null || _request is not null || _pause is not null;
 
     public void AddCommands(CommandTable commands) =>
-        commands.Add(
-            CodeEditorCommands.TriggerParameterHints,
-            () => Ask(SignatureHelpTriggerKind.Invoked, null),
-            CommandNeeds.TextFocus | CommandNeeds.Writable
-        );
+        commands.Add(CodeEditorCommands.TriggerParameterHints, Trigger, CommandNeeds.TextFocus | CommandNeeds.Writable);
+
+    /// <summary>Asks for signature help, where the server has it and the user can type.</summary>
+    private bool Trigger()
+    {
+        if (
+            _document.Features?.SignatureHelp is null
+            || !_textArea.ReadOnlySectionProvider.CanInsert(_textArea.Caret.Offset)
+        )
+            return false;
+        Ask(SignatureHelpTriggerKind.Invoked, null);
+        return true;
+    }
 
     /// <summary>Up and Down, from the editor's key handler, while more than one signature shows: the others.</summary>
     /// <returns>Whether the key was signature help's.</returns>

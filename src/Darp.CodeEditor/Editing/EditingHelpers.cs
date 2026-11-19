@@ -74,17 +74,10 @@ internal sealed class EditingHelpers : IEditorFeature
 
     public void AddCommands(CommandTable commands)
     {
-        commands.Add(CodeEditorCommands.CommentLine, ToggleComment, CommandNeeds.TextFocus | CommandNeeds.Writable);
-        commands.Add(
-            CodeEditorCommands.Undo,
-            () => UndoOrRedo(redo: false),
-            CommandNeeds.TextFocus | CommandNeeds.Writable
-        );
-        commands.Add(
-            CodeEditorCommands.Redo,
-            () => UndoOrRedo(redo: true),
-            CommandNeeds.TextFocus | CommandNeeds.Writable
-        );
+        const CommandNeeds needs = CommandNeeds.TextFocus | CommandNeeds.Writable;
+        commands.Add(CodeEditorCommands.CommentLine, ToggleComment, needs);
+        commands.Add(CodeEditorCommands.Undo, () => UndoOrRedo(redo: false), needs);
+        commands.Add(CodeEditorCommands.Redo, () => UndoOrRedo(redo: true), needs);
     }
 
     /// <summary>
@@ -97,13 +90,17 @@ internal sealed class EditingHelpers : IEditorFeature
         && TypingOffsets() is { } offsets
         && DeletePairs(offsets);
 
-    private void UndoOrRedo(bool redo)
+    /// <returns>Whether there was a step to undo or redo.</returns>
+    private bool UndoOrRedo(bool redo)
     {
+        if (!(redo ? _document.CanRedo : _document.CanUndo))
+            return false;
         if (redo)
             _document.Redo();
         else
             _document.Undo();
         _textArea.Caret.BringCaretToView();
+        return true;
     }
 
     private void OnTextEntering(object? sender, TextInputEventArgs e)
@@ -608,7 +605,8 @@ internal sealed class EditingHelpers : IEditorFeature
     /// Ctrl+/: toggles line comments on the selected lines, or the caret's, with the language's line comment, or else
     /// with its block comment around them.
     /// </summary>
-    private void ToggleComment()
+    /// <returns>Whether the language has a comment to toggle.</returns>
+    private bool ToggleComment()
     {
         LanguageConfiguration configuration = Configuration;
         (int first, int last) = SelectedLines();
@@ -616,6 +614,9 @@ internal sealed class EditingHelpers : IEditorFeature
             ToggleLineComment(token, first, last);
         else if (configuration.BlockComment is { } block)
             ToggleBlockComment(block, first, last);
+        else
+            return false;
+        return true;
     }
 
     /// <summary>

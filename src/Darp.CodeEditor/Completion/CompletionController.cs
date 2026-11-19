@@ -135,11 +135,19 @@ internal sealed class CompletionController : IEditorFeature
     }
 
     public void AddCommands(CommandTable commands) =>
-        commands.Add(
-            CodeEditorCommands.TriggerSuggest,
-            () => Ask(new CompletionTrigger(CompletionTriggerKind.Invoked)),
-            CommandNeeds.TextFocus | CommandNeeds.Writable
-        );
+        commands.Add(CodeEditorCommands.TriggerSuggest, Trigger, CommandNeeds.TextFocus | CommandNeeds.Writable);
+
+    /// <summary>Asks for completion, where the server completes and the user can type.</summary>
+    private bool Trigger()
+    {
+        if (
+            _document.Features?.Completion is null
+            || !_textArea.ReadOnlySectionProvider.CanInsert(_textArea.Caret.Offset)
+        )
+            return false;
+        Ask(new CompletionTrigger(CompletionTriggerKind.Invoked));
+        return true;
+    }
 
     /// <summary>
     /// The keys of completion's list while it shows, from the editor's key handler while the text area has the
