@@ -264,6 +264,34 @@ public sealed class SearchTests(UiFixture ui)
         });
 
     /// <summary>
+    /// Shift+F3 beyond the matches highlighted that runs out of its time says so, and leaves the selection, rather than
+    /// select the last match that it reached.
+    /// </summary>
+    [Fact]
+    public Task Shift_F3_beyond_the_matches_highlighted_out_of_its_time_says_so_and_stays() =>
+        _ui.Run(async () =>
+        {
+            string text = string.Concat(Enumerable.Repeat("a\n", TextSearch.MaxMatches + 2));
+            var clock = new SteppingTime();
+            using var window = new EditorWindow(
+                new CodeEditor { Document = new StandaloneDocument(CodeLanguage.PlainText, text, clock) }
+            );
+            // The query is the word at the caret.
+            window.Editor.OpenSearch();
+            SearchBar bar = BarOf(window);
+            await SearchedAsync(bar);
+            window.Editor.Selection = new TextSelection(0, 1);
+            // Out of time at the search's second look at the clock, after the first match that it reached.
+            clock.Step = TextSearch.TimeLimit / 2;
+
+            window.Press(Key.F3, KeyModifiers.Shift);
+            await SearchedAsync(bar);
+
+            bar.Message.ShouldNotBeNull().ShouldContain("stopped");
+            window.Editor.Selection.ShouldBe(new TextSelection(0, 1));
+        });
+
+    /// <summary>
     /// As in VS Code, a regular expression that can match a line break searches across lines, and the match shows over
     /// both lines.
     /// </summary>
