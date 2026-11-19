@@ -2,7 +2,7 @@ namespace Darp.CodeEditor;
 
 /// <summary>
 /// The line breaks of new text, as VS Code picks them: each document has one, <see cref="CodeDocument.LineBreak"/>,
-/// which new lines, pasted text, snippets and replacements take.
+/// which new lines, pasted text, snippets, replacements and completions take.
 /// </summary>
 internal static class LineBreaks
 {

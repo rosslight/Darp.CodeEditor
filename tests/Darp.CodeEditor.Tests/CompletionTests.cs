@@ -1136,6 +1136,33 @@ public sealed class CompletionTests(UiFixture ui)
             }
         });
 
+    /// <summary>As VS Code's text model takes in text: in its own line breaks.</summary>
+    [Fact]
+    public Task An_items_text_and_additional_edits_go_in_with_the_documents_line_breaks() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [ { "label": "block", "insertText": "{\n}", "additionalTextEdits": [
+                      { "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 0 } },
+                        "newText": "using System;\n" } ] } ] }
+                    """
+                )
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "x\r\nbl");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            await OpenAsync(window, document.Text.Length);
+            window.Press(Key.Enter);
+
+            document.Text.ShouldBe("using System;\r\nx\r\n{\r\n}");
+        });
+
     [Fact]
     public Task Additional_edits_that_come_late_are_dropped_after_a_change_before_where_they_go() =>
         _ui.Run(async () =>
