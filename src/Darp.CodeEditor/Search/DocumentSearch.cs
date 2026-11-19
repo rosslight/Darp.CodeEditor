@@ -40,7 +40,7 @@ internal sealed class DocumentSearch : IDisposable
     private readonly LatestJob<(SearchMatch? Match, SearchOutcome Outcome)> _seek;
 
     /// <summary>The search of Replace All beyond the matches that the result keeps.</summary>
-    private readonly LatestJob<(IReadOnlyList<TextEdit>? Edits, SearchOutcome Outcome)> _replaceAll;
+    private readonly LatestJob<(CombinedEdit? Edit, SearchOutcome Outcome)> _replaceAll;
 
     /// <summary>The result of the last search, for the text and the query of then.</summary>
     private SearchResult? _result;
@@ -295,8 +295,8 @@ internal sealed class DocumentSearch : IDisposable
                 // A change of the text, the query, the replacement or the scope searches again and cancels this.
                 if (CurrentResult() != result)
                     return;
-                if (replaced.Edits is { } edits)
-                    Apply(edits);
+                if (replaced.Edit is { } edit)
+                    _changes.Run(EditStep.Own, () => _changes.Apply(edit));
                 else if (replaced.Outcome == SearchOutcome.OutOfTime)
                     _bar.ShowTimedOut();
             }

@@ -122,15 +122,16 @@ internal static class TextSearch
     }
 
     /// <summary>
-    /// The edits that replace every match of <paramref name="query"/> in <paramref name="snapshot"/>, however many
-    /// there are, also beyond the matches that a search keeps: in order and apart, as one change of
-    /// <see cref="TextChanges"/> takes them.
+    /// The edit that replaces every match of <paramref name="query"/> in <paramref name="snapshot"/>, however many
+    /// there are, also beyond the matches that a search keeps: one change of the text, combined here, off the UI thread,
+    /// for <see cref="TextChanges.Apply(CombinedEdit)"/>.
     /// </summary>
     /// <returns>
-    /// The edits, unless the search ran out of time or the regular expression is invalid: then null, with the outcome.
+    /// The edit, null without a match; null also where the search ran out of time or the regular expression is
+    /// invalid, with that outcome.
     /// </returns>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
-    public static (IReadOnlyList<TextEdit>? Edits, SearchOutcome Outcome) ReplaceAll(
+    public static (CombinedEdit? Edit, SearchOutcome Outcome) ReplaceAll(
         TextSnapshot snapshot,
         SearchQuery query,
         SearchReplacement replacement,
@@ -154,7 +155,11 @@ internal static class TextSearch
             },
             cancellationToken
         ).Scan(scope);
-        return (outcome == SearchOutcome.Complete ? edits : null, outcome);
+        CombinedEdit? edit =
+            outcome == SearchOutcome.Complete && edits.Count > 0
+                ? CombinedEdit.Of(new StringTextSource(text), edits)
+                : null;
+        return (edit, outcome);
     }
 
     /// <summary>
