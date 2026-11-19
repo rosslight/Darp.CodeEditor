@@ -90,19 +90,4 @@ internal sealed class CompletionSession
 
     /// <summary>The selected item's index in <see cref="Items"/>.</summary>
     public int Selected { get; set; }
-
-    /// <summary>The resolves of the items, under way or done.</summary>
-    public Dictionary<CompletionItem, ItemResolve> Resolves { get; } = new(ReferenceEqualityComparer.Instance);
-
-    /// <summary>The item whose details show, or are about to; null for none.</summary>
-    public CompletionItem? DetailsOf { get; set; }
-
-    /// <summary>Cancels the reading of the details that are about to show.</summary>
-    public CancellationTokenSource? Details { get; set; }
-
-    /// <summary>The item as the server resolved it; null while it did not.</summary>
-    public CompletionItem? ResolvedOf(CompletionItem item) =>
-        Resolves.TryGetValue(item, out ItemResolve? resolve) && resolve.Task.IsCompletedSuccessfully
-            ? resolve.Task.Result
-            : null;
 }

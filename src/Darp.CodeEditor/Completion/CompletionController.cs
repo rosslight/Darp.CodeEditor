@@ -78,10 +78,8 @@ internal sealed class CompletionController : IEditorFeature
     /// <summary>Whether "No suggestions." shows for an empty answer to a request by key, with no completion open.</summary>
     private bool _showsEmpty;
 
-    /// <summary>Whether the selected item's details show beside the list; the user toggles them.</summary>
-    private bool _showsDetails = true;
-
     private readonly CompletionCommit _commit;
+    private readonly CompletionResolver _resolver;
 
     private readonly CompletionRanking _ranking = new();
 
@@ -102,6 +100,7 @@ internal sealed class CompletionController : IEditorFeature
         _snippets = snippets;
         _view = new CompletionView(editor, _textView);
         _commit = new CompletionCommit(textArea, document, snippets);
+        _resolver = new CompletionResolver(_view, highlighter);
         _view.Clicked += OnClicked;
         _buffer.Changing += OnBufferChanging;
         _buffer.TextChanged += OnBufferTextChanged;
@@ -181,9 +180,7 @@ internal sealed class CompletionController : IEditorFeature
     {
         if (_session is not { IsShowing: true } session)
             return false;
-        _showsDetails = !_showsDetails;
-        session.DetailsOf = null;
-        ResolveSelected(session);
+        _resolver.ToggleDetails();
         return true;
     }
 
@@ -248,11 +245,8 @@ internal sealed class CompletionController : IEditorFeature
         _session = null;
         session.Pending?.Cancellation.Cancel();
         session.Filtering?.Cancellation.Cancel();
-        foreach (ItemResolve resolve in session.Resolves.Values)
-            resolve.Cancellation.Cancel();
-        session.Details?.Cancel();
+        _resolver.Clear();
         _view.Hide();
-        _view.ShowDetails(null);
         return session.IsShowing || session.ShowsNoMatch;
     }
 
@@ -570,6 +564,9 @@ internal sealed class CompletionController : IEditorFeature
         ResolveSelected(session);
     }
 
+    private void ResolveSelected(CompletionSession session) =>
+        _resolver.Select(session.Items[session.Selected].Item, session.Shown?.Answer.List);
+
     /// <summary>Hides the list while completion waits for an answer; a filter of the old one under way stops.</summary>
     private void Hide(CompletionSession session)
     {
@@ -580,114 +577,8 @@ internal sealed class CompletionController : IEditorFeature
         session.CommitAt = null;
         session.Shown = null;
         session.Items = [];
-        session.DetailsOf = null;
-        session.Details?.Cancel();
+        _resolver.Hide();
         _view.Hide();
-        _view.ShowDetails(null);
-    }
-
-    /// <summary>
-    /// Shows the selected item's details, and asks the server to resolve it, unless it did: the resolved details
-    /// replace them once it answers, if the item is still selected. The resolve of an item no longer selected is
-    /// cancelled while it is under way.
-    /// </summary>
-    private async void ResolveSelected(CompletionSession session)
-    {
-        CompletionItem item = session.Items[session.Selected].Item;
-        // Whether or not this item still needs its own, the resolve of another one is no longer needed.
-        foreach (
-            (CompletionItem other, ItemResolve running) in session
-                .Resolves.Where(r => !ReferenceEquals(r.Key, item) && !r.Value.Task.IsCompleted)
-                .ToList()
-        )
-        {
-            running.Cancellation.Cancel();
-            session.Resolves.Remove(other);
-        }
-        ShowDetails(session, session.ResolvedOf(item) ?? item);
-        if (session.Shown?.Answer is not { List.Resolves: true } answer || session.Resolves.ContainsKey(item))
-            return;
-        var cancellation = new CancellationTokenSource();
-        Task<CompletionItem?> resolving = answer.List.ResolveAsync(item, cancellation.Token);
-        session.Resolves[item] = new ItemResolve(resolving, cancellation);
-        try
-        {
-            if (
-                await resolving is { } resolved
-                && _session == session
-                && session.IsShowing
-                && ReferenceEquals(session.Items[session.Selected].Item, item)
-            )
-            {
-                ShowDetails(session, resolved);
-            }
-        }
-        catch (Exception e)
-        {
-            Logger.TryGet(LogEventLevel.Error, AssetFiles.LogArea)?.Log(this, "Resolving failed: {Exception}", e);
-        }
-    }
-
-    /// <summary>
-    /// Shows <paramref name="item"/>'s detail, as code, and its documentation beside the list, read off the UI thread
-    /// as the hover reads its Markdown; nothing when it has neither. Typing that keeps the item selected keeps them.
-    /// </summary>
-    private async void ShowDetails(CompletionSession session, CompletionItem item)
-    {
-        if (ReferenceEquals(session.DetailsOf, item))
-            return;
-        session.DetailsOf = item;
-        session.Details?.Cancel();
-        session.Details = null;
-        if (!_showsDetails || (item.Detail is null && item.Documentation is null))
-        {
-            _view.ShowDetails(null);
-            return;
-        }
-        var cancellation = new CancellationTokenSource();
-        session.Details = cancellation;
-        TextMateGrammar? grammar = _highlighter.Grammar;
-        try
-        {
-            IReadOnlyList<HoverBlock> blocks = await Task.Run(
-                () => DetailBlocks(item, grammar, cancellation.Token),
-                cancellation.Token
-            );
-            if (_session != session || cancellation.IsCancellationRequested || !session.IsShowing)
-                return;
-            _view.ShowDetails(HoverView.Create(blocks, _view.Look));
-        }
-        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
-        catch (Exception e)
-        {
-            Logger
-                .TryGet(LogEventLevel.Error, AssetFiles.LogArea)
-                ?.Log(this, "Showing an item's details failed: {Exception}", e);
-        }
-    }
-
-    /// <summary>
-    /// The detail, as code, and the documentation, as much of both as a hover shows: one budget for both, cut before
-    /// anything reads them, so that a server's long detail or documentation costs the UI thread no more than the
-    /// largest hover.
-    /// </summary>
-    private static IReadOnlyList<HoverBlock> DetailBlocks(
-        CompletionItem item,
-        TextMateGrammar? grammar,
-        CancellationToken cancellationToken
-    )
-    {
-        var budget = new HoverBudget();
-        var blocks = new List<HoverBlock>();
-        if (item.Detail is { } detail && budget.Take(detail) is { } kept)
-        {
-            // Lines end at \r\n, \n or \r, as everywhere in the library.
-            string[] lines = kept.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-            blocks.AddRange(budget.Fit([HoverBlocks.Highlight(lines, grammar, cancellationToken)]));
-        }
-        if (item.Documentation is { } documentation)
-            blocks.AddRange(HoverBlocks.Of(new HoverInfo([documentation], null), grammar, budget, cancellationToken));
-        return blocks;
     }
 
     /// <summary>
@@ -705,13 +596,9 @@ internal sealed class CompletionController : IEditorFeature
             return;
         }
         CompletionItem selected = session.Items[index].Item;
-        CompletionItem item = session.ResolvedOf(selected) ?? selected;
-        ItemResolve? late = null;
-        if (item.AdditionalEdits is null && answer.List.Resolves && !session.Resolves.Remove(selected, out late))
-        {
-            var cancellation = new CancellationTokenSource();
-            late = new ItemResolve(answer.List.ResolveAsync(selected, cancellation.Token), cancellation);
-        }
+        CompletionItem item = _resolver.ResolvedOf(selected) ?? selected;
+        ItemResolve? late =
+            item.AdditionalEdits is null && answer.List.Resolves ? _resolver.Take(selected, answer.List) : null;
         Close();
         _commit.Commit(item, answer.Request, replace, late);
     }
