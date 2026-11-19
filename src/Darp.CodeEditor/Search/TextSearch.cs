@@ -151,6 +151,8 @@ internal static class TextSearch
         long start = Stopwatch.GetTimestamp();
         try
         {
+            // Before the first match, which can run out of time on its own and would hide the cancellation.
+            cancellationToken.ThrowIfCancellationRequested();
             for (int lineStart = 0; ; )
             {
                 int lineEnd = text.AsSpan(lineStart).IndexOfAny('\r', '\n') is var found and >= 0
@@ -191,6 +193,7 @@ internal static class TextSearch
         }
         catch (RegexMatchTimeoutException)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             return SearchOutcome.OutOfTime;
         }
     }
