@@ -34,13 +34,15 @@ internal sealed record InitializeResult(ServerCapabilities Capabilities);
 /// <param name="CompletionProvider">An object with trigger and commit characters, and whether items resolve.</param>
 /// <param name="SignatureHelpProvider">An object with trigger and retrigger characters.</param>
 /// <param name="SelectionRangeProvider">True, or an object of options.</param>
+/// <param name="DocumentHighlightProvider">True, or an object of options.</param>
 internal sealed record ServerCapabilities(
     JsonElement? TextDocumentSync = null,
     JsonElement? HoverProvider = null,
     JsonElement? SemanticTokensProvider = null,
     JsonElement? CompletionProvider = null,
     JsonElement? SignatureHelpProvider = null,
-    JsonElement? SelectionRangeProvider = null
+    JsonElement? SelectionRangeProvider = null,
+    JsonElement? DocumentHighlightProvider = null
 );
 
 internal sealed record TextDocumentItem(string Uri, string LanguageId, int Version, string Text);
@@ -79,7 +81,7 @@ internal sealed record LspDiagnostic(
     [property: JsonConverter(typeof(DiagnosticCodeConverter))] string? Code = null
 );
 
-/// <summary>The params of <c>textDocument/hover</c>.</summary>
+/// <summary>The params of <c>textDocument/hover</c> and <c>textDocument/documentHighlight</c>.</summary>
 internal sealed record TextDocumentPositionParams(TextDocumentIdentifier TextDocument, LspPosition Position);
 
 /// <summary>The params of <c>textDocument/semanticTokens/full</c>.</summary>
