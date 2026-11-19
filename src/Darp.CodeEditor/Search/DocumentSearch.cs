@@ -25,14 +25,8 @@ internal sealed class DocumentSearch : IDisposable
     private readonly SearchMatchLayer _matchLayer;
     private readonly SearchScopeLayer _scopeLayer;
     private readonly LatestJob<SearchResult> _search;
-
-    /// <summary>The search for a match beyond those that the result keeps.</summary>
     private readonly LatestJob<(SearchMatch? Match, SearchOutcome Outcome)> _seek;
-
-    /// <summary>The search of Replace All beyond the matches that the result keeps.</summary>
     private readonly LatestJob<(CombinedEdit? Edit, SearchOutcome Outcome)> _replaceAll;
-
-    /// <summary>The result of the last search, for the text and the query of then.</summary>
     private SearchResult? _result;
 
     /// <summary>

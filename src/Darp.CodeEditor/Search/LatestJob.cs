@@ -11,8 +11,6 @@ namespace Darp.CodeEditor.Search;
 internal sealed class LatestJob<T>
 {
     private readonly Dispatcher _dispatcher;
-
-    /// <summary>What the work is, for the log.</summary>
     private readonly string _name;
 
     /// <summary>The run whose result is still to come; null for none.</summary>
