@@ -3,7 +3,6 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
-using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
@@ -97,9 +96,13 @@ namespace Darp.CodeEditor;
 /// macOS but for Ctrl+Space, and Linux's own keys where its desktops take these. Open popups have keys of their own,
 /// and editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation and indentation (Tab, Shift+Tab) are
 /// AvaloniaEdit's. Other keys, such as F5 or Ctrl+S, go on to the app's key bindings, and so does a key of the keymap
-/// whose command does not apply, such as Ctrl+Z in a read-only editor. A right click opens the editor's context menu:
-/// Cut, Copy, Paste and Select All. For an app's Edit menu, <see cref="Cut"/>, <see cref="Copy"/>, <see cref="Paste"/>
-/// and <see cref="SelectAll"/> do the same, and the document's <c>Undo</c> and <c>Redo</c> the rest.
+/// whose command does not apply, such as Ctrl+Z in a read-only editor. A right click opens the editor's context menu,
+/// its <c>ContextFlyout</c>, with the items' keys and in the UI culture's language, English or German: Cut, Copy,
+/// Paste, Select All, Toggle Line Comment, Find and Replace. As in VS Code, a right click outside the selection moves
+/// the caret there first. An app replaces the menu with its own <c>ContextFlyout</c> or <c>ContextMenu</c>, or removes
+/// it by setting <c>ContextFlyout</c> to null. For an app's Edit menu, <see cref="Cut"/>, <see cref="Copy"/>,
+/// <see cref="Paste"/> and <see cref="SelectAll"/> do the same, and the document's <c>Undo</c> and <c>Redo</c> the
+/// rest.
 /// </para>
 /// <para>Members that take offsets or ranges clamp them to the text.</para>
 /// </remarks>
@@ -187,6 +190,9 @@ public class CodeEditor : TemplatedControl
 
     private KeyGesture? _pendingKeys;
 
+    /// <summary>The editor's own context menu, which the app may replace.</summary>
+    private readonly EditorMenu _menu;
+
     /// <summary>The template's panel, which the search bar goes into, over the text.</summary>
     private Panel? _root;
 
@@ -252,7 +258,7 @@ public class CodeEditor : TemplatedControl
         // AvaloniaEdit checks Dispatcher.UIThread: on another dispatcher, the editor would fail later and elsewhere.
         if (Application.Current?.Dispatcher != Dispatcher)
             throw new InvalidOperationException("The editor works only on the app's main UI thread.");
-        ContextMenu = CreateContextMenu();
+        ContextFlyout = _menu = new EditorMenu(this);
         _searchCommands =
         [
             new(ApplicationCommands.Find, (_, _) => OpenSearch()),
@@ -264,6 +270,7 @@ public class CodeEditor : TemplatedControl
         AddHandler(KeyDownEvent, OnKeyDownTunnel, RoutingStrategies.Tunnel);
         AddHandler(TextInputEvent, OnTextInputTunnel, RoutingStrategies.Tunnel);
         AddHandler(PointerPressedEvent, (_, _) => EndWait(), RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(ContextRequestedEvent, OnContextRequestedTunnel, RoutingStrategies.Tunnel);
     }
 
     /// <summary>
@@ -1031,31 +1038,41 @@ public class CodeEditor : TemplatedControl
             TaskScheduler.Default
         );
 
-    /// <summary>The editor's context menu, in the app's look.</summary>
-    private ContextMenu CreateContextMenu()
+    /// <summary>Runs one of <see cref="CodeEditorCommands"/> from the context menu, on the text.</summary>
+    internal void RunFromMenu(string command)
     {
-        PlatformHotkeyConfiguration? keys = Application.Current?.PlatformSettings?.HotkeyConfiguration;
-        MenuItem cut = Item("Cut", keys?.Cut, Cut);
-        MenuItem paste = Item("Paste", keys?.Paste, Paste);
-        var menu = new ContextMenu
-        {
-            ItemsSource = new Control[]
-            {
-                cut,
-                Item("Copy", keys?.Copy, Copy),
-                paste,
-                new Separator(),
-                Item("Select All", keys?.SelectAll, SelectAll),
-            },
-        };
-        menu.Opening += (_, _) => cut.IsEnabled = paste.IsEnabled = !IsReadOnly && _shown is not null;
-        return menu;
+        _part?.TextArea.Focus();
+        _view?.RunCommand(command);
+    }
 
-        static MenuItem Item(string header, List<KeyGesture>? gestures, Action action)
+    /// <summary>
+    /// A context request in the text, before the menu opens. A right click moves the caret to the click, unless it is
+    /// inside the selection, as in VS Code; a menu opened by key opens at the caret.
+    /// </summary>
+    private void OnContextRequestedTunnel(object? sender, ContextRequestedEventArgs e)
+    {
+        if (
+            _shown is null
+            || _part?.TextArea is not { } area
+            || e.Source is not Visual source
+            || !area.IsVisualAncestorOf(source) && area != source
+        )
+            return;
+        TextView view = area.TextView;
+        if (!e.TryGetPosition(view, out Point point))
         {
-            var item = new MenuItem { Header = header, InputGesture = gestures?.FirstOrDefault() };
-            item.Click += (_, _) => action();
-            return item;
+            Rect caret = area.Caret.CalculateCaretRectangle().Translate(-view.ScrollOffset);
+            _menu.OpenAt(view.TranslatePoint(caret.BottomLeft, this));
+            return;
+        }
+        _menu.OpenAt(null);
+        if (
+            view.GetPosition(point + view.ScrollOffset) is { } clicked
+            && !area.Selection.Contains(area.Document.GetOffset(clicked.Location))
+        )
+        {
+            area.ClearSelection();
+            area.Caret.Position = clicked;
         }
     }
 
