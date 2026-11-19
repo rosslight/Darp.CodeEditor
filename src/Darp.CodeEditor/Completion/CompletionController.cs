@@ -134,6 +134,8 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
             goOn => Accept(replace: true, goOn),
             needs
         );
+        commands.Add(CodeEditorCommands.SelectNextSuggestion, () => SelectBy(1));
+        commands.Add(CodeEditorCommands.SelectPrevSuggestion, () => SelectBy(-1));
     }
 
     /// <summary>Asks for completion, where the server completes and the user can type.</summary>
@@ -189,7 +191,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
     {
         if (_session is null)
             HideEmpty();
-        if (_session is null || !_filter.IsShowing || _filter.Items.Count < 2 || e.KeyModifiers != KeyModifiers.None)
+        if (!SelectsAmongItems || e.KeyModifiers != KeyModifiers.None)
             return false;
         int count = _filter.Items.Count;
         int selected = _filter.Selected;
@@ -197,11 +199,9 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         switch (e.Key)
         {
             case Key.Down:
-                _filter.Select((selected + 1) % count);
-                return true;
+                return SelectBy(1);
             case Key.Up:
-                _filter.Select((selected + count - 1) % count);
-                return true;
+                return SelectBy(-1);
             case Key.PageDown:
                 _filter.Select(CompletionPaging.Down(selected, list.FirstRow, list.VisibleRows, count));
                 return true;
@@ -211,6 +211,20 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
             default:
                 return false;
         }
+    }
+
+    /// <summary>Whether the list shows more than one item, among which Up and Down select.</summary>
+    private bool SelectsAmongItems => _session is not null && _filter.IsShowing && _filter.Items.Count > 1;
+
+    /// <summary>Selects the item <paramref name="step"/> rows on, round the list's ends, while it has more than one.</summary>
+    /// <returns>Whether it selected: otherwise the key goes on, as to the caret.</returns>
+    private bool SelectBy(int step)
+    {
+        if (!SelectsAmongItems)
+            return false;
+        int count = _filter.Items.Count;
+        _filter.Select((_filter.Selected + step + count) % count);
+        return true;
     }
 
     /// <summary>
