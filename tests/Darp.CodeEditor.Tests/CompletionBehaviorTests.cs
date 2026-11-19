@@ -214,7 +214,13 @@ public sealed class CompletionBehaviorTests(UiFixture ui)
 
             window.Type("rni");
 
-            await WaitForLabelsAsync(window, ["print"]);
+            // Ranked for what was typed, with "n" and "i" swapped: not the rows for "p", nor a frozen list's.
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return Labels(window) is ["print"]
+                    && RowRuns(window, "print").SequenceEqual([("prin", true), ("t", false)]);
+            });
             // Asked for there, the list is ranked whole, strictly: it has more than 2,000 items.
             window.Press(Key.Escape);
             window.Press(Key.Space, KeyModifiers.Control);
