@@ -42,7 +42,7 @@ internal static class HoverView
     /// The controls of <paramref name="blocks"/>, all of them: as many as a part of a hover takes
     /// (<see cref="HoverParts"/>) at once, and the next parts in the frames after it, while they show.
     /// </summary>
-    public static HoverContent Create(IReadOnlyList<HoverBlock> blocks, PopupLook look) => new(blocks, look);
+    public static HoverContent Create(IEnumerable<HoverBlock> blocks, PopupLook look) => new(blocks, look);
 
     /// <summary>The control of a block.</summary>
     internal static Control Block(HoverBlock block, PopupLook look) =>
@@ -310,11 +310,13 @@ internal sealed class HoverContent : StackPanel
         RoutingStrategies.Bubble
     );
 
-    private readonly IReadOnlyList<HoverBlock> _blocks;
     private readonly PopupLook _look;
 
-    /// <summary>The index of the next block to build.</summary>
-    private int _next;
+    /// <summary>
+    /// The blocks after the ones read, read one at a time, as they are built: blocks made as they are read, as the
+    /// diagnostics' are, are made a part at a time too. Null once all are read.
+    /// </summary>
+    private IEnumerator<HoverBlock>? _blocks;
 
     /// <summary>The pieces of the block being built, after the ones built; null between blocks.</summary>
     private IEnumerator<HoverBlock>? _pieces;
@@ -325,15 +327,15 @@ internal sealed class HoverContent : StackPanel
     /// <summary>Whether the next part is asked for, for the next frame.</summary>
     private bool _requested;
 
-    public HoverContent(IReadOnlyList<HoverBlock> blocks, PopupLook look)
+    public HoverContent(IEnumerable<HoverBlock> blocks, PopupLook look)
     {
-        _blocks = blocks;
+        _blocks = blocks.GetEnumerator();
         _look = look;
         AddPart();
     }
 
     /// <summary>Whether all of the blocks are built.</summary>
-    public bool IsComplete => _pending is null && _pieces is null && _next >= _blocks.Count;
+    public bool IsComplete => _pending is null && _pieces is null && _blocks is null;
 
     /// <summary>Builds the next part now, for tests and for the benchmarks.</summary>
     internal void AddNextPart()
@@ -418,9 +420,15 @@ internal sealed class HoverContent : StackPanel
                 pieces.Dispose();
                 _pieces = null;
             }
-            if (_next >= _blocks.Count)
+            if (_blocks is not { } blocks)
                 return null;
-            _pieces = HoverParts.Split(_blocks[_next++]).GetEnumerator();
+            if (!blocks.MoveNext())
+            {
+                blocks.Dispose();
+                _blocks = null;
+                return null;
+            }
+            _pieces = HoverParts.Split(blocks.Current).GetEnumerator();
         }
     }
 }

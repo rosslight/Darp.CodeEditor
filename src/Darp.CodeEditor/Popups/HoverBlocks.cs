@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Text;
 using Avalonia.Media;
 using Darp.CodeEditor.Highlighting;
@@ -117,15 +118,17 @@ internal static class HoverBlocks
     /// <summary>
     /// <paramref name="diagnostics"/>, as VS Code's hover shows them (<see cref="HoverDiagnostic"/>):
     /// <paramref name="open"/> makes what goes to a related place, or null where the editor cannot go there. A code's
-    /// web page is a link only when it is one, an <c>http</c> or <c>https</c> URI.
+    /// web page is a link only when it is one, an <c>http</c> or <c>https</c> URI. Each is made as it is read, so that
+    /// a hover that builds thousands a part at a time reads them a part at a time.
     /// </summary>
-    public static IReadOnlyList<HoverBlock> Of(
-        IEnumerable<Diagnostic> diagnostics,
+    public static IReadOnlyCollection<HoverBlock> Of(
+        IReadOnlyCollection<Diagnostic> diagnostics,
         Func<Diagnostic, DiagnosticRelatedInformation, Action?>? open = null,
         HoverIcon icon = HoverIcon.Shown
     ) =>
-        [
-            .. diagnostics.Select(diagnostic => new HoverDiagnostic(
+        new DiagnosticBlocks(
+            diagnostics,
+            diagnostic => new HoverDiagnostic(
                 diagnostic.Severity,
                 diagnostic.Message,
                 diagnostic.Source,
@@ -139,8 +142,8 @@ internal static class HoverBlocks
                     )),
                 ],
                 icon
-            )),
-        ];
+            )
+        );
 
     /// <summary>The name of a document by its URI, as VS Code's <c>basename</c> takes it: the last part of its path.</summary>
     public static string Name(Uri uri)
@@ -227,6 +230,19 @@ internal static class HoverBlocks
             else
                 runs.Add(new CodeRun(text, foreground));
         }
+    }
+
+    /// <summary>A block for each diagnostic, made as it is read.</summary>
+    private sealed class DiagnosticBlocks(
+        IReadOnlyCollection<Diagnostic> diagnostics,
+        Func<Diagnostic, HoverBlock> block
+    ) : IReadOnlyCollection<HoverBlock>
+    {
+        public int Count => diagnostics.Count;
+
+        public IEnumerator<HoverBlock> GetEnumerator() => diagnostics.Select(block).GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }
 

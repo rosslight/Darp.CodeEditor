@@ -780,6 +780,53 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_hover_over_thousands_of_diagnostics_reads_them_a_part_at_a_time_the_most_severe_first() =>
+        _ui.Run(() =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "a word here");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            TextSnapshot snapshot = document.CurrentSnapshot;
+            // 10,000 on one word, their severities taking turns from hints to errors.
+            document.SetDiagnostics([
+                .. Enumerable
+                    .Range(0, DiagnosticsBatch.MaxShown)
+                    .Select(i => new Diagnostic(
+                        snapshot,
+                        new TextRange(2, 4),
+                        (DiagnosticSeverity)(i % 4),
+                        null,
+                        $"{i}"
+                    )),
+            ]);
+            window.Layout();
+            using var squiggles = new SquiggleLayer(EditorWindow.PartOf(editor).TextArea, document);
+            var read = new ReadCount(squiggles.At(3));
+            read.Count.ShouldBe(DiagnosticsBatch.MaxShown);
+
+            HoverContent content = HoverView.Create(
+                HoverBlocks.Of(read),
+                new PopupLook(new FontFamily("DejaVu Sans Mono"), 13, PopupColors.Default)
+            );
+
+            // As it opens, the first part, and the one that did not fit it.
+            content.IsComplete.ShouldBeFalse();
+            read.Read.ShouldBe(content.Children.Count + 1);
+            Texts(content).Take(2).ShouldBe(["3", "7"]);
+            // Each next part reads its own.
+            content.AddNextPart();
+            read.Read.ShouldBe(content.Children.Count + 1);
+            while (!content.IsComplete)
+                content.AddNextPart();
+            read.Read.ShouldBe(DiagnosticsBatch.MaxShown);
+            Texts(content).Skip(DiagnosticsBatch.MaxShown / 4).First().ShouldBe("2");
+            Texts(content).Last().ShouldBe($"{DiagnosticsBatch.MaxShown - 4}");
+
+            static IEnumerable<string> Texts(HoverContent content) =>
+                content.GetVisualDescendants().OfType<TextBlock>().Select(TextOf);
+        });
+
+    [Fact]
     public Task A_diagnostic_without_a_message_shows_its_code_and_a_related_place_longer_than_a_part_in_parts() =>
         _ui.Run(() =>
         {
@@ -788,7 +835,7 @@ public sealed class HoverTests(UiFixture ui)
             {
                 RelatedInformation = [new DiagnosticRelatedInformation(new Uri("file:///a.py"), new(2, 4), related)],
             };
-            IReadOnlyList<HoverBlock> blocks = HoverBlocks.Of([diagnostic]);
+            IReadOnlyCollection<HoverBlock> blocks = HoverBlocks.Of([diagnostic]);
             blocks.SelectMany(HoverParts.Split).ShouldAllBe(piece => HoverParts.Fits(HoverParts.Size(piece)));
             var look = new PopupLook(new FontFamily("DejaVu Sans Mono"), 13, PopupColors.Default);
             var host = new Border();
@@ -890,9 +937,9 @@ public sealed class HoverTests(UiFixture ui)
             window.Layout();
             using var squiggles = new SquiggleLayer(EditorWindow.PartOf(editor).TextArea, document);
 
-            IReadOnlyList<Diagnostic> shown = squiggles.At(1, 120);
+            IReadOnlyList<Diagnostic> shown = [.. squiggles.At(1).Take(120)];
 
-            // The errors, which come every fourth, in the server's order; no more than asked for.
+            // First the errors, which come every fourth, in the server's order.
             shown.Select(d => d.Message).ShouldBe(Enumerable.Range(0, 120).Select(i => $"{4 * i + 3}"));
         });
 
@@ -1038,4 +1085,23 @@ public sealed class HoverTests(UiFixture ui)
 
     private static string TextOf(Control control) =>
         control is TextBlock { Inlines: { } inlines } ? inlines.Text ?? "" : ((TextBlock)control).Text ?? "";
+
+    /// <summary>Diagnostics that count how many of them were read.</summary>
+    private sealed class ReadCount(IReadOnlyCollection<Diagnostic> diagnostics) : IReadOnlyCollection<Diagnostic>
+    {
+        public int Read { get; private set; }
+
+        public int Count => diagnostics.Count;
+
+        public IEnumerator<Diagnostic> GetEnumerator()
+        {
+            foreach (Diagnostic diagnostic in diagnostics)
+            {
+                Read++;
+                yield return diagnostic;
+            }
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
 }

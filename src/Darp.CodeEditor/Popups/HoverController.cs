@@ -355,7 +355,7 @@ internal sealed class HoverController : IDisposable
     {
         hovered.IsDue = true;
         if (!hovered.IsProblem)
-            hovered.Messages = HoverBlocks.Of(_squiggles.At(hovered.Offset, int.MaxValue), Opener);
+            hovered.Messages = HoverBlocks.Of(_squiggles.At(hovered.Offset), Opener);
         Render(hovered);
     }
 
@@ -431,11 +431,12 @@ internal sealed class HoverController : IDisposable
                     ? [new HoverParagraph([new HoverSpan(Strings.Default.HoverLoading)])]
                     : []
             );
-        IReadOnlyList<HoverBlock> blocks =
+        // Not read here: the diagnostics' blocks are made as the hover's parts read them.
+        IEnumerable<HoverBlock> blocks =
             hovered.Messages.Count == 0 ? below
             : below.Count == 0 ? hovered.Messages
-            : [.. hovered.Messages, new HoverRule(), .. below];
-        if (blocks.Count == 0)
+            : hovered.Messages.Append(new HoverRule()).Concat(below);
+        if (hovered.Messages.Count == 0 && below.Count == 0)
         {
             StayOpen();
             _popup.Hide();
@@ -444,7 +445,7 @@ internal sealed class HoverController : IDisposable
         Show(hovered, blocks);
     }
 
-    private void Show(Hovered hovered, IReadOnlyList<HoverBlock> blocks)
+    private void Show(Hovered hovered, IEnumerable<HoverBlock> blocks)
     {
         PopupColors colors = _colors?.Popups ?? PopupColors.Default;
         _frame.Paint(
@@ -783,8 +784,10 @@ internal sealed class HoverController : IDisposable
 
         public TextSnapshot Snapshot { get; } = snapshot;
 
-        /// <summary>The diagnostics' messages, once the delay is over.</summary>
-        public IReadOnlyList<HoverBlock> Messages { get; set; } = [];
+        /// <summary>
+        /// The diagnostics' messages, once the delay is over: made as the hover's parts are built, the most severe first.
+        /// </summary>
+        public IReadOnlyCollection<HoverBlock> Messages { get; set; } = [];
 
         /// <summary>Whether the user asked for it by key, at the caret, rather than by resting the pointer.</summary>
         public bool FromKeyboard { get; init; }

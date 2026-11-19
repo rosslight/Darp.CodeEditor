@@ -319,7 +319,7 @@ public sealed class SquiggleTests(UiFixture ui)
             window.Layout();
             using var squiggles = new SquiggleLayer(EditorWindow.PartOf(editor).TextArea, document);
 
-            IReadOnlyList<Diagnostic> taken = squiggles.At(3, 20_000);
+            IReadOnlyList<Diagnostic> taken = [.. squiggles.At(3)];
 
             // The document keeps them all; its editors the first 10,000 errors.
             document.Diagnostics.Count.ShouldBe(100_000);
