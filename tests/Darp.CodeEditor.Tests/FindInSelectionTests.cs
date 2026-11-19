@@ -114,6 +114,7 @@ public sealed class FindInSelectionTests(UiFixture ui)
             document.Replace(new TextRange(0, 0), "a\n");
             await Wait.UntilAsync(() => bar.ReplaceAllButton.IsEnabled);
             Click(bar, "Replace All");
+            await SearchTests.SearchedAsync(bar);
 
             document.Text.ShouldBe("a\na\nb\nb\na");
         });

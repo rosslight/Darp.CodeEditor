@@ -138,7 +138,7 @@ internal sealed class SearchScan
     {
         if (!_text.AsSpan(start, end - start).Contains('\r'))
             return Within(_text, start, end, from, null);
-        LineFeedText joined = LineFeedText.Of(_text, start, end);
+        LineFeedText joined = LineFeedText.Of(_text, start, end, _cancellationToken);
         return Within(joined.Text, 0, joined.Text.Length, joined.FromText(from), joined);
     }
 
@@ -282,23 +282,22 @@ internal sealed class SearchScan
 
         public string Text { get; }
 
-        public static LineFeedText Of(string text, int start, int end)
+        public static LineFeedText Of(string text, int start, int end, CancellationToken cancellationToken)
         {
             var joined = new List<int>();
             var builder = new StringBuilder(end - start);
-            for (int i = start; i < end; i++)
+            for (int i = start; i < end; )
             {
-                if (text[i] != '\r')
-                {
-                    builder.Append(text[i]);
-                    continue;
-                }
-                if (i + 1 < end && text[i + 1] == '\n')
-                {
+                cancellationToken.ThrowIfCancellationRequested();
+                int lineBreak = text.AsSpan(i, end - i).IndexOf('\r') is var found and >= 0 ? i + found : end;
+                builder.Append(text, i, lineBreak - i);
+                if (lineBreak == end)
+                    break;
+                bool crLf = lineBreak + 1 < end && text[lineBreak + 1] == '\n';
+                if (crLf)
                     joined.Add(builder.Length);
-                    i++;
-                }
                 builder.Append('\n');
+                i = lineBreak + (crLf ? 2 : 1);
             }
             return new LineFeedText(builder.ToString(), start, joined);
         }

@@ -241,7 +241,11 @@ public sealed class TextSearchTests
         [
             .. found.Matches.Select(match => new TextEdit(match.StartOffset, match.Length, match.Replacement)),
         ];
-        Replaced(text, edits.Length > 0 ? CombinedEdit.Of(new StringTextSource(text), edits) : null).ShouldBe(expected);
+        Replaced(
+                text,
+                edits.Length > 0 ? CombinedEdit.Of(new StringTextSource(text), edits, CancellationToken.None) : null
+            )
+            .ShouldBe(expected);
         outcome.ShouldBe(SearchOutcome.Complete);
         Replaced(text, edit).ShouldBe(expected);
     }

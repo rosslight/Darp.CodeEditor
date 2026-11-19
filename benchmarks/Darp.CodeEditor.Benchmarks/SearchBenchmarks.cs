@@ -94,9 +94,9 @@ public class SearchBenchmarks
 }
 
 /// <summary>
-/// Replace All on the UI thread, with the frame that follows: about 10,000 matches in 5,000 lines of JSON, close to the
-/// most a search keeps. Calls replace every "e" with "E" and back in turn, so that each one starts from one of two
-/// texts and its replacements can be checked.
+/// Replace All, from the click until its change, combined in the background, is made, with the frame that follows:
+/// about 10,000 matches in 5,000 lines of JSON. Calls replace every "e" with "E" and back in turn, so that each one
+/// starts from one of two texts and its replacements can be checked.
 /// </summary>
 [NotInBaseline]
 [InvocationCount(1)]
@@ -147,7 +147,17 @@ public class ReplaceAllBenchmarks
     [Benchmark]
     public void ReplaceAll10000Matches()
     {
+        CodeDocument document = _document ?? throw new InvalidOperationException("Not set up.");
+        int version = document.CurrentSnapshot.Version;
         Bar.ReplaceAllButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        // The change is combined in the background and made on the UI thread once it is ready.
+        long start = Stopwatch.GetTimestamp();
+        while (document.CurrentSnapshot.Version == version)
+        {
+            Dispatcher.UIThread.RunJobs();
+            if (Stopwatch.GetElapsedTime(start) > TimeSpan.FromSeconds(10))
+                throw new InvalidOperationException("Replace All did not complete.");
+        }
         HeadlessEditor.Render(_window ?? throw new InvalidOperationException("Not set up."));
     }
 

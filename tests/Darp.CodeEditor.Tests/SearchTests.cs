@@ -190,6 +190,7 @@ public sealed class SearchTests(UiFixture ui)
 
             await Wait.UntilAsync(() => bar.ReplaceAllButton.IsEnabled);
             Click(bar, "Replace All");
+            await SearchedAsync(bar);
             document.Text.ShouldBe("1:one 2:two 3:three");
 
             document.Undo();
@@ -349,7 +350,7 @@ public sealed class SearchTests(UiFixture ui)
             );
             bar.Message.ShouldBeNull();
             Click(bar, "Replace All");
-            await Wait.UntilAsync(() => document.Text != text);
+            await SearchedAsync(bar);
             document.Text.ShouldBe(string.Concat(Enumerable.Repeat("b\n", TextSearch.MaxMatches + 2)));
             document.Undo();
             document.Text.ShouldBe(text);
@@ -365,7 +366,7 @@ public sealed class SearchTests(UiFixture ui)
         {
             string text = string.Concat(Enumerable.Repeat("x\n", TextSearch.MaxMatches + 1));
             // Still for the search; then running out at Replace All's first look at it.
-            var clock = new SteppingTime();
+            var clock = new SteppingTime { UiThread = Environment.CurrentManagedThreadId };
             using var window = new EditorWindow(
                 new CodeEditor { Document = new StandaloneDocument(CodeLanguage.PlainText, text, clock) }
             );
@@ -385,6 +386,7 @@ public sealed class SearchTests(UiFixture ui)
             await SearchedAsync(bar);
             bar.Message.ShouldNotBeNull().ShouldContain("stopped");
             document.Text.ShouldBe(text);
+            clock.ReadOnUiThread.ShouldBeFalse();
         });
 
     /// <summary>
@@ -560,6 +562,7 @@ public sealed class SearchTests(UiFixture ui)
             window.Editor.Selection.ShouldBe(new TextSelection(0));
 
             Click(bar, "Replace All");
+            await SearchedAsync(bar);
             document.Text.ShouldBe("> a\n> b\r\n> c");
         });
 
@@ -760,6 +763,7 @@ public sealed class SearchTests(UiFixture ui)
                 .ShouldBe($"Preserve Case ({new KeyGesture(Key.P, Toggle).ToString("p", null)})");
             await Wait.UntilAsync(() => bar.ReplaceAllButton.IsEnabled);
             Click(bar, "Replace All");
+            await SearchedAsync(bar);
             document.Text.ShouldBe("Bar BAR bar");
         });
 

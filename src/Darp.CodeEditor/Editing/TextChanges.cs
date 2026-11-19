@@ -156,7 +156,12 @@ internal sealed record CombinedEdit(
     /// <summary>
     /// Combines <paramref name="edits"/>, in order and apart, of <paramref name="text"/>; on any thread.
     /// </summary>
-    public static CombinedEdit Of(ITextSource text, IReadOnlyList<TextEdit> edits)
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
+    public static CombinedEdit Of(
+        ITextSource text,
+        IReadOnlyList<TextEdit> edits,
+        CancellationToken cancellationToken = default
+    )
     {
         int start = edits[0].Offset;
         string replacedText = text.GetText(start, edits[^1].Offset + edits[^1].Length - start);
@@ -166,6 +171,7 @@ internal sealed record CombinedEdit(
         int delta = 0;
         foreach ((int offset, int length, string inserted) in edits)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             replaced.Append(replacedText, copied, offset - start - copied).Append(inserted);
             map.Add(new OffsetChangeMapEntry(offset + delta, length, inserted.Length));
             delta += inserted.Length - length;
