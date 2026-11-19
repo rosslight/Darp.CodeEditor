@@ -1405,6 +1405,38 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_list_with_room_for_fewer_rows_than_its_items_selects_and_pages_among_the_rows_that_fit() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            string[] labels = [.. Enumerable.Range(0, 10).Select(i => $"item{i}")];
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items(labels));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document }, height: 120);
+            var inside = new Rect(window.Window.ClientSize);
+            await OpenAsync(window, 0);
+            CompletionListBox list = List(window).ShouldNotBeNull();
+            int rows = list.VisibleRows;
+            rows.ShouldBeInRange(2, 9);
+            inside.Contains(BoundsInWindow(Flyout(window).ShouldNotBeNull())).ShouldBeTrue();
+
+            // Up wraps to the last item, which scrolls into the rows that show.
+            window.Press(Key.Up);
+            window.Render();
+            list.SelectedIndex.ShouldBe(9);
+            Rect last = BoundsInWindow(list.RowOf(9).ShouldNotBeNull());
+            inside.Contains(last).ShouldBeTrue(last.ToString());
+
+            // A page is as many rows as show, less one.
+            window.Press(Key.PageUp);
+            window.Render();
+            list.SelectedIndex.ShouldBe(9 - (rows - 1));
+            Rect selected = BoundsInWindow(list.RowOf(list.SelectedIndex).ShouldNotBeNull());
+            inside.Contains(selected).ShouldBeTrue(selected.ToString());
+        });
+
+    [Fact]
     public Task Completion_ends_on_Escape_leaving_the_word_focus_loss_scrolling_and_a_server_change() =>
         _ui.Run(async () =>
         {
