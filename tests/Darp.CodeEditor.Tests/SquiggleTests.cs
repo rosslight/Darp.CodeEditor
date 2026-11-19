@@ -12,7 +12,7 @@ namespace Darp.CodeEditor.Tests;
 public sealed class SquiggleTests(UiFixture ui)
 {
     /// <summary>The colors of the test theme's marks.</summary>
-    private static readonly Color s_error = Color.Parse("#FF8000");
+    private static readonly Color s_error = Color.Parse("#C00040");
 
     private static readonly Color s_warning = Color.Parse("#00C0C0");
     private static readonly Color s_information = Color.Parse("#8000FF");
