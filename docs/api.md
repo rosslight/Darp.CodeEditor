@@ -226,7 +226,7 @@ The default keys on Windows and Linux; macOS in brackets where it differs beyond
 | Ctrl+], Ctrl+[ | `editor.action.indentLines`, `editor.action.outdentLines` | indents and outdents the lines to the next or the previous tab stop |
 | Ctrl+L | `expandLineSelection` | selects the lines whole; again, it takes the next line too |
 | Ctrl+Shift+\ | `editor.action.jumpToBracket` | goes to the bracket that matches the one at the start of the selection; elsewhere to the closing bracket of the pair around it, or else to the next bracket |
-| F7, Shift+F7 | `editor.action.wordHighlight.next`, `editor.action.wordHighlight.prev` | the next and the previous occurrence of the symbol at the caret, while they show (section 6) |
+| F7, Shift+F7 | `editor.action.wordHighlight.next`, `editor.action.wordHighlight.prev` | the next and the previous occurrence of the symbol at the caret, while they show, in the middle of the view unless it shows already (section 6) |
 | Shift+Alt+Right, Shift+Alt+Left (macOS: Ctrl+Shift+Cmd) | `editor.action.smartSelect.expand`, `editor.action.smartSelect.shrink` | expands the selection to the next range around it, and shrinks it back (section 6). In a rectangle selection the keys go on to AvaloniaEdit's, which grow the rectangle |
 
 `editor.action.selectToBracket` has no key, as in VS Code: it selects the pair at the start of the selection, or else
@@ -646,7 +646,8 @@ How the client talks to a server, where the protocol leaves a choice:
   999, as VS Code finds them, found off the UI thread. An edit, a caret that it moves and the keyboard leaving the
   editor clear them; a selection over several lines, or beyond the word at the caret, shows none. An answer that
   comes after an edit, once the selection left the word it was asked for or once the editor shows another document is
-  dropped, and a request for a word that the selection left ends at once. F7 and Shift+F7 go through them.
+  dropped, and a request for a word that the selection left ends at once. The word at the caret is read within 500
+  characters on either side, as the search bar reads it. F7 and Shift+F7 go through them.
 - **Token colors** come from the color theme as in VS Code: its `semanticTokenColors`, matched by type, modifiers and
   language with VS Code's scores; otherwise its TextMate color of the scopes that VS Code's standard mapping gives the
   type and modifiers, such as `entity.name.type` for a class or `variable.other.constant` for a read-only variable.
