@@ -20,8 +20,11 @@ public sealed class LineClipboardTests(UiFixture ui)
 
     private readonly UiFixture _ui = ui;
 
-    [Fact]
-    public Task Copy_without_a_selection_copies_the_line_which_pastes_above_the_carets_line() =>
+    /// <summary>By key, and by the editor's method, as an app's Edit menu and the context menu paste.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public Task Copy_without_a_selection_copies_the_line_which_pastes_above_the_carets_line(bool byKey) =>
         _ui.Run(async () =>
         {
             using EditorWindow window = MarkedText.Show("al|pha\nbeta", CodeLanguage.PlainText);
@@ -30,7 +33,7 @@ public sealed class LineClipboardTests(UiFixture ui)
             (await ClipboardText(window)).ShouldBe("alpha" + s_lineBreak);
 
             window.Editor.Selection = new TextSelection(8);
-            await PasteAsync(window);
+            await PasteAsync(window, byKey);
 
             MarkedText.Of(window).ShouldBe("alpha\nalpha\nbe|ta");
         });
@@ -160,13 +163,19 @@ public sealed class LineClipboardTests(UiFixture ui)
             (await ClipboardText(window)).ShouldBe("kept");
         });
 
-    /// <summary>Pastes by key, and waits for the text to change: the clipboard is read in the background.</summary>
-    private static Task PasteAsync(EditorWindow window)
+    /// <summary>
+    /// Pastes by key, or by the editor's method, and waits for the text to change: the clipboard is read in the
+    /// background.
+    /// </summary>
+    private static Task PasteAsync(EditorWindow window, bool byKey = true)
     {
         CodeDocument document = DocumentOf(window);
         var changed = new TaskCompletionSource();
         document.TextChanged += OnChanged;
-        window.Press(Key.V, EditorWindow.Command);
+        if (byKey)
+            window.Press(Key.V, EditorWindow.Command);
+        else
+            window.Editor.Paste();
         return Wait.ForAsync(changed.Task);
 
         void OnChanged(object? sender, EventArgs e)
