@@ -22,6 +22,7 @@ public sealed class BracketJumpTests(UiFixture ui)
     [InlineData("[\"]\", |1]", "[\"]\", 1|]")]
     [InlineData("{ x| ] }", "{ x ] |}")]
     [InlineData("[ |{ x ] }", "[ { x |] }")]
+    [InlineData("|a ] [1]", "a ] |[1]")]
     public Task Ctrl_Shift_backslash_goes_to_the_matching_bracket_or_else_to_the_end_of_the_pair_around_or_the_next_bracket(
         string marked,
         string expected
@@ -74,6 +75,21 @@ public sealed class BracketJumpTests(UiFixture ui)
             window.Press(Keys.B, KeyModifiers.Control | KeyModifiers.Alt);
 
             window.Editor.Selection.ShouldBe(new TextSelection(selectedAnchor, selectedCaret));
+        });
+
+    /// <summary>A closing bracket that closes none is no bracket: the next pair is the one after it.</summary>
+    [Fact]
+    public Task Select_to_bracket_passes_a_closing_bracket_that_closes_none() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = await ShowColored("|a ] [1]");
+            window.Editor.Keymap = CodeEditorKeymap.Default.With(
+                new CodeEditorKeyBinding("ctrl+alt+b", CodeEditorCommands.SelectToBracket)
+            );
+
+            window.Press(Keys.B, KeyModifiers.Control | KeyModifiers.Alt);
+
+            window.Editor.Selection.ShouldBe(new TextSelection(4, 7));
         });
 
     /// <summary>Without a pair there is nothing to select: the key goes on.</summary>

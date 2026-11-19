@@ -143,8 +143,9 @@ internal static class BracketMatcher
     }
 
     /// <summary>
-    /// The first bracket from <paramref name="offset"/> on, opening or closing, as VS Code's <c>findNextBracket</c>
-    /// finds it, within <see cref="MaxDistance"/> characters; null for none.
+    /// The first bracket from <paramref name="offset"/> on, opening or closing, as VS Code's bracket pairs find it: a
+    /// closing bracket that closes no bracket open there is none (<see cref="BracketNesting"/>). Within
+    /// <see cref="MaxDistance"/> characters on each side; null for none.
     /// </summary>
     public static int? FindNext(
         TextDocument document,
@@ -154,6 +155,7 @@ internal static class BracketMatcher
     )
     {
         (string opens, string closes) = Characters(brackets);
+        BracketNesting nesting = OpenBefore(document, offset, opens, closes, tokensOf);
         int? next = null;
         if (opens.Length > 0)
         {
@@ -164,10 +166,11 @@ internal static class BracketMatcher
                 forward: true,
                 opens + closes,
                 tokensOf,
-                (_, at) =>
+                (c, at) =>
                 {
-                    next = at;
-                    return true;
+                    if (opens.IndexOf(c) >= 0 || nesting.Close(closes.IndexOf(c)) is not null)
+                        next = at;
+                    return next is not null;
                 }
             );
         }
