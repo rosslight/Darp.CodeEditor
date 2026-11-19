@@ -212,7 +212,9 @@ internal sealed class AutoClosingPairs : IDisposable
         AutoClosingMode mode = Mode(candidate, _options().AutoClosing);
         if (mode == AutoClosingMode.Never)
             return null;
-        string after = Buffer.GetText(caret, line.EndOffset - caret);
+        // As far as the longest text of a pair, which the checks after the caret need, also on a long line.
+        int needed = Configuration.AutoClosingPairs.Max(pair => Math.Max(pair.Open.Length, pair.Close.Length));
+        string after = Buffer.GetText(caret, Math.Min(line.EndOffset - caret, needed));
         if (after.Length > 0 && !ClosesBefore(mode, IsQuote(typed), after[0]) && !StartsWithClosingOnly(after))
             return null;
         if (
