@@ -20,13 +20,16 @@ public sealed class BracketJumpTests(UiFixture ui)
     [InlineData("1, |2 [3]", "1, 2 |[3]")]
     [InlineData("1, «2» 3", "1, |2 3")]
     [InlineData("[\"]\", |1]", "[\"]\", 1|]")]
+    [InlineData("{ x| ] }", "{ x ] |}")]
+    [InlineData("[ |{ x ] }", "[ { x |] }")]
     public Task Ctrl_Shift_backslash_goes_to_the_matching_bracket_or_else_to_the_end_of_the_pair_around_or_the_next_bracket(
         string marked,
         string expected
     ) =>
         _ui.Run(async () =>
         {
-            // Brackets in strings don't count; without any, the caret goes to the selection's start.
+            // Brackets in strings don't count, nor a closing one that closes none; without any, the caret goes to the
+            // selection's start. An opening bracket that an outer pair's closing one closes has no match.
             using EditorWindow window = await ShowColored(marked);
 
             window.Press(Keys.OemPipe, EditorWindow.Command | KeyModifiers.Shift);

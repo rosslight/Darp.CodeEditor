@@ -138,8 +138,9 @@ internal sealed class BracketMatching : IBackgroundRenderer, IEditorFeature
 
     /// <summary>
     /// The pair around <paramref name="caret"/>: the one found last, while the text and its tokens stay and the brackets
-    /// between its caret and this one match among themselves, as when an arrow key or Page Down moves the caret inside
-    /// it; otherwise found again. Finding it reads up to 200,000 characters, past every bracket between.
+    /// between the caret it was last kept for and this one nest among themselves, as when an arrow key or Page Down
+    /// moves the caret inside it; otherwise found again. Finding it reads up to 200,000 characters, past every bracket
+    /// between.
     /// </summary>
     private (int Open, int Close)? Around(int caret)
     {
@@ -151,13 +152,7 @@ internal sealed class BracketMatching : IBackgroundRenderer, IEditorFeature
             && caret <= close
             && caret - open <= BracketMatcher.MaxDistance
             && close - caret < BracketMatcher.MaxDistance
-            && BracketMatcher.Balanced(
-                _buffer,
-                Math.Min(at, caret),
-                Math.Max(at, caret),
-                Brackets,
-                _highlighter.TokensOf
-            )
+            && BracketMatcher.Nested(_buffer, Math.Min(at, caret), Math.Max(at, caret), Brackets, _highlighter.TokensOf)
         )
             return (open, close);
         (int Open, int Close)? found = BracketMatcher.FindEnclosing(_buffer, caret, Brackets, _highlighter.TokensOf);
