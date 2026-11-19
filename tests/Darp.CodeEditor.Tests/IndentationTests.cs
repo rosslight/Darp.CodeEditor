@@ -2,6 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using AvaloniaEdit;
 using AvaloniaEdit.Rendering;
+using Darp.CodeEditor.Editing;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -224,6 +225,23 @@ public sealed class IndentationTests(UiFixture ui)
             window.Press(Key.Tab);
 
             MarkedText.Of(window).ShouldBe(expected);
+        });
+
+    [Theory]
+    [InlineData(Key.Enter)]
+    [InlineData(Key.Tab)]
+    public Task Enter_and_Tab_change_nothing_in_a_long_lines_hidden_tail(Key key) =>
+        _ui.Run(() =>
+        {
+            string line = new('a', VisibleText.LineLimit + 5);
+            using EditorWindow window = MarkedText.Show(
+                line.Insert(VisibleText.LineLimit + 2, "|"),
+                CodeLanguage.PlainText
+            );
+
+            window.Press(key);
+
+            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(line);
         });
 
     [Theory]
