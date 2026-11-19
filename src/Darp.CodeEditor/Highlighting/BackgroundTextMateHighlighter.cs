@@ -56,7 +56,6 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
     private static readonly TimeSpan s_backgroundLineTimeLimit = TimeSpan.FromMilliseconds(50);
 
     private static readonly TimeSpan s_frameBudget = TimeSpan.FromMilliseconds(4);
-    private static readonly long s_frameBudgetTicks = (long)(s_frameBudget.TotalSeconds * Stopwatch.Frequency);
 
     /// <summary>
     /// How long finding the tokens around a typed character may take on the UI thread: one line up to the caret,
@@ -82,6 +81,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
     private Request? _request;
     private bool _scheduled;
     private int _firstEditedSinceRequest = int.MaxValue;
+    private TimeProvider _frameClock = TimeProvider.System;
     private long _frameDeadline;
     private bool _disposed;
 
@@ -117,6 +117,21 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
 
     /// <summary>The grammar the tokens come from; null for none.</summary>
     public TextMateGrammar? Grammar => _grammar;
+
+    /// <summary>
+    /// The clock of the UI thread's budget in each layout pass: the system's. On another clock, such as a test's, only
+    /// that clock ends the budget, and TextMate and the wait for the grammar take as long as they need.
+    /// </summary>
+    internal TimeProvider FrameClock
+    {
+        get => _frameClock;
+        set
+        {
+            _frameClock = value;
+            // A deadline on the old clock means nothing on this one: the budget starts with the next layout pass.
+            _frameDeadline = 0;
+        }
+    }
 
     /// <summary>
     /// The tokens of the line <paramref name="lineNumber"/> as last tokenized, which may be from before an edit, moved
@@ -304,7 +319,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
 
     /// <summary>Starts the UI thread's tokenizing budget for a layout pass.</summary>
     private void OnLayoutStarting(object? sender, VisualLineConstructionStartEventArgs e) =>
-        _frameDeadline = Stopwatch.GetTimestamp() + s_frameBudgetTicks;
+        _frameDeadline = FrameClock.GetTimestamp() + (long)(s_frameBudget.TotalSeconds * FrameClock.TimestampFrequency);
 
     private void OnVisualLinesChanged(object? sender, EventArgs e) => Schedule();
 
@@ -320,24 +335,27 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
         bool exact = previous is null || previous.IsValid;
         if (!exact && entry.Tokens is not null)
             return;
-        long now = Stopwatch.GetTimestamp();
+        long now = FrameClock.GetTimestamp();
         if (now >= _frameDeadline)
             return;
+        // TextMate and the wait for the grammar stop by real time, which uses up the budget on the system's clock only.
+        bool realTime = FrameClock == TimeProvider.System;
+        TimeSpan wait = realTime ? FrameClock.GetElapsedTime(now, _frameDeadline) : Timeout.InfiniteTimeSpan;
         // The background holds the grammar for one line at a time, and lets the UI thread go next.
-        if (!grammar.TryEnterOnUiThread(Stopwatch.GetElapsedTime(now, _frameDeadline)))
+        if (!grammar.TryEnterOnUiThread(wait))
         {
             _frameDeadline = 0;
             return;
         }
         ITokenizeLineResult2 result;
-        long start = Stopwatch.GetTimestamp();
-        TimeSpan limit = Stopwatch.GetElapsedTime(start, _frameDeadline);
+        long start = FrameClock.GetTimestamp();
+        TimeSpan limit = FrameClock.GetElapsedTime(start, _frameDeadline);
         try
         {
             result = grammar.Grammar.TokenizeLine2(
                 new LineText(_document.GetText(line).AsMemory()),
                 previous?.EndState,
-                limit
+                realTime ? limit : TimeSpan.MaxValue
             );
         }
         finally
@@ -345,7 +363,7 @@ internal sealed class BackgroundTextMateHighlighter : DocumentColorizingTransfor
             grammar.ExitOnUiThread();
         }
         // TextMate stops at the time limit without saying so: a result that took that long may be incomplete.
-        TimeSpan elapsed = Stopwatch.GetElapsedTime(start);
+        TimeSpan elapsed = FrameClock.GetElapsedTime(start);
         if (elapsed >= limit)
         {
             _frameDeadline = 0;
