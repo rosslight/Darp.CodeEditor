@@ -11,6 +11,7 @@ using Avalonia.Styling;
 using Avalonia.VisualTree;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
+using AvaloniaEdit.Rendering;
 using Darp.CodeEditor.Completion;
 using Darp.CodeEditor.Popups;
 using Darp.CodeEditor.Search;
@@ -1442,6 +1443,38 @@ public sealed class CompletionTests(UiFixture ui)
             new Rect(window.Window.ClientSize).Contains(bounds).ShouldBeTrue($"{bounds} in {window.Window.ClientSize}");
             // No room below the caret's line: above it.
             bounds.Bottom.ShouldBeLessThanOrEqualTo(window.PointAt(text.Length).Y);
+        });
+
+    [Fact]
+    public Task In_a_scaled_editor_the_list_opens_below_the_words_line_as_the_window_shows_it() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("println"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "x\n    pri");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(
+                editor,
+                new LayoutTransformControl { LayoutTransform = new ScaleTransform(2, 2), Child = editor }
+            );
+
+            await OpenAsync(window, 9);
+
+            Rect list = BoundsInWindow(Flyout(window).ShouldNotBeNull());
+            TextView view = window.TextView;
+            VisualLine line = view.GetVisualLine(2).ShouldNotBeNull();
+            Point lineBottom = view.TranslatePoint(
+                    new Point(0, line.VisualTop + line.Height) - view.ScrollOffset,
+                    window.Window
+                )
+                .ShouldNotBeNull();
+            list.Top.ShouldBe(lineBottom.Y, tolerance: 1);
+            // Its labels line up with the word, as the window shows it.
+            (list.Left + 1 + CompletionListBox.LabelInset).ShouldBeInRange(
+                window.PointAt(6).X - 10,
+                window.PointAt(6).X
+            );
         });
 
     [Fact]
