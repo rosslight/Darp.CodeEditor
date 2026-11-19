@@ -11,6 +11,31 @@ namespace Darp.CodeEditor.Tests;
 public sealed class IndentRulesTests
 {
     [Fact]
+    public void Indentation_stops_between_quick_matches_once_its_time_is_up()
+    {
+        // Each match is quick, far within its own time limit: only the time of the whole indentation ends the scan.
+        var rules = new IndentationRules(new Regex("x"), new Regex("y"));
+        var time = new ManualTime();
+        int reads = 0;
+        var lines = new RuleLines(
+            _ =>
+            {
+                reads++;
+                time.Advance(TimeSpan.FromMilliseconds(1));
+                return "a";
+            },
+            (_, _) => null,
+            brackets: null
+        );
+
+        Should.Throw<RegexMatchTimeoutException>(() =>
+            IndentRules.Inherited(new IndentationMatching(rules, time), lines, 1_000, honorIntentional: false)
+        );
+
+        reads.ShouldBe((int)IndentationRules.TimeLimit.TotalMilliseconds);
+    }
+
+    [Fact]
     public void A_blank_line_stops_looking_up_for_text_once_its_indentation_is_out_of_time()
     {
         var time = new ManualTime();
