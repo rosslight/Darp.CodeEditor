@@ -154,7 +154,11 @@ internal sealed class BracketMatching : IBackgroundRenderer, IEditorFeature
             && close - caret < BracketMatcher.MaxDistance
             && BracketMatcher.Nested(_buffer, Math.Min(at, caret), Math.Max(at, caret), Brackets, _highlighter.TokensOf)
         )
+        {
+            // The next move reads only from here.
+            _around = (open, close, caret, text, tokens);
             return (open, close);
+        }
         (int Open, int Close)? found = BracketMatcher.FindEnclosing(_buffer, caret, Brackets, _highlighter.TokensOf);
         _around = found is var (o, c) ? (o, c, caret, _textVersion, _highlighter.TokensVersion) : null;
         return found;
