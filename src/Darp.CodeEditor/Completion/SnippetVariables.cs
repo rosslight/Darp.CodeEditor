@@ -1,10 +1,12 @@
 using System.Globalization;
+using System.Text;
 
 namespace Darp.CodeEditor.Completion;
 
 /// <summary>
-/// The values of the snippet variables that need no editor: the file's, the time's and the random ones, as VS Code
-/// gives them. Names and months are English, as in VS Code's English version.
+/// The values of the snippet variables that need no editor: the file's, the time's, the clipboard's and the random ones,
+/// as VS Code gives them, and the indentation of selected text. Names and months are English, as in VS Code's English
+/// version.
 /// </summary>
 internal static class SnippetVariables
 {
@@ -57,6 +59,54 @@ internal static class SnippetVariables
             : zone.Id,
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// <c>CLIPBOARD</c>'s value from the clipboard's <paramref name="text"/>, as VS Code gives it to a snippet that one
+    /// caret inserts: the text's only line that is not blank, when it has one, as VS Code's default
+    /// <c>editor.multiCursorPaste</c> spreads it over the carets; otherwise the whole text. Null for no text.
+    /// </summary>
+    public static string? Clipboard(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return null;
+        string? only = null;
+        foreach (string line in text.Split(["\r\n", "\n", "\r"], StringSplitOptions.None))
+        {
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+            if (only is not null)
+                return text;
+            only = line;
+        }
+        return only ?? text;
+    }
+
+    /// <summary>
+    /// Selected text that spans lines, as VS Code puts it in for <c>SELECTION</c> and <c>TM_SELECTED_TEXT</c>: each of
+    /// its lines after the first gets the indentation that the snippet adds where the variable is, the part of
+    /// <paramref name="variableIndentation"/> past what it shares with <paramref name="lineIndentation"/>.
+    /// </summary>
+    /// <param name="value">The selected text.</param>
+    /// <param name="variableIndentation">
+    /// The whitespace at the start of the last line of what went in before the variable.
+    /// </param>
+    /// <param name="lineIndentation">The whitespace at the start of the selection's line, up to where it starts.</param>
+    public static string IndentSelection(string value, string variableIndentation, string lineIndentation)
+    {
+        string extra = variableIndentation[variableIndentation.AsSpan().CommonPrefixLength(lineIndentation)..];
+        if (extra.Length == 0)
+            return value;
+        var text = new StringBuilder(value.Length);
+        for (int i = 0; i < value.Length; i++)
+        {
+            text.Append(value[i]);
+            if (value[i] == '\r' && i + 1 < value.Length && value[i + 1] == '\n')
+                text.Append(value[++i]);
+            if (value[i] is '\r' or '\n')
+                text.Append(extra);
+        }
+        return text.ToString();
     }
 
     /// <summary>A random variable: six decimal or hexadecimal digits, or a UUID; null for another variable.</summary>

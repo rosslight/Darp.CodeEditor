@@ -24,6 +24,12 @@ internal sealed class TabStop(TextAnchor start, TextAnchor end, TabStop? parent,
     /// <summary>Its place among the session's stops, in the order of the text.</summary>
     public int Order { get; set; }
 
+    /// <summary>What its text becomes as Tab or Shift+Tab leaves its number; null for none.</summary>
+    public SnippetTransform? Transform { get; init; }
+
+    /// <summary>The options of a choice; null for a stop that is no choice.</summary>
+    public IReadOnlyList<string>? Choice { get; init; }
+
     /// <summary>The stops of its number, itself included: its mirrors.</summary>
     public List<TabStop> Group { get; set; } = [];
 
