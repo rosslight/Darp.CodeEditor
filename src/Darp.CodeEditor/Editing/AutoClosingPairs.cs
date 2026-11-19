@@ -80,13 +80,19 @@ internal sealed class AutoClosingPairs : IDisposable
     }
 
     /// <summary>
+    /// Forgets the closing texts of the kinds of pairs whose option changed: a change, also off and on again, ends what
+    /// the editor closed before it.
+    /// </summary>
+    public void OnOptionsChanged(AutoClosingOptions old, AutoClosingOptions now) =>
+        _autoClosed.RemoveAll(closed => Mode(closed.Pair, old) != Mode(closed.Pair, now));
+
+    /// <summary>
     /// Typing <paramref name="typed"/> right before the same closing character that the editor typed steps over it:
     /// only a single character, and not a quote that a backslash escapes.
     /// </summary>
     /// <returns>Whether it stepped over.</returns>
     public bool TypeOver(char typed)
     {
-        ForgetPairsThatNoLongerClose();
         if (TypingOffsets() is not { } offsets || !Array.TrueForAll(offsets, IsClosedBefore))
             return false;
         _changes.Run(_changes.Typing(typed.ToString()), () => _changes.Apply([], moved: 1));
@@ -154,7 +160,6 @@ internal sealed class AutoClosingPairs : IDisposable
     /// <returns>Whether it deleted them.</returns>
     public bool DeletePair()
     {
-        ForgetPairsThatNoLongerClose();
         if (TypingOffsets() is not { } offsets || !Array.TrueForAll(offsets, IsInEmptyPair))
             return false;
         bool deleted = false;
@@ -214,7 +219,7 @@ internal sealed class AutoClosingPairs : IDisposable
         if (found is not { } candidate)
             return null;
         bool quote = IsQuote(typed);
-        AutoClosingMode mode = Mode(candidate);
+        AutoClosingMode mode = Mode(candidate, _options().AutoClosing);
         if (mode == AutoClosingMode.Never)
             return null;
         string after = Buffer.GetText(caret, line.EndOffset - caret);
@@ -289,18 +294,11 @@ internal sealed class AutoClosingPairs : IDisposable
     /// Where pairs of the kind of <paramref name="pair"/> close: quotes and brackets as the options say, and pairs that
     /// open a block comment by the language's rules alone, as comments have no option.
     /// </summary>
-    private AutoClosingMode Mode(AutoClosingPair pair)
-    {
-        AutoClosingOptions options = _options().AutoClosing;
-        return IsQuote(pair.Open[^1]) ? options.Quotes
-            : Configuration.BlockComment is { } block && pair.Open.Contains(block.Open, StringComparison.Ordinal)
-                ? AutoClosingMode.LanguageDefined
-            : options.Brackets;
-    }
-
-    /// <summary>Forgets the closing texts of the kinds of pairs that the options no longer close, as if typed by the user.</summary>
-    private void ForgetPairsThatNoLongerClose() =>
-        _autoClosed.RemoveAll(closed => Mode(closed.Pair) == AutoClosingMode.Never);
+    private AutoClosingMode Mode(AutoClosingPair pair, AutoClosingOptions options) =>
+        IsQuote(pair.Open[^1]) ? options.Quotes
+        : Configuration.BlockComment is { } block && pair.Open.Contains(block.Open, StringComparison.Ordinal)
+            ? AutoClosingMode.LanguageDefined
+        : options.Brackets;
 
     /// <summary>Whether a quote, or else a bracket, closes before <paramref name="next"/> by <paramref name="mode"/>.</summary>
     private bool ClosesBefore(AutoClosingMode mode, bool quote, char next) =>

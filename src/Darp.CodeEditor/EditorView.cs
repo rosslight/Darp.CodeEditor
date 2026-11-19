@@ -47,6 +47,7 @@ internal sealed class EditorView : IDisposable
 
     private readonly TextChanges _changes;
     private readonly EditingHelpers _helpers;
+    private readonly AutoClosingPairs _pairs;
     private readonly Typing _typing;
     private readonly Clipboard _clipboard;
     private readonly BracketHighlighter _brackets;
@@ -69,7 +70,8 @@ internal sealed class EditorView : IDisposable
         Highlighter = new BackgroundTextMateHighlighter(area.TextView, area.Document, context.Editor.Dispatcher, null);
         _changes = new TextChanges(area);
         _helpers = new EditingHelpers(area, document, _changes);
-        _typing = new Typing(area, document, Highlighter, _changes, context.Options);
+        _pairs = new AutoClosingPairs(area, document, Highlighter, _changes, context.Options);
+        _typing = new Typing(area, document, Highlighter, _changes, _pairs);
         _clipboard = new Clipboard(area, document);
         _brackets = new BracketHighlighter(area, document, Highlighter);
         _whitespace = new WhitespaceLayer(area);
@@ -86,6 +88,7 @@ internal sealed class EditorView : IDisposable
             Highlighter,
             _changes,
             _helpers,
+            _pairs,
             _typing,
             _clipboard,
             _brackets,
@@ -169,6 +172,10 @@ internal sealed class EditorView : IDisposable
         if (!e.Handled)
             _typing.OnTextInput(e);
     }
+
+    /// <summary>The editor's settings changed.</summary>
+    public void OnOptionsChanged(CodeEditorOptions old, CodeEditorOptions now) =>
+        _pairs.OnOptionsChanged(old.AutoClosing, now.AutoClosing);
 
     /// <summary>Runs a command, as its key does, where it applies.</summary>
     /// <returns>Whether it applied.</returns>

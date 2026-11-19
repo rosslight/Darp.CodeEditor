@@ -37,14 +37,14 @@ internal sealed class Typing : IDisposable
         CodeDocument document,
         BackgroundTextMateHighlighter highlighter,
         TextChanges changes,
-        Func<CodeEditorOptions> options
+        AutoClosingPairs pairs
     )
     {
         _area = area;
         _document = document;
         _highlighter = highlighter;
         _changes = changes;
-        _pairs = new AutoClosingPairs(area, document, highlighter, changes, options);
+        _pairs = pairs;
         area.TextEntered += OnTextEntered;
     }
 
@@ -58,11 +58,7 @@ internal sealed class Typing : IDisposable
 
     private RuleLines Lines => RuleLines.Of(Buffer, _highlighter, Configuration.BracketPattern);
 
-    public void Dispose()
-    {
-        _area.TextEntered -= OnTextEntered;
-        _pairs.Dispose();
-    }
+    public void Dispose() => _area.TextEntered -= OnTextEntered;
 
     /// <summary>A key, while the text has the keyboard, once the keymap and the open popups left it.</summary>
     /// <returns>Whether the key was typing's; otherwise AvaloniaEdit takes it.</returns>

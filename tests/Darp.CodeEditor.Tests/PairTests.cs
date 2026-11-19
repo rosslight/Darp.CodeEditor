@@ -256,8 +256,10 @@ public sealed class PairTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe(expected);
         });
 
-    [Fact]
-    public Task Typing_steps_over_a_closing_bracket_only_while_brackets_close() =>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task Typing_steps_over_no_closing_bracket_from_before_brackets_stopped_closing(bool andStartedAgain) =>
         _ui.Run(async () =>
         {
             await Pairs.Loaded;
@@ -268,6 +270,8 @@ public sealed class PairTests(UiFixture ui)
             {
                 AutoClosing = new AutoClosingOptions { Brackets = AutoClosingMode.Never },
             };
+            if (andStartedAgain)
+                window.Editor.Options = new CodeEditorOptions();
             window.Type(")");
 
             MarkedText.Of(window).ShouldBe("()|)");

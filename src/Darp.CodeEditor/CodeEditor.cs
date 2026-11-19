@@ -555,6 +555,8 @@ public class CodeEditor : TemplatedControl
         }
         else if (change.Property == KeymapProperty)
             EndWait();
+        else if (change.Property == OptionsProperty)
+            _view?.OnOptionsChanged(change.GetOldValue<CodeEditorOptions>(), change.GetNewValue<CodeEditorOptions>());
         else if (
             change.Property == ColorThemeProperty
             || change.Property == ThemeVariantScope.ActualThemeVariantProperty
