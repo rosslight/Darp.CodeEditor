@@ -339,11 +339,14 @@ public sealed class OccurrenceHighlightTests(UiFixture ui)
     }
 
     /// <summary>
-    /// Waits until the editor has the server's answers to the requests sent before: it reads them in order, so once a
-    /// later request's answer is in, theirs were handed on.
+    /// Waits until the editor has handled the server's answers to the requests sent before: it reads them in order, so
+    /// once a later request's answer is in, theirs posted their rest to the dispatcher, which then runs it.
     /// </summary>
-    private static Task AnswersInAsync(CodeDocument document) =>
-        document.HoverAsync(document.CurrentSnapshot, new TextPosition(1, 1), CancellationToken.None);
+    private static async Task AnswersInAsync(CodeDocument document)
+    {
+        await document.HoverAsync(document.CurrentSnapshot, new TextPosition(1, 1), CancellationToken.None);
+        await EditorWindow.RunPostedJobsAsync();
+    }
 
     /// <summary>Puts the caret at <paramref name="caret"/>, and waits for the occurrences there.</summary>
     private static async Task ShowAtAsync(EditorWindow window, ManualTime time, int caret, int count)
