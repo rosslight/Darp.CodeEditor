@@ -331,8 +331,9 @@ public sealed class SnippetSessionTests(UiFixture ui)
     public Task Escape_ends_the_session_after_completion_and_signature_help_and_before_the_hover_and_the_search_bar() =>
         _ui.Run(async () =>
         {
+            var time = new ManualTime();
             var fake = new FakeServer();
-            await using var server = new LanguageServer(fake.Options);
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
             var editor = new CodeEditor { Document = document };
             using var window = new EditorWindow(editor);
@@ -341,6 +342,7 @@ public sealed class SnippetSessionTests(UiFixture ui)
             window.Press(Key.Enter);
             window.Type("call(");
             document.Text.ShouldBe("call(;");
+            time.Advance(TimeSpan.FromMilliseconds(120));
             await Wait.UntilAsync(() => PopupFrames.Find(window, "SignatureHelp") is not null);
             await OpenAsync(window, 5);
 
