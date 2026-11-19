@@ -1108,6 +1108,34 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Additional_edits_that_come_late_are_dropped_once_the_commit_is_undone() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, ItemWithImport());
+            const string text = "x\nCon";
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            using (await CommandAsync(server, fake, "hold-resolve", "holding resolve"))
+            {
+                await OpenAsync(window, 5);
+                await fake.WaitForAsync("resolve ");
+                window.Press(Key.Enter);
+                document.Text.ShouldBe("x\nConsole");
+                window.Press(Key.Z, EditorWindow.Command);
+                document.Text.ShouldBe(text);
+            }
+            using (await CommandAsync(server, fake, "release-resolve", "released resolve"))
+            {
+                // A list shows after the late answer: the client has read it by then.
+                await OpenAsync(window, document.Text.Length);
+                document.Text.ShouldBe(text);
+            }
+        });
+
+    [Fact]
     public Task Additional_edits_that_come_late_are_dropped_after_a_change_before_where_they_go() =>
         _ui.Run(async () =>
         {

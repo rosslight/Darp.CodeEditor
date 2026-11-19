@@ -52,8 +52,8 @@ namespace Darp.CodeEditor.Completion;
 /// deciding later would hold back or reorder what the user types. A read-only editor
 /// neither completes nor commits. The server resolves the selected item, so that its detail and documentation show
 /// beside the list. An item whose additional edits are still to come when it is committed gets them when they come, as
-/// in VS Code, unless the text changed before where they start since: in its step while that is the last one, and
-/// otherwise in a step of their own.
+/// in VS Code, unless the text changed before where they start since, or the commit was undone: in its step while that
+/// is the last one, and otherwise in a step of their own.
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends completion, for every reason it ends: Escape, the caret leaving the line or moving back
@@ -938,8 +938,13 @@ internal sealed class CompletionController : IDisposable
         TextSnapshot before = _document.CurrentSnapshot;
         var step = new object();
         var mark = new SnippetMark();
+        var marks = new List<IUndoableOperation>();
+        if (snippet is not null)
+            marks.Add(mark);
+        if (late is not null)
+            marks.Add(new LateEditsMark(late.Cancellation));
         List<CompletionEdit> edits = WithoutOverlaps([main], Mapped(request.Snapshot, item.AdditionalEdits ?? []));
-        Apply(step, continued: false, edits, snippet is null ? null : mark);
+        Apply(step, continued: false, edits, marks);
         // The item's text moved by the additional edits before it.
         int start =
             main.Range.Start
@@ -975,8 +980,9 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>
     /// Applies the additional edits that a committed item's resolve brings, as VS Code does: unless the text changed
-    /// before where one of them starts since the commit, the commit's own edit included, as by typing above an import.
-    /// They go in the commit's undo step while it is the last one, and otherwise in a step of their own.
+    /// before where one of them starts since the commit, the commit's own edit included, as by typing above an import,
+    /// or the commit was undone, which cancels the resolve. They go in the commit's undo step while it is the last one,
+    /// and otherwise in a step of their own.
     /// </summary>
     /// <param name="late">The resolve.</param>
     /// <param name="step">The commit's undo step.</param>
@@ -1010,9 +1016,11 @@ internal sealed class CompletionController : IDisposable
                 _buffer.UndoStack.LastGroupDescriptor == step ? step : new object(),
                 continued: _buffer.UndoStack.LastGroupDescriptor == step,
                 WithoutOverlaps([], Mapped(snapshot, additional)),
-                mark: null
+                marks: []
             );
         }
+        // Undone, or replaced by a newer commit's.
+        catch (OperationCanceledException) when (late.Cancellation.IsCancellationRequested) { }
         catch (Exception e)
         {
             Logger
@@ -1028,10 +1036,10 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>
     /// Applies edits, from the last to the first, in the undo step <paramref name="step"/>: a new one, or the last one
-    /// continued. A snippet's <paramref name="mark"/> goes in first, so that undoing the step reaches it last, once
-    /// the text is back.
+    /// continued. The <paramref name="marks"/>, as a snippet's, go in first, so that undoing the step reaches them
+    /// last, once the text is back.
     /// </summary>
-    private void Apply(object step, bool continued, List<CompletionEdit> edits, SnippetMark? mark)
+    private void Apply(object step, bool continued, List<CompletionEdit> edits, List<IUndoableOperation> marks)
     {
         UndoStack undo = _buffer.UndoStack;
         if (continued)
@@ -1040,7 +1048,7 @@ internal sealed class CompletionController : IDisposable
             undo.StartUndoGroup(step);
         try
         {
-            if (mark is not null)
+            foreach (IUndoableOperation mark in marks)
                 undo.Push(mark);
             using (_buffer.RunUpdate())
             {
@@ -1298,6 +1306,17 @@ internal sealed class CompletionController : IDisposable
     {
         public PressedKey(KeyEventArgs e)
             : this(e.Key, e.KeyModifiers, e.PhysicalKey, e.KeySymbol, e.KeyDeviceType) { }
+    }
+
+    /// <summary>
+    /// Marks a commit's undo step for the additional edits still to come: undoing the step cancels them, as the commit
+    /// they belong to is gone. Redoing it brings back the commit alone.
+    /// </summary>
+    private sealed class LateEditsMark(CancellationTokenSource lateEdits) : IUndoableOperation
+    {
+        public void Undo() => lateEdits.Cancel();
+
+        public void Redo() { }
     }
 
     /// <summary>What a list is filtered for: an answer, at a version of the text and a caret.</summary>
