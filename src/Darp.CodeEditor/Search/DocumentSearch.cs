@@ -46,10 +46,10 @@ internal sealed class DocumentSearch : IDisposable
     private SearchResult? _result;
 
     /// <summary>
-    /// The ranges that Find in Selection searches, which follow the edits; null while it is off. It stays on until the
-    /// bar closes.
+    /// The ranges that Find in Selection searches, from anchor to anchor, which grow with text typed at either edge, as
+    /// VS Code's do; null while it is off. It stays on until the bar closes.
     /// </summary>
-    private TextSegmentCollection<TextSegment>? _scope;
+    private List<(TextAnchor Start, TextAnchor End)>? _scope;
 
     /// <summary>
     /// Where to move once the search under way has its result. A newer search that takes over keeps it: it replaces
@@ -168,7 +168,7 @@ internal sealed class DocumentSearch : IDisposable
         _replaceAll.Cancel();
         if (move != SearchMove.None)
             _move = move;
-        _scopeLayer.Scope = _bar.IsOpen ? _scope : null;
+        _scopeLayer.Scope = _bar.IsOpen ? Scope() : null;
         if (!_bar.IsOpen || _bar.Query is not { } query)
         {
             _move = SearchMove.None;
@@ -348,19 +348,30 @@ internal sealed class DocumentSearch : IDisposable
     /// <summary>Searches only <paramref name="ranges"/> from now on, or everywhere for null.</summary>
     private void SetScope(List<TextRange>? ranges)
     {
-        _scope = null;
-        if (ranges is not null)
-        {
-            _scope = [];
-            foreach (TextRange range in ranges)
-                _scope.Add(new TextSegment { StartOffset = range.Start, Length = range.Length });
-        }
+        _scope = ranges
+            ?.Select(range =>
+                (
+                    Anchor(range.Start, AnchorMovementType.BeforeInsertion),
+                    Anchor(range.End, AnchorMovementType.AfterInsertion)
+                )
+            )
+            .ToList();
         _bar.FindInSelection = _scope is not null;
+
+        TextAnchor Anchor(int offset, AnchorMovementType movement)
+        {
+            TextAnchor anchor = _buffer.CreateAnchor(offset);
+            anchor.MovementType = movement;
+            anchor.SurviveDeletion = true;
+            return anchor;
+        }
     }
 
     /// <summary>The ranges that Find in Selection searches, as they are now; null while it is off.</summary>
     private List<TextRange>? Scope() =>
-        _scope?.Select(range => new TextRange(range.StartOffset, range.Length)).ToList();
+        _scope
+            ?.Select(range => TextRange.FromBounds(range.Start.Offset, Math.Max(range.Start.Offset, range.End.Offset)))
+            .ToList();
 
     /// <summary>Shows a search's result, and moves as the search was to.</summary>
     private void OnSearched(SearchResult result)
@@ -467,12 +478,8 @@ internal sealed class DocumentSearch : IDisposable
             : null;
     }
 
-    /// <summary>Keeps the matches and the scope on their text while the text changes.</summary>
-    private void OnBufferChanged(object? sender, DocumentChangeEventArgs e)
-    {
-        _result?.Matches.UpdateOffsets(e);
-        _scope?.UpdateOffsets(e);
-    }
+    /// <summary>Keeps the matches on their text while the text changes.</summary>
+    private void OnBufferChanged(object? sender, DocumentChangeEventArgs e) => _result?.Matches.UpdateOffsets(e);
 
     private void OnTextChanged(object? sender, EventArgs e)
     {

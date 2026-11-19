@@ -1,6 +1,5 @@
 using Avalonia;
 using Avalonia.Media;
-using AvaloniaEdit.Document;
 using AvaloniaEdit.Rendering;
 using Darp.CodeEditor.Highlighting;
 
@@ -14,7 +13,7 @@ internal sealed class SearchScopeLayer : IBackgroundRenderer, IDisposable
 {
     private readonly TextView _textView;
     private TextAreaColors? _colors;
-    private TextSegmentCollection<TextSegment>? _scope;
+    private IReadOnlyList<TextRange>? _scope;
 
     public SearchScopeLayer(TextView textView)
     {
@@ -35,8 +34,8 @@ internal sealed class SearchScopeLayer : IBackgroundRenderer, IDisposable
         }
     }
 
-    /// <summary>The ranges whose lines to highlight, which follow the edits; null for none.</summary>
-    public TextSegmentCollection<TextSegment>? Scope
+    /// <summary>The ranges whose lines to highlight, as they are in the text; null for none.</summary>
+    public IReadOnlyList<TextRange>? Scope
     {
         set
         {
@@ -52,7 +51,8 @@ internal sealed class SearchScopeLayer : IBackgroundRenderer, IDisposable
         foreach (VisualLine line in textView.VisualLines)
         {
             int start = line.FirstDocumentLine.Offset;
-            if (scope.FindOverlappingSegments(start, line.LastDocumentLine.EndOffset - start).Count == 0)
+            int end = line.LastDocumentLine.EndOffset;
+            if (!scope.Any(range => range.Start <= end && start <= range.End))
                 continue;
             var rectangle = new Rect(0, line.VisualTop - textView.VerticalOffset, textView.Bounds.Width, line.Height);
             drawingContext.DrawRectangle(colors.FindRange, colors.FindRangeBorder, rectangle);
