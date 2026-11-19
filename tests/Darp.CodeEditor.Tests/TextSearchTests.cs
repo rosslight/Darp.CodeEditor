@@ -56,6 +56,22 @@ public sealed class TextSearchTests
         result.Matches.Single().Replacement.ShouldBe("x\ny\nz");
     }
 
+    /// <summary>A line break written as <c>\r</c> and <c>\n</c> around an empty group is one line break.</summary>
+    [Fact]
+    public void A_replacement_takes_the_documents_line_breaks_once_it_is_expanded()
+    {
+        TextSnapshot snapshot = TextSnapshot.FromString("ab\ncd");
+
+        SearchResult result = TextSearch.Find(
+            snapshot,
+            new SearchQuery("b()", MatchCase: true, WholeWord: false, UseRegex: true),
+            "x\r$1\ny",
+            CancellationToken.None
+        );
+
+        result.Matches.Single().Replacement.ShouldBe("x\ny");
+    }
+
     [Fact]
     public void A_cancelled_search_stops()
     {
