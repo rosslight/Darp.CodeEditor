@@ -1,4 +1,5 @@
 using System.Globalization;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.VisualTree;
@@ -78,6 +79,34 @@ public sealed class DiagnosticNavigationTests(UiFixture ui)
             window.Editor.CaretPosition.Line.ShouldBe(251);
             window.TextView.VisualLines.ShouldContain(line => line.FirstDocumentLine.LineNumber == 251);
             Texts(Hover(window).ShouldNotBeNull()).First().ShouldBe("1 of 1 problem");
+        });
+
+    [Fact]
+    public Task F8_to_a_long_line_below_the_view_scrolls_across_to_the_problem_and_shows_it_there() =>
+        _ui.Run(async () =>
+        {
+            // Short lines in view, and below them a line far wider than the view, its problem near its end.
+            string text = string.Concat(Enumerable.Range(0, 100).Select(i => $"line{i}\n")) + new string('x', 600);
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document }, width: 400, height: 300);
+            int at = text.Length - 20;
+            document.SetDiagnostics([
+                new Diagnostic(
+                    document.CurrentSnapshot,
+                    new TextRange(at, 5),
+                    DiagnosticSeverity.Error,
+                    null,
+                    "':' expected"
+                ),
+            ]);
+
+            (await GoAsync(window, Key.F8)).ShouldBe((at, "':' expected"));
+
+            Point caret = window.PointAt(at);
+            new Rect(window.Window.ClientSize).Contains(caret).ShouldBeTrue($"{caret}");
+            Rect bounds = Hovers.BoundsInWindow(Hover(window).ShouldNotBeNull());
+            double left = caret.X - window.TextView.WideSpaceWidth / 2;
+            bounds.Left.ShouldBe(Math.Min(left, window.Window.ClientSize.Width - bounds.Width), 1);
         });
 
     [Fact]

@@ -887,6 +887,12 @@ public class CodeEditor : TemplatedControl
         (double left, double right) = part.WordWrap || bottom - start.Y > view.Height ? (start.X, start.X) : Edges();
         double x = part.WordWrap ? 0 : OffsetToShow(left, right, start.X, offset.X, view.Width);
         SetScrollOffset(part, new Vector(Math.Max(0, x), Math.Max(0, y)));
+        // A row wider than those laid out scrolls across only once laid out: now, before anything opens there.
+        if (textView.ScrollOffset.X < x - 0.5)
+        {
+            part.UpdateLayout();
+            SetScrollOffset(part, new Vector(x, textView.ScrollOffset.Y));
+        }
 
         Point Position(int textOffset, VisualYPosition at) =>
             textView.GetVisualPosition(new TextViewPosition(buffer.GetLocation(textOffset)), at);
