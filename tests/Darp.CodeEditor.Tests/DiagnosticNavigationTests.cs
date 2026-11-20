@@ -138,6 +138,38 @@ public sealed class DiagnosticNavigationTests(UiFixture ui)
         });
 
     [Fact]
+    public Task F8_past_long_wrapped_lines_below_the_view_scrolls_to_the_problem_and_shows_it_there() =>
+        _ui.Run(async () =>
+        {
+            // Short lines in view, and below them long lines that wrap, each over more rows than the view shows, which
+            // the view knows only as a row each until it lays them out; then the problem's line, and more short lines.
+            string prose = string.Join(' ', Enumerable.Repeat("word", 180));
+            string text =
+                string.Concat(Enumerable.Range(0, 30).Select(i => $"line{i}\n"))
+                + string.Concat(Enumerable.Repeat(prose + "\n", 6))
+                + "wrong\n"
+                + string.Concat(Enumerable.Range(0, 30).Select(i => $"line{i}\n"));
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, text);
+            var editor = new CodeEditor { Document = document, WordWrap = true };
+            using var window = new EditorWindow(editor, width: 400, height: 300);
+            int at = text.IndexOf("wrong", StringComparison.Ordinal);
+            document.SetDiagnostics([
+                new Diagnostic(
+                    document.CurrentSnapshot,
+                    new TextRange(at, 4),
+                    DiagnosticSeverity.Error,
+                    null,
+                    "':' expected"
+                ),
+            ]);
+
+            (await GoAsync(window, Key.F8)).ShouldBe((at, "':' expected"));
+
+            Point caret = window.PointAt(at);
+            new Rect(window.Window.ClientSize).Contains(caret).ShouldBeTrue($"{caret}");
+        });
+
+    [Fact]
     public Task A_document_shown_by_a_layout_handler_while_F8_reveals_its_problem_keeps_its_own_scroll_position() =>
         _ui.Run(() =>
         {
