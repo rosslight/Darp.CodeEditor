@@ -98,7 +98,9 @@ The C# server and the runner run on one .NET runtime that the app ships, with Re
 - **Tests:** one test project per package. Fixture projects only where a separate DLL or process is what a test checks. Tests
   also run as a NativeAOT app (#101).
 - **Samples:** one sample app from the Avalonia template, published both JIT and NativeAOT from the same source. It
-  shows how to use the API, nothing else. `samples/Darp.CodeEditor.UseCases` holds the API draft's use cases.
+  shows how to use the API, nothing else: documents of several languages with the language servers that are installed,
+  the editor's options, English and German, and windows in Avalonia's Fluent and Simple themes to check the popups' look
+  in both. `samples/Darp.CodeEditor.UseCases` holds the API draft's use cases.
 - **Benchmarks:** a BenchmarkDotNet project for most measurements. Measurements of a published app, such as the first
   highlighted frame or key-to-pixel times, need a small app of their own, and fail loudly when a run fails.
 
