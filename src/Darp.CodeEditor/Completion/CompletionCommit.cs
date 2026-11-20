@@ -84,10 +84,9 @@ internal sealed class CompletionCommit : IDisposable
         // code, the text after it stays out.
         TextRange since = TextRange.FromBounds(request.Offset, replace ? item.ReplaceRange.End : item.Edit.Range.End);
         int end = _document.MapToCurrent(request.Snapshot, since).End;
-        var range = TextRange.FromBounds(
-            item.Edit.Range.Start,
-            Math.Min(_buffer.GetLineByOffset(caret).EndOffset, Math.Max(caret, end))
-        );
+        // A server's edit ends on the caret's line; a choice's option replaces the choice's whole text, of any lines.
+        int last = answer.IsChoice ? _buffer.TextLength : _buffer.GetLineByOffset(caret).EndOffset;
+        var range = TextRange.FromBounds(item.Edit.Range.Start, Math.Min(last, Math.Max(caret, end)));
         RenderedSnippet? snippet = item.Snippet is { } source
             ? _snippets.Render(source, range.Start, selected, answer.Clipboard)
             : null;

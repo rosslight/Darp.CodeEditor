@@ -494,6 +494,35 @@ public sealed class SnippetSessionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task An_option_committed_from_inside_the_first_line_of_a_choice_of_lines_replaces_the_whole_choice() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Item("${1|red\nline,green|}$0", "color")
+            );
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe(NewLines.In("red\nline", start: ""));
+
+            // Inside its first line, the choice's options show again.
+            window.Press(Key.Left);
+            window.Press(Key.Right);
+            window.Press(Key.Space, EditorWindow.Command);
+            (await WaitForLabelsAsync(window)).Count.ShouldBe(2);
+            window.Press(Key.Down);
+            window.Press(Key.Enter);
+
+            document.Text.ShouldBe("green");
+        });
+
+    [Fact]
     public Task The_clipboard_variable_is_the_clipboards_text_read_as_the_list_shows() =>
         _ui.Run(async () =>
         {
