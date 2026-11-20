@@ -77,6 +77,41 @@ public sealed class HoverDiagnosticTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_related_place_goes_no_further_once_the_app_shows_another_document_as_the_caret_moves() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer("--diagnostic-details");
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            string path = Path.Combine(AppContext.BaseDirectory, "details.txt");
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two", path);
+            using CodeDocument other = server.CreateDocument(CodeLanguage.PlainText, "other text");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+            // A selection, which going to the place clears first.
+            editor.Selection = new TextSelection(4, 7);
+            PopupFrame popup = await HoverAsync(window, 4, "two is a word in", time);
+            TextBlock place = popup
+                .GetVisualDescendants()
+                .OfType<TextBlock>()
+                .First(text => TextOf(text).StartsWith("details.txt", StringComparison.Ordinal));
+            // An app that shows another document as the selection changes: the caret's move is not for that one.
+            editor.PropertyChanged += (_, e) =>
+            {
+                if (e.Property == CodeEditor.SelectionProperty)
+                    editor.Document = other;
+            };
+
+            window.Click(TextPointAt(place, 2), MouseButton.Left);
+            window.Render();
+
+            editor.Document.ShouldBeSameAs(other);
+            Popup(window).ShouldBeNull();
+            editor.Selection.ShouldBe(new TextSelection(0));
+        });
+
+    [Fact]
     public Task The_most_severe_diagnostics_are_found_among_however_many_there_are() =>
         _ui.Run(() =>
         {

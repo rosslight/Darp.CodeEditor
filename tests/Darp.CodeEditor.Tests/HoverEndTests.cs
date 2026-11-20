@@ -315,6 +315,32 @@ public sealed class HoverEndTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Text_typed_with_the_keyboard_in_the_hover_goes_into_no_document_that_the_text_shows_as_it_takes_it_back() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer("--no-diagnostics");
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two");
+            using CodeDocument other = server.CreateDocument(CodeLanguage.PlainText, "other");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            await server.StartAsync();
+            await HoverAsync(window, 4, "two is a word in", time);
+            window.Press(Key.K, EditorWindow.Command);
+            window.Press(Key.I, EditorWindow.Command);
+            Popup(window).ShouldNotBeNull().IsKeyboardFocusWithin.ShouldBeTrue();
+            // An app that shows another document as the text gets the keyboard.
+            EditorWindow.PartOf(editor).TextArea.GotFocus += (_, _) => editor.Document = other;
+
+            window.Type("x");
+
+            Popup(window).ShouldBeNull();
+            document.Text.ShouldBe("one two");
+            other.Text.ShouldBe("other");
+        });
+
+    [Fact]
     public Task The_popup_closes_on_typing_Escape_scrolling_and_focus_loss() =>
         _ui.Run(async () =>
         {

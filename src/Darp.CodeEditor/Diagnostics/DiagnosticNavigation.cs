@@ -32,6 +32,7 @@ internal sealed class DiagnosticNavigation : IEditorFeature
     private readonly CodeDocument _document;
     private readonly HoverController _hover;
     private readonly Action<TextRange> _reveal;
+    private readonly TextChanges _changes;
 
     /// <summary>The diagnostics in the order of the moves; null to sort them again.</summary>
     private DiagnosticMarker[]? _markers;
@@ -42,12 +43,23 @@ internal sealed class DiagnosticNavigation : IEditorFeature
     /// <summary>Whether a move moves the caret, which keeps where the moves are.</summary>
     private bool _moving;
 
+    /// <summary>Whether the view is disposed: a move under way stops at its next step.</summary>
+    private bool _disposed;
+
     /// <param name="area">The text area.</param>
     /// <param name="document">The document shown.</param>
     /// <param name="hover">The hover, which shows the problem moved to.</param>
     /// <param name="reveal">Brings a range into view, centered unless visible.</param>
-    public DiagnosticNavigation(TextArea area, CodeDocument document, HoverController hover, Action<TextRange> reveal)
+    /// <param name="changes">Tells whether the text area still shows the view's document.</param>
+    public DiagnosticNavigation(
+        TextArea area,
+        CodeDocument document,
+        HoverController hover,
+        Action<TextRange> reveal,
+        TextChanges changes
+    )
     {
+        _changes = changes;
         _area = area;
         _buffer = area.Document;
         _document = document;
@@ -68,6 +80,7 @@ internal sealed class DiagnosticNavigation : IEditorFeature
 
     public void Dispose()
     {
+        _disposed = true;
         _document.PropertyChanged -= OnDocumentPropertyChanged;
         _area.Caret.PositionChanged -= OnCaretPositionChanged;
     }
@@ -87,19 +100,23 @@ internal sealed class DiagnosticNavigation : IEditorFeature
         DiagnosticMarker marker = markers[_index];
         var range = new TextRange(marker.StartOffset, marker.Length);
         int to = Holds(range, caret) ? caret : range.Start;
+        TextSnapshot snapshot = _document.CurrentSnapshot;
+        bool current;
         _moving = true;
         try
         {
-            _area.ClearSelection();
-            _area.Caret.Offset = to;
+            current = Step(_area.ClearSelection) && Step(() => _area.Caret.Offset = to);
         }
         finally
         {
             _moving = false;
         }
-        _reveal(range);
-        _hover.ShowProblem(to, Problem(marker.Diagnostic, _index + 1, count));
+        if (current && Step(() => _reveal(range)))
+            _hover.ShowProblem(to, Problem(marker.Diagnostic, _index + 1, count));
         return true;
+
+        // The app's handlers of each step may show another document or change the text, which the rest is not for.
+        bool Step(Action step) => !_disposed && _changes.WhileShown(step) && _document.CurrentSnapshot == snapshot;
     }
 
     /// <summary>The errors, warnings and information shown, the most severe first, then in the order of the text.</summary>
