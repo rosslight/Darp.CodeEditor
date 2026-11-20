@@ -28,8 +28,11 @@ internal sealed class Hovered(int offset, TextRange word, TextRange along, TextS
     /// <summary>The text that the popup stays open over: the word, and the server's range.</summary>
     public TextRange Range { get; private set; } = word;
 
-    /// <summary>The diagnostics' messages, once the delay is over.</summary>
-    public IReadOnlyList<HoverBlock> Messages { get; set; } = [];
+    /// <summary>The diagnostics there, once the delay is over, made as they are read; or the problem that F8 went to.</summary>
+    public IReadOnlyCollection<HoverBlock> Messages { get; set; } = [];
+
+    /// <summary>Whether it shows the problem that F8 went to: no more than that, and no server's hover.</summary>
+    public bool IsProblem { get; set; }
 
     /// <summary>Cancels the server's request and the reading of its answer.</summary>
     public CancellationTokenSource Cancellation { get; } = new();
@@ -51,13 +54,14 @@ internal sealed class Hovered(int offset, TextRange word, TextRange along, TextS
 
     /// <summary>
     /// What shows once the delay is over: the diagnostics' messages, and below them the server's hover, or "Loading…"
-    /// while it is late; nothing before. Not read here: the diagnostics' blocks are made as the hover's parts read them.
+    /// while it is late; null before, and with nothing to show. Not read here: the diagnostics' blocks are made as the
+    /// hover's parts read them.
     /// </summary>
-    public IEnumerable<HoverBlock> Blocks()
+    public IEnumerable<HoverBlock>? Blocks()
     {
         IReadOnlyList<HoverBlock> below =
             Answer ?? (IsLate && !IsAnswered ? [new HoverParagraph([new HoverSpan(Strings.HoverLoading)])] : []);
-        return !IsDue || (Messages.Count == 0 && below.Count == 0) ? []
+        return !IsDue || (Messages.Count == 0 && below.Count == 0) ? null
             : Messages.Count == 0 ? below
             : below.Count == 0 ? Messages
             : Messages.Append(new HoverRule()).Concat(below);

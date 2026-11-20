@@ -7,6 +7,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Media.Immutable;
 using Avalonia.Media.TextFormatting;
 using Avalonia.VisualTree;
 
@@ -42,6 +43,8 @@ internal static class HoverView
             HoverParagraph paragraph => Paragraph(paragraph, look),
             HoverCode codeBlock => Code(codeBlock, look),
             HoverRule => new PopupLine { Height = 1, Background = look.Colors.HoverBorder },
+            HoverDiagnostic diagnostic => Diagnostic(diagnostic, look),
+            HoverHeading heading => Heading(heading, look),
             _ => throw new UnreachableException(),
         };
 
@@ -77,7 +80,7 @@ internal static class HoverView
     private static Control Paragraph(HoverParagraph paragraph, PopupLook look)
     {
         var inlines = new InlineCollection();
-        var links = new List<(int Start, int End, Uri Uri)>();
+        var links = new List<(int Start, int End, Action<TopLevel> Open)>();
         int length = 0;
         foreach (HoverSpan span in paragraph.Spans)
         {
@@ -95,7 +98,7 @@ internal static class HoverView
             if (span.Link is { } uri)
             {
                 run.Foreground = look.Colors.Link;
-                links.Add((length, length + span.Text.Length, uri));
+                links.Add((length, length + span.Text.Length, topLevel => Open(topLevel, uri)));
             }
             inlines.Add(run);
             length += span.Text.Length;
@@ -120,6 +123,103 @@ internal static class HoverView
         return item;
     }
 
+    /// <summary>
+    /// A diagnostic, as VS Code's hover shows it, in the editor's font (<see cref="HoverDiagnostic"/>): the icon in a
+    /// column of its own, 8 pixels from the text; the source and code at VS Code's 60% opacity, after a space; each
+    /// related place 8 pixels below the one before.
+    /// </summary>
+    private static Control Diagnostic(HoverDiagnostic diagnostic, PopupLook look)
+    {
+        IBrush dimmed = Dimmed(look.Foreground);
+        var inlines = new InlineCollection { new Run(diagnostic.Message) };
+        var links = new List<(int Start, int End, Action<TopLevel> Open)>();
+        int length = diagnostic.Message.Length;
+        if (diagnostic.Source is not null || diagnostic.Code is not null)
+        {
+            Add(" " + diagnostic.Source, dimmed);
+            if (diagnostic.Code is { } code && diagnostic.CodeLink is { } page)
+            {
+                Add("(", dimmed);
+                Add(code, Dimmed(look.Colors.Link)).TextDecorations = TextDecorations.Underline;
+                links.Add((length - code.Length, length, topLevel => Open(topLevel, page)));
+                Add(")", dimmed);
+            }
+            else if (diagnostic.Code is { } plain)
+                Add($"({plain})", dimmed);
+        }
+        var column = new PopupStack();
+        // A piece that goes on with places alone has no line for the message.
+        if (!diagnostic.Continues || length > 0)
+        {
+            TextBlock message = CodeText(look);
+            message.Inlines = inlines;
+            if (links.Count > 0)
+                OpenLinks(message, links);
+            column.Children.Add(message);
+        }
+        foreach (HoverRelated related in diagnostic.Related)
+        {
+            TextBlock place = CodeText(look);
+            place.Margin = new Thickness(0, related.Continues ? 0 : 8, 0, 0);
+            place.Inlines = [new Run(related.Place) { Foreground = look.Colors.Link }, new Run(related.Message)];
+            if (related.Open is { } open)
+                OpenLinks(place, [(0, related.Place.Length, _ => open())]);
+            column.Children.Add(place);
+        }
+        if (diagnostic.Icon == HoverIcon.None)
+            return column;
+        Control icon =
+            diagnostic.Icon == HoverIcon.Shown
+                ? new SeverityIcon(diagnostic.Severity, look.Colors)
+                : new Control { Width = SeverityIcon.Size, Height = SeverityIcon.Size };
+        icon.Margin = new Thickness(0, 1, 8, 0);
+        icon.VerticalAlignment = VerticalAlignment.Top;
+        DockPanel.SetDock(icon, Dock.Left);
+        return new PopupDock { Children = { icon, column } };
+
+        Run Add(string text, IBrush foreground)
+        {
+            var run = new Run(text) { Foreground = foreground };
+            inlines.Add(run);
+            length += text.Length;
+            return run;
+        }
+    }
+
+    /// <summary>
+    /// The heading of the problem that F8 went to, as the title of VS Code's widget for it shows it: the icon 4 pixels
+    /// from the document's name, and which problem it is of how many, in <c>descriptionForeground</c>.
+    /// </summary>
+    private static Control Heading(HoverHeading heading, PopupLook look)
+    {
+        var icon = new SeverityIcon(heading.Severity, look.Colors)
+        {
+            Margin = new Thickness(0, 0, 4, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        DockPanel.SetDock(icon, Dock.Left);
+        TextBlock text = Prose(look);
+        text.VerticalAlignment = VerticalAlignment.Center;
+        var count = new Run(heading.Count) { Foreground = look.Colors.Description };
+        text.Inlines = heading.Name is { } name ? [new Run(name), new Run("  "), count] : [count];
+        return new PopupDock { Children = { icon, text } };
+    }
+
+    /// <summary>Text in the editor's font and size, in the popup's foreground, that wraps.</summary>
+    private static TextBlock CodeText(PopupLook look)
+    {
+        TextBlock text = Text(look);
+        text.FontFamily = look.CodeFont;
+        text.FontSize = look.CodeSize;
+        text.Foreground = look.Foreground;
+        text.TextWrapping = TextWrapping.Wrap;
+        return text;
+    }
+
+    /// <summary><paramref name="brush"/> at VS Code's 60% opacity of a hover's dimmed parts.</summary>
+    private static IBrush Dimmed(IBrush brush) =>
+        brush is ISolidColorBrush solid ? new ImmutableSolidColorBrush(solid.Color, solid.Opacity * 0.6) : brush;
+
     private static TextBlock Code(HoverCode block, PopupLook look)
     {
         var inlines = new InlineCollection();
@@ -138,7 +238,7 @@ internal static class HoverView
     /// Opens the web page of a link that is clicked without selecting, through the app's launcher, and shows the hand
     /// over links.
     /// </summary>
-    private static void OpenLinks(TextBlock text, List<(int Start, int End, Uri Uri)> links)
+    private static void OpenLinks(TextBlock text, List<(int Start, int End, Action<TopLevel> Open)> links)
     {
         Cursor? cursor = text.Cursor;
         text.PointerMoved += (_, e) =>
@@ -151,11 +251,11 @@ internal static class HoverView
                 if (
                     e.InitialPressMouseButton == MouseButton.Left
                     && text is not SelectableTextBlock { SelectedText.Length: > 0 }
-                    && LinkAt(text, links, e) is { } uri
+                    && LinkAt(text, links, e) is { } open
                     && TopLevel.GetTopLevel(text) is { } topLevel
                 )
                 {
-                    Open(topLevel, uri);
+                    open(topLevel);
                 }
             },
             RoutingStrategies.Bubble,
@@ -163,16 +263,20 @@ internal static class HoverView
         );
     }
 
-    private static Uri? LinkAt(TextBlock text, List<(int Start, int End, Uri Uri)> links, PointerEventArgs e)
+    private static Action<TopLevel>? LinkAt(
+        TextBlock text,
+        List<(int Start, int End, Action<TopLevel> Open)> links,
+        PointerEventArgs e
+    )
     {
         Point point = e.GetPosition(text) - new Point(text.Padding.Left, text.Padding.Top);
         TextHitTestResult hit = text.TextLayout.HitTestPoint(point);
         if (!hit.IsInside)
             return null;
-        foreach ((int start, int end, Uri uri) in links)
+        foreach ((int start, int end, Action<TopLevel> open) in links)
         {
             if (hit.TextPosition >= start && hit.TextPosition < end)
-                return uri;
+                return open;
         }
         return null;
     }

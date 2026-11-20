@@ -30,6 +30,61 @@ internal sealed record HoverCode(IReadOnlyList<CodeRun> Runs) : HoverBlock;
 /// <summary>A line between two parts.</summary>
 internal sealed record HoverRule : HoverBlock;
 
+/// <summary>
+/// A diagnostic, as VS Code's hover shows it, in the editor's font: the icon of its severity beside its message, which
+/// keeps its line breaks, then its source and code, dimmed, the code as a link to its web page where it has one, and
+/// below them the other places it concerns, each a link where the editor can go there. A piece that goes on from the
+/// one before with nothing on its message's line, only with places, shows no such line.
+/// </summary>
+/// <param name="Severity">Its severity, for its icon.</param>
+/// <param name="Message">Its message, or a piece of it; empty for none.</param>
+/// <param name="Source">What reported it; null for none, as in a piece that more pieces follow.</param>
+/// <param name="Code">Its code; null for none.</param>
+/// <param name="CodeLink">The web page of its code; null for none.</param>
+/// <param name="Related">The other places it concerns.</param>
+/// <param name="Icon">Whether its severity's icon shows beside it, or only the room of one.</param>
+internal sealed record HoverDiagnostic(
+    DiagnosticSeverity Severity,
+    string Message,
+    string? Source,
+    string? Code,
+    Uri? CodeLink,
+    IReadOnlyList<HoverRelated> Related,
+    HoverIcon Icon = HoverIcon.Shown
+) : HoverBlock;
+
+/// <summary>Whether a diagnostic's icon shows beside it.</summary>
+internal enum HoverIcon
+{
+    /// <summary>No icon, and no room for one, as below a heading that shows it.</summary>
+    None,
+
+    /// <summary>The icon.</summary>
+    Shown,
+
+    /// <summary>The room of the icon, beside a piece of a diagnostic after the first.</summary>
+    Room,
+}
+
+/// <summary>A place that a diagnostic concerns.</summary>
+/// <param name="Place">Where it is, as VS Code writes it: <c>file.py(3, 5): </c>.</param>
+/// <param name="Message">What it has to do with the problem.</param>
+/// <param name="Open">Goes there; null where the editor cannot, as in another document.</param>
+internal sealed record HoverRelated(string Place, string Message, Action? Open)
+{
+    /// <summary>Whether it goes on from the place before, as a piece of a long one: without a place of its own.</summary>
+    public bool Continues { get; init; }
+}
+
+/// <summary>
+/// The heading of the problem that F8 went to, as VS Code's widget for it shows it: the icon of its severity, the
+/// document's name and which problem it is of how many.
+/// </summary>
+/// <param name="Severity">The problem's severity.</param>
+/// <param name="Name">The document's name; null for none.</param>
+/// <param name="Count">Which problem it is of how many, such as "2 of 5 problems".</param>
+internal sealed record HoverHeading(DiagnosticSeverity Severity, string? Name, string Count) : HoverBlock;
+
 /// <summary>Text with one style.</summary>
 /// <param name="Text">The text; a line break in it breaks the line.</param>
 /// <param name="Style">Its emphasis, or code.</param>
@@ -57,17 +112,41 @@ internal static class HoverBlocks
     private static readonly TimeSpan s_lineTimeLimit = TimeSpan.FromMilliseconds(50);
 
     /// <summary>
-    /// The messages of <paramref name="diagnostics"/>, each with its code, as plain text, all of them: the message and
-    /// the code apart, so that a long message is never copied to put them together.
+    /// <paramref name="diagnostics"/>, as VS Code's hover shows them (<see cref="HoverDiagnostic"/>):
+    /// <paramref name="open"/> makes what goes to a related place, or null where the editor cannot go there. A code's
+    /// web page is a link only when it is one, an <c>http</c> or <c>https</c> URI. Each is made as it is read, so that a
+    /// hover that builds thousands a part at a time reads them a part at a time.
     /// </summary>
-    public static IReadOnlyList<HoverBlock> Of(IEnumerable<Diagnostic> diagnostics) =>
-        [
-            .. diagnostics.Select(diagnostic => new HoverParagraph(
-                diagnostic.Code is { } code
-                    ? [new HoverSpan(diagnostic.Message), new HoverSpan($" ({code})")]
-                    : [new HoverSpan(diagnostic.Message)]
-            )),
-        ];
+    public static IReadOnlyCollection<HoverBlock> Of(
+        IReadOnlyCollection<Diagnostic> diagnostics,
+        Func<Diagnostic, DiagnosticRelatedInformation, Action?>? open = null,
+        HoverIcon icon = HoverIcon.Shown
+    ) =>
+        new Read<Diagnostic, HoverBlock>(
+            diagnostics,
+            diagnostic => new HoverDiagnostic(
+                diagnostic.Severity,
+                diagnostic.Message,
+                diagnostic.Source,
+                diagnostic.Code,
+                diagnostic.CodeDescription is { Scheme: "http" or "https" } page ? page : null,
+                [
+                    .. diagnostic.RelatedInformation.Select(related => new HoverRelated(
+                        $"{Name(related.Uri)}({related.Start.Line}, {related.Start.Column}): ",
+                        related.Message,
+                        open?.Invoke(diagnostic, related)
+                    )),
+                ],
+                icon
+            )
+        );
+
+    /// <summary>The name of a document by its URI, as VS Code's <c>basename</c> takes it: the last part of its path.</summary>
+    public static string Name(Uri uri)
+    {
+        string path = uri.IsFile ? uri.LocalPath : Uri.UnescapeDataString(uri.AbsolutePath);
+        return Path.GetFileName(path.TrimEnd('/', '\\')) is { Length: > 0 } name ? name : path;
+    }
 
     /// <summary>The server's hover, all of it, as <see cref="Of(HoverInfo, TextMateGrammar?, HoverBudget?, CancellationToken)"/> reads it.</summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
@@ -267,4 +346,18 @@ internal sealed class HoverBudget
             HoverCode code => code.Runs.Count,
             _ => 1,
         };
+}
+
+/// <summary><paramref name="items"/>, each made into a result as it is read, as often as it is read.</summary>
+internal sealed class Read<T, TResult>(IReadOnlyCollection<T> items, Func<T, TResult> make)
+    : IReadOnlyCollection<TResult>
+{
+    private readonly IReadOnlyCollection<T> _items = items;
+    private readonly Func<T, TResult> _make = make;
+
+    public int Count => _items.Count;
+
+    public IEnumerator<TResult> GetEnumerator() => _items.Select(_make).GetEnumerator();
+
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 }

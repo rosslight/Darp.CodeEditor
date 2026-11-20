@@ -70,6 +70,18 @@ internal sealed record PopupColors
     /// <summary><c>textLink.foreground</c>.</summary>
     public required IBrush Link { get; init; }
 
+    /// <summary><c>descriptionForeground</c>: dimmed text, such as which problem F8 went to of how many.</summary>
+    public required IBrush Description { get; init; }
+
+    /// <summary><c>problemsErrorIcon.foreground</c>: the icon of an error in a hover.</summary>
+    public required IBrush ErrorIcon { get; init; }
+
+    /// <summary><c>problemsWarningIcon.foreground</c>: the icon of a warning in a hover.</summary>
+    public required IBrush WarningIcon { get; init; }
+
+    /// <summary><c>problemsInfoIcon.foreground</c>: the icon of information or a hint in a hover.</summary>
+    public required IBrush InfoIcon { get; init; }
+
     /// <summary><c>focusBorder</c>: the outline of a popup that has the keyboard.</summary>
     public required IBrush FocusBorder { get; init; }
 
@@ -138,6 +150,24 @@ internal sealed record PopupColors
             CodeForeground = text.Foreground,
             CodeSpanBackground = Brush(Own("textCodeBlock.background") ?? Hex(dark ? 0x660A0A0Au : 0x66DCDCDCu)),
             Link = Brush(Own("textLink.foreground") ?? Hex(dark ? 0xFF3794FF : 0xFF006AB1)),
+            Description = Brush(
+                Own("descriptionForeground") ?? (dark ? Transparent(foreground, 0.7) : Hex(0xFF717171))
+            ),
+            ErrorIcon = Brush(
+                Own("problemsErrorIcon.foreground")
+                    ?? Own("editorError.foreground")
+                    ?? Hex(dark ? 0xFFF14C4C : 0xFFE51400)
+            ),
+            WarningIcon = Brush(
+                Own("problemsWarningIcon.foreground")
+                    ?? Own("editorWarning.foreground")
+                    ?? Hex(dark ? 0xFFCCA700 : 0xFFBF8803)
+            ),
+            InfoIcon = Brush(
+                Own("problemsInfoIcon.foreground")
+                    ?? Own("editorInfo.foreground")
+                    ?? Hex(dark ? 0xFF3794FF : 0xFF1A85FF)
+            ),
             FocusBorder = Brush(Own("focusBorder") ?? Hex(dark ? 0xFF007FD4 : 0xFF0090F1)),
             Selection = text.Selection,
             Slider = (
