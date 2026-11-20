@@ -195,15 +195,15 @@ internal sealed class HoverPopup
     }
 
     /// <summary>
-    /// Places the popup at the word's start, or at where the hover is, the pointer, the caret or F8's place, where a
-    /// wrapped row out of view holds the start of a long word, as VS Code's widget goes where F8 went.
+    /// Places the popup at the word's start, or at where the hover is, the pointer, the caret or F8's place, where the
+    /// start of a long word is out of view, above or to the side, as VS Code's widget goes where F8 went.
     /// </summary>
     private void Place() =>
         _popup.Show(
             _textView,
             () =>
-                TextViewBoxes.CharacterAt(_textView, _word.Start) is { Bottom: > 0 } start
-                && start.Top < _textView.Bounds.Height
+                TextViewBoxes.CharacterAt(_textView, _word.Start) is var start
+                && new Rect(_textView.Bounds.Size).Intersects(start)
                     ? start
                     : TextViewBoxes.CharacterAt(_textView, _at)
         );
