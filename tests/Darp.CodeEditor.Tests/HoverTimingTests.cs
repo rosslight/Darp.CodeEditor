@@ -160,6 +160,39 @@ public sealed class HoverTimingTests(UiFixture ui)
         });
 
     [Fact]
+    public Task An_answer_that_comes_late_keeps_a_hover_scrolled_to_its_end_where_it_was() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            // Forty lines, the diagnostic's message, taller than the popup.
+            string text = string.Concat(Enumerable.Range(0, 40).Select(i => $"line{i}\n"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+            using CodeDocument hold = await CompletionTests.CommandAsync(server, fake, "hold-hovers", "holding hovers");
+            PopupFrame popup = await HoverAsync(window, 1, "line39", time);
+            await fake.WaitForAsync("hover ");
+            Pass(window, time, TimeSpan.FromMilliseconds(600));
+            await WaitForPopupAsync(window, "Loading…");
+            popup.GetVisualDescendants().OfType<PopupScroller>().Single().ScrollBy(10_000);
+            window.Layout();
+            double end = Content(popup).Bounds.Top;
+
+            using CodeDocument release = await CompletionTests.CommandAsync(
+                server,
+                fake,
+                "release-hovers",
+                "released hovers"
+            );
+
+            await WaitForPopupAsync(window, "is a word in");
+            window.Layout();
+            Content(popup).Bounds.Top.ShouldBe(end);
+        });
+
+    [Fact]
     public void The_hover_delay_is_between_0_and_10_seconds()
     {
         new HoverOptions().Delay.ShouldBe(TimeSpan.FromMilliseconds(300));

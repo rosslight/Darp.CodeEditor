@@ -110,25 +110,28 @@ internal sealed class PopupScroller : Control
         if (Child is { } child)
         {
             double extent = child.DesiredSize.Height;
-            _offset = Math.Clamp(_offset, 0, Math.Max(0, extent - finalSize.Height));
+            double offset = Math.Clamp(_offset, 0, Math.Max(0, extent - finalSize.Height));
+            // Content that still builds, as a hover's answer after "Loading…", grows back to the offset asked for.
+            if (child is not HoverContent { IsComplete: false })
+                _offset = offset;
             double width = finalSize.Width - (_gutter ? PopupSlider.Thickness : 0);
-            child.Arrange(new Rect(0, -_offset, Math.Max(0, width), extent));
+            child.Arrange(new Rect(0, -offset, Math.Max(0, width), extent));
             if (_scrollTo?.TranslatePoint(default, child) is { } part && _scrollTo is { } scrolled)
             {
                 _scrollTo = null;
                 double bottom = part.Y + scrolled.Bounds.Height - finalSize.Height;
-                double offset = Math.Clamp(
-                    Math.Min(part.Y, Math.Max(_offset, bottom)),
+                double to = Math.Clamp(
+                    Math.Min(part.Y, Math.Max(offset, bottom)),
                     0,
                     Math.Max(0, extent - finalSize.Height)
                 );
-                if (offset != _offset)
+                if (to != offset)
                 {
-                    _offset = offset;
-                    child.Arrange(new Rect(0, -_offset, Math.Max(0, width), extent));
+                    _offset = offset = to;
+                    child.Arrange(new Rect(0, -offset, Math.Max(0, width), extent));
                 }
             }
-            _slider.Show(finalSize.Height, extent, _offset);
+            _slider.Show(finalSize.Height, extent, offset);
         }
         _slider.Arrange(new Rect(finalSize));
         return finalSize;
