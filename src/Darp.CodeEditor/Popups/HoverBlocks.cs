@@ -32,18 +32,15 @@ internal sealed record HoverRule : HoverBlock;
 
 /// <summary>
 /// A diagnostic, as VS Code's hover shows it, in the editor's font: the icon of its severity beside its line, its message,
-/// which keeps its line breaks, then its source and code, dimmed, the code as a link to its web page where it has one,
-/// and below them the other places it concerns, each a link where the editor can go there. A piece that goes on from the
-/// one before with nothing on its line, only with places, shows no such line.
+/// which keeps its line breaks, then its source and code, dimmed, the code as a link to its web page where it has one.
+/// The other places it concerns follow it as blocks of their own (<see cref="HoverRelated"/>).
 /// </summary>
 /// <param name="Severity">Its severity, for its icon.</param>
-/// <param name="Line">Its message, source and code, or a piece of them; empty for none.</param>
-/// <param name="Related">The other places it concerns.</param>
+/// <param name="Line">Its message, source and code, or a piece of them.</param>
 /// <param name="Icon">Whether its severity's icon shows beside it, or only the room of one.</param>
 internal sealed record HoverDiagnostic(
     DiagnosticSeverity Severity,
     IReadOnlyList<HoverSpan> Line,
-    IReadOnlyList<HoverRelated> Related,
     HoverIcon Icon = HoverIcon.Shown
 ) : HoverBlock;
 
@@ -59,15 +56,12 @@ internal enum HoverIcon
     Room,
 }
 
-/// <summary>A place that a diagnostic concerns.</summary>
+/// <summary>A place that a diagnostic concerns, below it, or a piece of one.</summary>
 /// <param name="Place">Where it is, as VS Code writes it: <c>file.py(3, 5): </c>.</param>
 /// <param name="Message">What it has to do with the problem.</param>
 /// <param name="Open">Goes there; null where the editor cannot, as in another document.</param>
-internal sealed record HoverRelated(string Place, string Message, Action? Open)
-{
-    /// <summary>Whether it goes on from the place before, as a piece of a long one: without a place of its own.</summary>
-    public bool Continues { get; init; }
-}
+/// <param name="Indented">Whether it lines up with a diagnostic beside its icon.</param>
+internal sealed record HoverRelated(string Place, string Message, Action? Open, bool Indented) : HoverBlock;
 
 /// <summary>
 /// The heading of the problem that F8 went to, as VS Code's widget for it shows it: the icon of its severity, the
@@ -107,31 +101,34 @@ internal static class HoverBlocks
     private static readonly TimeSpan s_lineTimeLimit = TimeSpan.FromMilliseconds(50);
 
     /// <summary>
-    /// <paramref name="diagnostics"/>, as VS Code's hover shows them (<see cref="HoverDiagnostic"/>):
+    /// <paramref name="diagnostics"/>, as VS Code's hover shows them, each followed by its related places:
     /// <paramref name="open"/> makes what goes to a related place, or null where the editor cannot go there. A code's
-    /// web page is a link only when it is one, an <c>http</c> or <c>https</c> URI. Each is made as it is read, so that a
-    /// hover that builds thousands a part at a time reads them a part at a time.
+    /// web page is a link only when it is one, an <c>http</c> or <c>https</c> URI. Each block is made as it is read, so
+    /// that a hover that builds thousands a part at a time makes them a part at a time.
     /// </summary>
     public static IReadOnlyCollection<HoverBlock> Of(
         IReadOnlyCollection<Diagnostic> diagnostics,
         Func<Diagnostic, DiagnosticRelatedInformation, Action?>? open = null,
         HoverIcon icon = HoverIcon.Shown
-    ) =>
-        new Read<Diagnostic, HoverBlock>(
-            diagnostics,
-            diagnostic => new HoverDiagnostic(
-                diagnostic.Severity,
-                Line(diagnostic),
-                [
-                    .. diagnostic.RelatedInformation.Select(related => new HoverRelated(
-                        $"{Name(related.Uri)}({related.Start.Line}, {related.Start.Column}): ",
-                        related.Message,
-                        open?.Invoke(diagnostic, related)
-                    )),
-                ],
-                icon
-            )
-        );
+    ) => new DiagnosticBlocks(diagnostics.Count, diagnostics.SelectMany(diagnostic => Of(diagnostic, open, icon)));
+
+    private static IEnumerable<HoverBlock> Of(
+        Diagnostic diagnostic,
+        Func<Diagnostic, DiagnosticRelatedInformation, Action?>? open,
+        HoverIcon icon
+    )
+    {
+        yield return new HoverDiagnostic(diagnostic.Severity, Line(diagnostic), icon);
+        foreach (DiagnosticRelatedInformation related in diagnostic.RelatedInformation)
+        {
+            yield return new HoverRelated(
+                $"{Name(related.Uri)}({related.Start.Line}, {related.Start.Column}): ",
+                related.Message,
+                open?.Invoke(diagnostic, related),
+                icon != HoverIcon.None
+            );
+        }
+    }
 
     /// <summary>A diagnostic's message, then its source and its code, dimmed, as VS Code writes them: <c>message source(code)</c>.</summary>
     private static IReadOnlyList<HoverSpan> Line(Diagnostic diagnostic)
@@ -360,16 +357,14 @@ internal sealed class HoverBudget
         };
 }
 
-/// <summary><paramref name="items"/>, each made into a result as it is read, as often as it is read.</summary>
-internal sealed class Read<T, TResult>(IReadOnlyCollection<T> items, Func<T, TResult> make)
-    : IReadOnlyCollection<TResult>
+/// <summary>The blocks of diagnostics, made as they are read; their count is the diagnostics'.</summary>
+internal sealed class DiagnosticBlocks(int count, IEnumerable<HoverBlock> blocks) : IReadOnlyCollection<HoverBlock>
 {
-    private readonly IReadOnlyCollection<T> _items = items;
-    private readonly Func<T, TResult> _make = make;
+    private readonly IEnumerable<HoverBlock> _blocks = blocks;
 
-    public int Count => _items.Count;
+    public int Count { get; } = count;
 
-    public IEnumerator<TResult> GetEnumerator() => _items.Select(_make).GetEnumerator();
+    public IEnumerator<HoverBlock> GetEnumerator() => _blocks.GetEnumerator();
 
     System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 }

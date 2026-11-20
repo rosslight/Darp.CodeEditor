@@ -7,9 +7,9 @@ namespace Darp.CodeEditor.Popups;
 /// <summary>
 /// The controls of a popup's blocks, all of them, built in parts so that each takes a frame at most, as
 /// <see cref="HoverParts"/> measures them: the first part as it is made, and each next part in the next frame while it
-/// shows, where a block larger than a part goes in pieces. Content that comes after another waits until the other is
-/// built in full, so that a frame builds one part of either. <see cref="GrewEvent"/> tells the popup around it after
-/// each part, so that it places itself again.
+/// shows, where a block larger than a part goes in pieces. A tail that follows the blocks, as the server's hover follows
+/// the diagnostics, can be replaced while the blocks keep their controls. <see cref="GrewEvent"/> tells the popup around
+/// it after each part, so that it places itself again.
 /// </summary>
 internal sealed class HoverContent : StackPanel
 {
@@ -21,11 +21,13 @@ internal sealed class HoverContent : StackPanel
 
     private readonly PopupLook _look;
 
-    /// <summary>The content that this one comes after, until that is built in full; null for none.</summary>
-    private HoverContent? _after;
-
-    /// <summary>The blocks after the ones read, read as they are built; null once all are read.</summary>
+    /// <summary>The blocks after the ones read, read as they are built, then the tail's; null once all are read.</summary>
     private IEnumerator<HoverBlock>? _blocks;
+
+    private IEnumerable<HoverBlock> _tail;
+
+    /// <summary>Where the tail's controls start among the children, once the blocks before it are read; null before.</summary>
+    private int? _tailStart;
 
     /// <summary>The pieces of the block being built, after the ones built; null between blocks.</summary>
     private IEnumerator<HoverBlock>? _pieces;
@@ -35,18 +37,31 @@ internal sealed class HoverContent : StackPanel
 
     private bool _requested;
 
-    public HoverContent(IEnumerable<HoverBlock> blocks, PopupLook look, HoverContent? after = null)
+    public HoverContent(IEnumerable<HoverBlock> blocks, PopupLook look, IEnumerable<HoverBlock>? tail = null)
     {
-        _after = after;
         // Set here, as on every panel of a popup, so that an app's styles for panels don't reach it.
         Spacing = HoverView.Spacing;
         Margin = default;
         _blocks = blocks.GetEnumerator();
+        _tail = tail ?? [];
         _look = look;
-        if (_after is { IsComplete: true })
-            _after = null;
-        if (_after is null)
-            AddPart();
+        AddPart();
+    }
+
+    /// <summary>
+    /// Makes <paramref name="tail"/> follow the blocks in place of the tail before: the blocks keep their controls, and
+    /// the tail is built a part a frame after them.
+    /// </summary>
+    public void Follow(IEnumerable<HoverBlock> tail)
+    {
+        _tail = tail;
+        if (_tailStart is not { } start)
+            return;
+        Children.RemoveRange(start, Children.Count - start);
+        _pieces?.Dispose();
+        _blocks?.Dispose();
+        (_pending, _pieces, _blocks) = (null, null, tail.GetEnumerator());
+        RequestPart();
     }
 
     protected override Type StyleKeyOverride => typeof(HoverContent);
@@ -78,11 +93,7 @@ internal sealed class HoverContent : StackPanel
             // No longer shown, as when the popup closed: the rest is never built.
             if (TopLevel.GetTopLevel(this) is null)
                 return;
-            // After the content it waits for, from the frame after the one that built its last part.
-            if (_after is null)
-                AddNextPart();
-            else if (_after.IsComplete)
-                _after = null;
+            AddNextPart();
             RequestPart();
         });
     }
@@ -139,8 +150,9 @@ internal sealed class HoverContent : StackPanel
             if (!blocks.MoveNext())
             {
                 blocks.Dispose();
-                _blocks = null;
-                return null;
+                _blocks = _tailStart is null ? _tail.GetEnumerator() : null;
+                _tailStart ??= Children.Count;
+                continue;
             }
             _pieces = HoverParts.Split(blocks.Current).GetEnumerator();
         }

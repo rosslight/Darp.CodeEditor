@@ -315,6 +315,38 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Opening_with_the_servers_answer_in_builds_one_part_of_the_diagnostics_and_the_answer() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            // A line of 1,500 characters: the diagnostic's message, and the server's code block.
+            string text = string.Join(' ', Enumerable.Repeat("word", 300));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+            window.MoveMouse(window.PointAt(1));
+            Pass(window, time, TimeSpan.FromMilliseconds(150));
+            await Wait.UntilAsync(() => window.Editor.HoverIsAnswered);
+
+            // What the popup has as it opens, before any frame builds a part after the first.
+            int? opened = null;
+            OverlayLayer.GetOverlayLayer(window.Window).ShouldNotBeNull().Children.CollectionChanged += (_, e) =>
+                opened ??= e
+                    .NewItems?.OfType<Visual>()
+                    .SelectMany(root => root.GetVisualDescendants())
+                    .OfType<TextBlock>()
+                    .Sum(block => TextOf(block).Length);
+
+            Pass(window, time, TimeSpan.FromMilliseconds(150));
+
+            opened.ShouldNotBeNull().ShouldBeLessThanOrEqualTo(HoverParts.MaxCharacters);
+            // The rest in the frames after.
+            await WaitForPopupAsync(window, "is a word in");
+        });
+
+    [Fact]
     public Task A_resize_that_Escape_cuts_short_leaves_the_next_hover_alone() =>
         _ui.Run(async () =>
         {
@@ -363,7 +395,7 @@ public sealed class HoverTests(UiFixture ui)
 
             PopupFrame popup = await HoverAsync(window, 1, "word is a word in", time);
 
-            HoverContent content = Sections(popup).Single();
+            var content = (HoverContent)Content(popup);
             while (!content.IsComplete)
                 content.AddNextPart();
             window.Layout();

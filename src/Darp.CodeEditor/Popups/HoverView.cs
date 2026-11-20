@@ -27,16 +27,17 @@ internal static class HoverView
     /// <summary>The space between two blocks, unless the second goes on from the first.</summary>
     public const double Spacing = 6;
 
+    /// <summary>The room of a diagnostic's icon, 8 pixels from its text.</summary>
+    private const double IconRoom = SeverityIcon.Size + 8;
+
     /// <summary>The hand over links, made the first time it is needed.</summary>
     private static Cursor? s_hand;
 
     /// <summary>
     /// The controls of <paramref name="blocks"/>, all of them: as many as a part takes (<see cref="HoverParts"/>) at
-    /// once, and the next parts in the frames after it, while they show; once <paramref name="after"/> is built in full,
-    /// where given.
+    /// once, and the next parts in the frames after it, while they show.
     /// </summary>
-    public static HoverContent Create(IEnumerable<HoverBlock> blocks, PopupLook look, HoverContent? after = null) =>
-        new(blocks, look, after);
+    public static HoverContent Create(IEnumerable<HoverBlock> blocks, PopupLook look) => new(blocks, look);
 
     /// <summary>The control of a block.</summary>
     internal static Control Block(HoverBlock block, PopupLook look) =>
@@ -46,6 +47,7 @@ internal static class HoverView
             HoverCode codeBlock => Code(codeBlock, look),
             HoverRule => new PopupLine { Height = 1, Background = look.Colors.HoverBorder },
             HoverDiagnostic diagnostic => Diagnostic(diagnostic, look),
+            HoverRelated related => Related(related, look),
             HoverHeading heading => Heading(heading, look),
             _ => throw new UnreachableException(),
         };
@@ -105,37 +107,36 @@ internal static class HoverView
     /// </summary>
     private static Control Diagnostic(HoverDiagnostic diagnostic, PopupLook look)
     {
-        var column = new PopupStack();
-        if (!diagnostic.Continues || diagnostic.Line.Count > 0)
+        TextBlock line = CodeText(look);
+        Show(line, diagnostic.Line, look);
+        if (diagnostic.Icon != HoverIcon.Shown)
         {
-            TextBlock line = CodeText(look);
-            Show(line, diagnostic.Line, look);
-            column.Children.Add(line);
+            line.Margin = new Thickness(diagnostic.Icon == HoverIcon.Room ? IconRoom : 0, 0, 0, 0);
+            return line;
         }
-        foreach (HoverRelated related in diagnostic.Related)
+        var icon = new SeverityIcon(diagnostic.Severity, look.Colors)
         {
-            TextBlock place = CodeText(look);
-            place.Margin = new Thickness(0, related.Continues ? 0 : 8, 0, 0);
-            var where = new Run(related.Place);
-            place.Inlines = [where, new Run(related.Message)];
-            // Only a place that the editor can go to looks like a link.
-            if (related.Open is { } open)
-            {
-                where.Foreground = look.Colors.Link;
-                OpenLinks(place, [(0, related.Place.Length, _ => open())]);
-            }
-            column.Children.Add(place);
-        }
-        if (diagnostic.Icon == HoverIcon.None)
-            return column;
-        Control icon =
-            diagnostic.Icon == HoverIcon.Shown
-                ? new SeverityIcon(diagnostic.Severity, look.Colors)
-                : new Control { Width = SeverityIcon.Size, Height = SeverityIcon.Size };
-        icon.Margin = new Thickness(0, 1, 8, 0);
-        icon.VerticalAlignment = VerticalAlignment.Top;
+            Margin = new Thickness(0, 1, IconRoom - SeverityIcon.Size, 0),
+            VerticalAlignment = VerticalAlignment.Top,
+        };
         DockPanel.SetDock(icon, Dock.Left);
-        return new PopupDock { Children = { icon, column } };
+        return new PopupDock { Children = { icon, line } };
+    }
+
+    /// <summary>A related place, lined up with its diagnostic's line, 8 pixels below the block before it.</summary>
+    private static TextBlock Related(HoverRelated related, PopupLook look)
+    {
+        TextBlock place = CodeText(look);
+        place.Margin = new Thickness(related.Indented ? IconRoom : 0, related.Continues ? 0 : 8 - Spacing, 0, 0);
+        var where = new Run(related.Place);
+        place.Inlines = [where, new Run(related.Message)];
+        // Only a place that the editor can go to looks like a link.
+        if (related.Open is { } open)
+        {
+            where.Foreground = look.Colors.Link;
+            OpenLinks(place, [(0, related.Place.Length, _ => open())]);
+        }
+        return place;
     }
 
     /// <summary>

@@ -142,12 +142,11 @@ internal sealed class DiagnosticNavigation : IEditorFeature
             : _document is ServerDocument { Uri: var uri } && Uri.TryCreate(uri, UriKind.Absolute, out Uri? parsed)
                 ? HoverBlocks.Name(parsed)
             : null;
-        return
-        [
-            new HoverHeading(diagnostic.Severity, name, of),
-            new HoverRule(),
-            .. HoverBlocks.Of([diagnostic], _hover.OpenRelated, HoverIcon.None),
-        ];
+        HoverBlock[] heading = [new HoverHeading(diagnostic.Severity, name, of), new HoverRule()];
+        return new DiagnosticBlocks(
+            1,
+            heading.Concat(HoverBlocks.Of([diagnostic], _hover.OpenRelated, HoverIcon.None))
+        );
     }
 
     /// <summary>

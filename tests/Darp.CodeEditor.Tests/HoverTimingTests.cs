@@ -124,6 +124,42 @@ public sealed class HoverTimingTests(UiFixture ui)
         });
 
     [Fact]
+    public Task The_servers_answer_below_the_diagnostics_keeps_them_with_their_selection_and_the_scroll_position() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            // Forty lines, the diagnostic's message, taller than the popup.
+            string text = string.Concat(Enumerable.Range(0, 40).Select(i => $"line{i}\n"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+            using CodeDocument hold = await CompletionTests.CommandAsync(server, fake, "hold-hovers", "holding hovers");
+            PopupFrame popup = await HoverAsync(window, 1, "line39", time);
+            await fake.WaitForAsync("hover ");
+            SelectableTextBlock message = popup.GetVisualDescendants().OfType<SelectableTextBlock>().Single();
+            message.SelectionStart = 0;
+            message.SelectionEnd = 5;
+            popup.GetVisualDescendants().OfType<PopupScroller>().Single().ScrollBy(100);
+            window.Layout();
+            double scrolled = Content(popup).Bounds.Top;
+
+            using CodeDocument release = await CompletionTests.CommandAsync(
+                server,
+                fake,
+                "release-hovers",
+                "released hovers"
+            );
+
+            await WaitForPopupAsync(window, "is a word in");
+            IsShown(message).ShouldBeTrue();
+            message.SelectedText.ShouldBe("line0");
+            Content(popup).Bounds.Top.ShouldBe(scrolled);
+            scrolled.ShouldBeLessThan(0);
+        });
+
+    [Fact]
     public void The_hover_delay_is_between_0_and_10_seconds()
     {
         new HoverOptions().Delay.ShouldBe(TimeSpan.FromMilliseconds(300));

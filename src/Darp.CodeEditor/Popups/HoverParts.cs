@@ -36,7 +36,32 @@ internal static class HoverParts
                         Continues = !first || code.Continues,
                     }
             ),
-            HoverDiagnostic diagnostic when !Fits(Size(diagnostic)) => DiagnosticPieces(diagnostic),
+            HoverDiagnostic diagnostic when !Fits(Size(diagnostic)) => Pieces(
+                diagnostic.Line.Select(span => (span.Text, span)),
+                (spans, first) =>
+                    new HoverDiagnostic(
+                        diagnostic.Severity,
+                        [.. spans.Select(s => s.Run with { Text = s.Text })],
+                        first || diagnostic.Icon == HoverIcon.None ? diagnostic.Icon : HoverIcon.Room
+                    )
+                    {
+                        Continues = !first || diagnostic.Continues,
+                    },
+                reservedRuns: 1
+            ),
+            HoverRelated related when !Fits(Size(related)) => Pieces(
+                [(related.Place, true), (related.Message, false)],
+                (texts, first) =>
+                    new HoverRelated(
+                        string.Concat(texts.Where(t => t.Run).Select(t => t.Text)),
+                        string.Concat(texts.Where(t => !t.Run).Select(t => t.Text)),
+                        first ? related.Open : null,
+                        related.Indented
+                    )
+                    {
+                        Continues = !first,
+                    }
+            ),
             HoverParagraph paragraph when !Fits(Size(paragraph)) => Pieces(
                 paragraph.Spans.Select(span => (span.Text, span)),
                 (spans, first) =>
@@ -55,7 +80,7 @@ internal static class HoverParts
 
     /// <summary>
     /// The size of <paramref name="block"/> as a part counts it: its characters, lines and runs, a list item's marker
-    /// and a diagnostic's icon as a run.
+    /// and a diagnostic's icon as a run, and a related place's place.
     /// </summary>
     public static (int Characters, int Lines, int Runs) Size(HoverBlock block)
     {
@@ -69,99 +94,14 @@ internal static class HoverParts
                 return (characters, lines, code.Runs.Count);
             case HoverDiagnostic diagnostic:
                 (characters, lines) = Count(diagnostic.Line.Select(span => span.Text));
-                (int Characters, int Lines, int Runs) size = (characters, lines, diagnostic.Line.Count + 1);
-                foreach (HoverRelated related in diagnostic.Related)
-                    size = Add(size, Size(related));
-                return size;
+                return (characters, lines, diagnostic.Line.Count + 1);
+            case HoverRelated related:
+                (characters, lines) = Count([related.Place, related.Message]);
+                return (characters, lines, 2);
             default:
                 return (0, 1, 1);
         }
     }
-
-    /// <summary>The size of a related place as a part counts it: on a line of its own, in two runs.</summary>
-    private static (int Characters, int Lines, int Runs) Size(HoverRelated related)
-    {
-        (int characters, int lines) = Count([related.Place, related.Message]);
-        return (characters, lines, 2);
-    }
-
-    private static (int Characters, int Lines, int Runs) Add(
-        (int Characters, int Lines, int Runs) a,
-        (int Characters, int Lines, int Runs) b
-    ) => (a.Characters + b.Characters, a.Lines + b.Lines, a.Runs + b.Runs);
-
-    /// <summary>
-    /// A diagnostic larger than a part in pieces: its line's, the icon beside the first, then its related places, with
-    /// the line's last piece while they fit it and then in pieces of their own.
-    /// </summary>
-    private static IEnumerable<HoverBlock> DiagnosticPieces(HoverDiagnostic diagnostic)
-    {
-        HoverIcon room = diagnostic.Icon == HoverIcon.None ? HoverIcon.None : HoverIcon.Room;
-        HoverDiagnostic? current = null;
-        foreach (
-            HoverDiagnostic piece in Pieces(
-                diagnostic.Line.Select(span => (span.Text, span)),
-                (spans, first) =>
-                    new HoverDiagnostic(
-                        diagnostic.Severity,
-                        [.. spans.Select(s => s.Run with { Text = s.Text })],
-                        [],
-                        first ? diagnostic.Icon : room
-                    )
-                    {
-                        Continues = !first || diagnostic.Continues,
-                    },
-                reservedRuns: 1
-            )
-        )
-        {
-            if (current is not null)
-                yield return current;
-            current = piece;
-        }
-        current ??= diagnostic with { Line = [], Related = [] };
-        var related = new List<HoverRelated>();
-        (int Characters, int Lines, int Runs) size = Size(current);
-        foreach (HoverRelated place in diagnostic.Related.SelectMany(RelatedPieces))
-        {
-            (int Characters, int Lines, int Runs) with = Add(size, Size(place));
-            if (Fits(with))
-            {
-                related.Add(place);
-                size = with;
-                continue;
-            }
-            yield return current with
-            {
-                Related = related,
-            };
-            // A piece of related places alone: no line of its own for the message.
-            current = new HoverDiagnostic(diagnostic.Severity, [], [], room) { Continues = true };
-            related = [place];
-            size = Add(Size(current), Size(place));
-        }
-        yield return current with
-        {
-            Related = related,
-        };
-    }
-
-    /// <summary><paramref name="related"/>, or its pieces when it is larger than a part, the link with the first.</summary>
-    private static IEnumerable<HoverRelated> RelatedPieces(HoverRelated related) =>
-        Fits(Size(related))
-            ? [related]
-            : Pieces(
-                [(related.Place, true), (related.Message, false)],
-                (texts, first) =>
-                    new HoverRelated(
-                        string.Concat(texts.Where(t => t.Run).Select(t => t.Text)),
-                        string.Concat(texts.Where(t => !t.Run).Select(t => t.Text)),
-                        first ? related.Open : null
-                    )
-                    {
-                        Continues = !first,
-                    }
-            );
 
     /// <summary>Whether something of <paramref name="size"/> fits a part.</summary>
     public static bool Fits((int Characters, int Lines, int Runs) size) =>
