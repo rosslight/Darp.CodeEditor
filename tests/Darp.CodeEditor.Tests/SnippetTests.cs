@@ -309,7 +309,39 @@ public sealed class SnippetTests
         rendered.Text.ShouldBe("if (x) {\n        a\n        b\n    }\n    a\n    b");
         // On one line, or without the selection's line, it goes in as it is.
         Render("{\n\t$TM_SELECTED_TEXT", values, lineIndentation: "    ").Text.ShouldBe("{\n        a\n    b");
-        SnippetVariables.IndentSelection("a\r\nb\rc\n", "\t\t", "\t").ShouldBe("a\r\n\tb\r\tc\n\t");
+        // Each of its line breaks becomes the document's, and the next line takes the indentation.
+        Snippet
+            .Parse("if (x) {\n\t$TM_SELECTED_TEXT\n}")
+            .Render(
+                new SnippetContext("    ", Indentation.Spaces(4), "\r\n", _ => "a\r\nb\rc\n")
+                {
+                    MultilineSelectionIndentation = "    ",
+                }
+            )
+            .Text.ShouldBe("if (x) {\r\n        a\r\n    b\r\n    c\r\n    \r\n    }");
+        SnippetVariables.SelectionIndentation("\t\t", "\t").ShouldBe("\t");
+    }
+
+    [Fact]
+    public void Selected_text_whose_added_indentation_would_pass_a_million_characters_is_counted_before_it_is_made()
+    {
+        // 10,000 lines, each to take the 4,000 spaces that the snippet adds where it goes: 40 million characters.
+        string selected = string.Concat(Enumerable.Repeat("x\n", 10_000));
+        string snippet = "a\n" + new string(' ', 4_000) + "$TM_SELECTED_TEXT";
+        var context = new SnippetContext("", Indentation.Spaces(4), "\n", _ => selected)
+        {
+            MultilineSelectionIndentation = "",
+        };
+        Snippet.Parse(snippet).Render(context);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        RenderedSnippet rendered = Snippet.Parse(snippet).Render(context);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        rendered.Text.ShouldBe(snippet);
+        rendered.Stops.ShouldBeEmpty();
+        // A million characters take 2 MB, and the text that a builder holds twice that at most.
+        allocated.ShouldBeLessThan(16_000_000);
     }
 
     [Theory]
