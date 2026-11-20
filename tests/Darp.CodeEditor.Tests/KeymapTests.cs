@@ -130,9 +130,11 @@ public sealed class KeymapTests(UiFixture ui)
         PressedKey first = Key(Keys.K, EditorWindow.Command);
 
         Resolve(keymap, first).Waits.ShouldBeTrue();
+        // The sequence first; the second stroke's own bindings after it, should the hover not apply.
         KeyResolution
             .Of(keymap, first, Key(Keys.I, EditorWindow.Command))
-            .Commands.ShouldBe([CodeEditorCommands.ShowHover]);
+            .Commands[0]
+            .ShouldBe(CodeEditorCommands.ShowHover);
     }
 
     [Fact]
