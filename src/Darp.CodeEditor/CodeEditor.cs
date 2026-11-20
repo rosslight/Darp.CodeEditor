@@ -389,6 +389,9 @@ public class CodeEditor : TemplatedControl
     /// <summary>Whether the editor asks for the occurrences at the caret, for tests.</summary>
     internal bool IsAskingForOccurrences => _view?.IsAskingForOccurrences ?? false;
 
+    /// <summary>Whether the server's answer to the hover is in, for tests.</summary>
+    internal bool HoverIsAnswered => _view?.HoverIsAnswered ?? false;
+
     /// <summary>Where the editor's work off the UI thread runs, such as ranking completion's items; tests hold it.</summary>
     internal TaskScheduler BackgroundScheduler { get; init; } = TaskScheduler.Default;
 
@@ -568,12 +571,6 @@ public class CodeEditor : TemplatedControl
     {
         base.OnLostFocus(e);
         EndWait();
-        // Raised as the focus leaves an element inside the editor; it may stay inside, as when it goes to the search bar.
-        Dispatcher.Post(() =>
-        {
-            if (!IsKeyboardFocusWithin)
-                _view?.OnFocusLeft();
-        });
     }
 
     /// <inheritdoc />

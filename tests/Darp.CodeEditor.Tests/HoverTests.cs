@@ -654,7 +654,7 @@ public sealed class HoverTests(UiFixture ui)
     public Task The_hover_grows_up_to_VS_Codes_limits_and_to_the_size_the_user_resized_a_hover_to() =>
         _ui.Run(async () =>
         {
-            HoverController.LastResizedSize = default;
+            HoverPopup.LastResizedSize = default;
             try
             {
                 var fake = new FakeServer("--no-diagnostics");
@@ -678,7 +678,7 @@ public sealed class HoverTests(UiFixture ui)
                 window.Window.MouseMove(dragged, RawInputModifiers.LeftMouseButton);
                 window.Window.MouseUp(dragged, MouseButton.Left);
                 window.Layout();
-                Size resized = HoverController.LastResizedSize;
+                Size resized = HoverPopup.LastResizedSize;
                 resized.Width.ShouldBeGreaterThan(1056);
                 resized.Height.ShouldBeGreaterThan(300);
                 popup.Width.ShouldBe(resized.Width);
@@ -692,7 +692,7 @@ public sealed class HoverTests(UiFixture ui)
             }
             finally
             {
-                HoverController.LastResizedSize = default;
+                HoverPopup.LastResizedSize = default;
             }
         });
 
@@ -807,12 +807,14 @@ public sealed class HoverTests(UiFixture ui)
     public Task An_outdated_hover_request_is_cancelled() =>
         _ui.Run(async () =>
         {
-            var fake = new FakeServer();
+            // Without diagnostics, nothing shows for "slow", so that leaving it ends its hover at once.
+            var fake = new FakeServer("--no-diagnostics");
             var time = new ManualTime();
             await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             const string text = "slow fast";
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
             using var window = new EditorWindow(new CodeEditor { Document = document });
+            await server.StartAsync();
 
             // The server never answers for "slow".
             window.MoveMouse(window.PointAt(1));
@@ -922,18 +924,18 @@ public sealed class HoverTests(UiFixture ui)
             var buffer = new AvaloniaEdit.Document.TextDocument("ab " + new string('x', 1_000_000) + " cd");
             const int reach = HoverController.MaxWordReach;
 
-            HoverController.WordAt(buffer, 1).ShouldBe(new TextRange(0, 2));
-            HoverController.WordAt(buffer, 3).ShouldBe(new TextRange(3, reach));
+            Hovered.WordAt(buffer, 1).ShouldBe(new TextRange(0, 2));
+            Hovered.WordAt(buffer, 3).ShouldBe(new TextRange(3, reach));
             // Nor past the shown part of a long line.
-            HoverController.WordAt(buffer, 2_500).ShouldBe(TextRange.FromBounds(2_500 - reach, VisibleText.LineLimit));
+            Hovered.WordAt(buffer, 2_500).ShouldBe(TextRange.FromBounds(2_500 - reach, VisibleText.LineLimit));
 
             // The pointer may move on along a cut word, in the shown part of its line only: neither into its hidden
             // tail nor past it, onto the next line.
             var tail = new AvaloniaEdit.Document.TextDocument(new string('x', 10_000_000) + "\nend");
-            TextRange word = HoverController.WordAt(tail, 5);
-            HoverController.AlongWord(tail, word).ShouldBe(new TextRange(0, VisibleText.LineLimit));
-            HoverController.AlongWord(buffer, new TextRange(0, 2)).ShouldBe(new TextRange(0, 2));
-            HoverController.AlongWord(buffer, new TextRange(2, 1)).ShouldBe(new TextRange(2, 1));
+            TextRange word = Hovered.WordAt(tail, 5);
+            Hovered.AlongWord(tail, word).ShouldBe(new TextRange(0, VisibleText.LineLimit));
+            Hovered.AlongWord(buffer, new TextRange(0, 2)).ShouldBe(new TextRange(0, 2));
+            Hovered.AlongWord(buffer, new TextRange(2, 1)).ShouldBe(new TextRange(2, 1));
         });
 
     /// <summary>

@@ -77,4 +77,10 @@
   <data name="NoSuggestions" xml:space="preserve">
     <value>Keine Vorschläge.</value>
   </data>
+  <data name="ShowHover" xml:space="preserve">
+    <value>Hover anzeigen</value>
+  </data>
+  <data name="HoverLoading" xml:space="preserve">
+    <value>Wird geladen…</value>
+  </data>
 </root>

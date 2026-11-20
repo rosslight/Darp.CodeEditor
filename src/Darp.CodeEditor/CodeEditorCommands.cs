@@ -39,6 +39,13 @@ public static class CodeEditorCommands
     /// <summary>Selects the previous item of completion's list, as Up does, as <see cref="SelectNextSuggestion"/>.</summary>
     public const string SelectPrevSuggestion = "selectPrevSuggestion";
 
+    /// <summary>
+    /// Shows the hover at the caret: the diagnostics there and the language server's information, at once. When a hover
+    /// shows already, the keyboard goes into it, where the arrows, Page Up, Page Down, Home and End scroll it, and
+    /// Escape closes it.
+    /// </summary>
+    public const string ShowHover = "editor.action.showHover";
+
     /// <summary>Asks the language server for the signature of the call around the caret.</summary>
     public const string TriggerParameterHints = "editor.action.triggerParameterHints";
 

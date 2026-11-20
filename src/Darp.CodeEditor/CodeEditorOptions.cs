@@ -23,6 +23,9 @@ public sealed record CodeEditorOptions
     /// <summary>What the search bar starts with as it opens: <c>editor.find.*</c>.</summary>
     public FindOptions Find { get; init; } = new();
 
+    /// <summary>When the hover shows as the pointer rests on text: <c>editor.hover.*</c>.</summary>
+    public HoverOptions Hover { get; init; } = new();
+
     /// <summary>
     /// Which brackets are boxed at a caret without a selection: <c>editor.matchBrackets</c>.
     /// <see cref="MatchBrackets.Near"/> is the cheaper, quieter mode.
@@ -49,6 +52,26 @@ public sealed record ParameterHintsOptions
     /// turning it off closes signature help that shows.
     /// </summary>
     public bool Enabled { get; init; } = true;
+}
+
+/// <summary>When the hover shows as the pointer rests on text.</summary>
+public sealed record HoverOptions
+{
+    private static readonly TimeSpan s_maxDelay = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// How long the pointer rests on a character before its hover shows: <c>editor.hover.delay</c>, 300 ms by default,
+    /// from 0 to 10 seconds; a value outside is clamped. The language server is asked halfway through.
+    /// </summary>
+    public TimeSpan Delay
+    {
+        get;
+        init =>
+            field =
+                value < TimeSpan.Zero ? TimeSpan.Zero
+                : value > s_maxDelay ? s_maxDelay
+                : value;
+    } = TimeSpan.FromMilliseconds(300);
 }
 
 /// <summary>
