@@ -549,11 +549,13 @@ How the client talks to a server, where the protocol leaves a choice:
     case, so the few letters whose case depends on their context, such as the Greek final sigma, match differently
     than in VS Code. The first item is selected, or the first that
     the server preselects among those that match best. Lists of up to 2,000 items tolerate a typo, as VS Code's
-    `fuzzyScoreGraceful`: an item that the typed text does not match also matches with two neighbouring typed
-    characters swapped, after the first and up to the seventh and eighth, at a cost of 3, the best swap counting. VS
-    Code's suggest widget tries the swaps also for an item that matches as typed, which costs up to seven matches an
-    item; one ranking here fills at most 2 million cells of the scoring tables, some 12 ms, and scores the rest by the
-    way that one pass finds, which tolerates a typo too and scores no higher than the table. As in VS Code, typing on ranks
+    suggest widget does with `fuzzyScoreGracefulAggressive`: an item also matches with two neighbouring typed
+    characters swapped, after the first and up to the seventh and eighth, at a cost of 3, and the best of these and
+    the text as typed counts, so that "cno" ranks "console" as "con" does. That costs up to seven matches an item: a
+    ranking whose scoring tables would fill more than 2 million cells, some 12 ms, as 2,000 labels of 128 characters
+    against 63 typed characters do, scores all of its items the cheaper way instead, by the way that one pass finds,
+    as the table scores it, and with swaps only for an item that does not match as typed, as VS Code's
+    `fuzzyScoreGraceful`. It decides before it scores, so that alike items score alike. As in VS Code, typing on ranks
     the items that show, and anything else, such as Backspace, all of the answer's: a long list tolerates a typo once
     typing shortened it, and Ctrl+Space there ranks it whole, strictly. Matching runs off the UI thread,
     whatever the list's length and the typed text's: each change cancels the filter under way, and the list shows the
@@ -1274,12 +1276,15 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   thread did nothing else in between, the list still shows what it showed, and then the
   newest result. The matched characters show in bold, and a preselected item is selected among the best. A typo of
   two neighbouring characters finds the item in lists of up to 2,000, also in a longer one once typing on shortened
-  what shows, and Ctrl+Space there ranks the long list strictly; past its budget, a ranking scores as the table does
-  for the way that one pass finds, still tolerates a typo, and finds no item the table would not. Ranking 2,000 items
-  of 128 characters against 63 typed characters that each label holds, the worst case, takes the background thread
-  16 ms, where matching them strictly took 49 ms; from typing a character until a frame shows such a list filtered
-  takes 21 ms at the 95th percentile, where strict matching took 65 ms, and 20 ms for short labels, as before
-  (BenchmarkDotNet, i7-13700); a list longer than 2,000 items costs no more than before;
+  what shows, and Ctrl+Space there ranks the long list strictly; "cno" ranks "console" as "con" does, less 3, as in
+  VS Code; past its budget, a ranking scores every item as the table does for the way that one pass finds, still
+  tolerates a typo, finds no item the table would not, and scores alike items alike whatever its budget. Ranking
+  2,000 items of 128 characters against 63 typed characters that each label holds, the worst case, takes the
+  background thread 1.4 ms, where matching them strictly took 49 ms; from typing a character until a frame shows such
+  a list filtered takes 24 ms at the 95th percentile, where strict matching took 69 ms, and 20 ms for short labels, as
+  before; Backspace over 2,000 labels of 40 characters against 8 typed characters, the most that tables score, takes
+  35 ms, where strict matching took 23 ms (BenchmarkDotNet, i7-13700); a list longer than 2,000 items costs no more
+  than before;
 - Enter, Tab, a click, the item's own commit character and the server's commit the selected item, each as one step
   that the user undoes, and a commit character then goes in; an item's own commit characters replace the server's.
   A text edit replaces its range, also grown by what was typed since; Enter inserts an insert and replace edit over

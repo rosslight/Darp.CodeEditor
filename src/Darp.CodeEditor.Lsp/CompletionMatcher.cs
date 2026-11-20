@@ -14,15 +14,18 @@ namespace Darp.CodeEditor.Lsp;
 /// the same score.
 /// </para>
 /// <para>
-/// Lists of up to <see cref="MaxGracefulItems"/> items tolerate a typo: an item that the typed text does not match
-/// also matches with two neighbouring characters of it swapped, after the first character and up to the seventh and
-/// eighth, at a cost of 3, the best swap counting, so that "prnit" matches "print". Longer lists match strictly, as
-/// each swap is another match.
+/// Lists of up to <see cref="MaxGracefulItems"/> items tolerate a typo, as VS Code's suggest widget does with
+/// <c>fuzzyScoreGracefulAggressive</c>: an item also matches with two neighbouring characters of the typed text
+/// swapped, after the first character and up to the seventh and eighth, at a cost of 3, and the best of these and the
+/// text as typed counts, so that "prnit" matches "print", and "cno" matches "console" as "con" does. Longer lists match
+/// strictly, as each swap is another match.
 /// </para>
 /// <para>
-/// One ranking fills at most <see cref="MaxCellsPerRank"/> cells of the scoring tables, as many as some 12 ms take:
-/// matching 2,000 labels of 128 characters against 63 typed characters fills about 8 million. Past them, an item's
-/// score is that of the way that one pass finds, which still tolerates a typo (<see cref="FuzzyScorer"/>).
+/// A ranking whose scoring tables would fill more than <see cref="MaxCellsPerRank"/> cells, as many as some 12 ms take,
+/// scores each of its items the cheaper way: by the way that one pass finds, as the table scores that way
+/// (<see cref="FuzzyScorer.ScoreInOnePass"/>), and with swaps only for an item that the typed text does not match, as
+/// VS Code's <c>fuzzyScoreGraceful</c>. Matching 2,000 labels of 128 characters against 63 typed characters fills some
+/// 8 million for the text as typed alone. It decides before it scores, so that alike items score alike.
 /// </para>
 /// <para>
 /// This is a port of VS Code's <c>fuzzyScore</c>, <c>fuzzyScoreGraceful</c> and <c>anyScore</c>
@@ -46,7 +49,7 @@ internal sealed class CompletionMatcher
     /// <summary>The most items that <see cref="Rank"/> matches gracefully, tolerating a typo; longer lists strictly.</summary>
     public const int MaxGracefulItems = 2000;
 
-    /// <summary>The most cells of the scoring tables that one ranking fills (<see cref="FuzzyScorer.CellsLeft"/>).</summary>
+    /// <summary>The most cells of the scoring tables that one ranking fills (<see cref="FuzzyScorer.Cells"/>).</summary>
     public const long MaxCellsPerRank = 2_000_000;
 
     /// <summary>The score of an item when nothing is typed: below any score of a match.</summary>
@@ -62,8 +65,9 @@ internal sealed class CompletionMatcher
 
     /// <summary>
     /// The items that match, best first; equal scores keep the order of <paramref name="items"/>. Up to
-    /// <see cref="MaxGracefulItems"/> items match gracefully. Matching a long list against a long typed text takes
-    /// long, so it belongs off the UI thread; it stops soon once <paramref name="cancellationToken"/> is cancelled.
+    /// <see cref="MaxGracefulItems"/> items match gracefully, and all of them by tables while those stay within
+    /// <see cref="MaxCellsPerRank"/>. Matching a long list against a long typed text takes long, so it belongs off the
+    /// UI thread; it stops soon once <paramref name="cancellationToken"/> is cancelled.
     /// </summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public List<RankedCompletion> Rank(
@@ -72,23 +76,16 @@ internal sealed class CompletionMatcher
     )
     {
         bool graceful = items.Count <= MaxGracefulItems;
+        bool exact = Cells(items, graceful, cancellationToken) <= _cellsPerRank;
         var ranked = new List<RankedCompletion>();
-        _scorer.CellsLeft = _cellsPerRank;
-        try
+        for (int i = 0; i < items.Count; i++)
         {
-            for (int i = 0; i < items.Count; i++)
-            {
-                // An item takes up to some 50 µs: a check every 64 items keeps the wait short and its cost small.
-                if (i % 64 == 0)
-                    cancellationToken.ThrowIfCancellationRequested();
-                CompletionCandidate item = items[i];
-                if (Match(item.Typed, item.Label, item.FilterText, item.FilterTextIsLabel, graceful) is { } match)
-                    ranked.Add(new RankedCompletion(i, match.Score, match.Highlights));
-            }
-        }
-        finally
-        {
-            _scorer.CellsLeft = long.MaxValue;
+            // An item takes up to some 50 µs: a check every 64 items keeps the wait short and its cost small.
+            if (i % 64 == 0)
+                cancellationToken.ThrowIfCancellationRequested();
+            CompletionCandidate item = items[i];
+            if (Match(item.Typed, item.Label, item.FilterText, item.FilterTextIsLabel, graceful, exact) is { } match)
+                ranked.Add(new RankedCompletion(i, match.Score, match.Highlights));
         }
         // A stable order: List.Sort is not stable, so the index decides between equal scores.
         ranked.Sort(static (a, b) => a.Score != b.Score ? b.Score.CompareTo(a.Score) : a.Index.CompareTo(b.Index));
@@ -111,32 +108,87 @@ internal sealed class CompletionMatcher
     /// reading the item once, as comparing whole texts costs as much as they are long.
     /// </param>
     /// <param name="graceful">Whether a typo is tolerated, as in a list of up to <see cref="MaxGracefulItems"/>.</param>
+    /// <param name="exact">
+    /// Whether scores come from the tables; otherwise the cheaper way, as a ranking past <see cref="MaxCellsPerRank"/>.
+    /// Both find the same items.
+    /// </param>
     public (int Score, int[] Highlights)? Match(
         string typed,
         string label,
         string filterText,
         bool filterTextIsLabel,
-        bool graceful = false
+        bool graceful = false,
+        bool exact = true
     )
     {
-        // Whitespace that the item's edit starts with is not typed text.
-        int start = 0;
-        while (start < typed.Length && typed[start] is ' ' or '\t')
-            start++;
+        int start = TypedStart(typed);
         if (start == typed.Length)
             return (DefaultScore, []);
         string typedLow = Lower(typed);
         string filterTextLow = Lower(filterText);
         (int Score, int[] Positions)? scored = graceful
-            ? GracefulScore(typed, typedLow, start, filterText, filterTextLow)
-            : _scorer.Score(typed, typedLow, start, filterText, filterTextLow, firstMatchCanBeWeak: false);
+            ? GracefulScore(typed, typedLow, start, filterText, filterTextLow, exact)
+            : Score(typed, typedLow, start, filterText, filterTextLow, firstMatchCanBeWeak: false, exact);
         if (scored is not { } match)
             return null;
         if (filterTextIsLabel)
             return match;
         // The label shows: its characters that match, by the most lenient score, with the filter text's score.
-        return (match.Score, AnyScore(typed, typedLow, start, label));
+        return (match.Score, AnyScore(typed, typedLow, start, label, exact));
     }
+
+    /// <summary>
+    /// The cells of the scoring tables that ranking <paramref name="items"/> by them fills, up to the first count past
+    /// the budget: for each item, its filter text's for the text as typed and for each swap that it tries, and its
+    /// label's, which shows the matched characters, when the filter text is another.
+    /// </summary>
+    private long Cells(IReadOnlyList<CompletionCandidate> items, bool graceful, CancellationToken cancellationToken)
+    {
+        long cells = 0;
+        for (int i = 0; i < items.Count && cells <= _cellsPerRank; i++)
+        {
+            if (i % 64 == 0)
+                cancellationToken.ThrowIfCancellationRequested();
+            CompletionCandidate item = items[i];
+            int start = TypedStart(item.Typed);
+            if (start == item.Typed.Length)
+                continue;
+            string typedLow = Lower(item.Typed);
+            string filterTextLow = Lower(item.FilterText);
+            cells += _scorer.Cells(typedLow, start, filterTextLow);
+            if (graceful)
+            {
+                foreach (int moving in Swaps(item.Typed, start))
+                    cells += _scorer.Cells(Swapped(typedLow, moving), start, filterTextLow);
+            }
+            if (!item.FilterTextIsLabel)
+                cells += _scorer.Cells(typedLow, start, Lower(item.Label));
+        }
+        return cells;
+    }
+
+    /// <summary>Where the typed text starts: whitespace that the item's edit starts with is not typed text.</summary>
+    private static int TypedStart(string typed)
+    {
+        int start = 0;
+        while (start < typed.Length && typed[start] is ' ' or '\t')
+            start++;
+        return start;
+    }
+
+    /// <summary>The table's score, or with <paramref name="exact"/> false the cheaper one's.</summary>
+    private (int Score, int[] Positions)? Score(
+        string pattern,
+        string patternLow,
+        int patternStart,
+        string word,
+        string wordLow,
+        bool firstMatchCanBeWeak,
+        bool exact
+    ) =>
+        exact
+            ? _scorer.Score(pattern, patternLow, patternStart, word, wordLow, firstMatchCanBeWeak)
+            : FuzzyScorer.ScoreInOnePass(pattern, patternLow, patternStart, word, wordLow, firstMatchCanBeWeak);
 
     /// <summary>
     /// The first <see cref="MaxLength"/> characters of <paramref name="text"/>, all that matching reads, in lower case:
@@ -149,55 +201,55 @@ internal sealed class CompletionMatcher
     /// VS Code's <c>anyScore</c>: the characters of <paramref name="word"/> that match, also weakly and from a later
     /// typed character; none when nothing does.
     /// </summary>
-    private int[] AnyScore(string pattern, string patternLow, int patternStart, string word)
+    private int[] AnyScore(string pattern, string patternLow, int patternStart, string word, bool exact)
     {
         string wordLow = Lower(word);
         int max = Math.Min(13, pattern.Length);
         for (int start = patternStart; start < max; start++)
         {
-            if (_scorer.Score(pattern, patternLow, start, word, wordLow, firstMatchCanBeWeak: true) is { } match)
+            if (Score(pattern, patternLow, start, word, wordLow, firstMatchCanBeWeak: true, exact) is { } match)
                 return match.Positions;
         }
         return [];
     }
 
     /// <summary>
-    /// VS Code's <c>fuzzyScoreGraceful</c>: <see cref="FuzzyScorer.Score"/> for <paramref name="pattern"/> as typed, or
-    /// when that does not match, the best with two neighbouring characters swapped, one pair at a time, each swap
-    /// costing 3; null when none matches.
+    /// VS Code's <c>fuzzyScoreGracefulAggressive</c>, by the tables: the best score of <paramref name="pattern"/> as
+    /// typed and with two neighbouring characters swapped, one pair at a time, each swap costing 3. The cheaper way,
+    /// with <paramref name="exact"/> false, is its <c>fuzzyScoreGraceful</c>: the swaps only when the text as typed
+    /// does not match. Null when none matches.
     /// </summary>
     private (int Score, int[] Positions)? GracefulScore(
         string pattern,
         string patternLow,
         int patternStart,
         string word,
-        string wordLow
+        string wordLow,
+        bool exact
     )
     {
-        (int Score, int[] Positions)? top = _scorer.Score(
+        (int Score, int[] Positions)? top = Score(
             pattern,
             patternLow,
             patternStart,
             word,
             wordLow,
-            firstMatchCanBeWeak: false
+            firstMatchCanBeWeak: false,
+            exact
         );
-        if (top is not null || pattern.Length < 3)
+        if (top is not null && !exact)
             return top;
-        // At most 7 tries, after the first character; VS Code counts them from the start of the whole pattern.
-        int tries = Math.Min(7, pattern.Length - 1);
-        for (int moving = patternStart + 1; moving < tries; moving++)
+        foreach (int moving in Swaps(pattern, patternStart))
         {
-            // Alike neighbours have nothing to swap.
             if (
-                pattern[moving] != pattern[moving + 1]
-                && _scorer.Score(
+                Score(
                     Swapped(pattern, moving),
                     Swapped(patternLow, moving),
                     patternStart,
                     word,
                     wordLow,
-                    firstMatchCanBeWeak: false
+                    firstMatchCanBeWeak: false,
+                    exact
                 )
                     is { } candidate
                 && (top is not { } best || candidate.Score - 3 > best.Score)
@@ -207,6 +259,23 @@ internal sealed class CompletionMatcher
             }
         }
         return top;
+    }
+
+    /// <summary>
+    /// The positions whose character a graceful match swaps with the next, one at a time: from after the first typed
+    /// character up to the seventh, where the two differ, as alike neighbours have nothing to swap; none for fewer than
+    /// three characters. VS Code counts the seven from the start of the whole pattern.
+    /// </summary>
+    private static IEnumerable<int> Swaps(string pattern, int patternStart)
+    {
+        if (pattern.Length < 3)
+            yield break;
+        int tries = Math.Min(7, pattern.Length - 1);
+        for (int moving = patternStart + 1; moving < tries; moving++)
+        {
+            if (pattern[moving] != pattern[moving + 1])
+                yield return moving;
+        }
     }
 
     /// <summary><paramref name="text"/> with the characters at <paramref name="position"/> and after it swapped.</summary>
