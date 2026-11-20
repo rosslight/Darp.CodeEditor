@@ -101,7 +101,6 @@ internal sealed class PopupFrame : Border
 
     protected override Size ArrangeOverride(Size finalSize)
     {
-        // Inside the border, with the corners' radius less the border's.
         _outline.Radius = Math.Max(0, Radius - BorderThickness.Left);
         _outline.Arrange(new Rect(finalSize).Deflate(BorderThickness));
         return base.ArrangeOverride(finalSize);

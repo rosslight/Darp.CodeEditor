@@ -107,7 +107,6 @@ internal static class HoverView
     private static Control Diagnostic(HoverDiagnostic diagnostic, PopupLook look)
     {
         var column = new PopupStack();
-        // A piece that goes on with places alone has no line for the message.
         if (!diagnostic.Continues || diagnostic.Line.Count > 0)
         {
             TextBlock line = CodeText(look);

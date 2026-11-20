@@ -235,14 +235,8 @@ internal sealed class HoverController : IEditorFeature
             return;
         }
         int caret = _textArea.Caret.Offset;
-        DocumentLine line = _buffer.GetLineByOffset(caret);
         // Right after a word, as the caret is when typing ends, the hover is the word's.
-        int offset =
-            caret > line.Offset
-            && (caret == line.EndOffset || !WordCharacters.IsWordCharacter(_buffer.GetCharAt(caret)))
-            && WordCharacters.IsWordCharacter(_buffer.GetCharAt(caret - 1))
-                ? caret - 1
-                : caret;
+        int offset = WordRules.WordAt(_buffer, caret) is { Length: > 0 } word && word.End == caret ? caret - 1 : caret;
         Hovered hovered = Begin(offset, fromKeyboard: true);
         Ask(hovered);
         Due(hovered);
@@ -369,7 +363,6 @@ internal sealed class HoverController : IEditorFeature
         _pointer = pressed ? null : point;
         if (_clickedAt is { } clicked && point != clicked)
             _clickedAt = null;
-        // A held hover stays, as does one asked for by key, as in VS Code.
         if (_popup.IsHeld || (_hovered is { FromKeyboard: true } && _popup.IsOpen))
             return;
         if (_popup.IsOpen && _hovered is { } shown)
