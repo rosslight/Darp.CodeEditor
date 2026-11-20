@@ -1278,9 +1278,11 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   two neighbouring characters finds the item in lists of up to 2,000, also in a longer one once typing on shortened
   what shows, and Ctrl+Space there ranks the long list strictly; "cno" ranks "console" as "con" does, less 3, as in
   VS Code; past its budget, a ranking scores every item as the table does for the way that one pass finds, still
-  tolerates a typo, finds no item the table would not, and scores alike items alike whatever its budget. Ranking
+  tolerates a typo, finds no item the table would not, and scores alike items alike whatever its budget, which counts
+  the table that finds a label's matched characters, also from a later typed character. Ranking
   2,000 items of 128 characters against 63 typed characters that each label holds, the worst case, takes the
-  background thread 1.4 ms, where matching them strictly took 49 ms; from typing a character until a frame shows such
+  background thread 1.4 ms, where matching them strictly took 49 ms, and 2,000 whose filter texts differ from such
+  labels 3.2 ms; from typing a character until a frame shows such
   a list filtered takes 24 ms at the 95th percentile, where strict matching took 69 ms, and 20 ms for short labels, as
   before; Backspace over 2,000 labels of 40 characters against 8 typed characters, the most that tables score, takes
   35 ms, where strict matching took 23 ms (BenchmarkDotNet, i7-13700); a list longer than 2,000 items costs no more

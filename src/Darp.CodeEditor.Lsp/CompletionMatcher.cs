@@ -67,7 +67,8 @@ internal sealed class CompletionMatcher
     /// The items that match, best first; equal scores keep the order of <paramref name="items"/>. Up to
     /// <see cref="MaxGracefulItems"/> items match gracefully, and all of them by tables while those stay within
     /// <see cref="MaxCellsPerRank"/>. Matching a long list against a long typed text takes long, so it belongs off the
-    /// UI thread; it stops soon once <paramref name="cancellationToken"/> is cancelled.
+    /// UI thread; it stops soon once <paramref name="cancellationToken"/> is cancelled. Each text is read in lower case
+    /// once, and a typed text that items share, as they mostly do, is made ready once, with its swaps.
     /// </summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public List<RankedCompletion> Rank(
@@ -75,8 +76,8 @@ internal sealed class CompletionMatcher
         CancellationToken cancellationToken = default
     )
     {
-        bool graceful = items.Count <= MaxGracefulItems;
-        bool exact = Cells(items, graceful, cancellationToken) <= _cellsPerRank;
+        var texts = new RankedTexts(items, items.Count <= MaxGracefulItems);
+        bool exact = Cells(texts, cancellationToken) <= _cellsPerRank;
         var ranked = new List<RankedCompletion>();
         for (int i = 0; i < items.Count; i++)
         {
@@ -84,8 +85,12 @@ internal sealed class CompletionMatcher
             if (i % 64 == 0)
                 cancellationToken.ThrowIfCancellationRequested();
             CompletionCandidate item = items[i];
-            if (Match(item.Typed, item.Label, item.FilterText, item.FilterTextIsLabel, graceful, exact) is { } match)
+            if (
+                Match(texts.Typed(i), item.Label, texts, i, item.FilterText, item.FilterTextIsLabel, exact) is { } match
+            )
+            {
                 ranked.Add(new RankedCompletion(i, match.Score, match.Highlights));
+            }
         }
         // A stable order: List.Sort is not stable, so the index decides between equal scores.
         ranked.Sort(static (a, b) => a.Score != b.Score ? b.Score.CompareTo(a.Score) : a.Index.CompareTo(b.Index));
@@ -121,59 +126,59 @@ internal sealed class CompletionMatcher
         bool exact = true
     )
     {
-        int start = TypedStart(typed);
-        if (start == typed.Length)
+        var texts = new RankedTexts([new CompletionCandidate(typed, label, filterText, filterTextIsLabel)], graceful);
+        return Match(texts.Typed(0), label, texts, 0, filterText, filterTextIsLabel, exact);
+    }
+
+    /// <summary>How the item at <paramref name="index"/> of <paramref name="texts"/> matches, as <see cref="Match(string, string, string, bool, bool, bool)"/> says.</summary>
+    private (int Score, int[] Highlights)? Match(
+        TypedText typed,
+        string label,
+        RankedTexts texts,
+        int index,
+        string filterText,
+        bool filterTextIsLabel,
+        bool exact
+    )
+    {
+        if (typed.Start == typed.Text.Length)
             return (DefaultScore, []);
-        string typedLow = Lower(typed);
-        string filterTextLow = Lower(filterText);
-        (int Score, int[] Positions)? scored = graceful
-            ? GracefulScore(typed, typedLow, start, filterText, filterTextLow, exact)
-            : Score(typed, typedLow, start, filterText, filterTextLow, firstMatchCanBeWeak: false, exact);
+        string filterTextLow = texts.FilterTextLow(index);
+        (int Score, int[] Positions)? scored = GracefulScore(typed, filterText, filterTextLow, exact);
         if (scored is not { } match)
             return null;
         if (filterTextIsLabel)
             return match;
         // The label shows: its characters that match, by the most lenient score, with the filter text's score.
-        return (match.Score, AnyScore(typed, typedLow, start, label, exact));
+        return (match.Score, AnyScore(typed, label, texts.LabelLow(index), exact));
     }
 
     /// <summary>
-    /// The cells of the scoring tables that ranking <paramref name="items"/> by them fills, up to the first count past
-    /// the budget: for each item, its filter text's for the text as typed and for each swap that it tries, and its
-    /// label's, which shows the matched characters, when the filter text is another.
+    /// The cells of the scoring tables that ranking the items of <paramref name="texts"/> by them fills, up to the first
+    /// count past the budget: for each item, its filter text's for the text as typed and for each swap that it tries,
+    /// and, when the filter text is another than the label and may match, the label's table that finds its matched
+    /// characters.
     /// </summary>
-    private long Cells(IReadOnlyList<CompletionCandidate> items, bool graceful, CancellationToken cancellationToken)
+    private long Cells(RankedTexts texts, CancellationToken cancellationToken)
     {
         long cells = 0;
-        for (int i = 0; i < items.Count && cells <= _cellsPerRank; i++)
+        for (int i = 0; i < texts.Count && cells <= _cellsPerRank; i++)
         {
             if (i % 64 == 0)
                 cancellationToken.ThrowIfCancellationRequested();
-            CompletionCandidate item = items[i];
-            int start = TypedStart(item.Typed);
-            if (start == item.Typed.Length)
+            TypedText typed = texts.Typed(i);
+            if (typed.Start == typed.Text.Length)
                 continue;
-            string typedLow = Lower(item.Typed);
-            string filterTextLow = Lower(item.FilterText);
-            cells += _scorer.Cells(typedLow, start, filterTextLow);
-            if (graceful)
-            {
-                foreach (int moving in Swaps(item.Typed, start))
-                    cells += _scorer.Cells(Swapped(typedLow, moving), start, filterTextLow);
-            }
-            if (!item.FilterTextIsLabel)
-                cells += _scorer.Cells(typedLow, start, Lower(item.Label));
+            string filterTextLow = texts.FilterTextLow(i);
+            long filtered = _scorer.Cells(typed.Low, typed.Start, filterTextLow);
+            foreach ((_, string swappedLow) in typed.Swaps)
+                filtered += _scorer.Cells(swappedLow, typed.Start, filterTextLow);
+            cells += filtered;
+            // Only an item that may match shows its label.
+            if (!texts.FilterTextIsLabel(i) && filtered > 0)
+                cells += AnyTable(typed.Low, typed.Start, texts.LabelLow(i)).Cells;
         }
         return cells;
-    }
-
-    /// <summary>Where the typed text starts: whitespace that the item's edit starts with is not typed text.</summary>
-    private static int TypedStart(string typed)
-    {
-        int start = 0;
-        while (start < typed.Length && typed[start] is ' ' or '\t')
-            start++;
-        return start;
     }
 
     /// <summary>The table's score, or with <paramref name="exact"/> false the cheaper one's.</summary>
@@ -201,37 +206,44 @@ internal sealed class CompletionMatcher
     /// VS Code's <c>anyScore</c>: the characters of <paramref name="word"/> that match, also weakly and from a later
     /// typed character; none when nothing does.
     /// </summary>
-    private int[] AnyScore(string pattern, string patternLow, int patternStart, string word, bool exact)
+    private int[] AnyScore(TypedText typed, string word, string wordLow, bool exact)
     {
-        string wordLow = Lower(word);
-        int max = Math.Min(13, pattern.Length);
-        for (int start = patternStart; start < max; start++)
-        {
-            if (Score(pattern, patternLow, start, word, wordLow, firstMatchCanBeWeak: true, exact) is { } match)
-                return match.Positions;
-        }
-        return [];
+        int start = AnyTable(typed.Low, typed.Start, wordLow).Start;
+        return
+            start >= 0
+            && Score(typed.Text, typed.Low, start, word, wordLow, firstMatchCanBeWeak: true, exact) is { } match
+            ? match.Positions
+            : [];
     }
 
     /// <summary>
-    /// VS Code's <c>fuzzyScoreGracefulAggressive</c>, by the tables: the best score of <paramref name="pattern"/> as
-    /// typed and with two neighbouring characters swapped, one pair at a time, each swap costing 3. The cheaper way,
-    /// with <paramref name="exact"/> false, is its <c>fuzzyScoreGraceful</c>: the swaps only when the text as typed
-    /// does not match. Null when none matches.
+    /// Where <see cref="AnyScore"/> matches from, and the cells of its table: the first typed character, from
+    /// <paramref name="patternStart"/> and before the fourteenth, from which the word holds the rest of the typed text
+    /// in order, as a match that may start weakly needs no more; -1 and none when there is no such character.
     /// </summary>
-    private (int Score, int[] Positions)? GracefulScore(
-        string pattern,
-        string patternLow,
-        int patternStart,
-        string word,
-        string wordLow,
-        bool exact
-    )
+    private (int Start, long Cells) AnyTable(string patternLow, int patternStart, string wordLow)
+    {
+        int max = Math.Min(13, patternLow.Length);
+        for (int start = patternStart; start < max; start++)
+        {
+            if (_scorer.Cells(patternLow, start, wordLow) is > 0 and var cells)
+                return (start, cells);
+        }
+        return (-1, 0);
+    }
+
+    /// <summary>
+    /// VS Code's <c>fuzzyScoreGracefulAggressive</c>, by the tables: the best score of the text as typed and with two
+    /// neighbouring characters swapped (<see cref="TypedText.Swaps"/>), one pair at a time, each swap costing 3. The
+    /// cheaper way, with <paramref name="exact"/> false, is its <c>fuzzyScoreGraceful</c>: the swaps only when the text
+    /// as typed does not match. Without swaps, as for a strict match, the text as typed. Null when none matches.
+    /// </summary>
+    private (int Score, int[] Positions)? GracefulScore(TypedText typed, string word, string wordLow, bool exact)
     {
         (int Score, int[] Positions)? top = Score(
-            pattern,
-            patternLow,
-            patternStart,
+            typed.Text,
+            typed.Low,
+            typed.Start,
             word,
             wordLow,
             firstMatchCanBeWeak: false,
@@ -239,18 +251,10 @@ internal sealed class CompletionMatcher
         );
         if (top is not null && !exact)
             return top;
-        foreach (int moving in Swaps(pattern, patternStart))
+        foreach ((string swapped, string swappedLow) in typed.Swaps)
         {
             if (
-                Score(
-                    Swapped(pattern, moving),
-                    Swapped(patternLow, moving),
-                    patternStart,
-                    word,
-                    wordLow,
-                    firstMatchCanBeWeak: false,
-                    exact
-                )
+                Score(swapped, swappedLow, typed.Start, word, wordLow, firstMatchCanBeWeak: false, exact)
                     is { } candidate
                 && (top is not { } best || candidate.Score - 3 > best.Score)
             )
@@ -262,28 +266,82 @@ internal sealed class CompletionMatcher
     }
 
     /// <summary>
-    /// The positions whose character a graceful match swaps with the next, one at a time: from after the first typed
-    /// character up to the seventh, where the two differ, as alike neighbours have nothing to swap; none for fewer than
-    /// three characters. VS Code counts the seven from the start of the whole pattern.
+    /// A typed text as matching reads it, made ready once for the items that share it: in lower case, where it starts
+    /// after the whitespace that an item's edit starts with, and, matched gracefully, its swaps: the text with a
+    /// character swapped with the next, one at a time, from after the first typed character up to the seventh, where
+    /// the two differ, as alike neighbours have nothing to swap; none for fewer than three characters. VS Code counts
+    /// the seven from the start of the whole text.
     /// </summary>
-    private static IEnumerable<int> Swaps(string pattern, int patternStart)
+    private sealed class TypedText
     {
-        if (pattern.Length < 3)
-            yield break;
-        int tries = Math.Min(7, pattern.Length - 1);
-        for (int moving = patternStart + 1; moving < tries; moving++)
+        public TypedText(string text, bool graceful)
         {
-            if (pattern[moving] != pattern[moving + 1])
-                yield return moving;
+            Text = text;
+            Low = Lower(text);
+            while (Start < text.Length && text[Start] is ' ' or '\t')
+                Start++;
+            if (!graceful || text.Length < 3)
+                return;
+            int tries = Math.Min(7, text.Length - 1);
+            var swaps = new List<(string, string)>();
+            for (int moving = Start + 1; moving < tries; moving++)
+            {
+                if (text[moving] != text[moving + 1])
+                    swaps.Add((Swapped(text, moving), Swapped(Low, moving)));
+            }
+            Swaps = [.. swaps];
         }
+
+        public string Text { get; }
+
+        public string Low { get; }
+
+        public int Start { get; }
+
+        /// <summary>The text with a swap, and in lower case, as many as it has.</summary>
+        public (string Text, string Low)[] Swaps { get; } = [];
+
+        /// <summary><paramref name="text"/> with the characters at <paramref name="position"/> and after it swapped.</summary>
+        private static string Swapped(string text, int position) =>
+            string.Create(
+                text.Length,
+                (text, position),
+                static (span, state) =>
+                {
+                    state.text.AsSpan().CopyTo(span);
+                    (span[state.position], span[state.position + 1]) = (span[state.position + 1], span[state.position]);
+                }
+            );
     }
 
-    /// <summary><paramref name="text"/> with the characters at <paramref name="position"/> and after it swapped.</summary>
-    private static string Swapped(string text, int position)
+    /// <summary>
+    /// The texts of a ranking's items, each read in lower case once, when matching first needs it, and the typed text
+    /// that items share made ready once.
+    /// </summary>
+    private sealed class RankedTexts(IReadOnlyList<CompletionCandidate> items, bool graceful)
     {
-        char[] swapped = text.ToCharArray();
-        (swapped[position], swapped[position + 1]) = (swapped[position + 1], swapped[position]);
-        return new string(swapped);
+        private readonly IReadOnlyList<CompletionCandidate> _items = items;
+        private readonly bool _graceful = graceful;
+        private readonly string?[] _filterTextLows = new string?[items.Count];
+        private readonly string?[] _labelLows = new string?[items.Count];
+        private TypedText? _typed;
+
+        public int Count => _items.Count;
+
+        public bool FilterTextIsLabel(int index) => _items[index].FilterTextIsLabel;
+
+        /// <summary>The typed text of the item at <paramref name="index"/>: the one before, when the items share it.</summary>
+        public TypedText Typed(int index)
+        {
+            string text = _items[index].Typed;
+            if (_typed is not { } typed || typed.Text != text)
+                _typed = typed = new TypedText(text, _graceful);
+            return typed;
+        }
+
+        public string FilterTextLow(int index) => _filterTextLows[index] ??= Lower(_items[index].FilterText);
+
+        public string LabelLow(int index) => _labelLows[index] ??= Lower(_items[index].Label);
     }
 }
 

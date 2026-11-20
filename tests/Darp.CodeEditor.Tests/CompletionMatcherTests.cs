@@ -230,6 +230,26 @@ public sealed class CompletionMatcherTests
     }
 
     [Fact]
+    public void A_rankings_budget_counts_the_table_that_finds_a_labels_matched_characters()
+    {
+        // The label lacks the first typed character: its matched characters are found from the second on.
+        CompletionCandidate[] items = [new("xab", "yazab", "xab", FilterTextIsLabel: false)];
+        int[] exact = _matcher.Rank(items, TestContext.Current.CancellationToken).Single().Highlights;
+        int[] cheaper = new CompletionMatcher(cellsPerRank: 0)
+            .Rank(items, TestContext.Current.CancellationToken)
+            .Single()
+            .Highlights;
+        exact.ShouldNotBe(cheaper);
+        long filterText = new FuzzyScorer().Cells("xab", 0, "xab");
+
+        // A budget for the filter text's table alone: with the label's, the ranking is past it.
+        new CompletionMatcher(cellsPerRank: filterText)
+            .Rank(items, TestContext.Current.CancellationToken)
+            .Single()
+            .Highlights.ShouldBe(cheaper);
+    }
+
+    [Fact]
     public void Matching_gracefully_swaps_neither_the_first_character_nor_after_the_eighth()
     {
         _matcher.Match("rpint", "print", "print", true, graceful: true).ShouldBeNull();
