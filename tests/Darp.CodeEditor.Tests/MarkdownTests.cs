@@ -172,6 +172,20 @@ public sealed class MarkdownTests
         Pieces([Code("short")]).ShouldHaveSingleItem().Continues.ShouldBeFalse();
     }
 
+    [Fact]
+    public void A_diagnostic_shows_all_of_its_message_with_its_code()
+    {
+        var diagnostic = new Diagnostic(
+            TextSnapshot.FromString(""),
+            default,
+            DiagnosticSeverity.Error,
+            "CS0001",
+            new string('m', 100_000)
+        );
+
+        TextOf(HoverBlocks.Of([diagnostic])).ShouldBe(diagnostic.Message + " (CS0001)");
+    }
+
     /// <summary>The line breaks of the library, and one where only the layout of text breaks lines.</summary>
     public static TheoryData<string> LineBreaks => ["\r\n", "\n", "\r", "\u2028"];
 
@@ -326,6 +340,12 @@ public sealed class MarkdownTests
                 {
                     HoverParagraph paragraph => string.Concat(paragraph.Spans.Select(span => span.Text)),
                     HoverCode code => string.Concat(code.Runs.Select(run => run.Text)),
+                    HoverDiagnostic diagnostic => diagnostic.Message
+                        + (
+                            diagnostic.Source is null && diagnostic.Code is null ? ""
+                            : diagnostic.Code is null ? $" {diagnostic.Source}"
+                            : $" {diagnostic.Source}({diagnostic.Code})"
+                        ),
                     _ => "",
                 }
             )

@@ -124,6 +124,18 @@ public sealed class KeymapTests(UiFixture ui)
     }
 
     [Fact]
+    public void By_default_F8_and_Alt_F8_go_to_the_next_diagnostic_and_with_Shift_to_the_previous_one()
+    {
+        CodeEditorKeymap keymap = CodeEditorKeymap.Default;
+
+        Resolve(keymap, Key(Keys.F8, KeyModifiers.None)).Commands.ShouldBe([CodeEditorCommands.NextMarkerInFiles]);
+        Resolve(keymap, Key(Keys.F8, KeyModifiers.Shift)).Commands.ShouldBe([CodeEditorCommands.PreviousMarkerInFiles]);
+        Resolve(keymap, Key(Keys.F8, KeyModifiers.Alt)).Commands.ShouldBe([CodeEditorCommands.NextMarker]);
+        Resolve(keymap, Key(Keys.F8, KeyModifiers.Alt | KeyModifiers.Shift))
+            .Commands.ShouldBe([CodeEditorCommands.PreviousMarker]);
+    }
+
+    [Fact]
     public void By_default_Ctrl_K_Ctrl_I_shows_the_hover()
     {
         CodeEditorKeymap keymap = CodeEditorKeymap.Default;
