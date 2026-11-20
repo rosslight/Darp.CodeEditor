@@ -431,6 +431,46 @@ public sealed class CompletionBehaviorTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_view_that_a_handler_of_the_commit_ended_runs_no_command_once_the_document_shows_again() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [ { "label": "key",
+                      "command": { "title": "Suggest", "command": "editor.action.triggerSuggest" } } ] }
+                    """
+                )
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "ke");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            using CodeDocument other = CodeDocument.Create(CodeLanguage.PlainText, "unrelated text");
+            bool switched = false;
+            // Another document, and this one again in a new view: the view that commits ended.
+            document.TextChanged += (_, _) =>
+            {
+                if (switched)
+                    return;
+                switched = true;
+                window.Editor.Document = other;
+                window.Editor.Document = document;
+            };
+            await OpenAsync(window, 2);
+            int asked = fake.LinesStartingWith("completion ").Count;
+
+            window.Press(Key.Enter);
+            await BarrierAsync(server, fake);
+
+            document.Text.ShouldBe("key");
+            fake.LinesStartingWith("completion ").Count.ShouldBe(asked);
+            List(window).ShouldBeNull();
+        });
+
+    [Fact]
     public Task An_items_command_runs_only_once_the_item_went_in() =>
         _ui.Run(async () =>
         {
