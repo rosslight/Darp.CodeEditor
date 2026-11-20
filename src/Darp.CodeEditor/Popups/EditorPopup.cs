@@ -80,6 +80,12 @@ internal sealed class EditorPopup
     /// </summary>
     public double? Left { get; set; }
 
+    /// <summary>The size a user resized it to, which it takes within the window's room; NaN for its content's.</summary>
+    public Size FrameSize { get; set; } = new(double.NaN, double.NaN);
+
+    /// <summary>How wide it may grow by its right edge where it is: to the window's edge.</summary>
+    public double MaxWidth => (_layer?.Bounds.Width ?? 0) - (Placed?.Bounds.Left ?? 0);
+
     /// <summary>Whether its edges away from what it is next to resize it, from its next placing on; false by default.</summary>
     public bool IsResizable { get; set; }
 
@@ -191,6 +197,7 @@ internal sealed class EditorPopup
                 return;
             _placedBy = (space, line, left);
             _root.MaxHeight = double.PositiveInfinity;
+            (Frame.Width, Frame.Height) = (FrameSize.Width, FrameSize.Height);
             _root.Measure(new Size(space.Width, double.PositiveInfinity));
             // While the user drags an edge, it stays on its side of the line rather than jump from under the pointer;
             // it takes a side again at its first placing after they let go.
@@ -205,6 +212,8 @@ internal sealed class EditorPopup
                 return;
             }
             placed = next;
+            Frame.Width = Math.Min(FrameSize.Width, next.Bounds.Width);
+            Frame.Height = Math.Min(FrameSize.Height, next.MaxHeight);
         }
         else if (_beside is var (owner, width))
         {

@@ -454,18 +454,55 @@ public sealed class HoverTests(UiFixture ui)
                 await server.StartAsync();
                 PopupFrame popup = await HoverAsync(window, 1, "one is a word in", time);
                 Rect bounds = BoundsInWindow(popup);
-                Drag(window, new Point(bounds.Right - 2, bounds.Center.Y), 100);
+                Drag(window, new Point(bounds.Right - 2, bounds.Center.Y), new Vector(100, 0));
                 // Narrower than the widened popup's right edge: the window's edge pushes it left.
                 window.Window.Width = BoundsInWindow(popup).Right - 10;
                 window.Layout();
                 window.Render();
                 Rect pushed = BoundsInWindow(popup);
 
-                Drag(window, new Point(pushed.Right - 2, pushed.Center.Y), -30);
+                Drag(window, new Point(pushed.Right - 2, pushed.Center.Y), new Vector(-30, 0));
 
                 Rect resized = BoundsInWindow(popup);
                 resized.Left.ShouldBe(pushed.Left, 0.5);
                 resized.Right.ShouldBe(pushed.Right - 30, 0.5);
+            }
+            finally
+            {
+                HoverPopup.LastResizedSize = default;
+            }
+        });
+
+    [Fact]
+    public Task A_resized_hover_stays_in_a_window_that_shrinks_and_takes_its_size_again_as_the_window_grows() =>
+        _ui.Run(async () =>
+        {
+            HoverPopup.LastResizedSize = default;
+            try
+            {
+                var fake = new FakeServer("--no-diagnostics");
+                var time = new ManualTime();
+                await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+                using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two");
+                using var window = new EditorWindow(new CodeEditor { Document = document });
+                await server.StartAsync();
+                PopupFrame popup = await HoverAsync(window, 1, "one is a word in", time);
+                Rect bounds = BoundsInWindow(popup);
+                Drag(window, bounds.BottomRight - new Point(2, 2), new Vector(200, 150));
+                Rect resized = BoundsInWindow(popup);
+                Size client = window.Window.ClientSize;
+
+                // Narrower and shorter than the popup: it stays in the window, with its grips and its scroll bar.
+                Resize(window, new Size(resized.Width - 100, resized.Top + resized.Height / 2));
+                new Rect(window.Window.ClientSize).Contains(BoundsInWindow(popup)).ShouldBeTrue();
+                Resize(window, client);
+                BoundsInWindow(popup).Width.ShouldBe(resized.Width, 0.5);
+                BoundsInWindow(popup).Height.ShouldBe(resized.Height, 0.5);
+
+                // Dragged beyond the window's edge, it grows up to it, its left edge where it was.
+                Drag(window, resized.BottomRight - new Point(2, 2), new Vector(client.Width, 0));
+                BoundsInWindow(popup).Left.ShouldBe(resized.Left, 0.5);
+                BoundsInWindow(popup).Right.ShouldBe(client.Width, 1);
             }
             finally
             {
@@ -642,13 +679,22 @@ public sealed class HoverTests(UiFixture ui)
             popup.Hide();
         });
 
-    /// <summary>Drags a popup's right grip at <paramref name="grip"/> across by <paramref name="by"/> pixels.</summary>
-    private static void Drag(EditorWindow window, Point grip, double by)
+    /// <summary>Drags a popup's grip at <paramref name="grip"/> by <paramref name="by"/>.</summary>
+    private static void Drag(EditorWindow window, Point grip, Vector by)
     {
         window.MoveMouse(grip);
         window.Window.MouseDown(grip, MouseButton.Left);
-        window.Window.MouseMove(grip + new Point(by, 0), RawInputModifiers.LeftMouseButton);
-        window.Window.MouseUp(grip + new Point(by, 0), MouseButton.Left);
+        window.Window.MouseMove(grip + by, RawInputModifiers.LeftMouseButton);
+        window.Window.MouseUp(grip + by, MouseButton.Left);
         window.Layout();
+        window.Render();
+    }
+
+    /// <summary>Resizes the window to <paramref name="size"/>, as the user does.</summary>
+    private static void Resize(EditorWindow window, Size size)
+    {
+        (window.Window.Width, window.Window.Height) = (size.Width, size.Height);
+        window.Layout();
+        window.Render();
     }
 }
