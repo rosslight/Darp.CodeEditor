@@ -91,9 +91,8 @@ internal static class HoverParts
     ) => (a.Characters + b.Characters, a.Lines + b.Lines, a.Runs + b.Runs);
 
     /// <summary>
-    /// A diagnostic larger than a part in pieces of at most a part each, each going on from the one before: its line,
-    /// its message, source and code, with the icon beside the first piece; then its related places, with the last piece
-    /// of the line while they fit it and then in pieces of their own, a place larger than a part in pieces too.
+    /// A diagnostic larger than a part in pieces: its line's, the icon beside the first, then its related places, with
+    /// the line's last piece while they fit it and then in pieces of their own.
     /// </summary>
     private static IEnumerable<HoverBlock> DiagnosticPieces(HoverDiagnostic diagnostic)
     {
@@ -147,10 +146,7 @@ internal static class HoverParts
         };
     }
 
-    /// <summary>
-    /// <paramref name="related"/>, or when it is larger than a part, its pieces: the place, which opens it, with the
-    /// first, and each next going on from the one before.
-    /// </summary>
+    /// <summary><paramref name="related"/>, or its pieces when it is larger than a part, the link with the first.</summary>
     private static IEnumerable<HoverRelated> RelatedPieces(HoverRelated related) =>
         Fits(Size(related))
             ? [related]

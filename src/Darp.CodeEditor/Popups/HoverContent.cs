@@ -24,10 +24,7 @@ internal sealed class HoverContent : StackPanel
     /// <summary>The content that this one comes after, until that is built in full; null for none.</summary>
     private HoverContent? _after;
 
-    /// <summary>
-    /// The blocks after the ones read, read one at a time, as they are built: blocks made as they are read are made a
-    /// part at a time too. Null once all are read.
-    /// </summary>
+    /// <summary>The blocks after the ones read, read as they are built; null once all are read.</summary>
     private IEnumerator<HoverBlock>? _blocks;
 
     /// <summary>The pieces of the block being built, after the ones built; null between blocks.</summary>
@@ -36,7 +33,6 @@ internal sealed class HoverContent : StackPanel
     /// <summary>A piece that did not fit the last part, to build first in the next.</summary>
     private HoverBlock? _pending;
 
-    /// <summary>Whether the next part is asked for, for the next frame.</summary>
     private bool _requested;
 
     public HoverContent(IEnumerable<HoverBlock> blocks, PopupLook look, HoverContent? after = null)
@@ -55,7 +51,6 @@ internal sealed class HoverContent : StackPanel
 
     protected override Type StyleKeyOverride => typeof(HoverContent);
 
-    /// <summary>Whether all of the blocks are built.</summary>
     public bool IsComplete => _pending is null && _pieces is null && _blocks is null;
 
     /// <summary>Builds the next part now, for tests and for the benchmarks.</summary>
@@ -122,9 +117,7 @@ internal sealed class HoverContent : StackPanel
         }
     }
 
-    /// <summary>
-    /// The next piece to build: one that did not fit the last part, the next of a block, or the next block's first.
-    /// </summary>
+    /// <summary>The next piece: one that did not fit the last part, the next of a block, or the next block's first.</summary>
     private HoverBlock? NextPiece()
     {
         if (_pending is { } pending)

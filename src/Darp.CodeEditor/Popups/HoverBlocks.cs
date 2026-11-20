@@ -53,7 +53,6 @@ internal enum HoverIcon
     /// <summary>No icon, and no room for one, as below a heading that shows it.</summary>
     None,
 
-    /// <summary>The icon.</summary>
     Shown,
 
     /// <summary>The room of the icon, beside a piece of a diagnostic after the first.</summary>

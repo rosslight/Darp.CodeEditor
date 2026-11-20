@@ -34,27 +34,22 @@ internal sealed class Hovered(int offset, TextRange word, TextRange along, TextS
     /// <summary>Whether it shows the problem that F8 went to: no more than that, and no server's hover.</summary>
     public bool IsProblem { get; set; }
 
-    /// <summary>Cancels the server's request and the reading of its answer.</summary>
     public CancellationTokenSource Cancellation { get; } = new();
 
     /// <summary>The timers of the wait for the pointer's hover: for asking, showing and "Loading…".</summary>
     public ITimer[] Timers { get; set; } = [];
 
-    /// <summary>Whether its delay is over, so that what is known shows.</summary>
     public bool IsDue { get; set; }
 
     /// <summary>Whether the server answered, also with nothing, or failed.</summary>
     public bool IsAnswered { get; set; }
 
-    /// <summary>Whether the server is late: "Loading…" shows until it answers.</summary>
     public bool IsLate { get; set; }
 
     /// <summary>The server's hover, once it answered with one and its Markdown was read; null before.</summary>
     public IReadOnlyList<HoverBlock>? Answer { get; private set; }
 
-    /// <summary>
-    /// What shows below the diagnostics: the server's hover, or "Loading…" while it is late; nothing before.
-    /// </summary>
+    /// <summary>What shows below the diagnostics: the server's hover, or "Loading…" while it is late.</summary>
     public IReadOnlyList<HoverBlock> Below() =>
         Answer ?? (IsLate && !IsAnswered ? [new HoverParagraph([new HoverSpan(Strings.HoverLoading)])] : []);
 
@@ -66,15 +61,11 @@ internal sealed class Hovered(int offset, TextRange word, TextRange along, TextS
             Range = TextRange.FromBounds(Math.Min(Range.Start, over.Start), Math.Max(Range.End, over.End));
     }
 
-    /// <summary>
-    /// Whether <paramref name="offset"/> is in the hovered text: in its range, or further along a word that was cut.
-    /// Reads no text: how far the word goes was found when the hover started.
-    /// </summary>
+    /// <summary>Whether <paramref name="offset"/> is in the hovered text, also along a word that was cut; reads no text.</summary>
     public bool IsOver(int offset) =>
         (offset >= Range.Start && offset < Math.Max(Range.End, Range.Start + 1))
         || (offset >= _along.Start && offset < _along.End);
 
-    /// <summary>Stops the timers, the server's request and the reading of its answer.</summary>
     public void Stop()
     {
         foreach (ITimer timer in Timers)
