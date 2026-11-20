@@ -61,9 +61,6 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
     /// <summary>Completion from its first request until it ends; null while there is none.</summary>
     private CompletionSession? _session;
 
-    /// <summary>Whether "No suggestions." shows for an empty answer to a request by key, with no completion open.</summary>
-    private bool _showsEmpty;
-
     private readonly CompletionCommit _commit;
     private readonly CompletionResolver _resolver;
     private readonly CompletionFilter _filter;
@@ -204,7 +201,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
     public bool OnKeyDown(KeyEventArgs e)
     {
         if (_session is null)
-            HideEmpty();
+            _view.HideNoSuggestions();
         return _session is not null && e.KeyModifiers == KeyModifiers.None && _filter.SelectByKey(e.Key);
     }
 
@@ -234,7 +231,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
     /// <returns>Whether the list or a message showed.</returns>
     public bool Close()
     {
-        bool showedEmpty = HideEmpty();
+        bool showedEmpty = _view.HideNoSuggestions();
         if (_session is not { } session)
             return showedEmpty;
         bool showed = _filter.IsShowing || _filter.ShowsNoMatch;
@@ -272,7 +269,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         if (!_textArea.ReadOnlySectionProvider.CanInsert(caret))
             return;
         var request = new CompletionRequest(_document.CurrentSnapshot, WordBefore(caret));
-        HideEmpty();
+        _view.HideNoSuggestions();
         CompletionSession session = _session ??= new CompletionSession();
         session.ByKey |= byKey;
         session.Pending?.Cancellation.Cancel();
@@ -313,7 +310,6 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
                 if (session is { ByKey: true, Answer: null })
                 {
                     Close();
-                    _showsEmpty = true;
                     _view.ShowNoSuggestions(request.Word.Start);
                     return;
                 }
@@ -345,7 +341,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         if (_session is not { } session)
         {
             // "No suggestions." of an empty answer shows until the caret moves.
-            HideEmpty();
+            _view.HideNoSuggestions();
             return;
         }
         int caret = _textArea.Caret.Offset;
@@ -375,17 +371,6 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         if (answer.List.IsIncomplete && caret > latest.Offset && WordBefore(caret).Length > 0)
             Ask(new CompletionTrigger(CompletionTriggerKind.TriggerForIncompleteCompletions));
         _filter.Run(answer);
-    }
-
-    /// <summary>Hides "No suggestions." of an empty answer, if it shows.</summary>
-    /// <returns>Whether it showed.</returns>
-    private bool HideEmpty()
-    {
-        if (!_showsEmpty)
-            return false;
-        _showsEmpty = false;
-        _view.Hide();
-        return true;
     }
 
     /// <summary>

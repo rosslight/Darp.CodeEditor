@@ -50,6 +50,9 @@ internal sealed class CompletionView
     /// <summary>Where the word that the list completes starts; null while the list is closed.</summary>
     private int? _wordStart;
 
+    /// <summary>Whether "No suggestions." shows, for an empty answer to a request by key.</summary>
+    private bool _showsNoSuggestions;
+
     public CompletionView(TemplatedControl editor, TextView textView)
     {
         _editor = editor;
@@ -118,10 +121,22 @@ internal sealed class CompletionView
         _list.ShowMessage(Strings.NoSuggestions, look, _textView.DefaultLineHeight);
         ShowDetails(null);
         Open(wordStart);
+        _showsNoSuggestions = true;
+    }
+
+    /// <summary>Hides "No suggestions.", if it shows.</summary>
+    /// <returns>Whether it showed.</returns>
+    public bool HideNoSuggestions()
+    {
+        if (!_showsNoSuggestions)
+            return false;
+        Hide();
+        return true;
     }
 
     public void Hide()
     {
+        _showsNoSuggestions = false;
         _wordStart = null;
         _detailsPopup.Hide();
         _listPopup.Hide();
