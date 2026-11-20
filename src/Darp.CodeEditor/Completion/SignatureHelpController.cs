@@ -342,6 +342,8 @@ internal sealed class SignatureHelpController : IEditorFeature
     /// </summary>
     private async void Show(SignatureHelpInfo help)
     {
+        // What asks once reading started, such as a caret move out of the call, makes what it reads outdated.
+        int asks = _asks;
         _shown = help;
         _reading?.Cancel();
         var reading = new CancellationTokenSource();
@@ -375,7 +377,7 @@ internal sealed class SignatureHelpController : IEditorFeature
                         TaskCreationOptions.DenyChildAttach,
                         _background
                     );
-            if (_reading != reading)
+            if (_reading != reading || asks != _asks)
                 return;
             _popup.Frame.Paint(_colors.HoverBackground, _colors.HoverBorder, _colors.HoverForeground, _colors.Shadow);
             _content.SliderBrushes = _colors.Slider;
