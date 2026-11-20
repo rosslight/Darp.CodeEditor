@@ -79,35 +79,9 @@ internal static class HoverView
 
     private static Control Paragraph(HoverParagraph paragraph, PopupLook look)
     {
-        var inlines = new InlineCollection();
-        var links = new List<(int Start, int End, Action<TopLevel> Open)>();
-        int length = 0;
-        foreach (HoverSpan span in paragraph.Spans)
-        {
-            var run = new Run(span.Text);
-            if (span.Style.HasFlag(SpanStyle.Bold))
-                run.FontWeight = FontWeight.Bold;
-            if (span.Style.HasFlag(SpanStyle.Italic))
-                run.FontStyle = FontStyle.Italic;
-            // A small code span, in the editor's font at the paragraph's size, so that it fits its line.
-            if (span.Style.HasFlag(SpanStyle.Code))
-            {
-                run.FontFamily = look.CodeFont;
-                run.Background = look.Colors.CodeSpanBackground;
-            }
-            if (span.Link is { } uri)
-            {
-                run.Foreground = look.Colors.Link;
-                links.Add((length, length + span.Text.Length, topLevel => Open(topLevel, uri)));
-            }
-            inlines.Add(run);
-            length += span.Text.Length;
-        }
         TextBlock text = Prose(look);
-        text.Inlines = inlines;
+        Show(text, paragraph.Spans, look);
         text.TextWrapping = TextWrapping.Wrap;
-        if (links.Count > 0)
-            OpenLinks(text, links);
         if (paragraph.Marker is not { } marker)
         {
             text.Margin = new Thickness(ListIndent * paragraph.Level, 0, 0, 0);
@@ -130,32 +104,13 @@ internal static class HoverView
     /// </summary>
     private static Control Diagnostic(HoverDiagnostic diagnostic, PopupLook look)
     {
-        IBrush dimmed = Dimmed(look.Foreground);
-        var inlines = new InlineCollection { new Run(diagnostic.Message) };
-        var links = new List<(int Start, int End, Action<TopLevel> Open)>();
-        int length = diagnostic.Message.Length;
-        if (diagnostic.Source is not null || diagnostic.Code is not null)
-        {
-            Add(" " + diagnostic.Source, dimmed);
-            if (diagnostic.Code is { } code && diagnostic.CodeLink is { } page)
-            {
-                Add("(", dimmed);
-                Add(code, Dimmed(look.Colors.Link)).TextDecorations = TextDecorations.Underline;
-                links.Add((length - code.Length, length, topLevel => Open(topLevel, page)));
-                Add(")", dimmed);
-            }
-            else if (diagnostic.Code is { } plain)
-                Add($"({plain})", dimmed);
-        }
         var column = new PopupStack();
         // A piece that goes on with places alone has no line for the message.
-        if (!diagnostic.Continues || length > 0)
+        if (!diagnostic.Continues || diagnostic.Line.Count > 0)
         {
-            TextBlock message = CodeText(look);
-            message.Inlines = inlines;
-            if (links.Count > 0)
-                OpenLinks(message, links);
-            column.Children.Add(message);
+            TextBlock line = CodeText(look);
+            Show(line, diagnostic.Line, look);
+            column.Children.Add(line);
         }
         foreach (HoverRelated related in diagnostic.Related)
         {
@@ -181,14 +136,45 @@ internal static class HoverView
         icon.VerticalAlignment = VerticalAlignment.Top;
         DockPanel.SetDock(icon, Dock.Left);
         return new PopupDock { Children = { icon, column } };
+    }
 
-        Run Add(string text, IBrush foreground)
+    /// <summary>
+    /// Shows <paramref name="spans"/> in <paramref name="text"/>: bold, italic, code in the editor's font at the text's
+    /// size on <c>textCodeBlock.background</c>, so that it fits its line, links in the link color, which open their page,
+    /// and dimmed text at VS Code's 60% opacity.
+    /// </summary>
+    private static void Show(TextBlock text, IReadOnlyList<HoverSpan> spans, PopupLook look)
+    {
+        var inlines = new InlineCollection();
+        var links = new List<(int Start, int End, Action<TopLevel> Open)>();
+        int length = 0;
+        foreach (HoverSpan span in spans)
         {
-            var run = new Run(text) { Foreground = foreground };
+            var run = new Run(span.Text);
+            if (span.Style.HasFlag(SpanStyle.Bold))
+                run.FontWeight = FontWeight.Bold;
+            if (span.Style.HasFlag(SpanStyle.Italic))
+                run.FontStyle = FontStyle.Italic;
+            if (span.Style.HasFlag(SpanStyle.Underline))
+                run.TextDecorations = TextDecorations.Underline;
+            if (span.Style.HasFlag(SpanStyle.Code))
+            {
+                run.FontFamily = look.CodeFont;
+                run.Background = look.Colors.CodeSpanBackground;
+            }
+            IBrush? foreground = span.Link is null ? null : look.Colors.Link;
+            if (span.Style.HasFlag(SpanStyle.Dimmed))
+                foreground = Dimmed(foreground ?? look.Foreground);
+            if (foreground is not null)
+                run.Foreground = foreground;
+            if (span.Link is { } uri)
+                links.Add((length, length + span.Text.Length, topLevel => Open(topLevel, uri)));
             inlines.Add(run);
-            length += text.Length;
-            return run;
+            length += span.Text.Length;
         }
+        text.Inlines = inlines;
+        if (links.Count > 0)
+            OpenLinks(text, links);
     }
 
     /// <summary>

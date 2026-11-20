@@ -173,6 +173,46 @@ public sealed class MarkdownTests
     }
 
     [Fact]
+    public void Every_piece_fits_a_part_also_of_a_list_item_a_diagnostics_source_and_code_and_line_breaks_at_the_limit()
+    {
+        // A list item one character longer than a part.
+        string word = new string('x', HoverParts.MaxCharacters + 1);
+        IReadOnlyList<HoverBlock> item = Pieces(
+            HoverBlocks.Of(Hover("- " + word, true), null, TestContext.Current.CancellationToken)
+        );
+        // A message that nearly fills a part, and a source and a code that take its line past it.
+        var diagnostic = new Diagnostic(
+            TextSnapshot.FromString(""),
+            default,
+            DiagnosticSeverity.Error,
+            new string('c', 30),
+            new string('m', HoverParts.MaxCharacters - 10)
+        )
+        {
+            Source = new string('s', 30),
+            CodeDescription = new Uri("https://example.com/code"),
+        };
+        IReadOnlyList<HoverBlock> line = Pieces(HoverBlocks.Of([diagnostic]));
+        // A line break that would take the part past its characters.
+        string text = new string('x', HoverParts.MaxCharacters - 1) + "\r\ny";
+        IReadOnlyList<HoverBlock> lines = Pieces([new HoverParagraph([new HoverSpan(text)])]);
+
+        foreach (IReadOnlyList<HoverBlock> pieces in (IReadOnlyList<HoverBlock>[])[item, line, lines])
+        {
+            pieces.Count.ShouldBeGreaterThan(1);
+            pieces.ShouldAllBe(piece => HoverParts.Fits(HoverParts.Size(piece)));
+        }
+        string.Concat(item.Select(Text)).ShouldBe(word);
+        item[0].ShouldBeOfType<HoverParagraph>().Marker.ShouldNotBeNull();
+        item.Skip(1)
+            .OfType<HoverParagraph>()
+            .Count(piece => piece.Marker == null && piece.Continues)
+            .ShouldBe(item.Count - 1);
+        string.Concat(line.Select(Text)).ShouldBe($"{diagnostic.Message} {diagnostic.Source}({diagnostic.Code})");
+        lines.Select(Text).ShouldBe([new string('x', HoverParts.MaxCharacters - 1), "y"]);
+    }
+
+    [Fact]
     public void A_diagnostic_shows_all_of_its_message_with_its_code()
     {
         var diagnostic = new Diagnostic(
@@ -340,12 +380,7 @@ public sealed class MarkdownTests
                 {
                     HoverParagraph paragraph => string.Concat(paragraph.Spans.Select(span => span.Text)),
                     HoverCode code => string.Concat(code.Runs.Select(run => run.Text)),
-                    HoverDiagnostic diagnostic => diagnostic.Message
-                        + (
-                            diagnostic.Source is null && diagnostic.Code is null ? ""
-                            : diagnostic.Code is null ? $" {diagnostic.Source}"
-                            : $" {diagnostic.Source}({diagnostic.Code})"
-                        ),
+                    HoverDiagnostic diagnostic => string.Concat(diagnostic.Line.Select(span => span.Text)),
                     _ => "",
                 }
             )

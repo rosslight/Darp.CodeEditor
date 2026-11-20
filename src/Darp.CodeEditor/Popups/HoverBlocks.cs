@@ -31,24 +31,18 @@ internal sealed record HoverCode(IReadOnlyList<CodeRun> Runs) : HoverBlock;
 internal sealed record HoverRule : HoverBlock;
 
 /// <summary>
-/// A diagnostic, as VS Code's hover shows it, in the editor's font: the icon of its severity beside its message, which
-/// keeps its line breaks, then its source and code, dimmed, the code as a link to its web page where it has one, and
-/// below them the other places it concerns, each a link where the editor can go there. A piece that goes on from the
-/// one before with nothing on its message's line, only with places, shows no such line.
+/// A diagnostic, as VS Code's hover shows it, in the editor's font: the icon of its severity beside its line, its message,
+/// which keeps its line breaks, then its source and code, dimmed, the code as a link to its web page where it has one,
+/// and below them the other places it concerns, each a link where the editor can go there. A piece that goes on from the
+/// one before with nothing on its line, only with places, shows no such line.
 /// </summary>
 /// <param name="Severity">Its severity, for its icon.</param>
-/// <param name="Message">Its message, or a piece of it; empty for none.</param>
-/// <param name="Source">What reported it; null for none, as in a piece that more pieces follow.</param>
-/// <param name="Code">Its code; null for none.</param>
-/// <param name="CodeLink">The web page of its code; null for none.</param>
+/// <param name="Line">Its message, source and code, or a piece of them; empty for none.</param>
 /// <param name="Related">The other places it concerns.</param>
 /// <param name="Icon">Whether its severity's icon shows beside it, or only the room of one.</param>
 internal sealed record HoverDiagnostic(
     DiagnosticSeverity Severity,
-    string Message,
-    string? Source,
-    string? Code,
-    Uri? CodeLink,
+    IReadOnlyList<HoverSpan> Line,
     IReadOnlyList<HoverRelated> Related,
     HoverIcon Icon = HoverIcon.Shown
 ) : HoverBlock;
@@ -103,6 +97,8 @@ internal enum SpanStyle
     Bold = 1,
     Italic = 2,
     Code = 4,
+    Dimmed = 8,
+    Underline = 16,
 }
 
 /// <summary>What a hover shows: the messages of the diagnostics under the pointer, above the server's hover.</summary>
@@ -126,10 +122,7 @@ internal static class HoverBlocks
             diagnostics,
             diagnostic => new HoverDiagnostic(
                 diagnostic.Severity,
-                diagnostic.Message,
-                diagnostic.Source,
-                diagnostic.Code,
-                diagnostic.CodeDescription is { Scheme: "http" or "https" } page ? page : null,
+                Line(diagnostic),
                 [
                     .. diagnostic.RelatedInformation.Select(related => new HoverRelated(
                         $"{Name(related.Uri)}({related.Start.Line}, {related.Start.Column}): ",
@@ -140,6 +133,26 @@ internal static class HoverBlocks
                 icon
             )
         );
+
+    /// <summary>A diagnostic's message, then its source and its code, dimmed, as VS Code writes them: <c>message source(code)</c>.</summary>
+    private static IReadOnlyList<HoverSpan> Line(Diagnostic diagnostic)
+    {
+        var line = new List<HoverSpan> { new(diagnostic.Message) };
+        if (diagnostic.Source is null && diagnostic.Code is null)
+            return line;
+        line.Add(new HoverSpan(" " + diagnostic.Source, SpanStyle.Dimmed));
+        if (diagnostic.Code is not { } code)
+            return line;
+        if (diagnostic.CodeDescription is not { Scheme: "http" or "https" } page)
+        {
+            line.Add(new HoverSpan($"({code})", SpanStyle.Dimmed));
+            return line;
+        }
+        line.Add(new HoverSpan("(", SpanStyle.Dimmed));
+        line.Add(new HoverSpan(code, SpanStyle.Dimmed | SpanStyle.Underline, page));
+        line.Add(new HoverSpan(")", SpanStyle.Dimmed));
+        return line;
+    }
 
     /// <summary>The name of a document by its URI, as VS Code's <c>basename</c> takes it: the last part of its path.</summary>
     public static string Name(Uri uri)
