@@ -104,8 +104,7 @@ internal sealed class HoverPopup
     /// <summary>Starts a new hover: the popup takes the size of its content, within its limits.</summary>
     public void Reset()
     {
-        _popup.Frame.Width = double.NaN;
-        _popup.Frame.Height = double.NaN;
+        _popup.FrameSize = new Size(double.NaN, double.NaN);
         _popup.Left = null;
         _resized = false;
     }
@@ -209,22 +208,22 @@ internal sealed class HoverPopup
         );
 
     /// <summary>
-    /// The user drags an edge: the popup takes the size dragged to, at least VS Code's narrowest and a line high, and
-    /// later hovers grow up to it.
+    /// The user drags an edge: the popup takes the size dragged to, within the room right of it and on its side of the
+    /// line, at least VS Code's narrowest and a line high, and later hovers grow up to it.
     /// </summary>
     private void OnResized(Size size, Edges edges)
     {
         _resized = true;
         PopupFrame frame = _popup.Frame;
         double minHeight = _textView.DefaultLineHeight + frame.Padding.Top + frame.Padding.Bottom;
+        size = new Size(Math.Min(size.Width, _popup.MaxWidth), Math.Min(size.Height, _popup.Placed?.MaxHeight ?? 0));
         if ((edges & (Edges.Left | Edges.Right)) != 0)
-            frame.Width = frame.MaxWidth = Math.Max(MinResizedWidth, size.Width);
-        // Within the room on its side of the line.
+            _popup.FrameSize = _popup.FrameSize.WithWidth(frame.MaxWidth = Math.Max(MinResizedWidth, size.Width));
         if ((edges & (Edges.Top | Edges.Bottom)) != 0)
-            frame.Height = frame.MaxHeight = Math.Max(minHeight, Math.Min(size.Height, _popup.Placed?.MaxHeight ?? 0));
+            _popup.FrameSize = _popup.FrameSize.WithHeight(frame.MaxHeight = Math.Max(minHeight, size.Height));
         LastResizedSize = new Size(
-            double.IsNaN(frame.Width) ? frame.Bounds.Width : frame.Width,
-            double.IsNaN(frame.Height) ? frame.Bounds.Height : frame.Height
+            double.IsNaN(_popup.FrameSize.Width) ? frame.Bounds.Width : _popup.FrameSize.Width,
+            double.IsNaN(_popup.FrameSize.Height) ? frame.Bounds.Height : _popup.FrameSize.Height
         );
         Place();
     }
