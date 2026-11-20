@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Primitives.PopupPositioning;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
@@ -11,7 +12,7 @@ namespace Darp.CodeEditor.Editing;
 
 /// <summary>
 /// The editor's default context menu, as Avalonia's text box has one: a flyout, which takes the keyboard while it is
-/// open. The clipboard and Select All; Toggle Line Comment; Find and Replace.
+/// open. Show Hover; the clipboard and Select All; Toggle Line Comment; Find and Replace.
 /// </summary>
 /// <remarks>
 /// As the menu opens, each item takes its text in the UI culture, its keys and whether it applies: the keymap's keys
@@ -32,6 +33,8 @@ internal sealed class EditorMenu : MenuFlyout
         Func<bool> editable = () => showsText() && !editor.IsReadOnly;
         _controls =
         [
+            Command(() => Strings.ShowHover, CodeEditorCommands.ShowHover, showsText),
+            new Separator(),
             Add(() => Strings.Cut, Platform(hotkeys?.Cut), editable, editor.Cut),
             Add(() => Strings.Copy, Platform(hotkeys?.Copy), showsText, editor.Copy),
             Add(() => Strings.Paste, Platform(hotkeys?.Paste), editable, editor.Paste),
@@ -83,12 +86,11 @@ internal sealed class EditorMenu : MenuFlyout
         ControlTheme? separator = Fallback(typeof(Separator), "CodeEditorMenuSeparatorTheme");
         foreach (Separator line in _controls.OfType<Separator>())
             line.Theme = separator;
-        foreach ((MenuItem item, Func<string> text, Func<IReadOnlyList<KeyGesture>> keys, Func<bool> applies) in _items)
+        foreach ((KeysItem item, Func<string> text, Func<IReadOnlyList<KeyGesture>> keys, Func<bool> applies) in _items)
         {
             item.Header = text();
             item.IsEnabled = applies();
-            // A menu item shows one stroke: a sequence of two shows none rather than half of it.
-            item.InputGesture = keys() is [KeyGesture key] ? key : null;
+            item.ShowKeys(keys());
         }
         base.OnOpening(args);
     }
@@ -105,16 +107,53 @@ internal sealed class EditorMenu : MenuFlyout
     /// </summary>
     private MenuItem Add(Func<string> text, Func<IReadOnlyList<KeyGesture>> keys, Func<bool> applies, Action run)
     {
-        var item = new MenuItem();
+        var item = new KeysItem();
         item.Click += (_, _) => run();
         _items.Add(new Item(item, text, keys, applies));
         return item;
     }
 
     private sealed record Item(
-        MenuItem Control,
+        KeysItem Control,
         Func<string> Text,
         Func<IReadOnlyList<KeyGesture>> Keys,
         Func<bool> Applies
     );
+
+    /// <summary>
+    /// A menu item that also shows a sequence of two strokes, such as Ctrl+K Ctrl+I, where <see cref="MenuItem"/> shows
+    /// one gesture: the themes of Fluent, Simple and FluentAvalonia show its keys in their <c>PART_InputGestureText</c>.
+    /// </summary>
+    private sealed class KeysItem : MenuItem
+    {
+        private TextBlock? _keysText;
+        private string? _sequence;
+
+        protected override Type StyleKeyOverride => typeof(MenuItem);
+
+        public void ShowKeys(IReadOnlyList<KeyGesture> keys)
+        {
+            // The first stroke also tells the theme that the item has keys to show.
+            InputGesture = keys.Count > 0 ? keys[0] : null;
+            _sequence = keys.Count > 1 ? string.Join(' ', keys.Select(key => key.ToString("p", null))) : null;
+            ShowSequence();
+        }
+
+        protected override void OnApplyTemplate(TemplateAppliedEventArgs e)
+        {
+            base.OnApplyTemplate(e);
+            _keysText = e.NameScope.Find<TextBlock>("PART_InputGestureText");
+            ShowSequence();
+        }
+
+        private void ShowSequence()
+        {
+            if (_keysText is null)
+                return;
+            if (_sequence is null)
+                _keysText.ClearValue(TextBlock.TextProperty);
+            else
+                _keysText.Text = _sequence;
+        }
+    }
 }
