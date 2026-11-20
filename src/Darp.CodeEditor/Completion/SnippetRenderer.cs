@@ -116,28 +116,36 @@ internal sealed class SnippetRenderer
 
     /// <summary>
     /// A variable's value as it is, as VS Code puts it in, but in the document's line breaks; selected text that
-    /// spans lines gets the indentation that the snippet adds where it goes in, on each of its lines after the first.
-    /// A value longer than what is left is not read.
+    /// spans lines gets the indentation that the snippet adds where it goes in, on each of its lines after the first
+    /// (<see cref="SnippetVariables.SelectionIndentation"/>). A value longer than what is left is not read, and each
+    /// line, line break and indentation counts before it goes in.
     /// </summary>
     private bool WriteValue(SnippetVariableNode variable, string value)
     {
         if (value.Length > _budget)
             return false;
-        if (
+        string indentation =
             variable.Name is "SELECTION" or "TM_SELECTED_TEXT"
             && _context.MultilineSelectionIndentation is { } selectionIndentation
-        )
+                ? SnippetVariables.SelectionIndentation(_lastIndentation ?? selectionIndentation, selectionIndentation)
+                : "";
+        // Where the value's last line starts: its indentation is what the snippet's next lines go on from.
+        int lastLine = Text.Length;
+        int start = 0;
+        while (value.AsSpan(start).IndexOfAny('\r', '\n') is var length and >= 0)
         {
-            value = SnippetVariables.IndentSelection(
-                value,
-                _lastIndentation ?? selectionIndentation,
-                selectionIndentation
-            );
+            int lineBreak = start + length;
+            if (!Append(value.AsSpan(start, length)) || !Append(_context.LineBreak))
+                return false;
+            lastLine = Text.Length;
+            if (!Append(indentation))
+                return false;
+            bool crlf = value[lineBreak] == '\r' && lineBreak + 1 < value.Length && value[lineBreak + 1] == '\n';
+            start = lineBreak + (crlf ? 2 : 1);
         }
-        value = TextUtilities.NormalizeNewLines(value, _context.LineBreak);
-        if (!Append(value))
+        if (!Append(value.AsSpan(start)))
             return false;
-        _lastIndentation = LeadingWhitespace(value.AsSpan(value.LastIndexOfAny(['\r', '\n']) + 1));
+        _lastIndentation = LeadingWhitespace(lastLine);
         return true;
     }
 
@@ -165,7 +173,7 @@ internal sealed class SnippetRenderer
             if (length < 0)
             {
                 // The line as it went in: indented, at a line's start, or as written after other text.
-                _lastIndentation = LeadingWhitespace(Text.ToString(lineStart, Text.Length - lineStart));
+                _lastIndentation = LeadingWhitespace(lineStart);
                 return true;
             }
             int lineBreak = start + length;
@@ -189,13 +197,13 @@ internal sealed class SnippetRenderer
         return Append(_indenting.Whitespace(columns)) && Append(line[whitespace..]);
     }
 
-    /// <summary>The spaces and tabs that <paramref name="line"/> starts with.</summary>
-    private static string LeadingWhitespace(ReadOnlySpan<char> line)
+    /// <summary>The spaces and tabs of the text from <paramref name="start"/> on, up to anything else.</summary>
+    private string LeadingWhitespace(int start)
     {
-        int length = 0;
-        while (length < line.Length && line[length] is ' ' or '\t')
-            length++;
-        return line[..length].ToString();
+        int end = start;
+        while (end < Text.Length && Text[end] is ' ' or '\t')
+            end++;
+        return Text.ToString(start, end - start);
     }
 
     private bool Append(ReadOnlySpan<char> text)
@@ -222,7 +230,7 @@ internal sealed record SnippetContext(
 {
     /// <summary>
     /// For selected text that spans lines, the whitespace at the start of the selection's line up to where it starts:
-    /// <c>SELECTION</c> and <c>TM_SELECTED_TEXT</c> go in with <see cref="SnippetVariables.IndentSelection"/>. Null for
+    /// <c>SELECTION</c> and <c>TM_SELECTED_TEXT</c> take <see cref="SnippetVariables.SelectionIndentation"/>. Null for
     /// selected text on one line, and without any.
     /// </summary>
     public string? MultilineSelectionIndentation { get; init; }

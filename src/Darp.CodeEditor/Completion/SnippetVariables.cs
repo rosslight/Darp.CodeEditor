@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 
 namespace Darp.CodeEditor.Completion;
 
@@ -83,31 +82,16 @@ internal static class SnippetVariables
     }
 
     /// <summary>
-    /// Selected text that spans lines, as VS Code puts it in for <c>SELECTION</c> and <c>TM_SELECTED_TEXT</c>: each of
-    /// its lines after the first gets the indentation that the snippet adds where the variable is, the part of
-    /// <paramref name="variableIndentation"/> past what it shares with <paramref name="lineIndentation"/>.
+    /// The indentation that selected text spanning lines gets on each of its lines after the first, as VS Code puts it
+    /// in for <c>SELECTION</c> and <c>TM_SELECTED_TEXT</c>: the indentation that the snippet adds where the variable is,
+    /// the part of <paramref name="variableIndentation"/> past what it shares with <paramref name="lineIndentation"/>.
     /// </summary>
-    /// <param name="value">The selected text.</param>
     /// <param name="variableIndentation">
     /// The whitespace at the start of the last line of what went in before the variable.
     /// </param>
     /// <param name="lineIndentation">The whitespace at the start of the selection's line, up to where it starts.</param>
-    public static string IndentSelection(string value, string variableIndentation, string lineIndentation)
-    {
-        string extra = variableIndentation[variableIndentation.AsSpan().CommonPrefixLength(lineIndentation)..];
-        if (extra.Length == 0)
-            return value;
-        var text = new StringBuilder(value.Length);
-        for (int i = 0; i < value.Length; i++)
-        {
-            text.Append(value[i]);
-            if (value[i] == '\r' && i + 1 < value.Length && value[i + 1] == '\n')
-                text.Append(value[++i]);
-            if (value[i] is '\r' or '\n')
-                text.Append(extra);
-        }
-        return text.ToString();
-    }
+    public static string SelectionIndentation(string variableIndentation, string lineIndentation) =>
+        variableIndentation[variableIndentation.AsSpan().CommonPrefixLength(lineIndentation)..];
 
     /// <summary>A random variable: six decimal or hexadecimal digits, or a UUID; null for another variable.</summary>
     public static string? Random(string name) =>
