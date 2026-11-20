@@ -242,11 +242,11 @@ internal sealed class EditorPopup
         Frame.ResizableEdges = IsResizable ? EdgesAway(placed) : Edges.None;
     }
 
-    /// <summary>Closes the popup, as its line left the view.</summary>
+    /// <summary>Closes the popup, as its line left the view: its owner first, which may give the keyboard back from it.</summary>
     private void LeaveView()
     {
-        Hide();
         LeftView?.Invoke(this, EventArgs.Empty);
+        Hide();
     }
 
     /// <summary>The popup's height at <paramref name="width"/>.</summary>

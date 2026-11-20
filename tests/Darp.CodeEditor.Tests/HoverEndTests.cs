@@ -341,6 +341,45 @@ public sealed class HoverEndTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_held_hover_whose_line_leaves_the_window_ends_and_gives_the_keyboard_back() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer("--no-diagnostics");
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            await server.StartAsync();
+
+            // Held by a click beside its text, which leaves the keyboard in the text; then out of the window and back.
+            Rect bounds = BoundsInWindow(await HoverAsync(window, 0, "one is a word in", time));
+            window.Click(new Point(bounds.Left + 4, bounds.Center.Y), MouseButton.Left);
+            MoveOutAndBack();
+
+            // Nothing holds it: resting on other text shows its hover.
+            Popup(window).ShouldBeNull();
+            await HoverAsync(window, 4, "two is a word in", time);
+
+            // Held with the keyboard in it, which goes back to the text before the popup leaves.
+            window.Press(Key.K, EditorWindow.Command);
+            window.Press(Key.I, EditorWindow.Command);
+            Popup(window).ShouldNotBeNull().IsKeyboardFocusWithin.ShouldBeTrue();
+            MoveOutAndBack();
+
+            Popup(window).ShouldBeNull();
+            EditorWindow.PartOf(editor).TextArea.IsFocused.ShouldBeTrue();
+
+            void MoveOutAndBack()
+            {
+                editor.Margin = new Thickness(0, 2_000, 0, 0);
+                window.Layout();
+                editor.Margin = default;
+                window.Layout();
+            }
+        });
+
+    [Fact]
     public Task The_popup_closes_on_typing_Escape_scrolling_and_focus_loss() =>
         _ui.Run(async () =>
         {
