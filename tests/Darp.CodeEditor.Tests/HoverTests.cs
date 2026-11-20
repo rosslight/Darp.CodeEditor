@@ -376,6 +376,36 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_long_wrapped_words_hover_shows_also_where_the_word_starts_out_of_view() =>
+        _ui.Run(async () =>
+        {
+            // One word over many rows of a narrow editor, scrolled to its end: its start is rows above the view.
+            var time = new ManualTime();
+            var document = new StandaloneDocument(CodeLanguage.PlainText, new string('x', 2_000), time);
+            var editor = new CodeEditor { Document = document, WordWrap = true };
+            using var window = new EditorWindow(editor, width: 300, height: 200);
+            document.SetDiagnostics([
+                new Diagnostic(
+                    document.CurrentSnapshot,
+                    new TextRange(0, 2_000),
+                    DiagnosticSeverity.Error,
+                    null,
+                    "long"
+                ),
+            ]);
+            editor.ScrollTo(new TextRange(1_990, 0));
+            window.Layout();
+
+            // By the pointer, and by Ctrl+K Ctrl+I at the caret.
+            await HoverAsync(window, 1_990, "long", time);
+            window.Press(Key.Escape);
+            editor.Selection = new TextSelection(1_990);
+            window.Press(Key.K, EditorWindow.Command);
+            window.Press(Key.I, EditorWindow.Command);
+            await WaitForPopupAsync(window, "long");
+        });
+
+    [Fact]
     public Task A_resize_that_Escape_cuts_short_leaves_the_next_hover_alone() =>
         _ui.Run(async () =>
         {
