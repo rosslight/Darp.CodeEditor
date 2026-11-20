@@ -16,8 +16,13 @@
         <Style Selector="TextBlock.section.first">
             <Setter Property="Margin" Value="0,0,0,6" />
         </Style>
-        <Style Selector="fa|FASettingsExpander ComboBox">
+        <Style Selector="fa|FASettingsExpander ComboBox, fa|FASettingsExpander fa|FANumberBox">
             <Setter Property="MinWidth" Value="200" />
+        </Style>
+        <!-- The switches' state in the app's language, rather than the theme's English. -->
+        <Style Selector="fa|FASettingsExpander ToggleSwitch" x:DataType="local:MainViewModel">
+            <Setter Property="OnContent" Value="{Binding Strings.On}" />
+            <Setter Property="OffContent" Value="{Binding Strings.Off}" />
         </Style>
     </UserControl.Styles>
 
@@ -76,6 +81,117 @@
                                 </DataTemplate>
                             </ComboBox.ItemTemplate>
                         </ComboBox>
+                    </fa:FASettingsExpander.Footer>
+                </fa:FASettingsExpander>
+
+                <!--
+                  The editor's options, which every editor of the app takes. The choices are the API's values, as VS
+                  Code's settings show theirs.
+                -->
+                <TextBlock Classes="section" Text="{Binding Strings.Editor}" />
+                <fa:FASettingsExpander
+                    IconSource="Code"
+                    Header="{Binding Strings.AutoClosingBrackets}"
+                    Description="{Binding Strings.AutoClosingBracketsDescription}"
+                >
+                    <fa:FASettingsExpander.Footer>
+                        <ComboBox
+                            ItemsSource="{x:Static settings:EditorSettings.AutoClosingModes}"
+                            SelectedItem="{Binding Settings.Editor.AutoClosingBrackets}"
+                        />
+                    </fa:FASettingsExpander.Footer>
+                </fa:FASettingsExpander>
+                <fa:FASettingsExpander
+                    IconSource="Comment"
+                    Header="{Binding Strings.AutoClosingQuotes}"
+                    Description="{Binding Strings.AutoClosingQuotesDescription}"
+                >
+                    <fa:FASettingsExpander.Footer>
+                        <ComboBox
+                            ItemsSource="{x:Static settings:EditorSettings.AutoClosingModes}"
+                            SelectedItem="{Binding Settings.Editor.AutoClosingQuotes}"
+                        />
+                    </fa:FASettingsExpander.Footer>
+                </fa:FASettingsExpander>
+                <fa:FASettingsExpander
+                    IconSource="Clipboard"
+                    Header="{Binding Strings.EmptySelectionClipboard}"
+                    Description="{Binding Strings.EmptySelectionClipboardDescription}"
+                >
+                    <fa:FASettingsExpander.Footer>
+                        <ToggleSwitch IsChecked="{Binding Settings.Editor.EmptySelectionClipboard}" />
+                    </fa:FASettingsExpander.Footer>
+                </fa:FASettingsExpander>
+                <fa:FASettingsExpander
+                    IconSource="Find"
+                    Header="{Binding Strings.SeedSearchString}"
+                    Description="{Binding Strings.SeedSearchStringDescription}"
+                >
+                    <fa:FASettingsExpander.Footer>
+                        <ComboBox
+                            ItemsSource="{x:Static settings:EditorSettings.SeedSearchStrings}"
+                            SelectedItem="{Binding Settings.Editor.SeedSearchStringFromSelection}"
+                        />
+                    </fa:FASettingsExpander.Footer>
+                </fa:FASettingsExpander>
+                <fa:FASettingsExpander
+                    IconSource="SelectAll"
+                    Header="{Binding Strings.AutoFindInSelection}"
+                    Description="{Binding Strings.AutoFindInSelectionDescription}"
+                >
+                    <fa:FASettingsExpander.Footer>
+                        <ComboBox
+                            ItemsSource="{x:Static settings:EditorSettings.AutoFindInSelections}"
+                            SelectedItem="{Binding Settings.Editor.AutoFindInSelection}"
+                        />
+                    </fa:FASettingsExpander.Footer>
+                </fa:FASettingsExpander>
+                <fa:FASettingsExpander
+                    IconSource="Clock"
+                    Header="{Binding Strings.HoverDelay}"
+                    Description="{Binding Strings.HoverDelayDescription}"
+                >
+                    <fa:FASettingsExpander.Footer>
+                        <fa:FANumberBox
+                            Value="{Binding Settings.Editor.HoverDelay}"
+                            ValueChanged="OnHoverDelayChanged"
+                            Minimum="0"
+                            Maximum="10000"
+                            SmallChange="50"
+                            LargeChange="500"
+                            SimpleNumberFormat="F0"
+                            SpinButtonPlacementMode="Inline"
+                        />
+                    </fa:FASettingsExpander.Footer>
+                </fa:FASettingsExpander>
+                <fa:FASettingsExpander
+                    IconSource="Target"
+                    Header="{Binding Strings.MatchBrackets}"
+                    Description="{Binding Strings.MatchBracketsDescription}"
+                >
+                    <fa:FASettingsExpander.Footer>
+                        <ComboBox
+                            ItemsSource="{x:Static settings:EditorSettings.MatchBracketsModes}"
+                            SelectedItem="{Binding Settings.Editor.MatchBrackets}"
+                        />
+                    </fa:FASettingsExpander.Footer>
+                </fa:FASettingsExpander>
+                <fa:FASettingsExpander
+                    IconSource="Highlight"
+                    Header="{Binding Strings.OccurrencesHighlight}"
+                    Description="{Binding Strings.OccurrencesHighlightDescription}"
+                >
+                    <fa:FASettingsExpander.Footer>
+                        <ToggleSwitch IsChecked="{Binding Settings.Editor.OccurrencesHighlight}" />
+                    </fa:FASettingsExpander.Footer>
+                </fa:FASettingsExpander>
+                <fa:FASettingsExpander
+                    IconSource="BulletList"
+                    Header="{Binding Strings.ParameterHints}"
+                    Description="{Binding Strings.ParameterHintsDescription}"
+                >
+                    <fa:FASettingsExpander.Footer>
+                        <ToggleSwitch IsChecked="{Binding Settings.Editor.ParameterHints}" />
                     </fa:FASettingsExpander.Footer>
                 </fa:FASettingsExpander>
 

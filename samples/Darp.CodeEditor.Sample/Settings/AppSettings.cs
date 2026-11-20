@@ -7,8 +7,8 @@ using Sample.Localization;
 namespace Sample.Settings;
 
 /// <summary>
-/// The user's choices: the themes and the language on the settings page, and the view's options in the title bar.
-/// They last as long as the app runs.
+/// The user's choices: the themes, the language and the editor's options on the settings page, and the view's options
+/// in the title bar. They last as long as the app runs.
 /// </summary>
 public sealed partial class AppSettings : ObservableObject
 {
@@ -45,9 +45,12 @@ public sealed partial class AppSettings : ObservableObject
     [ObservableProperty]
     public partial ThemeChoice EditorTheme { get; set; }
 
+    /// <summary>The editor's options, which every editor of the app shares.</summary>
+    public EditorSettings Editor { get; } = new();
+
     public IReadOnlyList<CultureInfo> Cultures => Strings.Cultures;
 
-    /// <summary>The language of the app's own text.</summary>
+    /// <summary>The language of the app's own text, and of the editor's, which follows the UI culture.</summary>
     public CultureInfo Culture
     {
         get => Strings.Current.Culture;

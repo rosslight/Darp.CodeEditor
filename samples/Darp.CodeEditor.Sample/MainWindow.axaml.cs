@@ -6,6 +6,7 @@ using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Avalonia.Styling;
 using Avalonia.VisualTree;
 using CommunityToolkit.Mvvm.Input;
 using Darp.CodeEditor;
@@ -159,6 +160,37 @@ public sealed partial class MainWindow : FAAppWindow
             viewModel.Workspace.Current = document;
     }
 
+    /// <summary>
+    /// Opens the examples' schemas after the examples, as files that the user can edit and save. A file needs the
+    /// window's storage, so they open once the window shows.
+    /// </summary>
+    protected override async void OnOpened(EventArgs e)
+    {
+        base.OnOpened(e);
+        await OneAtATimeAsync(async () =>
+        {
+            if (Workspace is not { } workspace)
+                return;
+            foreach (string path in ServerSettings.Schemas)
+            {
+                try
+                {
+                    IStorageFile file =
+                        await StorageProvider.TryGetFileFromPathAsync(path)
+                        ?? throw new FileNotFoundException(null, path);
+                    await workspace.OpenAsync(file, show: false);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    await ShowErrorAsync(
+                        Strings.Current.Format(Strings.Current.OpenFailed, Path.GetFileName(path)),
+                        exception.Message
+                    );
+                }
+            }
+        });
+    }
+
     private void OnDisplayModeChanged(object? sender, FANavigationViewDisplayModeChangedEventArgs e) =>
         PaneButton.IsVisible = e.DisplayMode != FANavigationViewDisplayMode.Expanded;
 
@@ -226,6 +258,26 @@ public sealed partial class MainWindow : FAAppWindow
         menu.Items.Add(MenuItem(strings.Replace, FASymbol.Switch, DocumentPage.Replace, shows));
         menu.Items.Add(MenuItem(strings.GoToLine, FASymbol.Go, OpenGoToLine, shows));
         menu.Items.Add(MenuItem(strings.InsertDateTime, FASymbol.Calendar, DocumentPage.InsertDateTime, shows));
+        menu.Items.Add(new FAMenuFlyoutSeparator());
+        var themes = new FAMenuFlyoutSubItem
+        {
+            Text = strings.OpenInTheme,
+            IconSource = new FASymbolIconSource { Symbol = FASymbol.ColorBackground },
+        };
+        foreach (bool fluent in (bool[])[true, false])
+        {
+            foreach (ThemeVariant variant in (ThemeVariant[])[ThemeVariant.Light, ThemeVariant.Dark])
+            {
+                themes.Items.Add(
+                    MenuItem(
+                        ThemeWindow.Describe(fluent, variant),
+                        icon: null,
+                        () => ThemeWindow.Open(this, fluent, variant)
+                    )
+                );
+            }
+        }
+        menu.Items.Add(themes);
     }
 
     private void ToggleWordWrap()
@@ -321,6 +373,8 @@ public sealed partial class MainWindow : FAAppWindow
     /// <returns>Whether the document was saved.</returns>
     private async Task<bool> SaveAsync(OpenDocument document, bool saveAs)
     {
+        if (Workspace is not { } workspace)
+            return false;
         IStorageFile? file = saveAs ? null : document.File;
         if (file is null)
         {
@@ -338,7 +392,7 @@ public sealed partial class MainWindow : FAAppWindow
             if (file is null)
                 return false;
             // Opens and saves run one at a time: no other document takes the path while the file is written.
-            if (file.TryGetLocalPath() is { } path && Workspace?.WithPath(path, except: document) is not null)
+            if (file.TryGetLocalPath() is { } path && workspace.WithPath(path, except: document) is not null)
             {
                 await ShowErrorAsync(
                     Strings.Current.Format(Strings.Current.SaveFailed, file.Name),
@@ -350,7 +404,7 @@ public sealed partial class MainWindow : FAAppWindow
         }
         try
         {
-            await document.SaveAsync(file);
+            await workspace.SaveAsync(document, file);
             return true;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)

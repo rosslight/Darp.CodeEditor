@@ -169,7 +169,7 @@
     <value>Sprache</value>
   </data>
   <data name="LanguageDescription" xml:space="preserve">
-    <value>Die Sprache der Befehle und Meldungen der App</value>
+    <value>Die Sprache der Befehle und Meldungen der App und ihrer Editoren</value>
   </data>
   <data name="WordWrap" xml:space="preserve">
     <value>Zeilenumbruch</value>
@@ -179,6 +179,72 @@
   </data>
   <data name="FontSize" xml:space="preserve">
     <value>Schriftgröße</value>
+  </data>
+  <data name="OpenInTheme" xml:space="preserve">
+    <value>In Design öffnen</value>
+  </data>
+  <data name="Editor" xml:space="preserve">
+    <value>Editor</value>
+  </data>
+  <data name="AutoClosingBrackets" xml:space="preserve">
+    <value>Klammern automatisch schließen</value>
+  </data>
+  <data name="AutoClosingBracketsDescription" xml:space="preserve">
+    <value>Wo eine getippte öffnende Klammer die schließende mitbringt</value>
+  </data>
+  <data name="AutoClosingQuotes" xml:space="preserve">
+    <value>Anführungszeichen automatisch schließen</value>
+  </data>
+  <data name="AutoClosingQuotesDescription" xml:space="preserve">
+    <value>Wo ein getipptes Anführungszeichen das schließende mitbringt</value>
+  </data>
+  <data name="EmptySelectionClipboard" xml:space="preserve">
+    <value>Zeile ohne Auswahl kopieren</value>
+  </data>
+  <data name="EmptySelectionClipboardDescription" xml:space="preserve">
+    <value>Ob Kopieren und Ausschneiden ohne Auswahl die ganze Zeile des Cursors nehmen</value>
+  </data>
+  <data name="SeedSearchString" xml:space="preserve">
+    <value>Nach der Auswahl suchen</value>
+  </data>
+  <data name="SeedSearchStringDescription" xml:space="preserve">
+    <value>Womit die Suche beginnt, wenn sich die Suchleiste öffnet</value>
+  </data>
+  <data name="AutoFindInSelection" xml:space="preserve">
+    <value>In Auswahl suchen</value>
+  </data>
+  <data name="AutoFindInSelectionDescription" xml:space="preserve">
+    <value>Wann die Suchleiste beim Öffnen nur in der Auswahl sucht</value>
+  </data>
+  <data name="HoverDelay" xml:space="preserve">
+    <value>Hover-Verzögerung</value>
+  </data>
+  <data name="HoverDelayDescription" xml:space="preserve">
+    <value>Wie lange der Mauszeiger auf Text ruht, bevor dessen Informationen erscheinen, in Millisekunden</value>
+  </data>
+  <data name="MatchBrackets" xml:space="preserve">
+    <value>Passende Klammern hervorheben</value>
+  </data>
+  <data name="MatchBracketsDescription" xml:space="preserve">
+    <value>Welche Klammern am Cursor umrahmt werden</value>
+  </data>
+  <data name="OccurrencesHighlight" xml:space="preserve">
+    <value>Vorkommen hervorheben</value>
+  </data>
+  <data name="OccurrencesHighlightDescription" xml:space="preserve">
+    <value>Ob die anderen Stellen des Symbols am Cursor hervorgehoben werden</value>
+  </data>
+  <data name="ParameterHints" xml:space="preserve">
+    <value>Parameterhinweise</value>
+  </data>
+  <data name="ParameterHintsDescription" xml:space="preserve">
+    <value>Ob Tippen in einem Aufruf dessen Signaturen zeigt</value>
+  </data>
+  <data name="On" xml:space="preserve">
+    <value>Ein</value>
+  </data>
+  <data name="Off" xml:space="preserve">
+    <value>Aus</value>
   </data>
   <data name="About" xml:space="preserve">
     <value>Info</value>

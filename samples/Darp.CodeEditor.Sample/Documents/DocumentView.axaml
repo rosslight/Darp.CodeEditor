@@ -13,6 +13,7 @@
             WordWrap="{Binding Settings.WordWrap}"
             ShowLineNumbers="{Binding Settings.ShowLineNumbers}"
             FontSize="{Binding Settings.FontSize}"
+            Options="{Binding Settings.Editor.Options}"
             Padding="8,6,0,0"
         />
     </ThemeVariantScope>

@@ -85,11 +85,12 @@ public sealed partial class Workspace : ObservableObject, IDisposable
 
     /// <summary>
     /// Opens <paramref name="file"/>, or shows the document that has its path already. The workspace owns the file.
+    /// With <paramref name="show"/> false, the current document stays.
     /// </summary>
     /// <exception cref="IOException">
     /// The file can't be read, or an example has its path: the example's text is not the file's.
     /// </exception>
-    public async Task OpenAsync(IStorageFile file)
+    public async Task OpenAsync(IStorageFile file, bool show = true)
     {
         string text;
         try
@@ -113,10 +114,25 @@ public sealed partial class Workspace : ObservableObject, IDisposable
             file.Dispose();
             if (open.File is null)
                 throw new IOException(Strings.Current.Format(Strings.Current.ExampleHasPath, open.Name));
-            Current = open;
+            if (show)
+                Current = open;
             return;
         }
-        Add(file.Name, FileType.ForFile(file.Name), text, file, path);
+        Add(file.Name, FileType.ForFile(file.Name), text, file, path, show);
+    }
+
+    /// <summary>
+    /// Saves <paramref name="document"/> in <paramref name="file"/>. A saved schema applies to the documents it is for
+    /// once the servers read their settings again.
+    /// </summary>
+    public async Task SaveAsync(OpenDocument document, IStorageFile file)
+    {
+        await document.SaveAsync(file);
+        if (document.Document.FilePath is { } path && ServerSettings.Schemas.Contains(path, s_paths))
+        {
+            foreach (LanguageServer server in _servers.Values)
+                server.NotifySettingsChanged();
+        }
     }
 
     /// <summary>
@@ -151,10 +167,10 @@ public sealed partial class Workspace : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Adds a document and shows it. A file type whose server is installed gets its documents from that server, which
-    /// serves them from then on; the others get documents without a server.
+    /// Adds a document, and shows it if <paramref name="show"/>. A file type whose server is installed gets its
+    /// documents from that server, which serves them from then on; the others get documents without a server.
     /// </summary>
-    private void Add(string name, FileType type, string text, IStorageFile? file, string? filePath)
+    private void Add(string name, FileType type, string text, IStorageFile? file, string? filePath, bool show = true)
     {
         LanguageServer? server = _servers.GetValueOrDefault(type);
         CodeDocument document;
@@ -167,7 +183,8 @@ public sealed partial class Workspace : ObservableObject, IDisposable
         }
         var open = new OpenDocument(name, type, document, server, file);
         Documents.Add(open);
-        Current = open;
+        if (show)
+            Current = open;
     }
 
     /// <summary>
