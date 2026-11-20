@@ -52,8 +52,9 @@ public sealed class HoverTests(UiFixture ui)
             );
 
             Control[] parts = [.. ((Panel)Content(popup)).Children];
-            // The diagnostic's message and code, a line, the server's paragraph, and its code block.
-            TextOf(parts[0]).ShouldBe($"{text} (echo)");
+            // The diagnostic's icon, message and code, a line, the server's paragraph, and its code block.
+            parts[0].GetVisualDescendants().OfType<SeverityIcon>().ShouldHaveSingleItem();
+            parts[0].GetVisualDescendants().OfType<TextBlock>().Select(TextOf).ShouldBe([$"{text} (echo)"]);
             parts[1].ShouldBeAssignableTo<Border>().ShouldNotBeNull().Height.ShouldBe(1);
             TextOf(parts[2]).ShouldBe("key is a word in json.");
             ((TextBlock)parts[2]).Inlines.ShouldNotBeNull().OfType<Run>().First().FontWeight.ShouldBe(FontWeight.Bold);
@@ -67,6 +68,54 @@ public sealed class HoverTests(UiFixture ui)
             runs.ShouldContain(run => run.Text == "1" && (run.Foreground as ISolidColorBrush)!.Color == s_number);
             Rect bounds = BoundsInWindow(popup);
             new Rect(window.Window.ClientSize).Contains(bounds).ShouldBeTrue(bounds.ToString());
+        });
+
+    [Fact]
+    public Task A_diagnostic_shows_its_icon_message_source_code_link_and_related_places_as_in_VS_Code() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer("--diagnostic-details");
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            const string text = "one two";
+            string path = Path.Combine(AppContext.BaseDirectory, "details.txt");
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text, path);
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+            Diagnostic diagnostic = document.Diagnostics[0];
+            diagnostic.Source.ShouldBe("fake");
+            diagnostic.CodeDescription.ShouldBe(new Uri("https://example.com/echo"));
+            diagnostic
+                .RelatedInformation.Select(r => (r.Start, r.Message))
+                .ShouldBe([(new TextPosition(1, 2), "related here"), (new TextPosition(3, 4), "elsewhere")]);
+
+            PopupFrame popup = await HoverAsync(window, 4, "two is a word in", time);
+
+            Control part = ((Panel)Content(popup)).Children[0];
+            part.GetVisualDescendants().OfType<SeverityIcon>().ShouldHaveSingleItem();
+            TextBlock[] texts = [.. part.GetVisualDescendants().OfType<TextBlock>()];
+            texts
+                .Select(TextOf)
+                .ShouldBe([$"{text} fake(echo)", "details.txt(1, 2): related here", "other.txt(3, 4): elsewhere"]);
+            texts.ShouldAllBe(block => block.FontFamily == editor.FontFamily);
+            // The code, underlined in the link color, at the 60% of its source.
+            Run code = texts[0].Inlines.ShouldNotBeNull().OfType<Run>().Single(run => run.Text == "echo");
+            code.TextDecorations.ShouldBe(TextDecorations.Underline);
+            code.Foreground.ShouldBeAssignableTo<ISolidColorBrush>().ShouldNotBeNull().Opacity.ShouldBe(0.6);
+            texts[0]
+                .Inlines.ShouldNotBeNull()
+                .OfType<Run>()
+                .Single(run => run.Text == " fake")
+                .Foreground.ShouldNotBeNull()
+                .Opacity.ShouldBe(0.6);
+
+            // A place in the document is a link there; one elsewhere, which the editor cannot show, is not (Q121).
+            window.Click(TextPointAt(texts[2], 2), MouseButton.Left);
+            Popup(window).ShouldNotBeNull();
+            window.Click(TextPointAt(texts[1], 2), MouseButton.Left);
+            Popup(window).ShouldBeNull();
+            editor.Selection.ShouldBe(new TextSelection(1));
         });
 
     [Fact]
@@ -827,7 +876,7 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
-    public Task A_hover_takes_the_few_most_severe_diagnostics_of_however_many_there_are() =>
+    public Task The_most_severe_diagnostics_are_found_among_however_many_there_are() =>
         _ui.Run(() =>
         {
             CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "word");
@@ -849,12 +898,78 @@ public sealed class HoverTests(UiFixture ui)
             window.Layout();
             using var squiggles = new SquiggleLayer(EditorWindow.PartOf(editor).TextArea, document);
 
-            IReadOnlyList<Diagnostic> shown = squiggles.At(1, HoverBudget.MaxLines);
+            IReadOnlyList<Diagnostic> shown = [.. squiggles.At(1).Take(120)];
 
-            // The errors, which come every fourth, in the server's order; no more than a hover has lines.
-            shown
-                .Select(d => d.Message)
-                .ShouldBe(Enumerable.Range(0, HoverBudget.MaxLines).Select(i => $"{4 * i + 3}"));
+            // First the errors, which come every fourth, in the server's order.
+            shown.Select(d => d.Message).ShouldBe(Enumerable.Range(0, 120).Select(i => $"{4 * i + 3}"));
+        });
+
+    [Fact]
+    public Task A_hover_over_thousands_of_diagnostics_reads_them_a_part_at_a_time_the_most_severe_first() =>
+        _ui.Run(() =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "a word here");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            TextSnapshot snapshot = document.CurrentSnapshot;
+            // 10,000 on one word, their severities taking turns from hints to errors.
+            const int count = 10_000;
+            document.SetDiagnostics([
+                .. Enumerable
+                    .Range(0, count)
+                    .Select(i => new Diagnostic(
+                        snapshot,
+                        new TextRange(2, 4),
+                        (DiagnosticSeverity)(i % 4),
+                        null,
+                        $"{i}"
+                    )),
+            ]);
+            window.Layout();
+            using var squiggles = new SquiggleLayer(EditorWindow.PartOf(editor).TextArea, document);
+            var read = new ReadCount(squiggles.At(3));
+            read.Count.ShouldBe(count);
+
+            HoverContent content = HoverView.Create(HoverBlocks.Of(read), Look());
+
+            // As it opens, the first part, and the one that did not fit it.
+            content.IsComplete.ShouldBeFalse();
+            read.Read.ShouldBe(content.Children.Count + 1);
+            TextsOf(content).Take(2).ShouldBe(["3", "7"]);
+            // Each next part reads its own.
+            content.AddNextPart();
+            read.Read.ShouldBe(content.Children.Count + 1);
+            while (!content.IsComplete)
+                content.AddNextPart();
+            read.Read.ShouldBe(count);
+            TextsOf(content).Skip(count / 4).First().ShouldBe("2");
+            TextsOf(content).Last().ShouldBe($"{count - 4}");
+        });
+
+    [Fact]
+    public Task A_diagnostic_without_a_message_shows_its_code_and_a_related_place_longer_than_a_part_in_parts() =>
+        _ui.Run(() =>
+        {
+            string related = string.Join(' ', Enumerable.Repeat("word", 1_020));
+            var diagnostic = new Diagnostic(TextSnapshot.FromString(""), default, DiagnosticSeverity.Warning, "W1", "")
+            {
+                RelatedInformation = [new DiagnosticRelatedInformation(new Uri("file:///a.py"), new(2, 4), related)],
+            };
+            IReadOnlyCollection<HoverBlock> blocks = HoverBlocks.Of([diagnostic]);
+            blocks.SelectMany(HoverParts.Split).ShouldAllBe(piece => HoverParts.Fits(HoverParts.Size(piece)));
+            var host = new Border();
+            using var window = new EditorWindow(new CodeEditor(), host);
+
+            HoverContent content = HoverView.Create(blocks, Look());
+            host.Child = content;
+            while (!content.IsComplete)
+                content.AddNextPart();
+            window.Render();
+
+            content.GetVisualDescendants().OfType<SeverityIcon>().ShouldHaveSingleItem();
+            string[] texts = [.. TextsOf(content)];
+            texts[0].ShouldBe(" (W1)");
+            string.Concat(texts.Skip(1)).ShouldBe("a.py(2, 4): " + related);
         });
 
     [Fact]
@@ -970,6 +1085,37 @@ public sealed class HoverTests(UiFixture ui)
             return popup is not null && Texts(popup).Any(t => t.Contains(text, StringComparison.Ordinal));
         });
         return popup ?? throw new InvalidOperationException();
+    }
+
+    /// <summary>Where the window shows the character at <paramref name="index"/> of a text block's text.</summary>
+    private static Point TextPointAt(TextBlock text, int index) =>
+        text.TranslatePoint(
+            text.TextLayout.HitTestTextPosition(index).Center,
+            TopLevel.GetTopLevel(text) ?? throw new InvalidOperationException("Not shown.")
+        ) ?? throw new InvalidOperationException("Not shown.");
+
+    private static IEnumerable<string> TextsOf(HoverContent content) =>
+        content.GetVisualDescendants().OfType<TextBlock>().Select(TextOf);
+
+    /// <summary>Diagnostics that count how many of them were read.</summary>
+    private sealed class ReadCount(IReadOnlyCollection<Diagnostic> diagnostics) : IReadOnlyCollection<Diagnostic>
+    {
+        private readonly IReadOnlyCollection<Diagnostic> _diagnostics = diagnostics;
+
+        public int Read { get; private set; }
+
+        public int Count => _diagnostics.Count;
+
+        public IEnumerator<Diagnostic> GetEnumerator()
+        {
+            foreach (Diagnostic diagnostic in _diagnostics)
+            {
+                Read++;
+                yield return diagnostic;
+            }
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     /// <summary>A popup's look with the hover's colors, in a font that every test machine has.</summary>
