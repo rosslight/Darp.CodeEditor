@@ -64,6 +64,7 @@ internal sealed class HoverPopup
         // VS Code's padding.
         _popup.Frame.Padding = new Thickness(8, 4);
         _popup.Resized += OnResized;
+        _popup.LeftView += (_, _) => _close();
         _popup.Root.AddHandler(InputElement.KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
         _popup.Root.AddHandler(InputElement.TextInputEvent, OnTextInput, RoutingStrategies.Tunnel);
         // Also when its text handles the press, to select; not on an edge, which resizes it.
