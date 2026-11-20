@@ -43,8 +43,8 @@ internal sealed class HoverPopup
     private TextRange _word;
     private bool _resized;
 
-    /// <summary>The diagnostics shown, and the sections: theirs, a line and the server's; null while nothing shows.</summary>
-    private (IReadOnlyCollection<HoverBlock> Messages, PopupStack Sections)? _shown;
+    /// <summary>The diagnostics shown, and the content, where the server's hover follows them; null while nothing shows.</summary>
+    private (IReadOnlyCollection<HoverBlock> Messages, HoverContent Content)? _shown;
 
     /// <summary>The window whose clicks and deactivation a held popup watches, as they end it; null otherwise.</summary>
     private TopLevel? _watched;
@@ -138,26 +138,16 @@ internal sealed class HoverPopup
         }
         bool hadKeyboard = HasKeyboard;
         PopupLook look = PopupLook.Of(_editor, colors, colors.HoverForeground) with { Selectable = true };
-        if (_shown is not var (shown, sections) || shown != messages)
+        IEnumerable<HoverBlock> tail = messages.Count == 0 || below.Count == 0 ? below : [new HoverRule(), .. below];
+        if (_shown is var (shown, content) && shown == messages)
+            content.Follow(tail);
+        else
         {
-            sections = new PopupStack { Spacing = HoverView.Spacing };
-            if (messages.Count > 0)
-                sections.Children.Add(HoverView.Create(messages, look));
-            _shown = (messages, sections);
-            _content.Child = sections;
+            content = new HoverContent(messages, look, tail);
+            _shown = (messages, content);
+            _content.Child = content;
         }
-        int kept = messages.Count > 0 ? 1 : 0;
-        sections.Children.RemoveRange(kept, sections.Children.Count - kept);
-        if (below.Count > 0)
-        {
-            if (kept > 0)
-                sections.Children.Add(HoverView.Block(new HoverRule(), look));
-            // Its parts after the diagnostics', a part a frame in all.
-            sections.Children.Add(
-                HoverView.Create(below, look, after: kept > 0 ? (HoverContent)sections.Children[0] : null)
-            );
-        }
-        // The text that had the keyboard may have gone with the section below: the scroller keeps it.
+        // The text that had the keyboard may have gone with the tail: the scroller keeps it.
         if (hadKeyboard && !HasKeyboard)
             TakeKeyboard();
         _word = word;

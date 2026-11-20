@@ -19,8 +19,9 @@
 // "signatures" set, or two of "call", with the parameter at the position active, and the signature that the client
 // says it shows, or the first. Completion and signature help in a document with the word "slow" are never
 // answered. Selection ranges answer with what the command "selection-ranges" set, as the result's first selection
-// range, or with the word at the position and its line; once "hold-selection-ranges" holds them, only when "release-selection-ranges" releases them,
-// with the answer of when they came. Document highlights are the occurrences of the word at the position, as whole
+// range, or with the word at the position and its line; once "hold-selection-ranges" holds them, only when
+// "release-selection-ranges" releases them, with the answer of when they came, and hovers so by "hold-hovers" and
+// "release-hovers". Document highlights are the occurrences of the word at the position, as whole
 // words: one followed by " =" is a write, the others are reads. The word "none" is answered with null, and "nothing"
 // with no highlights; once "hold-document-highlights" holds them, only when "release-document-highlights" releases
 // them. A request about a document that is not open is answered with an error.
@@ -138,6 +139,14 @@ internal sealed class FakeServer
     /// <c>release-selection-ranges</c>, which answers them as they would have been answered when they came.
     /// </summary>
     private bool _holdSelectionRanges;
+
+    /// <summary>
+    /// Set by the command <c>hold-hovers</c>: hover requests wait for the command <c>release-hovers</c>, which answers
+    /// them as they would have been answered when they came.
+    /// </summary>
+    private bool _holdHovers;
+
+    private readonly List<(JsonNode? Id, JsonNode Answer)> _heldHovers = [];
 
     private readonly List<(JsonNode? Id, JsonNode Answer)> _heldSelectionRanges = [];
 
@@ -479,6 +488,17 @@ internal sealed class FakeServer
                 _selectionRange = JsonNode.Parse(json);
                 Log("set selection ranges");
                 break;
+            case ["hold-hovers"]:
+                _holdHovers = true;
+                Log("holding hovers");
+                break;
+            case ["release-hovers"]:
+                _holdHovers = false;
+                foreach ((JsonNode? id, JsonNode answer) in _heldHovers)
+                    Reply(id, answer);
+                _heldHovers.Clear();
+                Log("released hovers");
+                break;
             case ["hold-selection-ranges"]:
                 _holdSelectionRanges = true;
                 Log("holding selection ranges");
@@ -543,23 +563,24 @@ internal sealed class FakeServer
         if (word == "slow")
             return;
         (int lineStart, int lineEnd) = Lines(document.Text).Last(line => line.Start <= offset);
-        Reply(
-            id,
-            new JsonObject
+        var answer = new JsonObject
+        {
+            ["contents"] = new JsonObject
             {
-                ["contents"] = new JsonObject
-                {
-                    ["kind"] = "markdown",
-                    ["value"] =
-                        $"**{word}** is a word in `{document.LanguageId}`.\n\n```{document.LanguageId}\n{document.Text[lineStart..lineEnd]}\n```",
-                },
-                ["range"] = new JsonObject
-                {
-                    ["start"] = Position(document.Text, start),
-                    ["end"] = Position(document.Text, end),
-                },
-            }
-        );
+                ["kind"] = "markdown",
+                ["value"] =
+                    $"**{word}** is a word in `{document.LanguageId}`.\n\n```{document.LanguageId}\n{document.Text[lineStart..lineEnd]}\n```",
+            },
+            ["range"] = new JsonObject
+            {
+                ["start"] = Position(document.Text, start),
+                ["end"] = Position(document.Text, end),
+            },
+        };
+        if (_holdHovers)
+            _heldHovers.Add((id?.DeepClone(), answer));
+        else
+            Reply(id, answer);
     }
 
     /// <summary>

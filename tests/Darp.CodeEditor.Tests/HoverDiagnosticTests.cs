@@ -46,9 +46,13 @@ public sealed class HoverDiagnosticTests(UiFixture ui)
 
             PopupFrame popup = await HoverAsync(window, 4, "two is a word in", time);
 
-            Control part = Blocks(popup)[0];
-            part.GetVisualDescendants().OfType<SeverityIcon>().ShouldHaveSingleItem();
-            TextBlock[] texts = [.. part.GetVisualDescendants().OfType<TextBlock>()];
+            // The diagnostic, then each related place below it.
+            Control[] blocks = Blocks(popup);
+            blocks[0].GetVisualDescendants().OfType<SeverityIcon>().ShouldHaveSingleItem();
+            TextBlock[] texts =
+            [
+                .. blocks.Take(3).SelectMany(block => block.GetVisualDescendants().Prepend(block)).OfType<TextBlock>(),
+            ];
             texts
                 .Select(TextOf)
                 .ShouldBe([$"{text} fake(echo)", "details.txt(1, 2): related here", "other.txt(3, 4): elsewhere"]);
@@ -109,6 +113,49 @@ public sealed class HoverDiagnosticTests(UiFixture ui)
             editor.Document.ShouldBeSameAs(other);
             Popup(window).ShouldBeNull();
             editor.Selection.ShouldBe(new TextSelection(0));
+        });
+
+    [Fact]
+    public Task A_diagnostics_thousands_of_related_places_are_made_a_part_at_a_time() =>
+        _ui.Run(() =>
+        {
+            const int count = 10_000;
+            var diagnostic = new Diagnostic(
+                TextSnapshot.FromString(""),
+                default,
+                DiagnosticSeverity.Error,
+                null,
+                "many places"
+            )
+            {
+                RelatedInformation =
+                [
+                    .. Enumerable
+                        .Range(0, count)
+                        .Select(i => new DiagnosticRelatedInformation(new Uri("file:///a.py"), new(i + 1, 1), $"{i}")),
+                ],
+            };
+            int made = 0;
+
+            HoverContent content = HoverView.Create(
+                HoverBlocks.Of(
+                    [diagnostic],
+                    (_, _) =>
+                    {
+                        made++;
+                        return null;
+                    }
+                ),
+                Look()
+            );
+
+            // As it opens, the places of the first part, and the one that did not fit it, besides the diagnostic.
+            made.ShouldBe(content.Children.Count);
+            content.AddNextPart();
+            made.ShouldBe(content.Children.Count);
+            while (!content.IsComplete)
+                content.AddNextPart();
+            made.ShouldBe(count);
         });
 
     [Fact]
