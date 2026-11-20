@@ -115,6 +115,29 @@ public sealed class DiagnosticNavigationTests(UiFixture ui)
         });
 
     [Fact]
+    public Task F8_stops_once_the_app_shows_another_document_as_the_caret_moves() =>
+        _ui.Run(() =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, Text);
+            CodeDocument other = CodeDocument.Create(CodeLanguage.PlainText, "other text");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            SetDiagnostics(document);
+            // An app that shows another document as the selection moves.
+            window.Editor.PropertyChanged += (_, e) =>
+            {
+                if (e.Property == CodeEditor.SelectionProperty)
+                    window.Editor.Document = other;
+            };
+
+            window.Press(Key.F8);
+            window.Render();
+
+            window.Editor.Document.ShouldBeSameAs(other);
+            Hover(window).ShouldBeNull();
+            window.Editor.Selection.ShouldBe(new TextSelection(0));
+        });
+
+    [Fact]
     public Task Without_diagnostics_F8_does_nothing() =>
         _ui.Run(() =>
         {

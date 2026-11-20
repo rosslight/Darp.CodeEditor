@@ -38,6 +38,7 @@ internal sealed class HoverPopup
 
     private readonly TemplatedControl _editor;
     private readonly TextArea _textArea;
+    private readonly TextChanges _changes;
     private readonly TextView _textView;
     private readonly Action _close;
     private readonly PopupScroller _content = new();
@@ -54,11 +55,13 @@ internal sealed class HoverPopup
 
     /// <param name="editor">The editor whose hover it is.</param>
     /// <param name="textArea">The text, which the keyboard goes back to.</param>
+    /// <param name="changes">Tells whether the text area still shows the view's document.</param>
     /// <param name="close">Ends the hover, as Escape and typing in the popup do.</param>
-    public HoverPopup(TemplatedControl editor, TextArea textArea, Action close)
+    public HoverPopup(TemplatedControl editor, TextArea textArea, TextChanges changes, Action close)
     {
         _editor = editor;
         _textArea = textArea;
+        _changes = changes;
         _textView = textArea.TextView;
         _close = close;
         _popup = new EditorPopup(editor, _content, "Hover") { IsResizable = true };
@@ -233,6 +236,9 @@ internal sealed class HoverPopup
     {
         e.Handled = true;
         _close();
+        // The text taking the keyboard back may have shown another document, which the text was not typed into.
+        if (!_changes.IsShown)
+            return;
         _textArea.RaiseEvent(
             new TextInputEventArgs
             {

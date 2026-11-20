@@ -59,6 +59,7 @@ internal sealed class HoverController : IEditorFeature
     private readonly SquiggleLayer _squiggles;
     private readonly BackgroundTextMateHighlighter _highlighter;
     private readonly Func<CodeEditorOptions> _options;
+    private readonly TextChanges _changes;
     private readonly HoverPopup _popup;
     private PopupColors _colors = PopupColors.Default;
 
@@ -83,7 +84,8 @@ internal sealed class HoverController : IEditorFeature
         CodeDocument document,
         SquiggleLayer squiggles,
         BackgroundTextMateHighlighter highlighter,
-        Func<CodeEditorOptions> options
+        Func<CodeEditorOptions> options,
+        TextChanges changes
     )
     {
         _editor = editor;
@@ -94,7 +96,8 @@ internal sealed class HoverController : IEditorFeature
         _squiggles = squiggles;
         _highlighter = highlighter;
         _options = options;
-        _popup = new HoverPopup(editor, textArea, () => Close());
+        _changes = changes;
+        _popup = new HoverPopup(editor, textArea, changes, () => Close());
         _textView.PointerMoved += OnPointerMoved;
         _textView.PointerExited += OnPointerExited;
         _textView.ScrollOffsetChanged += OnClosingChange;
@@ -203,13 +206,18 @@ internal sealed class HoverController : IEditorFeature
             return null;
         return () =>
         {
+            TextSnapshot now = _document.CurrentSnapshot;
             TextSnapshot snapshot = diagnostic.Snapshot;
             int offset = _document.MapToCurrent(snapshot, new TextRange(snapshot.GetOffset(related.Start), 0)).Start;
             Close();
-            _textArea.Focus();
-            _textArea.ClearSelection();
-            _textArea.Caret.Offset = offset;
-            _textArea.Caret.BringCaretToView();
+            // The app's handlers of each step may show another document or change the text, which the rest is not for.
+            _ =
+                Step(() => _textArea.Focus())
+                && Step(_textArea.ClearSelection)
+                && Step(() => _textArea.Caret.Offset = offset)
+                && Step(_textArea.Caret.BringCaretToView);
+
+            bool Step(Action step) => _changes.WhileShown(step) && _document.CurrentSnapshot == now;
         };
     }
 
