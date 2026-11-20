@@ -872,18 +872,18 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>
     /// Brings a range into view: centered unless it is visible, from its start when it is taller or wider than the view.
-    /// Rows not laid out yet may be taller or wider than the view knows, so it lays them out and scrolls again, before
-    /// anything opens there; a few times at most, and not once a handler of the layout changed the text or document.
+    /// Rows not laid out may be taller or wider than the view knows: laid out, it scrolls again, not above the range's
+    /// line, so that the lines above no longer move it; three passes at most, none once the text or document changed.
     /// </summary>
     private static void Reveal(TextEditor part, TextRange range)
     {
         ITextSourceVersion? version = part.Document?.Version;
-        for (int tries = 0; tries < 4 && part.Document?.Version == version && Scroll(part, range); tries++)
+        for (int pass = 0; pass < 3 && part.Document?.Version == version && Scroll(part, range, pass > 0); pass++)
             part.UpdateLayout();
     }
 
     /// <summary>Scrolls to show a range where the view has it now; false when it shows.</summary>
-    private static bool Scroll(TextEditor part, TextRange range)
+    private static bool Scroll(TextEditor part, TextRange range, bool fromLine)
     {
         TextView textView = part.TextArea.TextView;
         TextDocument buffer = textView.Document;
@@ -896,7 +896,8 @@ public class CodeEditor : TemplatedControl
         // fits needs the left and right edges of every line it covers.
         (double left, double right) = part.WordWrap || bottom - start.Y > view.Height ? (start.X, start.X) : Edges();
         double x = part.WordWrap ? 0 : OffsetToShow(left, right, start.X, offset.X, view.Width);
-        var shows = new Vector(Math.Max(0, x), Math.Max(0, y));
+        double top = fromLine ? textView.GetVisualTopByDocumentLine(buffer.GetLineByOffset(range.Start).LineNumber) : 0;
+        var shows = new Vector(Math.Max(0, x), y == offset.Y ? y : Math.Max(top, y));
         SetScrollOffset(part, shows);
         return shows != offset;
 
