@@ -70,6 +70,12 @@ internal sealed record PopupColors
     /// <summary><c>textLink.foreground</c>.</summary>
     public required IBrush Link { get; init; }
 
+    /// <summary><c>focusBorder</c>: the outline of a popup that has the keyboard.</summary>
+    public required IBrush FocusBorder { get; init; }
+
+    /// <summary>The text area's selection: selected text in popups.</summary>
+    public required IBrush Selection { get; init; }
+
     /// <summary><c>scrollbarSlider.background</c>, <c>.hoverBackground</c> and <c>.activeBackground</c>.</summary>
     public required (IBrush Normal, IBrush Hover, IBrush Active) Slider { get; init; }
 
@@ -132,6 +138,8 @@ internal sealed record PopupColors
             CodeForeground = text.Foreground,
             CodeSpanBackground = Brush(Own("textCodeBlock.background") ?? Hex(dark ? 0x660A0A0Au : 0x66DCDCDCu)),
             Link = Brush(Own("textLink.foreground") ?? Hex(dark ? 0xFF3794FF : 0xFF006AB1)),
+            FocusBorder = Brush(Own("focusBorder") ?? Hex(dark ? 0xFF007FD4 : 0xFF0090F1)),
+            Selection = text.Selection,
             Slider = (
                 Brush(Own("scrollbarSlider.background") ?? Hex(dark ? 0x66797979u : 0x66646464u)),
                 Brush(Own("scrollbarSlider.hoverBackground") ?? Hex(0xB3646464)),
