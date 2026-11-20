@@ -1331,8 +1331,9 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
 - signature help opens 120 ms after "(", on a clock that the test advances, with every signature, the active one
   marked, its parameter in bold and its Markdown; what is typed within the pause asks once, for the "("; it moves the
   parameter on ",", also while a request is under way, which it cancels; it asks again only after 120 ms without an
-  edit, also after an edit that leaves the caret where it was; Up and Down go around the signatures, the server keeps
-  the one that shows, and an open completion list takes them; it shows above the line while completion's list shows
+  edit, also after an edit that leaves the caret where it was, and the answer to a request that a caret move
+  outdated leaves the next request to ask; Up and Down go around the signatures, the server keeps the one that shows,
+  an open completion list takes them, and they move the caret until the popup shows; it shows above the line while completion's list shows
   below; a key that moves the caret asks again, and a click ends it; without parameter hints typing opens nothing,
   Ctrl+Shift+Space still does, and turning them off closes it; it ends on Escape, on leaving the call, on focus loss
   and when the server stops serving the document;
@@ -1341,7 +1342,9 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   that does not parse; mirrors take their text and its variables' values, also nested, and mirrors of each other end;
   variables take their values or their default or nothing, also unknown ones; transformations replace their matches
   with their formats, also VS Code's case changes and if and else branches, never splitting a surrogate pair, and
-  invalid ones are text; choices keep their options, also in a mirror; selected text that spans lines takes the
+  invalid ones are text, and a transformation stops once its result would pass a million characters; choices keep
+  their options, also in a mirror, in the document's line breaks, as does a snippet that goes in as written, and a
+  choice of 20,000 options takes keys of one size; selected text that spans lines takes the
   snippet's indentation, and the clipboard its only line that is not blank. In the editor, a snippet goes in by its `insertText`, and by a text edit grown by what was
   typed, indented by its line, in one undo step with its additional edits as plain text, and its first stop selected.
   Tab and Shift+Tab move through the stops, Shift+Tab on the first one outdents, and the final stop ends the session;
