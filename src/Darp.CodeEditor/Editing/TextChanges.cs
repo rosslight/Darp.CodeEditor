@@ -19,6 +19,9 @@ internal sealed class TextChanges : IDisposable
     /// <summary>The document that the view edits: the text area's when the view was made.</summary>
     private readonly TextDocument _shown;
 
+    /// <summary>Whether the view ended: it edits nothing more, also once the text area shows its document again.</summary>
+    private bool _disposed;
+
     public TextChanges(TextArea area)
     {
         _area = area;
@@ -34,7 +37,11 @@ internal sealed class TextChanges : IDisposable
             ? new TextSelection(_area.Caret.Offset)
             : new TextSelection(Buffer.GetOffset(_area.Selection.StartPosition.Location), _area.Caret.Offset);
 
-    public void Dispose() => _steps.Dispose();
+    public void Dispose()
+    {
+        _disposed = true;
+        _steps.Dispose();
+    }
 
     /// <inheritdoc cref="UndoSteps.Typing"/>
     public EditStep Typing(string text) => _steps.Typing(text);
@@ -50,9 +57,11 @@ internal sealed class TextChanges : IDisposable
     /// brings the caret into view; without it, AvaloniaEdit's anchors carry the selection, and the view stays, as
     /// bringing the caret into view lays out its line again, and after Ctrl+/ on every line a screen elsewhere.
     /// </summary>
-    /// <returns>Whether they went in: not when one touches read-only text.</returns>
+    /// <returns>Whether they went in: not when one touches read-only text, nor once the view ended.</returns>
     public bool Apply(IReadOnlyList<TextEdit> edits, TextSelection? select = null)
     {
+        if (_disposed)
+            return false;
         TextDocument edited = Buffer;
         foreach (TextEdit edit in edits)
         {
@@ -83,8 +92,11 @@ internal sealed class TextChanges : IDisposable
         return IsShown;
     }
 
-    /// <summary>Whether the text area shows the view's document, not another one that a handler showed.</summary>
-    public bool IsShown => _area.Document == _shown;
+    /// <summary>
+    /// Whether the text area shows the view's document, not another one that a handler showed, and the view did not end:
+    /// a handler that shows another document and then this one again ends this view, and a new one edits it.
+    /// </summary>
+    public bool IsShown => !_disposed && _area.Document == _shown;
 
     /// <summary>Selects <paramref name="selection"/>, by offsets, and brings the caret into view.</summary>
     public void Select(TextSelection selection)
