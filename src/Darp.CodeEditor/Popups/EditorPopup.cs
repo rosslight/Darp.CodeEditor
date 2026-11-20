@@ -58,7 +58,6 @@ internal sealed class EditorPopup
         Frame.Resized += (size, edges) => Resized?.Invoke(size, edges);
         _root = new ThemeVariantScope { Child = Frame };
         EditorPopups.SetOwner(_root, editor);
-        // Content that grows, as a hover built in parts, places the popup again.
         _root.AddHandler(HoverContent.GrewEvent, (_, _) => _placedBy = null);
         _side = side;
     }

@@ -168,7 +168,7 @@ internal sealed class DiagnosticNavigation : IEditorFeature
         for (int i = 0; i < markers.Length; i++)
         {
             var range = new TextRange(markers[i].StartOffset, markers[i].Length);
-            if (range.Length == 0 && WordTouching(range.Start) is { } word)
+            if (range.Length == 0 && WordRules.WordAt(_buffer, range.Start) is { } word)
                 range = word;
             if (caret > range.End)
                 continue;
@@ -177,24 +177,6 @@ internal sealed class DiagnosticNavigation : IEditorFeature
             return (i + markers.Length - 1) % markers.Length;
         }
         return next ? 0 : markers.Length - 1;
-    }
-
-    /// <summary>
-    /// The word that <paramref name="offset"/> is in or touches, by VS Code's word characters, reaching as far as a
-    /// hovered word; null where none does.
-    /// </summary>
-    private TextRange? WordTouching(int offset)
-    {
-        DocumentLine line = _buffer.GetLineByOffset(offset);
-        int first = Math.Max(line.Offset, offset - HoverController.MaxWordReach);
-        int last = Math.Min(line.EndOffset, offset + HoverController.MaxWordReach);
-        int start = offset;
-        while (start > first && WordCharacters.IsWordCharacter(_buffer.GetCharAt(start - 1)))
-            start--;
-        int end = offset;
-        while (end < last && WordCharacters.IsWordCharacter(_buffer.GetCharAt(end)))
-            end++;
-        return start == end ? null : TextRange.FromBounds(start, end);
     }
 
     /// <summary>Whether <paramref name="range"/> holds <paramref name="offset"/>, either edge included, as VS Code's ranges do.</summary>

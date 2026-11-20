@@ -108,7 +108,6 @@ internal sealed class HoverContent : StackPanel
             }
             part = with;
             Control control = HoverView.Block(piece, _look);
-            // No space between a piece and the one it goes on from.
             if (piece.Continues && Children.Count > 0)
             {
                 Thickness margin = control.Margin;

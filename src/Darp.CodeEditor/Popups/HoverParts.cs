@@ -204,7 +204,6 @@ internal static class HoverParts
                         i += length;
                         continue;
                     }
-                    // The next line starts the next piece.
                     Add(start, i);
                     foreach (TPiece done in Flush())
                         yield return done;
