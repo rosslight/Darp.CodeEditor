@@ -7,7 +7,14 @@ using TextMateSharp.Grammars;
 namespace Darp.CodeEditor.Popups;
 
 /// <summary>A block of a hover: a paragraph, a code block or a line between parts.</summary>
-internal abstract record HoverBlock;
+internal abstract record HoverBlock
+{
+    /// <summary>
+    /// Whether it goes on from the block before, as a piece of a long paragraph or code block does: no space between
+    /// them.
+    /// </summary>
+    public bool Continues { get; init; }
+}
 
 /// <summary>A paragraph, a heading or a list item: text with inline styles.</summary>
 /// <param name="Spans">The text.</param>
@@ -50,43 +57,45 @@ internal static class HoverBlocks
     private static readonly TimeSpan s_lineTimeLimit = TimeSpan.FromMilliseconds(50);
 
     /// <summary>
-    /// The messages of <paramref name="diagnostics"/>, each with its code, as plain text, as much of them as
-    /// <paramref name="budget"/> leaves.
+    /// The messages of <paramref name="diagnostics"/>, each with its code, as plain text, all of them: the message and
+    /// the code apart, so that a long message is never copied to put them together.
     /// </summary>
-    public static IReadOnlyList<HoverBlock> Of(IEnumerable<Diagnostic> diagnostics, HoverBudget budget)
-    {
-        var blocks = new List<HoverBlock>();
-        foreach (Diagnostic diagnostic in diagnostics)
-        {
-            // Cut before it is put together: the work is bounded by the budget, not by the server's message.
-            string? text = diagnostic.Code is { } code
-                ? budget.Take(diagnostic.Message, " (", code, ")")
-                : budget.Take(diagnostic.Message);
-            if (text is null)
-                break;
-            blocks.Add(new HoverParagraph([new HoverSpan(text)]));
-        }
-        return budget.Fit(blocks);
-    }
+    public static IReadOnlyList<HoverBlock> Of(IEnumerable<Diagnostic> diagnostics) =>
+        [
+            .. diagnostics.Select(diagnostic => new HoverParagraph(
+                diagnostic.Code is { } code
+                    ? [new HoverSpan(diagnostic.Message), new HoverSpan($" ({code})")]
+                    : [new HoverSpan(diagnostic.Message)]
+            )),
+        ];
+
+    /// <summary>The server's hover, all of it, as <see cref="Of(HoverInfo, TextMateGrammar?, HoverBudget?, CancellationToken)"/> reads it.</summary>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    public static IReadOnlyList<HoverBlock> Of(
+        HoverInfo hover,
+        TextMateGrammar? grammar,
+        CancellationToken cancellationToken
+    ) => Of(hover, grammar, null, cancellationToken);
 
     /// <summary>
-    /// The server's hover, its parts apart, as much of it as <paramref name="budget"/> leaves: Markdown with its code
-    /// blocks highlighted by <paramref name="grammar"/>, and plain text as it is. Off the UI thread: tokenizing a code
-    /// block takes the grammar from the background highlighter for a line at a time. Reading stops between lines and
-    /// paragraphs once <paramref name="cancellationToken"/> is cancelled, as the hover is no longer needed.
+    /// The server's hover, its parts apart, as much of it as <paramref name="budget"/> leaves, or all of it without
+    /// one: Markdown with its code blocks highlighted by <paramref name="grammar"/>, and plain text as it is. Off the UI
+    /// thread: tokenizing a code block takes the grammar from the background highlighter for a line at a time. Reading
+    /// stops between lines and paragraphs once <paramref name="cancellationToken"/> is cancelled, as the hover is no
+    /// longer needed.
     /// </summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public static IReadOnlyList<HoverBlock> Of(
         HoverInfo hover,
         TextMateGrammar? grammar,
-        HoverBudget budget,
+        HoverBudget? budget,
         CancellationToken cancellationToken
     )
     {
         var blocks = new List<HoverBlock>();
         foreach (HoverText part in hover.Contents)
         {
-            if (budget.Take(part.Text) is not { } text)
+            if ((budget is null ? part.Text : budget.Take(part.Text)) is not { } text)
                 break;
             if (blocks.Count > 0)
                 blocks.Add(new HoverRule());
@@ -99,7 +108,7 @@ internal static class HoverBlocks
             else
                 blocks.Add(new HoverParagraph([new HoverSpan(text.Trim())]));
         }
-        return budget.Fit(blocks);
+        return budget is null ? blocks : budget.Fit(blocks);
     }
 
     /// <summary>
@@ -154,33 +163,30 @@ internal static class HoverBlocks
 }
 
 /// <summary>
-/// How much a hover shows, so that the UI thread builds and lays it out well within a frame: at most
-/// <see cref="MaxCharacters"/> characters on <see cref="MaxLines"/> lines, in <see cref="MaxRuns"/> runs, its parts in
-/// order. The text is cut where any of them runs out, and "…" marks the cut. A hover is a tooltip that scrolls, so more
-/// would not help the user.
+/// How much completion's details and signature help show: a part of a hover (<see cref="HoverParts"/>), so that the UI
+/// thread builds and lays them out within a frame, their parts in order. The text is cut where any of its limits runs
+/// out, and "…" marks the cut.
 /// </summary>
 /// <remarks>
-/// The UI thread's cost follows the runs, the pieces of text of one style or one color that it builds and shapes one by
-/// one, more than the characters: about 10 µs a run and 1 µs a character (the hover benchmark). The text is cut before
-/// it is read, which bounds the work in the background too, and what is read is cut by its runs.
+/// The text is cut before it is read, which bounds the work in the background too, and what is read is cut by its runs.
 /// </remarks>
 internal sealed class HoverBudget
 {
-    public const int MaxCharacters = 2_000;
+    public const int MaxCharacters = HoverParts.MaxCharacters;
 
-    public const int MaxLines = 50;
+    public const int MaxLines = HoverParts.MaxLines;
 
-    public const int MaxRuns = 250;
+    public const int MaxRuns = HoverParts.MaxRuns;
 
     private int _characters = MaxCharacters;
     private int _lines = MaxLines;
     private int _runs = MaxRuns;
 
     /// <summary>
-    /// The start of a part of a hover, on lines of its own, that the characters and lines left allow, with "…" at its
-    /// end when it was cut; null when nothing is left. The part is <paramref name="pieces"/> one after another, and each
-    /// is read only as far as it is kept, so the work is bounded by the budget, not by the text. Every piece of a
-    /// hover's text passes here before anything else reads it.
+    /// The start of a part of the details or of signature help, on lines of its own, that the characters and lines left
+    /// allow, with "…" at its end when it was cut; null when nothing is left. The part is <paramref name="pieces"/> one
+    /// after another, and each is read only as far as it is kept, so the work is bounded by the budget, not by the text.
+    /// Every piece of their text passes here before anything else reads it.
     /// </summary>
     /// <remarks>
     /// Lines break at <c>\r\n</c>, <c>\n</c> and <c>\r</c>, as everywhere in the library, and also where the layout of
@@ -200,7 +206,7 @@ internal sealed class HoverBudget
             for (; end < piece.Length; end++)
             {
                 char c = piece[end];
-                bool lineBreak = IsLineBreak(c) && !(c == '\n' && afterCarriageReturn);
+                bool lineBreak = HoverParts.IsLineBreak(c) && !(c == '\n' && afterCarriageReturn);
                 afterCarriageReturn = c == '\r';
                 if (kept.Length + end == _characters || (lineBreak && ++lines > _lines))
                 {
@@ -218,8 +224,6 @@ internal sealed class HoverBudget
         _lines -= lines;
         return kept.ToString();
     }
-
-    private static bool IsLineBreak(char c) => c is '\n' or '\r' or '\v' or '\f' or '\u0085' or '\u2028' or '\u2029';
 
     /// <summary>
     /// The blocks that the runs left allow: those that fit, and as much of the next as fits, ending with "…". Nothing
