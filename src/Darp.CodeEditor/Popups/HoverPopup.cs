@@ -73,7 +73,10 @@ internal sealed class HoverPopup
             InputElement.PointerPressedEvent,
             (_, _) =>
             {
-                if (!IsDragging)
+                // A drag starts: the edge across from the one dragged stays where it shows.
+                if (IsDragging)
+                    _popup.Left = _popup.Placed?.Bounds.Left;
+                else
                     Hold();
             },
             handledEventsToo: true
@@ -212,8 +215,6 @@ internal sealed class HoverPopup
     private void OnResized(Size size, Edges edges)
     {
         _resized = true;
-        // The edge across from the one dragged stays, also where the window's edge had pushed the popup.
-        _popup.Left ??= _popup.Placed?.Bounds.Left;
         PopupFrame frame = _popup.Frame;
         double minHeight = _textView.DefaultLineHeight + frame.Padding.Top + frame.Padding.Bottom;
         if ((edges & (Edges.Left | Edges.Right)) != 0)

@@ -406,6 +406,40 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_resized_hover_narrows_from_the_dragged_edge_also_after_the_window_moved_it() =>
+        _ui.Run(async () =>
+        {
+            HoverPopup.LastResizedSize = default;
+            try
+            {
+                var fake = new FakeServer("--no-diagnostics");
+                var time = new ManualTime();
+                await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+                using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two");
+                using var window = new EditorWindow(new CodeEditor { Document = document });
+                await server.StartAsync();
+                PopupFrame popup = await HoverAsync(window, 1, "one is a word in", time);
+                Rect bounds = BoundsInWindow(popup);
+                Drag(window, new Point(bounds.Right - 2, bounds.Center.Y), 100);
+                // Narrower than the widened popup's right edge: the window's edge pushes it left.
+                window.Window.Width = BoundsInWindow(popup).Right - 10;
+                window.Layout();
+                window.Render();
+                Rect pushed = BoundsInWindow(popup);
+
+                Drag(window, new Point(pushed.Right - 2, pushed.Center.Y), -30);
+
+                Rect resized = BoundsInWindow(popup);
+                resized.Left.ShouldBe(pushed.Left, 0.5);
+                resized.Right.ShouldBe(pushed.Right - 30, 0.5);
+            }
+            finally
+            {
+                HoverPopup.LastResizedSize = default;
+            }
+        });
+
+    [Fact]
     public Task A_resize_that_Escape_cuts_short_leaves_the_next_hover_alone() =>
         _ui.Run(async () =>
         {
@@ -573,4 +607,14 @@ public sealed class HoverTests(UiFixture ui)
             BoundsInWindow(popup.Root).Bottom.ShouldBeLessThanOrEqualTo(window.Window.ClientSize.Height);
             popup.Hide();
         });
+
+    /// <summary>Drags a popup's right grip at <paramref name="grip"/> across by <paramref name="by"/> pixels.</summary>
+    private static void Drag(EditorWindow window, Point grip, double by)
+    {
+        window.MoveMouse(grip);
+        window.Window.MouseDown(grip, MouseButton.Left);
+        window.Window.MouseMove(grip + new Point(by, 0), RawInputModifiers.LeftMouseButton);
+        window.Window.MouseUp(grip + new Point(by, 0), MouseButton.Left);
+        window.Layout();
+    }
 }
