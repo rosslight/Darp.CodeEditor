@@ -1,6 +1,7 @@
 // Left out of the baseline's build while the target branch has no completion: see NotInBaselineAttribute.
 #if !BENCHMARK_BASELINE
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
@@ -126,8 +127,26 @@ public class CompletionBenchmarks
         _server?.Dispose();
     }
 
-    internal static CompletionListBox? List(Window window) =>
-        OverlayLayer.GetOverlayLayer(window)?.GetVisualDescendants().OfType<CompletionListBox>().FirstOrDefault();
+    /// <summary>The list that a window showed last: an editor keeps its list, which shows again in the same window.</summary>
+    private static readonly ConditionalWeakTable<Window, CompletionListBox> s_lists = new();
+
+    /// <summary>
+    /// The list that shows in <paramref name="window"/>; null while none does. Found once, as looking through the
+    /// window's popups on each turn of a wait allocated more than the keystroke it waited for.
+    /// </summary>
+    internal static CompletionListBox? List(Window window)
+    {
+        if (s_lists.TryGetValue(window, out CompletionListBox? known) && TopLevel.GetTopLevel(known) == window)
+            return known;
+        CompletionListBox? list = OverlayLayer
+            .GetOverlayLayer(window)
+            ?.GetVisualDescendants()
+            .OfType<CompletionListBox>()
+            .FirstOrDefault();
+        if (list is not null)
+            s_lists.AddOrUpdate(window, list);
+        return list;
+    }
 
     /// <summary>Runs the UI thread's jobs until <paramref name="condition"/> holds; fails after 10 seconds.</summary>
     internal static void RunJobsUntil(Func<bool> condition, string failure)

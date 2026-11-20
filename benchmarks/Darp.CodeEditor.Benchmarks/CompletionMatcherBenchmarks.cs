@@ -23,9 +23,24 @@ public class CompletionMatcherBenchmarks
     /// <summary>The most that a ranking scores by tables: labels of 40 characters, as the fake server makes them.</summary>
     private CompletionCandidate[] _byTables = [];
 
+    /// <summary>Filter texts that are what was typed, and labels of 128 characters that lack its first character.</summary>
+    private CompletionCandidate[] _otherLabels = [];
+
     [GlobalSetup]
     public void SetUp()
     {
+        string typedX = "x" + string.Concat(Enumerable.Repeat("ab", 31));
+        _otherLabels =
+        [
+            .. Enumerable
+                .Range(0, Items)
+                .Select(i =>
+                {
+                    string label = $"y{i}";
+                    label += string.Concat(Enumerable.Range(0, 128 - label.Length).Select(c => c % 2 == 0 ? 'a' : 'b'));
+                    return new CompletionCandidate(typedX, label, typedX, FilterTextIsLabel: false);
+                }),
+        ];
         string[] words = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"];
         _byTables =
         [
@@ -61,4 +76,12 @@ public class CompletionMatcherBenchmarks
     /// </summary>
     [Benchmark]
     public int RankTheMostThatTablesScore() => _matcher.Rank(_byTables).Count;
+
+    /// <summary>
+    /// 2,000 items whose filter texts, which the typed text matches whole, differ from their labels of 128 characters,
+    /// as a server's may: the label shows its matched characters, found from the second typed character on, as the
+    /// first is not in it, so that its table is long.
+    /// </summary>
+    [Benchmark]
+    public int RankFilterTextsThatDifferFromTheirLongLabels() => _matcher.Rank(_otherLabels).Count;
 }
