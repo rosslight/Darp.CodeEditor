@@ -153,21 +153,9 @@ internal sealed record PopupColors
             Description = Brush(
                 Own("descriptionForeground") ?? (dark ? Transparent(foreground, 0.7) : Hex(0xFF717171))
             ),
-            ErrorIcon = Brush(
-                Own("problemsErrorIcon.foreground")
-                    ?? Own("editorError.foreground")
-                    ?? Hex(dark ? 0xFFF14C4C : 0xFFE51400)
-            ),
-            WarningIcon = Brush(
-                Own("problemsWarningIcon.foreground")
-                    ?? Own("editorWarning.foreground")
-                    ?? Hex(dark ? 0xFFCCA700 : 0xFFBF8803)
-            ),
-            InfoIcon = Brush(
-                Own("problemsInfoIcon.foreground")
-                    ?? Own("editorInfo.foreground")
-                    ?? Hex(dark ? 0xFF3794FF : 0xFF1A85FF)
-            ),
+            ErrorIcon = Icon("problemsErrorIcon.foreground", "editorError.foreground", 0xFFF14C4C, 0xFFE51400),
+            WarningIcon = Icon("problemsWarningIcon.foreground", "editorWarning.foreground", 0xFFCCA700, 0xFFBF8803),
+            InfoIcon = Icon("problemsInfoIcon.foreground", "editorInfo.foreground", 0xFF3794FF, 0xFF1A85FF),
             FocusBorder = Brush(Own("focusBorder") ?? Hex(dark ? 0xFF007FD4 : 0xFF0090F1)),
             Selection = text.Selection,
             Slider = (
@@ -178,6 +166,10 @@ internal sealed record PopupColors
         };
 
         Color? Own(string key) => colors.TryGetValue(key, out Color color) ? color : null;
+
+        // A problem's icon: its own color, else the editor's for its severity, else VS Code's default.
+        IBrush Icon(string own, string editor, uint onDark, uint onLight) =>
+            Brush(Own(own) ?? Own(editor) ?? Hex(dark ? onDark : onLight));
     }
 
     /// <summary>The colors of a light theme that sets nothing but its background.</summary>
