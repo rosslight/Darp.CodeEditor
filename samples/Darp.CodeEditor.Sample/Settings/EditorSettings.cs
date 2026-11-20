@@ -53,7 +53,10 @@ public sealed partial class EditorSettings : ObservableObject
         set => Options = Options with { Find = Options.Find with { AutoFindInSelection = value } };
     }
 
-    /// <summary>The hover's delay in milliseconds, for a number box, which is NaN while empty: the delay stays.</summary>
+    /// <summary>
+    /// The hover's delay in milliseconds, for a number box. A blank box gives NaN, which the delay ignores; the page then
+    /// shows the delay again.
+    /// </summary>
     public double HoverDelay
     {
         get => Options.Hover.Delay.TotalMilliseconds;

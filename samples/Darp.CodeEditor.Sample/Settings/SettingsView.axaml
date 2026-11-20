@@ -154,6 +154,7 @@
                     <fa:FASettingsExpander.Footer>
                         <fa:FANumberBox
                             Value="{Binding Settings.Editor.HoverDelay}"
+                            ValueChanged="OnHoverDelayChanged"
                             Minimum="0"
                             Maximum="10000"
                             SmallChange="50"
