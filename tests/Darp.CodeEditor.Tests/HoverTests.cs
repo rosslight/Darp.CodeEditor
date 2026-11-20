@@ -279,6 +279,40 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_resize_that_Escape_cuts_short_leaves_the_next_hover_alone() =>
+        _ui.Run(async () =>
+        {
+            HoverPopup.LastResizedSize = default;
+            try
+            {
+                var fake = new FakeServer("--no-diagnostics");
+                var time = new ManualTime();
+                await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+                using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two");
+                using var window = new EditorWindow(new CodeEditor { Document = document });
+                await server.StartAsync();
+                PopupFrame popup = await HoverAsync(window, 1, "one is a word in", time);
+                Rect bounds = BoundsInWindow(popup);
+                var corner = new Point(bounds.Right - 2, bounds.Bottom - 2);
+                window.MoveMouse(corner);
+                window.Window.MouseDown(corner, MouseButton.Left);
+
+                window.Press(Key.Escape);
+                window.Window.MouseUp(corner + new Point(0, 100), MouseButton.Left);
+                popup = await HoverAsync(window, 4, "two is a word in", time);
+                window.MoveMouse(BoundsInWindow(popup).Center);
+
+                popup.IsDragging.ShouldBeFalse();
+                popup.Width.ShouldBe(double.NaN);
+                HoverPopup.LastResizedSize.ShouldBe(default);
+            }
+            finally
+            {
+                HoverPopup.LastResizedSize = default;
+            }
+        });
+
+    [Fact]
     public Task A_long_hover_shows_all_of_its_content_and_scrolls() =>
         _ui.Run(async () =>
         {
