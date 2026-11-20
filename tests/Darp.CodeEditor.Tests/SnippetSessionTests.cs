@@ -514,7 +514,7 @@ public sealed class SnippetSessionTests(UiFixture ui)
             // Inside its first line, the choice's options show again.
             window.Press(Key.Left);
             window.Press(Key.Right);
-            window.Press(Key.Space, EditorWindow.Command);
+            window.Press(Key.Space, KeyModifiers.Control);
             (await WaitForLabelsAsync(window)).Count.ShouldBe(2);
             window.Press(Key.Down);
             window.Press(Key.Enter);
