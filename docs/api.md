@@ -138,6 +138,7 @@ editor.Options = CodeEditorOptions.Default with
 | `EmptySelectionClipboard` | `editor.emptySelectionClipboard` | true: without a selection, Copy and Cut take the caret's line with a line break, the last line too, and Paste puts that line above the caret's line while nothing is selected. Off, they need a selection, so that a stray Ctrl+C keeps the clipboard |
 | `Find.SeedSearchStringFromSelection` | `editor.find.seedSearchStringFromSelection` | `Always`: Ctrl+F's query starts with the selection within one line, or else the word at the caret, escaped while the bar uses a regular expression; `Selection` takes only a selection, `Never` nothing. Ctrl+H takes only a selection, and F3 takes one only for an empty query |
 | `Find.AutoFindInSelection` | `editor.find.autoFindInSelection` | `Never`: Find in Selection turns on only by its toggle and Alt+L; `Always` whenever something is selected as the bar opens, `Multiline` for a selection over several lines |
+| `Hover.Delay` | `editor.hover.delay` | 300 ms, from 0 to 10 s, a value outside clamped: how long the pointer rests on a character before its hover shows; the server is asked halfway through (section 6). Viewers and editors want different delays |
 | `MatchBrackets` | `editor.matchBrackets` | `Always`: at a caret without a selection, the bracket next to it and its match are boxed in the theme's colors, the one after the caret first, or else the innermost pair around the caret. `Near` boxes only a bracket next to the caret and its match, the cheaper, quieter mode; `Never` none. Brackets in strings and comments don't count, and brackets pair as VS Code's parser nests them: a closing bracket closes the closest open one of its kind, and those opened inside it stay unclosed, and one that closes none counts as no bracket. A match or a pair further than 100,000 characters away shows none |
 | `OccurrencesHighlight` | `editor.occurrencesHighlight` | true: the occurrences of the symbol at the caret are highlighted, the server's with reads and writes apart, or else the word's (section 6). Off, a caret move asks the server nothing, for users who find them noise and apps whose servers they load. VS Code's `multiFile` has no counterpart: an editor knows its own document only |
 | `ParameterHints.Enabled` | `editor.parameterHints.enabled` | true: typing the server's trigger characters opens signature help. Off, only Ctrl+Shift+Space opens it, and turning it off closes signature help that shows |
@@ -205,8 +206,8 @@ keys to them (design.md #113). A `CodeEditorKeymap` is immutable and can be shar
   then as an ordinary key. A key that starts several sequences waits for the second stroke of any of them.
 - **Not in the keymap:** the keys inside open popups (Up, Down, Page Up and Page Down in completion's list,
   Up and Down while signature help shows several signatures), Tab and Shift+Tab between a snippet's stops, except
-  Shift+Tab on the first stop, Escape, which closes completion, signature help, a snippet's stops, the hover and the
-  search bar one at a time, the search bar's own keys (Enter and Shift+Enter for the next and the previous match,
+  Shift+Tab on the first stop, Escape, which closes completion, signature help, a snippet's stops and the search bar
+  one at a time, and the hover along with the first of them, the search bar's own keys (Enter and Shift+Enter for the next and the previous match,
   Ctrl+Enter, also on macOS, for a line break in the query, and Tab between the query and the replacement), and
   AvaloniaEdit's own editing and clipboard keys. Other keys, such as F5 or Ctrl+S, reach
   the app's key bindings, and so does a key of the keymap whose commands don't apply.
@@ -220,6 +221,7 @@ The default keys on Windows and Linux; macOS in brackets where it differs beyond
 | Ctrl+N, Ctrl+P (macOS only) | `selectNextSuggestion`, `selectPrevSuggestion`, while the list shows more than one item | the next and the previous item, as Down and Up; otherwise the caret's keys |
 | Enter | `acceptSelectedSuggestion`, while the list shows | inserts the item and keeps the rest of the word (design.md #114) |
 | Tab, Shift+Enter | `acceptAlternativeSelectedSuggestion`, while the list shows | replaces the rest of the word with the item; VS Code's Tab inserts |
+| Ctrl+K Ctrl+I | `editor.action.showHover` | the hover at the caret, at once; again, the keyboard goes into it, where the arrows, Page Up, Page Down, Home and End scroll it (design.md #118) |
 | Ctrl+Shift+Space | `editor.action.triggerParameterHints` | signature help |
 | Alt+Up, Alt+Down (macOS also Ctrl+P, Ctrl+N) | `showPrevParameterHint`, `showNextParameterHint`, while signature help shows several signatures | the signature before or after the active one, ahead of the keys' other bindings, such as moving lines, as VS Code weighs them, but after completion's list, which takes Ctrl+N and Ctrl+P first; otherwise the keys go on to those |
 | Ctrl+F, Ctrl+H (macOS: Cmd+Alt+F for replace) | `actions.find`, `editor.action.startFindReplaceAction` | the search and the replace bar, not in a read-only editor |
@@ -244,9 +246,9 @@ The default keys on Windows and Linux; macOS in brackets where it differs beyond
 `editor.action.selectToBracket` has no key, as in VS Code: it selects the pair at the start of the selection, or else
 the pair around it, or else the next one, with the text between its brackets, backward from a closing bracket.
 
-**Context menu:** the editor's `ContextFlyout`, as in Avalonia's text box, with Cut, Copy, Paste, Select All, Toggle
-Line Comment, Find and Replace, their keys from the keymap and their text in the UI culture's language, English or
-German, as the search bar's. A right click outside the selection moves the caret there first, as in VS Code. An app
+**Context menu:** the editor's `ContextFlyout`, as in Avalonia's text box, with Show Hover, Cut, Copy, Paste, Select
+All, Toggle Line Comment, Find and Replace, their keys from the keymap, both strokes of a sequence such as Ctrl+K
+Ctrl+I, and their text in the UI culture's language, English or German, as the search bar's. A right click outside the selection moves the caret there first, as in VS Code. An app
 replaces the menu with its own `ContextFlyout` or `ContextMenu`, or removes it by setting `ContextFlyout` to null.
 
 **Indentation** belongs to the document (`CodeDocument.Indentation`), so all editors of one document agree. It starts
@@ -276,7 +278,9 @@ handler closes the group on the document it opened it on. Text that the app sets
   Code's keys, such as `editorSuggestWidget.background`, `editorHoverWidget.border` and `editorWidget.foreground`, and
   VS Code's defaults where a theme sets none. So a theme made for VS Code looks as it does there, and the popups look
   the same under Avalonia's Fluent and Simple themes, light or dark: an app's styles for flyouts, tooltips and lists
-  don't reach them. Prose shows in the app's font; code in the editor's font and colors.
+  don't reach them. Prose shows in the app's font; code in the editor's font and colors. A popup that has the keyboard,
+  as a hover can, shows the theme's `focusBorder` inside its border, as VS Code outlines its focused widgets. The
+  popups count as the editor's own for the keyboard: they close once it has left the editor and all of them.
 - **The search bar, the scroll bars and the context menu** are the app's controls, in the app's look, Fluent,
   FluentAvalonia or any other theme. Where the app's theme has no `MenuFlyoutPresenter` theme, as FluentAvalonia's,
   the menu takes one from `CodeEditorStyles`, built from the Fluent themes' menu resources.
@@ -316,7 +320,11 @@ popups; the search bar and the scroll bars follow the theme variant.
   server's information.
 - **Hover:** Markdown, with emphasis, inline code, lists and links. Code blocks are highlighted with the editor's
   grammar and colors, on the hover's background; inline code is on `textCodeBlock.background`, and links are in
-  `textLink.foreground`.
+  `textLink.foreground`. It shows all of its content, as VS Code's hover does: it grows up to two thirds of the
+  editor's width and a quarter of its height, or 750 by 250 pixels where that is more, and then scrolls. Dragging its
+  edges away from the word resizes it, and later hovers grow up to that size. Once clicked into, or given the keyboard
+  with Ctrl+K Ctrl+I, its text can be selected and copied, and it stays until Escape or a click outside it (design.md
+  #118).
 - **Completion:** a list as VS Code's suggest widget, below the word, or above it when only that side has room: 12
   rows at once, each exactly the editor's line height, with the icon and the label in the editor's font lined up with
   the word; the selected row shows its detail while the details are closed. A window with room for fewer rows shows
@@ -457,31 +465,44 @@ How the client talks to a server, where the protocol leaves a choice:
   after the start's settings went out: until then they get nothing, and when it opens there, not when the server
   runs, they learn that the server serves it, so a hover, completion and signature help end, and semantic tokens are
   asked for again.
-- **Hover** is asked when the pointer rests on a character for 400 ms, as long as Avalonia's tooltips wait (it is
-  AvaloniaEdit's hover time), at that character's position, or at a line's end within a space's width after it, where
-  an empty diagnostic's squiggle is. A `MarkedString` with a language becomes a Markdown code
-  block. The popup stays while the pointer is over the word, the range that the answer names, or the popup itself.
+- **Hover** has VS Code's timing: it shows when the pointer rests on a character for `Options.Hover.Delay`, 300 ms by
+  default, on the server's `TimeProvider`, and moving to another character starts the wait again. The server is asked
+  halfway through, at that character's position, or at a line's end within a space's width after it, where an empty
+  diagnostic's squiggle is; once the delay is over, the diagnostics there show, with the server's answer if it came,
+  which otherwise joins them when it comes. While the server has not answered by three times the delay, "Loading…"
+  shows below them, in the UI culture's language. Ctrl+K Ctrl+I asks at once at the caret, without "Loading…". A
+  `MarkedString` with a language becomes a Markdown code block. The popup stays while the pointer is over the word,
+  the range that the answer names, or the popup itself, and for VS Code's 300 ms after it left them, so that it can
+  cross other text on its way into the popup.
   The word reaches at most 1,000 characters to either side of the pointer, as in VS Code, so a line of millions of
   word characters costs the pointer no more; the popup still stays while the pointer moves on along such a word,
   which the view shows only up to its 3,000th character. How far the word goes on its line is found once, when the
   hover starts, so moving the pointer reads no text.
-  The hover ends when the pointer rests on another word, on typing, scrolling and Escape, when the editor loses the
-  keyboard focus, when a server starts or stops serving the document, and with new colors; also while it still
-  waits for its answer. Ending it cancels the request still under way with `$/cancelRequest`, stops reading the
+  The hover ends when the pointer has left the word, the answer's range and the popup by then, also for another word
+  under the same diagnostic; on a click in the editor, and on any key in the text but a modifier, the first stroke of
+  a sequence and the keys that show the hover; on typing, scrolling and Escape, which ends it along with what else it
+  closes, also from the search bar; when the keyboard leaves the editor and its popups, when a server starts or stops
+  serving the document, and with new colors; also while it still waits for its answer. A hover the user clicked into,
+  or put the keyboard into with Ctrl+K Ctrl+I, is held: it stays wherever the pointer goes, also while a drag that
+  selects its text crosses its edge, and keys and clicks in the editor leave it open, until Escape, a click outside
+  it, typing, scrolling or the window losing the focus (design.md #118); meanwhile resting on other text shows no
+  other hover. Text typed with the keyboard in it goes into the editor's text. While a button is down, as when a drag
+  selects, and after a click until the pointer moves, no hover starts, as in VS Code. Ending it cancels the request still under way with `$/cancelRequest`, stops reading the
   answer between lines and paragraphs and highlighting its code between lines, and drops what they would show. The
   popup is placed again when the window or the text it is next to moves, as when the window narrows.
-- **The hover's look:** the editor's popup in the theme's hover colors (section 2), up to 500 pixels wide; code blocks
-  in the editor's font and colors on its background, highlighted with the document's grammar; inline code as a small
-  span in the editor's font family on `textCodeBlock.background`, at the size of the text around it, so that it fits
-  its line.
-- **The hover's size:** a hover shows at most 2,000 characters on 50 lines, in 250 runs of one style or color, the
-  diagnostics' messages first, the most severe first and at most 50 of them; "…" marks where it was cut. The UI thread builds and lays out every run one by one, at
-  about 10 µs a run and 1 µs a character, so the largest hover takes it about 2 ms, with the frame about 7 ms
-  (BenchmarkDotNet, i7-13700), and a popup that scrolls gains nothing from more. Every piece of a hover's text, a
-  diagnostic's message and code as much as the server's answer, is cut in one place before anything else reads it,
-  so the work, in the background too, is bounded by these limits and not by what the server sends. Lines are counted
-  at `\r\n`, `\n` and `\r`, and also where the layout of text breaks them, such as the Unicode line separator; a cut
-  never splits a surrogate pair. Finding the diagnostics under the pointer puts in order only those it keeps: with the
+- **The hover's look:** the editor's popup in the theme's hover colors (section 2), with text that selects in the
+  text area's selection color; code blocks in the editor's font and colors on its background, highlighted with the
+  document's grammar; inline code as a small span in the editor's font family on `textCodeBlock.background`, at the
+  size of the text around it, so that it fits its line.
+- **The hover's size:** a hover shows all of its content, as VS Code's does: the diagnostics' messages, the most
+  severe first and at most 50 of them, and all of the server's answer. So that the UI thread stays within a frame, it
+  builds and lays out a part at a time, of at most 2,000 characters on 50 lines in 250 runs of one style or color, as
+  much as a whole hover showed before: the first as the popup opens, the next ones in the frames after it, long code
+  blocks and paragraphs in pieces. The UI thread builds and lays out every run one by one, at about 10 µs a run and
+  1 µs a character, so the largest part takes it about 2 ms, with the frame about 7 ms (BenchmarkDotNet, i7-13700).
+  Lines are counted at `\r\n`, `\n` and `\r`, and also where the layout of text breaks them, such as the Unicode
+  line separator; a part never splits a surrogate pair. Completion's details and signature help show at most one
+  part's worth, cut where it runs out, before anything reads more of their text. Finding the diagnostics under the pointer puts in order only those it keeps: with the
   hover's text, 0.75 ms for 10,000 on one character in the worst order, where each one found beats those before
   (BenchmarkDotNet, i7-13700).
 - **The shown part of a line.** The editor's views work only on the part of each line that the view shows, its first
@@ -595,7 +616,7 @@ How the client talks to a server, where the protocol leaves a choice:
     the editor has nowhere to send them (Q122).
   - **Resolving:** the selected item is resolved when it is selected, and the resolve of an item that is no longer
     selected is cancelled. Its detail, as code highlighted with the document's grammar, and its documentation show
-    beside the list, unless Ctrl+Space hid them, as much of both as a hover shows: they share one budget of the hover's size, cut before anything
+    beside the list, unless Ctrl+Space hid them, as much of both as a part of a hover takes: they share one budget of a part's size, cut before anything
     reads them. A row shows at most 256 characters of a label, with "…". Additional edits that the resolve brings only
     after the item was committed go in as VS Code puts them in: in the commit's undo step while it is the last one,
     and in a step of their own once the user typed on. They are dropped when a change since the commit, its own edit
@@ -675,7 +696,7 @@ How the client talks to a server, where the protocol leaves a choice:
     leaves the stops; when the step that inserted the snippet is undone; when a change removes all of the snippet's
     text, such as setting `Text`; when the editor becomes read-only; and when it no longer shows the document. Losing
     the keyboard focus does not end it, as in VS Code. VS Code also hides a hover on any key, so its Escape ends the
-    session and hides the hover together; the editor closes one thing at a time, the hover after the session.
+    session and hides the hover together, and so does the editor's (design.md #118).
   - **The stops' look:** boxes in the theme's `editor.snippetTabstopHighlightBackground`, and the final stop as a border
     in `editor.snippetFinalTabstopHighlightBorder`, in VS Code's colors where the theme sets none, as long as the
     session runs.
@@ -708,7 +729,7 @@ How the client talks to a server, where the protocol leaves a choice:
   signature's own, or the answer's, or the first; one outside the parameters is none, and a signature whose active
   parameter is past its parameters cannot match the call, unless it has none and the first is active. A parameter
   labelled by a string is found as a whole word in the signature. The active parameter's documentation shows below,
-  then the active signature's; all of it as much as a hover shows, the active signature first, then the others. Up and
+  then the active signature's; all of it as much as a part of a hover takes, the active signature first, then the others. Up and
   Down choose the active signature, around the ends, while completion's list is closed, and Alt+Up and Alt+Down also
   while it is open (section 2). It ends on Escape, after
   completion's list, on a click or drag that moves the caret, with no signature, when the editor becomes read-only,
@@ -1208,18 +1229,26 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   the document's grammar in the editor's font and colors on the popup's background; in the editor's popup, in the
   window's overlay layer, inside a window narrower than the popup. An editor in a dark `ThemeVariantScope` of a light
   window shows Dark+'s hover background, in its pixels. Inline code shows in the editor's font on Dark+'s
-  `textCodeBlock.background`, and code without a color of its own in the editor's foreground, in the pixels. The popup stays while the pointer is over its word or over the
-  popup, and closes when the
-  pointer leaves both, rests on another word under the same diagnostic, and on typing, Escape, scrolling and focus
-  loss. Resting on another word cancels the request still under way with `$/cancelRequest`, and so does Escape
+  `textCodeBlock.background`, and code without a color of its own in the editor's foreground, in the pixels. All on
+  a manual clock: the server is asked halfway through the delay and the hover shows once it is over, the wait starts
+  again on another character, and "Loading…" shows at three times the delay; the delay is clamped to 0 to 10 s. The
+  popup stays while the pointer is over its word or over the popup, and closes 300 ms after the pointer left both,
+  also over another word under the same diagnostic, and on typing, Escape, scrolling and focus loss; a click in the
+  editor and a key in the text end it, but not the first stroke of Ctrl+K Ctrl+I, and no hover starts during a drag
+  or where it rests after a click. Clicked into to select its text, it stays wherever the pointer goes, also over
+  other text, until a click outside it or typing, which goes into the text; Ctrl+K Ctrl+I shows the hover at the
+  caret, and again puts the keyboard into it, also into one the mouse opened, with the theme's `focusBorder` inside
+  its border, until Escape gives it back. Escape ends the hover along with the search bar or completion. Dragging its
+  corner resizes it beyond VS Code's limits, and later hovers grow up to that size. A long hover shows all of its
+  content and scrolls; its content builds a part at once and the next parts in the frames after it, only while it
+  shows. Resting on another word cancels the request still under way with `$/cancelRequest`, and so does Escape
   before any popup showed. A server that stops serving the document and new colors end the hover, and reading its
   Markdown and highlighting its code stop part-way once it ended. A popup stays inside a window that narrows. An empty
-  diagnostic at a line's end shows when the pointer rests where its squiggle is. A hover shows at most its characters,
-  lines and runs, also for a diagnostic message of 100,000 characters, an answer of 1,000 lines and a paragraph of
-  800 runs, and the messages leave the server's hover only what they do not use. A diagnostic of 10 million
-  characters with a code allocates under 1 MB to be shown; lines count at `\r\n`, `\n`, `\r` and the line
-  separator; a cut keeps surrogate pairs whole; and a popup whose space is not a whole number of pixels stays inside
-  the window;
+  diagnostic at a line's end shows when the pointer rests where its squiggle is. A hover keeps all of its text in
+  pieces of at most a part, also a diagnostic message of 20,000 words, an answer of 1,000 lines and a paragraph of
+  800 runs, while completion's details and signature help show at most their budget's; lines count at `\r\n`, `\n`,
+  `\r` and the line separator; neither a piece nor a cut splits a surrogate pair; and a popup whose space is not a
+  whole number of pixels stays inside the window;
 - the Markdown subset: emphasis, also nested, paired as CommonMark pairs it, also in text with thousands of
   delimiters that never close, inline code, escapes, links that open only http and https pages, nested
   lists, hard line breaks, headings, rules and fenced code blocks; and hover answers as `MarkupContent`, `MarkedString`
@@ -1366,8 +1395,8 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   the list shows, and the selection that typing replaced before completion committed. Completion inside a stop keeps
   the session, and a snippet committed there joins it. The session ends when the selection leaves
   the stops, the insertion is undone, the text is replaced, the editor becomes read-only, and it stops showing the
-  document; Escape ends it after completion and signature help and before the hover and the search bar, and closes the
-  search bar first when the bar has the keyboard. The variables of the caret, the document's file, the language and the
+  document; Escape ends it after completion and signature help and before the search bar, the hover along with it, and
+  closes the search bar first when the bar has the keyboard. The variables of the caret, the document's file, the language and the
   server's clock go in, and the stops show in a theme's colors, in the rendered pixels. A snippet beyond each limit goes
   in as written, also ones crafted so that parsing would take quadratic time, in many short tokens or few long ones, one
   whose indentation would make it millions of characters long, one whose mirrors would copy a selected text past a
