@@ -41,6 +41,7 @@ internal sealed class HoverPopup
     private readonly EditorPopup _popup;
 
     private TextRange _word;
+    private int _at;
     private bool _resized;
 
     /// <summary>The diagnostics shown, and the content, where the server's hover follows them; null while nothing shows.</summary>
@@ -114,7 +115,8 @@ internal sealed class HoverPopup
         IReadOnlyCollection<HoverBlock> messages,
         IReadOnlyList<HoverBlock> below,
         PopupColors colors,
-        TextRange word
+        TextRange word,
+        int at
     )
     {
         _popup.Frame.Paint(
@@ -151,7 +153,7 @@ internal sealed class HoverPopup
         // The text that had the keyboard may have gone with the tail: the scroller keeps it.
         if (hadKeyboard && !HasKeyboard)
             TakeKeyboard();
-        _word = word;
+        (_word, _at) = (word, at);
         Place();
     }
 
@@ -189,7 +191,19 @@ internal sealed class HoverPopup
         _popup.Hide();
     }
 
-    private void Place() => _popup.Show(_textView, () => TextViewBoxes.CharacterAt(_textView, _word.Start));
+    /// <summary>
+    /// Places the popup at the word's start, or at where the hover is, the pointer, the caret or F8's place, where a
+    /// wrapped row out of view holds the start of a long word, as VS Code's widget goes where F8 went.
+    /// </summary>
+    private void Place() =>
+        _popup.Show(
+            _textView,
+            () =>
+                TextViewBoxes.CharacterAt(_textView, _word.Start) is { Bottom: > 0 } start
+                && start.Top < _textView.Bounds.Height
+                    ? start
+                    : TextViewBoxes.CharacterAt(_textView, _at)
+        );
 
     /// <summary>
     /// The user drags an edge: the popup takes the size dragged to, at least VS Code's narrowest and a line high, and
