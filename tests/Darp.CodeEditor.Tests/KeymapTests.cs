@@ -124,6 +124,18 @@ public sealed class KeymapTests(UiFixture ui)
     }
 
     [Fact]
+    public void By_default_Ctrl_K_Ctrl_I_shows_the_hover()
+    {
+        CodeEditorKeymap keymap = CodeEditorKeymap.Default;
+        PressedKey first = Key(Keys.K, EditorWindow.Command);
+
+        Resolve(keymap, first).Waits.ShouldBeTrue();
+        KeyResolution
+            .Of(keymap, first, Key(Keys.I, EditorWindow.Command))
+            .Commands.ShouldBe([CodeEditorCommands.ShowHover]);
+    }
+
+    [Fact]
     public void A_key_that_starts_several_sequences_waits_for_the_second_stroke_of_each()
     {
         CodeEditorKeymap keymap = CodeEditorKeymap.Empty.With(
