@@ -131,15 +131,9 @@ internal sealed class HoverPopup
         _content.SliderBrushes = colors.Slider;
         if (!_resized)
         {
-            Size editor = _editor.Bounds.Size;
-            _popup.Frame.MaxWidth = Math.Max(
-                Math.Max(MinMaxWidth, Math.Floor(editor.Width * 0.66)),
-                LastResizedSize.Width
-            );
-            _popup.Frame.MaxHeight = Math.Max(
-                Math.Max(MinMaxHeight, Math.Floor(editor.Height / 4)),
-                LastResizedSize.Height
-            );
+            var most = new Size(Math.Floor(_editor.Bounds.Width * 0.66), Math.Floor(_editor.Bounds.Height / 4));
+            _popup.Frame.MaxWidth = Math.Max(Math.Max(MinMaxWidth, most.Width), LastResizedSize.Width);
+            _popup.Frame.MaxHeight = Math.Max(Math.Max(MinMaxHeight, most.Height), LastResizedSize.Height);
         }
         bool hadKeyboard = HasKeyboard;
         PopupLook look = PopupLook.Of(_editor, colors, colors.HoverForeground) with { Selectable = true };
