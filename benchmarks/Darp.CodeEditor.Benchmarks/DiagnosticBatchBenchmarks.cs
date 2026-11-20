@@ -205,7 +205,8 @@ public class DiagnosticBatchBenchmarks
     public int FindWhatAHoverShowsOfTheLargestBatch()
     {
         SquiggleLayer layer = _layer ?? throw new InvalidOperationException("Not set up.");
-        return HoverBlocks.Of(layer.At(_hovered, HoverParts.MaxLines)).Count;
+        // The first part of the hover: a diagnostic takes a line at least.
+        return HoverBlocks.Of(layer.At(_hovered)).Take(HoverParts.MaxLines).Count();
     }
 
     [GlobalCleanup]

@@ -124,13 +124,13 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ## Codicons
 
-The completion icons are VS Code's codicons, from the npm package `@vscode/codicons` 0.0.46-24
+The completion icons, and the icons of a diagnostic's severity in the hover, are VS Code's codicons, from the npm package `@vscode/codicons` 0.0.46-24
 (https://github.com/microsoft/vscode-codicons). The path data of these SVG files in its `src/icons` folder is copied
 unchanged and drawn as vector shapes: `symbol-key`, `symbol-method`, `symbol-field`, `symbol-variable`,
 `symbol-class`, `symbol-interface`, `symbol-namespace`, `symbol-property`, `symbol-ruler`, `symbol-enum`,
 `symbol-keyword`, `symbol-snippet`, `symbol-color`, `symbol-file`, `go-to-file`, `folder`, `symbol-enum-member`,
-`symbol-constant`, `symbol-structure`, `symbol-event`, `symbol-operator` and `symbol-parameter`. The designs are not
-changed.
+`symbol-constant`, `symbol-structure`, `symbol-event`, `symbol-operator`, `symbol-parameter`, `error`, `warning` and
+`info`. The designs are not changed.
 
 ```
 Codicons, copyright (c) Microsoft Corporation.

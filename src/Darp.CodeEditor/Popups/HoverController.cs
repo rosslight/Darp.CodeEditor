@@ -123,6 +123,9 @@ internal sealed class HoverController : IEditorFeature
     /// <summary>Whether the server's answer to the hover that waits or shows is in, its Markdown read; for tests.</summary>
     internal bool IsAnswered => _hovered is { IsAnswered: true };
 
+    /// <summary>Where the problem that F8 went to shows, while it shows; null otherwise.</summary>
+    public int? ProblemOffset => _hovered is { IsProblem: true } hovered && _popup.IsOpen ? hovered.Offset : null;
+
     public void AddCommands(CommandTable commands) => commands.Add(CodeEditorCommands.ShowHover, ShowAtCaret);
 
     /// <summary>
@@ -163,6 +166,51 @@ internal sealed class HoverController : IEditorFeature
         _popup.Root.PointerEntered -= OnPointerEnteredPopup;
         _editor.RemoveHandler(InputElement.PointerPressedEvent, OnEditorPressed);
         _editor.RemoveHandler(InputElement.PointerReleasedEvent, OnEditorReleased);
+    }
+
+    /// <summary>
+    /// Shows <paramref name="problem"/>, the blocks of the problem that F8 went to at <paramref name="offset"/>, as a hover
+    /// asked for by key, without the server's hover.
+    /// </summary>
+    public void ShowProblem(int offset, IReadOnlyCollection<HoverBlock> problem)
+    {
+        Hovered hovered = Begin(offset, fromKeyboard: true);
+        (hovered.IsProblem, hovered.IsDue, hovered.IsAnswered) = (true, true, true);
+        hovered.Messages = problem;
+        Render(hovered);
+    }
+
+    /// <summary>Shows <paramref name="problem"/> in place of the problem that shows, as new diagnostics replaced it.</summary>
+    public void UpdateProblem(IReadOnlyCollection<HoverBlock> problem)
+    {
+        if (_hovered is not { IsProblem: true } hovered)
+            return;
+        hovered.Messages = problem;
+        Render(hovered);
+    }
+
+    /// <summary>
+    /// What goes to a place that <paramref name="diagnostic"/> concerns, in the document: the caret goes there, where it
+    /// is now in the text, and the hover ends. Null for a place in another document, which an editor cannot show (Q121).
+    /// </summary>
+    public Action? OpenRelated(Diagnostic diagnostic, DiagnosticRelatedInformation related)
+    {
+        string? here =
+            _document is ServerDocument { Uri: var uri } ? uri
+            : _document.FilePath is { } path ? DocumentUris.File(path)
+            : null;
+        if (here is null || DocumentUris.Identity(here) != DocumentUris.Identity(related.Uri.OriginalString))
+            return null;
+        return () =>
+        {
+            TextSnapshot snapshot = diagnostic.Snapshot;
+            int offset = _document.MapToCurrent(snapshot, new TextRange(snapshot.GetOffset(related.Start), 0)).Start;
+            Close();
+            _textArea.Focus();
+            _textArea.ClearSelection();
+            _textArea.Caret.Offset = offset;
+            _textArea.Caret.BringCaretToView();
+        };
     }
 
     /// <summary>
@@ -232,8 +280,7 @@ internal sealed class HoverController : IEditorFeature
     private void Due(Hovered hovered)
     {
         hovered.IsDue = true;
-        // Each diagnostic takes a line at least, so a hover never shows more of them than a part has lines.
-        hovered.Messages = HoverBlocks.Of(_squiggles.At(hovered.Offset, HoverParts.MaxLines));
+        hovered.Messages = HoverBlocks.Of(_squiggles.At(hovered.Offset), OpenRelated);
         Render(hovered);
     }
 
@@ -291,8 +338,7 @@ internal sealed class HoverController : IEditorFeature
     /// </summary>
     private void Render(Hovered hovered)
     {
-        IEnumerable<HoverBlock> blocks = hovered.Blocks();
-        if (!blocks.Any())
+        if (hovered.Blocks() is not { } blocks)
         {
             StayOpen();
             _popup.Hide();

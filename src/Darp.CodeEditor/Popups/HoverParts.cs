@@ -21,8 +21,8 @@ internal static class HoverParts
 
     /// <summary>
     /// <paramref name="block"/> in pieces of at most a part each: a code block between its lines, a paragraph that is
-    /// no list item between its lines, or within a line too long for a part, after a space where there is one. Each
-    /// piece after the first goes on from the one before. Other blocks, and blocks that fit, stay whole.
+    /// no list item or a diagnostic between its lines, or within a line too long for a part, after a space where there
+    /// is one. Each piece after the first goes on from the one before. Other blocks, and blocks that fit, stay whole.
     /// </summary>
     public static IEnumerable<HoverBlock> Split(HoverBlock block) =>
         block switch
@@ -35,6 +35,7 @@ internal static class HoverParts
                         Continues = !first || code.Continues,
                     }
             ),
+            HoverDiagnostic diagnostic when !Fits(Size(diagnostic)) => DiagnosticPieces(diagnostic),
             HoverParagraph { Marker: null } paragraph when !Fits(Size(paragraph)) => Pieces(
                 paragraph.Spans.Select(span => (span.Text, span)),
                 (spans, first) =>
@@ -60,10 +61,114 @@ internal static class HoverParts
             case HoverCode code:
                 (characters, lines) = Count(code.Runs.Select(run => run.Text));
                 return (characters, lines, code.Runs.Count);
+            case HoverDiagnostic diagnostic:
+                (characters, lines) = Count([diagnostic.Message, diagnostic.Source ?? "", diagnostic.Code ?? ""]);
+                (int Characters, int Lines, int Runs) size = (characters, lines, 5);
+                foreach (HoverRelated related in diagnostic.Related)
+                    size = Add(size, Size(related));
+                return size;
             default:
                 return (0, 1, 1);
         }
     }
+
+    /// <summary>The size of a related place as a part counts it: on a line of its own, in two runs.</summary>
+    private static (int Characters, int Lines, int Runs) Size(HoverRelated related)
+    {
+        (int characters, int lines) = Count([related.Place, related.Message]);
+        return (characters, lines, 2);
+    }
+
+    private static (int Characters, int Lines, int Runs) Add(
+        (int Characters, int Lines, int Runs) a,
+        (int Characters, int Lines, int Runs) b
+    ) => (a.Characters + b.Characters, a.Lines + b.Lines, a.Runs + b.Runs);
+
+    /// <summary>
+    /// A diagnostic larger than a part in pieces of at most a part each, each going on from the one before: its
+    /// message, also an empty one, with the icon beside the first piece and its source and code after the last; then
+    /// its related places, with that piece while they fit it and then in pieces of their own, a place larger than a
+    /// part in pieces too.
+    /// </summary>
+    private static IEnumerable<HoverBlock> DiagnosticPieces(HoverDiagnostic diagnostic)
+    {
+        HoverIcon room = diagnostic.Icon == HoverIcon.None ? HoverIcon.None : HoverIcon.Room;
+        HoverDiagnostic? current = null;
+        foreach (
+            HoverDiagnostic piece in Pieces(
+                [(diagnostic.Message, 0)],
+                (texts, first) =>
+                    new HoverDiagnostic(
+                        diagnostic.Severity,
+                        string.Concat(texts.Select(t => t.Text)),
+                        null,
+                        null,
+                        null,
+                        [],
+                        first ? diagnostic.Icon : room
+                    )
+                    {
+                        Continues = !first || diagnostic.Continues,
+                    }
+            )
+        )
+        {
+            if (current is not null)
+                yield return current;
+            current = piece;
+        }
+        current = (current ?? diagnostic with { Message = "" }) with
+        {
+            Source = diagnostic.Source,
+            Code = diagnostic.Code,
+            CodeLink = diagnostic.CodeLink,
+            Related = [],
+        };
+        var related = new List<HoverRelated>();
+        (int Characters, int Lines, int Runs) size = Size(current);
+        foreach (HoverRelated place in diagnostic.Related.SelectMany(RelatedPieces))
+        {
+            (int Characters, int Lines, int Runs) with = Add(size, Size(place));
+            if (Fits(with))
+            {
+                related.Add(place);
+                size = with;
+                continue;
+            }
+            yield return current with
+            {
+                Related = related,
+            };
+            // A piece of related places alone: no line of its own for the message.
+            current = new HoverDiagnostic(diagnostic.Severity, "", null, null, null, [], room) { Continues = true };
+            related = [place];
+            size = Add(Size(current), Size(place));
+        }
+        yield return current with
+        {
+            Related = related,
+        };
+    }
+
+    /// <summary>
+    /// <paramref name="related"/>, or when it is larger than a part, its pieces: the place, which opens it, with the
+    /// first, and each next going on from the one before.
+    /// </summary>
+    private static IEnumerable<HoverRelated> RelatedPieces(HoverRelated related) =>
+        Fits(Size(related))
+            ? [related]
+            : Pieces(
+                [(related.Place, true), (related.Message, false)],
+                (texts, first) =>
+                    new HoverRelated(
+                        string.Concat(texts.Where(t => t.Run).Select(t => t.Text)),
+                        string.Concat(texts.Where(t => !t.Run).Select(t => t.Text)),
+                        first ? related.Open : null
+                    )
+                    {
+                        Continues = !first,
+                    }
+            );
 
     /// <summary>Whether something of <paramref name="size"/> fits a part.</summary>
     public static bool Fits((int Characters, int Lines, int Runs) size) =>
