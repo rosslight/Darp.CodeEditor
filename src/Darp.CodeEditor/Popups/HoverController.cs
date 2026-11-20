@@ -321,7 +321,13 @@ internal sealed class HoverController : IEditorFeature
             _popup.Hide();
             return;
         }
-        _popup.Show(hovered.Messages, below, _colors, hovered.Word);
+        // F8's popup goes where F8 revealed, as VS Code's widget does: not at a long word's start, which may be out of view.
+        _popup.Show(
+            hovered.Messages,
+            below,
+            _colors,
+            hovered.IsProblem ? new TextRange(hovered.Offset, 0) : hovered.Word
+        );
     }
 
     /// <summary>Over other text, a hover that shows closes soon; while none shows, the pointer's hover starts.</summary>

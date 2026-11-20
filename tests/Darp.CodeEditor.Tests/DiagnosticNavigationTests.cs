@@ -108,6 +108,31 @@ public sealed class DiagnosticNavigationTests(UiFixture ui)
         });
 
     [Fact]
+    public Task F8_in_a_long_wrapped_word_shows_the_popup_where_it_brings_the_caret() =>
+        _ui.Run(async () =>
+        {
+            // One word over many rows of a narrow editor: its start is out of view where the diagnostic is.
+            string text = new string('x', 2_000);
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(
+                new CodeEditor { Document = document, WordWrap = true },
+                width: 300,
+                height: 200
+            );
+            document.SetDiagnostics([
+                new Diagnostic(
+                    document.CurrentSnapshot,
+                    new TextRange(1_990, 5),
+                    DiagnosticSeverity.Error,
+                    null,
+                    "':' expected"
+                ),
+            ]);
+
+            (await GoAsync(window, Key.F8)).ShouldBe((1_990, "':' expected"));
+        });
+
+    [Fact]
     public Task New_diagnostics_show_in_the_problem_that_shows_or_close_it_without_one_there() =>
         _ui.Run(async () =>
         {
