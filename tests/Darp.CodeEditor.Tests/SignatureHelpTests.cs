@@ -226,6 +226,38 @@ public sealed class SignatureHelpTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Signatures_whose_documentation_is_read_once_the_caret_left_the_call_do_not_show() =>
+        _ui.Run(async () =>
+        {
+            var time = new ManualTime();
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "\ncall(");
+            var reading = new HeldScheduler();
+            using var window = new EditorWindow(new CodeEditor { Document = document, BackgroundScheduler = reading });
+            await CompletionTests.StartServingAsync(server, document);
+            window.Editor.Selection = new TextSelection(6);
+            reading.Hold();
+            window.Press(Key.Space, EditorWindow.Command | KeyModifiers.Shift);
+            await Wait.UntilAsync(() => reading.Held > 0);
+
+            // Out of the call while the documentation is read; it is read within the pause that the move started.
+            window.Press(Key.Up);
+            await reading.ReleaseAndWaitAsync();
+            await EditorWindow.RunPostedJobsAsync();
+            window.Render();
+            Popup(window).ShouldBeNull();
+
+            // Asked again there, the server has none.
+            time.Advance(s_pause);
+            (await fake.WaitForAsync("signatureHelp ", 2)).ShouldEndWith(" 0");
+            await CompletionTests.BarrierAsync(server, fake);
+            await EditorWindow.RunPostedJobsAsync();
+            window.Render();
+            Popup(window).ShouldBeNull();
+        });
+
+    [Fact]
     public Task Up_and_Down_choose_the_active_signature_the_server_keeps_the_choice_and_an_open_list_takes_them() =>
         _ui.Run(async () =>
         {
