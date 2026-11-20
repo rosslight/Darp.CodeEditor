@@ -23,6 +23,10 @@ namespace Darp.CodeEditor.Popups;
 /// line. <see cref="Resized"/> reports the size dragged to and the edges dragged, and its owner shows it again at that
 /// size, on the same side of its line until the user lets go.
 /// </para>
+/// <para>
+/// Its root names the editor as its owner (<see cref="EditorPopups"/>), so that the keyboard in it counts as in the
+/// editor.
+/// </para>
 /// </remarks>
 internal sealed class EditorPopup
 {
@@ -53,6 +57,9 @@ internal sealed class EditorPopup
         Frame = new PopupFrame { Name = name, Child = content };
         Frame.Resized += (size, edges) => Resized?.Invoke(size, edges);
         _root = new ThemeVariantScope { Child = Frame };
+        EditorPopups.SetOwner(_root, editor);
+        // Content that grows, as a hover built in parts, places the popup again.
+        _root.AddHandler(HoverContent.GrewEvent, (_, _) => _placedBy = null);
         _side = side;
     }
 

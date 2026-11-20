@@ -8,11 +8,12 @@ namespace Darp.CodeEditor.Popups;
 /// <summary>
 /// Scrolls a popup's content up and down, as VS Code's widgets do: its <see cref="PopupSlider"/> takes a gutter of its
 /// own while the content is taller than the scroller, so that it never covers the text, and the content wraps to the
-/// width left. Nothing scrolls across. The wheel scrolls too.
+/// width left. Nothing scrolls across. The wheel scrolls too, and while it has the keyboard, the arrows, Page Up, Page
+/// Down, Home and End.
 /// </summary>
 internal sealed class PopupScroller : Control
 {
-    /// <summary>How far one notch of the wheel scrolls.</summary>
+    /// <summary>How far one notch of the wheel and one arrow key scroll.</summary>
     private const double Step = 40;
 
     private readonly PopupSlider _slider = new();
@@ -30,6 +31,8 @@ internal sealed class PopupScroller : Control
     public PopupScroller()
     {
         ClipToBounds = true;
+        // The popup's frame shows the keyboard in it.
+        FocusAdorner = null;
         VisualChildren.Add(_slider);
         _slider.Scrolled += ScrollTo;
     }
@@ -143,6 +146,30 @@ internal sealed class PopupScroller : Control
         ScrollTo(_offset - e.Delta.Y * Step);
         e.Handled = true;
     }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        if (e.Handled || e.KeyModifiers != KeyModifiers.None || !_slider.CanScroll)
+            return;
+        double? delta = e.Key switch
+        {
+            Key.Down => Step,
+            Key.Up => -Step,
+            Key.PageDown => Bounds.Height,
+            Key.PageUp => -Bounds.Height,
+            Key.End => double.PositiveInfinity,
+            Key.Home => double.NegativeInfinity,
+            _ => null,
+        };
+        if (delta is not { } by)
+            return;
+        ScrollBy(by);
+        e.Handled = true;
+    }
+
+    /// <summary>Scrolls by <paramref name="delta"/> pixels, down where positive, as far as the content goes.</summary>
+    public void ScrollBy(double delta) => ScrollTo(_offset + delta);
 
     private void ScrollTo(double offset)
     {
