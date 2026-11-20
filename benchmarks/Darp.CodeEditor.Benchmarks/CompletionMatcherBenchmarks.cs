@@ -5,9 +5,10 @@ namespace Darp.CodeEditor.Benchmarks;
 
 /// <summary>
 /// Ranking a list off the UI thread in the worst case of matching that tolerates typos: as many items as are matched
-/// so, 2,000, of 128 characters each, and a typed word of 63 characters that every label holds in order, so that each
-/// match fills its table, until the ranking's budget of cells is spent. Not in the CI category: the list shows the
-/// previous result meanwhile, and <see cref="CompletionLongLabelBenchmarks"/> measures the same up to a frame.
+/// so, 2,000, of 128 characters each, and a typed word of 63 characters that every label holds in order, so that the
+/// tables would fill far more cells than a ranking's budget, and the ranking finds that out and scores the cheaper way.
+/// Not in the CI category: the list shows the previous result meanwhile, and <see cref="CompletionLongLabelBenchmarks"/>
+/// measures the same up to a frame.
 /// </summary>
 [WarmupCount(3)]
 [IterationCount(10)]
@@ -19,9 +20,24 @@ public class CompletionMatcherBenchmarks
 
     private CompletionCandidate[] _candidates = [];
 
+    /// <summary>The most that a ranking scores by tables: labels of 40 characters, as the fake server makes them.</summary>
+    private CompletionCandidate[] _byTables = [];
+
     [GlobalSetup]
     public void SetUp()
     {
+        string[] words = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"];
+        _byTables =
+        [
+            .. Enumerable
+                .Range(0, Items)
+                .Select(i =>
+                {
+                    string label = $"{words[i % words.Length]}{i}";
+                    label += string.Concat(Enumerable.Range(0, 40 - label.Length).Select(c => c % 2 == 0 ? 'a' : 'b'));
+                    return new CompletionCandidate("aabbabaa", label, label, FilterTextIsLabel: true);
+                }),
+        ];
         string typed = string.Concat(Enumerable.Repeat("ab", 32))[..63];
         _candidates =
         [
@@ -38,4 +54,11 @@ public class CompletionMatcherBenchmarks
 
     [Benchmark]
     public int RankTheWorstCaseOfTheMostItemsMatchedWithTyposTolerated() => _matcher.Rank(_candidates).Count;
+
+    /// <summary>
+    /// The most that a ranking scores by tables, as in <see cref="CompletionTableBudgetBenchmarks"/>: 2,000
+    /// labels of 40 characters against 8 typed characters, with their swaps, just within the budget of cells.
+    /// </summary>
+    [Benchmark]
+    public int RankTheMostThatTablesScore() => _matcher.Rank(_byTables).Count;
 }
