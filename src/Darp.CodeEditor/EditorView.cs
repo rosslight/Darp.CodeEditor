@@ -68,6 +68,16 @@ internal sealed class EditorView : IDisposable
     private readonly SignatureHelpController _signatureHelp;
     private readonly FindController _search;
 
+    /// <summary>The commands that show the hover, which their keys leave open: they show it again.</summary>
+    private static readonly string[] s_showHover =
+    [
+        CodeEditorCommands.ShowHover,
+        CodeEditorCommands.NextMarker,
+        CodeEditorCommands.PreviousMarker,
+        CodeEditorCommands.NextMarkerInFiles,
+        CodeEditorCommands.PreviousMarkerInFiles,
+    ];
+
     /// <summary>The key that started a sequence while the view waits for its second stroke; null otherwise.</summary>
     private PressedKey? _pending;
 
@@ -200,12 +210,7 @@ internal sealed class EditorView : IDisposable
         _resumed = null;
         // As VS Code hides the hover on a key in the text, but for those that may show it; Escape closes it below.
         bool escape = e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None;
-        if (
-            _context.Area.IsFocused
-            && !escape
-            && !resolution.Waits
-            && !resolution.Commands.Contains(CodeEditorCommands.ShowHover)
-        )
+        if (_context.Area.IsFocused && !escape && !resolution.Waits && !resolution.Commands.Any(s_showHover.Contains))
             _hover.CloseOnKey();
         int waitsEnded = _waitsEnded;
         for (int i = 0; i < resolution.Commands.Count; i++)

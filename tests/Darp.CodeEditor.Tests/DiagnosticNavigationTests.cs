@@ -138,6 +138,23 @@ public sealed class DiagnosticNavigationTests(UiFixture ui)
         });
 
     [Fact]
+    public Task F8_after_Escape_starts_again_from_the_caret() =>
+        _ui.Run(async () =>
+        {
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, Text);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            SetDiagnostics(document);
+            (await GoAsync(window, Key.F8)).ShouldBe((17, "delta is wrong"));
+
+            window.Press(Key.Escape);
+            Hover(window).ShouldBeNull();
+
+            // From the caret, on the error, which holds it; the presses after go on from there.
+            (await GoAsync(window, Key.F8)).ShouldBe((17, "delta is wrong"));
+            (await GoAsync(window, Key.F8)).ShouldBe((6, "beta looks odd"));
+        });
+
+    [Fact]
     public Task Without_diagnostics_F8_does_nothing() =>
         _ui.Run(() =>
         {
