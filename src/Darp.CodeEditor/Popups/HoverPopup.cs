@@ -101,6 +101,7 @@ internal sealed class HoverPopup
     public void Reset()
     {
         _popup.Frame.Width = double.NaN;
+        _popup.Frame.Height = double.NaN;
         _resized = false;
     }
 
@@ -210,11 +211,12 @@ internal sealed class HoverPopup
         double minHeight = _textView.DefaultLineHeight + frame.Padding.Top + frame.Padding.Bottom;
         if ((edges & (Edges.Left | Edges.Right)) != 0)
             frame.Width = frame.MaxWidth = Math.Max(MinResizedWidth, size.Width);
+        // Within the room on its side of the line.
         if ((edges & (Edges.Top | Edges.Bottom)) != 0)
-            frame.MaxHeight = Math.Max(minHeight, size.Height);
+            frame.Height = frame.MaxHeight = Math.Max(minHeight, Math.Min(size.Height, _popup.Placed?.MaxHeight ?? 0));
         LastResizedSize = new Size(
             double.IsNaN(frame.Width) ? frame.Bounds.Width : frame.Width,
-            Math.Max(minHeight, size.Height)
+            double.IsNaN(frame.Height) ? frame.Bounds.Height : frame.Height
         );
         Place();
     }
