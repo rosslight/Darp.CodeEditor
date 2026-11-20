@@ -25,11 +25,29 @@ internal sealed class SnippetRenderer
     /// </summary>
     private string? _lastIndentation;
 
+    /// <summary>Whether the text goes in after other text on its line, which its first line keeps as it is.</summary>
+    private readonly bool _continued;
+
     public SnippetRenderer(SnippetContext context)
+        : this(context, continued: false) { }
+
+    private SnippetRenderer(SnippetContext context, bool continued)
     {
         _context = context;
+        _continued = continued;
         _indenting = new Indenting(context.Indentation);
         _lineColumns = _indenting.Width(context.LineIndentation);
+    }
+
+    /// <summary>
+    /// <paramref name="text"/>, such as a stop's transformed text, as it goes in after other text on its line: its first
+    /// line as it is, and each line after a line break as the snippet's text goes in; null when it would be longer than
+    /// <see cref="Snippet.MaxText"/>, with the indentation and the line breaks that it takes.
+    /// </summary>
+    public static string? Continued(string text, SnippetContext context)
+    {
+        var renderer = new SnippetRenderer(context, continued: true);
+        return renderer.WriteText(text) ? renderer.Text.ToString() : null;
     }
 
     public StringBuilder Text { get; } = new();
@@ -139,7 +157,7 @@ internal sealed class SnippetRenderer
             ReadOnlySpan<char> line = length < 0 ? value.AsSpan(start) : value.AsSpan(start, length);
             int lineStart = Text.Length;
             bool written =
-                Text.Length == 0 ? WriteIndented(line, column: 0)
+                Text.Length == 0 ? (_continued ? Append(line) : WriteIndented(line, column: 0))
                 : Text[^1] is '\r' or '\n' ? WriteIndented(line, _lineColumns)
                 : Append(line);
             if (!written)
