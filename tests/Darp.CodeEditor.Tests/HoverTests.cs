@@ -279,6 +279,42 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Dragging_a_short_hovers_bottom_edge_makes_it_taller_and_the_next_hover_as_tall_as_its_content() =>
+        _ui.Run(async () =>
+        {
+            HoverPopup.LastResizedSize = default;
+            try
+            {
+                var fake = new FakeServer("--no-diagnostics");
+                var time = new ManualTime();
+                await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+                using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two");
+                using var window = new EditorWindow(new CodeEditor { Document = document });
+                await server.StartAsync();
+                // Below the first line: its bottom edge resizes it.
+                PopupFrame popup = await HoverAsync(window, 1, "one is a word in", time);
+                Rect bounds = BoundsInWindow(popup);
+                var edge = new Point(bounds.Center.X, bounds.Bottom - 2);
+
+                window.MoveMouse(edge);
+                window.Window.MouseDown(edge, MouseButton.Left);
+                window.Window.MouseMove(edge + new Point(0, 90), RawInputModifiers.LeftMouseButton);
+                window.Window.MouseUp(edge + new Point(0, 90), MouseButton.Left);
+                window.Layout();
+
+                BoundsInWindow(popup).Height.ShouldBe(bounds.Height + 90, 0.5);
+                HoverPopup.LastResizedSize.Height.ShouldBe(BoundsInWindow(popup).Height, 0.5);
+                window.Press(Key.Escape);
+                popup = await HoverAsync(window, 4, "two is a word in", time);
+                popup.Height.ShouldBe(double.NaN);
+            }
+            finally
+            {
+                HoverPopup.LastResizedSize = default;
+            }
+        });
+
+    [Fact]
     public Task A_resize_that_Escape_cuts_short_leaves_the_next_hover_alone() =>
         _ui.Run(async () =>
         {
