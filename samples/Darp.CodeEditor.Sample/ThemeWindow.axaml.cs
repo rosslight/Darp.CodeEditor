@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Avalonia.Controls;
 using Avalonia.Styling;
 using Avalonia.Themes.Fluent;
@@ -24,13 +25,13 @@ public sealed partial class ThemeWindow : Window
     /// <param name="variant">Light or dark.</param>
     public static void Open(Window owner, bool fluent, ThemeVariant variant)
     {
-        var window = new ThemeWindow
-        {
-            DataContext = owner.DataContext,
-            RequestedThemeVariant = variant,
-            Title = Describe(fluent, variant),
-        };
+        var window = new ThemeWindow { DataContext = owner.DataContext, RequestedThemeVariant = variant };
         window.Styles.Add(fluent ? new FluentTheme() : new SimpleTheme());
+        // The title follows the app's language. The strings outlive the window, which stops listening as it closes.
+        PropertyChangedEventHandler updateTitle = (_, _) => window.Title = Describe(fluent, variant);
+        Strings.Current.PropertyChanged += updateTitle;
+        window.Closed += (_, _) => Strings.Current.PropertyChanged -= updateTitle;
+        window.Title = Describe(fluent, variant);
         window.Show(owner);
     }
 
