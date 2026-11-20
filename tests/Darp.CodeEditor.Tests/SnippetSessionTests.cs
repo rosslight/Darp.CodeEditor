@@ -683,11 +683,12 @@ public sealed class SnippetSessionTests(UiFixture ui)
             window.Press(Key.Tab);
             editor.Selection.ShouldBe(new TextSelection(5));
 
-            // With the keyboard in the text, Escape ends the session before the hover closes, and the hover before the
-            // bar.
+            // With the keyboard in the text, Escape ends the session, and the hover along with it, as any key in the
+            // text ends the hover; then the bar.
             editor.OpenSearch();
             EditorWindow.PartOf(editor).TextArea.Focus();
             window.MoveMouse(window.PointAt(1));
+            time.Advance(editor.Options.Hover.Delay);
             await Wait.UntilAsync(() =>
             {
                 window.Render();
@@ -697,8 +698,6 @@ public sealed class SnippetSessionTests(UiFixture ui)
                         .OfType<TextBlock>()
                         .Any(t => (t.Inlines?.Text ?? t.Text ?? "").Contains("is a word in", StringComparison.Ordinal));
             });
-            window.Press(Key.Escape);
-            PopupFrames.Find(window, "Hover").ShouldNotBeNull();
             window.Press(Key.Escape);
             PopupFrames.Find(window, "Hover").ShouldBeNull();
             bar.IsOpen.ShouldBeTrue();
