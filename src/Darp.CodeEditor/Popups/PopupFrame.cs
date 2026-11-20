@@ -114,6 +114,19 @@ internal sealed class PopupFrame : Border
             _outline.IsVisible = change.GetNewValue<bool>();
     }
 
+    /// <summary>A drag ends without its release too, as when the popup closes under it.</summary>
+    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+    {
+        base.OnPointerCaptureLost(e);
+        _drag = null;
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        _drag = null;
+    }
+
     private void OnPointerPressedTunnel(object? sender, PointerPressedEventArgs e)
     {
         Edges edges = EdgesAt(e.GetPosition(this));
