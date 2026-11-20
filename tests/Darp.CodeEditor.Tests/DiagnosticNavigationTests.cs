@@ -110,6 +110,69 @@ public sealed class DiagnosticNavigationTests(UiFixture ui)
         });
 
     [Fact]
+    public Task F8_to_the_end_of_a_long_wrapped_line_below_the_view_scrolls_down_to_the_problem_and_shows_it_there() =>
+        _ui.Run(async () =>
+        {
+            // Short lines in view, and below them a last line that wraps over more rows than the view shows.
+            string text =
+                string.Concat(Enumerable.Range(0, 100).Select(i => $"line{i}\n"))
+                + string.Join(' ', Enumerable.Repeat("word", 400));
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, text);
+            var editor = new CodeEditor { Document = document, WordWrap = true };
+            using var window = new EditorWindow(editor, width: 400, height: 300);
+            int at = text.Length - 10;
+            document.SetDiagnostics([
+                new Diagnostic(
+                    document.CurrentSnapshot,
+                    new TextRange(at, 4),
+                    DiagnosticSeverity.Error,
+                    null,
+                    "':' expected"
+                ),
+            ]);
+
+            (await GoAsync(window, Key.F8)).ShouldBe((at, "':' expected"));
+
+            Point caret = window.PointAt(at);
+            new Rect(window.Window.ClientSize).Contains(caret).ShouldBeTrue($"{caret}");
+        });
+
+    [Fact]
+    public Task A_document_shown_by_a_layout_handler_while_F8_reveals_its_problem_keeps_its_own_scroll_position() =>
+        _ui.Run(() =>
+        {
+            string text = string.Concat(Enumerable.Range(0, 100).Select(i => $"line{i}\n")) + new string('x', 600);
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, text);
+            using CodeDocument other = CodeDocument.Create(CodeLanguage.PlainText, new string('y', 600));
+            using var window = new EditorWindow(new CodeEditor { Document = document }, width: 400, height: 300);
+            document.SetDiagnostics([
+                new Diagnostic(
+                    document.CurrentSnapshot,
+                    new TextRange(text.Length - 20, 5),
+                    DiagnosticSeverity.Error,
+                    null,
+                    "':' expected"
+                ),
+            ]);
+            window.Layout();
+            // The app shows another document as the layout reveals the problem, before its popup opens.
+            void ShowOther(object? sender, EventArgs e)
+            {
+                window.TextView.LayoutUpdated -= ShowOther;
+                window.Editor.Document = other;
+            }
+            window.TextView.LayoutUpdated += ShowOther;
+
+            window.Press(Key.F8);
+            window.Layout();
+            window.Render();
+
+            window.Editor.Document.ShouldBeSameAs(other);
+            window.TextView.ScrollOffset.ShouldBe(default);
+            Hover(window).ShouldBeNull();
+        });
+
+    [Fact]
     public Task F8_inside_a_diagnostic_taller_than_the_view_shows_it_at_the_caret_in_view() =>
         _ui.Run(async () =>
         {
