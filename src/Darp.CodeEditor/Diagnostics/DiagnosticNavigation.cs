@@ -17,13 +17,9 @@ namespace Darp.CodeEditor.Diagnostics;
 /// </summary>
 /// <remarks>
 /// This is a port of VS Code's <c>MarkerList</c> and <c>MarkerController</c> (<c>editor.action.marker.next</c>,
-/// <c>gotoError</c>, MIT license) for one file. The first move starts from the caret: forward, to the first diagnostic in
-/// the order that holds the caret or ends after it; backward, to the one before that, unless it holds the caret. An
-/// empty diagnostic counts as the word it touches. Later moves take the next or previous one in the order, until the
-/// caret leaves the diagnostic moved to, or the diagnostics change. The caret goes to where the diagnostic starts, or
-/// stays where it is inside it. New diagnostics show in the problem's popup while it is open, as VS Code's widget
-/// updates: the first in the order that holds where the caret went, which it is of how many now; without one, the
-/// popup closes.
+/// <c>gotoError</c>, MIT license) for one file. The first move starts from the caret (<see cref="First"/>); later moves
+/// take the next or previous one in the order, until the popup closes, the caret leaves the diagnostic moved to, or the
+/// diagnostics change. The caret goes to where the diagnostic starts, or stays where it is inside it.
 /// </remarks>
 internal sealed class DiagnosticNavigation : IEditorFeature
 {
@@ -85,10 +81,7 @@ internal sealed class DiagnosticNavigation : IEditorFeature
         _area.Caret.PositionChanged -= OnCaretPositionChanged;
     }
 
-    /// <summary>
-    /// Moves the caret to the next diagnostic, or the previous one, and shows it in the hover.
-    /// </summary>
-    /// <returns>Whether there was one to move to.</returns>
+    /// <returns>Whether there was a diagnostic to move to.</returns>
     private bool Move(bool next)
     {
         // The moves end with the problem's popup, as by Escape, as VS Code's session ends with its widget.
@@ -134,10 +127,7 @@ internal sealed class DiagnosticNavigation : IEditorFeature
                 .Select(found => found.Marker),
         ];
 
-    /// <summary>
-    /// What the hover shows of <paramref name="diagnostic"/>, which problem it is of how many: a heading with the icon of
-    /// its severity, the document's name and which problem it is, then the diagnostic without an icon of its own.
-    /// </summary>
+    /// <summary>A heading with the severity's icon, the document's name and which problem it is, then the diagnostic.</summary>
     private IReadOnlyCollection<HoverBlock> Problem(Diagnostic diagnostic, int index, int count)
     {
         string of = string.Format(
@@ -161,7 +151,8 @@ internal sealed class DiagnosticNavigation : IEditorFeature
 
     /// <summary>
     /// VS Code's first move from the caret: forward, the first diagnostic in the order that holds the caret or ends after
-    /// it, else the first; backward, the one before it, unless it holds the caret, else the last.
+    /// it, an empty one counting as the word it touches, else the first; backward, the one before it, unless it holds the
+    /// caret, else the last.
     /// </summary>
     private int First(DiagnosticMarker[] markers, int caret, bool next)
     {
@@ -183,8 +174,8 @@ internal sealed class DiagnosticNavigation : IEditorFeature
     private static bool Holds(TextRange range, int offset) => offset >= range.Start && offset <= range.End;
 
     /// <summary>
-    /// New diagnostics: the next move sorts them, and starts from the caret; the problem that shows shows as they have
-    /// it, the first in the order whose range holds where the caret went, or closes without one.
+    /// New diagnostics: the next move starts from the caret, and the problem that shows becomes the first in the order
+    /// that holds where the caret went, as VS Code's widget updates, or closes without one.
     /// </summary>
     private void OnDocumentPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {

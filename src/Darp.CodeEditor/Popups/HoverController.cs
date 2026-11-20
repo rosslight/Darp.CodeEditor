@@ -72,10 +72,7 @@ internal sealed class HoverController : IEditorFeature
     /// <summary>The delay before the hover closes, once the pointer left it; null while none runs.</summary>
     private ITimer? _hiding;
 
-    /// <summary>
-    /// Where the last click in the editor pressed or released its button, in the text view, until the pointer moves
-    /// away from there; null otherwise. Meanwhile no hover starts.
-    /// </summary>
+    /// <summary>Where the last click in the editor was, until the pointer moves away; meanwhile no hover starts.</summary>
     private Point? _clickedAt;
 
     public HoverController(
@@ -131,10 +128,7 @@ internal sealed class HoverController : IEditorFeature
 
     public void AddCommands(CommandTable commands) => commands.Add(CodeEditorCommands.ShowHover, ShowAtCaret);
 
-    /// <summary>
-    /// Ends the current hover: closes the popup, cancels the server's request and the reading of its answer if they are
-    /// still under way, and drops what they would show. The keyboard goes back to the text from the popup.
-    /// </summary>
+    /// <summary>Ends the current hover, for every reason it ends (see the remarks).</summary>
     /// <returns>Whether a popup was open.</returns>
     public bool Close()
     {
@@ -146,10 +140,7 @@ internal sealed class HoverController : IEditorFeature
         return wasOpen;
     }
 
-    /// <summary>
-    /// Ends the hover for a key in the text, unless it is held, as VS Code does: the view leaves out the keys that keep
-    /// it, those that start a key sequence or show the hover.
-    /// </summary>
+    /// <summary>Ends the hover for a key in the text, unless it is held; the view leaves out the keys that keep it.</summary>
     public void CloseOnKey()
     {
         if (!_popup.IsHeld)
@@ -171,10 +162,7 @@ internal sealed class HoverController : IEditorFeature
         _editor.RemoveHandler(InputElement.PointerReleasedEvent, OnEditorReleased);
     }
 
-    /// <summary>
-    /// Shows <paramref name="problem"/>, the blocks of the problem that F8 went to at <paramref name="offset"/>, as a hover
-    /// asked for by key, without the server's hover.
-    /// </summary>
+    /// <summary>Shows the problem that F8 went to at <paramref name="offset"/>, as a hover asked for by key.</summary>
     public void ShowProblem(int offset, IReadOnlyCollection<HoverBlock> problem)
     {
         Hovered hovered = Begin(offset, fromKeyboard: true);
@@ -221,10 +209,7 @@ internal sealed class HoverController : IEditorFeature
         };
     }
 
-    /// <summary>
-    /// Shows the hover at the caret, the diagnostics there and the server's hover; when a hover shows already, also one
-    /// the pointer opened, the keyboard goes into it, as in VS Code, and it is held.
-    /// </summary>
+    /// <summary>Shows the hover at the caret; when one shows already, the keyboard goes into it, and it is held.</summary>
     private void ShowAtCaret()
     {
         if (_popup.IsOpen)
@@ -252,11 +237,6 @@ internal sealed class HoverController : IEditorFeature
         return hovered;
     }
 
-    /// <summary>
-    /// Starts the hover of the pointer at <paramref name="offset"/>, as VS Code's hover operation starts: the server is
-    /// asked halfway through the delay, what is known shows once it is over, and "Loading…" joins it when the server has
-    /// not answered by three times the delay.
-    /// </summary>
     private void StartDelayed(int offset)
     {
         Hovered hovered = Begin(offset, fromKeyboard: false);
@@ -295,10 +275,7 @@ internal sealed class HoverController : IEditorFeature
         Render(hovered);
     }
 
-    /// <summary>
-    /// Asks the server for its hover, and reads its Markdown, off the UI thread; it shows once the delay is over, unless
-    /// the hover ended meanwhile, as by an edit or another document. Failures of reading it go to the log.
-    /// </summary>
+    /// <summary>Asks the server, and reads its Markdown off the UI thread, unless the hover ended meanwhile.</summary>
     private async void Ask(Hovered hovered)
     {
         CancellationToken cancellation = hovered.Cancellation.Token;
@@ -334,10 +311,7 @@ internal sealed class HoverController : IEditorFeature
         Render(hovered);
     }
 
-    /// <summary>
-    /// Shows what is known of <paramref name="hovered"/> once its delay is over: the diagnostics there, and below them
-    /// the server's hover or "Loading…"; with nothing to show, no popup shows.
-    /// </summary>
+    /// <summary>Shows what is known of <paramref name="hovered"/> once its delay is over, if anything.</summary>
     private void Render(Hovered hovered)
     {
         IReadOnlyList<HoverBlock> below = hovered.Below();
@@ -350,11 +324,7 @@ internal sealed class HoverController : IEditorFeature
         _popup.Show(hovered.Messages, below, _colors, hovered.Word);
     }
 
-    /// <summary>
-    /// While a hover shows, the pointer over other text closes it after <see cref="s_hidingDelay"/>, unless the pointer
-    /// reaches it or comes back meanwhile. While none shows, the pointer on a character starts its hover, and on another
-    /// character starts again, as in VS Code; not while a button is down, nor after a click until the pointer moves on.
-    /// </summary>
+    /// <summary>Over other text, a hover that shows closes soon; while none shows, the pointer's hover starts.</summary>
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
         Point point = e.GetPosition(_textView);
@@ -376,10 +346,7 @@ internal sealed class HoverController : IEditorFeature
         RestAt(_pointer);
     }
 
-    /// <summary>
-    /// The pointer is at <paramref name="point"/> of the text view while no hover shows: on the character of the hover
-    /// that waits, the wait goes on; on another character, its hover starts; elsewhere, or for null, none waits.
-    /// </summary>
+    /// <summary>The pointer is at <paramref name="point"/> while no hover shows: on another character, its hover starts.</summary>
     private void RestAt(Point? point)
     {
         if (_clickedAt is not null || point is not { } at || OffsetAt(at) is not { } offset)
@@ -394,9 +361,8 @@ internal sealed class HoverController : IEditorFeature
     }
 
     /// <summary>
-    /// The pointer left the text or the popup: a hover that shows closes after <see cref="s_hidingDelay"/> unless the
-    /// pointer is over it by then, and one that waits ends. Posted, as the pointer enters the other only after it left
-    /// the one.
+    /// The pointer left the text or the popup: a hover that shows closes soon, one that waits ends. Posted, as the
+    /// pointer enters the other only after it left the one.
     /// </summary>
     private void OnPointerExited(object? sender, PointerEventArgs e)
     {

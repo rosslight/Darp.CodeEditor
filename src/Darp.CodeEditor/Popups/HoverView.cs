@@ -100,8 +100,7 @@ internal static class HoverView
     }
 
     /// <summary>
-    /// A diagnostic, as VS Code's hover shows it, in the editor's font (<see cref="HoverDiagnostic"/>): the icon in a
-    /// column of its own, 8 pixels from the text; the source and code at VS Code's 60% opacity, after a space; each
+    /// A diagnostic in VS Code's geometry (<see cref="HoverDiagnostic"/>): the icon 8 pixels from the text, and each
     /// related place 8 pixels below the one before, in the link color where the editor can go there.
     /// </summary>
     private static Control Diagnostic(HoverDiagnostic diagnostic, PopupLook look)
@@ -140,9 +139,8 @@ internal static class HoverView
     }
 
     /// <summary>
-    /// Shows <paramref name="spans"/> in <paramref name="text"/>: bold, italic, code in the editor's font at the text's
-    /// size on <c>textCodeBlock.background</c>, so that it fits its line, links in the link color, which open their page,
-    /// and dimmed text at VS Code's 60% opacity.
+    /// Shows <paramref name="spans"/> in <paramref name="text"/>: code in the editor's font at the text's size, so that
+    /// it fits its line, links in the link color, and dimmed text at VS Code's 60% opacity.
     /// </summary>
     private static void Show(TextBlock text, IReadOnlyList<HoverSpan> spans, PopupLook look)
     {
@@ -178,10 +176,7 @@ internal static class HoverView
             OpenLinks(text, links);
     }
 
-    /// <summary>
-    /// The heading of the problem that F8 went to, as the title of VS Code's widget for it shows it: the icon 4 pixels
-    /// from the document's name, and which problem it is of how many, in <c>descriptionForeground</c>.
-    /// </summary>
+    /// <summary>The heading of the problem that F8 went to, as VS Code's widget's title: the icon 4 pixels from the text.</summary>
     private static Control Heading(HoverHeading heading, PopupLook look)
     {
         var icon = new SeverityIcon(heading.Severity, look.Colors)

@@ -27,13 +27,9 @@ namespace Darp.CodeEditor.Popups;
 /// </remarks>
 internal sealed class HoverPopup
 {
-    /// <summary>The narrowest the hover's most width gets, VS Code's: wider in wider editors.</summary>
+    // VS Code's: the least of the hover's most width and height, which grow with the editor, and its least width.
     private const double MinMaxWidth = 750;
-
-    /// <summary>The lowest the hover's most height gets, VS Code's: higher in higher editors.</summary>
     private const double MinMaxHeight = 250;
-
-    /// <summary>The narrowest the user resizes the hover to, VS Code's.</summary>
     private const double MinResizedWidth = 150;
 
     private readonly TemplatedControl _editor;
@@ -44,16 +40,10 @@ internal sealed class HoverPopup
     private readonly PopupScroller _content = new();
     private readonly EditorPopup _popup;
 
-    /// <summary>The word the popup is next to.</summary>
     private TextRange _word;
-
-    /// <summary>Whether the user resized the hover that shows.</summary>
     private bool _resized;
 
-    /// <summary>
-    /// The diagnostics shown, and the content: their section, a line and the server's section below; null while nothing
-    /// shows.
-    /// </summary>
+    /// <summary>The diagnostics shown, and the sections: theirs, a line and the server's; null while nothing shows.</summary>
     private (IReadOnlyCollection<HoverBlock> Messages, PopupStack Sections)? _shown;
 
     /// <summary>The window whose clicks and deactivation a held popup watches, as they end it; null otherwise.</summary>
@@ -99,10 +89,8 @@ internal sealed class HoverPopup
 
     public bool IsOpen => _popup.IsOpen;
 
-    /// <summary>Whether the user drags an edge.</summary>
     public bool IsDragging => _popup.Frame.IsDragging;
 
-    /// <summary>Whether the keyboard is in the popup.</summary>
     public bool HasKeyboard => _popup.Root.IsKeyboardFocusWithin;
 
     /// <summary>Whether the user clicked into the popup, or put the keyboard into it: it stays wherever the pointer goes.</summary>
@@ -116,11 +104,8 @@ internal sealed class HoverPopup
     }
 
     /// <summary>
-    /// Shows <paramref name="messages"/>, the diagnostics, and <paramref name="below"/> them the server's hover, in
-    /// <paramref name="colors"/> above <paramref name="word"/>, where the pointer comes from, or below it where only that
-    /// side has room. Shown again with the same diagnostics, as when "Loading…" or the server's answer joins them, only
-    /// the section below changes: the diagnostics keep their selection, and the popup its scroll position. The keyboard
-    /// stays in the popup if it was.
+    /// Shows the diagnostics, and <paramref name="below"/> them the server's hover, above <paramref name="word"/>. With the
+    /// same diagnostics, only the section below changes: the diagnostics keep their selection, the popup its scroll.
     /// </summary>
     public void Show(
         IReadOnlyCollection<HoverBlock> messages,
@@ -177,7 +162,6 @@ internal sealed class HoverPopup
         Place();
     }
 
-    /// <summary>Puts the keyboard into the popup, where its keys scroll it.</summary>
     public void TakeKeyboard()
     {
         _content.Focusable = true;
