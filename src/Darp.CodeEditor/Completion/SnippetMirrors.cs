@@ -153,16 +153,26 @@ internal sealed class SnippetMirrors
     public void Transform(SnippetSession session, List<TabStop> group)
     {
         List<(TabStop Stop, string Text)> transformed = [];
+        var context = new SnippetContext(
+            session.LineIndentation,
+            _document.Indentation,
+            _document.LineBreak,
+            _ => null
+        );
         // From the last in the text to the first, as mirrors are copied.
         foreach (TabStop stop in group.OrderByDescending(stop => stop.StartOffset).ThenByDescending(stop => stop.Order))
         {
             if (stop.Transform is not { } transform || stop.IsGone)
                 continue;
             string text = _buffer.GetText(stop.StartOffset, stop.EndOffset - stop.StartOffset);
-            // A result longer than a snippet's text may be leaves the stop as it is.
-            if (transform.Resolve(text, Snippet.MaxText) is not { } resolved)
+            // A result longer than a snippet's text may be, with its lines' indentation, leaves the stop as it is.
+            if (
+                transform.Resolve(text, Snippet.MaxText) is not { } resolved
+                || SnippetRenderer.Continued(resolved, context) is not { } result
+            )
+            {
                 continue;
-            string result = Indented(resolved, session.LineIndentation);
+            }
             if (result != text)
                 transformed.Add((stop, result));
         }
@@ -187,21 +197,6 @@ internal sealed class SnippetMirrors
             undo.EndUndoGroup();
             IsChanging = false;
         }
-    }
-
-    /// <summary>
-    /// <paramref name="text"/> with each line after the first starting with <paramref name="lineIndentation"/>, the
-    /// whole indentation in the document's, and the document's line breaks.
-    /// </summary>
-    private string Indented(string text, string lineIndentation)
-    {
-        if (text.AsSpan().IndexOfAny('\r', '\n') < 0)
-            return text;
-        var indenting = new Indenting(_document.Indentation);
-        string[] lines = text.Split(["\r\n", "\r", "\n"], StringSplitOptions.None);
-        for (int i = 1; i < lines.Length; i++)
-            lines[i] = indenting.Normalize(lineIndentation + lines[i]);
-        return string.Join(_document.LineBreak, lines);
     }
 
     /// <summary>

@@ -392,6 +392,31 @@ public sealed class SnippetSessionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_transformation_whose_lines_would_pass_a_million_characters_with_their_indentation_leaves_its_stop() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            string indentation = new(' ', 1_000);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, indentation);
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+            // 1,001 line breaks, each followed by the line's 1,000 spaces: just over a million characters.
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Item("${1:a} ${1/(.*)/" + new string('\n', 1_001) + "/}")
+            );
+            await OpenAsync(window, 1_000);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe(indentation + "a a");
+
+            window.Press(Key.Tab);
+
+            document.Text.ShouldBe(indentation + "a a");
+        });
+
+    [Fact]
     public Task A_transformed_stop_next_to_another_keeps_apart_from_it() =>
         _ui.Run(async () =>
         {
