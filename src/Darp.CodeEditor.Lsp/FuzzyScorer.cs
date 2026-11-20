@@ -2,11 +2,11 @@ namespace Darp.CodeEditor.Lsp;
 
 /// <summary>
 /// VS Code's <c>fuzzyScore</c> (<c>src/vs/base/common/filters.ts</c>, 1.145.0, MIT license), with <c>boostFullMatch</c>:
-/// the best score of a typed text in a filter text, by a table of every way it matches. Texts are matched up to their
-/// first <see cref="CompletionMatcher.MaxLength"/> characters. Once the cells it may fill are spent
-/// (<see cref="CellsLeft"/>), it scores the one way that a single pass finds instead, as the table would score that
-/// way: a long typed text against long filter texts fills thousands of cells for each. An instance keeps the table for
-/// reuse: use it on one thread at a time. It takes about 150 KB.
+/// the best score of a typed text in a filter text, by a table of every way it matches (<see cref="Score"/>). Texts are
+/// matched up to their first <see cref="CompletionMatcher.MaxLength"/> characters. A long typed text against a long
+/// filter text fills thousands of cells (<see cref="Cells"/>): <see cref="ScoreInOnePass"/> scores the one way that a
+/// single pass finds instead, as the table scores that way. An instance keeps the table for reuse: use it on one thread
+/// at a time. It takes about 150 KB.
 /// </summary>
 internal sealed class FuzzyScorer
 {
@@ -29,11 +29,6 @@ internal sealed class FuzzyScorer
     private readonly byte[] _arrows = new byte[Stride * Stride];
 
     /// <summary>
-    /// The cells of the table that scoring may still fill: a score that would fill more is found in one pass instead.
-    /// </summary>
-    public long CellsLeft { get; set; } = long.MaxValue;
-
-    /// <summary>
     /// The best score of <paramref name="pattern"/> from <paramref name="patternStart"/> in <paramref name="word"/>, and
     /// the positions in the word that matched, ascending; null without a match.
     /// </summary>
@@ -46,23 +41,8 @@ internal sealed class FuzzyScorer
         bool firstMatchCanBeWeak
     )
     {
-        int patternLength = Math.Min(pattern.Length, MaxLength);
-        int wordLength = Math.Min(word.Length, MaxLength);
-        if (patternStart >= patternLength || wordLength == 0 || patternLength - patternStart > wordLength)
+        if (!Prepare(patternLow, patternStart, wordLow, out int patternLength, out int wordLength))
             return null;
-        if (!IsPatternInWord(patternLow, patternStart, patternLength, wordLow, wordLength))
-            return null;
-        FillInMaxWordMatchPos(patternLength, wordLength, patternStart, patternLow, wordLow);
-        long cells = 0;
-        for (int patternPos = patternStart; patternPos < patternLength; patternPos++)
-        {
-            int next = patternPos + 1 < patternLength ? _maxWordMatchPos[patternPos + 1] : wordLength;
-            cells += next - _minWordMatchPos[patternPos];
-        }
-        if (cells > CellsLeft)
-            return OnePass(pattern, patternLow, patternStart, word, wordLow, firstMatchCanBeWeak);
-        CellsLeft -= cells;
-
         bool hasStrongFirstMatch = false;
         int row = 1;
         int column = 1;
@@ -182,12 +162,31 @@ internal sealed class FuzzyScorer
     }
 
     /// <summary>
+    /// The cells of the table that <see cref="Score"/> fills for <paramref name="patternLow"/> from
+    /// <paramref name="patternStart"/> in <paramref name="wordLow"/>: for each typed position, the word positions that
+    /// it and the next one can match; none when the typed characters are not all in the word, in order.
+    /// </summary>
+    public long Cells(string patternLow, int patternStart, string wordLow)
+    {
+        if (!Prepare(patternLow, patternStart, wordLow, out int patternLength, out int wordLength))
+            return 0;
+        long cells = 0;
+        for (int patternPos = patternStart; patternPos < patternLength; patternPos++)
+        {
+            int next = patternPos + 1 < patternLength ? _maxWordMatchPos[patternPos + 1] : wordLength;
+            cells += next - _minWordMatchPos[patternPos];
+        }
+        return cells;
+    }
+
+    /// <summary>
     /// The score of one way that <paramref name="pattern"/> matches, found in one pass and scored as the table scores
     /// that way, so that it ranks among the table's scores, at most as high as the best way: the first character where
     /// it first matches strongly, or at all with <paramref name="firstMatchCanBeWeak"/>, and each next one where it
-    /// first matches after the one before. Null when the pattern does not match so.
+    /// first matches after the one before. Null when the pattern does not match so, which is when the table finds no
+    /// match either.
     /// </summary>
-    private static (int Score, int[] Positions)? OnePass(
+    public static (int Score, int[] Positions)? ScoreInOnePass(
         string pattern,
         string patternLow,
         int patternStart,
@@ -199,6 +198,8 @@ internal sealed class FuzzyScorer
         int patternLength = Math.Min(pattern.Length, MaxLength);
         int wordLength = Math.Min(word.Length, MaxLength);
         int count = patternLength - patternStart;
+        if (count <= 0 || count > wordLength)
+            return null;
         int first = -1;
         int total = 0;
         for (int wordPos = 0; wordPos <= wordLength - count && first < 0; wordPos++)
@@ -263,6 +264,22 @@ internal sealed class FuzzyScorer
     /// Whether the pattern's characters occur in the word in order, ignoring case; fills in the first word position
     /// each can match.
     /// </summary>
+    /// <summary>
+    /// Whether the table may find a match: the typed characters are all in the word, in order; then fills for each
+    /// typed position the first and the last word position that it can match.
+    /// </summary>
+    private bool Prepare(string patternLow, int patternStart, string wordLow, out int patternLength, out int wordLength)
+    {
+        patternLength = Math.Min(patternLow.Length, MaxLength);
+        wordLength = Math.Min(wordLow.Length, MaxLength);
+        if (patternStart >= patternLength || wordLength == 0 || patternLength - patternStart > wordLength)
+            return false;
+        if (!IsPatternInWord(patternLow, patternStart, patternLength, wordLow, wordLength))
+            return false;
+        FillInMaxWordMatchPos(patternLength, wordLength, patternStart, patternLow, wordLow);
+        return true;
+    }
+
     private bool IsPatternInWord(string patternLow, int patternPos, int patternLength, string wordLow, int wordLength)
     {
         int wordPos = 0;

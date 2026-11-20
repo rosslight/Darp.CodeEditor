@@ -136,18 +136,56 @@ public sealed class CompletionMatcherTests
     }
 
     [Fact]
-    public void Matching_gracefully_tries_swaps_only_when_the_text_as_typed_does_not_match()
+    public void Matching_gracefully_compares_the_swaps_with_the_text_as_typed_as_VS_Code_does()
     {
-        // "cno" matches "console" as typed, if not as well as "con" would.
+        // "cno" matches "console" as typed, at -8; swapped to "con", it matches better, at 18 less 3, as in VS Code.
+        _matcher.Match("cno", "console", "console", true).ShouldNotBeNull().Score.ShouldBe(-8);
         (int score, int[] highlights) = _matcher
             .Match("cno", "console", "console", true, graceful: true)
             .ShouldNotBeNull();
-        score.ShouldBe(_matcher.Match("cno", "console", "console", true).ShouldNotBeNull().Score);
-        highlights.ShouldBe([0, 2, 4]);
-        _matcher
-            .Match("prnit", "print", "print", true, graceful: true)
-            .ShouldNotBeNull()
-            .Highlights.ShouldBe([0, 1, 2, 3, 4]);
+
+        score.ShouldBe(15);
+        highlights.ShouldBe([0, 1, 2]);
+    }
+
+    [Fact]
+    public void Past_its_budget_a_ranking_swaps_only_for_an_item_that_the_text_as_typed_does_not_match()
+    {
+        var spent = new CompletionMatcher(cellsPerRank: 0);
+
+        List<RankedCompletion> ranked = spent.Rank(
+            [new("cno", "console", "console", true), new("prnit", "print", "print", true)],
+            TestContext.Current.CancellationToken
+        );
+
+        ranked.Single(r => r.Index == 0).Highlights.ShouldBe([0, 2, 4]);
+        ranked.Single(r => r.Index == 0).Score.ShouldBe(-8);
+        ranked.Single(r => r.Index == 1).Highlights.ShouldBe([0, 1, 2, 3, 4]);
+    }
+
+    [Fact]
+    public void A_ranking_scores_alike_items_alike_whatever_its_budget()
+    {
+        // Long, as a server's names may be: the table finds a better way than one pass does.
+        string typed = "aabb" + string.Concat(Enumerable.Repeat("ab", 29));
+        string label = "alpha0" + string.Concat(Enumerable.Range(0, 122).Select(c => c % 2 == 0 ? 'a' : 'b'));
+        CompletionCandidate[] items = [.. Enumerable.Repeat(new CompletionCandidate(typed, label, label, true), 100)];
+        int exact = _matcher.Rank(items[..1], TestContext.Current.CancellationToken).Single().Score;
+        int cheaper = new CompletionMatcher(cellsPerRank: 0)
+            .Rank(items[..1], TestContext.Current.CancellationToken)
+            .Single()
+            .Score;
+        exact.ShouldNotBe(cheaper);
+        long one = new FuzzyScorer().Cells(typed, 0, label);
+
+        // A budget for half of them: the whole ranking is scored the cheaper way.
+        List<RankedCompletion> ranked = new CompletionMatcher(cellsPerRank: 50 * one).Rank(
+            items,
+            TestContext.Current.CancellationToken
+        );
+
+        ranked.Select(r => r.Score).ShouldAllBe(score => score == cheaper);
+        ranked.Select(r => r.Index).ShouldBe(Enumerable.Range(0, 100));
     }
 
     [Theory]
