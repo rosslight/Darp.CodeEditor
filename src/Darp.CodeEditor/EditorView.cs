@@ -146,6 +146,7 @@ internal sealed class EditorView : IDisposable
             _squiggles,
             SemanticHighlighter,
             _hover,
+            new DiagnosticNavigation(area, document, _hover, context.Reveal),
             _snippets,
             _completion,
             _signatureHelp,

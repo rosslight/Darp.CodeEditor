@@ -46,6 +46,24 @@ public static class CodeEditorCommands
     /// </summary>
     public const string ShowHover = "editor.action.showHover";
 
+    /// <summary>
+    /// Moves the caret to the next of the document's errors, warnings and information, the most severe first, then by
+    /// position, after the last to the first, and shows it in the hover at the caret with which problem it is of how
+    /// many. Hints are left out. Without a problem it does not apply.
+    /// </summary>
+    public const string NextMarker = "editor.action.marker.next";
+
+    /// <summary>Moves the caret to the previous problem, as <see cref="NextMarker"/> moves it to the next one.</summary>
+    public const string PreviousMarker = "editor.action.marker.prev";
+
+    /// <summary>
+    /// <see cref="NextMarker"/>: an editor knows its own document only, where VS Code goes on into other files.
+    /// </summary>
+    public const string NextMarkerInFiles = "editor.action.marker.nextInFiles";
+
+    /// <summary><see cref="PreviousMarker"/>, as <see cref="NextMarkerInFiles"/> is <see cref="NextMarker"/>.</summary>
+    public const string PreviousMarkerInFiles = "editor.action.marker.prevInFiles";
+
     /// <summary>Asks the language server for the signature of the call around the caret.</summary>
     public const string TriggerParameterHints = "editor.action.triggerParameterHints";
 
