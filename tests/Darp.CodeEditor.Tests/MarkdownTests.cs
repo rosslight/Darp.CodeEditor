@@ -183,10 +183,12 @@ public sealed class MarkdownTests
         const int count = 400;
         string text = string.Join(lineBreak, Enumerable.Repeat("x  ", count));
         CancellationToken going = TestContext.Current.CancellationToken;
+        // Full parts, and the rest.
         int[] parts =
         [
-            .. Enumerable.Repeat(HoverParts.MaxLines, count / HoverParts.MaxLines),
-            .. count % HoverParts.MaxLines is var rest and > 0 ? [rest] : Array.Empty<int>(),
+            .. Enumerable
+                .Range(0, (count + HoverParts.MaxLines - 1) / HoverParts.MaxLines)
+                .Select(i => Math.Min(HoverParts.MaxLines, count - i * HoverParts.MaxLines)),
         ];
 
         IReadOnlyList<HoverBlock> markdown = Pieces(HoverBlocks.Of(Hover(text, true), null, going));
