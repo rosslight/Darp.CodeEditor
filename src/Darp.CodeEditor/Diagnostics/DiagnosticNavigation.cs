@@ -91,6 +91,9 @@ internal sealed class DiagnosticNavigation : IEditorFeature
     /// <returns>Whether there was one to move to.</returns>
     private bool Move(bool next)
     {
+        // The moves end with the problem's popup, as by Escape, as VS Code's session ends with its widget.
+        if (_hover.ProblemOffset is null)
+            _index = -1;
         DiagnosticMarker[] markers = _markers ??= Sorted();
         int count = markers.Length;
         if (count == 0)
