@@ -180,6 +180,9 @@
   <data name="FontSize" xml:space="preserve">
     <value>Schriftgröße</value>
   </data>
+  <data name="OpenInTheme" xml:space="preserve">
+    <value>In Design öffnen</value>
+  </data>
   <data name="Editor" xml:space="preserve">
     <value>Editor</value>
   </data>

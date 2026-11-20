@@ -1,0 +1,20 @@
+<Window
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ce="using:Darp.CodeEditor"
+    xmlns:local="using:Sample"
+    x:Class="Sample.ThemeWindow"
+    x:DataType="local:MainViewModel"
+    Width="1000"
+    Height="680"
+>
+    <!-- The document that the main window's pane selects, with the same options as the main window's editor. -->
+    <ce:CodeEditor
+        Document="{Binding Workspace.Current?.Document}"
+        Options="{Binding Settings.Editor.Options}"
+        WordWrap="{Binding Settings.WordWrap}"
+        ShowLineNumbers="{Binding Settings.ShowLineNumbers}"
+        FontSize="{Binding Settings.FontSize}"
+        Padding="8,6,0,0"
+    />
+</Window>

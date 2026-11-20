@@ -94,6 +94,7 @@ public sealed class Strings : INotifyPropertyChanged
     public string WordWrap => Get();
     public string LineNumbers => Get();
     public string FontSize => Get();
+    public string OpenInTheme => Get();
     public string Editor => Get();
     public string AutoClosingBrackets => Get();
     public string AutoClosingBracketsDescription => Get();

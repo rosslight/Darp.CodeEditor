@@ -6,6 +6,7 @@ using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Avalonia.Styling;
 using Avalonia.VisualTree;
 using CommunityToolkit.Mvvm.Input;
 using Darp.CodeEditor;
@@ -257,6 +258,26 @@ public sealed partial class MainWindow : FAAppWindow
         menu.Items.Add(MenuItem(strings.Replace, FASymbol.Switch, DocumentPage.Replace, shows));
         menu.Items.Add(MenuItem(strings.GoToLine, FASymbol.Go, OpenGoToLine, shows));
         menu.Items.Add(MenuItem(strings.InsertDateTime, FASymbol.Calendar, DocumentPage.InsertDateTime, shows));
+        menu.Items.Add(new FAMenuFlyoutSeparator());
+        var themes = new FAMenuFlyoutSubItem
+        {
+            Text = strings.OpenInTheme,
+            IconSource = new FASymbolIconSource { Symbol = FASymbol.ColorBackground },
+        };
+        foreach (bool fluent in (bool[])[true, false])
+        {
+            foreach (ThemeVariant variant in (ThemeVariant[])[ThemeVariant.Light, ThemeVariant.Dark])
+            {
+                themes.Items.Add(
+                    MenuItem(
+                        ThemeWindow.Describe(fluent, variant),
+                        icon: null,
+                        () => ThemeWindow.Open(this, fluent, variant)
+                    )
+                );
+            }
+        }
+        menu.Items.Add(themes);
     }
 
     private void ToggleWordWrap()
