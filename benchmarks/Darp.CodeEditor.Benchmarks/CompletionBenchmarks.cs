@@ -146,7 +146,7 @@ public class CompletionBenchmarks
 /// From typing a character until a rendered frame shows the list filtered, as in <see cref="CompletionBenchmarks"/>,
 /// with as many items as tolerate a typo, 2,000, of 128 characters each, such as long names that a server sends, and a
 /// typed word of 63 characters that every label holds in order, two neighbouring ones swapped: the worst case of
-/// matching, as the labels that start with another letter match only with a swap, if at all. The budget of 50 ms is the
+/// matching, far past what a ranking scores by tables, so that it scores the cheaper way. The budget of 50 ms is the
 /// same.
 /// </summary>
 [NotInBaseline]
@@ -239,6 +239,120 @@ public class CompletionLongLabelBenchmarks
         window.KeyRelease(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
         if (document.CurrentSnapshot.Length != s_typed.Length)
             document.Undo();
+        HeadlessEditor.Render(window);
+    }
+
+    [GlobalCleanup]
+    public void Close()
+    {
+        _window?.Close();
+        _document?.Dispose();
+        _server?.Dispose();
+    }
+}
+
+/// <summary>
+/// From Backspace until a rendered frame shows the list ranked again, as in <see cref="CompletionBenchmarks"/>, in the
+/// heaviest ranking that scores by tables: Backspace ranks all of the answer's items, 2,000 of 40 characters, as many
+/// as tolerate a typo, against a typed word of 8 characters that every label holds in order, two neighbouring ones
+/// swapped, so that the word as typed and each of its six swaps fill a table for each item, some 1.9 million cells,
+/// just within the ranking's budget. The budget of 50 ms is the same.
+/// </summary>
+[NotInBaseline]
+[InvocationCount(1)]
+[WarmupCount(10)]
+[IterationCount(20)]
+public class CompletionTableBudgetBenchmarks
+{
+    private const int Items = 2000;
+
+    private const string Typed = "aabbabaa";
+
+    private LanguageServer? _server;
+    private Window? _window;
+    private CodeDocument? _document;
+
+    [GlobalSetup]
+    public void SetUp()
+    {
+        HeadlessEditor.SetUpApp();
+        string fakeServer = Path.Combine(AppContext.BaseDirectory, "Darp.CodeEditor.Tests.FakeServer.dll");
+        _server = new LanguageServer(
+            new LanguageServerOptions
+            {
+                FileName = Environment.ProcessPath ?? "dotnet",
+                Arguments =
+                [
+                    fakeServer,
+                    "--completion-items",
+                    $"{Items}",
+                    "--completion-label-length",
+                    "40",
+                    "--no-diagnostics",
+                    "--semantic-tokens",
+                    "none",
+                ],
+            }
+        );
+        Task start = _server.StartAsync();
+        CompletionBenchmarks.RunJobsUntil(() => start.IsCompleted, "The language server did not start.");
+        start.GetAwaiter().GetResult();
+        _document = _server.CreateDocument(CodeLanguage.PlainText, Typed);
+        CodeDocument document = _document;
+        CompletionBenchmarks.RunJobsUntil(
+            () => document.Features is not null,
+            "The document did not open in the server."
+        );
+        var editor = new CodeEditor { Document = _document };
+        _window = HeadlessEditor.Show(editor);
+        HeadlessEditor.Render(_window);
+        editor.Selection = new TextSelection(Typed.Length);
+        editor.Focus();
+    }
+
+    /// <summary>
+    /// Opens the list for the 8 characters, and types a ninth, which ranks the items that show: Backspace then ranks
+    /// the answer's, which was asked for the 8, without asking again.
+    /// </summary>
+    [IterationSetup]
+    public void OpenTheListAndTypeOn()
+    {
+        Window window = _window ?? throw new InvalidOperationException("Not set up.");
+        window.KeyPress(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
+        window.KeyRelease(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
+        CompletionBenchmarks.RunJobsUntil(
+            () => CompletionBenchmarks.List(window)?.Items is [{ Highlights.Length: 8 }, ..],
+            "The list was not ranked."
+        );
+        window.KeyTextInput("b");
+        CompletionBenchmarks.RunJobsUntil(
+            () => CompletionBenchmarks.List(window)?.Items is [{ Highlights.Length: 9 }, ..],
+            "The list was not filtered."
+        );
+        HeadlessEditor.Render(window);
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("CI")]
+    public void BackspaceUntilAFrameShowsTheListRankedByTables()
+    {
+        Window window = _window ?? throw new InvalidOperationException("Not set up.");
+        window.KeyPress(Key.Back, RawInputModifiers.None, PhysicalKey.Backspace, null);
+        window.KeyRelease(Key.Back, RawInputModifiers.None, PhysicalKey.Backspace, null);
+        CompletionBenchmarks.RunJobsUntil(
+            () => CompletionBenchmarks.List(window)?.Items is [{ Highlights.Length: 8 }, ..],
+            "The list was not ranked."
+        );
+        HeadlessEditor.Render(window);
+    }
+
+    /// <summary>Closes the list; Backspace left the text as it was.</summary>
+    [IterationCleanup]
+    public void CloseTheList()
+    {
+        Window window = _window ?? throw new InvalidOperationException("Not set up.");
+        window.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
+        window.KeyRelease(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
         HeadlessEditor.Render(window);
     }
 
