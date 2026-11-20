@@ -26,7 +26,11 @@ public sealed partial class ThemeWindow : Window
     public static void Open(Window owner, bool fluent, ThemeVariant variant)
     {
         var window = new ThemeWindow { DataContext = owner.DataContext, RequestedThemeVariant = variant };
-        window.Styles.Add(fluent ? new FluentTheme() : new SimpleTheme());
+        Styles theme = fluent ? new FluentTheme() : new SimpleTheme();
+        window.Styles.Add(theme);
+        // Fluent follows the platform's colors, whose subscription would keep the closed window alive. The theme leaves
+        // as the window closes, also with its owner, while the platform's settings are still there to unsubscribe from.
+        window.Closing += (_, _) => window.Styles.Remove(theme);
         // The title follows the app's language. The strings outlive the window, which stops listening as it closes.
         PropertyChangedEventHandler updateTitle = (_, _) => window.Title = Describe(fluent, variant);
         Strings.Current.PropertyChanged += updateTitle;
