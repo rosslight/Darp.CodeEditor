@@ -45,10 +45,10 @@ public class HoverBenchmarks
         };
         _window.Show();
         IBrush[] colors = [new ImmutableSolidColorBrush(Colors.Red), new ImmutableSolidColorBrush(Colors.Blue)];
-        // Line breaks are runs too, so the lines share the runs left.
+        // Line breaks are runs and characters too, so the lines share the runs and characters left.
         int lines = HoverParts.MaxLines;
         int runsPerLine = (HoverParts.MaxRuns - (lines - 1)) / lines;
-        int runLength = HoverParts.MaxCharacters / (lines * runsPerLine);
+        int runLength = (HoverParts.MaxCharacters - (lines - 1)) / (lines * runsPerLine);
         var runs = new List<CodeRun>();
         for (int line = 0; line < lines; line++)
         {
