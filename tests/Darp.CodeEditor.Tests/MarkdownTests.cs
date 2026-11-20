@@ -101,20 +101,15 @@ public sealed class MarkdownTests
     }
 
     [Fact]
-    public void A_hover_shows_at_most_its_characters_lines_and_runs_cut_with_an_ellipsis()
+    public void Details_and_signature_help_show_at_most_their_budgets_characters_lines_and_runs_cut_with_an_ellipsis()
     {
         CancellationToken going = TestContext.Current.CancellationToken;
-        var diagnostic = new Diagnostic(
-            TextSnapshot.FromString(""),
-            default,
-            DiagnosticSeverity.Error,
-            null,
-            new string('m', 100_000)
-        );
         // Emphasis that alternates: two runs every four characters, 800 runs on one line.
         string emphasis = string.Concat(Enumerable.Repeat("*x* ", 400));
 
-        string characters = TextOf(HoverBlocks.Of([diagnostic], new HoverBudget()));
+        string characters = TextOf(
+            HoverBlocks.Of(Hover(new string('m', 100_000), false), null, new HoverBudget(), going)
+        );
         string lines = TextOf(
             HoverBlocks.Of(
                 Hover(string.Join('\n', Enumerable.Repeat("x", 1_000)), false),
@@ -124,9 +119,9 @@ public sealed class MarkdownTests
             )
         );
         IReadOnlyList<HoverBlock> runs = HoverBlocks.Of(Hover(emphasis, true), null, new HoverBudget(), going);
-        // The diagnostics' messages come first, and leave nothing to the server's hover.
+        // What comes first leaves nothing to what comes after it.
         var shared = new HoverBudget();
-        HoverBlocks.Of([diagnostic], shared);
+        HoverBlocks.Of(Hover(new string('m', 100_000), true), null, shared, going);
         IReadOnlyList<HoverBlock> after = HoverBlocks.Of(Hover("more", true), null, shared, going);
 
         characters.Length.ShouldBe(HoverBudget.MaxCharacters + 1);
@@ -140,24 +135,95 @@ public sealed class MarkdownTests
     }
 
     [Fact]
-    public void A_diagnostic_is_cut_to_the_budget_before_its_message_and_code_are_put_together()
+    public void A_hover_keeps_all_of_its_text_in_pieces_of_at_most_a_part_each()
+    {
+        CancellationToken going = TestContext.Current.CancellationToken;
+        var diagnostic = new Diagnostic(
+            TextSnapshot.FromString(""),
+            default,
+            DiagnosticSeverity.Error,
+            null,
+            string.Join(' ', Enumerable.Repeat("word", 20_000))
+        );
+        string lines = string.Join('\n', Enumerable.Repeat("x", 1_000));
+        // Emphasis that alternates: two runs every four characters, 800 runs on one line.
+        string emphasis = string.Concat(Enumerable.Repeat("*x* ", 400));
+
+        IReadOnlyList<HoverBlock> characters = Pieces(HoverBlocks.Of([diagnostic]));
+        IReadOnlyList<HoverBlock> code = Pieces([Code(lines)]);
+        IReadOnlyList<HoverBlock> plain = Pieces(HoverBlocks.Of(Hover(lines, false), null, going));
+        IReadOnlyList<HoverBlock> runs = Pieces(HoverBlocks.Of(Hover(emphasis, true), null, going));
+
+        // A long line breaks after a space, and the next piece goes on from there; pieces of lines break at a line
+        // break, which goes with neither.
+        string.Concat(characters.Select(Text)).ShouldBe(diagnostic.Message);
+        characters.SkipLast(1).ShouldAllBe(piece => Text(piece).EndsWith(' '));
+        string.Join('\n', code.Select(Text)).ShouldBe(lines);
+        string.Join('\n', plain.Select(Text)).ShouldBe(lines);
+        string.Concat(runs.Select(Text)).ShouldBe(TextOf(HoverBlocks.Of(Hover(emphasis, true), null, going)));
+        foreach (IReadOnlyList<HoverBlock> pieces in (IReadOnlyList<HoverBlock>[])[characters, code, plain, runs])
+        {
+            pieces.Count.ShouldBeGreaterThan(1);
+            pieces.ShouldAllBe(piece => HoverParts.Fits(HoverParts.Size(piece)));
+            pieces[0].Continues.ShouldBeFalse();
+            pieces.Skip(1).ShouldAllBe(piece => piece.Continues);
+        }
+        // A block that fits a part stays whole.
+        Pieces([Code("short")]).ShouldHaveSingleItem().Continues.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Every_piece_fits_a_part_also_of_a_list_item_a_diagnostics_source_and_code_and_line_breaks_at_the_limit()
+    {
+        // A list item one character longer than a part.
+        string word = new string('x', HoverParts.MaxCharacters + 1);
+        IReadOnlyList<HoverBlock> item = Pieces(
+            HoverBlocks.Of(Hover("- " + word, true), null, TestContext.Current.CancellationToken)
+        );
+        // A message that nearly fills a part, and a source and a code that take its line past it.
+        var diagnostic = new Diagnostic(
+            TextSnapshot.FromString(""),
+            default,
+            DiagnosticSeverity.Error,
+            new string('c', 30),
+            new string('m', HoverParts.MaxCharacters - 10)
+        )
+        {
+            Source = new string('s', 30),
+            CodeDescription = new Uri("https://example.com/code"),
+        };
+        IReadOnlyList<HoverBlock> line = Pieces(HoverBlocks.Of([diagnostic]));
+        // A line break that would take the part past its characters.
+        string text = new string('x', HoverParts.MaxCharacters - 1) + "\r\ny";
+        IReadOnlyList<HoverBlock> lines = Pieces([new HoverParagraph([new HoverSpan(text)])]);
+
+        foreach (IReadOnlyList<HoverBlock> pieces in (IReadOnlyList<HoverBlock>[])[item, line, lines])
+        {
+            pieces.Count.ShouldBeGreaterThan(1);
+            pieces.ShouldAllBe(piece => HoverParts.Fits(HoverParts.Size(piece)));
+        }
+        string.Concat(item.Select(Text)).ShouldBe(word);
+        item[0].ShouldBeOfType<HoverParagraph>().Marker.ShouldNotBeNull();
+        item.Skip(1)
+            .OfType<HoverParagraph>()
+            .Count(piece => piece.Marker == null && piece.Continues)
+            .ShouldBe(item.Count - 1);
+        string.Concat(line.Select(Text)).ShouldBe($"{diagnostic.Message} {diagnostic.Source}({diagnostic.Code})");
+        lines.Select(Text).ShouldBe([new string('x', HoverParts.MaxCharacters - 1), "y"]);
+    }
+
+    [Fact]
+    public void A_diagnostic_shows_all_of_its_message_with_its_code()
     {
         var diagnostic = new Diagnostic(
             TextSnapshot.FromString(""),
             default,
             DiagnosticSeverity.Error,
             "CS0001",
-            new string('m', 10_000_000)
+            new string('m', 100_000)
         );
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        string shown = TextOf(HoverBlocks.Of([diagnostic], new HoverBudget()));
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-
-        shown.ShouldBe(new string('m', HoverBudget.MaxCharacters) + "…");
-        // The message alone takes 20 MB: putting it together with its code would copy all of it.
-        allocated.ShouldBeLessThan(1_000_000);
-        TextOf(HoverBlocks.Of([diagnostic with { Message = "short" }], new HoverBudget())).ShouldBe("short (CS0001)");
+        TextOf(HoverBlocks.Of([diagnostic])).ShouldBe(diagnostic.Message + " (CS0001)");
     }
 
     /// <summary>The line breaks of the library, and one where only the layout of text breaks lines.</summary>
@@ -168,18 +234,26 @@ public sealed class MarkdownTests
     public void A_hovers_lines_are_counted_at_every_line_break(string lineBreak)
     {
         // Two spaces end each line of Markdown with a hard break; plain text keeps its line breaks.
-        string text = string.Join(lineBreak, Enumerable.Repeat("x  ", 400));
-        var diagnostic = new Diagnostic(TextSnapshot.FromString(""), default, DiagnosticSeverity.Error, null, text);
+        const int count = 400;
+        string text = string.Join(lineBreak, Enumerable.Repeat("x  ", count));
+        CancellationToken going = TestContext.Current.CancellationToken;
+        // Full parts, and the rest.
+        int[] parts =
+        [
+            .. Enumerable
+                .Range(0, (count + HoverParts.MaxLines - 1) / HoverParts.MaxLines)
+                .Select(i => Math.Min(HoverParts.MaxLines, count - i * HoverParts.MaxLines)),
+        ];
 
-        string markdown = TextOf(
-            HoverBlocks.Of(Hover(text, true), null, new HoverBudget(), TestContext.Current.CancellationToken)
-        );
-        string message = TextOf(HoverBlocks.Of([diagnostic], new HoverBudget()));
+        IReadOnlyList<HoverBlock> markdown = Pieces(HoverBlocks.Of(Hover(text, true), null, going));
+        IReadOnlyList<HoverBlock> plain = Pieces([new HoverParagraph([new HoverSpan(text)])]);
+        string budgeted = TextOf(HoverBlocks.Of(Hover(text, true), null, new HoverBudget(), going));
 
-        LineCount(markdown).ShouldBe(HoverBudget.MaxLines);
-        markdown.ShouldEndWith("…");
-        LineCount(message).ShouldBe(HoverBudget.MaxLines);
-        message.ShouldEndWith("…");
+        markdown.Select(piece => LineCount(Text(piece))).ShouldBe(parts);
+        plain.Select(piece => LineCount(Text(piece))).ShouldBe(parts);
+        string.Join(lineBreak, plain.Select(Text)).ShouldBe(text);
+        LineCount(budgeted).ShouldBe(HoverBudget.MaxLines);
+        budgeted.ShouldEndWith("…");
     }
 
     [Fact]
@@ -187,14 +261,23 @@ public sealed class MarkdownTests
     {
         // The budget ends between the two halves of the emoji.
         string text = new string('x', HoverBudget.MaxCharacters - 1) + "😀tail";
-        var diagnostic = new Diagnostic(TextSnapshot.FromString(""), default, DiagnosticSeverity.Error, null, text);
         string expected = new string('x', HoverBudget.MaxCharacters - 1) + "…";
 
-        TextOf(HoverBlocks.Of([diagnostic], new HoverBudget())).ShouldBe(expected);
         TextOf(HoverBlocks.Of(Hover(text, false), null, new HoverBudget(), TestContext.Current.CancellationToken))
             .ShouldBe(expected);
         TextOf(HoverBlocks.Of(Hover(text, true), null, new HoverBudget(), TestContext.Current.CancellationToken))
             .ShouldBe(expected);
+    }
+
+    [Fact]
+    public void A_piece_never_ends_inside_a_surrogate_pair()
+    {
+        // A part is full between the two halves of the emoji.
+        string text = new string('x', HoverParts.MaxCharacters - 1) + "😀tail";
+
+        IReadOnlyList<HoverBlock> pieces = Pieces([new HoverParagraph([new HoverSpan(text)])]);
+
+        pieces.Select(Text).ShouldBe([new string('x', HoverParts.MaxCharacters - 1), "😀tail"]);
     }
 
     [Fact]
@@ -281,6 +364,13 @@ public sealed class MarkdownTests
 
     private static HoverInfo Hover(string text, bool markdown) => new([new HoverText(text, markdown)], null);
 
+    /// <summary>The pieces of <paramref name="blocks"/> that a hover builds.</summary>
+    private static IReadOnlyList<HoverBlock> Pieces(IEnumerable<HoverBlock> blocks) =>
+        [.. blocks.SelectMany(HoverParts.Split)];
+
+    /// <summary>The text of a paragraph or a code block.</summary>
+    private static string Text(HoverBlock block) => TextOf([block]);
+
     /// <summary>The text that blocks show, paragraphs on lines of their own.</summary>
     private static string TextOf(IEnumerable<HoverBlock> blocks) =>
         string.Join(
@@ -290,6 +380,7 @@ public sealed class MarkdownTests
                 {
                     HoverParagraph paragraph => string.Concat(paragraph.Spans.Select(span => span.Text)),
                     HoverCode code => string.Concat(code.Runs.Select(run => run.Text)),
+                    HoverDiagnostic diagnostic => string.Concat(diagnostic.Line.Select(span => span.Text)),
                     _ => "",
                 }
             )

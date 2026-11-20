@@ -389,6 +389,9 @@ public class CodeEditor : TemplatedControl
     /// <summary>Whether the editor asks for the occurrences at the caret, for tests.</summary>
     internal bool IsAskingForOccurrences => _view?.IsAskingForOccurrences ?? false;
 
+    /// <summary>Whether the server's answer to the hover is in, for tests.</summary>
+    internal bool HoverIsAnswered => _view?.HoverIsAnswered ?? false;
+
     /// <summary>Where the editor's work off the UI thread runs, such as ranking completion's items; tests hold it.</summary>
     internal TaskScheduler BackgroundScheduler { get; init; } = TaskScheduler.Default;
 
@@ -568,12 +571,6 @@ public class CodeEditor : TemplatedControl
     {
         base.OnLostFocus(e);
         EndWait();
-        // Raised as the focus leaves an element inside the editor; it may stay inside, as when it goes to the search bar.
-        Dispatcher.Post(() =>
-        {
-            if (!IsKeyboardFocusWithin)
-                _view?.OnFocusLeft();
-        });
     }
 
     /// <inheritdoc />
@@ -875,8 +872,18 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>
     /// Brings a range into view: centered unless it is visible, from its start when it is taller or wider than the view.
+    /// Rows not laid out may be taller or wider than the view knows: laid out, it scrolls again, not above the range's
+    /// line, so that the lines above no longer move it; three passes at most, none once the text or document changed.
     /// </summary>
     private static void Reveal(TextEditor part, TextRange range)
+    {
+        ITextSourceVersion? version = part.Document?.Version;
+        for (int pass = 0; pass < 3 && part.Document?.Version == version && Scroll(part, range, pass > 0); pass++)
+            part.UpdateLayout();
+    }
+
+    /// <summary>Scrolls to show a range where the view has it now; false when it shows.</summary>
+    private static bool Scroll(TextEditor part, TextRange range, bool fromLine)
     {
         TextView textView = part.TextArea.TextView;
         TextDocument buffer = textView.Document;
@@ -889,7 +896,10 @@ public class CodeEditor : TemplatedControl
         // fits needs the left and right edges of every line it covers.
         (double left, double right) = part.WordWrap || bottom - start.Y > view.Height ? (start.X, start.X) : Edges();
         double x = part.WordWrap ? 0 : OffsetToShow(left, right, start.X, offset.X, view.Width);
-        SetScrollOffset(part, new Vector(Math.Max(0, x), Math.Max(0, y)));
+        double top = fromLine ? textView.GetVisualTopByDocumentLine(buffer.GetLineByOffset(range.Start).LineNumber) : 0;
+        var shows = new Vector(Math.Max(0, x), y == offset.Y ? y : Math.Max(top, y));
+        SetScrollOffset(part, shows);
+        return shows != offset;
 
         Point Position(int textOffset, VisualYPosition at) =>
             textView.GetVisualPosition(new TextViewPosition(buffer.GetLocation(textOffset)), at);

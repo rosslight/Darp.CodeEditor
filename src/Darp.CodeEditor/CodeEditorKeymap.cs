@@ -64,6 +64,7 @@ public sealed class CodeEditorKeymap
     /// <item><term>(ctrl+n, ctrl+p)</term><description><see cref="CodeEditorCommands.SelectNextSuggestion"/>, <see cref="CodeEditorCommands.SelectPrevSuggestion"/> while the list shows; otherwise the caret's keys</description></item>
     /// <item><term>enter</term><description><see cref="CodeEditorCommands.AcceptSelectedSuggestion"/> while the list shows</description></item>
     /// <item><term>tab, shift+enter</term><description><see cref="CodeEditorCommands.AcceptAlternativeSelectedSuggestion"/> while the list shows; VS Code binds Tab to <see cref="CodeEditorCommands.AcceptSelectedSuggestion"/></description></item>
+    /// <item><term>ctrl+k ctrl+i (cmd+k cmd+i)</term><description><see cref="CodeEditorCommands.ShowHover"/></description></item>
     /// <item><term>ctrl+shift+space (shift+cmd+space)</term><description><see cref="CodeEditorCommands.TriggerParameterHints"/></description></item>
     /// <item><term>alt+up, alt+down (also ctrl+p, ctrl+n)</term><description><see cref="CodeEditorCommands.ShowPrevParameterHint"/>, <see cref="CodeEditorCommands.ShowNextParameterHint"/> while signature help shows several signatures, before the other bindings of those keys, but completion's list's ctrl+n and ctrl+p</description></item>
     /// <item><term>ctrl+f (cmd+f)</term><description><see cref="CodeEditorCommands.Find"/></description></item>
@@ -87,6 +88,7 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+shift+\ (shift+cmd+\)</term><description><see cref="CodeEditorCommands.JumpToBracket"/></description></item>
     /// <item><term>shift+alt+right, shift+alt+left (ctrl+shift+cmd+right, ctrl+shift+cmd+left)</term><description><see cref="CodeEditorCommands.SmartSelectExpand"/>, <see cref="CodeEditorCommands.SmartSelectShrink"/></description></item>
     /// <item><term>f7, shift+f7</term><description><see cref="CodeEditorCommands.WordHighlightNext"/>, <see cref="CodeEditorCommands.WordHighlightPrevious"/></description></item>
+    /// <item><term>f8, shift+f8; alt+f8, shift+alt+f8</term><description><see cref="CodeEditorCommands.NextMarkerInFiles"/>, <see cref="CodeEditorCommands.PreviousMarkerInFiles"/>; <see cref="CodeEditorCommands.NextMarker"/>, <see cref="CodeEditorCommands.PreviousMarker"/></description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default { get; } = new(DefaultBindings(OperatingSystem.IsMacOS()));
@@ -165,6 +167,7 @@ public sealed class CodeEditorKeymap
         yield return new("shift+enter", CodeEditorCommands.AcceptAlternativeSelectedSuggestion);
         if (mac)
             yield return new("alt+escape", CodeEditorCommands.TriggerSuggest);
+        yield return new($"{command}+k {command}+i", CodeEditorCommands.ShowHover);
         yield return new($"{command}+shift+space", CodeEditorCommands.TriggerParameterHints);
         yield return new($"{command}+f", CodeEditorCommands.Find);
         yield return new(mac ? "alt+cmd+f" : "ctrl+h", CodeEditorCommands.Replace);
@@ -204,6 +207,10 @@ public sealed class CodeEditorKeymap
         yield return new($"{smartSelect}+left", CodeEditorCommands.SmartSelectShrink);
         yield return new("f7", CodeEditorCommands.WordHighlightNext);
         yield return new("shift+f7", CodeEditorCommands.WordHighlightPrevious);
+        yield return new("f8", CodeEditorCommands.NextMarkerInFiles);
+        yield return new("shift+f8", CodeEditorCommands.PreviousMarkerInFiles);
+        yield return new("alt+f8", CodeEditorCommands.NextMarker);
+        yield return new("shift+alt+f8", CodeEditorCommands.PreviousMarker);
         // Last, as VS Code weighs them above the other commands of their keys, such as Alt+Up's line move: they apply
         // only while signature help shows several signatures, and the key goes on to the binding before otherwise.
         yield return new("alt+up", CodeEditorCommands.ShowPrevParameterHint);

@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Media;
 
 namespace Darp.CodeEditor.Popups;
@@ -12,19 +13,41 @@ namespace Darp.CodeEditor.Popups;
 /// <summary>Text in a popup.</summary>
 internal sealed class PopupText : TextBlock
 {
-    public PopupText()
-    {
-        FontWeight = FontWeight.Normal;
-        FontStyle = FontStyle.Normal;
-        FontStretch = FontStretch.Normal;
-        TextDecorations = null;
-        LineHeight = double.NaN;
-        LetterSpacing = 0;
-        Margin = default;
-        Padding = default;
-    }
+    public PopupText() => Reset(this);
 
     protected override Type StyleKeyOverride => typeof(PopupText);
+
+    /// <summary>Sets the typography and layout that an app's styles would otherwise set.</summary>
+    public static void Reset(TextBlock text)
+    {
+        text.FontWeight = FontWeight.Normal;
+        text.FontStyle = FontStyle.Normal;
+        text.FontStretch = FontStretch.Normal;
+        text.TextDecorations = null;
+        text.MaxLines = 0;
+        text.TextTrimming = TextTrimming.None;
+        text.LineHeight = double.NaN;
+        text.LetterSpacing = 0;
+        text.Margin = default;
+        text.Padding = default;
+    }
+}
+
+/// <summary>
+/// Text in a popup that the user can select and copy with Ctrl+C, as in a hover: clicking it gives it the keyboard.
+/// </summary>
+internal sealed class PopupSelectableText : SelectableTextBlock
+{
+    private static readonly Cursor s_beam = new(StandardCursorType.Ibeam);
+
+    public PopupSelectableText(IBrush selection)
+    {
+        PopupText.Reset(this);
+        Cursor = s_beam;
+        SelectionBrush = selection;
+    }
+
+    protected override Type StyleKeyOverride => typeof(PopupSelectableText);
 }
 
 /// <summary>Blocks of a popup, one below the other.</summary>

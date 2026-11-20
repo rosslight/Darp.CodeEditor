@@ -440,24 +440,39 @@ public sealed class CodeEditorTests(UiFixture ui)
             MenuItem[] items = [.. menu.Items.OfType<MenuItem>()];
             items
                 .Select(item => item.Header as string)
-                .ShouldBe(["Cut", "Copy", "Paste", "Select All", "Toggle Line Comment", "Find", "Replace"]);
-            KeysShownBy(items[4]).ShouldBe(new KeyGesture(Key.Oem2, EditorWindow.Command).ToString("p", null));
+                .ShouldBe([
+                    "Show Hover",
+                    "Cut",
+                    "Copy",
+                    "Paste",
+                    "Select All",
+                    "Toggle Line Comment",
+                    "Find",
+                    "Replace",
+                ]);
+            // A sequence of two strokes shows in full, where a menu item shows one gesture.
+            string[] hoverKeys =
+            [
+                .. new[] { Key.K, Key.I }.Select(key => new KeyGesture(key, EditorWindow.Command).ToString("p", null)),
+            ];
+            KeysShownBy(items[0]).ShouldBe(string.Join(' ', hoverKeys));
+            KeysShownBy(items[5]).ShouldBe(new KeyGesture(Key.Oem2, EditorWindow.Command).ToString("p", null));
             menu.Hide();
 
             editor.Selection = new TextSelection(4, 7);
-            items[1].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            items[2].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
             (await Clipboard(window).TryGetTextAsync()).ShouldBe("two");
-            items[3].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            items[4].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
             editor.Selection.ShouldBe(new TextSelection(0, 7));
             // The editor's commands run once the menu has closed.
-            items[4].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            items[5].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
             Dispatcher.UIThread.RunJobs();
             DocumentOf(editor).Text.ShouldBe("// one two");
 
             editor.IsReadOnly = true;
             window.Click(window.PointAt(1), MouseButton.Right);
             menu.IsOpen.ShouldBeTrue();
-            items.Select(item => item.IsEnabled).ShouldBe([false, true, false, true, false, true, false]);
+            items.Select(item => item.IsEnabled).ShouldBe([true, false, true, false, true, false, true, false]);
             menu.Hide();
         });
 

@@ -77,4 +77,16 @@
   <data name="NoSuggestions" xml:space="preserve">
     <value>Keine Vorschläge.</value>
   </data>
+  <data name="ShowHover" xml:space="preserve">
+    <value>Hover anzeigen</value>
+  </data>
+  <data name="HoverLoading" xml:space="preserve">
+    <value>Wird geladen…</value>
+  </data>
+  <data name="ProblemOfProblems" xml:space="preserve">
+    <value>{0} von {1} Problemen</value>
+  </data>
+  <data name="ProblemOfProblem" xml:space="preserve">
+    <value>{0} von {1} Problem</value>
+  </data>
 </root>

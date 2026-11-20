@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
+using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Styling;
@@ -9,12 +10,15 @@ using Avalonia.VisualTree;
 using Darp.CodeEditor.Diagnostics;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Popups;
+using Darp.CodeEditor.Search;
+using static Darp.CodeEditor.Tests.Hovers;
 
 namespace Darp.CodeEditor.Tests;
 
 /// <summary>
-/// Hover: the diagnostics' messages above the server's Markdown, in the editor's own popup in its color theme's hover
-/// colors, which stays inside the window, takes the editor's theme variant, and closes when it is no longer wanted.
+/// Hover: the diagnostics above the server's Markdown, in the editor's own popup in its color theme's hover colors,
+/// inside the window, in the editor's theme variant, as large as VS Code's limits or a resize, and all of its content
+/// built a part a frame.
 /// </summary>
 [Collection(UiFixture.Collection)]
 public sealed class HoverTests(UiFixture ui)
@@ -32,7 +36,8 @@ public sealed class HoverTests(UiFixture ui)
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
-            await using var server = new LanguageServer(fake.Options);
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             const string text = "{\n  \"key\": 1\n}";
             using CodeDocument document = server.CreateDocument(CodeLanguage.Json, text);
             var editor = new CodeEditor { Document = document };
@@ -40,12 +45,17 @@ public sealed class HoverTests(UiFixture ui)
             using var window = new EditorWindow(editor, width: 300, height: 200);
             await Wait.UntilAsync(() => document.Diagnostics.Count == 1 && window.ColorAt(5) == s_propertyName);
 
-            window.MoveMouse(window.PointAt(text.IndexOf("key", StringComparison.Ordinal)));
+            PopupFrame popup = await HoverAsync(
+                window,
+                text.IndexOf("key", StringComparison.Ordinal),
+                "is a word in",
+                time
+            );
 
-            PopupFrame popup = await WaitForPopupAsync(window, "is a word in");
-            Control[] parts = [.. ((Panel)Content(popup)).Children];
-            // The diagnostic's message and code, a line, the server's paragraph, and its code block.
-            TextOf(parts[0]).ShouldBe($"{text} (echo)");
+            Control[] parts = Blocks(popup);
+            // The diagnostic's icon, message and code, a line, the server's paragraph, and its code block.
+            parts[0].GetVisualDescendants().OfType<SeverityIcon>().ShouldHaveSingleItem();
+            parts[0].GetVisualDescendants().OfType<TextBlock>().Select(TextOf).ShouldBe([$"{text} (echo)"]);
             parts[1].ShouldBeAssignableTo<Border>().ShouldNotBeNull().Height.ShouldBe(1);
             TextOf(parts[2]).ShouldBe("key is a word in json.");
             ((TextBlock)parts[2]).Inlines.ShouldNotBeNull().OfType<Run>().First().FontWeight.ShouldBe(FontWeight.Bold);
@@ -66,14 +76,15 @@ public sealed class HoverTests(UiFixture ui)
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
-            await using var server = new LanguageServer(fake.Options);
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             using CodeDocument document = server.CreateDocument(CodeLanguage.Json, "{\n  \"key\": 1\n}");
             // A dark color theme in a light app: popups take the color theme's colors.
             var editor = new CodeEditor { Document = document, ColorTheme = CodeEditorColorTheme.DarkPlus };
             using var window = new EditorWindow(editor);
             await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
 
-            PopupFrame popup = await HoverAsync(window, 5, "key is a word in");
+            PopupFrame popup = await HoverAsync(window, 5, "key is a word in", time);
 
             var paragraph = popup
                 .GetVisualDescendants()
@@ -98,13 +109,14 @@ public sealed class HoverTests(UiFixture ui)
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
-            await using var server = new LanguageServer(fake.Options);
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             // Plain text has no grammar: no token of its code block has a color of its own.
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "some plain words");
             using var window = new EditorWindow(new CodeEditor { Document = document });
             await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
 
-            PopupFrame popup = await HoverAsync(window, 1, "some is a word in");
+            PopupFrame popup = await HoverAsync(window, 1, "some is a word in", time);
 
             // In Light+'s black text: the code block, in the editor's font, after the diagnostic.
             TextBlock code = popup
@@ -120,7 +132,8 @@ public sealed class HoverTests(UiFixture ui)
         _ui.Run(async () =>
         {
             // As a missing semicolon: no server, only the diagnostic.
-            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "let a = 1\nlet b = 2");
+            var time = new ManualTime();
+            var document = new StandaloneDocument(CodeLanguage.PlainText, "let a = 1\nlet b = 2", time);
             using var window = new EditorWindow(new CodeEditor { Document = document });
             document.SetDiagnostics([
                 new Diagnostic(
@@ -132,9 +145,38 @@ public sealed class HoverTests(UiFixture ui)
                 ),
             ]);
 
-            window.MoveMouse(window.PointAt(9));
+            await HoverAsync(window, 9, "';' expected", time);
+        });
 
-            await WaitForPopupAsync(window, "';' expected");
+    [Fact]
+    public Task App_styles_for_text_cut_no_line_of_the_hover() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            // The server's diagnostic has the text as its message: three lines.
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one\ntwo\nthree");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Window.Styles.Add(
+                new Style(x => x.Is<TextBlock>())
+                {
+                    Setters =
+                    {
+                        new Setter(TextBlock.MaxLinesProperty, 1),
+                        new Setter(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis),
+                    },
+                }
+            );
+            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+
+            PopupFrame popup = await HoverAsync(window, 1, "one is a word in", time);
+
+            TextBlock message = popup.GetVisualDescendants().OfType<TextBlock>().First();
+            TextOf(message).ShouldStartWith("one\ntwo\nthree");
+            message.MaxLines.ShouldBe(0);
+            message.TextTrimming.ShouldBe(TextTrimming.None);
+            message.TextLayout.TextLines.Count.ShouldBeGreaterThanOrEqualTo(3);
         });
 
     [Fact]
@@ -142,7 +184,8 @@ public sealed class HoverTests(UiFixture ui)
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
-            await using var server = new LanguageServer(fake.Options);
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             using CodeDocument document = server.CreateDocument(CodeLanguage.Json, "{\n  \"key\": 1\n}");
             var editor = new CodeEditor { Document = document };
             // A dark editor in a light window.
@@ -152,9 +195,8 @@ public sealed class HoverTests(UiFixture ui)
             );
             await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
 
-            window.MoveMouse(window.PointAt(5));
+            PopupFrame popup = await HoverAsync(window, 5, "is a word in", time);
 
-            PopupFrame popup = await WaitForPopupAsync(window, "is a word in");
             window.Window.ActualThemeVariant.ShouldBe(ThemeVariant.Light);
             popup.ActualThemeVariant.ShouldBe(ThemeVariant.Dark);
             // Dark+'s hover background, as VS Code defaults it, in the frame's pixels.
@@ -165,126 +207,18 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
-    public Task The_popup_stays_over_its_word_and_itself_and_closes_when_the_pointer_leaves_both() =>
-        _ui.Run(async () =>
-        {
-            var fake = new FakeServer();
-            await using var server = new LanguageServer(fake.Options);
-            const string text = "one two\nthree";
-            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
-            var outside = new Border { Width = 100, Background = Brushes.Gray };
-            DockPanel.SetDock(outside, Dock.Right);
-            var editor = new CodeEditor { Document = document };
-            using var window = new EditorWindow(editor, new DockPanel { Children = { outside, editor } });
-            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
-
-            // Over another character of the word, and over the popup, it stays.
-            PopupFrame popup = await HoverAsync(
-                window,
-                text.IndexOf("three", StringComparison.Ordinal),
-                "three is a word in"
-            );
-            window.MoveMouse(window.PointAt(text.IndexOf("three", StringComparison.Ordinal) + 3));
-            Popup(window).ShouldBeSameAs(popup);
-            window.MoveMouse(BoundsInWindow(popup).Center);
-            Popup(window).ShouldBeSameAs(popup);
-
-            // Out of the popup to the side of the editor.
-            window.MoveMouse(outside.TranslatePoint(new Point(50, 50), window.Window)!.Value);
-            Popup(window).ShouldBeNull();
-
-            // Over another word, though under the same diagnostic.
-            await HoverAsync(window, 0, "one is a word in");
-            window.MoveMouse(window.PointAt(text.IndexOf("two", StringComparison.Ordinal)));
-            Popup(window).ShouldBeNull();
-        });
-
-    [Fact]
-    public Task The_popup_closes_on_typing_Escape_scrolling_and_focus_loss() =>
-        _ui.Run(async () =>
-        {
-            // Without diagnostics: the echoed whole text would take all that a hover shows.
-            var fake = new FakeServer("--no-diagnostics");
-            await using var server = new LanguageServer(fake.Options);
-            string text = string.Concat(Enumerable.Range(0, 200).Select(i => $"word{i}\n"));
-            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
-            var button = new Button { Content = "Elsewhere" };
-            DockPanel.SetDock(button, Dock.Top);
-            var editor = new CodeEditor { Document = document };
-            using var window = new EditorWindow(editor, new DockPanel { Children = { button, editor } });
-            await server.StartAsync();
-
-            await HoverAsync(window, 1, "word0 is a word in");
-            window.Type("x");
-            Popup(window).ShouldBeNull();
-
-            await HoverAsync(window, 1, "xword0 is a word in");
-            window.Press(Key.Escape);
-            Popup(window).ShouldBeNull();
-
-            await HoverAsync(window, 1, "xword0 is a word in");
-            editor.ScrollTo(new TextRange(text.Length, 0));
-            window.Layout();
-            Popup(window).ShouldBeNull();
-
-            editor.ScrollTo(new TextRange(0, 0));
-            await HoverAsync(window, 1, "xword0 is a word in");
-            button.Focus();
-            window.Layout();
-            Popup(window).ShouldBeNull();
-        });
-
-    [Fact]
-    public Task Escape_ends_a_hover_that_still_waits_for_its_server() =>
-        _ui.Run(async () =>
-        {
-            // Without diagnostics, nothing shows until the server answers, and it never answers for "slow". The clock
-            // stands still, so that no hang limit cancels the request instead.
-            var fake = new FakeServer("--no-diagnostics");
-            await using var server = new LanguageServer(fake.Options with { TimeProvider = new ManualTime() });
-            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "slow");
-            using var window = new EditorWindow(new CodeEditor { Document = document });
-            await server.StartAsync();
-            window.MoveMouse(window.PointAt(1));
-            string id = (await fake.WaitForAsync("hover "))["hover ".Length..].Split(' ')[0];
-            Popup(window).ShouldBeNull();
-
-            window.Press(Key.Escape);
-
-            // Its request is cancelled, so that a late answer opens nothing.
-            await fake.WaitForAsync($"cancel {id}");
-            Popup(window).ShouldBeNull();
-        });
-
-    [Fact]
-    public Task A_server_that_stops_serving_the_document_ends_its_hover() =>
-        _ui.Run(async () =>
-        {
-            var fake = new FakeServer();
-            await using var server = new LanguageServer(fake.Options with { TimeProvider = new ManualTime() });
-            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "word");
-            using var window = new EditorWindow(new CodeEditor { Document = document });
-            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
-            await HoverAsync(window, 1, "word is a word in");
-
-            // The process crashes: its information and its diagnostics' messages are outdated.
-            using CodeDocument crash = server.CreateDocument(FakeServer.Commands, "exit 3");
-
-            await Wait.UntilAsync(() => Popup(window) is null);
-        });
-
-    [Fact]
     public Task New_colors_end_the_hover_whose_code_shows_the_old_ones() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
-            await using var server = new LanguageServer(fake.Options);
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             using CodeDocument document = server.CreateDocument(CodeLanguage.Json, "{\n  \"key\": 1\n}");
             var editor = new CodeEditor { Document = document };
             var scope = new ThemeVariantScope { RequestedThemeVariant = ThemeVariant.Light, Child = editor };
             using var window = new EditorWindow(editor, scope);
             await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
-            await HoverAsync(window, 5, "is a word in");
+            await HoverAsync(window, 5, "is a word in", time);
 
             scope.RequestedThemeVariant = ThemeVariant.Dark;
 
@@ -299,11 +233,414 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task The_hover_grows_up_to_VS_Codes_limits_and_to_the_size_the_user_resized_a_hover_to() =>
+        _ui.Run(async () =>
+        {
+            HoverPopup.LastResizedSize = default;
+            try
+            {
+                var fake = new FakeServer("--no-diagnostics");
+                var time = new ManualTime();
+                await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+                using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two");
+                using var window = new EditorWindow(new CodeEditor { Document = document }, width: 1600, height: 1200);
+                await server.StartAsync();
+
+                // 66% of the editor's width, and a quarter of its height, at least 750 by 250 pixels.
+                PopupFrame popup = await HoverAsync(window, 1, "one is a word in", time);
+                popup.MaxWidth.ShouldBe(1056);
+                popup.MaxHeight.ShouldBe(300);
+
+                // Below the first line: its right and bottom edges resize it.
+                Rect bounds = BoundsInWindow(popup);
+                var corner = new Point(bounds.Right - 2, bounds.Bottom - 2);
+                var dragged = new Point(corner.X + 1_200, corner.Y + 400);
+                window.MoveMouse(corner);
+                window.Window.MouseDown(corner, MouseButton.Left);
+                window.Window.MouseMove(dragged, RawInputModifiers.LeftMouseButton);
+                window.Window.MouseUp(dragged, MouseButton.Left);
+                window.Layout();
+                Size resized = HoverPopup.LastResizedSize;
+                resized.Width.ShouldBeGreaterThan(1056);
+                resized.Height.ShouldBeGreaterThan(300);
+                popup.Width.ShouldBe(resized.Width);
+
+                // A later hover takes the size of its content, and may grow as large as the resized one.
+                window.Press(Key.Escape);
+                popup = await HoverAsync(window, 4, "two is a word in", time);
+                popup.Width.ShouldBe(double.NaN);
+                popup.MaxWidth.ShouldBe(resized.Width);
+                popup.MaxHeight.ShouldBe(resized.Height);
+            }
+            finally
+            {
+                HoverPopup.LastResizedSize = default;
+            }
+        });
+
+    [Fact]
+    public Task Dragging_a_short_hovers_bottom_edge_makes_it_taller_and_the_next_hover_as_tall_as_its_content() =>
+        _ui.Run(async () =>
+        {
+            HoverPopup.LastResizedSize = default;
+            try
+            {
+                var fake = new FakeServer("--no-diagnostics");
+                var time = new ManualTime();
+                await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+                using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two");
+                using var window = new EditorWindow(new CodeEditor { Document = document });
+                await server.StartAsync();
+                // Below the first line: its bottom edge resizes it.
+                PopupFrame popup = await HoverAsync(window, 1, "one is a word in", time);
+                Rect bounds = BoundsInWindow(popup);
+                var edge = new Point(bounds.Center.X, bounds.Bottom - 2);
+
+                window.MoveMouse(edge);
+                window.Window.MouseDown(edge, MouseButton.Left);
+                window.Window.MouseMove(edge + new Point(0, 90), RawInputModifiers.LeftMouseButton);
+                window.Window.MouseUp(edge + new Point(0, 90), MouseButton.Left);
+                window.Layout();
+
+                BoundsInWindow(popup).Height.ShouldBe(bounds.Height + 90, 0.5);
+                HoverPopup.LastResizedSize.Height.ShouldBe(BoundsInWindow(popup).Height, 0.5);
+                window.Press(Key.Escape);
+                popup = await HoverAsync(window, 4, "two is a word in", time);
+                popup.Height.ShouldBe(double.NaN);
+            }
+            finally
+            {
+                HoverPopup.LastResizedSize = default;
+            }
+        });
+
+    [Fact]
+    public Task Opening_with_the_servers_answer_in_builds_one_part_of_the_diagnostics_and_the_answer() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            // A line of 1,500 characters: the diagnostic's message, and the server's code block.
+            string text = string.Join(' ', Enumerable.Repeat("word", 300));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+            window.MoveMouse(window.PointAt(1));
+            Pass(window, time, TimeSpan.FromMilliseconds(150));
+            await Wait.UntilAsync(() => window.Editor.HoverIsAnswered);
+
+            // What the popup has as it opens, before any frame builds a part after the first.
+            int? opened = null;
+            OverlayLayer.GetOverlayLayer(window.Window).ShouldNotBeNull().Children.CollectionChanged += (_, e) =>
+                opened ??= e
+                    .NewItems?.OfType<Visual>()
+                    .SelectMany(root => root.GetVisualDescendants())
+                    .OfType<TextBlock>()
+                    .Sum(block => TextOf(block).Length);
+
+            Pass(window, time, TimeSpan.FromMilliseconds(150));
+
+            opened.ShouldNotBeNull().ShouldBeLessThanOrEqualTo(HoverParts.MaxCharacters);
+            // The rest in the frames after.
+            await WaitForPopupAsync(window, "is a word in");
+        });
+
+    [Fact]
+    public Task A_hover_at_the_windows_right_edge_narrows_from_the_edge_that_is_dragged() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            // Near the right edge, with a diagnostic as wide as the line: the window's edge pushes the popup left.
+            string text = new string('a', 60) + " word";
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document }, width: 600);
+            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+            PopupFrame popup = await HoverAsync(window, text.Length - 2, "word is a word in", time);
+            Rect bounds = BoundsInWindow(popup);
+            bounds.Right.ShouldBe(window.Window.ClientSize.Width, 1);
+            var grip = new Point(bounds.Right - 2, bounds.Center.Y);
+
+            window.MoveMouse(grip);
+            window.Window.MouseDown(grip, MouseButton.Left);
+            window.Window.MouseMove(grip - new Point(20, 0), RawInputModifiers.LeftMouseButton);
+            window.Window.MouseUp(grip - new Point(20, 0), MouseButton.Left);
+            window.Layout();
+            window.Render();
+
+            Rect resized = BoundsInWindow(popup);
+            resized.Left.ShouldBe(bounds.Left, 0.5);
+            resized.Right.ShouldBe(bounds.Right - 20, 0.5);
+        });
+
+    [Fact]
+    public Task A_long_wrapped_words_hover_shows_also_where_the_word_starts_out_of_view() =>
+        _ui.Run(async () =>
+        {
+            // One word over many rows of a narrow editor, scrolled to its end: its start is rows above the view.
+            var time = new ManualTime();
+            var document = new StandaloneDocument(CodeLanguage.PlainText, new string('x', 2_000), time);
+            var editor = new CodeEditor { Document = document, WordWrap = true };
+            using var window = new EditorWindow(editor, width: 300, height: 200);
+            document.SetDiagnostics([
+                new Diagnostic(
+                    document.CurrentSnapshot,
+                    new TextRange(0, 2_000),
+                    DiagnosticSeverity.Error,
+                    null,
+                    "long"
+                ),
+            ]);
+            editor.ScrollTo(new TextRange(1_990, 0));
+            window.Layout();
+
+            // By the pointer, and by Ctrl+K Ctrl+I at the caret.
+            await HoverAsync(window, 1_990, "long", time);
+            window.Press(Key.Escape);
+            editor.Selection = new TextSelection(1_990);
+            window.Press(Key.K, EditorWindow.Command);
+            window.Press(Key.I, EditorWindow.Command);
+            await WaitForPopupAsync(window, "long");
+        });
+
+    [Fact]
+    public Task F8_and_Ctrl_K_Ctrl_I_in_a_scrolled_editor_show_the_hover_at_the_caret_where_the_word_starts_out_of_view() =>
+        _ui.Run(async () =>
+        {
+            // One long word, its start scrolled out of view to the left as F8 goes to a problem near its end.
+            var time = new ManualTime();
+            var document = new StandaloneDocument(CodeLanguage.PlainText, new string('x', 500), time);
+            using var window = new EditorWindow(new CodeEditor { Document = document }, width: 400, height: 200);
+            document.SetDiagnostics([
+                new Diagnostic(
+                    document.CurrentSnapshot,
+                    new TextRange(450, 10),
+                    DiagnosticSeverity.Error,
+                    null,
+                    "late"
+                ),
+            ]);
+            window.Layout();
+
+            window.Press(Key.F8);
+            PopupFrame popup = await WaitForPopupAsync(window, "late");
+            window.PointAt(0).X.ShouldBeLessThan(0);
+            double caret = window.PointAt(450).X - window.TextView.WideSpaceWidth / 2;
+            Rect bounds = BoundsInWindow(popup);
+            bounds.Left.ShouldBe(Math.Min(caret, window.Window.ClientSize.Width - bounds.Width), 1);
+
+            window.Press(Key.Escape);
+            window.Press(Key.K, EditorWindow.Command);
+            window.Press(Key.I, EditorWindow.Command);
+            popup = await WaitForPopupAsync(window, "late");
+            bounds = BoundsInWindow(popup);
+            bounds.Left.ShouldBe(Math.Min(caret, window.Window.ClientSize.Width - bounds.Width), 1);
+        });
+
+    [Fact]
+    public Task A_resized_hover_narrows_from_the_dragged_edge_also_after_the_window_moved_it() =>
+        _ui.Run(async () =>
+        {
+            HoverPopup.LastResizedSize = default;
+            try
+            {
+                var fake = new FakeServer("--no-diagnostics");
+                var time = new ManualTime();
+                await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+                using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two");
+                using var window = new EditorWindow(new CodeEditor { Document = document });
+                await server.StartAsync();
+                PopupFrame popup = await HoverAsync(window, 1, "one is a word in", time);
+                Rect bounds = BoundsInWindow(popup);
+                Drag(window, new Point(bounds.Right - 2, bounds.Center.Y), new Vector(100, 0));
+                // Narrower than the widened popup's right edge: the window's edge pushes it left.
+                window.Window.Width = BoundsInWindow(popup).Right - 10;
+                window.Layout();
+                window.Render();
+                Rect pushed = BoundsInWindow(popup);
+
+                Drag(window, new Point(pushed.Right - 2, pushed.Center.Y), new Vector(-30, 0));
+
+                Rect resized = BoundsInWindow(popup);
+                resized.Left.ShouldBe(pushed.Left, 0.5);
+                resized.Right.ShouldBe(pushed.Right - 30, 0.5);
+            }
+            finally
+            {
+                HoverPopup.LastResizedSize = default;
+            }
+        });
+
+    [Fact]
+    public Task A_resized_hover_stays_in_a_window_that_shrinks_and_takes_its_size_again_as_the_window_grows() =>
+        _ui.Run(async () =>
+        {
+            HoverPopup.LastResizedSize = default;
+            try
+            {
+                var fake = new FakeServer("--no-diagnostics");
+                var time = new ManualTime();
+                await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+                using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two");
+                using var window = new EditorWindow(new CodeEditor { Document = document });
+                await server.StartAsync();
+                PopupFrame popup = await HoverAsync(window, 1, "one is a word in", time);
+                Rect bounds = BoundsInWindow(popup);
+                Drag(window, bounds.BottomRight - new Point(2, 2), new Vector(200, 150));
+                Rect resized = BoundsInWindow(popup);
+                Size client = window.Window.ClientSize;
+
+                // Narrower and shorter than the popup: it stays in the window, with its grips and its scroll bar.
+                Resize(window, new Size(resized.Width - 100, resized.Top + resized.Height / 2));
+                new Rect(window.Window.ClientSize).Contains(BoundsInWindow(popup)).ShouldBeTrue();
+                Resize(window, client);
+                BoundsInWindow(popup).Width.ShouldBe(resized.Width, 0.5);
+                BoundsInWindow(popup).Height.ShouldBe(resized.Height, 0.5);
+
+                // Dragged beyond the window's edge, it grows up to it, its left edge where it was.
+                Drag(window, resized.BottomRight - new Point(2, 2), new Vector(client.Width, 0));
+                BoundsInWindow(popup).Left.ShouldBe(resized.Left, 0.5);
+                BoundsInWindow(popup).Right.ShouldBe(client.Width, 1);
+            }
+            finally
+            {
+                HoverPopup.LastResizedSize = default;
+            }
+        });
+
+    [Fact]
+    public Task A_resize_that_Escape_cuts_short_leaves_the_next_hover_alone() =>
+        _ui.Run(async () =>
+        {
+            HoverPopup.LastResizedSize = default;
+            try
+            {
+                var fake = new FakeServer("--no-diagnostics");
+                var time = new ManualTime();
+                await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+                using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two");
+                using var window = new EditorWindow(new CodeEditor { Document = document });
+                await server.StartAsync();
+                PopupFrame popup = await HoverAsync(window, 1, "one is a word in", time);
+                Rect bounds = BoundsInWindow(popup);
+                var corner = new Point(bounds.Right - 2, bounds.Bottom - 2);
+                window.MoveMouse(corner);
+                window.Window.MouseDown(corner, MouseButton.Left);
+
+                window.Press(Key.Escape);
+                window.Window.MouseUp(corner + new Point(0, 100), MouseButton.Left);
+                popup = await HoverAsync(window, 4, "two is a word in", time);
+                window.MoveMouse(BoundsInWindow(popup).Center);
+
+                popup.IsDragging.ShouldBeFalse();
+                popup.Width.ShouldBe(double.NaN);
+                HoverPopup.LastResizedSize.ShouldBe(default);
+            }
+            finally
+            {
+                HoverPopup.LastResizedSize = default;
+            }
+        });
+
+    [Fact]
+    public Task A_long_hover_shows_all_of_its_content_and_scrolls() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer("--no-diagnostics");
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            // The server's hover shows the hovered line as code: 20,000 characters.
+            string line = string.Concat(Enumerable.Repeat("word ", 4_000)).TrimEnd();
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, line);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await server.StartAsync();
+
+            PopupFrame popup = await HoverAsync(window, 1, "word is a word in", time);
+
+            var content = (HoverContent)Content(popup);
+            while (!content.IsComplete)
+                content.AddNextPart();
+            window.Layout();
+            string.Concat(CodeTexts(popup, window.Editor.FontFamily)).ShouldBe(line);
+            PopupScroller scroller = popup.GetVisualDescendants().OfType<PopupScroller>().Single();
+            Content(popup).Bounds.Height.ShouldBeGreaterThan(scroller.Bounds.Height);
+            BoundsInWindow(popup).Height.ShouldBeLessThanOrEqualTo(popup.MaxHeight);
+        });
+
+    [Fact]
+    public Task Hover_content_builds_a_part_at_once_and_the_next_parts_in_the_frames_after_while_it_shows() =>
+        _ui.Run(() =>
+        {
+            // 300 paragraphs of 100 characters: parts of as many paragraphs as a part has characters for.
+            HoverBlock[] blocks =
+            [
+                .. Enumerable.Range(0, 300).Select(i => new HoverParagraph([new HoverSpan(new string('p', 100))])),
+            ];
+            int perPart = HoverParts.MaxCharacters / 100;
+            HoverContent content = HoverView.Create(blocks, Look());
+            content.Children.Count.ShouldBe(perPart);
+            var host = new Border();
+            using var window = new EditorWindow(new CodeEditor(), host);
+            int grew = 0;
+            host.AddHandler(HoverContent.GrewEvent, (_, _) => grew++);
+
+            // Out of view by the next frame: nothing more is built.
+            host.Child = content;
+            host.Child = null;
+            window.Render();
+            content.Children.Count.ShouldBe(perPart);
+            content.IsComplete.ShouldBeFalse();
+
+            // In view, the next part comes with the next frame, and the parts after it with the frames after that.
+            host.Child = content;
+            window.Render();
+            content.Children.Count.ShouldBeGreaterThan(perPart);
+            while (!content.IsComplete)
+                content.AddNextPart();
+            content.Children.Count.ShouldBe(300);
+            grew.ShouldBe(300 / perPart - 1);
+            // The space between blocks, as between blocks built at once.
+            window.Layout();
+            (content.Children[^1].Bounds.Top - content.Children[^2].Bounds.Bottom).ShouldBe(HoverView.Spacing);
+        });
+
+    [Fact]
+    public Task Up_after_End_scrolls_a_hover_whose_content_still_builds() =>
+        _ui.Run(() =>
+        {
+            // Many parts: the frames build them a few at a time.
+            HoverBlock[] blocks =
+            [
+                .. Enumerable.Range(0, 3_000).Select(i => new HoverParagraph([new HoverSpan(new string('p', 100))])),
+            ];
+            HoverContent content = HoverView.Create(blocks, Look());
+            var scroller = new PopupScroller
+            {
+                Child = content,
+                Height = 200,
+                Focusable = true,
+            };
+            using var window = new EditorWindow(new CodeEditor(), new Border { Child = scroller });
+            window.Render();
+            scroller.Focus();
+
+            window.Press(Key.End);
+            content.IsComplete.ShouldBeFalse();
+            double end = content.Bounds.Top;
+            window.Press(Key.Up);
+
+            content.Bounds.Top.ShouldBeGreaterThan(end);
+        });
+
+    [Fact]
     public Task The_popup_stays_inside_a_window_that_narrows() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
-            await using var server = new LanguageServer(fake.Options);
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             string text = new string('a', 36) + " word";
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
             using var window = new EditorWindow(new CodeEditor { Document = document }, width: 700);
@@ -311,7 +648,8 @@ public sealed class HoverTests(UiFixture ui)
             PopupFrame popup = await HoverAsync(
                 window,
                 text.IndexOf("word", StringComparison.Ordinal),
-                "word is a word in"
+                "word is a word in",
+                time
             );
             double right = BoundsInWindow(popup).Right;
 
@@ -341,168 +679,22 @@ public sealed class HoverTests(UiFixture ui)
             popup.Hide();
         });
 
-    [Fact]
-    public Task An_outdated_hover_request_is_cancelled() =>
-        _ui.Run(async () =>
-        {
-            var fake = new FakeServer();
-            await using var server = new LanguageServer(fake.Options);
-            const string text = "slow fast";
-            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
-            using var window = new EditorWindow(new CodeEditor { Document = document });
-
-            // The server never answers for "slow".
-            window.MoveMouse(window.PointAt(1));
-            string id = (await fake.WaitForAsync("hover "))["hover ".Length..].Split(' ')[0];
-            (await fake.WaitForAsync("hover ")).ShouldEndWith(" slow");
-
-            await HoverAsync(window, text.IndexOf("fast", StringComparison.Ordinal), "fast is a word in");
-            await fake.WaitForAsync($"cancel {id}");
-        });
-
-    [Fact]
-    public Task A_hover_takes_the_few_most_severe_diagnostics_of_however_many_there_are() =>
-        _ui.Run(() =>
-        {
-            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "word");
-            var editor = new CodeEditor { Document = document };
-            using var window = new EditorWindow(editor);
-            TextSnapshot snapshot = document.CurrentSnapshot;
-            // 10,000 on one word, their severities taking turns from hints to errors.
-            document.SetDiagnostics([
-                .. Enumerable
-                    .Range(0, 10_000)
-                    .Select(i => new Diagnostic(
-                        snapshot,
-                        new TextRange(0, 4),
-                        (DiagnosticSeverity)(i % 4),
-                        null,
-                        $"{i}"
-                    )),
-            ]);
-            window.Layout();
-            using var squiggles = new SquiggleLayer(EditorWindow.PartOf(editor).TextArea, document);
-
-            IReadOnlyList<Diagnostic> shown = squiggles.At(1, HoverBudget.MaxLines);
-
-            // The errors, which come every fourth, in the server's order; no more than a hover has lines.
-            shown
-                .Select(d => d.Message)
-                .ShouldBe(Enumerable.Range(0, HoverBudget.MaxLines).Select(i => $"{4 * i + 3}"));
-        });
-
-    [Fact]
-    public Task The_popup_stays_over_a_word_longer_than_the_hovered_word_reaches() =>
-        _ui.Run(async () =>
-        {
-            string text = new string('x', 2_500) + " end";
-            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, text);
-            var editor = new CodeEditor { Document = document, WordWrap = true };
-            using var window = new EditorWindow(editor, height: 800);
-            document.SetDiagnostics([
-                new Diagnostic(
-                    document.CurrentSnapshot,
-                    new TextRange(0, 2_500),
-                    DiagnosticSeverity.Error,
-                    null,
-                    "long"
-                ),
-            ]);
-            PopupFrame popup = await HoverAsync(window, 0, "long");
-
-            // Past where the hovered word was cut, in the same word.
-            window.MoveMouse(window.PointAt(HoverController.MaxWordReach + 1));
-            Popup(window).ShouldBeSameAs(popup);
-            window.MoveMouse(window.PointAt(2_499));
-            Popup(window).ShouldBeSameAs(popup);
-
-            window.MoveMouse(window.PointAt(text.IndexOf("end", StringComparison.Ordinal)));
-            Popup(window).ShouldBeNull();
-        });
-
-    [Fact]
-    public Task The_pointer_over_a_long_lines_hidden_tail_is_over_no_text() =>
-        _ui.Run(async () =>
-        {
-            // The editor shows the first 3,000 characters of the word, wrapped, and "..." for its other ten million.
-            string text = new string('x', 10_000_000) + "\nend";
-            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, text);
-            using var window = new EditorWindow(new CodeEditor { Document = document, WordWrap = true }, height: 900);
-            document.SetDiagnostics([
-                new Diagnostic(document.CurrentSnapshot, new TextRange(0, 10), DiagnosticSeverity.Error, null, "long"),
-            ]);
-            await HoverAsync(window, 5, "long");
-
-            // Over the "...", where the hidden tail starts.
-            window.MoveMouse(window.PointAt(VisibleText.LineLimit));
-
-            Popup(window).ShouldBeNull();
-
-            // Straight on to the next line, past the hidden tail.
-            await HoverAsync(window, 5, "long");
-            window.MoveMouse(window.PointAt(text.Length - 2));
-
-            Popup(window).ShouldBeNull();
-        });
-
-    [Fact]
-    public Task The_hovered_word_reaches_a_bounded_distance_from_the_pointer() =>
-        _ui.Run(() =>
-        {
-            // One word of a million characters on a line, after a short one.
-            var buffer = new AvaloniaEdit.Document.TextDocument("ab " + new string('x', 1_000_000) + " cd");
-            const int reach = HoverController.MaxWordReach;
-
-            HoverController.WordAt(buffer, 1).ShouldBe(new TextRange(0, 2));
-            HoverController.WordAt(buffer, 3).ShouldBe(new TextRange(3, reach));
-            // Nor past the shown part of a long line.
-            HoverController.WordAt(buffer, 2_500).ShouldBe(TextRange.FromBounds(2_500 - reach, VisibleText.LineLimit));
-
-            // The pointer may move on along a cut word, in the shown part of its line only: neither into its hidden
-            // tail nor past it, onto the next line.
-            var tail = new AvaloniaEdit.Document.TextDocument(new string('x', 10_000_000) + "\nend");
-            TextRange word = HoverController.WordAt(tail, 5);
-            HoverController.AlongWord(tail, word).ShouldBe(new TextRange(0, VisibleText.LineLimit));
-            HoverController.AlongWord(buffer, new TextRange(0, 2)).ShouldBe(new TextRange(0, 2));
-            HoverController.AlongWord(buffer, new TextRange(2, 1)).ShouldBe(new TextRange(2, 1));
-        });
-
-    /// <summary>
-    /// Moves the pointer away, then rests it on the character at <paramref name="offset"/>, and waits for the popup
-    /// with <paramref name="text"/>.
-    /// </summary>
-    private static Task<PopupFrame> HoverAsync(EditorWindow window, int offset, string text)
+    /// <summary>Drags a popup's grip at <paramref name="grip"/> by <paramref name="by"/>.</summary>
+    private static void Drag(EditorWindow window, Point grip, Vector by)
     {
-        window.MoveMouse(window.PointAt(offset) + new Point(0, 200));
-        window.MoveMouse(window.PointAt(offset));
-        return WaitForPopupAsync(window, text);
+        window.MoveMouse(grip);
+        window.Window.MouseDown(grip, MouseButton.Left);
+        window.Window.MouseMove(grip + by, RawInputModifiers.LeftMouseButton);
+        window.Window.MouseUp(grip + by, MouseButton.Left);
+        window.Layout();
+        window.Render();
     }
 
-    private static async Task<PopupFrame> WaitForPopupAsync(EditorWindow window, string text)
+    /// <summary>Resizes the window to <paramref name="size"/>, as the user does.</summary>
+    private static void Resize(EditorWindow window, Size size)
     {
-        PopupFrame? popup = null;
-        await Wait.UntilAsync(() =>
-        {
-            window.Render();
-            popup = Popup(window);
-            return popup is not null && Texts(popup).Any(t => t.Contains(text, StringComparison.Ordinal));
-        });
-        return popup ?? throw new InvalidOperationException();
+        (window.Window.Width, window.Window.Height) = (size.Width, size.Height);
+        window.Layout();
+        window.Render();
     }
-
-    /// <summary>The hover's popup in the window's overlay layer; null while it is closed.</summary>
-    private static PopupFrame? Popup(EditorWindow window) => PopupFrames.Find(window, "Hover");
-
-    private static Rect BoundsInWindow(Visual visual) =>
-        visual.GetTransformedBounds() is { } bounds
-            ? bounds.Bounds.TransformToAABB(bounds.Transform)
-            : throw new InvalidOperationException("Not shown.");
-
-    private static Control Content(PopupFrame popup) => PopupFrames.Content(popup);
-
-    private static IEnumerable<string> Texts(PopupFrame popup) =>
-        popup.GetVisualDescendants().OfType<TextBlock>().Select(TextOf);
-
-    private static string TextOf(Control control) =>
-        control is TextBlock { Inlines: { } inlines } ? inlines.Text ?? "" : ((TextBlock)control).Text ?? "";
 }

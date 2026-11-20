@@ -786,7 +786,29 @@ internal sealed class ServerConnection
             severity,
             diagnostic.Code,
             diagnostic.Message
-        );
+        )
+        {
+            Source = diagnostic.Source,
+            CodeDescription = Uri.TryCreate(diagnostic.CodeDescription?.Href, UriKind.Absolute, out Uri? page)
+                ? page
+                : null,
+            // A place without a URI that names a document is no place.
+            RelatedInformation =
+            [
+                .. (diagnostic.RelatedInformation ?? []).SelectMany(related =>
+                    Uri.TryCreate(related.Location.Uri, UriKind.Absolute, out Uri? uri)
+                        ?
+                        [
+                            new DiagnosticRelatedInformation(
+                                uri,
+                                Positions.FromLsp(related.Location.Range.Start),
+                                related.Message
+                            ),
+                        ]
+                        : Array.Empty<DiagnosticRelatedInformation>()
+                ),
+            ],
+        };
     }
 
     /// <summary>
@@ -877,7 +899,12 @@ internal sealed class ServerConnection
             ["textDocument"] = new JsonObject
             {
                 ["synchronization"] = new JsonObject { ["dynamicRegistration"] = false },
-                ["publishDiagnostics"] = new JsonObject { ["versionSupport"] = true },
+                ["publishDiagnostics"] = new JsonObject
+                {
+                    ["versionSupport"] = true,
+                    ["relatedInformation"] = true,
+                    ["codeDescriptionSupport"] = true,
+                },
                 ["hover"] = new JsonObject { ["contentFormat"] = new JsonArray("markdown", "plaintext") },
                 ["selectionRange"] = new JsonObject { ["dynamicRegistration"] = false },
                 ["completion"] = new JsonObject

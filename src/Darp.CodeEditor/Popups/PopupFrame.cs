@@ -4,6 +4,7 @@ using Avalonia.Controls.Documents;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using Avalonia.Media.Immutable;
 
 namespace Darp.CodeEditor.Popups;
 
@@ -24,9 +25,15 @@ internal enum Edges
 /// never reach it. Its content draws only what it shows.
 /// </summary>
 /// <remarks>
+/// <para>
+/// While the keyboard is in the popup, a 1-pixel outline in the color theme's <c>focusBorder</c> shows inside its
+/// border, as VS Code draws its focused widgets: <c>outline: 1px solid</c> with <c>outline-offset: -1px</c>.
+/// </para>
+/// <para>
 /// Dragging one of its <see cref="ResizableEdges"/>, or a corner between two, within a few pixels inside its border,
 /// reports the size dragged to through <see cref="Resized"/>, within the window, with the edges dragged: its owner
 /// applies what they change.
+/// </para>
 /// </remarks>
 internal sealed class PopupFrame : Border
 {
@@ -46,10 +53,15 @@ internal sealed class PopupFrame : Border
     /// <summary>A drag under way: where it started in the window, the frame's bounds in the window then, and its edges.</summary>
     private (Point Start, Rect Bounds, Edges Edges)? _drag;
 
+    /// <summary>The outline while the keyboard is in the popup: a visual child besides its child, over its background.</summary>
+    private readonly FocusOutline _outline = new() { IsVisible = false };
+
     public PopupFrame()
     {
         BorderThickness = new Thickness(1);
         CornerRadius = new CornerRadius(Radius);
+        // Before the child, which the frame adds after it: under the content.
+        VisualChildren.Add(_outline);
         // Not what the window around passes down: the popup's text is as the editor sets it.
         TextElement.SetFontWeight(this, FontWeight.Normal);
         TextElement.SetFontStyle(this, FontStyle.Normal);
@@ -68,13 +80,50 @@ internal sealed class PopupFrame : Border
     /// <summary>Raised while the user drags an edge, with the size that the frame would have, and the edges dragged.</summary>
     public event Action<Size, Edges>? Resized;
 
-    /// <summary>Paints the frame, and gives its text <paramref name="foreground"/>.</summary>
-    public void Paint(IBrush background, IBrush border, IBrush foreground, BoxShadows shadow)
+    /// <summary>
+    /// Paints the frame, and gives its text <paramref name="foreground"/>; <paramref name="focus"/> outlines it while
+    /// the keyboard is in it.
+    /// </summary>
+    public void Paint(IBrush background, IBrush border, IBrush foreground, BoxShadows shadow, IBrush? focus = null)
     {
         Background = background;
         BorderBrush = border;
         BoxShadow = shadow;
         TextElement.SetForeground(this, foreground);
+        _outline.Pen = focus is null ? null : new ImmutablePen(focus.ToImmutable());
+    }
+
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        _outline.Measure(availableSize);
+        return base.MeasureOverride(availableSize);
+    }
+
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        _outline.Radius = Math.Max(0, Radius - BorderThickness.Left);
+        _outline.Arrange(new Rect(finalSize).Deflate(BorderThickness));
+        return base.ArrangeOverride(finalSize);
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property == IsKeyboardFocusWithinProperty)
+            _outline.IsVisible = change.GetNewValue<bool>();
+    }
+
+    /// <summary>A drag ends without its release too, as when the popup closes under it.</summary>
+    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+    {
+        base.OnPointerCaptureLost(e);
+        _drag = null;
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        _drag = null;
     }
 
     private void OnPointerPressedTunnel(object? sender, PointerPressedEventArgs e)
@@ -138,6 +187,31 @@ internal sealed class PopupFrame : Border
                 : Edges.None
             );
         return edges & ResizableEdges;
+    }
+
+    /// <summary>A 1-pixel outline at the edge of its bounds, which takes no pointer.</summary>
+    private sealed class FocusOutline : Control
+    {
+        public FocusOutline() => IsHitTestVisible = false;
+
+        public IPen? Pen
+        {
+            get;
+            set
+            {
+                field = value;
+                InvalidateVisual();
+            }
+        }
+
+        public double Radius { get; set; }
+
+        public override void Render(DrawingContext context)
+        {
+            Rect inside = new Rect(Bounds.Size).Deflate(0.5);
+            if (Pen is { } pen && inside.Width > 0 && inside.Height > 0)
+                context.DrawRectangle(null, pen, inside, Radius, Radius);
+        }
     }
 
     private static Cursor? CursorOf(Edges edges) =>

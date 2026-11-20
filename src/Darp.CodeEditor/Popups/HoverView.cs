@@ -4,8 +4,10 @@ using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Media.Immutable;
 using Avalonia.Media.TextFormatting;
 using Avalonia.VisualTree;
 
@@ -14,95 +16,83 @@ namespace Darp.CodeEditor.Popups;
 /// <summary>
 /// The controls that show a hover's blocks, as VS Code's hover shows Markdown: prose in the popup's font and foreground,
 /// links in <c>textLink.foreground</c>, code spans on <c>textCodeBlock.background</c>, code blocks on the popup's
-/// background in the editor's font and token colors, and a line between parts in the hover's border color.
+/// background in the editor's font and token colors, and a line between parts in the hover's border color. In a look
+/// that says so, as the hover's, all text is selectable, and Ctrl+C copies the selection.
 /// </summary>
 internal static class HoverView
 {
     /// <summary>How far each level of a list is indented.</summary>
     private const double ListIndent = 16;
 
+    /// <summary>The space between two blocks, unless the second goes on from the first.</summary>
+    public const double Spacing = 6;
+
+    /// <summary>The room of a diagnostic's icon, 8 pixels from its text.</summary>
+    private const double IconRoom = SeverityIcon.Size + 8;
+
     /// <summary>The hand over links, made the first time it is needed.</summary>
     private static Cursor? s_hand;
 
-    public static Control Create(IReadOnlyList<HoverBlock> blocks, PopupLook look)
-    {
-        var panel = new PopupStack { Spacing = 6 };
-        foreach (HoverBlock block in blocks)
+    /// <summary>
+    /// The controls of <paramref name="blocks"/>, all of them: as many as a part takes (<see cref="HoverParts"/>) at
+    /// once, and the next parts in the frames after it, while they show.
+    /// </summary>
+    public static HoverContent Create(IEnumerable<HoverBlock> blocks, PopupLook look) => new(blocks, look);
+
+    /// <summary>The control of a block.</summary>
+    internal static Control Block(HoverBlock block, PopupLook look) =>
+        block switch
         {
-            panel.Children.Add(
-                block switch
-                {
-                    HoverParagraph paragraph => Paragraph(paragraph, look),
-                    HoverCode codeBlock => Code(codeBlock, look),
-                    HoverRule => new PopupLine { Height = 1, Background = look.Colors.HoverBorder },
-                    _ => throw new UnreachableException(),
-                }
-            );
-        }
-        return panel;
-    }
+            HoverParagraph paragraph => Paragraph(paragraph, look),
+            HoverCode codeBlock => Code(codeBlock, look),
+            HoverRule => new PopupLine { Height = 1, Background = look.Colors.HoverBorder },
+            HoverDiagnostic diagnostic => Diagnostic(diagnostic, look),
+            HoverRelated related => Related(related, look),
+            HoverHeading heading => Heading(heading, look),
+            _ => throw new UnreachableException(),
+        };
 
     /// <summary>
     /// Prose in the app's font and the popup's foreground, set on the text itself: an app's styles for text would beat
     /// what it inherits.
     /// </summary>
-    public static PopupText Prose(PopupLook look) =>
-        new()
-        {
-            FontFamily = look.TextFont,
-            FontSize = look.TextSize,
-            Foreground = look.Foreground,
-        };
+    public static TextBlock Prose(PopupLook look)
+    {
+        TextBlock text = Text(look);
+        text.FontFamily = look.TextFont;
+        text.FontSize = look.TextSize;
+        text.Foreground = look.Foreground;
+        return text;
+    }
 
     /// <summary>Code in the editor's font, size and token colors, on the popup's background.</summary>
-    public static TextBlock Code(InlineCollection inlines, PopupLook look) =>
-        new PopupText
-        {
-            Inlines = inlines,
-            FontFamily = look.CodeFont,
-            FontSize = look.CodeSize,
-            Foreground = look.Colors.CodeForeground,
-            TextWrapping = TextWrapping.Wrap,
-        };
+    public static TextBlock Code(InlineCollection inlines, PopupLook look)
+    {
+        TextBlock text = Text(look);
+        text.Inlines = inlines;
+        text.FontFamily = look.CodeFont;
+        text.FontSize = look.CodeSize;
+        text.Foreground = look.Colors.CodeForeground;
+        text.TextWrapping = TextWrapping.Wrap;
+        return text;
+    }
+
+    /// <summary>Text of the popup's kind: selectable where the look says so.</summary>
+    private static TextBlock Text(PopupLook look) =>
+        look.Selectable ? new PopupSelectableText(look.Colors.Selection) : new PopupText();
 
     private static Control Paragraph(HoverParagraph paragraph, PopupLook look)
     {
-        var inlines = new InlineCollection();
-        var links = new List<(int Start, int End, Uri Uri)>();
-        int length = 0;
-        foreach (HoverSpan span in paragraph.Spans)
-        {
-            var run = new Run(span.Text);
-            if (span.Style.HasFlag(SpanStyle.Bold))
-                run.FontWeight = FontWeight.Bold;
-            if (span.Style.HasFlag(SpanStyle.Italic))
-                run.FontStyle = FontStyle.Italic;
-            // A small code span, in the editor's font at the paragraph's size, so that it fits its line.
-            if (span.Style.HasFlag(SpanStyle.Code))
-            {
-                run.FontFamily = look.CodeFont;
-                run.Background = look.Colors.CodeSpanBackground;
-            }
-            if (span.Link is { } uri)
-            {
-                run.Foreground = look.Colors.Link;
-                links.Add((length, length + span.Text.Length, uri));
-            }
-            inlines.Add(run);
-            length += span.Text.Length;
-        }
-        PopupText text = Prose(look);
-        text.Inlines = inlines;
+        TextBlock text = Prose(look);
+        Show(text, paragraph.Spans, look);
         text.TextWrapping = TextWrapping.Wrap;
-        if (links.Count > 0)
-            OpenLinks(text, links);
         if (paragraph.Marker is not { } marker)
         {
             text.Margin = new Thickness(ListIndent * paragraph.Level, 0, 0, 0);
             return text;
         }
         var item = new PopupDock { Margin = new Thickness(ListIndent * (paragraph.Level - 1), 0, 0, 0) };
-        PopupText markerText = Prose(look);
+        TextBlock markerText = Prose(look);
         markerText.Text = marker;
         markerText.Margin = new Thickness(0, 0, 6, 0);
         DockPanel.SetDock(markerText, Dock.Left);
@@ -110,6 +100,113 @@ internal static class HoverView
         item.Children.Add(text);
         return item;
     }
+
+    /// <summary>
+    /// A diagnostic in VS Code's geometry (<see cref="HoverDiagnostic"/>): the icon 8 pixels from the text, and each
+    /// related place 8 pixels below the one before, in the link color where the editor can go there.
+    /// </summary>
+    private static Control Diagnostic(HoverDiagnostic diagnostic, PopupLook look)
+    {
+        TextBlock line = CodeText(look);
+        Show(line, diagnostic.Line, look);
+        if (diagnostic.Icon != HoverIcon.Shown)
+        {
+            line.Margin = new Thickness(diagnostic.Icon == HoverIcon.Room ? IconRoom : 0, 0, 0, 0);
+            return line;
+        }
+        var icon = new SeverityIcon(diagnostic.Severity, look.Colors)
+        {
+            Margin = new Thickness(0, 1, IconRoom - SeverityIcon.Size, 0),
+            VerticalAlignment = VerticalAlignment.Top,
+        };
+        DockPanel.SetDock(icon, Dock.Left);
+        return new PopupDock { Children = { icon, line } };
+    }
+
+    /// <summary>A related place, lined up with its diagnostic's line, 8 pixels below the block before it.</summary>
+    private static TextBlock Related(HoverRelated related, PopupLook look)
+    {
+        TextBlock place = CodeText(look);
+        place.Margin = new Thickness(related.Indented ? IconRoom : 0, related.Continues ? 0 : 8 - Spacing, 0, 0);
+        var where = new Run(related.Place);
+        place.Inlines = [where, new Run(related.Message)];
+        // Only a place that the editor can go to looks like a link.
+        if (related.Open is { } open)
+        {
+            where.Foreground = look.Colors.Link;
+            OpenLinks(place, [(0, related.Place.Length, _ => open())]);
+        }
+        return place;
+    }
+
+    /// <summary>
+    /// Shows <paramref name="spans"/> in <paramref name="text"/>: code in the editor's font at the text's size, so that
+    /// it fits its line, links in the link color, and dimmed text at VS Code's 60% opacity.
+    /// </summary>
+    private static void Show(TextBlock text, IReadOnlyList<HoverSpan> spans, PopupLook look)
+    {
+        var inlines = new InlineCollection();
+        var links = new List<(int Start, int End, Action<TopLevel> Open)>();
+        int length = 0;
+        foreach (HoverSpan span in spans)
+        {
+            var run = new Run(span.Text);
+            if (span.Style.HasFlag(SpanStyle.Bold))
+                run.FontWeight = FontWeight.Bold;
+            if (span.Style.HasFlag(SpanStyle.Italic))
+                run.FontStyle = FontStyle.Italic;
+            if (span.Style.HasFlag(SpanStyle.Underline))
+                run.TextDecorations = TextDecorations.Underline;
+            if (span.Style.HasFlag(SpanStyle.Code))
+            {
+                run.FontFamily = look.CodeFont;
+                run.Background = look.Colors.CodeSpanBackground;
+            }
+            IBrush? foreground = span.Link is null ? null : look.Colors.Link;
+            if (span.Style.HasFlag(SpanStyle.Dimmed))
+                foreground = Dimmed(foreground ?? look.Foreground);
+            if (foreground is not null)
+                run.Foreground = foreground;
+            if (span.Link is { } uri)
+                links.Add((length, length + span.Text.Length, topLevel => Open(topLevel, uri)));
+            inlines.Add(run);
+            length += span.Text.Length;
+        }
+        text.Inlines = inlines;
+        if (links.Count > 0)
+            OpenLinks(text, links);
+    }
+
+    /// <summary>The heading of the problem that F8 went to, as VS Code's widget's title: the icon 4 pixels from the text.</summary>
+    private static Control Heading(HoverHeading heading, PopupLook look)
+    {
+        var icon = new SeverityIcon(heading.Severity, look.Colors)
+        {
+            Margin = new Thickness(0, 0, 4, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        DockPanel.SetDock(icon, Dock.Left);
+        TextBlock text = Prose(look);
+        text.VerticalAlignment = VerticalAlignment.Center;
+        var count = new Run(heading.Count) { Foreground = look.Colors.Description };
+        text.Inlines = heading.Name is { } name ? [new Run(name), new Run("  "), count] : [count];
+        return new PopupDock { Children = { icon, text } };
+    }
+
+    /// <summary>Text in the editor's font and size, in the popup's foreground, that wraps.</summary>
+    private static TextBlock CodeText(PopupLook look)
+    {
+        TextBlock text = Text(look);
+        text.FontFamily = look.CodeFont;
+        text.FontSize = look.CodeSize;
+        text.Foreground = look.Foreground;
+        text.TextWrapping = TextWrapping.Wrap;
+        return text;
+    }
+
+    /// <summary><paramref name="brush"/> at VS Code's 60% opacity of a hover's dimmed parts.</summary>
+    private static IBrush Dimmed(IBrush brush) =>
+        brush is ISolidColorBrush solid ? new ImmutableSolidColorBrush(solid.Color, solid.Opacity * 0.6) : brush;
 
     private static TextBlock Code(HoverCode block, PopupLook look)
     {
@@ -126,36 +223,48 @@ internal static class HoverView
     }
 
     /// <summary>
-    /// Opens the web page of a link that is clicked, through the app's launcher, and shows the hand over links. The text
-    /// takes no keyboard focus, so the editor keeps it.
+    /// Opens the web page of a link that is clicked without selecting, through the app's launcher, and shows the hand
+    /// over links.
     /// </summary>
-    private static void OpenLinks(TextBlock text, List<(int Start, int End, Uri Uri)> links)
+    private static void OpenLinks(TextBlock text, List<(int Start, int End, Action<TopLevel> Open)> links)
     {
+        Cursor? cursor = text.Cursor;
         text.PointerMoved += (_, e) =>
-            text.Cursor = LinkAt(text, links, e) is null ? null : s_hand ??= new(StandardCursorType.Hand);
-        text.PointerReleased += (_, e) =>
-        {
-            if (
-                e.InitialPressMouseButton == MouseButton.Left
-                && LinkAt(text, links, e) is { } uri
-                && TopLevel.GetTopLevel(text) is { } topLevel
-            )
+            text.Cursor = LinkAt(text, links, e) is null ? cursor : s_hand ??= new(StandardCursorType.Hand);
+        // Selectable text handles the press and release itself, to select.
+        text.AddHandler(
+            InputElement.PointerReleasedEvent,
+            (_, e) =>
             {
-                Open(topLevel, uri);
-            }
-        };
+                if (
+                    e.InitialPressMouseButton == MouseButton.Left
+                    && text is not SelectableTextBlock { SelectedText.Length: > 0 }
+                    && LinkAt(text, links, e) is { } open
+                    && TopLevel.GetTopLevel(text) is { } topLevel
+                )
+                {
+                    open(topLevel);
+                }
+            },
+            RoutingStrategies.Bubble,
+            handledEventsToo: true
+        );
     }
 
-    private static Uri? LinkAt(TextBlock text, List<(int Start, int End, Uri Uri)> links, PointerEventArgs e)
+    private static Action<TopLevel>? LinkAt(
+        TextBlock text,
+        List<(int Start, int End, Action<TopLevel> Open)> links,
+        PointerEventArgs e
+    )
     {
         Point point = e.GetPosition(text) - new Point(text.Padding.Left, text.Padding.Top);
         TextHitTestResult hit = text.TextLayout.HitTestPoint(point);
         if (!hit.IsInside)
             return null;
-        foreach ((int start, int end, Uri uri) in links)
+        foreach ((int start, int end, Action<TopLevel> open) in links)
         {
             if (hit.TextPosition >= start && hit.TextPosition < end)
-                return uri;
+                return open;
         }
         return null;
     }
@@ -183,6 +292,9 @@ internal sealed record PopupLook(
     IBrush Foreground
 )
 {
+    /// <summary>Whether its text is selectable, as a hover's; false by default.</summary>
+    public bool Selectable { get; init; }
+
     /// <summary>The look of <paramref name="editor"/>'s popups, with prose in <paramref name="foreground"/>.</summary>
     public static PopupLook Of(TemplatedControl editor, PopupColors colors, IBrush foreground)
     {

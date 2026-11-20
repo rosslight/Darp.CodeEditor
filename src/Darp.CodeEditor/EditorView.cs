@@ -52,6 +52,7 @@ internal sealed class EditorView : IDisposable
     /// <summary>Everything the view made, in the order it made them: disposed the other way round.</summary>
     private readonly IDisposable[] _features;
 
+    private readonly EditorPopups _popups;
     private readonly CaretMoves _caretMoves;
     private readonly TextChanges _changes;
     private readonly AutoClosingPairs _pairs;
@@ -66,6 +67,16 @@ internal sealed class EditorView : IDisposable
     private readonly CompletionController _completion;
     private readonly SignatureHelpController _signatureHelp;
     private readonly FindController _search;
+
+    /// <summary>The commands that show the hover, which their keys leave open: they show it again.</summary>
+    private static readonly string[] s_showHover =
+    [
+        CodeEditorCommands.ShowHover,
+        CodeEditorCommands.NextMarker,
+        CodeEditorCommands.PreviousMarker,
+        CodeEditorCommands.NextMarkerInFiles,
+        CodeEditorCommands.PreviousMarkerInFiles,
+    ];
 
     /// <summary>The key that started a sequence while the view waits for its second stroke; null otherwise.</summary>
     private PressedKey? _pending;
@@ -86,6 +97,7 @@ internal sealed class EditorView : IDisposable
         CodeDocument document = context.Document;
         // Before the features, which run each other's commands; they add them once all are made.
         _commands = new CommandTable(area);
+        _popups = new EditorPopups(context.Editor, OnFocusLeft);
         Highlighter = new BackgroundTextMateHighlighter(area.TextView, area.Document, context.Editor.Dispatcher, null);
         _caretMoves = new CaretMoves(context.Editor, area);
         _changes = new TextChanges(area);
@@ -97,7 +109,15 @@ internal sealed class EditorView : IDisposable
         _whitespace = new WhitespaceLayer(area);
         _squiggles = new SquiggleLayer(area, document);
         SemanticHighlighter = new SemanticHighlighter(area.TextView, document, context.Editor.Dispatcher);
-        _hover = new HoverController(context.Editor, area, document, _squiggles, Highlighter);
+        _hover = new HoverController(
+            context.Editor,
+            area,
+            document,
+            _squiggles,
+            Highlighter,
+            context.Options,
+            _changes
+        );
         _snippets = new SnippetController(area, document, _changes);
         // After typing: it sees typed text first, so that a typed "(" has its ")" when completion asks.
         _completion = new CompletionController(
@@ -124,6 +144,7 @@ internal sealed class EditorView : IDisposable
         _search = new FindController(context, _changes);
         _features =
         [
+            _popups,
             Highlighter,
             _caretMoves,
             _changes,
@@ -143,6 +164,7 @@ internal sealed class EditorView : IDisposable
             _squiggles,
             SemanticHighlighter,
             _hover,
+            new DiagnosticNavigation(area, document, _hover, context.Reveal, _changes),
             _snippets,
             _completion,
             _signatureHelp,
@@ -186,6 +208,10 @@ internal sealed class EditorView : IDisposable
         KeyResolution resolution = _resumed ?? KeyResolution.Of(_context.Keymap(), _pending, key);
         _pending = null;
         _resumed = null;
+        // As VS Code hides the hover on a key in the text, but for those that may show it; Escape closes it below.
+        bool escape = e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None;
+        if (_context.Area.IsFocused && !escape && !resolution.Waits && !resolution.Commands.Any(s_showHover.Contains))
+            _hover.CloseOnKey();
         int waitsEnded = _waitsEnded;
         for (int i = 0; i < resolution.Commands.Count; i++)
         {
@@ -198,7 +224,7 @@ internal sealed class EditorView : IDisposable
             _pending = key;
             return true;
         }
-        if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && Dismiss())
+        if (escape && Dismiss())
             return true;
         if (!_context.Area.IsFocused)
             return false;
@@ -304,16 +330,19 @@ internal sealed class EditorView : IDisposable
 
     /// <summary>
     /// What Escape closes, one at a time: completion, signature help, a snippet's stops while the text area has the
-    /// keyboard, the hover and the search bar, in the order of VS Code's keys. Each also ends what still waits for its
-    /// server.
+    /// keyboard, and the search bar, in the order of VS Code's keys; the hover along with the first of them, as VS Code
+    /// hides it on any key. Each also ends what still waits for its server.
     /// </summary>
     /// <returns>Whether it closed something the user saw.</returns>
-    public bool Dismiss() =>
-        _completion.Close()
-        || _signatureHelp.Close()
-        || (_context.Area.IsFocused && _snippets.End())
-        || _hover.Close()
-        || _search.Close();
+    public bool Dismiss()
+    {
+        bool hover = _hover.Close();
+        return _completion.Close()
+            || _signatureHelp.Close()
+            || (_context.Area.IsFocused && _snippets.End())
+            || _search.Close()
+            || hover;
+    }
 
     /// <summary>The occurrences of the symbol at the caret, for tests.</summary>
     internal IReadOnlyList<Occurrence> Occurrences => _occurrences.Highlights;
@@ -321,8 +350,11 @@ internal sealed class EditorView : IDisposable
     /// <summary>Whether the view asks for the occurrences, for tests.</summary>
     internal bool IsAskingForOccurrences => _occurrences.IsAsking;
 
-    /// <summary>Closes the popups, and clears the occurrences, once the keyboard has left the editor.</summary>
-    public void OnFocusLeft()
+    /// <summary>Whether the server's answer to the hover is in, for tests.</summary>
+    internal bool HoverIsAnswered => _hover.IsAnswered;
+
+    /// <summary>Closes the popups, and clears the occurrences, once the keyboard has left the editor and its popups.</summary>
+    private void OnFocusLeft()
     {
         _occurrences.Clear();
         _hover.Close();

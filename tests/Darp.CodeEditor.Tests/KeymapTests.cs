@@ -124,6 +124,32 @@ public sealed class KeymapTests(UiFixture ui)
     }
 
     [Fact]
+    public void By_default_F8_and_Alt_F8_go_to_the_next_diagnostic_and_with_Shift_to_the_previous_one()
+    {
+        CodeEditorKeymap keymap = CodeEditorKeymap.Default;
+
+        Resolve(keymap, Key(Keys.F8, KeyModifiers.None)).Commands.ShouldBe([CodeEditorCommands.NextMarkerInFiles]);
+        Resolve(keymap, Key(Keys.F8, KeyModifiers.Shift)).Commands.ShouldBe([CodeEditorCommands.PreviousMarkerInFiles]);
+        Resolve(keymap, Key(Keys.F8, KeyModifiers.Alt)).Commands.ShouldBe([CodeEditorCommands.NextMarker]);
+        Resolve(keymap, Key(Keys.F8, KeyModifiers.Alt | KeyModifiers.Shift))
+            .Commands.ShouldBe([CodeEditorCommands.PreviousMarker]);
+    }
+
+    [Fact]
+    public void By_default_Ctrl_K_Ctrl_I_shows_the_hover()
+    {
+        CodeEditorKeymap keymap = CodeEditorKeymap.Default;
+        PressedKey first = Key(Keys.K, EditorWindow.Command);
+
+        Resolve(keymap, first).Waits.ShouldBeTrue();
+        // The sequence first; the second stroke's own bindings after it, should the hover not apply.
+        KeyResolution
+            .Of(keymap, first, Key(Keys.I, EditorWindow.Command))
+            .Commands[0]
+            .ShouldBe(CodeEditorCommands.ShowHover);
+    }
+
+    [Fact]
     public void A_key_that_starts_several_sequences_waits_for_the_second_stroke_of_each()
     {
         CodeEditorKeymap keymap = CodeEditorKeymap.Empty.With(
