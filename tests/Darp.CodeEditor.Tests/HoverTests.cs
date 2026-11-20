@@ -149,6 +149,37 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task App_styles_for_text_cut_no_line_of_the_hover() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            // The server's diagnostic has the text as its message: three lines.
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one\ntwo\nthree");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Window.Styles.Add(
+                new Style(x => x.Is<TextBlock>())
+                {
+                    Setters =
+                    {
+                        new Setter(TextBlock.MaxLinesProperty, 1),
+                        new Setter(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis),
+                    },
+                }
+            );
+            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+
+            PopupFrame popup = await HoverAsync(window, 1, "one is a word in", time);
+
+            TextBlock message = popup.GetVisualDescendants().OfType<TextBlock>().First();
+            TextOf(message).ShouldStartWith("one\ntwo\nthree");
+            message.MaxLines.ShouldBe(0);
+            message.TextTrimming.ShouldBe(TextTrimming.None);
+            message.TextLayout.TextLines.Count.ShouldBeGreaterThanOrEqualTo(3);
+        });
+
+    [Fact]
     public Task The_popup_takes_the_editors_theme_variant() =>
         _ui.Run(async () =>
         {

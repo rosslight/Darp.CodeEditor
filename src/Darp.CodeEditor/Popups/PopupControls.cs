@@ -24,6 +24,8 @@ internal sealed class PopupText : TextBlock
         text.FontStyle = FontStyle.Normal;
         text.FontStretch = FontStretch.Normal;
         text.TextDecorations = null;
+        text.MaxLines = 0;
+        text.TextTrimming = TextTrimming.None;
         text.LineHeight = double.NaN;
         text.LetterSpacing = 0;
         text.Margin = default;

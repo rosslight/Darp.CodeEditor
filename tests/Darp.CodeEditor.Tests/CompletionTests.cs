@@ -1959,6 +1959,8 @@ public sealed class CompletionTests(UiFixture ui)
                         new Setter(TextBlock.ForegroundProperty, Brushes.Red),
                         new Setter(TextBlock.FontFamilyProperty, new FontFamily("Serif")),
                         new Setter(TextBlock.FontSizeProperty, 30.0),
+                        new Setter(TextBlock.MaxLinesProperty, 1),
+                        new Setter(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis),
                     },
                 }
             );
@@ -1982,6 +1984,8 @@ public sealed class CompletionTests(UiFixture ui)
             {
                 text.FontWeight.ShouldBe(FontWeight.Normal);
                 text.Margin.ShouldBe(default);
+                text.MaxLines.ShouldBe(0);
+                text.TextTrimming.ShouldBe(TextTrimming.None);
             }
             details
                 .GetVisualDescendants()
