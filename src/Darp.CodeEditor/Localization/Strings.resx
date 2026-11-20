@@ -83,4 +83,10 @@
   <data name="HoverLoading" xml:space="preserve">
     <value>Loading…</value>
   </data>
+  <data name="ProblemOfProblems" xml:space="preserve">
+    <value>{0} of {1} problems</value>
+  </data>
+  <data name="ProblemOfProblem" xml:space="preserve">
+    <value>{0} of {1} problem</value>
+  </data>
 </root>

@@ -35,6 +35,8 @@ internal static class Strings
     public static string NoSuggestions => Get();
     public static string ShowHover => Get();
     public static string HoverLoading => Get();
+    public static string ProblemOfProblems => Get();
+    public static string ProblemOfProblem => Get();
 
     private static string Get([CallerMemberName] string name = "") =>
         s_resources.GetString(name, CultureInfo.CurrentUICulture) ?? name;

@@ -88,6 +88,7 @@ public sealed class CodeEditorKeymap
     /// <item><term>ctrl+shift+\ (shift+cmd+\)</term><description><see cref="CodeEditorCommands.JumpToBracket"/></description></item>
     /// <item><term>shift+alt+right, shift+alt+left (ctrl+shift+cmd+right, ctrl+shift+cmd+left)</term><description><see cref="CodeEditorCommands.SmartSelectExpand"/>, <see cref="CodeEditorCommands.SmartSelectShrink"/></description></item>
     /// <item><term>f7, shift+f7</term><description><see cref="CodeEditorCommands.WordHighlightNext"/>, <see cref="CodeEditorCommands.WordHighlightPrevious"/></description></item>
+    /// <item><term>f8, shift+f8; alt+f8, shift+alt+f8</term><description><see cref="CodeEditorCommands.NextMarkerInFiles"/>, <see cref="CodeEditorCommands.PreviousMarkerInFiles"/>; <see cref="CodeEditorCommands.NextMarker"/>, <see cref="CodeEditorCommands.PreviousMarker"/></description></item>
     /// </list>
     /// </remarks>
     public static CodeEditorKeymap Default { get; } = new(DefaultBindings(OperatingSystem.IsMacOS()));
@@ -206,6 +207,10 @@ public sealed class CodeEditorKeymap
         yield return new($"{smartSelect}+left", CodeEditorCommands.SmartSelectShrink);
         yield return new("f7", CodeEditorCommands.WordHighlightNext);
         yield return new("shift+f7", CodeEditorCommands.WordHighlightPrevious);
+        yield return new("f8", CodeEditorCommands.NextMarkerInFiles);
+        yield return new("shift+f8", CodeEditorCommands.PreviousMarkerInFiles);
+        yield return new("alt+f8", CodeEditorCommands.NextMarker);
+        yield return new("shift+alt+f8", CodeEditorCommands.PreviousMarker);
         // Last, as VS Code weighs them above the other commands of their keys, such as Alt+Up's line move: they apply
         // only while signature help shows several signatures, and the key goes on to the binding before otherwise.
         yield return new("alt+up", CodeEditorCommands.ShowPrevParameterHint);
