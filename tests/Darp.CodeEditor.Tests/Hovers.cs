@@ -92,6 +92,18 @@ internal static class Hovers
 
     internal static Control Content(PopupFrame popup) => PopupFrames.Content(popup);
 
+    /// <summary>The hover's content in its sections: the diagnostics', and the server's below a line.</summary>
+    internal static IEnumerable<HoverContent> Sections(PopupFrame popup) =>
+        ((Panel)Content(popup)).Children.OfType<HoverContent>();
+
+    /// <summary>The controls of the hover's blocks, in order, the line between its sections among them.</summary>
+    internal static Control[] Blocks(PopupFrame popup) =>
+        [
+            .. ((Panel)Content(popup)).Children.SelectMany(section =>
+                section is HoverContent content ? content.Children : [section]
+            ),
+        ];
+
     /// <summary>The texts of the hover's code blocks and their pieces, in the editor's <paramref name="font"/>.</summary>
     internal static IEnumerable<string> CodeTexts(PopupFrame popup, FontFamily font) =>
         popup.GetVisualDescendants().OfType<TextBlock>().Where(block => block.FontFamily == font).Select(TextOf);

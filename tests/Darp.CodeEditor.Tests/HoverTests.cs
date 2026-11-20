@@ -52,7 +52,7 @@ public sealed class HoverTests(UiFixture ui)
                 time
             );
 
-            Control[] parts = [.. ((Panel)Content(popup)).Children];
+            Control[] parts = Blocks(popup);
             // The diagnostic's icon, message and code, a line, the server's paragraph, and its code block.
             parts[0].GetVisualDescendants().OfType<SeverityIcon>().ShouldHaveSingleItem();
             parts[0].GetVisualDescendants().OfType<TextBlock>().Select(TextOf).ShouldBe([$"{text} (echo)"]);
@@ -262,13 +262,13 @@ public sealed class HoverTests(UiFixture ui)
 
             PopupFrame popup = await HoverAsync(window, 1, "word is a word in", time);
 
-            var content = (HoverContent)Content(popup);
+            HoverContent content = Sections(popup).Single();
             while (!content.IsComplete)
                 content.AddNextPart();
             window.Layout();
             string.Concat(CodeTexts(popup, window.Editor.FontFamily)).ShouldBe(line);
             PopupScroller scroller = popup.GetVisualDescendants().OfType<PopupScroller>().Single();
-            content.Bounds.Height.ShouldBeGreaterThan(scroller.Bounds.Height);
+            Content(popup).Bounds.Height.ShouldBeGreaterThan(scroller.Bounds.Height);
             BoundsInWindow(popup).Height.ShouldBeLessThanOrEqualTo(popup.MaxHeight);
         });
 

@@ -32,9 +32,11 @@ internal static class HoverView
 
     /// <summary>
     /// The controls of <paramref name="blocks"/>, all of them: as many as a part takes (<see cref="HoverParts"/>) at
-    /// once, and the next parts in the frames after it, while they show.
+    /// once, and the next parts in the frames after it, while they show; once <paramref name="after"/> is built in full,
+    /// where given.
     /// </summary>
-    public static HoverContent Create(IEnumerable<HoverBlock> blocks, PopupLook look) => new(blocks, look);
+    public static HoverContent Create(IEnumerable<HoverBlock> blocks, PopupLook look, HoverContent? after = null) =>
+        new(blocks, look, after);
 
     /// <summary>The control of a block.</summary>
     internal static Control Block(HoverBlock block, PopupLook look) =>

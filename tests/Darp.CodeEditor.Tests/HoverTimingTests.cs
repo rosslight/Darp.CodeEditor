@@ -101,6 +101,29 @@ public sealed class HoverTimingTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Loading_below_the_diagnostics_keeps_them_with_their_selection() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            // The server never answers for "slow": "Loading…" joins the diagnostic at three times the delay.
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "slow");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+            PopupFrame popup = await HoverAsync(window, 1, "slow (echo)", time);
+            SelectableTextBlock message = popup.GetVisualDescendants().OfType<SelectableTextBlock>().Single();
+            message.SelectionStart = 0;
+            message.SelectionEnd = 4;
+
+            Pass(window, time, TimeSpan.FromMilliseconds(600));
+
+            await WaitForPopupAsync(window, "Loading…");
+            IsShown(message).ShouldBeTrue();
+            message.SelectedText.ShouldBe("slow");
+        });
+
+    [Fact]
     public void The_hover_delay_is_between_0_and_10_seconds()
     {
         new HoverOptions().Delay.ShouldBe(TimeSpan.FromMilliseconds(300));

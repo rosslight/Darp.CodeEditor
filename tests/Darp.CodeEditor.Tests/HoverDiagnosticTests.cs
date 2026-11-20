@@ -46,7 +46,7 @@ public sealed class HoverDiagnosticTests(UiFixture ui)
 
             PopupFrame popup = await HoverAsync(window, 4, "two is a word in", time);
 
-            Control part = ((Panel)Content(popup)).Children[0];
+            Control part = Blocks(popup)[0];
             part.GetVisualDescendants().OfType<SeverityIcon>().ShouldHaveSingleItem();
             TextBlock[] texts = [.. part.GetVisualDescendants().OfType<TextBlock>()];
             texts
