@@ -502,6 +502,34 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Up_after_End_scrolls_a_hover_whose_content_still_builds() =>
+        _ui.Run(() =>
+        {
+            // Many parts: the frames build them a few at a time.
+            HoverBlock[] blocks =
+            [
+                .. Enumerable.Range(0, 3_000).Select(i => new HoverParagraph([new HoverSpan(new string('p', 100))])),
+            ];
+            HoverContent content = HoverView.Create(blocks, Look());
+            var scroller = new PopupScroller
+            {
+                Child = content,
+                Height = 200,
+                Focusable = true,
+            };
+            using var window = new EditorWindow(new CodeEditor(), new Border { Child = scroller });
+            window.Render();
+            scroller.Focus();
+
+            window.Press(Key.End);
+            content.IsComplete.ShouldBeFalse();
+            double end = content.Bounds.Top;
+            window.Press(Key.Up);
+
+            content.Bounds.Top.ShouldBeGreaterThan(end);
+        });
+
+    [Fact]
     public Task The_popup_stays_inside_a_window_that_narrows() =>
         _ui.Run(async () =>
         {

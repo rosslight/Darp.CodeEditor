@@ -19,6 +19,9 @@ internal sealed class PopupScroller : Control
     private readonly PopupSlider _slider = new();
     private double _offset;
 
+    /// <summary>The offset arranged last, which the user's scrolling goes from.</summary>
+    private double _shown;
+
     /// <summary>The part of the content to scroll into view at the next arrange; null for none.</summary>
     private Control? _scrollTo;
 
@@ -49,7 +52,7 @@ internal sealed class PopupScroller : Control
                 LogicalChildren.Remove(old);
             }
             field = value;
-            _offset = 0;
+            _offset = _shown = 0;
             if (value is not null)
             {
                 LogicalChildren.Add(value);
@@ -131,6 +134,7 @@ internal sealed class PopupScroller : Control
                     child.Arrange(new Rect(0, -offset, Math.Max(0, width), extent));
                 }
             }
+            _shown = offset;
             _slider.Show(finalSize.Height, extent, offset);
         }
         _slider.Arrange(new Rect(finalSize));
@@ -146,7 +150,7 @@ internal sealed class PopupScroller : Control
         base.OnPointerWheelChanged(e);
         if (!_slider.CanScroll)
             return;
-        ScrollTo(_offset - e.Delta.Y * Step);
+        ScrollTo(_shown - e.Delta.Y * Step);
         e.Handled = true;
     }
 
@@ -172,11 +176,12 @@ internal sealed class PopupScroller : Control
     }
 
     /// <summary>Scrolls by <paramref name="delta"/> pixels, down where positive, as far as the content goes.</summary>
-    public void ScrollBy(double delta) => ScrollTo(_offset + delta);
+    public void ScrollBy(double delta) => ScrollTo(_shown + delta);
 
+    /// <summary>Scrolls to <paramref name="offset"/>, within the content as it is now.</summary>
     private void ScrollTo(double offset)
     {
-        _offset = offset;
+        _offset = Math.Clamp(offset, 0, Math.Max(0, (Child?.DesiredSize.Height ?? 0) - Bounds.Height));
         InvalidateArrange();
     }
 }
