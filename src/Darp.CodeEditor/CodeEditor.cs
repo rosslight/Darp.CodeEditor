@@ -872,8 +872,18 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>
     /// Brings a range into view: centered unless it is visible, from its start when it is taller or wider than the view.
+    /// Rows not laid out yet may be taller or wider than the view knows, so it lays them out and scrolls again, before
+    /// anything opens there; a few times at most, and not once a handler of the layout changed the text or document.
     /// </summary>
     private static void Reveal(TextEditor part, TextRange range)
+    {
+        ITextSourceVersion? version = part.Document?.Version;
+        for (int tries = 0; tries < 4 && part.Document?.Version == version && Scroll(part, range); tries++)
+            part.UpdateLayout();
+    }
+
+    /// <summary>Scrolls to show a range where the view has it now; false when it shows.</summary>
+    private static bool Scroll(TextEditor part, TextRange range)
     {
         TextView textView = part.TextArea.TextView;
         TextDocument buffer = textView.Document;
@@ -886,13 +896,9 @@ public class CodeEditor : TemplatedControl
         // fits needs the left and right edges of every line it covers.
         (double left, double right) = part.WordWrap || bottom - start.Y > view.Height ? (start.X, start.X) : Edges();
         double x = part.WordWrap ? 0 : OffsetToShow(left, right, start.X, offset.X, view.Width);
-        SetScrollOffset(part, new Vector(Math.Max(0, x), Math.Max(0, y)));
-        // A row wider than those laid out scrolls across only once laid out: now, before anything opens there.
-        if (textView.ScrollOffset.X < x - 0.5)
-        {
-            part.UpdateLayout();
-            SetScrollOffset(part, new Vector(x, textView.ScrollOffset.Y));
-        }
+        var shows = new Vector(Math.Max(0, x), Math.Max(0, y));
+        SetScrollOffset(part, shows);
+        return shows != offset;
 
         Point Position(int textOffset, VisualYPosition at) =>
             textView.GetVisualPosition(new TextViewPosition(buffer.GetLocation(textOffset)), at);
