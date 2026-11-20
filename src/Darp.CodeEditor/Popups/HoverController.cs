@@ -341,18 +341,19 @@ internal sealed class HoverController : IEditorFeature
     }
 
     /// <summary>
-    /// Shows what is known of <paramref name="hovered"/> once its delay is over (<see cref="Hovered.Blocks"/>); with
-    /// nothing to show, no popup shows.
+    /// Shows what is known of <paramref name="hovered"/> once its delay is over: the diagnostics there, and below them
+    /// the server's hover or "Loading…"; with nothing to show, no popup shows.
     /// </summary>
     private void Render(Hovered hovered)
     {
-        if (hovered.Blocks() is not { } blocks)
+        IReadOnlyList<HoverBlock> below = hovered.Below();
+        if (!hovered.IsDue || (hovered.Messages.Count == 0 && below.Count == 0))
         {
             StayOpen();
             _popup.Hide();
             return;
         }
-        _popup.Show(blocks, _colors, hovered.Word);
+        _popup.Show(hovered.Messages, below, _colors, hovered.Word);
     }
 
     /// <summary>

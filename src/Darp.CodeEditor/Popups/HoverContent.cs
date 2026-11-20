@@ -7,8 +7,9 @@ namespace Darp.CodeEditor.Popups;
 /// <summary>
 /// The controls of a popup's blocks, all of them, built in parts so that each takes a frame at most, as
 /// <see cref="HoverParts"/> measures them: the first part as it is made, and each next part in the next frame while it
-/// shows, where a block larger than a part goes in pieces. <see cref="GrewEvent"/> tells the popup around it after each
-/// part, so that it places itself again.
+/// shows, where a block larger than a part goes in pieces. Content that comes after another waits until the other is
+/// built in full, so that a frame builds one part of either. <see cref="GrewEvent"/> tells the popup around it after
+/// each part, so that it places itself again.
 /// </summary>
 internal sealed class HoverContent : StackPanel
 {
@@ -19,6 +20,9 @@ internal sealed class HoverContent : StackPanel
     );
 
     private readonly PopupLook _look;
+
+    /// <summary>The content that this one comes after, until that is built in full; null for none.</summary>
+    private HoverContent? _after;
 
     /// <summary>
     /// The blocks after the ones read, read one at a time, as they are built: blocks made as they are read are made a
@@ -35,14 +39,18 @@ internal sealed class HoverContent : StackPanel
     /// <summary>Whether the next part is asked for, for the next frame.</summary>
     private bool _requested;
 
-    public HoverContent(IEnumerable<HoverBlock> blocks, PopupLook look)
+    public HoverContent(IEnumerable<HoverBlock> blocks, PopupLook look, HoverContent? after = null)
     {
+        _after = after;
         // Set here, as on every panel of a popup, so that an app's styles for panels don't reach it.
         Spacing = HoverView.Spacing;
         Margin = default;
         _blocks = blocks.GetEnumerator();
         _look = look;
-        AddPart();
+        if (_after is { IsComplete: true })
+            _after = null;
+        if (_after is null)
+            AddPart();
     }
 
     protected override Type StyleKeyOverride => typeof(HoverContent);
@@ -75,7 +83,11 @@ internal sealed class HoverContent : StackPanel
             // No longer shown, as when the popup closed: the rest is never built.
             if (TopLevel.GetTopLevel(this) is null)
                 return;
-            AddNextPart();
+            // After the content it waits for, from the frame after the one that built its last part.
+            if (_after is null)
+                AddNextPart();
+            else if (_after.IsComplete)
+                _after = null;
             RequestPart();
         });
     }

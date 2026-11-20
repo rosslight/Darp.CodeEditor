@@ -50,6 +50,12 @@ internal sealed class HoverPopup
     /// <summary>Whether the user resized the hover that shows.</summary>
     private bool _resized;
 
+    /// <summary>
+    /// The diagnostics shown, and the content: their section, a line and the server's section below; null while nothing
+    /// shows.
+    /// </summary>
+    private (IReadOnlyCollection<HoverBlock> Messages, PopupStack Sections)? _shown;
+
     /// <summary>The window whose clicks and deactivation a held popup watches, as they end it; null otherwise.</summary>
     private TopLevel? _watched;
 
@@ -110,10 +116,18 @@ internal sealed class HoverPopup
     }
 
     /// <summary>
-    /// Shows <paramref name="blocks"/> in <paramref name="colors"/> above <paramref name="word"/>, where the pointer
-    /// comes from, or below it where only that side has room; the keyboard stays in the popup if it was.
+    /// Shows <paramref name="messages"/>, the diagnostics, and <paramref name="below"/> them the server's hover, in
+    /// <paramref name="colors"/> above <paramref name="word"/>, where the pointer comes from, or below it where only that
+    /// side has room. Shown again with the same diagnostics, as when "Loading…" or the server's answer joins them, only
+    /// the section below changes: the diagnostics keep their selection, and the popup its scroll position. The keyboard
+    /// stays in the popup if it was.
     /// </summary>
-    public void Show(IEnumerable<HoverBlock> blocks, PopupColors colors, TextRange word)
+    public void Show(
+        IReadOnlyCollection<HoverBlock> messages,
+        IReadOnlyList<HoverBlock> below,
+        PopupColors colors,
+        TextRange word
+    )
     {
         _popup.Frame.Paint(
             colors.HoverBackground,
@@ -136,15 +150,28 @@ internal sealed class HoverPopup
             );
         }
         bool hadKeyboard = HasKeyboard;
-        _content.Child = HoverView.Create(
-            blocks,
-            PopupLook.Of(_editor, colors, colors.HoverForeground) with
-            {
-                Selectable = true,
-            }
-        );
-        // The text that had the keyboard went with the old content: the scroller keeps it.
-        if (hadKeyboard)
+        PopupLook look = PopupLook.Of(_editor, colors, colors.HoverForeground) with { Selectable = true };
+        if (_shown is not var (shown, sections) || shown != messages)
+        {
+            sections = new PopupStack { Spacing = HoverView.Spacing };
+            if (messages.Count > 0)
+                sections.Children.Add(HoverView.Create(messages, look));
+            _shown = (messages, sections);
+            _content.Child = sections;
+        }
+        int kept = messages.Count > 0 ? 1 : 0;
+        sections.Children.RemoveRange(kept, sections.Children.Count - kept);
+        if (below.Count > 0)
+        {
+            if (kept > 0)
+                sections.Children.Add(HoverView.Block(new HoverRule(), look));
+            // Its parts after the diagnostics', a part a frame in all.
+            sections.Children.Add(
+                HoverView.Create(below, look, after: kept > 0 ? (HoverContent)sections.Children[0] : null)
+            );
+        }
+        // The text that had the keyboard may have gone with the section below: the scroller keeps it.
+        if (hadKeyboard && !HasKeyboard)
             TakeKeyboard();
         _word = word;
         Place();
@@ -181,6 +208,7 @@ internal sealed class HoverPopup
         if (HasKeyboard)
             _textArea.Focus();
         _content.Focusable = false;
+        _shown = null;
         _popup.Hide();
     }
 

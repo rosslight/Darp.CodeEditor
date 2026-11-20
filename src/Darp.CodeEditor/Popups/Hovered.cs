@@ -53,19 +53,10 @@ internal sealed class Hovered(int offset, TextRange word, TextRange along, TextS
     public IReadOnlyList<HoverBlock>? Answer { get; private set; }
 
     /// <summary>
-    /// What shows once the delay is over: the diagnostics' messages, and below them the server's hover, or "Loading…"
-    /// while it is late; null before, and with nothing to show. Not read here: the diagnostics' blocks are made as the
-    /// hover's parts read them.
+    /// What shows below the diagnostics: the server's hover, or "Loading…" while it is late; nothing before.
     /// </summary>
-    public IEnumerable<HoverBlock>? Blocks()
-    {
-        IReadOnlyList<HoverBlock> below =
-            Answer ?? (IsLate && !IsAnswered ? [new HoverParagraph([new HoverSpan(Strings.HoverLoading)])] : []);
-        return !IsDue || (Messages.Count == 0 && below.Count == 0) ? null
-            : Messages.Count == 0 ? below
-            : below.Count == 0 ? Messages
-            : Messages.Append(new HoverRule()).Concat(below);
-    }
+    public IReadOnlyList<HoverBlock> Below() =>
+        Answer ?? (IsLate && !IsAnswered ? [new HoverParagraph([new HoverSpan(Strings.HoverLoading)])] : []);
 
     /// <summary>Takes the server's hover, which the popup stays open over too.</summary>
     public void Answered(IReadOnlyList<HoverBlock> answer, TextRange? range)
