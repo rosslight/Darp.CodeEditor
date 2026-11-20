@@ -406,6 +406,40 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task F8_and_Ctrl_K_Ctrl_I_in_a_scrolled_editor_show_the_hover_at_the_caret_where_the_word_starts_out_of_view() =>
+        _ui.Run(async () =>
+        {
+            // One long word, its start scrolled out of view to the left as F8 goes to a problem near its end.
+            var time = new ManualTime();
+            var document = new StandaloneDocument(CodeLanguage.PlainText, new string('x', 500), time);
+            using var window = new EditorWindow(new CodeEditor { Document = document }, width: 400, height: 200);
+            document.SetDiagnostics([
+                new Diagnostic(
+                    document.CurrentSnapshot,
+                    new TextRange(450, 10),
+                    DiagnosticSeverity.Error,
+                    null,
+                    "late"
+                ),
+            ]);
+            window.Layout();
+
+            window.Press(Key.F8);
+            PopupFrame popup = await WaitForPopupAsync(window, "late");
+            window.PointAt(0).X.ShouldBeLessThan(0);
+            double caret = window.PointAt(450).X - window.TextView.WideSpaceWidth / 2;
+            Rect bounds = BoundsInWindow(popup);
+            bounds.Left.ShouldBe(Math.Min(caret, window.Window.ClientSize.Width - bounds.Width), 1);
+
+            window.Press(Key.Escape);
+            window.Press(Key.K, EditorWindow.Command);
+            window.Press(Key.I, EditorWindow.Command);
+            popup = await WaitForPopupAsync(window, "late");
+            bounds = BoundsInWindow(popup);
+            bounds.Left.ShouldBe(Math.Min(caret, window.Window.ClientSize.Width - bounds.Width), 1);
+        });
+
+    [Fact]
     public Task A_resized_hover_narrows_from_the_dragged_edge_also_after_the_window_moved_it() =>
         _ui.Run(async () =>
         {
