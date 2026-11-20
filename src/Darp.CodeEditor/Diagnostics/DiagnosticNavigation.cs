@@ -107,7 +107,8 @@ internal sealed class DiagnosticNavigation : IEditorFeature
         {
             _moving = false;
         }
-        if (current && Step(() => _reveal(range)))
+        // Where the popup goes, as VS Code reveals it: not the start of a diagnostic taller than the view.
+        if (current && Step(() => _reveal(new TextRange(to, 0))))
             _hover.ShowProblem(to, Problem(marker.Diagnostic, _index + 1, count));
         return true;
 

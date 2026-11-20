@@ -81,6 +81,33 @@ public sealed class DiagnosticNavigationTests(UiFixture ui)
         });
 
     [Fact]
+    public Task F8_inside_a_diagnostic_taller_than_the_view_shows_it_at_the_caret_in_view() =>
+        _ui.Run(async () =>
+        {
+            string text = string.Concat(Enumerable.Range(0, 300).Select(i => $"line{i}\n"));
+            CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            // Over 200 lines, and the caret near its end, out of view.
+            int start = text.IndexOf("line10\n", StringComparison.Ordinal);
+            int end = text.IndexOf("line210\n", StringComparison.Ordinal);
+            document.SetDiagnostics([
+                new Diagnostic(
+                    document.CurrentSnapshot,
+                    TextRange.FromBounds(start, end),
+                    DiagnosticSeverity.Error,
+                    null,
+                    "':' expected"
+                ),
+            ]);
+            int caret = text.IndexOf("line200\n", StringComparison.Ordinal);
+            window.Editor.Selection = new TextSelection(caret);
+
+            (await GoAsync(window, Key.F8)).ShouldBe((caret, "':' expected"));
+
+            window.TextView.VisualLines.ShouldContain(line => line.FirstDocumentLine.LineNumber == 201);
+        });
+
+    [Fact]
     public Task New_diagnostics_show_in_the_problem_that_shows_or_close_it_without_one_there() =>
         _ui.Run(async () =>
         {
