@@ -169,7 +169,7 @@
     <value>Language</value>
   </data>
   <data name="LanguageDescription" xml:space="preserve">
-    <value>The language of the app's commands and messages</value>
+    <value>The language of the commands and messages of the app and its editors</value>
   </data>
   <data name="WordWrap" xml:space="preserve">
     <value>Word wrap</value>
@@ -179,6 +179,69 @@
   </data>
   <data name="FontSize" xml:space="preserve">
     <value>Font size</value>
+  </data>
+  <data name="Editor" xml:space="preserve">
+    <value>Editor</value>
+  </data>
+  <data name="AutoClosingBrackets" xml:space="preserve">
+    <value>Auto-close brackets</value>
+  </data>
+  <data name="AutoClosingBracketsDescription" xml:space="preserve">
+    <value>Where a typed opening bracket brings its closing one</value>
+  </data>
+  <data name="AutoClosingQuotes" xml:space="preserve">
+    <value>Auto-close quotes</value>
+  </data>
+  <data name="AutoClosingQuotesDescription" xml:space="preserve">
+    <value>Where a typed quote brings its closing one</value>
+  </data>
+  <data name="EmptySelectionClipboard" xml:space="preserve">
+    <value>Copy the line without a selection</value>
+  </data>
+  <data name="EmptySelectionClipboardDescription" xml:space="preserve">
+    <value>Whether copy and cut without a selection take the caret's whole line</value>
+  </data>
+  <data name="SeedSearchString" xml:space="preserve">
+    <value>Search for the selection</value>
+  </data>
+  <data name="SeedSearchStringDescription" xml:space="preserve">
+    <value>What the search bar's query starts with as the bar opens</value>
+  </data>
+  <data name="AutoFindInSelection" xml:space="preserve">
+    <value>Find in selection</value>
+  </data>
+  <data name="AutoFindInSelectionDescription" xml:space="preserve">
+    <value>When the search bar searches only the selection as it opens</value>
+  </data>
+  <data name="HoverDelay" xml:space="preserve">
+    <value>Hover delay</value>
+  </data>
+  <data name="HoverDelayDescription" xml:space="preserve">
+    <value>How long the pointer rests on text before its information shows, in milliseconds</value>
+  </data>
+  <data name="MatchBrackets" xml:space="preserve">
+    <value>Highlight matching brackets</value>
+  </data>
+  <data name="MatchBracketsDescription" xml:space="preserve">
+    <value>Which brackets are boxed at the caret</value>
+  </data>
+  <data name="OccurrencesHighlight" xml:space="preserve">
+    <value>Highlight occurrences</value>
+  </data>
+  <data name="OccurrencesHighlightDescription" xml:space="preserve">
+    <value>Whether the other places of the symbol at the caret are highlighted</value>
+  </data>
+  <data name="ParameterHints" xml:space="preserve">
+    <value>Parameter hints</value>
+  </data>
+  <data name="ParameterHintsDescription" xml:space="preserve">
+    <value>Whether typing in a call shows its signatures</value>
+  </data>
+  <data name="On" xml:space="preserve">
+    <value>On</value>
+  </data>
+  <data name="Off" xml:space="preserve">
+    <value>Off</value>
   </data>
   <data name="About" xml:space="preserve">
     <value>About</value>
