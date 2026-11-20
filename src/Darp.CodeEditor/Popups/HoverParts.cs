@@ -20,9 +20,10 @@ internal static class HoverParts
     public const int MaxRuns = 250;
 
     /// <summary>
-    /// <paramref name="block"/> in pieces of at most a part each: a code block between its lines, a paragraph that is
-    /// no list item or a diagnostic between its lines, or within a line too long for a part, after a space where there
-    /// is one. Each piece after the first goes on from the one before. Other blocks, and blocks that fit, stay whole.
+    /// <paramref name="block"/> in pieces of at most a part each: a code block, a paragraph or a diagnostic's line between
+    /// its lines, or within a line too long for a part, after a space where there is one. Each piece after the first goes
+    /// on from the one before; a list item's marker goes with its first piece. Other blocks, and blocks that fit, stay
+    /// whole.
     /// </summary>
     public static IEnumerable<HoverBlock> Split(HoverBlock block) =>
         block switch
@@ -36,20 +37,25 @@ internal static class HoverParts
                     }
             ),
             HoverDiagnostic diagnostic when !Fits(Size(diagnostic)) => DiagnosticPieces(diagnostic),
-            HoverParagraph { Marker: null } paragraph when !Fits(Size(paragraph)) => Pieces(
+            HoverParagraph paragraph when !Fits(Size(paragraph)) => Pieces(
                 paragraph.Spans.Select(span => (span.Text, span)),
                 (spans, first) =>
-                    new HoverParagraph([.. spans.Select(s => s.Run with { Text = s.Text })], paragraph.Level)
+                    new HoverParagraph(
+                        [.. spans.Select(s => s.Run with { Text = s.Text })],
+                        paragraph.Level,
+                        first ? paragraph.Marker : null
+                    )
                     {
                         Continues = !first || paragraph.Continues,
-                    }
+                    },
+                reservedRuns: paragraph.Marker is null ? 0 : 1
             ),
             _ => [block],
         };
 
     /// <summary>
     /// The size of <paramref name="block"/> as a part counts it: its characters, lines and runs, a list item's marker
-    /// as a run.
+    /// and a diagnostic's icon as a run.
     /// </summary>
     public static (int Characters, int Lines, int Runs) Size(HoverBlock block)
     {
@@ -62,8 +68,8 @@ internal static class HoverParts
                 (characters, lines) = Count(code.Runs.Select(run => run.Text));
                 return (characters, lines, code.Runs.Count);
             case HoverDiagnostic diagnostic:
-                (characters, lines) = Count([diagnostic.Message, diagnostic.Source ?? "", diagnostic.Code ?? ""]);
-                (int Characters, int Lines, int Runs) size = (characters, lines, 5);
+                (characters, lines) = Count(diagnostic.Line.Select(span => span.Text));
+                (int Characters, int Lines, int Runs) size = (characters, lines, diagnostic.Line.Count + 1);
                 foreach (HoverRelated related in diagnostic.Related)
                     size = Add(size, Size(related));
                 return size;
@@ -85,10 +91,9 @@ internal static class HoverParts
     ) => (a.Characters + b.Characters, a.Lines + b.Lines, a.Runs + b.Runs);
 
     /// <summary>
-    /// A diagnostic larger than a part in pieces of at most a part each, each going on from the one before: its
-    /// message, also an empty one, with the icon beside the first piece and its source and code after the last; then
-    /// its related places, with that piece while they fit it and then in pieces of their own, a place larger than a
-    /// part in pieces too.
+    /// A diagnostic larger than a part in pieces of at most a part each, each going on from the one before: its line,
+    /// its message, source and code, with the icon beside the first piece; then its related places, with the last piece
+    /// of the line while they fit it and then in pieces of their own, a place larger than a part in pieces too.
     /// </summary>
     private static IEnumerable<HoverBlock> DiagnosticPieces(HoverDiagnostic diagnostic)
     {
@@ -96,20 +101,18 @@ internal static class HoverParts
         HoverDiagnostic? current = null;
         foreach (
             HoverDiagnostic piece in Pieces(
-                [(diagnostic.Message, 0)],
-                (texts, first) =>
+                diagnostic.Line.Select(span => (span.Text, span)),
+                (spans, first) =>
                     new HoverDiagnostic(
                         diagnostic.Severity,
-                        string.Concat(texts.Select(t => t.Text)),
-                        null,
-                        null,
-                        null,
+                        [.. spans.Select(s => s.Run with { Text = s.Text })],
                         [],
                         first ? diagnostic.Icon : room
                     )
                     {
                         Continues = !first || diagnostic.Continues,
-                    }
+                    },
+                reservedRuns: 1
             )
         )
         {
@@ -117,13 +120,7 @@ internal static class HoverParts
                 yield return current;
             current = piece;
         }
-        current = (current ?? diagnostic with { Message = "" }) with
-        {
-            Source = diagnostic.Source,
-            Code = diagnostic.Code,
-            CodeLink = diagnostic.CodeLink,
-            Related = [],
-        };
+        current ??= diagnostic with { Line = [], Related = [] };
         var related = new List<HoverRelated>();
         (int Characters, int Lines, int Runs) size = Size(current);
         foreach (HoverRelated place in diagnostic.Related.SelectMany(RelatedPieces))
@@ -140,7 +137,7 @@ internal static class HoverParts
                 Related = related,
             };
             // A piece of related places alone: no line of its own for the message.
-            current = new HoverDiagnostic(diagnostic.Severity, "", null, null, null, [], room) { Continues = true };
+            current = new HoverDiagnostic(diagnostic.Severity, [], [], room) { Continues = true };
             related = [place];
             size = Add(Size(current), Size(place));
         }
@@ -177,11 +174,13 @@ internal static class HoverParts
     /// <summary>
     /// The runs of a block in pieces of at most a part each: cut at a line break, which goes with neither piece, as the
     /// next piece starts on a line of its own; within a line too long for a part, after its last space in the run that
-    /// fills the part, or where the part is full, but never inside a surrogate pair; and after the most runs.
+    /// fills the part, or where the part is full, but never inside a surrogate pair; and after the most runs, less
+    /// <paramref name="reservedRuns"/> that the piece takes besides, as a list item's marker.
     /// </summary>
     private static IEnumerable<TPiece> Pieces<T, TPiece>(
         IEnumerable<(string Text, T Run)> runs,
-        Func<List<(string Text, T Run)>, bool, TPiece> piece
+        Func<List<(string Text, T Run)>, bool, TPiece> piece,
+        int reservedRuns = 0
     )
     {
         var current = new List<(string Text, T Run)>();
@@ -198,7 +197,8 @@ internal static class HoverParts
                 if (IsLineBreak(c))
                 {
                     int length = c == '\r' && i + 1 < text.Length && text[i + 1] == '\n' ? 2 : 1;
-                    if (lines < MaxLines)
+                    // A line break takes characters of the part too.
+                    if (lines < MaxLines && characters + i - start + length <= MaxCharacters)
                     {
                         lines++;
                         i += length;
@@ -226,7 +226,7 @@ internal static class HoverParts
                 start = i = cut;
             }
             Add(start, text.Length);
-            if (current.Count >= MaxRuns)
+            if (current.Count >= MaxRuns - reservedRuns)
             {
                 foreach (TPiece done in Flush())
                     yield return done;
