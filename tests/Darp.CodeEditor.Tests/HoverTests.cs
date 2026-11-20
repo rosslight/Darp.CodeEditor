@@ -110,7 +110,11 @@ public sealed class HoverTests(UiFixture ui)
                 .Foreground.ShouldNotBeNull()
                 .Opacity.ShouldBe(0.6);
 
-            // A place in the document is a link there; one elsewhere, which the editor cannot show, is not (Q121).
+            // A place in the document is a link there, in the link color; one elsewhere, which the editor cannot show,
+            // is not (Q121).
+            Run[] places = [.. texts.Skip(1).Select(block => block.Inlines.ShouldNotBeNull().OfType<Run>().First())];
+            places[0].Foreground.ShouldBe(PopupColors.Default.Link);
+            places[1].IsSet(TextElement.ForegroundProperty).ShouldBeFalse();
             window.Click(TextPointAt(texts[2], 2), MouseButton.Left);
             Popup(window).ShouldNotBeNull();
             window.Click(TextPointAt(texts[1], 2), MouseButton.Left);

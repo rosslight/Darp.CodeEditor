@@ -126,7 +126,7 @@ internal static class HoverView
     /// <summary>
     /// A diagnostic, as VS Code's hover shows it, in the editor's font (<see cref="HoverDiagnostic"/>): the icon in a
     /// column of its own, 8 pixels from the text; the source and code at VS Code's 60% opacity, after a space; each
-    /// related place 8 pixels below the one before.
+    /// related place 8 pixels below the one before, in the link color where the editor can go there.
     /// </summary>
     private static Control Diagnostic(HoverDiagnostic diagnostic, PopupLook look)
     {
@@ -161,9 +161,14 @@ internal static class HoverView
         {
             TextBlock place = CodeText(look);
             place.Margin = new Thickness(0, related.Continues ? 0 : 8, 0, 0);
-            place.Inlines = [new Run(related.Place) { Foreground = look.Colors.Link }, new Run(related.Message)];
+            var where = new Run(related.Place);
+            place.Inlines = [where, new Run(related.Message)];
+            // Only a place that the editor can go to looks like a link.
             if (related.Open is { } open)
+            {
+                where.Foreground = look.Colors.Link;
                 OpenLinks(place, [(0, related.Place.Length, _ => open())]);
+            }
             column.Children.Add(place);
         }
         if (diagnostic.Icon == HoverIcon.None)
