@@ -5,7 +5,8 @@ namespace Sample.Documents;
 
 /// <summary>
 /// The app's settings for its language servers, in sections as VS Code's settings are: the JSON schemas of the
-/// examples, which the app ships next to it, so that the servers read them by their file URIs.
+/// examples, which the app ships next to it, so that the servers read them by their file URIs. The schemas open among
+/// the documents too; servers read them again when their settings change.
 /// </summary>
 /// <remarks>
 /// Servers associate a schema with documents by their file names: here the examples' names, so that a file opened
@@ -15,8 +16,11 @@ namespace Sample.Documents;
 /// </remarks>
 internal static class ServerSettings
 {
-    private static readonly string s_configSchema = SchemaUri("config.schema.json");
-    private static readonly string s_pipelineSchema = SchemaUri("pipeline.schema.json");
+    private static readonly string s_configSchema = SchemaPath("config.schema.json");
+    private static readonly string s_pipelineSchema = SchemaPath("pipeline.schema.json");
+
+    /// <summary>The paths of the schemas.</summary>
+    public static IReadOnlyList<string> Schemas { get; } = [s_configSchema, s_pipelineSchema];
 
     /// <summary>The settings of <paramref name="request"/>'s section, or all of them; called on any thread.</summary>
     public static JsonNode? Get(LanguageServerSettingsRequest request) =>
@@ -34,13 +38,15 @@ internal static class ServerSettings
         {
             ["validate"] = new JsonObject { ["enable"] = true },
             ["schemas"] = new JsonArray(
-                new JsonObject { ["fileMatch"] = new JsonArray("Config.json"), ["url"] = s_configSchema }
+                new JsonObject { ["fileMatch"] = new JsonArray("Config.json"), ["url"] = FileUri(s_configSchema) }
             ),
         };
 
     /// <summary>The YAML server: each schema's URI, with a glob of the files it is for.</summary>
-    private static JsonObject Yaml() => new() { ["schemas"] = new JsonObject { [s_pipelineSchema] = "Pipeline.yaml" } };
+    private static JsonObject Yaml() =>
+        new() { ["schemas"] = new JsonObject { [FileUri(s_pipelineSchema)] = "Pipeline.yaml" } };
 
-    private static string SchemaUri(string fileName) =>
-        new Uri(Path.Combine(AppContext.BaseDirectory, "Schemas", fileName)).AbsoluteUri;
+    private static string SchemaPath(string fileName) => Path.Combine(AppContext.BaseDirectory, "Schemas", fileName);
+
+    private static string FileUri(string path) => new Uri(path).AbsoluteUri;
 }
