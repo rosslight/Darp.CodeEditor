@@ -102,6 +102,7 @@ internal sealed class HoverPopup
     {
         _popup.Frame.Width = double.NaN;
         _popup.Frame.Height = double.NaN;
+        _popup.Left = null;
         _resized = false;
     }
 
@@ -197,6 +198,8 @@ internal sealed class HoverPopup
     private void OnResized(Size size, Edges edges)
     {
         _resized = true;
+        // The edge across from the one dragged stays, also where the window's edge had pushed the popup.
+        _popup.Left ??= _popup.Placed?.Bounds.Left;
         PopupFrame frame = _popup.Frame;
         double minHeight = _textView.DefaultLineHeight + frame.Padding.Top + frame.Padding.Bottom;
         if ((edges & (Edges.Left | Edges.Right)) != 0)

@@ -347,6 +347,35 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_hover_at_the_windows_right_edge_narrows_from_the_edge_that_is_dragged() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            // Near the right edge, with a diagnostic as wide as the line: the window's edge pushes the popup left.
+            string text = new string('a', 60) + " word";
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document }, width: 600);
+            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+            PopupFrame popup = await HoverAsync(window, text.Length - 2, "word is a word in", time);
+            Rect bounds = BoundsInWindow(popup);
+            bounds.Right.ShouldBe(window.Window.ClientSize.Width, 1);
+            var grip = new Point(bounds.Right - 2, bounds.Center.Y);
+
+            window.MoveMouse(grip);
+            window.Window.MouseDown(grip, MouseButton.Left);
+            window.Window.MouseMove(grip - new Point(20, 0), RawInputModifiers.LeftMouseButton);
+            window.Window.MouseUp(grip - new Point(20, 0), MouseButton.Left);
+            window.Layout();
+            window.Render();
+
+            Rect resized = BoundsInWindow(popup);
+            resized.Left.ShouldBe(bounds.Left, 0.5);
+            resized.Right.ShouldBe(bounds.Right - 20, 0.5);
+        });
+
+    [Fact]
     public Task A_resize_that_Escape_cuts_short_leaves_the_next_hover_alone() =>
         _ui.Run(async () =>
         {
