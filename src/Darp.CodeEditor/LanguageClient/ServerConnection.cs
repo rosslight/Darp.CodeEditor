@@ -310,7 +310,7 @@ internal sealed class ServerConnection
             Positions.ToLsp(snapshot.GetPosition(offset)),
             new SignatureHelpContext(
                 trigger.Kind,
-                IsRetrigger: trigger.Showing is not null,
+                trigger.IsRetrigger,
                 trigger.Character?.ToString(),
                 trigger.Showing?.ToContext()
             )

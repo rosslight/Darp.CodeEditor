@@ -27,7 +27,13 @@ public sealed class CodeLanguage
 {
     private static readonly Lazy<CodeLanguage> s_plainText = new(() => new CodeLanguage("plaintext"));
 
-    private static readonly Lazy<CodeLanguage> s_json = new(() => BuiltIn("json"));
+    /// <summary>
+    /// JSON and YAML complete in strings too, where their keys and values are: VS Code's extensions for them set
+    /// <c>editor.quickSuggestions</c> so.
+    /// </summary>
+    private static readonly QuickSuggestions s_alsoInStrings = QuickSuggestions.Default with { Strings = true };
+
+    private static readonly Lazy<CodeLanguage> s_json = new(() => BuiltIn("json", quickSuggestions: s_alsoInStrings));
 
     private static readonly Lazy<CodeLanguage> s_xml = new(() => BuiltIn("xml"));
 
@@ -35,7 +41,9 @@ public sealed class CodeLanguage
     /// YAML indents by brackets and the rules for Enter, not by its indentation rules, which indent the line after every
     /// key: VS Code's YAML extension sets <c>editor.autoIndent</c> so for the language.
     /// </summary>
-    private static readonly Lazy<CodeLanguage> s_yaml = new(() => BuiltIn("yaml", AutoIndent.Advanced));
+    private static readonly Lazy<CodeLanguage> s_yaml = new(() =>
+        BuiltIn("yaml", AutoIndent.Advanced, s_alsoInStrings)
+    );
 
     /// <summary>Creates a language from the files of a VS Code extension, and starts loading them.</summary>
     /// <param name="id">The language identifier that the language server receives, such as <c>toml</c>.</param>
@@ -85,10 +93,21 @@ public sealed class CodeLanguage
     /// </summary>
     public AutoIndent AutoIndent { get; init; } = AutoIndent.Full;
 
+    /// <summary>
+    /// Where typing a word opens completion in the language's documents. Default: <see cref="QuickSuggestions.Default"/>,
+    /// in code only. <see cref="Json"/> and <see cref="Yaml"/> also open it in strings. To change a built-in language's,
+    /// create the language from its files, as for <see cref="AutoIndent"/>.
+    /// </summary>
+    public QuickSuggestions QuickSuggestions { get; init; } = QuickSuggestions.Default;
+
     /// <summary>The grammar and editing rules, once read; <see cref="LoadedLanguage.None"/> when a file failed.</summary>
     internal Task<LoadedLanguage> Loaded { get; }
 
-    private static CodeLanguage BuiltIn(string id, AutoIndent autoIndent = AutoIndent.Full) =>
+    private static CodeLanguage BuiltIn(
+        string id,
+        AutoIndent autoIndent = AutoIndent.Full,
+        QuickSuggestions? quickSuggestions = null
+    ) =>
         new(
             id,
             new Uri($"avares://Darp.CodeEditor/Languages/{id}.tmLanguage.json"),
@@ -96,6 +115,7 @@ public sealed class CodeLanguage
         )
         {
             AutoIndent = autoIndent,
+            QuickSuggestions = quickSuggestions ?? QuickSuggestions.Default,
         };
 
     private LoadedLanguage Load()

@@ -17,9 +17,9 @@
 // signature help. Resolving an item answers the item with the properties of its "data"
 // added. Signature help answers inside parentheses, "(" asks for it and "," asks again: the signatures that the command
 // "signatures" set, or two of "call", with the parameter at the position active, and the signature that the client
-// says it shows, or the first. Completion in a document with the word "slow" is never answered. Selection ranges
-// answer with what the command "selection-ranges" set, as the result's first selection range, or with the word at the
-// position and its line; once "hold-selection-ranges" holds them, only when "release-selection-ranges" releases them,
+// says it shows, or the first. Completion and signature help in a document with the word "slow" are never
+// answered. Selection ranges answer with what the command "selection-ranges" set, as the result's first selection
+// range, or with the word at the position and its line; once "hold-selection-ranges" holds them, only when "release-selection-ranges" releases them,
 // with the answer of when they came. Document highlights are the occurrences of the word at the position, as whole
 // words: one followed by " =" is a write, the others are reads. The word "none" is answered with null, and "nothing"
 // with no highlights; once "hold-document-highlights" holds them, only when "release-document-highlights" releases
@@ -696,6 +696,8 @@ internal sealed class FakeServer
             $"signatureHelp {id?.ToJsonString()} {(int?)context?["triggerKind"]} {(string?)context?["triggerCharacter"] ?? "-"} "
                 + $"{(bool?)context?["isRetrigger"]} {showing?["activeSignature"]?.ToJsonString() ?? "-"} {offset}"
         );
+        if (document.Text.Contains("slow", StringComparison.Ordinal))
+            return;
         // The innermost parenthesis still open before the position, and the commas in it.
         int depth = 0;
         int commas = 0;

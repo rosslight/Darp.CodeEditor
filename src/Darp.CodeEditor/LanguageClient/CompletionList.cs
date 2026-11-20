@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Darp.CodeEditor.Completion;
 using Darp.CodeEditor.Editing;
@@ -26,6 +27,8 @@ internal sealed class CompletionList
         Items = items;
         IsIncomplete = isIncomplete;
         _resolve = resolve;
+        // Read where the answer is read, off the UI thread.
+        NeedsClipboard = items.Any(item => item.Snippet?.NeedsClipboard == true);
     }
 
     /// <summary>The items, sorted by their <see cref="CompletionItem.SortKey"/>.</summary>
@@ -36,6 +39,61 @@ internal sealed class CompletionList
 
     /// <summary>Whether the server resolves items: adds their details, documentation and additional edits.</summary>
     public bool Resolves => _resolve is not null;
+
+    /// <summary>Whether an item is a snippet with <c>CLIPBOARD</c>: the clipboard is read before the list shows.</summary>
+    public bool NeedsClipboard { get; }
+
+    /// <summary>
+    /// The options of a snippet's choice as a list, as VS Code's choice completions give them: each a value over
+    /// <paramref name="range"/>, the choice's text, in their order. While that text is one of the options, each item is
+    /// matched by it and the option, so that all show. VS Code orders them by sort texts that grow with the index; here
+    /// they are of one size, and a matched text is as long as matching reads, as a choice may have many options.
+    /// </summary>
+    /// <param name="options">The choice's options.</param>
+    /// <param name="range">The choice's text, around the caret.</param>
+    /// <param name="text">What that text is.</param>
+    public static CompletionList OfChoice(IReadOnlyList<string> options, TextRange range, string text)
+    {
+        bool isAnOption = options.Contains(text);
+        var items = new List<CompletionItem>(options.Count);
+        for (int i = 0; i < options.Count; i++)
+        {
+            string option = options[i];
+            string filterText = isAnOption ? Matched(text, option) : option;
+            items.Add(
+                new CompletionItem(
+                    option,
+                    CompletionItemKinds.Value,
+                    Detail: null,
+                    Documentation: null,
+                    IsDeprecated: false,
+                    IsPreselected: false,
+                    filterText,
+                    string.Equals(filterText, option, StringComparison.OrdinalIgnoreCase),
+                    new CompletionSortKey(
+                        i.ToString("D10", CultureInfo.InvariantCulture),
+                        option,
+                        CompletionItemKinds.Value
+                    ),
+                    new CompletionEdit(range, option),
+                    range,
+                    Snippet: null,
+                    AdditionalEdits: null,
+                    CommitCharacters: "",
+                    Source: default
+                )
+            );
+        }
+        return new CompletionList(items, isIncomplete: false, resolve: null);
+
+        // The choice's text, "_" and the option, as far as matching reads them.
+        static string Matched(string text, string option) =>
+            string.Concat(
+                text.AsSpan(0, Math.Min(text.Length, CompletionMatcher.MaxLength)),
+                "_",
+                option.AsSpan(0, Math.Min(option.Length, CompletionMatcher.MaxLength))
+            );
+    }
 
     /// <summary>
     /// The item as the server that answered resolves it; null when it does not resolve, failed or ended, and when
@@ -109,6 +167,7 @@ internal sealed class CompletionList
                 Detail = ServerJson.String(result, "detail") ?? item.Detail,
                 Documentation = ServerJson.Documentation(result) ?? item.Documentation,
                 AdditionalEdits = AdditionalEdits(result, snapshot) ?? item.AdditionalEdits,
+                Command = Command(result) ?? item.Command,
             };
 
     /// <summary>
@@ -174,8 +233,17 @@ internal sealed class CompletionList
                 ? ServerFeatures.Characters(item, "commitCharacters")
                 : commitCharacters,
             item
-        );
+        )
+        {
+            Command = Command(item),
+        };
     }
+
+    /// <summary>The id of the command that committing an item runs after; null for none.</summary>
+    private static string? Command(JsonElement item) =>
+        item.TryGetProperty("command", out JsonElement command) && command.ValueKind == JsonValueKind.Object
+            ? ServerJson.String(command, "command")
+            : null;
 
     /// <summary>
     /// An item's <c>textEdit</c>, with the range it inserts over and the one it replaces: an <c>InsertReplaceEdit</c>'s
@@ -297,7 +365,13 @@ internal sealed record CompletionItem(
     IReadOnlyList<CompletionEdit>? AdditionalEdits,
     string CommitCharacters,
     JsonElement Source
-);
+)
+{
+    /// <summary>
+    /// The id of the command that committing it runs after, such as <c>editor.action.triggerSuggest</c>; null for none.
+    /// </summary>
+    public string? Command { get; init; }
+}
 
 /// <summary>A change of the text: <paramref name="Range"/> becomes <paramref name="NewText"/>.</summary>
 internal readonly record struct CompletionEdit(TextRange Range, string NewText);
@@ -318,4 +392,6 @@ internal static class InsertTextFormat
 internal static class CompletionItemKinds
 {
     public const int Property = 10;
+
+    public const int Value = 12;
 }

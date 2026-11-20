@@ -21,28 +21,33 @@ namespace Darp.CodeEditor.Completion;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Completion opens on Ctrl+Space, also on macOS, on the server's trigger characters, and when typing starts a word
-/// outside a comment. Until the server answers, nothing shows; what is typed meanwhile filters its answer, and so does
-/// what is typed while the list shows (<see cref="CompletionFilter"/>). A list that the server marks incomplete is
-/// asked for again as the user types on, and shows meanwhile. Moving back before where completion was asked, and any
-/// edit before it, as by another editor of the document, asks again while a word is left, as VS Code does when the
-/// caret moves back: the list's positions no longer fit the text. Asked for by key, an empty answer says "No
-/// suggestions." until the next key or caret move.
+/// Completion opens on Ctrl+Space, also on macOS, on the server's trigger characters, and on a word that typing ends or
+/// starts, where the language's quick suggestions say (<see cref="QuickSuggest"/>). Until the server answers, nothing
+/// shows; what is typed meanwhile filters its answer, and so does what is typed while the list shows
+/// (<see cref="CompletionFilter"/>). Opened by typing, an answer with nothing ends completion, and typing on in its
+/// word opens nothing. A list that the server marks incomplete is asked for again as the user types on, and shows meanwhile.
+/// Moving back before where completion was asked, and any edit before it, as by another editor of the document, asks
+/// again while a word is left, as VS Code does when the caret moves back: the list's positions no longer fit the text.
+/// Asked for by key, an empty answer says "No suggestions." until the next key or caret move.
 /// </para>
 /// <para>
 /// Up, Down, Page Up and Page Down select among the rows that show, while there is more than one item; with one, they
 /// go on to the text, as in VS Code. The keymap's accept commands, a click or one of the selected item's commit
 /// characters commit it (<see cref="CompletionCommit"/>): accepting inserts or replaces, a click and a commit character
-/// insert, and a commit character then goes in. A frozen list commits by accepting and by a click, but not by commit
-/// characters. A read-only editor neither completes nor commits.
+/// insert, and a commit character then goes in. Then the item's command runs, if it is one of the editor's. A frozen
+/// list commits by accepting and by a click, but not by commit characters. A read-only editor neither completes nor
+/// commits. A snippet's choice that is selected shows its options instead of the server's items, read before the list
+/// shows, as is the clipboard's text for snippets that have it.
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends completion, for every reason it ends: Escape, the caret leaving the line or moving back
-/// past the word, a selection, a command other than completion's that moves the caret, the editor becoming read-only,
-/// the list scrolling out of view, the text losing the keyboard focus, also to the search bar, which ends an accept that
-/// waits for the filter, a server that starts or stops serving the document, new colors, the list running out of
-/// matches, and the editor no longer showing the document. Ending it hides "No suggestions." too, and cancels the
-/// request still under way with <c>$/cancelRequest</c>, and so does a newer request; a late answer is dropped.
+/// past the word, a selection, a command other than completion's that moves the caret, and any other caret move that
+/// is not the keyboard's (<see cref="CaretMoves"/>), as by a click, an undo, code or another editor's edit before the
+/// caret, the editor becoming read-only, the list scrolling out of view, the text losing the keyboard focus, also to the
+/// search bar, which ends an accept that waits for the filter, a server that starts or stops serving the document, new
+/// colors, the list running out of matches, and the editor no longer showing the document. Ending it hides "No
+/// suggestions." too, and cancels the request still under way with <c>$/cancelRequest</c>, and so does a newer request;
+/// a late answer is dropped.
 /// </para>
 /// </remarks>
 internal sealed class CompletionController : IEditorFeature, ICompletionOwner
@@ -50,18 +55,26 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
     private readonly TextArea _textArea;
     private readonly TextDocument _buffer;
     private readonly CodeDocument _document;
-    private readonly BackgroundTextMateHighlighter _highlighter;
+    private readonly TextChanges _changes;
     private readonly CompletionView _view;
 
     /// <summary>Completion from its first request until it ends; null while there is none.</summary>
     private CompletionSession? _session;
 
-    /// <summary>Whether "No suggestions." shows for an empty answer to a request by key, with no completion open.</summary>
-    private bool _showsEmpty;
-
     private readonly CompletionCommit _commit;
     private readonly CompletionResolver _resolver;
     private readonly CompletionFilter _filter;
+    private readonly QuickSuggest _quickSuggest;
+
+    /// <summary>Runs one of the editor's commands by its id, where it applies.</summary>
+    private readonly Func<string, bool> _runCommand;
+
+    private readonly CaretMoves _caretMoves;
+    private readonly SnippetController _snippets;
+    private readonly Overtyping _overtyping;
+
+    /// <summary>Reads the clipboard's text.</summary>
+    private readonly Func<Task<string?>> _readClipboard;
 
     public CompletionController(
         TemplatedControl editor,
@@ -70,15 +83,23 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         BackgroundTextMateHighlighter highlighter,
         SnippetController snippets,
         TextChanges changes,
-        TaskScheduler background
+        CaretMoves caretMoves,
+        TaskScheduler background,
+        Func<string, bool> runCommand,
+        Func<Task<string?>> readClipboard
     )
     {
+        _runCommand = runCommand;
+        _caretMoves = caretMoves;
+        _snippets = snippets;
+        _readClipboard = readClipboard;
+        _overtyping = new Overtyping(textArea, () => _session is not null);
         _textArea = textArea;
         _buffer = textArea.Document;
         _document = document;
-        _highlighter = highlighter;
+        _changes = changes;
         _view = new CompletionView(editor, textArea.TextView);
-        _commit = new CompletionCommit(textArea, document, snippets, changes);
+        _commit = new CompletionCommit(textArea, document, snippets, changes, RunCommand);
         _resolver = new CompletionResolver(_view, highlighter);
         _filter = new CompletionFilter(
             _view,
@@ -89,6 +110,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
             WordBefore,
             this
         );
+        _quickSuggest = new QuickSuggest(textArea, document, highlighter, WordBefore);
         _view.Clicked += OnClicked;
         _buffer.Changing += OnBufferChanging;
         _buffer.TextChanged += OnBufferTextChanged;
@@ -97,30 +119,19 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         _textArea.LostFocus += OnClosingChange;
         _document.LanguageFeaturesChanged += OnClosingChange;
         _view.LeftView += OnClosingChange;
+        _snippets.ChoiceSelected += OnChoiceSelected;
     }
 
-    /// <summary>The popups' colors, from the color theme once it is loaded. New colors end completion.</summary>
-    public PopupColors Colors
+    /// <summary>
+    /// The popups' and the icons' colors, from the color theme once it is loaded. New colors end completion.
+    /// </summary>
+    public void SetColors(PopupColors colors, SymbolIconColors? icons)
     {
-        set
-        {
-            if (value == _view.Colors)
-                return;
-            _view.Colors = value;
-            Close();
-        }
-    }
-
-    /// <summary>The colors of the icons, once the color theme is loaded. New colors end completion.</summary>
-    public SymbolIconColors? Icons
-    {
-        set
-        {
-            if (value == _view.Icons)
-                return;
-            _view.Icons = value;
-            Close();
-        }
+        if (colors == _view.Colors && icons == _view.Icons)
+            return;
+        _view.Colors = colors;
+        _view.Icons = icons;
+        Close();
     }
 
     public void AddCommands(CommandTable commands)
@@ -134,8 +145,8 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
             goOn => Accept(replace: true, goOn),
             needs
         );
-        commands.Add(CodeEditorCommands.SelectNextSuggestion, () => SelectBy(1));
-        commands.Add(CodeEditorCommands.SelectPrevSuggestion, () => SelectBy(-1));
+        commands.Add(CodeEditorCommands.SelectNextSuggestion, () => _session is not null && _filter.SelectBy(1));
+        commands.Add(CodeEditorCommands.SelectPrevSuggestion, () => _session is not null && _filter.SelectBy(-1));
     }
 
     /// <summary>Asks for completion, where the server completes and the user can type.</summary>
@@ -190,41 +201,8 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
     public bool OnKeyDown(KeyEventArgs e)
     {
         if (_session is null)
-            HideEmpty();
-        if (!SelectsAmongItems || e.KeyModifiers != KeyModifiers.None)
-            return false;
-        int count = _filter.Items.Count;
-        int selected = _filter.Selected;
-        CompletionListBox list = _view.List;
-        switch (e.Key)
-        {
-            case Key.Down:
-                return SelectBy(1);
-            case Key.Up:
-                return SelectBy(-1);
-            case Key.PageDown:
-                _filter.Select(CompletionPaging.Down(selected, list.FirstRow, list.VisibleRows, count));
-                return true;
-            case Key.PageUp:
-                _filter.Select(CompletionPaging.Up(selected, list.FirstRow, list.VisibleRows));
-                return true;
-            default:
-                return false;
-        }
-    }
-
-    /// <summary>Whether the list shows more than one item, among which Up and Down select.</summary>
-    private bool SelectsAmongItems => _session is not null && _filter.IsShowing && _filter.Items.Count > 1;
-
-    /// <summary>Selects the item <paramref name="step"/> rows on, round the list's ends, while it has more than one.</summary>
-    /// <returns>Whether it selected: otherwise the key goes on, as to the caret.</returns>
-    private bool SelectBy(int step)
-    {
-        if (!SelectsAmongItems)
-            return false;
-        int count = _filter.Items.Count;
-        _filter.Select((_filter.Selected + step + count) % count);
-        return true;
+            _view.HideNoSuggestions();
+        return _session is not null && e.KeyModifiers == KeyModifiers.None && _filter.SelectByKey(e.Key);
     }
 
     /// <summary>
@@ -253,7 +231,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
     /// <returns>Whether the list or a message showed.</returns>
     public bool Close()
     {
-        bool showedEmpty = HideEmpty();
+        bool showedEmpty = _view.HideNoSuggestions();
         if (_session is not { } session)
             return showedEmpty;
         bool showed = _filter.IsShowing || _filter.ShowsNoMatch;
@@ -268,6 +246,9 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
     {
         Close();
         _commit.Dispose();
+        _quickSuggest.Dispose();
+        _overtyping.Dispose();
+        _snippets.ChoiceSelected -= OnChoiceSelected;
         _view.Clicked -= OnClicked;
         _buffer.Changing -= OnBufferChanging;
         _buffer.TextChanged -= OnBufferTextChanged;
@@ -288,12 +269,22 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         if (!_textArea.ReadOnlySectionProvider.CanInsert(caret))
             return;
         var request = new CompletionRequest(_document.CurrentSnapshot, WordBefore(caret));
-        HideEmpty();
+        _view.HideNoSuggestions();
         CompletionSession session = _session ??= new CompletionSession();
         session.ByKey |= byKey;
         session.Pending?.Cancellation.Cancel();
         session.Pending = request;
-        AskAsync(session, request, trigger);
+        // A snippet's selected choice has its options, and no other items; its text may stay selected while they show.
+        CompletionList? choices = _snippets.Choices();
+        session.ChoiceSelection = choices is null ? null : Selected();
+        if (choices is null)
+        {
+            AskAsync(session, request, trigger);
+            return;
+        }
+        session.Pending = null;
+        session.Answer = new CompletionAnswer(choices, request) { IsChoice = true };
+        Update();
     }
 
     /// <summary>Shows the server's answer, unless completion ended or asked again meanwhile.</summary>
@@ -307,6 +298,8 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
                 trigger,
                 request.Cancellation.Token
             );
+            // As in VS Code, the clipboard is read before the list shows, for the snippets that have it.
+            string? clipboard = list is { NeedsClipboard: true } ? await _readClipboard() : null;
             if (_session != session || session.Pending != request)
                 return;
             session.Pending = null;
@@ -317,22 +310,23 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
                 if (session is { ByKey: true, Answer: null })
                 {
                     Close();
-                    _showsEmpty = true;
                     _view.ShowNoSuggestions(request.Word.Start);
                     return;
                 }
-                if (!session.ByKey && list is not { IsIncomplete: true })
+                if (!session.ByKey)
                 {
                     // An accept that waits for the text and caret that this answer is for goes on: there is nothing
-                    // to commit from, as when the list that showed matched nothing.
+                    // to commit from, as when the list that showed matched nothing. Some servers answer nothing,
+                    // incomplete, in strings and comments: asking again on each key there would never end.
                     Action? goOn = _filter.TakeWaitingKey();
                     Close();
+                    _quickSuggest.Quiet(request);
                     goOn?.Invoke();
                     return;
                 }
                 list ??= new CompletionList([], isIncomplete: false, resolve: null);
             }
-            session.Answer = new CompletionAnswer(list, request);
+            session.Answer = new CompletionAnswer(list, request, clipboard);
             Update();
         }
         catch (Exception e)
@@ -347,13 +341,13 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         if (_session is not { } session)
         {
             // "No suggestions." of an empty answer shows until the caret moves.
-            HideEmpty();
+            _view.HideNoSuggestions();
             return;
         }
         int caret = _textArea.Caret.Offset;
         CompletionRequest latest = session.Latest;
         if (
-            !_textArea.Selection.IsEmpty
+            (!_textArea.Selection.IsEmpty && Selected() != session.ChoiceSelection)
             || (!latest.IsStale && _buffer.GetLineByOffset(caret) != _buffer.GetLineByOffset(latest.Offset))
         )
         {
@@ -379,17 +373,6 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         _filter.Run(answer);
     }
 
-    /// <summary>Hides "No suggestions." of an empty answer, if it shows.</summary>
-    /// <returns>Whether it showed.</returns>
-    private bool HideEmpty()
-    {
-        if (!_showsEmpty)
-            return false;
-        _showsEmpty = false;
-        _view.Hide();
-        return true;
-    }
-
     /// <summary>
     /// Commits the item at <paramref name="index"/> of the list, as it was resolved, with
     /// <see cref="CompletionCommit"/>: completion ends first. The resolve of an item whose additional edits are still to
@@ -405,7 +388,21 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         ItemResolve? late =
             item.AdditionalEdits is null && answer.List.Resolves ? _resolver.Take(selected, answer.List) : null;
         Close();
-        return _commit.Commit(item, answer.Request, replace, late);
+        return _commit.Commit(item, answer, replace, late, _overtyping.Last);
+    }
+
+    /// <summary>
+    /// Runs a committed item's command, as VS Code does after the commit: asking for completion asks as typing would,
+    /// such as for the value after a property's name; the editor's other commands run as their keys do, such as
+    /// <see cref="CodeEditorCommands.TriggerParameterHints"/>. A server's own commands do not run: the editor has
+    /// nowhere to send them.
+    /// </summary>
+    private void RunCommand(string command)
+    {
+        if (command == CodeEditorCommands.TriggerSuggest)
+            Ask(new CompletionTrigger(CompletionTriggerKind.Invoked));
+        else
+            _runCommand(command);
     }
 
     /// <summary>
@@ -434,7 +431,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
 
     void ICompletionOwner.Commit(int index, bool replace) => Commit(index, replace);
 
-    /// <summary>Opens completion on the server's trigger characters, and when typing starts a word.</summary>
+    /// <summary>Opens completion on the server's trigger characters, and where typing opens it.</summary>
     private void OnTextEntered(object? sender, TextInputEventArgs e)
     {
         if (e.Text is not { Length: > 0 } text || _document.Features?.Completion is not { } provider)
@@ -442,28 +439,20 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         char typed = text[^1];
         if (provider.TriggerCharacters.Contains(typed))
             Ask(new CompletionTrigger(CompletionTriggerKind.TriggerCharacter, typed));
-        else if (_session is null && StartsWord(typed))
+        else if (_session is null && _quickSuggest.Opens(typed))
             Ask(new CompletionTrigger(CompletionTriggerKind.Invoked));
     }
 
     /// <summary>
-    /// Whether the character just typed starts a word outside a comment: it is the whole word before the caret, and no
-    /// word goes on after the caret. VS Code asks there too in strings, as its JSON and YAML settings say.
+    /// A caret that the keyboard moves filters, asks again or ends completion; any other move ends it.
     /// </summary>
-    private bool StartsWord(char typed)
+    private void OnCaretPositionChanged(object? sender, EventArgs e)
     {
-        int caret = _textArea.Caret.Offset;
-        if (!WordCharacters.IsWordCharacter(typed) || WordBefore(caret).Length != 1)
-            return false;
-        if (
-            caret < _buffer.GetLineByOffset(caret).EndOffset
-            && WordCharacters.IsWordCharacter(_buffer.GetCharAt(caret))
-        )
-            return false;
-        return _highlighter.ContextAt(caret) is not { Before: TokenType.Comment };
+        if (_caretMoves.Mover == CaretMover.Keyboard)
+            Update();
+        else
+            Close();
     }
-
-    private void OnCaretPositionChanged(object? sender, EventArgs e) => Update();
 
     /// <summary>A part of a change before where completion was asked makes the request stale.</summary>
     private void OnBufferChanging(object? sender, DocumentChangeEventArgs e)
@@ -485,18 +474,17 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
 
     private void OnClosingChange(object? sender, EventArgs e) => Close();
 
-    /// <summary>
-    /// The word before <paramref name="caret"/>, by VS Code's word characters, which ends at the caret. It reaches
-    /// back at most <see cref="HoverController.MaxWordReach"/> characters, as a hovered word does: a line of millions
-    /// of word characters costs no more.
-    /// </summary>
-    private TextRange WordBefore(int caret)
-    {
-        DocumentLine line = _buffer.GetLineByOffset(caret);
-        int first = Math.Max(line.Offset, caret - HoverController.MaxWordReach);
-        int start = caret;
-        while (start > first && WordCharacters.IsWordCharacter(_buffer.GetCharAt(start - 1)))
-            start--;
-        return TextRange.FromBounds(start, caret);
-    }
+    /// <summary>A snippet's choice is selected: its options show, once the selection is set, if it is still selected.</summary>
+    private void OnChoiceSelected(object? sender, EventArgs e) =>
+        _textArea.Dispatcher.Post(() =>
+        {
+            if (_changes.IsShown && _snippets.Choices() is not null)
+                Ask(new CompletionTrigger(CompletionTriggerKind.Invoked), byKey: true);
+        });
+
+    /// <summary>What the selection covers.</summary>
+    private TextRange Selected() =>
+        new(_textArea.Selection.SurroundingSegment?.Offset ?? 0, _textArea.Selection.Length);
+
+    private TextRange WordBefore(int caret) => CompletionRequest.WordBefore(_buffer, caret);
 }

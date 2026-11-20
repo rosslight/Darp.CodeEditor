@@ -56,20 +56,9 @@ internal sealed class Clipboard : IDisposable
     /// </summary>
     public async void Paste()
     {
-        if (!CanPaste() || TopLevel.GetTopLevel(_textArea)?.Clipboard is not { } clipboard)
+        if (!CanPaste())
             return;
-        string? text;
-        try
-        {
-            text = await clipboard.TryGetTextAsync();
-        }
-        catch (Exception e)
-        {
-            Logger
-                .TryGet(LogEventLevel.Warning, AssetFiles.LogArea)
-                ?.Log(this, "Reading the clipboard failed: {Exception}", e);
-            return;
-        }
+        string? text = await ReadTextAsync();
         if (!_disposed && text is not null)
             Paste(text);
     }
@@ -86,6 +75,26 @@ internal sealed class Clipboard : IDisposable
         using (Buffer.RunUpdate())
             _textArea.Selection.ReplaceSelectionWithText(text);
         _textArea.Caret.BringCaretToView();
+    }
+
+    /// <summary>
+    /// The clipboard's text, as it is; null for none, and when the platform's clipboard fails, which goes to the log.
+    /// </summary>
+    public async Task<string?> ReadTextAsync()
+    {
+        if (TopLevel.GetTopLevel(_textArea)?.Clipboard is not { } clipboard)
+            return null;
+        try
+        {
+            return await clipboard.TryGetTextAsync();
+        }
+        catch (Exception e)
+        {
+            Logger
+                .TryGet(LogEventLevel.Warning, AssetFiles.LogArea)
+                ?.Log(this, "Reading the clipboard failed: {Exception}", e);
+            return null;
+        }
     }
 
     private bool CanPaste() => VisibleText.CanInsert(_textArea, _textArea.Caret.Offset);

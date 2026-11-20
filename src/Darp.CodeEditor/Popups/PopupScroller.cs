@@ -18,6 +18,9 @@ internal sealed class PopupScroller : Control
     private readonly PopupSlider _slider = new();
     private double _offset;
 
+    /// <summary>The part of the content to scroll into view at the next arrange; null for none.</summary>
+    private Control? _scrollTo;
+
     /// <summary>
     /// Whether the content was taller than the scroller at the last measure, so that the slider took its gutter: the
     /// next measure starts from there, as content mostly keeps its height, so that its text is laid out once.
@@ -52,6 +55,16 @@ internal sealed class PopupScroller : Control
             }
             InvalidateMeasure();
         }
+    }
+
+    /// <summary>
+    /// Scrolls <paramref name="part"/>, a part of <see cref="Child"/>, into view once it is laid out: as little as it
+    /// takes, its top first when it is taller than the scroller.
+    /// </summary>
+    public void ScrollIntoView(Control part)
+    {
+        _scrollTo = part;
+        InvalidateArrange();
     }
 
     /// <summary>The slider's colors: at rest, under the pointer, and while dragged.</summary>
@@ -97,6 +110,21 @@ internal sealed class PopupScroller : Control
             _offset = Math.Clamp(_offset, 0, Math.Max(0, extent - finalSize.Height));
             double width = finalSize.Width - (_gutter ? PopupSlider.Thickness : 0);
             child.Arrange(new Rect(0, -_offset, Math.Max(0, width), extent));
+            if (_scrollTo?.TranslatePoint(default, child) is { } part && _scrollTo is { } scrolled)
+            {
+                _scrollTo = null;
+                double bottom = part.Y + scrolled.Bounds.Height - finalSize.Height;
+                double offset = Math.Clamp(
+                    Math.Min(part.Y, Math.Max(_offset, bottom)),
+                    0,
+                    Math.Max(0, extent - finalSize.Height)
+                );
+                if (offset != _offset)
+                {
+                    _offset = offset;
+                    child.Arrange(new Rect(0, -_offset, Math.Max(0, width), extent));
+                }
+            }
             _slider.Show(finalSize.Height, extent, _offset);
         }
         _slider.Arrange(new Rect(finalSize));

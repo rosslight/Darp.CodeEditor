@@ -80,6 +80,29 @@ public sealed class KeymapTests(UiFixture ui)
     }
 
     [Fact]
+    public void By_default_Alt_Up_and_Alt_Down_choose_the_signature_before_moving_lines_and_on_macOS_Ctrl_P_and_Ctrl_N_after_the_list()
+    {
+        foreach (bool mac in (bool[])[false, true])
+        {
+            var keymap = new CodeEditorKeymap(CodeEditorKeymap.DefaultBindings(mac));
+
+            Resolve(keymap, Key(Keys.Up, KeyModifiers.Alt))
+                .Commands.ShouldBe([CodeEditorCommands.ShowPrevParameterHint, CodeEditorCommands.MoveLinesUp]);
+            Resolve(keymap, Key(Keys.Down, KeyModifiers.Alt))
+                .Commands.ShouldBe([CodeEditorCommands.ShowNextParameterHint, CodeEditorCommands.MoveLinesDown]);
+            // Completion's list takes them first.
+            Resolve(keymap, Key(Keys.P, KeyModifiers.Control))
+                .Commands.ShouldBe(
+                    mac ? [CodeEditorCommands.SelectPrevSuggestion, CodeEditorCommands.ShowPrevParameterHint] : []
+                );
+            Resolve(keymap, Key(Keys.N, KeyModifiers.Control))
+                .Commands.ShouldBe(
+                    mac ? [CodeEditorCommands.SelectNextSuggestion, CodeEditorCommands.ShowNextParameterHint] : []
+                );
+        }
+    }
+
+    [Fact]
     public void A_punctuation_key_matches_where_the_layout_types_its_character()
     {
         CodeEditorKeymap keymap = Keymap("ctrl+/");

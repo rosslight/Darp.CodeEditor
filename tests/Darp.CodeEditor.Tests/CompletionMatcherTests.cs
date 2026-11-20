@@ -121,4 +121,152 @@ public sealed class CompletionMatcherTests
 
         order.ShouldBe([3, 2, 1, 0]);
     }
+
+    [Fact]
+    public void Matching_gracefully_tolerates_two_neighbouring_characters_swapped_at_a_cost_of_3()
+    {
+        _matcher.Match("prnit", "print", "print", true).ShouldBeNull();
+
+        (int score, int[] highlights) = _matcher
+            .Match("prnit", "print", "print", true, graceful: true)
+            .ShouldNotBeNull();
+
+        highlights.ShouldBe([0, 1, 2, 3, 4]);
+        score.ShouldBe(_matcher.Match("print", "print", "print", true).ShouldNotBeNull().Score - 3);
+    }
+
+    [Fact]
+    public void Matching_gracefully_compares_the_swaps_with_the_text_as_typed_as_VS_Code_does()
+    {
+        // "cno" matches "console" as typed, at -8; swapped to "con", it matches better, at 18 less 3, as in VS Code.
+        _matcher.Match("cno", "console", "console", true).ShouldNotBeNull().Score.ShouldBe(-8);
+        (int score, int[] highlights) = _matcher
+            .Match("cno", "console", "console", true, graceful: true)
+            .ShouldNotBeNull();
+
+        score.ShouldBe(15);
+        highlights.ShouldBe([0, 1, 2]);
+    }
+
+    [Fact]
+    public void Past_its_budget_a_ranking_swaps_only_for_an_item_that_the_text_as_typed_does_not_match()
+    {
+        var spent = new CompletionMatcher(cellsPerRank: 0);
+
+        List<RankedCompletion> ranked = spent.Rank(
+            [new("cno", "console", "console", true), new("prnit", "print", "print", true)],
+            TestContext.Current.CancellationToken
+        );
+
+        ranked.Single(r => r.Index == 0).Highlights.ShouldBe([0, 2, 4]);
+        ranked.Single(r => r.Index == 0).Score.ShouldBe(-8);
+        ranked.Single(r => r.Index == 1).Highlights.ShouldBe([0, 1, 2, 3, 4]);
+    }
+
+    [Fact]
+    public void A_ranking_scores_alike_items_alike_whatever_its_budget()
+    {
+        // Long, as a server's names may be: the table finds a better way than one pass does.
+        string typed = "aabb" + string.Concat(Enumerable.Repeat("ab", 29));
+        string label = "alpha0" + string.Concat(Enumerable.Range(0, 122).Select(c => c % 2 == 0 ? 'a' : 'b'));
+        CompletionCandidate[] items = [.. Enumerable.Repeat(new CompletionCandidate(typed, label, label, true), 100)];
+        int exact = _matcher.Rank(items[..1], TestContext.Current.CancellationToken).Single().Score;
+        int cheaper = new CompletionMatcher(cellsPerRank: 0)
+            .Rank(items[..1], TestContext.Current.CancellationToken)
+            .Single()
+            .Score;
+        exact.ShouldNotBe(cheaper);
+        long one = new FuzzyScorer().Cells(typed, 0, label);
+
+        // A budget for half of them: the whole ranking is scored the cheaper way.
+        List<RankedCompletion> ranked = new CompletionMatcher(cellsPerRank: 50 * one).Rank(
+            items,
+            TestContext.Current.CancellationToken
+        );
+
+        ranked.Select(r => r.Score).ShouldAllBe(score => score == cheaper);
+        ranked.Select(r => r.Index).ShouldBe(Enumerable.Range(0, 100));
+    }
+
+    [Theory]
+    [InlineData("print", "print")]
+    [InlineData("pri", "print")]
+    [InlineData("Pri", "print")]
+    [InlineData("fb", "FooBar")]
+    [InlineData("lin", "write_line")]
+    [InlineData("ab", "x_ab_cd")]
+    public void Past_its_budget_a_ranking_scores_the_way_that_one_pass_finds_as_the_table_scores_it(
+        string typed,
+        string label
+    )
+    {
+        var spent = new CompletionMatcher(cellsPerRank: 0);
+        CompletionCandidate[] items = [new(typed, label, label, true)];
+
+        List<RankedCompletion> onePass = spent.Rank(items, TestContext.Current.CancellationToken);
+        List<RankedCompletion> table = _matcher.Rank(items, TestContext.Current.CancellationToken);
+
+        onePass.Single().Score.ShouldBe(table.Single().Score);
+        onePass.Single().Highlights.ShouldBe(table.Single().Highlights);
+    }
+
+    [Fact]
+    public void Past_its_budget_a_ranking_still_tolerates_a_typo_and_finds_no_more_than_the_table()
+    {
+        var spent = new CompletionMatcher(cellsPerRank: 0);
+        CompletionCandidate[] items =
+        [
+            new("prnit", "print", "print", true),
+            new("cno", "console", "console", true),
+            new("oo", "FooBar", "FooBar", true),
+        ];
+
+        List<RankedCompletion> onePass = spent.Rank(items, TestContext.Current.CancellationToken);
+        List<RankedCompletion> table = _matcher.Rank(items, TestContext.Current.CancellationToken);
+
+        onePass.Select(r => r.Index).Order().ShouldBe(table.Select(r => r.Index).Order());
+        foreach (RankedCompletion ranked in onePass)
+            ranked.Score.ShouldBeLessThanOrEqualTo(table.Single(r => r.Index == ranked.Index).Score);
+    }
+
+    [Fact]
+    public void A_rankings_budget_counts_the_table_that_finds_a_labels_matched_characters()
+    {
+        // The label lacks the first typed character: its matched characters are found from the second on.
+        CompletionCandidate[] items = [new("xab", "yazab", "xab", FilterTextIsLabel: false)];
+        int[] exact = _matcher.Rank(items, TestContext.Current.CancellationToken).Single().Highlights;
+        int[] cheaper = new CompletionMatcher(cellsPerRank: 0)
+            .Rank(items, TestContext.Current.CancellationToken)
+            .Single()
+            .Highlights;
+        exact.ShouldNotBe(cheaper);
+        long filterText = new FuzzyScorer().Cells("xab", 0, "xab");
+
+        // A budget for the filter text's table alone: with the label's, the ranking is past it.
+        new CompletionMatcher(cellsPerRank: filterText)
+            .Rank(items, TestContext.Current.CancellationToken)
+            .Single()
+            .Highlights.ShouldBe(cheaper);
+    }
+
+    [Fact]
+    public void Matching_gracefully_swaps_neither_the_first_character_nor_after_the_eighth()
+    {
+        _matcher.Match("rpint", "print", "print", true, graceful: true).ShouldBeNull();
+        _matcher.Match("abcdefhgij", "abcdefghij", "abcdefghij", true, graceful: true).ShouldNotBeNull();
+        _matcher.Match("abcdefghji", "abcdefghij", "abcdefghij", true, graceful: true).ShouldBeNull();
+    }
+
+    [Fact]
+    public void Lists_of_up_to_2000_items_rank_gracefully_and_longer_ones_strictly()
+    {
+        CompletionCandidate[] items =
+        [
+            .. Enumerable.Range(0, 1999).Select(i => new CompletionCandidate("prnit", $"x{i}", $"x{i}", true)),
+            new("prnit", "print", "print", true),
+        ];
+
+        _matcher.Rank(items, TestContext.Current.CancellationToken).Select(r => r.Index).ShouldBe([1999]);
+        _matcher.Rank([.. items, new("prnit", "x", "x", true)], TestContext.Current.CancellationToken).ShouldBeEmpty();
+    }
 }

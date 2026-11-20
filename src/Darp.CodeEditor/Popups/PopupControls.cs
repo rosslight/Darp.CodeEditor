@@ -51,6 +51,18 @@ internal sealed class PopupDock : DockPanel
     protected override Type StyleKeyOverride => typeof(PopupDock);
 }
 
+/// <summary>A box around a part of a popup, such as signature help's active signature on a background of its own.</summary>
+internal sealed class PopupBox : Border
+{
+    public PopupBox()
+    {
+        Margin = default;
+        BorderThickness = default;
+    }
+
+    protected override Type StyleKeyOverride => typeof(PopupBox);
+}
+
 /// <summary>A line between a popup's parts.</summary>
 internal sealed class PopupLine : Border
 {

@@ -52,6 +52,7 @@ internal sealed class EditorView : IDisposable
     /// <summary>Everything the view made, in the order it made them: disposed the other way round.</summary>
     private readonly IDisposable[] _features;
 
+    private readonly CaretMoves _caretMoves;
     private readonly TextChanges _changes;
     private readonly AutoClosingPairs _pairs;
     private readonly Typing _typing;
@@ -83,7 +84,10 @@ internal sealed class EditorView : IDisposable
         _context = context;
         TextArea area = context.Area;
         CodeDocument document = context.Document;
+        // Before the features, which run each other's commands; they add them once all are made.
+        _commands = new CommandTable(area);
         Highlighter = new BackgroundTextMateHighlighter(area.TextView, area.Document, context.Editor.Dispatcher, null);
+        _caretMoves = new CaretMoves(context.Editor, area);
         _changes = new TextChanges(area);
         _pairs = new AutoClosingPairs(area, document, Highlighter, _changes, context.Options);
         _typing = new Typing(area, document, Highlighter, _changes, _pairs);
@@ -103,13 +107,25 @@ internal sealed class EditorView : IDisposable
             Highlighter,
             _snippets,
             _changes,
-            context.Background
+            _caretMoves,
+            context.Background,
+            RunCommand,
+            _clipboard.ReadTextAsync
         );
-        _signatureHelp = new SignatureHelpController(context.Editor, area, document, Highlighter);
+        _signatureHelp = new SignatureHelpController(
+            context.Editor,
+            area,
+            document,
+            Highlighter,
+            _caretMoves,
+            context.Background,
+            context.Options
+        );
         _search = new FindController(context, _changes);
         _features =
         [
             Highlighter,
+            _caretMoves,
             _changes,
             new UndoCommands(area, document),
             new Comments(area, document, _changes),
@@ -132,7 +148,6 @@ internal sealed class EditorView : IDisposable
             _signatureHelp,
             _search,
         ];
-        _commands = new CommandTable(area);
         foreach (IEditorFeature feature in _features.OfType<IEditorFeature>())
             feature.AddCommands(_commands);
     }
@@ -185,14 +200,17 @@ internal sealed class EditorView : IDisposable
         }
         if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && Dismiss())
             return true;
-        return _context.Area.IsFocused
-            && (
-                _completion.OnKeyDown(e)
-                || _signatureHelp.OnKeyDown(e)
-                || _snippets.OnKeyDown(e)
-                || _typing.OnKeyDown(e)
-                || CaretKeys.OnKeyDown(_context.Area, e)
-            );
+        if (!_context.Area.IsFocused)
+            return false;
+        // With Ctrl or Cmd, a key that reaches the text runs one of AvaloniaEdit's commands, such as paste, which may
+        // move the caret within the key's event, as when the clipboard answers at once: that is no typing.
+        if ((e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) == 0)
+            _caretMoves.OnKeyboard();
+        return _completion.OnKeyDown(e)
+            || _signatureHelp.OnKeyDown(e)
+            || _snippets.OnKeyDown(e)
+            || _typing.OnKeyDown(e)
+            || CaretKeys.OnKeyDown(_context.Area, e);
     }
 
     /// <summary>
@@ -232,6 +250,7 @@ internal sealed class EditorView : IDisposable
     {
         if (!_context.Area.IsFocused)
             return;
+        _caretMoves.OnKeyboard();
         _completion.OnTextInput(e);
         if (!e.Handled)
             _typing.OnTextInput(e);
@@ -242,6 +261,7 @@ internal sealed class EditorView : IDisposable
         _pairs.OnOptionsChanged(old.AutoClosing, now.AutoClosing);
         _brackets.OnOptionsChanged(old.MatchBrackets, now.MatchBrackets);
         _occurrences.OnOptionsChanged(old.OccurrencesHighlight, now.OccurrencesHighlight);
+        _signatureHelp.OnOptionsChanged(old.ParameterHints, now.ParameterHints);
     }
 
     /// <summary>Runs a command, as its key does, where it applies.</summary>
@@ -327,8 +347,7 @@ internal sealed class EditorView : IDisposable
     {
         PopupColors popups =
             theme is not null && colors is not null ? PopupColors.From(theme, colors) : PopupColors.Default;
-        _completion.Colors = popups;
-        _completion.Icons = icons;
+        _completion.SetColors(popups, icons);
         _snippets.Colors = colors;
         _signatureHelp.Colors = popups;
         _brackets.Colors = colors;

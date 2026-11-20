@@ -43,6 +43,16 @@ public static class CodeEditorCommands
     public const string TriggerParameterHints = "editor.action.triggerParameterHints";
 
     /// <summary>
+    /// Makes the signature before the active one active, or the last, while signature help shows several.
+    /// </summary>
+    public const string ShowPrevParameterHint = "showPrevParameterHint";
+
+    /// <summary>
+    /// Makes the signature after the active one active, or the first, while signature help shows several.
+    /// </summary>
+    public const string ShowNextParameterHint = "showNextParameterHint";
+
+    /// <summary>
     /// Opens the search bar and puts the keyboard in its query, which starts with the selection within one line, or the
     /// word at the caret, as <see cref="FindOptions.SeedSearchStringFromSelection"/> says.
     /// </summary>
