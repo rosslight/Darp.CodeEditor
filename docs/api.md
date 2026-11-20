@@ -40,7 +40,7 @@ if (compilation.Succeeded)
 
 | Package | Public types |
 |---|---|
-| `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorColorTheme`, `CodeEditorViewState`, `CodeEditorStyles`, `TextSnapshot`, `TextRange`, `TextPosition`, `TextSelection`, `Indentation`, `Diagnostic`, `DiagnosticSeverity`; the keymap: `CodeEditorKeymap`, `CodeEditorKeyBinding`, `CodeEditorCommands`; the options: `CodeEditorOptions`, `AutoClosingOptions`, `AutoClosingMode`, `ParameterHintsOptions`, `AutoIndent`, `QuickSuggestions` |
+| `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorColorTheme`, `CodeEditorViewState`, `CodeEditorStyles`, `TextSnapshot`, `TextRange`, `TextPosition`, `TextSelection`, `Indentation`, `Diagnostic`, `DiagnosticRelatedInformation`, `DiagnosticSeverity`; the keymap: `CodeEditorKeymap`, `CodeEditorKeyBinding`, `CodeEditorCommands`; the options: `CodeEditorOptions`, `AutoClosingOptions`, `AutoClosingMode`, `HoverOptions`, `ParameterHintsOptions`, `AutoIndent`, `QuickSuggestions` |
 | `Darp.CodeEditor.CSharpScript` | `CSharpScriptServer`, `CSharpScriptServerOptions`, `CSharpScriptEnvironment<TGlobals>`, `CSharpScriptDocument<TGlobals>`, `CSharpScriptCompilation<TGlobals>`, `CSharpScriptAssembly<TGlobals>`, `CSharpCodeLanguage` (adds `CodeLanguage.CSharp`) |
 | `Darp.CodeEditor.CSharpScript.Runner` | `CSharpScriptSession` (starts sessions, and scripts in them), `CSharpScriptSession<TSessionSide, TSessionObject>`, `CSharpScriptSessionOptions`, `CSharpScriptRun`, `CSharpScriptException`, `CSharpScriptSessionExit`, `CSharpScriptSessionExitReason`, and the contracts that runner-side script APIs implement: `IScriptSessionObject<TSelf, TAppSide>`, `IScriptGlobalsFactory<TGlobals, TInput>`, `IScriptGlobalsFactory<TGlobals>` |
 
@@ -240,6 +240,7 @@ The default keys on Windows and Linux; macOS in brackets where it differs beyond
 | Ctrl+], Ctrl+[ | `editor.action.indentLines`, `editor.action.outdentLines` | indents and outdents the lines to the next or the previous tab stop |
 | Ctrl+L | `expandLineSelection` | selects the lines whole; again, it takes the next line too |
 | Ctrl+Shift+\ | `editor.action.jumpToBracket` | goes to the bracket that matches the one at the start of the selection; elsewhere to the closing bracket of the pair around it, or else to the next bracket |
+| F8, Shift+F8; Alt+F8, Shift+Alt+F8 | `editor.action.marker.nextInFiles`, `editor.action.marker.prevInFiles`; `editor.action.marker.next`, `editor.action.marker.prev` | the next and the previous of the document's errors, warnings and information, the most severe first, then by position, after the last the first; the caret goes there and the hover at the caret shows it with which problem it is of how many, in the UI culture's language, English or German, as VS Code's widget for it does, and shows it again, or closes, when new diagnostics come. Hints are left out. The `InFiles` commands stay in the document, which is all that an editor knows |
 | F7, Shift+F7 | `editor.action.wordHighlight.next`, `editor.action.wordHighlight.prev` | the next and the previous occurrence of the symbol at the caret, while they show, in the middle of the view unless it shows already (section 6) |
 | Shift+Alt+Right, Shift+Alt+Left (macOS: Ctrl+Shift+Cmd) | `editor.action.smartSelect.expand`, `editor.action.smartSelect.shrink` | expands the selection to the next range around it, and shrinks it back (section 6). In a rectangle selection the keys go on to AvaloniaEdit's, which grow the rectangle |
 
@@ -316,8 +317,11 @@ high contrast inherits from Light, so it shows Light+ without one. To make one e
 `ThemeVariantScope`: its popups turn dark too. Setting `ColorTheme` on the editor changes its text area and its
 popups; the search bar and the scroll bars follow the theme variant.
 
-- **Errors:** squiggles in the theme's error, warning and info colors. Hovering shows the messages above the
-  server's information.
+- **Errors:** squiggles in the theme's error, warning and info colors. Hovering shows the diagnostics above the
+  server's information, each as VS Code shows it: its severity's icon in the theme's `problems*Icon.foreground`, the
+  message in the editor's font, its `Source` and `Code`, dimmed, the code as a link to its `CodeDescription` page, and
+  its `RelatedInformation`, of which places in the same document are links there; places in other documents wait for
+  an app-facing API (Q121). F8 and Shift+F8 go through the diagnostics (the keys above).
 - **Hover:** Markdown, with emphasis, inline code, lists and links. Code blocks are highlighted with the editor's
   grammar and colors, on the hover's background; inline code is on `textCodeBlock.background`, and links are in
   `textLink.foreground`. It shows all of its content, as VS Code's hover does: it grows up to two thirds of the
@@ -433,7 +437,9 @@ How the client talks to a server, where the protocol leaves a choice:
   written to the server when they arrive. Diagnostics find their document by its file URI in whatever form the
   server writes it: decoded, with the drive letter and the host in any case. Servers built on VS Code's URI library
   write `file:///C:/a.txt` as `file:///c%3A/a.txt`; the same rule finds two documents with one file path. A
-  diagnostic without a severity is an error, as in VS Code. Diagnostics belong to the process that
+  diagnostic without a severity is an error, as in VS Code. The client advertises `relatedInformation` and
+  `codeDescriptionSupport`, and keeps a diagnostic's `source`, its code description's page and its related places; a
+  related place whose URI is not absolute is dropped. Diagnostics belong to the process that
   sent them: when it ends, by a crash, a hang or disposal, the documents' diagnostics are cleared.
 - **Server requests** run on the thread pool, and reading never waits for them, so responses and cancellations always
   get through: `workspace/configuration` calls `Settings` once per item, with the scope's path for a `file:` URI.
@@ -494,17 +500,20 @@ How the client talks to a server, where the protocol leaves a choice:
   text area's selection color; code blocks in the editor's font and colors on its background, highlighted with the
   document's grammar; inline code as a small span in the editor's font family on `textCodeBlock.background`, at the
   size of the text around it, so that it fits its line.
-- **The hover's size:** a hover shows all of its content, as VS Code's does: the diagnostics' messages, the most
-  severe first and at most 50 of them, and all of the server's answer. So that the UI thread stays within a frame, it
+- **The hover's size:** a hover shows all of its content, as VS Code's does: all the diagnostics there, the most
+  severe first, then in the server's order, and all of the server's answer. So that the UI thread stays within a frame, it
   builds and lays out a part at a time, of at most 2,000 characters on 50 lines in 250 runs of one style or color, as
   much as a whole hover showed before: the first as the popup opens, the next ones in the frames after it, long code
   blocks and paragraphs in pieces. The UI thread builds and lays out every run one by one, at about 10 µs a run and
   1 µs a character, so the largest part takes it about 2 ms, with the frame about 7 ms (BenchmarkDotNet, i7-13700).
+  A hover of 210,000 characters in 11,000 runs, 300 paragraphs and a code block of 3,000 lines, opens in 6.6 ms,
+  scrolls a step with its frame in 7.7 ms, and is built in full in 412 ms over the frames of its parts.
   Lines are counted at `\r\n`, `\n` and `\r`, and also where the layout of text breaks them, such as the Unicode
   line separator; a part never splits a surrogate pair. Completion's details and signature help show at most one
-  part's worth, cut where it runs out, before anything reads more of their text. Finding the diagnostics under the pointer puts in order only those it keeps: with the
-  hover's text, 0.75 ms for 10,000 on one character in the worst order, where each one found beats those before
-  (BenchmarkDotNet, i7-13700).
+  part's worth, cut where it runs out, before anything reads more of their text. The diagnostics under the pointer are
+  found when the delay is over and put in order as the parts read them, from a heap: thousands on one character cost
+  each part only its own, and the first part's among 10,000 takes 0.74 ms (BenchmarkDotNet, i7-13700). A message
+  or a related place larger than a part goes in pieces too.
 - **The shown part of a line.** The editor's views work only on the part of each line that the view shows, its first
   3,000 characters: AvaloniaEdit collapses the rest of a longer line into "...", which shows none of it (design.md
   #106). Squiggles are drawn only in the shown part, the hover finds no text over "..." and its word stops where the
@@ -1225,7 +1234,9 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   sideways;
   a frame with 10,000 errors over all of the text allocates under 1 MB more than one with one such error, where
   reading them for each line in view took 8.4 MB;
-- hover: the diagnostics' messages, with their codes, above the server's Markdown, whose code block is highlighted with
+- hover: the diagnostics, each with its severity's icon, its message, its source and its code dimmed, the code
+  underlined as a link to its page, and its related places, a place in the document a link that moves the caret there
+  and one in another document none, all in the editor's font, above the server's Markdown, whose code block is highlighted with
   the document's grammar in the editor's font and colors on the popup's background; in the editor's popup, in the
   window's overlay layer, inside a window narrower than the popup. An editor in a dark `ThemeVariantScope` of a light
   window shows Dark+'s hover background, in its pixels. Inline code shows in the editor's font on Dark+'s
@@ -1248,7 +1259,13 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   pieces of at most a part, also a diagnostic message of 20,000 words, an answer of 1,000 lines and a paragraph of
   800 runs, while completion's details and signature help show at most their budget's; lines count at `\r\n`, `\n`,
   `\r` and the line separator; neither a piece nor a cut splits a surrogate pair; and a popup whose space is not a
-  whole number of pixels stays inside the window;
+  whole number of pixels stays inside the window. Of 10,000 diagnostics on one character, the most severe are found
+  first, and a hover reads them a part at a time as it builds its parts, errors first; a diagnostic without a message
+  shows its code, and a related place longer than a part goes in pieces. F8 and Shift+F8, and Alt+F8 and Shift+Alt+F8,
+  go through errors, warnings and information with wraparound, the most severe first and hints left out, showing which
+  problem it is of how many, in English and German; a diagnostic out of view scrolls into view, one at a word's end
+  shows its own, new diagnostics show in the problem that shows or close it without one there, and without
+  diagnostics F8 does nothing;
 - the Markdown subset: emphasis, also nested, paired as CommonMark pairs it, also in text with thousands of
   delimiters that never close, inline code, escapes, links that open only http and https pages, nested
   lists, hard line breaks, headings, rules and fenced code blocks; and hover answers as `MarkupContent`, `MarkedString`
@@ -1277,8 +1294,8 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   the screen of a 4K window: preparing it takes the server's thread 0.9 ms, 4.0 ms when it is about text 100 edits
   old; taking it in takes the UI thread 13 µs, 79 µs after 100 edits since; drawing the squiggles 2.9 ms, and 3.2 ms
   with each error over all of the text; and the
-  headless frame, which also rasterizes, 107 ms against 92 ms without diagnostics. Finding what a hover shows among
-  10,000 on one character, each one found beating those before, takes 0.75 ms. Taking a server's tokens on every
+  headless frame, which also rasterizes, 107 ms against 92 ms without diagnostics. Finding the first part of a hover
+  among 10,000 on one character, each one found beating those before, takes 0.74 ms. Taking a server's tokens on every
   character of the 32 lines on screen of an 800 by 600 window, 3,000 a line, and drawing the frame after it takes
   57 ms, and 300 a line 45 ms; taking them and laying out the lines alone, 35 ms and 28 ms. One error over 100
   unwrapped lines of 3,000 characters in an 800 by 2,160 window takes 3.7 ms to draw. Showing the
