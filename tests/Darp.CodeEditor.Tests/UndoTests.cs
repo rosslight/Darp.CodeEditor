@@ -19,6 +19,8 @@ public sealed class UndoTests(UiFixture ui)
             await CodeLanguage.Json.Loaded;
             using EditorWindow window = MarkedText.Show("|", CodeLanguage.Json);
             CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            // A pair that stays out of strings closes only once the grammar can tell.
+            await window.TokensKnownAsync();
             foreach (string typed in (string[])["[", "1", ",", " ", "2"])
                 window.Type(typed);
             window.Press(Key.Z, EditorWindow.Command);
