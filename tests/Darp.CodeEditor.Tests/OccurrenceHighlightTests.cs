@@ -241,6 +241,25 @@ public sealed class OccurrenceHighlightTests(UiFixture ui)
     /// of text that is gone: nothing shows.
     /// </summary>
     [Fact]
+    public Task A_document_shown_in_an_editor_with_the_keyboard_gets_its_occurrences() =>
+        _ui.Run(async () =>
+        {
+            var time = new ManualTime();
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "abc abc");
+            using CodeDocument second = server.CreateDocument(CodeLanguage.PlainText, "def def");
+            using EditorWindow window = Show(document);
+            await CompletionTests.StartServingAsync(server, document);
+            await Wait.UntilAsync(() => second.Features is not null);
+
+            window.Editor.Document = second;
+            Advance(time, s_pause);
+
+            await Wait.UntilAsync(() => window.Editor.Occurrences.Count > 0);
+        });
+
+    [Fact]
     public Task Occurrences_that_come_after_an_edit_or_once_the_editor_shows_another_document_show_nothing() =>
         _ui.Run(async () =>
         {

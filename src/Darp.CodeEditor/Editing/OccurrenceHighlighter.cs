@@ -60,6 +60,9 @@ internal sealed class OccurrenceHighlighter : IBackgroundRenderer, IDisposable
         area.GotFocus += OnFocused;
         _buffer.Changing += OnChanging;
         area.TextView.BackgroundRenderers.Add(this);
+        // A document shown in an editor that has the keyboard gets no focus event, and its caret is already placed.
+        if (area.IsFocused)
+            Pause();
     }
 
     /// <summary>Behind the selection and the text.</summary>
