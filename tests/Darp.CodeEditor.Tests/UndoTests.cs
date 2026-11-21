@@ -14,9 +14,9 @@ public sealed class UndoTests(UiFixture ui)
 
     [Fact]
     public Task Typing_over_a_closing_bracket_keeps_what_can_be_redone() =>
-        _ui.Run(() =>
+        _ui.Run(async () =>
         {
-            using EditorWindow window = MarkedText.Show("|", CodeLanguage.Json);
+            using EditorWindow window = await ShowColored("|", CodeLanguage.Json);
             CodeDocument document = window.Editor.Document.ShouldNotBeNull();
             foreach (string typed in (string[])["[", "1", ",", " ", "2"])
                 window.Type(typed);
