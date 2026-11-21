@@ -109,7 +109,9 @@ public sealed class KeyBindingTests(UiFixture ui)
         {
             using EditorWindow window = MarkedText.Show("text|", CodeLanguage.PlainText);
             var app = new CountingCommand();
-            window.Window.KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.Oem2, s_command), Command = app });
+            window.Window.KeyBindings.Add(
+                new KeyBinding { Gesture = new KeyGesture(Key.Oem2, s_command), Command = app }
+            );
 
             window.Press(Key.Oem2, s_command);
 
