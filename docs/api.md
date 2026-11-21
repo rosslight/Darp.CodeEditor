@@ -147,7 +147,7 @@ Editor.KeyBindings.RemoveAll(binding => binding.Gesture == replace);
 | `TriggerParameterHints` | Ctrl+Shift+Space |
 | `Find`, `Replace` | Ctrl+F, Ctrl+H (macOS: Alt+Cmd+F) |
 | `FindNext`, `FindPrevious` | F3, Shift+F3 (macOS also Cmd+G, Shift+Cmd+G) |
-| `CommentLine` | Ctrl+/, the number pad's /; on Linux also Ctrl+Shift+7, the / of a German layout |
+| `CommentLine` | Ctrl+/, the number pad's / |
 | `Undo`, `Redo` | Ctrl+Z; Ctrl+Y, Ctrl+Shift+Z |
 | `Cut`, `Copy`, `Paste`, `SelectAll` | Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A |
 

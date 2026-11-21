@@ -315,18 +315,9 @@ public sealed class KeyBindingTests(UiFixture ui)
         });
 
     [Fact]
-    public void The_comment_key_has_a_second_binding_on_Linux_for_the_slash_of_a_German_layout()
-    {
-        var withShift = new KeyGesture(Key.D7, KeyModifiers.Control | KeyModifiers.Shift);
-
-        DefaultKeys.Table(mac: false, linux: true).ShouldContain((CodeEditorCommands.CommentLine, withShift));
-        DefaultKeys.Table(mac: false, linux: false).ShouldNotContain((CodeEditorCommands.CommentLine, withShift));
-    }
-
-    [Fact]
     public void On_macOS_Cmd_takes_Ctrls_place_but_for_Ctrl_Space()
     {
-        (string Id, KeyGesture Gesture)[] keys = [.. DefaultKeys.Table(mac: true, linux: false)];
+        (string Id, KeyGesture Gesture)[] keys = [.. DefaultKeys.Table(mac: true)];
 
         keys.ShouldContain((CodeEditorCommands.TriggerSuggest, new KeyGesture(Key.Space, KeyModifiers.Control)));
         keys.ShouldContain((CodeEditorCommands.TriggerSuggest, new KeyGesture(Key.Escape, KeyModifiers.Alt)));

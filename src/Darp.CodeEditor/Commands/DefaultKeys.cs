@@ -11,7 +11,7 @@ internal static class DefaultKeys
 {
     /// <summary>The bindings of this operating system, for <paramref name="editor"/>.</summary>
     public static IEnumerable<KeyBinding> For(CodeEditor editor) =>
-        Table(OperatingSystem.IsMacOS(), OperatingSystem.IsLinux())
+        Table(OperatingSystem.IsMacOS())
             .Select(key => new KeyBinding { Gesture = key.Gesture, Command = new KeyCommand(editor, key.Id) });
 
     /// <summary>Puts the defaults that remain behind the app's bindings, in their order.</summary>
@@ -28,7 +28,7 @@ internal static class DefaultKeys
     /// The commands and their keys: Cmd takes Ctrl's place on macOS, except for Ctrl+Space, as Cmd+Space is the system's
     /// search. Where a key has two commands, the first that applies runs.
     /// </summary>
-    internal static IEnumerable<(string Id, KeyGesture Gesture)> Table(bool mac, bool linux)
+    internal static IEnumerable<(string Id, KeyGesture Gesture)> Table(bool mac)
     {
         KeyModifiers command = mac ? KeyModifiers.Meta : KeyModifiers.Control;
         yield return (CodeEditorCommands.TriggerSuggest, new KeyGesture(Key.Space, KeyModifiers.Control));
@@ -55,9 +55,6 @@ internal static class DefaultKeys
 
         yield return (CodeEditorCommands.CommentLine, new KeyGesture(Key.Oem2, command));
         yield return (CodeEditorCommands.CommentLine, new KeyGesture(Key.Divide, command));
-        // On X11, the "/" of a German layout, Shift+7, arrives as the 7 key with Shift.
-        if (linux)
-            yield return (CodeEditorCommands.CommentLine, new KeyGesture(Key.D7, command | KeyModifiers.Shift));
 
         yield return (CodeEditorCommands.Undo, new KeyGesture(Key.Z, command));
         if (!mac)
