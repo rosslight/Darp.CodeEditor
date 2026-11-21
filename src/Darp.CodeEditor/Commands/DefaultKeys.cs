@@ -4,8 +4,8 @@ using Avalonia.Input;
 namespace Darp.CodeEditor.Commands;
 
 /// <summary>
-/// The editor's default keys: ordinary <see cref="KeyBinding"/>s, which <see cref="CodeEditor"/> appends to its
-/// <c>KeyBindings</c> when it is first attached, after those of the app's XAML, so that the app's run first.
+/// The editor's default keys: ordinary <see cref="KeyBinding"/>s in <see cref="CodeEditor"/>'s <c>KeyBindings</c>, which
+/// go behind those of the app's XAML when it is first attached, so that the app's run first.
 /// </summary>
 internal static class DefaultKeys
 {
@@ -13,6 +13,16 @@ internal static class DefaultKeys
     public static IEnumerable<KeyBinding> For(CodeEditor editor) =>
         Table(OperatingSystem.IsMacOS(), OperatingSystem.IsLinux())
             .Select(key => new KeyBinding { Gesture = key.Gesture, Command = new KeyCommand(editor, key.Id) });
+
+    /// <summary>Puts the defaults that remain behind the app's bindings, in their order.</summary>
+    public static void MoveLast(List<KeyBinding> bindings)
+    {
+        KeyBinding[] defaults = [.. bindings.Where(IsDefault)];
+        bindings.RemoveAll(IsDefault);
+        bindings.AddRange(defaults);
+    }
+
+    private static bool IsDefault(KeyBinding binding) => binding.Command is KeyCommand;
 
     /// <summary>
     /// The commands and their keys: Cmd takes Ctrl's place on macOS, except for Ctrl+Space, as Cmd+Space is the system's

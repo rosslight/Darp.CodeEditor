@@ -80,11 +80,11 @@ namespace Darp.CodeEditor;
 /// <para>
 /// The editor's keys are ordinary <c>KeyBindings</c>, for the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), undo (Ctrl+Z,
 /// Ctrl+Y, Ctrl+Shift+Z), search (Ctrl+F, Ctrl+H, F3, Shift+F3), completion (Ctrl+Space, Ctrl+I), signature help
-/// (Ctrl+Shift+Space) and comments (Ctrl+/). On macOS, Cmd takes Ctrl's place, but for Ctrl+Space. They join
-/// <c>KeyBindings</c> when the editor is first attached, after those of the app's XAML, which so run first. An app adds
-/// one later with <c>Insert(0, …)</c>, and removes a default from <c>Loaded</c> on with <c>RemoveAll</c>. A key whose
-/// command does not apply, such as Ctrl+Z with nothing to undo, goes on to the app, as do keys that the editor does not
-/// use, such as F5 or Ctrl+S. Enter, Tab, Escape, the arrows and typing are not bindings, so apps should not bind plain
+/// (Ctrl+Shift+Space) and comments (Ctrl+/). On macOS, Cmd takes Ctrl's place, but for Ctrl+Space. They are in
+/// <c>KeyBindings</c> from the start, and go behind the app's XAML bindings when the editor is first attached, so that
+/// those run first. An app adds one later with <c>Insert(0, …)</c>, and removes a default with <c>RemoveAll</c>. A key
+/// whose command does not apply, such as Ctrl+Z with nothing to undo, goes on to the app, as do keys that the editor does
+/// not use, such as F5 or Ctrl+S. Enter, Tab, Escape, the arrows and typing are not bindings, so apps should not bind plain
 /// Enter, Tab or Escape on an ancestor of the editor.
 /// </para>
 /// <para>
@@ -161,8 +161,8 @@ public class CodeEditor : TemplatedControl
     /// <summary>What the editor does for the shown document; null while it shows none.</summary>
     private EditorView? _view;
 
-    /// <summary>Whether <c>KeyBindings</c> has the default keys, which join it when the editor is first attached.</summary>
-    private bool _hasDefaultKeys;
+    /// <summary>Whether the default keys went behind the app's XAML bindings, which the first attach does.</summary>
+    private bool _defaultKeysAreLast;
 
     /// <summary>The template's panel, which the search bar goes into, over the text.</summary>
     private Panel? _root;
@@ -230,6 +230,7 @@ public class CodeEditor : TemplatedControl
         if (Application.Current?.Dispatcher != Dispatcher)
             throw new InvalidOperationException("The editor works only on the app's main UI thread.");
         ContextMenu = CreateContextMenu();
+        KeyBindings.AddRange(DefaultKeys.For(this));
         _searchCommands =
         [
             new(ApplicationCommands.Find, (_, _) => OpenSearch()),
@@ -515,11 +516,11 @@ public class CodeEditor : TemplatedControl
     {
         base.OnAttachedToVisualTree(e);
         _isAttached = true;
-        // Here and not in the constructor: after the bindings of the app's XAML, which run first.
-        if (!_hasDefaultKeys)
+        // XAML adds the app's bindings after the constructor, and the first match runs.
+        if (!_defaultKeysAreLast)
         {
-            _hasDefaultKeys = true;
-            KeyBindings.AddRange(DefaultKeys.For(this));
+            _defaultKeysAreLast = true;
+            DefaultKeys.MoveLast(KeyBindings);
         }
         UpdateShownDocument();
     }

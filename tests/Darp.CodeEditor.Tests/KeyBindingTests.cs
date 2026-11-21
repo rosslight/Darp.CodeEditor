@@ -103,6 +103,23 @@ public sealed class KeyBindingTests(UiFixture ui)
             editor.KeyBindings.ShouldNotContain(binding => binding.Gesture == gesture);
         });
 
+    [Fact]
+    public Task A_default_removed_before_the_editor_is_attached_stays_removed() =>
+        _ui.Run(() =>
+        {
+            var editor = new CodeEditor { Document = CodeDocument.Create(CodeLanguage.PlainText, "text") };
+            var gesture = new KeyGesture(Key.A, s_command);
+            editor.KeyBindings.RemoveAll(binding => binding.Gesture == gesture);
+            var app = new CountingCommand();
+            using var window = new EditorWindow(editor);
+            window.Window.KeyBindings.Add(new KeyBinding { Gesture = gesture, Command = app });
+
+            window.Press(Key.A, s_command);
+
+            app.Runs.ShouldBe(1);
+            editor.Selection.Range.Length.ShouldBe(0);
+        });
+
     /// <summary>AvaloniaEdit's Ctrl+D deletes the line, and its Ctrl+I indents it; neither is a default here.</summary>
     [Theory]
     [InlineData(Key.D)]

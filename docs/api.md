@@ -136,7 +136,7 @@ first attached, after those of the app's XAML, so the app's run first:
 ```
 
 ```csharp
-// From Loaded on, once the defaults are there. A binding added from code later goes first with Insert(0, …).
+// Works from the view's constructor on. A binding added from code after the editor is shown goes first with Insert(0, …).
 var replace = KeyGesture.Parse("Ctrl+H");
 Editor.KeyBindings.RemoveAll(binding => binding.Gesture == replace);
 ```
