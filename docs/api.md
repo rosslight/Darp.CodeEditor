@@ -231,7 +231,7 @@ theme variants and Dark+ for dark ones. An app with its own colors overrides it 
 So editors follow the app's theme variant through Avalonia's resource lookup, inside a `ThemeVariantScope` too. A
 custom variant gets the colors of the variant it inherits from, unless the app adds an entry for it: FluentAvalonia's
 high contrast inherits from Light, so it shows Light+ without one. To make one editor dark in a light app, wrap it in a
-`ThemeVariantScope`: its popups turn dark too. Setting `ColorTheme` on the editor changes only the text area.
+`ThemeVariantScope`: its popups turn dark too.
 
 - **Errors:** squiggles in the theme's error, warning and info colors. Hovering shows the messages above the
   server's information.
