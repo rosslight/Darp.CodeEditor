@@ -60,6 +60,9 @@ editing rules (comments, brackets, auto-closing pairs). Servers and script envir
 
 - **Built in:** `CodeLanguage.PlainText`, `Json`, `Xml` and `Yaml`. Packages add theirs as extension members:
   `CodeLanguage.CSharp` from the C# package, and Luau's from its package later. IntelliSense lists them all.
+- **How far it indents:** `AutoIndent` is `None`, `Keep`, `Brackets`, `Advanced` (also the rules for Enter) or `Full`
+  (also the indentation rules), the default. YAML takes `Advanced`, because its indentation rules would indent the line
+  after every key.
 - **The app's own:** made with the same public constructor as the built-in ones, from a VS Code extension's files.
   They can ship as Avalonia resources, so NativeAOT apps need no loose files:
 
@@ -92,6 +95,7 @@ rather than its view belong to the document, as in Monaco and CodeMirror.
 |---|---|
 | `Document` | the document the editor shows |
 | `IsReadOnly`, `WordWrap`, `ShowLineNumbers` | view settings; line numbers are on by default |
+| `AutoClosing` | whether typing an opening bracket or quote also types its closing one; on by default. A selection is still surrounded |
 | `ColorTheme` | the colors of the text area; by default from the `CodeEditorColorTheme` resource, so it follows the theme variant |
 | `FontFamily`, `FontSize` | inherited from Avalonia; the default font is a monospace one, not the app's |
 | `Selection` | a `TextSelection`: anchor and caret, so a backward selection keeps its direction |
@@ -102,8 +106,8 @@ rather than its view belong to the document, as in Monaco and CodeMirror.
 | `RunCommand(id)` | runs one of `CodeEditorCommands` from an app's button, menu or key binding; false where it does not apply |
 | `SaveViewState()`, `RestoreViewState(state)` | the caret, the selection and the scroll position, for an app that switches one editor between documents |
 
-**Built in, with no settings:** current-line highlight, bracket matching, auto-closing brackets and quotes,
-auto-indent, whitespace shown inside the selection, scrolling past the last line, a context menu with Cut, Copy, Paste
+**Built in, with no settings:** current-line highlight, bracket matching, the occurrences of the symbol at the caret
+(the server's, else the word's), auto-indent, undo by word, whitespace shown inside the selection, scrolling past the last line, a context menu with Cut, Copy, Paste
 and Select All, completion's snippets with their stops (section 6), and the look of errors, hover and completion
 below.
 
@@ -148,6 +152,12 @@ Editor.KeyBindings.RemoveAll(binding => binding.Gesture == replace);
 | `Find`, `Replace` | Ctrl+F, Ctrl+H (macOS: Alt+Cmd+F) |
 | `FindNext`, `FindPrevious` | F3, Shift+F3 (macOS also Cmd+G, Shift+Cmd+G) |
 | `CommentLine` | Ctrl+/, the number pad's / |
+| `MoveLinesUp`, `MoveLinesDown` | Alt+Up, Alt+Down |
+| `CopyLinesUp`, `CopyLinesDown` | Shift+Alt+Up, Shift+Alt+Down (Linux: Ctrl+Shift+Alt) |
+| `DeleteLines` | Ctrl+Shift+K |
+| `InsertLineAfter`, `InsertLineBefore` | Ctrl+Enter, Ctrl+Shift+Enter |
+| `IndentLines`, `OutdentLines` | Ctrl+], Ctrl+[ |
+| `ExpandLineSelection` | Ctrl+L |
 | `Undo`, `Redo` | Ctrl+Z; Ctrl+Y, Ctrl+Shift+Z |
 | `Cut`, `Copy`, `Paste`, `SelectAll` | Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A |
 
@@ -896,17 +906,19 @@ with Skia:
   its undo steps no longer keep the text areas that showed an edit, and its commands hold the last focused element
   weakly;
 - an editor created on another thread than the app's main UI thread fails at once with `InvalidOperationException`;
-- the editing helpers follow VS Code's rules, read from the language's `language-configuration.json`: Enter keeps the
-  indentation, indents after an opening bracket and by the increase pattern, with its flags, and puts the closing
-  bracket of `{|}` on a line of its own; typing a line that matches the decrease pattern outdents it; pairs close
-  unless the token types where the user types are a string or comment that the pair's `notIn` excludes, typed closing
-  characters step over, Backspace deletes an empty pair the editor closed, and opening characters surround the
-  selection; Ctrl+/ toggles line comments, or block comments in XML, as one change of the text whose cost grows with
-  the selection, as Replace All's does: 41 ms for 5,000 lines and about 0.15 s for 100,000, with the frame after it.
-  Each is one step that the user undoes. The token types come from tokenizing the line up to the caret on the UI
-  thread, within 2 ms, from the state at its start. Matching the indentation patterns for one new or typed line stops
-  after 10 ms, and a match after 5 ms, as with a pattern that backtracks on the lines above: the line then keeps its
-  indentation;
+- the editing helpers follow VS Code's rules, read from the language's `language-configuration.json`, as far as its
+  `AutoIndent` goes: Enter applies the rules for Enter, indents after an opening bracket and by the indentation rules,
+  including the single-line patterns, with brackets in strings and comments left out, and puts the closing bracket of
+  `{|}` on a line of its own; typing a line that matches the decrease pattern outdents it; pairs close before the
+  language's `autoCloseBefore` unless the token types where the user types are a string or comment that the pair's
+  `notIn` excludes, typed closing characters step over, Backspace deletes an empty pair the editor closed, and opening
+  characters surround the selection; Tab, Shift+Tab and Backspace in indentation go by tab stops; Ctrl+/ toggles line
+  comments, or block comments in XML, as one change of the text whose cost grows with the selection, as Replace All's
+  does: 41 ms for 5,000 lines and about 0.15 s for 100,000, with the frame after it. Undo goes by word: a run of typing
+  is one step, and a space, Enter, a pair that closes, a caret move or another edit starts the next. The token types
+  come from tokenizing the line up to the caret on the UI thread, within 2 ms, from the state at its start. Matching
+  the patterns for one new or typed line stops after 10 ms, and a match after 32 ms, as with a pattern that backtracks
+  on the lines above: the line then keeps its indentation;
 - the document's `Indentation` reaches every editor that shows it at once: Tab, Shift+Tab, new lines and the width of
   tabs;
 - the bracket next to the caret and its match are boxed in the theme's colors, ignoring brackets in strings and
@@ -1148,11 +1160,9 @@ Still open:
 - lines over 3,000 characters: the editor shows and edits lines of up to 3,000 characters in full, AvaloniaEdit's
   default, and a longer line collapses its tail (#106). The limit rises once Avalonia's text wrapping and font
   fallback get faster on long lines;
-- the parts of VS Code's editing rules that the editor does not read yet: `onEnterRules`, such as JSON's line comment
-  continued on Enter, `indentNextLinePattern` and `unIndentedLinePattern`, brackets of several characters for
-  matching, and the outdent of a closing bracket typed on an empty line by its opening bracket's line, without a
-  decrease pattern. VS Code also strips strings and comments from a line before matching its indentation patterns;
-  the editor matches the line as it is;
+- the parts of VS Code's editing rules that the editor leaves out: brackets of several characters for matching, Tab
+  on a blank line going to the expected level, re-indenting moved lines, and a typed closing bracket lining up with its
+  opener without a decrease pattern;
 - the editor's own text, before v1: its context menu and its search bar are in English only, also in an app that
   shows another language, such as the sample app in German. How apps get them in their language is not decided yet.
 
