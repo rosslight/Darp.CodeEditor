@@ -188,12 +188,13 @@ public sealed class SearchTests(UiFixture ui)
             SearchBar bar = BarOf(window);
             window.Type("foo");
             await Wait.UntilAsync(() => bar.Count == "1 of 3");
+            KeyModifiers toggle = OperatingSystem.IsMacOS() ? KeyModifiers.Alt | KeyModifiers.Meta : KeyModifiers.Alt;
 
-            window.Press(Key.C, KeyModifiers.Alt);
+            window.Press(Key.C, toggle);
             bar.MatchCaseToggle.IsChecked.ShouldBe(true);
             await Wait.UntilAsync(() => bar.Count == "1 of 2");
 
-            window.Press(Key.W, KeyModifiers.Alt);
+            window.Press(Key.W, toggle);
             bar.WholeWordToggle.IsChecked.ShouldBe(true);
             await Wait.UntilAsync(() => bar.Count == "1 of 1");
             bar.FindBox.IsFocused.ShouldBeTrue();
