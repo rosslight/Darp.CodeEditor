@@ -226,4 +226,73 @@ public sealed class CompletionBehaviorTests(UiFixture ui)
             window.Press(Key.Space, KeyModifiers.Control);
             await Wait.UntilAsync(() => List(window)?.Message == "No suggestions.");
         });
+
+    [Fact]
+    public Task Additional_edits_that_come_after_the_commit_join_its_step_while_it_is_the_last_one_or_take_their_own() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, ItemWithImport());
+            const string text = "x\nCon";
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            using (await CommandAsync(server, fake, "hold-resolve", "holding resolve"))
+            {
+                await OpenAsync(window, 5);
+                await fake.WaitForAsync("resolve ");
+                window.Press(Key.Enter);
+                document.Text.ShouldBe("x\nConsole");
+            }
+            using (await CommandAsync(server, fake, "release-resolve", "released resolve"))
+            {
+                await Wait.UntilAsync(() => document.Text == "using System;\nx\nConsole");
+                document.Undo();
+                document.Text.ShouldBe(text);
+            }
+
+            // The user typed on after the item, below where they go, before they came: they go in a step of their own.
+            using (await CommandAsync(server, fake, "hold-resolve", "holding resolve", 2))
+            {
+                await OpenAsync(window, 5);
+                await fake.WaitForAsync("resolve ", 2);
+                window.Press(Key.Enter);
+                window.Type("!");
+            }
+            using (await CommandAsync(server, fake, "release-resolve", "released resolve", 2))
+            {
+                await Wait.UntilAsync(() => document.Text == "using System;\nx\nConsole!");
+                document.Undo();
+                document.Text.ShouldBe("x\nConsole!");
+            }
+        });
+
+    [Fact]
+    public Task Additional_edits_that_come_late_are_dropped_once_the_commit_is_undone() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, ItemWithImport());
+            const string text = "x\nCon";
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            using (await CommandAsync(server, fake, "hold-resolve", "holding resolve"))
+            {
+                await OpenAsync(window, 5);
+                await fake.WaitForAsync("resolve ");
+                window.Press(Key.Enter);
+                document.Text.ShouldBe("x\nConsole");
+                window.Press(Key.Z, EditorWindow.Command);
+                document.Text.ShouldBe(text);
+            }
+            using (await CommandAsync(server, fake, "release-resolve", "released resolve"))
+            {
+                // A list shows after the late answer: the client has read it by then.
+                await OpenAsync(window, document.Text.Length);
+                document.Text.ShouldBe(text);
+            }
+        });
 }

@@ -1974,47 +1974,6 @@ public sealed class CompletionTests(UiFixture ui)
             await Wait.UntilAsync(() => DetailTexts(window).Contains("class System.Console"));
         });
 
-    [Fact]
-    public Task Additional_edits_that_come_after_the_commit_join_its_step_while_it_is_the_last_one() =>
-        _ui.Run(async () =>
-        {
-            var fake = new FakeServer();
-            await using var server = new LanguageServer(fake.Options);
-            using CodeDocument answer = await SetCompletionAsync(server, fake, ItemWithImport());
-            const string text = "x\nCon";
-            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
-            using var window = new EditorWindow(new CodeEditor { Document = document });
-
-            using (await CommandAsync(server, fake, "hold-resolve", "holding resolve"))
-            {
-                await OpenAsync(window, 5);
-                await fake.WaitForAsync("resolve ");
-                window.Press(Key.Enter);
-                document.Text.ShouldBe("x\nConsole");
-            }
-            using (await CommandAsync(server, fake, "release-resolve", "released resolve"))
-            {
-                await Wait.UntilAsync(() => document.Text == "using System;\nx\nConsole");
-                document.Undo();
-                document.Text.ShouldBe(text);
-            }
-
-            // The user typed on before they came: they are dropped.
-            using (await CommandAsync(server, fake, "hold-resolve", "holding resolve", 2))
-            {
-                await OpenAsync(window, 5);
-                await fake.WaitForAsync("resolve ", 2);
-                window.Press(Key.Enter);
-                window.Type("!");
-            }
-            using (await CommandAsync(server, fake, "release-resolve", "released resolve", 2))
-            {
-                // A list shows after the late answer: the client has read it by then.
-                await OpenAsync(window, document.Text.Length);
-                document.Text.ShouldBe("x\nConsole!");
-            }
-        });
-
     /// <summary>Makes the fake server answer completion with <paramref name="result"/>, until the document is disposed.</summary>
     /// <summary>
     /// Starts the server, and waits until <paramref name="document"/> is open in it: editors ask only then, once the
