@@ -11,7 +11,7 @@ internal static class DefaultKeys
 {
     /// <summary>The bindings of this operating system, for <paramref name="editor"/>.</summary>
     public static IEnumerable<KeyBinding> For(CodeEditor editor) =>
-        Table(OperatingSystem.IsMacOS())
+        Table(OperatingSystem.IsMacOS(), OperatingSystem.IsLinux())
             .Select(key => new KeyBinding { Gesture = key.Gesture, Command = new KeyCommand(editor, key.Id) });
 
     /// <summary>Puts the defaults that remain behind the app's bindings, in their order.</summary>
@@ -26,9 +26,10 @@ internal static class DefaultKeys
 
     /// <summary>
     /// The commands and their keys: Cmd takes Ctrl's place on macOS, except for Ctrl+Space, as Cmd+Space is the system's
-    /// search. Where a key has two commands, the first that applies runs.
+    /// search. Linux copies lines with Ctrl+Shift+Alt, as its desktops take Shift+Alt+Up and Down. Where a key has two
+    /// commands, the first that applies runs.
     /// </summary>
-    internal static IEnumerable<(string Id, KeyGesture Gesture)> Table(bool mac)
+    internal static IEnumerable<(string Id, KeyGesture Gesture)> Table(bool mac, bool linux = false)
     {
         KeyModifiers command = mac ? KeyModifiers.Meta : KeyModifiers.Control;
         yield return (CodeEditorCommands.TriggerSuggest, new KeyGesture(Key.Space, KeyModifiers.Control));
@@ -55,6 +56,19 @@ internal static class DefaultKeys
 
         yield return (CodeEditorCommands.CommentLine, new KeyGesture(Key.Oem2, command));
         yield return (CodeEditorCommands.CommentLine, new KeyGesture(Key.Divide, command));
+
+        KeyModifiers copyLines =
+            KeyModifiers.Shift | KeyModifiers.Alt | (linux ? KeyModifiers.Control : KeyModifiers.None);
+        yield return (CodeEditorCommands.MoveLinesUp, new KeyGesture(Key.Up, KeyModifiers.Alt));
+        yield return (CodeEditorCommands.MoveLinesDown, new KeyGesture(Key.Down, KeyModifiers.Alt));
+        yield return (CodeEditorCommands.CopyLinesUp, new KeyGesture(Key.Up, copyLines));
+        yield return (CodeEditorCommands.CopyLinesDown, new KeyGesture(Key.Down, copyLines));
+        yield return (CodeEditorCommands.DeleteLines, new KeyGesture(Key.K, command | KeyModifiers.Shift));
+        yield return (CodeEditorCommands.InsertLineAfter, new KeyGesture(Key.Enter, command));
+        yield return (CodeEditorCommands.InsertLineBefore, new KeyGesture(Key.Enter, command | KeyModifiers.Shift));
+        yield return (CodeEditorCommands.IndentLines, new KeyGesture(Key.OemCloseBrackets, command));
+        yield return (CodeEditorCommands.OutdentLines, new KeyGesture(Key.OemOpenBrackets, command));
+        yield return (CodeEditorCommands.ExpandLineSelection, new KeyGesture(Key.L, command));
 
         yield return (CodeEditorCommands.Undo, new KeyGesture(Key.Z, command));
         yield return (CodeEditorCommands.Redo, new KeyGesture(Key.Y, command));
