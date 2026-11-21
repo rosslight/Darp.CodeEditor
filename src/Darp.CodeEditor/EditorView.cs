@@ -91,7 +91,7 @@ internal sealed class EditorView : IDisposable
             _signatureHelp,
             new Clipboard(area, document),
             new UndoCommands(area, document),
-            new FindCommands(area, createSearchBar),
+            new FindCommands(area, searchBar, createSearchBar),
         ];
         foreach (IEditorFeature feature in _features.OfType<IEditorFeature>())
             feature.AddCommands(_commands);

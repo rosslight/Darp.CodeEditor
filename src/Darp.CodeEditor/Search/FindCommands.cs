@@ -1,3 +1,4 @@
+using Avalonia.Controls.Primitives;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using Darp.CodeEditor.Commands;
@@ -7,18 +8,21 @@ namespace Darp.CodeEditor.Search;
 
 /// <summary>
 /// The search bar's commands in one editor's view of a document. They need no text focus, so that their keys work from
-/// the bar too, and they apply wherever the editor has a place for the bar.
+/// the bar too, and they apply wherever the editor has a place for the bar. The toggles apply only while it is open.
 /// </summary>
 internal sealed class FindCommands : IEditorFeature
 {
     private readonly TextArea _area;
+    private readonly Func<SearchBar?> _existingBar;
     private readonly Func<SearchBar?> _bar;
 
     /// <param name="area">The text area searched.</param>
+    /// <param name="existingBar">The editor's bar; null until it is first needed.</param>
     /// <param name="bar">The editor's bar, made the first time it is needed; null without a place for it.</param>
-    public FindCommands(TextArea area, Func<SearchBar?> bar)
+    public FindCommands(TextArea area, Func<SearchBar?> existingBar, Func<SearchBar?> bar)
     {
         _area = area;
+        _existingBar = existingBar;
         _bar = bar;
     }
 
@@ -30,9 +34,25 @@ internal sealed class FindCommands : IEditorFeature
         commands.Add(CodeEditorCommands.Replace, () => Open(replace: true), CommandNeeds.None, HasBar);
         commands.Add(CodeEditorCommands.FindNext, () => Go(previous: false), CommandNeeds.None, HasBar);
         commands.Add(CodeEditorCommands.FindPrevious, () => Go(previous: true), CommandNeeds.None, HasBar);
+        commands.Add(
+            CodeEditorCommands.ToggleFindCaseSensitive,
+            () => Toggle(_existingBar()?.MatchCaseToggle),
+            CommandNeeds.None,
+            IsOpen
+        );
+        commands.Add(
+            CodeEditorCommands.ToggleFindWholeWord,
+            () => Toggle(_existingBar()?.WholeWordToggle),
+            CommandNeeds.None,
+            IsOpen
+        );
     }
 
     private bool HasBar() => _bar() is not null;
+
+    private bool IsOpen() => _existingBar() is { IsOpen: true };
+
+    private static void Toggle(ToggleButton? toggle) => toggle?.IsChecked = toggle.IsChecked != true;
 
     private void Open(bool replace)
     {

@@ -148,6 +148,8 @@ internal sealed class SearchBar : UserControl
 
     internal ToggleButton MatchCaseToggle => _matchCase;
 
+    internal ToggleButton WholeWordToggle => _wholeWord;
+
     internal Button ReplaceAllButton => _replaceAll;
 
     /// <summary>The number of matches, and which one is selected.</summary>

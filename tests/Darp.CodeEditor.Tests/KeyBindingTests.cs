@@ -165,6 +165,11 @@ public sealed class KeyBindingTests(UiFixture ui)
             { Key.X, s_command, true },
             { Key.V, s_command, true },
             { Key.Oem2, s_command, true },
+            // The search bar's toggles, with the bar closed.
+            { Key.C, KeyModifiers.Alt, false },
+            { Key.W, KeyModifiers.Alt, false },
+            { Key.C, KeyModifiers.Alt | s_command, false },
+            { Key.W, KeyModifiers.Alt | s_command, false },
         };
 
     [Theory]
@@ -340,6 +345,12 @@ public sealed class KeyBindingTests(UiFixture ui)
         keys.ShouldContain((CodeEditorCommands.Replace, new KeyGesture(Key.F, KeyModifiers.Alt | KeyModifiers.Meta)));
         keys.ShouldContain((CodeEditorCommands.FindNext, new KeyGesture(Key.G, KeyModifiers.Meta)));
         keys.ShouldContain((CodeEditorCommands.Redo, new KeyGesture(Key.Y, KeyModifiers.Meta)));
+        keys.ShouldContain(
+            (CodeEditorCommands.ToggleFindCaseSensitive, new KeyGesture(Key.C, KeyModifiers.Alt | KeyModifiers.Meta))
+        );
+        keys.ShouldContain(
+            (CodeEditorCommands.ToggleFindWholeWord, new KeyGesture(Key.W, KeyModifiers.Alt | KeyModifiers.Meta))
+        );
     }
 
     [Fact]

@@ -179,6 +179,26 @@ public sealed class SearchTests(UiFixture ui)
             bar.FindBox.Text.ShouldBe("nothing");
         });
 
+    [Fact]
+    public Task The_toggle_keys_change_the_search_while_the_bar_is_open() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("| Foo foo foobar", CodeLanguage.PlainText);
+            window.Editor.OpenSearch();
+            SearchBar bar = BarOf(window);
+            window.Type("foo");
+            await Wait.UntilAsync(() => bar.Count == "1 of 3");
+
+            window.Press(Key.C, KeyModifiers.Alt);
+            bar.MatchCaseToggle.IsChecked.ShouldBe(true);
+            await Wait.UntilAsync(() => bar.Count == "1 of 2");
+
+            window.Press(Key.W, KeyModifiers.Alt);
+            bar.WholeWordToggle.IsChecked.ShouldBe(true);
+            await Wait.UntilAsync(() => bar.Count == "1 of 1");
+            bar.FindBox.IsFocused.ShouldBeTrue();
+        });
+
     /// <summary>A newer search replaces the query's own before its result is in, with no dispatcher pass between.</summary>
     [Fact]
     public Task A_new_query_selects_its_first_match_also_when_a_newer_search_takes_over() =>

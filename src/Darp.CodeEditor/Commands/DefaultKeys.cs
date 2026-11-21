@@ -53,6 +53,9 @@ internal static class DefaultKeys
             yield return (CodeEditorCommands.FindNext, new KeyGesture(Key.G, command));
             yield return (CodeEditorCommands.FindPrevious, new KeyGesture(Key.G, command | KeyModifiers.Shift));
         }
+        KeyModifiers findToggle = mac ? KeyModifiers.Alt | command : KeyModifiers.Alt;
+        yield return (CodeEditorCommands.ToggleFindCaseSensitive, new KeyGesture(Key.C, findToggle));
+        yield return (CodeEditorCommands.ToggleFindWholeWord, new KeyGesture(Key.W, findToggle));
 
         yield return (CodeEditorCommands.CommentLine, new KeyGesture(Key.Oem2, command));
         yield return (CodeEditorCommands.CommentLine, new KeyGesture(Key.Divide, command));
