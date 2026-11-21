@@ -34,6 +34,9 @@ internal sealed record PopupColors
     /// <summary><c>editorSuggestWidget.selectedForeground</c>.</summary>
     public required IBrush SuggestSelectedForeground { get; init; }
 
+    /// <summary><c>editorSuggestWidget.selectedIconForeground</c>; null keeps the icon's own color.</summary>
+    public required IBrush? SuggestSelectedIconForeground { get; init; }
+
     /// <summary><c>list.hoverBackground</c>: the row under the pointer.</summary>
     public required IBrush ListHoverBackground { get; init; }
 
@@ -65,6 +68,10 @@ internal sealed record PopupColors
         Color widgetForeground = Own("editorWidget.foreground") ?? foreground;
         Color widgetBorder = Own("editorWidget.border") ?? Transparent(widgetForeground, 0.2);
         Color shadow = Own("widget.shadow") ?? Transparent(Colors.Black, dark ? 0.36 : 0.16);
+        Color? selectedIcon =
+            Own("editorSuggestWidget.selectedIconForeground")
+            ?? Own("quickInputList.focusIconForeground")
+            ?? Own("list.activeSelectionIconForeground");
         return new PopupColors
         {
             Shadow = new BoxShadows(
@@ -91,6 +98,7 @@ internal sealed record PopupColors
                     ?? Own("list.activeSelectionForeground")
                     ?? Colors.White
             ),
+            SuggestSelectedIconForeground = selectedIcon is { } icon ? Brush(icon) : null,
             ListHoverBackground = Brush(Own("list.hoverBackground") ?? Hex(dark ? 0xFF2A2D2E : 0xFFF0F0F0)),
             HoverBackground = Brush(Own("editorHoverWidget.background") ?? widgetBackground),
             HoverForeground = Brush(Own("editorHoverWidget.foreground") ?? widgetForeground),

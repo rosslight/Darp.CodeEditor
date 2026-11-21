@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Logging;
@@ -19,8 +20,8 @@ namespace Darp.CodeEditor.Completion;
 
 /// <summary>
 /// Signature help in one editor's view of a document: the signature of the call around the caret, with the parameter
-/// at the caret in bold and its documentation, in a popup that looks like the app's tooltips, above the caret's line,
-/// so that completion's list below it shows too.
+/// at the caret in bold and its documentation, in the editor's popup in the color theme's hover colors, above the
+/// caret's line, so that completion's list below it shows too.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -47,9 +48,13 @@ internal sealed class SignatureHelpController : IEditorFeature
     private readonly TextDocument _buffer;
     private readonly CodeDocument _document;
     private readonly BackgroundTextMateHighlighter _highlighter;
-    private readonly ContentControl _content = new();
+    private readonly PopupScrollViewer _content = new()
+    {
+        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+    };
+    private readonly PopupFrame _frame;
     private readonly EditorPopup _popup;
-    private TextAreaColors? _colors;
+    private PopupColors _colors = PopupColors.Default;
 
     /// <summary>The signature help that shows; null while none does.</summary>
     private SignatureHelpInfo? _shown;
@@ -76,7 +81,15 @@ internal sealed class SignatureHelpController : IEditorFeature
         _buffer = textArea.Document;
         _document = document;
         _highlighter = highlighter;
-        _popup = new EditorPopup(editor, new AppToolTip { Content = _content });
+        _frame = new PopupFrame
+        {
+            Name = "SignatureHelp",
+            Child = _content,
+            MaxWidth = PopupFrame.MaxTextWidth,
+            Padding = new Avalonia.Thickness(8, 4),
+        };
+        Paint();
+        _popup = new EditorPopup(editor, _frame);
         _textArea.TextEntered += OnTextEntered;
         _textArea.Caret.PositionChanged += OnEditOrCaretMove;
         _buffer.Changed += OnEditOrCaretMove;
@@ -84,14 +97,15 @@ internal sealed class SignatureHelpController : IEditorFeature
         _popup.LeftView += OnClosingChange;
     }
 
-    /// <summary>The colors of the color theme, for the signature, once it is loaded. New colors end signature help.</summary>
-    public TextAreaColors? Colors
+    /// <summary>The popup's colors, from the color theme once it is loaded. New colors end signature help.</summary>
+    public PopupColors Colors
     {
         set
         {
             if (value == _colors)
                 return;
             _colors = value;
+            Paint();
             Close();
         }
     }
@@ -281,8 +295,13 @@ internal sealed class SignatureHelpController : IEditorFeature
                     );
             if (_reading != reading)
                 return;
-            var look = new CodeLook(_editor.FontFamily, _editor.FontSize, _colors?.Background, _colors?.Foreground);
-            _content.Content = View(help, signature, label, blocks, look);
+            var look = new CodeLook(
+                _editor.FontFamily,
+                _editor.FontSize,
+                _colors.CodeBackground,
+                _colors.CodeForeground
+            );
+            _content.Content = View(help, signature, label, blocks, look, _colors.HoverBorder);
             _popup.Show(
                 _textView,
                 () =>
@@ -310,12 +329,14 @@ internal sealed class SignatureHelpController : IEditorFeature
     /// <param name="label">Its label, as much of it as the budget left, with "…" where it was cut.</param>
     /// <param name="documentation">The documentation.</param>
     /// <param name="look">How code looks.</param>
+    /// <param name="rule">The color of a line in the documentation.</param>
     private static Control View(
         SignatureHelpInfo help,
         SignatureInfo signature,
         string label,
         IReadOnlyList<HoverBlock> documentation,
-        CodeLook look
+        CodeLook look,
+        IBrush rule
     )
     {
         var inlines = new InlineCollection();
@@ -335,11 +356,11 @@ internal sealed class SignatureHelpController : IEditorFeature
         {
             inlines.Add(new Run(label));
         }
-        var code = new Border
+        var code = new PopupBox
         {
             Background = look.Background,
             Padding = new Avalonia.Thickness(6, 4),
-            Child = new TextBlock
+            Child = new PopupText
             {
                 Inlines = inlines,
                 FontFamily = look.FontFamily,
@@ -348,10 +369,10 @@ internal sealed class SignatureHelpController : IEditorFeature
                 TextWrapping = TextWrapping.Wrap,
             },
         };
-        var line = new DockPanel();
+        var line = new PopupDock();
         if (help.Signatures.Count > 1)
         {
-            var counter = new TextBlock
+            var counter = new PopupText
             {
                 Text = $"{help.ActiveSignature + 1}/{help.Signatures.Count}",
                 VerticalAlignment = VerticalAlignment.Center,
@@ -361,11 +382,14 @@ internal sealed class SignatureHelpController : IEditorFeature
             line.Children.Add(counter);
         }
         line.Children.Add(code);
-        var panel = new StackPanel { Spacing = 6, Children = { line } };
+        var panel = new PopupStack { Spacing = 6, Children = { line } };
         if (documentation.Count > 0)
-            panel.Children.Add(HoverView.Create(documentation, look));
+            panel.Children.Add(HoverView.Create(documentation, look, rule));
         return panel;
     }
+
+    private void Paint() =>
+        _frame.Paint(_colors.HoverBackground, _colors.HoverBorder, _colors.HoverForeground, _colors);
 
     private void OnClosingChange(object? sender, EventArgs e) => Close();
 }

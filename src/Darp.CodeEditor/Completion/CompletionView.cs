@@ -7,7 +7,6 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Styling;
 using Avalonia.VisualTree;
 using Darp.CodeEditor.LanguageClient;
 using Darp.CodeEditor.Popups;
@@ -15,11 +14,11 @@ using Darp.CodeEditor.Popups;
 namespace Darp.CodeEditor.Completion;
 
 /// <summary>
-/// What the completion popup shows: the items in a list in the app's flyout look, each with its icon and its label in
-/// the editor's font, the characters that matched in bold and deprecated items struck through; and in a flyout of its
-/// own the selected item's details, beside the list where the window has room for them, narrower if need be, and below
-/// it otherwise, as VS Code places them. Neither takes the keyboard focus, so the editor keeps it; clicking an item
-/// commits it.
+/// What the completion popup shows, in the color theme's suggest colors: the items in a list, each with its icon and its
+/// label in the editor's font, the characters that matched in bold and deprecated items struck through; and in a frame
+/// of its own the selected item's details, beside the list where the window has room for them, narrower if need be, and
+/// below it otherwise, as VS Code places them. Neither takes the keyboard focus, so the editor keeps it; clicking an
+/// item commits it.
 /// </summary>
 internal sealed class CompletionView
 {
@@ -40,11 +39,12 @@ internal sealed class CompletionView
 
     private const double Gap = 2;
 
-    private readonly ListBox _list;
-    private readonly FlyoutPresenter _details;
+    private readonly PopupListBox _list;
+    private readonly PopupFrame _listFrame;
+    private readonly PopupFrame _details;
     private readonly Layout _layout;
 
-    private readonly ScrollViewer _detailsContent = new()
+    private readonly PopupScrollViewer _detailsContent = new()
     {
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
         MaxWidth = DetailsWidth,
@@ -56,32 +56,22 @@ internal sealed class CompletionView
 
     public CompletionView()
     {
-        _list = new ListBox
+        _list = new PopupListBox
         {
-            Focusable = false,
             Width = ListWidth,
             // Each row is reused for the items it shows as the list changes: only its icon and text change.
             ItemTemplate = new FuncDataTemplate<ShownItem>((_, _) => new Row(this), supportsRecycling: true),
         };
-        // Rows as dense as the editor's lines, as in VS Code, in the app's look of list items otherwise.
-        _list.Styles.Add(
-            new Style(x => x.OfType<ListBoxItem>())
-            {
-                Setters =
-                {
-                    new Setter(TemplatedControl.PaddingProperty, new Thickness(4, 0)),
-                    new Setter(Layoutable.MinHeightProperty, 0.0),
-                },
-            }
-        );
         _list.AddHandler(InputElement.PointerPressedEvent, OnPointerPressed, RoutingStrategies.Tunnel);
-        _details = new FlyoutPresenter { Content = _detailsContent, IsVisible = false };
-        var listFlyout = new FlyoutPresenter { Content = _list };
-        // A theme's flyout may scroll across, as Fluent's does: its content then takes no width from it, and the
-        // details would not wrap.
-        ScrollViewer.SetHorizontalScrollBarVisibility(listFlyout, ScrollBarVisibility.Disabled);
-        ScrollViewer.SetHorizontalScrollBarVisibility(_details, ScrollBarVisibility.Disabled);
-        _layout = new Layout(listFlyout, _details);
+        _listFrame = new PopupFrame { Name = "CompletionList", Child = _list };
+        _details = new PopupFrame
+        {
+            Name = "CompletionDetails",
+            Child = _detailsContent,
+            Padding = new Thickness(6, 4, 2, 4),
+            IsVisible = false,
+        };
+        _layout = new Layout(_listFrame, _details);
     }
 
     /// <summary>The view's outermost control.</summary>
@@ -98,6 +88,13 @@ internal sealed class CompletionView
 
     /// <summary>Raised when an item is clicked, with its index.</summary>
     public event Action<int>? Clicked;
+
+    /// <summary>Gives the list and the details their colors.</summary>
+    public void Paint(PopupColors colors)
+    {
+        _listFrame.Paint(colors.SuggestBackground, colors.SuggestBorder, colors.SuggestForeground, colors);
+        _details.Paint(colors.SuggestBackground, colors.SuggestBorder, colors.SuggestForeground, colors);
+    }
 
     /// <summary>Shows <paramref name="items"/>, with <paramref name="selected"/> selected and in view.</summary>
     /// <param name="items">The items.</param>
@@ -241,7 +238,7 @@ internal sealed class CompletionView
             VerticalAlignment = VerticalAlignment.Center,
         };
 
-        private readonly TextBlock _label = new()
+        private readonly PopupText _label = new()
         {
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center,

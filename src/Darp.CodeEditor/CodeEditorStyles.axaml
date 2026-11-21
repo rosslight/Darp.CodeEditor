@@ -4,8 +4,14 @@
     xmlns:ce="using:Darp.CodeEditor"
     xmlns:ae="using:AvaloniaEdit"
     xmlns:popups="using:Darp.CodeEditor.Popups"
+    xmlns:completion="using:Darp.CodeEditor.Completion"
     x:Class="Darp.CodeEditor.CodeEditorStyles"
 >
+    <!-- A style, not part of the row's theme: the icon is in the row's content, not in its template. -->
+    <Style Selector="popups|PopupListItem:selected completion|CompletionIcon">
+        <Setter Property="SelectedBrush" Value="{DynamicResource CodeEditorPopupRowSelectedIcon}" />
+    </Style>
+
     <Styles.Resources>
         <ResourceDictionary>
             <!--

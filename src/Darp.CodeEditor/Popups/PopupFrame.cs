@@ -43,5 +43,6 @@ internal sealed class PopupFrame : Border
         Resources["CodeEditorPopupRowHover"] = colors.ListHoverBackground;
         Resources["CodeEditorPopupRowSelected"] = colors.SuggestSelectedBackground;
         Resources["CodeEditorPopupRowSelectedText"] = colors.SuggestSelectedForeground;
+        Resources["CodeEditorPopupRowSelectedIcon"] = colors.SuggestSelectedIconForeground;
     }
 }

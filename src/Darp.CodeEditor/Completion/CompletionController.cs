@@ -61,7 +61,7 @@ internal sealed class CompletionController : IEditorFeature
     private readonly SnippetController _snippets;
     private readonly CompletionView _view = new();
     private readonly EditorPopup _popup;
-    private TextAreaColors? _colors;
+    private PopupColors _colors = PopupColors.Default;
     private SymbolIconColors? _icons;
 
     /// <summary>Completion from its first request until it ends; null while there is none.</summary>
@@ -100,7 +100,8 @@ internal sealed class CompletionController : IEditorFeature
         _document = document;
         _highlighter = highlighter;
         _snippets = snippets;
-        _popup = new EditorPopup(editor, _view.Root, below: true);
+        _view.Paint(_colors);
+        _popup = new EditorPopup(editor, _view.Root, PopupSide.Below);
         _view.Clicked += OnClicked;
         _buffer.Changing += OnBufferChanging;
         _buffer.TextChanged += OnBufferTextChanged;
@@ -110,14 +111,15 @@ internal sealed class CompletionController : IEditorFeature
         _popup.LeftView += OnClosingChange;
     }
 
-    /// <summary>The colors of the color theme, for code in the details, once it is loaded. New colors end completion.</summary>
-    public TextAreaColors? Colors
+    /// <summary>The popup's colors, from the color theme once it is loaded. New colors end completion.</summary>
+    public PopupColors Colors
     {
         set
         {
             if (value == _colors)
                 return;
             _colors = value;
+            _view.Paint(value);
             Close();
         }
     }
@@ -584,7 +586,7 @@ internal sealed class CompletionController : IEditorFeature
             );
             if (_session != session || cancellation.IsCancellationRequested || session.Place is not { } place)
                 return;
-            _view.ShowDetails(HoverView.Create(blocks, Look()));
+            _view.ShowDetails(HoverView.Create(blocks, Look(), _colors.SuggestBorder));
             // The popup is wider now: placed again, so that it stays inside the window.
             _popup.Show(_textView, place);
         }
@@ -840,7 +842,8 @@ internal sealed class CompletionController : IEditorFeature
         return TextRange.FromBounds(start, caret);
     }
 
-    private CodeLook Look() => new(_editor.FontFamily, _editor.FontSize, _colors?.Background, _colors?.Foreground);
+    private CodeLook Look() =>
+        new(_editor.FontFamily, _editor.FontSize, _colors.CodeBackground, _colors.CodeForeground);
 
     /// <summary>A request for completion.</summary>
     /// <param name="snapshot">The text it was asked for.</param>

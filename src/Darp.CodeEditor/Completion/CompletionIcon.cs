@@ -10,13 +10,31 @@ namespace Darp.CodeEditor.Completion;
 /// <summary>A completion item's icon: the codicon of its kind, 16 by 16 pixels, in its color.</summary>
 internal sealed class CompletionIcon : Control
 {
+    /// <summary>Defines the <see cref="SelectedBrush"/> property.</summary>
+    public static readonly StyledProperty<IBrush?> SelectedBrushProperty = AvaloniaProperty.Register<
+        CompletionIcon,
+        IBrush?
+    >(nameof(SelectedBrush));
+
     private Geometry[] _shapes = [];
     private IBrush? _brush;
+
+    static CompletionIcon() => AffectsRender<CompletionIcon>(SelectedBrushProperty);
 
     public CompletionIcon()
     {
         Width = 16;
         Height = 16;
+    }
+
+    /// <summary>
+    /// The color theme's color for the icon of the selected row, which <see cref="CodeEditorStyles"/> sets there; null
+    /// keeps the icon's own.
+    /// </summary>
+    public IBrush? SelectedBrush
+    {
+        get => GetValue(SelectedBrushProperty);
+        set => SetValue(SelectedBrushProperty, value);
     }
 
     /// <summary>Shows the icon of <paramref name="kind"/>, from 1 to 25, in <paramref name="brush"/>.</summary>
@@ -30,7 +48,7 @@ internal sealed class CompletionIcon : Control
     public override void Render(DrawingContext context)
     {
         foreach (Geometry shape in _shapes)
-            context.DrawGeometry(_brush, null, shape);
+            context.DrawGeometry(SelectedBrush ?? _brush, null, shape);
     }
 }
 

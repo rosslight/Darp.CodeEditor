@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using Darp.CodeEditor.Completion;
+using Darp.CodeEditor.Popups;
 using Darp.CodeEditor.Search;
 using static Darp.CodeEditor.Tests.CompletionTests;
 
@@ -222,14 +223,14 @@ public sealed class SnippetSessionTests(UiFixture ui)
             window.Press(Key.Enter);
             window.Type("call(");
             document.Text.ShouldBe("call(;");
-            await Wait.UntilAsync(() => ToolTip(window) is not null);
+            await Wait.UntilAsync(() => SignatureHelp(window) is not null);
             await OpenAsync(window, 5);
 
             window.Press(Key.Escape);
             List(window).ShouldBeNull();
-            ToolTip(window).ShouldNotBeNull();
+            SignatureHelp(window).ShouldNotBeNull();
             window.Press(Key.Escape);
-            ToolTip(window).ShouldBeNull();
+            SignatureHelp(window).ShouldBeNull();
             // The session runs: Tab goes to the second stop, and Shift+Tab back to the first.
             window.Press(Key.Tab);
             editor.Selection.ShouldBe(new TextSelection(5));
@@ -252,16 +253,16 @@ public sealed class SnippetSessionTests(UiFixture ui)
             await Wait.UntilAsync(() =>
             {
                 window.Render();
-                return ToolTip(window) is { } hover
+                return Hover(window) is { } hover
                     && hover
                         .GetVisualDescendants()
                         .OfType<TextBlock>()
                         .Any(t => (t.Inlines?.Text ?? t.Text ?? "").Contains("is a word in", StringComparison.Ordinal));
             });
             window.Press(Key.Escape);
-            ToolTip(window).ShouldNotBeNull();
+            Hover(window).ShouldNotBeNull();
             window.Press(Key.Escape);
-            ToolTip(window).ShouldBeNull();
+            Hover(window).ShouldBeNull();
             bar.IsOpen.ShouldBeTrue();
             window.Press(Key.Escape);
             bar.IsOpen.ShouldBeFalse();
@@ -392,6 +393,8 @@ public sealed class SnippetSessionTests(UiFixture ui)
     }
 
     /// <summary>Signature help's popup; null while it is closed.</summary>
-    private static ToolTip? ToolTip(EditorWindow window) =>
-        OverlayLayer.GetOverlayLayer(window.Window)?.GetVisualDescendants().OfType<ToolTip>().FirstOrDefault();
+    private static PopupFrame? SignatureHelp(EditorWindow window) => PopupFrames.Find(window, "SignatureHelp");
+
+    /// <summary>The hover's popup; null while it is closed.</summary>
+    private static PopupFrame? Hover(EditorWindow window) => PopupFrames.Find(window, "Hover");
 }
