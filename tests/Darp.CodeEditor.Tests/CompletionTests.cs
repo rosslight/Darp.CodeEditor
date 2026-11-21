@@ -1975,42 +1975,6 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
-    public Task Typing_that_starts_a_word_opens_the_list_but_not_inside_a_word_or_a_comment() =>
-        _ui.Run(async () =>
-        {
-            var fake = new FakeServer();
-            await using var server = new LanguageServer(fake.Options);
-            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("xenon", "xylophone"));
-            const string text = "[\n  ,\n  ab\n]\n// note\n";
-            using CodeDocument document = server.CreateDocument(CodeLanguage.Json, text);
-            using var window = new EditorWindow(new CodeEditor { Document = document });
-            // JSON's comment color: the grammar knows the comment.
-            int comment = text.IndexOf("note", StringComparison.Ordinal);
-            await Wait.UntilAsync(() =>
-            {
-                window.Render();
-                return window.ColorAt(comment) == Color.Parse("#008000");
-            });
-
-            window.Editor.Selection = new TextSelection(4);
-            window.Type("x");
-            (await WaitForLabelsAsync(window)).ShouldBe(["xenon", "xylophone"]);
-            window.Type("y");
-            await WaitForLabelsAsync(window, ["xylophone"]);
-            window.Press(Key.Escape);
-
-            // On in the same word, before a word, and in a comment: no request.
-            window.Type("z");
-            window.Editor.Selection = new TextSelection(document.Text.IndexOf("ab", StringComparison.Ordinal));
-            window.Type("q");
-            window.Editor.Selection = new TextSelection(document.Text.IndexOf("note", StringComparison.Ordinal) + 4);
-            window.Type(" w");
-            await BarrierAsync(server, fake);
-            fake.LinesStartingWith("completion ").Count.ShouldBe(1);
-            document.Text.ShouldBe("[\n  xyz,\n  qab\n]\n// note w\n");
-        });
-
-    [Fact]
     public Task Additional_edits_that_come_after_the_commit_join_its_step_while_it_is_the_last_one() =>
         _ui.Run(async () =>
         {

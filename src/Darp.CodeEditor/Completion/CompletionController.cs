@@ -18,13 +18,14 @@ namespace Darp.CodeEditor.Completion;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Completion opens on Ctrl+Space, also on macOS, on the server's trigger characters, and when typing starts a word
-/// outside a comment. Until the server answers, nothing shows; what is typed meanwhile filters its answer, and so does
-/// what is typed while the list shows (<see cref="CompletionFilter"/>). A list that the server marks incomplete is asked
-/// for again as the user types on, and shows meanwhile. Moving back before where completion was asked, and any edit
-/// before it, as by another editor of the document, asks again while a word is left, as VS Code does when the caret
-/// moves back: the list's positions no longer fit the text. Asked for by key, an empty answer says "No suggestions."
-/// until the next key or caret move.
+/// Completion opens on Ctrl+Space, also on macOS, on the server's trigger characters, and on a word that typing ends or
+/// starts, where the language's quick suggestions say (<see cref="QuickSuggest"/>). Until the server answers, nothing
+/// shows; what is typed meanwhile filters its answer, and so does what is typed while the list shows
+/// (<see cref="CompletionFilter"/>). Opened by typing, an answer with nothing ends completion, and typing on in its word
+/// opens nothing. A list that the server marks incomplete is asked for again as the user types on, and shows meanwhile.
+/// Moving back before where completion was asked, and any edit before it, as by another editor of the document, asks
+/// again while a word is left, as VS Code does when the caret moves back: the list's positions no longer fit the text.
+/// Asked for by key, an empty answer says "No suggestions." until the next key or caret move.
 /// </para>
 /// <para>
 /// Up, Down, Page Up and Page Down select among the rows that show, while there is more than one item; with one, they
@@ -47,11 +48,11 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
     private readonly TextArea _textArea;
     private readonly TextDocument _buffer;
     private readonly CodeDocument _document;
-    private readonly BackgroundTextMateHighlighter _highlighter;
     private readonly CompletionView _view;
     private readonly CompletionCommit _commit;
     private readonly CompletionResolver _resolver;
     private readonly CompletionFilter _filter;
+    private readonly QuickSuggest _quickSuggest;
 
     /// <summary>Does the normal action of a key whose accept found nothing to commit.</summary>
     private readonly Action<KeyGesture> _performKey;
@@ -76,7 +77,6 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         _textArea = textArea;
         _buffer = textArea.Document;
         _document = document;
-        _highlighter = highlighter;
         _performKey = performKey;
         _view = new CompletionView(editor, textArea.TextView);
         _commit = new CompletionCommit(textArea, document, snippets, changes);
@@ -90,6 +90,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
             WordBefore,
             this
         );
+        _quickSuggest = new QuickSuggest(textArea, document, highlighter, WordBefore);
         _view.Clicked += OnClicked;
         _buffer.Changing += OnBufferChanging;
         _buffer.TextChanged += OnBufferTextChanged;
@@ -210,6 +211,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
     {
         Close();
         _commit.Dispose();
+        _quickSuggest.Dispose();
         _view.Clicked -= OnClicked;
         _buffer.Changing -= OnBufferChanging;
         _buffer.TextChanged -= OnBufferTextChanged;
@@ -265,9 +267,12 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
                 if (!session.ByKey)
                 {
                     // An accept that waits for the text and caret that this answer is for does its key's normal
-                    // action: there is nothing to commit from, as when the list that showed matched nothing.
+                    // action: there is nothing to commit from, as when the list that showed matched nothing. Some
+                    // servers answer nothing, incomplete, in strings and comments: asking again on each key there
+                    // would never end.
                     KeyGesture? pressed = _filter.TakeWaitingKey();
                     Close();
+                    _quickSuggest.Quiet(request);
                     if (pressed is { } key)
                         _performKey(key);
                     return;
@@ -366,7 +371,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
 
     void ICompletionOwner.PerformKey(KeyGesture key) => _performKey(key);
 
-    /// <summary>Opens completion on the server's trigger characters, and when typing starts a word.</summary>
+    /// <summary>Opens completion on the server's trigger characters, and where typing opens it.</summary>
     private void OnTextEntered(object? sender, TextInputEventArgs e)
     {
         if (e.Text is not { Length: > 0 } text || _document.Features?.Completion is not { } provider)
@@ -374,25 +379,8 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         char typed = text[^1];
         if (provider.TriggerCharacters.Contains(typed))
             Ask(new CompletionTrigger(CompletionTriggerKind.TriggerCharacter, typed));
-        else if (_session is null && StartsWord(typed))
+        else if (_session is null && _quickSuggest.Opens(typed))
             Ask(new CompletionTrigger(CompletionTriggerKind.Invoked));
-    }
-
-    /// <summary>
-    /// Whether the character just typed starts a word outside a comment: it is the whole word before the caret, and no
-    /// word goes on after the caret. VS Code asks there too in strings, as its JSON and YAML settings say.
-    /// </summary>
-    private bool StartsWord(char typed)
-    {
-        int caret = _textArea.Caret.Offset;
-        if (!WordCharacters.IsWordCharacter(typed) || WordBefore(caret).Length != 1)
-            return false;
-        if (
-            caret < _buffer.GetLineByOffset(caret).EndOffset
-            && WordCharacters.IsWordCharacter(_buffer.GetCharAt(caret))
-        )
-            return false;
-        return _highlighter.ContextAt(caret) is not { Before: TokenType.Comment };
     }
 
     private void OnCaretPositionChanged(object? sender, EventArgs e) => Update();
