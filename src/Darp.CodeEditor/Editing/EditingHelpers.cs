@@ -117,6 +117,9 @@ internal sealed class EditingHelpers : IDisposable
             else
                 _closing = PairToClose(typed, offsets);
         }
+        // Text of several characters, as from an input method.
+        else if (e.Text is { } text && text.AsSpan().IndexOfAny('\r', '\n') >= 0)
+            e.Text = TextUtilities.NormalizeNewLines(text, _document.LineBreak);
     }
 
     /// <summary>
@@ -406,7 +409,7 @@ internal sealed class EditingHelpers : IDisposable
                 line,
                 Buffer.GetText(line),
                 caret - line.Offset,
-                TextUtilities.GetNewLineFromDocument(Buffer, line.LineNumber)
+                _document.LineBreak
             );
             int replaced = CanChange(caret, newLine.Replaced) ? newLine.Replaced : 0;
             Buffer.Replace(caret, replaced, newLine.Text);

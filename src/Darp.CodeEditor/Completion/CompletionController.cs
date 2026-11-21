@@ -641,7 +641,7 @@ internal sealed class CompletionController : IDisposable
             Math.Min(_buffer.GetLineByOffset(caret).EndOffset, caret + (item.Edit.Range.End - request.Offset))
         );
         RenderedSnippet? snippet = item.Snippet is { } source ? _snippets.Render(source, range.Start) : null;
-        var main = new CompletionEdit(range, snippet?.Text ?? item.Edit.NewText);
+        var main = new CompletionEdit(range, snippet?.Text ?? InLineBreaks(item.Edit.NewText));
         Resolve? late = null;
         if (item.AdditionalEdits is null && answer.List.Resolves)
         {
@@ -735,7 +735,16 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>Edits in the text of <paramref name="snapshot"/>, moved to the current text.</summary>
     private IEnumerable<CompletionEdit> Mapped(TextSnapshot snapshot, IEnumerable<CompletionEdit> edits) =>
-        edits.Select(edit => edit with { Range = _document.MapToCurrent(snapshot, edit.Range) });
+        edits.Select(edit =>
+            edit with
+            {
+                Range = _document.MapToCurrent(snapshot, edit.Range),
+                NewText = InLineBreaks(edit.NewText),
+            }
+        );
+
+    /// <summary><paramref name="text"/> from the server in the document's line breaks.</summary>
+    private string InLineBreaks(string text) => TextUtilities.NormalizeNewLines(text, _document.LineBreak);
 
     /// <summary><paramref name="first"/> and the edits that overlap none before them.</summary>
     private static List<CompletionEdit> WithoutOverlaps(List<CompletionEdit> first, IEnumerable<CompletionEdit> more)

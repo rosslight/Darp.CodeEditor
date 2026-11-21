@@ -116,7 +116,7 @@ internal sealed class SnippetController : IBackgroundRenderer, IDisposable
             new SnippetContext(
                 _buffer.GetText(line.Offset, indentationEnd - line.Offset),
                 _document.Indentation,
-                TextUtilities.GetNewLineFromDocument(_buffer, line.LineNumber),
+                _document.LineBreak,
                 name =>
                     SnippetVariables.Random(name)
                     ?? (values.TryGetValue(name, out string? value) ? value : values[name] = Variable(name))

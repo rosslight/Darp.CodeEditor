@@ -21,6 +21,32 @@ public sealed class CodeDocumentTests(UiFixture ui)
             document.CurrentSnapshot.Version.ShouldBeGreaterThan(before.Version);
         });
 
+    /// <summary><c>\r\n</c> when more than half of the line breaks are <c>\r\n</c> or <c>\r</c>; the system's without any.</summary>
+    [Theory]
+    [InlineData("a\nb", "\n")]
+    [InlineData("a\r\nb", "\r\n")]
+    [InlineData("a\rb", "\r\n")]
+    [InlineData("a\r\nb\nc", "\n")]
+    [InlineData("a\r\nb\rc\nd", "\r\n")]
+    [InlineData("abc", null)]
+    public void New_lines_take_the_line_break_that_most_lines_of_the_text_end_with(string text, string? expected) =>
+        LineBreaks.Detect(text).ShouldBe(expected ?? NewLines.OfNewDocuments);
+
+    /// <summary>Edits keep it, also those that remove every line break.</summary>
+    [Fact]
+    public Task The_line_break_is_found_when_the_text_is_created_or_set() =>
+        _ui.Run(() =>
+        {
+            using CodeDocument document = CodeDocument.Create(CodeLanguage.PlainText, "a\r\nb");
+
+            document.Replace(new TextRange(1, 2), "");
+            document.LineBreak.ShouldBe("\r\n");
+            document.Text = "a\nb";
+            document.LineBreak.ShouldBe("\n");
+            document.Text = "a";
+            document.LineBreak.ShouldBe(NewLines.OfNewDocuments);
+        });
+
     [Theory]
     [InlineData(-4, 5, "xbc")]
     [InlineData(2, 99, "abx")]
@@ -172,7 +198,7 @@ public sealed class CodeDocumentTests(UiFixture ui)
         });
 
     [Fact]
-    public Task Indentation_starts_as_in_VS_Code() =>
+    public Task Indentation_of_a_text_without_indented_lines_starts_as_in_VS_Code() =>
         _ui.Run(() =>
         {
             CodeDocument.Create(CodeLanguage.Yaml).Indentation.ShouldBe(Indentation.Spaces(2));

@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Threading;
 using AvaloniaEdit.Document;
 using Darp.CodeEditor.Diagnostics;
+using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.LanguageClient;
 
 namespace Darp.CodeEditor;
@@ -69,11 +70,18 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     /// <summary>Diagnostics on their way to the UI thread. Only the latest is applied; null when none is on its way.</summary>
     private DiagnosticsBatch? _pendingDiagnostics;
 
+    /// <summary>The line break of new text. Changed and read on the UI thread.</summary>
+    private string _lineBreak;
+
     private protected CodeDocument(CodeLanguage language, string text, string? filePath = null)
     {
         Language = language;
         _filePath = filePath;
-        _indentation = language.Id == "yaml" ? Indentation.Spaces(2) : Indentation.Spaces(4);
+        _indentation = IndentationGuesser.Guess(
+            text,
+            language.Id == "yaml" ? Indentation.Spaces(2) : Indentation.Spaces(4)
+        );
+        _lineBreak = LineBreaks.Detect(text);
         _document = new TextDocument(text);
         _currentSnapshot = new TextSnapshot(_document.CreateSnapshot(), 0);
         _diagnostics = new DiagnosticsBatch([], _currentSnapshot);
@@ -126,21 +134,38 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
 
     /// <summary>
     /// The whole text, as <c>CurrentSnapshot.GetText()</c>. Setting it replaces the text in one step that the user can
-    /// undo.
+    /// undo, and detects anew the line break that editors give new lines.
     /// </summary>
     public string Text
     {
         get => _currentSnapshot.GetText();
-        set => Change(document => document.Text = value);
+        set
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            Change(document =>
+            {
+                _lineBreak = LineBreaks.Detect(value);
+                document.Text = value;
+            });
+        }
     }
+
+    /// <summary>
+    /// The line break that editors give new text (<see cref="LineBreaks.Detect"/>): detected from the text when the
+    /// document is created and when <see cref="Text"/> is set, and kept through the edits between, also those that
+    /// remove every line break.
+    /// </summary>
+    internal string LineBreak => _lineBreak;
 
     /// <summary>The text as it is now, with its version.</summary>
     public TextSnapshot CurrentSnapshot => _currentSnapshot;
 
     /// <summary>
     /// How Tab and new lines indent, in every editor that shows the document, and how wide tabs are drawn. It starts
-    /// as in VS Code: 2 spaces for YAML, 4 spaces otherwise. The document does not detect it from the text. Changing it
-    /// leaves the existing text as it is, and editors apply it at once.
+    /// as the initial text indents: tabs or spaces by how many lines start with each, and the size of a level by how
+    /// much lines indent more than the line above, in the first 10,000 lines. Where the text gives no answer, as when
+    /// it has no indented lines, it is 2 spaces for YAML and 4 spaces otherwise. Changing it leaves the existing text
+    /// as it is, and editors apply it at once.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The size is not from 1 to 1,000 columns.</exception>
     public Indentation Indentation
