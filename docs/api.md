@@ -40,11 +40,11 @@ if (compilation.Succeeded)
 
 | Package | Public types |
 |---|---|
-| `Darp.CodeEditor` | `CodeEditor`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorColorTheme`, `CodeEditorViewState`, `CodeEditorStyles`, `TextSnapshot`, `TextRange`, `TextPosition`, `TextSelection`, `Indentation`, `Diagnostic`, `DiagnosticSeverity` |
+| `Darp.CodeEditor` | `CodeEditor`, `CodeEditorCommands`, `CodeDocument`, `CodeLanguage`, `LanguageServer`, `LanguageServerOptions`, `LanguageServerSettingsRequest`, `LanguageServerState`, `CodeEditorColorTheme`, `CodeEditorViewState`, `CodeEditorStyles`, `TextSnapshot`, `TextRange`, `TextPosition`, `TextSelection`, `Indentation`, `Diagnostic`, `DiagnosticSeverity` |
 | `Darp.CodeEditor.CSharpScript` | `CSharpScriptServer`, `CSharpScriptServerOptions`, `CSharpScriptEnvironment<TGlobals>`, `CSharpScriptDocument<TGlobals>`, `CSharpScriptCompilation<TGlobals>`, `CSharpScriptAssembly<TGlobals>`, `CSharpCodeLanguage` (adds `CodeLanguage.CSharp`) |
 | `Darp.CodeEditor.CSharpScript.Runner` | `CSharpScriptSession` (starts sessions, and scripts in them), `CSharpScriptSession<TSessionSide, TSessionObject>`, `CSharpScriptSessionOptions`, `CSharpScriptRun`, `CSharpScriptException`, `CSharpScriptSessionExit`, `CSharpScriptSessionExitReason`, and the contracts that runner-side script APIs implement: `IScriptSessionObject<TSelf, TAppSide>`, `IScriptGlobalsFactory<TGlobals, TInput>`, `IScriptGlobalsFactory<TGlobals>` |
 
-34 public types in all. Three more things are public without being types of ours:
+35 public types in all. Three more things are public without being types of ours:
 
 - **The project file.**
   - `CSharpScriptReference="true"` on a package or project reference: scripts may use its assemblies. Publishing copies their DLLs next to the app, NativeAOT apps included, with their XML docs, which hover and completion show.
@@ -99,6 +99,7 @@ rather than its view belong to the document, as in Monaco and CodeMirror.
 | `ScrollTo(TextRange)` | brings a range into view: not at all when it is visible, centered when it is not |
 | `OpenSearch(replace)` | the search or replace bar, for a Find button; Ctrl+F and Ctrl+H open them too |
 | `Cut()`, `Copy()`, `Paste()`, `SelectAll()` | for an app's Edit menu; the keys and the editor's context menu do the same, and the document's `Undo` and `Redo` the rest |
+| `RunCommand(id)` | runs one of `CodeEditorCommands` from an app's button, menu or key binding; false where it does not apply |
 | `SaveViewState()`, `RestoreViewState(state)` | the caret, the selection and the scroll position, for an app that switches one editor between documents |
 
 **Built in, with no settings:** current-line highlight, bracket matching, auto-closing brackets and quotes,
@@ -120,15 +121,62 @@ A document holds no view state, so several editors of one document never fight o
 **Editing in code:** `document.Replace(range, text)` inserts or replaces in one step the user can undo, such as a
 template at the caret: `document.Replace(editor.Selection.Range, snippet)`. Setting `Text` replaces everything.
 
-**Keys:** the editor handles only its own: editing, navigation, search (Ctrl+F, Ctrl+H, F3), completion (Ctrl+Space),
-comments (Ctrl+/) and indentation (Tab, Shift+Tab). On macOS, Cmd takes Ctrl's place, except for completion, and
-Cmd+Alt+F opens the replace bar, as AvaloniaEdit decides by the operating system. While completion's list shows, Up,
-Down, Page Up, Page Down, Enter, Tab and Escape are its; while signature help shows several signatures, Up and Down
-are its; while a snippet's stops are active, Tab and Shift+Tab are theirs, except Shift+Tab on the first stop, and so
-is Escape after completion and signature help. Other keys, such as F5 or Ctrl+S, reach the app's key bindings.
+**Keys** are Avalonia's `KeyBindings` (#113). The editor appends its defaults to `CodeEditor.KeyBindings` when it is
+first attached, after those of the app's XAML, so the app's run first:
+
+```xml
+<ce:CodeEditor x:Name="Editor">
+    <ce:CodeEditor.KeyBindings>
+        <KeyBinding Gesture="F5" Command="{Binding RunScriptCommand}" />
+        <KeyBinding Gesture="Ctrl+J"
+                    Command="{Binding #Editor.RunCommand}"
+                    CommandParameter="{x:Static ce:CodeEditorCommands.CommentLine}" />
+    </ce:CodeEditor.KeyBindings>
+</ce:CodeEditor>
+```
+
+```csharp
+// From Loaded on, once the defaults are there. A binding added from code later goes first with Insert(0, …).
+var replace = KeyGesture.Parse("Ctrl+H");
+Editor.KeyBindings.RemoveAll(binding => binding.Gesture == replace);
+```
+
+| Command (`CodeEditorCommands`) | Default keys |
+|---|---|
+| `TriggerSuggest` | Ctrl+Space, Ctrl+I; on macOS also Alt+Escape |
+| `TriggerParameterHints` | Ctrl+Shift+Space |
+| `Find`, `Replace` | Ctrl+F, Ctrl+H (macOS: Alt+Cmd+F) |
+| `FindNext`, `FindPrevious` | F3, Shift+F3 (macOS also Cmd+G, Shift+Cmd+G) |
+| `CommentLine` | Ctrl+/, the number pad's /; on Linux also Ctrl+Shift+7, the / of a German layout |
+| `Undo`, `Redo` | Ctrl+Z; Ctrl+Y, Ctrl+Shift+Z |
+| `Cut`, `Copy`, `Paste`, `SelectAll` | Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A |
+
+On macOS, Cmd takes Ctrl's place, except in Ctrl+Space.
+
+- **A key whose command does not apply goes on** to the next binding and to the app: Ctrl+Z with nothing to undo,
+  Ctrl+Space without a server that completes, and every key of an editor without a document. Commands on the text need
+  the text to have the keyboard, so the search bar's text boxes keep their own clipboard keys; the find commands work
+  from the search bar too.
+- **`RunCommand`** skips that focus check, as the keyboard is on the app's button or menu at that moment. Afterwards
+  the keyboard goes to the text, unless it is in the editor already, as in the search bar's query after `Find`. An app's
+  `KeyBinding` to `RunCommand` always consumes its key, even when the command does not apply.
+- **Other keys are not bindings:** typing, Backspace, Enter, Tab, Shift+Tab, Escape and the arrows. While completion's
+  list shows, Up, Down, Page Up, Page Down, Enter, Tab and Escape are its; while signature help shows several
+  signatures, Up and Down are its; while a snippet's stops are active, Tab and Shift+Tab are theirs, except Shift+Tab on
+  the first stop, and so is Escape after completion and signature help. A binding for the same gesture on an ancestor
+  would take the key first, so apps should not bind plain Enter, Tab or Escape there.
+
+**Context menu:** a plain `ContextMenu` with Cut, Copy, Paste and Select All, which an app changes through its `Items`
+or replaces. A right click moves the caret, unless it is inside the selection.
+
+**Line breaks:** a document has one line break for new text: `\r\n` when more than half of its lines end in `\r\n` or
+`\r`, `\n` when the others do, and the system's for a text without any. It is read when the document is created and
+when `Text` is set. Enter, paste, drops, typed text and completion all use it. Copy and cut take it too, or `\r\n` on
+Windows. Existing line breaks stay as they are (#114).
 
 **Indentation** belongs to the document (`CodeDocument.Indentation`), so all editors of one document agree. It starts
-as in VS Code, 2 spaces for YAML and 4 otherwise, and is not detected from the text.
+as the document's first text indents, as VS Code guesses it; where the text gives no answer, 2 spaces for YAML and 4
+otherwise (#114).
 
 **Look.** The text and everything around it are styled differently, as in Monaco and CodeMirror:
 
@@ -188,7 +236,7 @@ ruler shows them. Scripts of 5,000 lines need them to find errors outside the vi
 changing it, so they wait until the core works.
 
 **Later, when asked for:** whitespace display modes, rulers, folding, a minimap, placeholder text for empty
-documents, indentation detected from the text, markers that the app adds, and a view state that can be stored across
+documents, markers that the app adds, and a view state that can be stored across
 app starts.
 
 ## 3. Who owns what
@@ -432,7 +480,7 @@ How the client talks to a server, where the protocol leaves a choice:
   option as a placeholder; no list of its options shows.
   - **What goes in.** The rules of a commit hold: the edit, grown by what was typed since, the additional edits, which
     stay plain text, one undo step, and nothing in a read-only editor. Lines after the first start with the whitespace
-    that the snippet's line has before it, and their indentation is the document's; line breaks are the line's. Items
+    that the snippet's line has before it, and their indentation and line breaks are the document's. Items
     in plain text still go in as they are written; VS Code would indent their lines too, and the client does not
     advertise `insertTextMode`.
   - **Variables** have their values for the text and the caret before the commit: `TM_CURRENT_LINE`, the shown part of
