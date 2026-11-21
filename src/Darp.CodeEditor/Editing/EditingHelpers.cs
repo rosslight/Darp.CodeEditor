@@ -450,7 +450,7 @@ internal sealed class EditingHelpers : IEditorFeature
     private string? IndentByRules(IndentationRules rules, DocumentLine line, string before, string after)
     {
         var indenting = new Indenting(_document.Indentation);
-        IndentationMatching matching = rules.StartMatching();
+        IndentationMatching matching = new(rules, IndentationRules.Clock);
         try
         {
             // The line before the new one is the text before the caret.
@@ -503,7 +503,7 @@ internal sealed class EditingHelpers : IEditorFeature
     /// </summary>
     private string? OutdentedIndentation(IndentationRules rules, int lineNumber, string text, int typed)
     {
-        IndentationMatching matching = rules.StartMatching();
+        IndentationMatching matching = new(rules, IndentationRules.Clock);
         try
         {
             if (matching.Decreases(text.Remove(typed, 1)) || !matching.Decreases(text))

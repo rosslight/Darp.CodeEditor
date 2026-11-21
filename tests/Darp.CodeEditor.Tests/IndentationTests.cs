@@ -165,10 +165,13 @@ public sealed class IndentationTests(UiFixture ui)
         // As after 500,000 empty lines: the scan for a line with text ends with the time, not only the matching.
         var rules = new IndentationRules(new Regex("x"), new Regex("y"));
         int reads = 0;
+        var time = new ManualTime();
+        var matching = new IndentationMatching(rules, time);
+        time.Advance(IndentationRules.TimeLimit);
 
         Should.Throw<RegexMatchTimeoutException>(() =>
             EditingHelpers.InheritedIndentation(
-                new IndentationMatching(rules, deadline: 0),
+                matching,
                 500_001,
                 honorIntentional: true,
                 _ =>
