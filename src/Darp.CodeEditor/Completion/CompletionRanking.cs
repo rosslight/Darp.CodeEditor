@@ -48,14 +48,16 @@ internal sealed class CompletionRanking
 
     /// <summary>
     /// Whether <paramref name="item"/> matches the text typed for it in <paramref name="snapshot"/> up to
-    /// <paramref name="caret"/>, checked on the UI thread for that item alone.
+    /// <paramref name="caret"/>, checked on the UI thread for that item alone; <paramref name="graceful"/>, tolerating a
+    /// typo, as among <see cref="CompletionMatcher.MaxGracefulItems"/> items or fewer.
     /// </summary>
-    public bool Matches(CompletionItem item, TextSnapshot snapshot, int caret) =>
+    public bool Matches(CompletionItem item, TextSnapshot snapshot, int caret, bool graceful) =>
         (_itemMatcher ??= new CompletionMatcher()).Match(
             Typed(snapshot, item.Edit.Range.Start, caret),
             item.Label,
             item.FilterText,
-            item.FilterTextIsLabel
+            item.FilterTextIsLabel,
+            graceful
         )
             is not null;
 

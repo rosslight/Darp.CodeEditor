@@ -3,6 +3,7 @@ using Avalonia.Logging;
 using AvaloniaEdit.Editing;
 using Darp.CodeEditor.LanguageClient;
 using Darp.CodeEditor.Loading;
+using Darp.CodeEditor.Lsp;
 
 namespace Darp.CodeEditor.Completion;
 
@@ -28,10 +29,12 @@ internal interface ICompletionOwner
 /// <summary>
 /// Filters completion's answer as the user types, and shows the result. Each change of the text or the caret filters
 /// anew off the UI thread (<see cref="CompletionRanking"/>), the filter under way stops, and the list shows the newest
-/// result, the previous one meanwhile. When nothing matches, a list opened by typing ends, unless more may come, as
-/// from a list asked for again: it freezes meanwhile. One asked for by key freezes, or says "No suggestions.". An accept
-/// that the current text's filter has to decide commits what it selects once it has run, unless the text or the caret
-/// changes before. It owns what the list shows until completion ends, which <see cref="Hide"/> forgets.
+/// result, the previous one meanwhile. Typing on ranks the items that show, as VS Code refilters, and anything else,
+/// such as Backspace, all of the answer's: once typing shortened a long list, it tolerates a typo. When nothing matches,
+/// a list opened by typing ends, unless more may come, as from a list asked for again: it freezes meanwhile. One asked
+/// for by key freezes, or says "No suggestions.". An accept that the current text's filter has to decide commits what it
+/// selects once it has run, unless the text or the caret changes before. It owns what the list shows until completion
+/// ends, which <see cref="Hide"/> forgets.
 /// </summary>
 internal sealed class CompletionFilter
 {
@@ -126,7 +129,11 @@ internal sealed class CompletionFilter
         var filtering = new FilterRun(key, new CancellationTokenSource());
         _filtering = filtering;
         // The UI thread reads no text: each item's typed text is read off it, from the snapshot of the key's version.
-        FilterAsync(filtering, answer.List.Items, _document.CurrentSnapshot);
+        FilterAsync(
+            filtering,
+            RanksShown(key) ? [.. Items.Select(shown => shown.Item)] : answer.List.Items,
+            _document.CurrentSnapshot
+        );
     }
 
     /// <summary>
@@ -172,7 +179,8 @@ internal sealed class CompletionFilter
         int caret = _textArea.Caret.Offset;
         if (shown.Answer.Request.IsStale || caret < shown.Answer.Request.Offset)
             return false;
-        return _ranking.Matches(item, _document.CurrentSnapshot, caret);
+        int ranked = RanksShown(CurrentKey(shown.Answer)) ? Items.Count : shown.Answer.List.Items.Count;
+        return _ranking.Matches(item, _document.CurrentSnapshot, caret, ranked <= CompletionMatcher.MaxGracefulItems);
     }
 
     /// <summary>
@@ -313,6 +321,13 @@ internal sealed class CompletionFilter
                 key.Answer.Request.Word.Start
             );
     }
+
+    /// <summary>
+    /// Whether a filter for <paramref name="key"/> ranks the items that show, rather than all of the answer's: the
+    /// caret went on past where they were filtered for, as when typing on.
+    /// </summary>
+    private bool RanksShown(FilterKey key) =>
+        _shown is { } shown && shown.Answer == key.Answer && key.Caret > shown.Caret;
 
     /// <summary>What filtering <paramref name="answer"/> now would filter for.</summary>
     private FilterKey CurrentKey(CompletionAnswer answer) =>

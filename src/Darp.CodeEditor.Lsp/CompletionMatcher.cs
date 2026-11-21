@@ -14,11 +14,25 @@ namespace Darp.CodeEditor.Lsp;
 /// the same score.
 /// </para>
 /// <para>
-/// This is a port of VS Code's <c>fuzzyScore</c> and <c>anyScore</c> (<c>src/vs/base/common/filters.ts</c>, 1.145.0, MIT
-/// license), with its default options: the first character must match strongly, and a full match is boosted. It has
-/// no typo-tolerant variant, and emoji are no separators. Texts are matched up to their first 128 characters. Case is
-/// ignored by .NET's invariant lower case, which differs from JavaScript's for the few letters whose case depends on
-/// their context, such as the Greek final sigma.
+/// Lists of up to <see cref="MaxGracefulItems"/> items tolerate a typo, as VS Code's suggest widget does with
+/// <c>fuzzyScoreGracefulAggressive</c>: an item also matches with two neighbouring characters of the typed text
+/// swapped, after the first character and up to the seventh and eighth, at a cost of 3, and the best of these and the
+/// text as typed counts, so that "prnit" matches "print", and "cno" matches "console" as "con" does. Longer lists match
+/// strictly, as each swap is another match.
+/// </para>
+/// <para>
+/// A ranking whose scoring tables would fill more than <see cref="MaxCellsPerRank"/> cells, as many as some 12 ms take,
+/// scores each of its items the cheaper way: by the way that one pass finds, as the table scores that way
+/// (<see cref="FuzzyScorer.ScoreInOnePass"/>), and with swaps only for an item that the typed text does not match, as
+/// VS Code's <c>fuzzyScoreGraceful</c>. Matching 2,000 labels of 128 characters against 63 typed characters fills some
+/// 8 million for the text as typed alone. It decides before it scores, so that alike items score alike.
+/// </para>
+/// <para>
+/// This is a port of VS Code's <c>fuzzyScore</c>, <c>fuzzyScoreGraceful</c> and <c>anyScore</c>
+/// (<c>src/vs/base/common/filters.ts</c>, 1.145.0, MIT license), with its default options: the first character must
+/// match strongly, and a full match is boosted. Emoji are no separators. Texts are matched up to their first 128
+/// characters. Case is ignored by .NET's invariant lower case, which differs from JavaScript's for the few letters
+/// whose case depends on their context, such as the Greek final sigma.
 /// </para>
 /// <para>
 /// An instance keeps the tables of the matching for reuse: use it on one thread at a time. They take about 150 KB.
@@ -32,30 +46,29 @@ internal sealed class CompletionMatcher
     /// </summary>
     public const int MaxLength = 128;
 
+    /// <summary>The most items that <see cref="Rank"/> matches gracefully, tolerating a typo; longer lists strictly.</summary>
+    public const int MaxGracefulItems = 2000;
+
+    /// <summary>The most cells of the scoring tables that one ranking fills (<see cref="FuzzyScorer.Cells"/>).</summary>
+    public const long MaxCellsPerRank = 2_000_000;
+
     /// <summary>The score of an item when nothing is typed: below any score of a match.</summary>
     private const int DefaultScore = -100;
 
-    private const int Stride = MaxLength + 1;
-    private const byte Diagonal = 1;
-    private const byte Left = 2;
-    private const byte LeftLeft = 3;
+    private readonly FuzzyScorer _scorer = new();
 
-    /// <summary>For each typed position, the first and the last filter text position that it can match.</summary>
-    private readonly int[] _minWordMatchPos = new int[2 * MaxLength + 1];
+    /// <summary>The cells of the scoring tables that one ranking fills at most.</summary>
+    private readonly long _cellsPerRank;
 
-    private readonly int[] _maxWordMatchPos = new int[2 * MaxLength + 1];
-
-    /// <summary>Per typed position (row) and filter text position (column): the best score, the length of the
-    /// contiguous match that ends there, and where the best score came from.</summary>
-    private readonly int[] _table = new int[Stride * Stride];
-
-    private readonly int[] _diagonal = new int[Stride * Stride];
-    private readonly byte[] _arrows = new byte[Stride * Stride];
+    /// <param name="cellsPerRank">The cells of the scoring tables that one ranking fills at most.</param>
+    public CompletionMatcher(long cellsPerRank = MaxCellsPerRank) => _cellsPerRank = cellsPerRank;
 
     /// <summary>
-    /// The items that match, best first; equal scores keep the order of <paramref name="items"/>. Matching a long list
-    /// against a long typed text takes long, so it belongs off the UI thread; it stops soon once
-    /// <paramref name="cancellationToken"/> is cancelled.
+    /// The items that match, best first; equal scores keep the order of <paramref name="items"/>. Up to
+    /// <see cref="MaxGracefulItems"/> items match gracefully, and all of them by tables while those stay within
+    /// <see cref="MaxCellsPerRank"/>. Matching a long list against a long typed text takes long, so it belongs off the
+    /// UI thread; it stops soon once <paramref name="cancellationToken"/> is cancelled. Each text is read in lower case
+    /// once, and a typed text that items share, as they mostly do, is made ready once, with its swaps.
     /// </summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public List<RankedCompletion> Rank(
@@ -63,6 +76,8 @@ internal sealed class CompletionMatcher
         CancellationToken cancellationToken = default
     )
     {
+        var texts = new RankedTexts(items, items.Count <= MaxGracefulItems);
+        bool exact = Cells(texts, cancellationToken) <= _cellsPerRank;
         var ranked = new List<RankedCompletion>();
         for (int i = 0; i < items.Count; i++)
         {
@@ -70,8 +85,12 @@ internal sealed class CompletionMatcher
             if (i % 64 == 0)
                 cancellationToken.ThrowIfCancellationRequested();
             CompletionCandidate item = items[i];
-            if (Match(item.Typed, item.Label, item.FilterText, item.FilterTextIsLabel) is { } match)
+            if (
+                Match(texts.Typed(i), item.Label, texts, i, item.FilterText, item.FilterTextIsLabel, exact) is { } match
+            )
+            {
                 ranked.Add(new RankedCompletion(i, match.Score, match.Highlights));
+            }
         }
         // A stable order: List.Sort is not stable, so the index decides between equal scores.
         ranked.Sort(static (a, b) => a.Score != b.Score ? b.Score.CompareTo(a.Score) : a.Index.CompareTo(b.Index));
@@ -93,22 +112,88 @@ internal sealed class CompletionMatcher
     /// characters, as VS Code shows them; otherwise its own, by the most lenient score. The caller knows it from
     /// reading the item once, as comparing whole texts costs as much as they are long.
     /// </param>
-    public (int Score, int[] Highlights)? Match(string typed, string label, string filterText, bool filterTextIsLabel)
+    /// <param name="graceful">Whether a typo is tolerated, as in a list of up to <see cref="MaxGracefulItems"/>.</param>
+    /// <param name="exact">
+    /// Whether scores come from the tables; otherwise the cheaper way, as a ranking past <see cref="MaxCellsPerRank"/>.
+    /// Both find the same items.
+    /// </param>
+    public (int Score, int[] Highlights)? Match(
+        string typed,
+        string label,
+        string filterText,
+        bool filterTextIsLabel,
+        bool graceful = false,
+        bool exact = true
+    )
     {
-        // Whitespace that the item's edit starts with is not typed text.
-        int start = 0;
-        while (start < typed.Length && typed[start] is ' ' or '\t')
-            start++;
-        if (start == typed.Length)
+        var texts = new RankedTexts([new CompletionCandidate(typed, label, filterText, filterTextIsLabel)], graceful);
+        return Match(texts.Typed(0), label, texts, 0, filterText, filterTextIsLabel, exact);
+    }
+
+    /// <summary>How the item at <paramref name="index"/> of <paramref name="texts"/> matches, as <see cref="Match(string, string, string, bool, bool, bool)"/> says.</summary>
+    private (int Score, int[] Highlights)? Match(
+        TypedText typed,
+        string label,
+        RankedTexts texts,
+        int index,
+        string filterText,
+        bool filterTextIsLabel,
+        bool exact
+    )
+    {
+        if (typed.Start == typed.Text.Length)
             return (DefaultScore, []);
-        string typedLow = Lower(typed);
-        if (Score(typed, typedLow, start, filterText, Lower(filterText), firstMatchCanBeWeak: false) is not { } match)
+        string filterTextLow = texts.FilterTextLow(index);
+        (int Score, int[] Positions)? scored = GracefulScore(typed, filterText, filterTextLow, exact);
+        if (scored is not { } match)
             return null;
         if (filterTextIsLabel)
             return match;
         // The label shows: its characters that match, by the most lenient score, with the filter text's score.
-        return (match.Score, AnyScore(typed, typedLow, start, label));
+        return (match.Score, AnyScore(typed, label, texts.LabelLow(index), exact));
     }
+
+    /// <summary>
+    /// The cells of the scoring tables that ranking the items of <paramref name="texts"/> by them fills, up to the first
+    /// count past the budget: for each item, its filter text's for the text as typed and for each swap that it tries,
+    /// and, when the filter text is another than the label and may match, the label's table that finds its matched
+    /// characters.
+    /// </summary>
+    private long Cells(RankedTexts texts, CancellationToken cancellationToken)
+    {
+        long cells = 0;
+        for (int i = 0; i < texts.Count && cells <= _cellsPerRank; i++)
+        {
+            if (i % 64 == 0)
+                cancellationToken.ThrowIfCancellationRequested();
+            TypedText typed = texts.Typed(i);
+            if (typed.Start == typed.Text.Length)
+                continue;
+            string filterTextLow = texts.FilterTextLow(i);
+            long filtered = _scorer.Cells(typed.Low, typed.Start, filterTextLow);
+            foreach ((_, string swappedLow) in typed.Swaps)
+                filtered += _scorer.Cells(swappedLow, typed.Start, filterTextLow);
+            cells += filtered;
+            // Only an item that may match shows its label.
+            if (!texts.FilterTextIsLabel(i) && filtered > 0)
+                cells += AnyTable(typed.Low, typed.Start, texts.LabelLow(i)).Cells;
+        }
+        return cells;
+    }
+
+    /// <summary>The table's score, or with <paramref name="exact"/> false the cheaper one's.</summary>
+    private (int Score, int[] Positions)? Score(
+        string pattern,
+        string patternLow,
+        int patternStart,
+        string word,
+        string wordLow,
+        bool firstMatchCanBeWeak,
+        bool exact
+    ) =>
+        exact
+            ? _scorer.Score(pattern, patternLow, patternStart, word, wordLow, firstMatchCanBeWeak)
+            : FuzzyScorer.ScoreInOnePass(pattern, patternLow, patternStart, word, wordLow, firstMatchCanBeWeak);
 
     /// <summary>
     /// The first <see cref="MaxLength"/> characters of <paramref name="text"/>, all that matching reads, in lower case:
@@ -121,303 +206,143 @@ internal sealed class CompletionMatcher
     /// VS Code's <c>anyScore</c>: the characters of <paramref name="word"/> that match, also weakly and from a later
     /// typed character; none when nothing does.
     /// </summary>
-    private int[] AnyScore(string pattern, string patternLow, int patternStart, string word)
+    private int[] AnyScore(TypedText typed, string word, string wordLow, bool exact)
     {
-        string wordLow = Lower(word);
-        int max = Math.Min(13, pattern.Length);
+        int start = AnyTable(typed.Low, typed.Start, wordLow).Start;
+        return
+            start >= 0
+            && Score(typed.Text, typed.Low, start, word, wordLow, firstMatchCanBeWeak: true, exact) is { } match
+            ? match.Positions
+            : [];
+    }
+
+    /// <summary>
+    /// Where <see cref="AnyScore"/> matches from, and the cells of its table: the first typed character, from
+    /// <paramref name="patternStart"/> and before the fourteenth, from which the word holds the rest of the typed text
+    /// in order, as a match that may start weakly needs no more; -1 and none when there is no such character.
+    /// </summary>
+    private (int Start, long Cells) AnyTable(string patternLow, int patternStart, string wordLow)
+    {
+        int max = Math.Min(13, patternLow.Length);
         for (int start = patternStart; start < max; start++)
         {
-            if (Score(pattern, patternLow, start, word, wordLow, firstMatchCanBeWeak: true) is { } match)
-                return match.Positions;
+            if (_scorer.Cells(patternLow, start, wordLow) is > 0 and var cells)
+                return (start, cells);
         }
-        return [];
+        return (-1, 0);
     }
 
     /// <summary>
-    /// VS Code's <c>fuzzyScore</c>, with <c>boostFullMatch</c>: the score of <paramref name="pattern"/> from
-    /// <paramref name="patternStart"/> in <paramref name="word"/>, and the positions in the word that matched,
-    /// ascending; null without a match.
+    /// VS Code's <c>fuzzyScoreGracefulAggressive</c>, by the tables: the best score of the text as typed and with two
+    /// neighbouring characters swapped (<see cref="TypedText.Swaps"/>), one pair at a time, each swap costing 3. The
+    /// cheaper way, with <paramref name="exact"/> false, is its <c>fuzzyScoreGraceful</c>: the swaps only when the text
+    /// as typed does not match. Without swaps, as for a strict match, the text as typed. Null when none matches.
     /// </summary>
-    private (int Score, int[] Positions)? Score(
-        string pattern,
-        string patternLow,
-        int patternStart,
-        string word,
-        string wordLow,
-        bool firstMatchCanBeWeak
-    )
+    private (int Score, int[] Positions)? GracefulScore(TypedText typed, string word, string wordLow, bool exact)
     {
-        int patternLength = Math.Min(pattern.Length, MaxLength);
-        int wordLength = Math.Min(word.Length, MaxLength);
-        if (patternStart >= patternLength || wordLength == 0 || patternLength - patternStart > wordLength)
-            return null;
-        if (!IsPatternInWord(patternLow, patternStart, patternLength, wordLow, wordLength))
-            return null;
-        FillInMaxWordMatchPos(patternLength, wordLength, patternStart, patternLow, wordLow);
-
-        bool hasStrongFirstMatch = false;
-        int row = 1;
-        int column = 1;
-        for (int patternPos = patternStart; patternPos < patternLength; row++, patternPos++)
+        (int Score, int[] Positions)? top = Score(
+            typed.Text,
+            typed.Low,
+            typed.Start,
+            word,
+            wordLow,
+            firstMatchCanBeWeak: false,
+            exact
+        );
+        if (top is not null && !exact)
+            return top;
+        foreach ((string swapped, string swappedLow) in typed.Swaps)
         {
-            // Only the word positions that this pattern position can match, and that the next row can reach.
-            int minWordMatchPos = _minWordMatchPos[patternPos];
-            int maxWordMatchPos = _maxWordMatchPos[patternPos];
-            int nextMaxWordMatchPos = patternPos + 1 < patternLength ? _maxWordMatchPos[patternPos + 1] : wordLength;
-            column = minWordMatchPos + 1;
-            for (int wordPos = minWordMatchPos; wordPos < nextMaxWordMatchPos; column++, wordPos++)
-            {
-                int score = int.MinValue;
-                if (wordPos <= maxWordMatchPos)
-                {
-                    score = DoScore(
-                        pattern,
-                        patternLow,
-                        patternPos,
-                        patternStart,
-                        word,
-                        wordLow,
-                        wordPos,
-                        wordLength,
-                        newMatchStart: _diagonal[At(row - 1, column - 1)] == 0,
-                        ref hasStrongFirstMatch
-                    );
-                }
-                bool canComeDiagonal = score != int.MinValue;
-                int diagonalScore = canComeDiagonal ? score + _table[At(row - 1, column - 1)] : 0;
-
-                bool canComeLeft = wordPos > minWordMatchPos;
-                // A penalty for the start of a gap.
-                int leftScore = canComeLeft
-                    ? _table[At(row, column - 1)] + (_diagonal[At(row, column - 1)] > 0 ? -5 : 0)
-                    : 0;
-                bool canComeLeftLeft = wordPos > minWordMatchPos + 1 && _diagonal[At(row, column - 1)] > 0;
-                int leftLeftScore = canComeLeftLeft
-                    ? _table[At(row, column - 2)] + (_diagonal[At(row, column - 2)] > 0 ? -5 : 0)
-                    : 0;
-
-                int cell = At(row, column);
-                if (
-                    canComeLeftLeft
-                    && (!canComeLeft || leftLeftScore >= leftScore)
-                    && (!canComeDiagonal || leftLeftScore >= diagonalScore)
-                )
-                {
-                    // Jumping over a diagonal means a match earlier in the word.
-                    (_table[cell], _arrows[cell], _diagonal[cell]) = (leftLeftScore, LeftLeft, 0);
-                }
-                else if (canComeLeft && (!canComeDiagonal || leftScore >= diagonalScore))
-                {
-                    // Left means a match earlier in the word.
-                    (_table[cell], _arrows[cell], _diagonal[cell]) = (leftScore, Left, 0);
-                }
-                else
-                {
-                    // IsPatternInWord found a match, so the diagonal is the remaining way.
-                    (_table[cell], _arrows[cell], _diagonal[cell]) = (
-                        diagonalScore,
-                        Diagonal,
-                        _diagonal[At(row - 1, column - 1)] + 1
-                    );
-                }
-            }
-        }
-
-        if (!hasStrongFirstMatch && !firstMatchCanBeWeak)
-            return null;
-
-        row--;
-        column--;
-        int total = _table[At(row, column)];
-        var positions = new int[patternLength - patternStart];
-        int backwardsDiagonalLength = 0;
-        int maxMatchColumn = 0;
-        while (row >= 1)
-        {
-            // The column where the path goes diagonally up.
-            int diagonalColumn = column;
-            do
-            {
-                byte arrow = _arrows[At(row, diagonalColumn)];
-                if (arrow == LeftLeft)
-                    diagonalColumn -= 2;
-                else if (arrow == Left)
-                    diagonalColumn -= 1;
-                else
-                    break;
-            } while (diagonalColumn >= 1);
-
-            // Keep the backwards diagonal instead, if it makes a longer contiguous match.
             if (
-                backwardsDiagonalLength > 1
-                && patternLow[patternStart + row - 1] == wordLow[column - 1]
-                && !IsUpperCaseAt(diagonalColumn - 1, word, wordLow)
-                && backwardsDiagonalLength + 1 > _diagonal[At(row, diagonalColumn)]
+                Score(swapped, swappedLow, typed.Start, word, wordLow, firstMatchCanBeWeak: false, exact)
+                    is { } candidate
+                && (top is not { } best || candidate.Score - 3 > best.Score)
             )
             {
-                diagonalColumn = column;
+                top = (candidate.Score - 3, candidate.Positions);
             }
-            backwardsDiagonalLength = diagonalColumn == column ? backwardsDiagonalLength + 1 : 1;
-            if (maxMatchColumn == 0)
-                maxMatchColumn = diagonalColumn;
-            row--;
-            column = diagonalColumn - 1;
-            positions[row] = column;
         }
-
-        // The word matches the pattern with all its characters: ahead of the others.
-        if (wordLength == patternLength)
-            total += 2;
-        // A penalty for each skipped character of the word.
-        total -= maxMatchColumn - patternLength;
-        return (total, positions);
+        return top;
     }
 
     /// <summary>
-    /// Whether the pattern's characters occur in the word in order, ignoring case; fills in the first word position
-    /// each can match.
+    /// A typed text as matching reads it, made ready once for the items that share it: in lower case, where it starts
+    /// after the whitespace that an item's edit starts with, and, matched gracefully, its swaps: the text with a
+    /// character swapped with the next, one at a time, from after the first typed character up to the seventh, where
+    /// the two differ, as alike neighbours have nothing to swap; none for fewer than three characters. VS Code counts
+    /// the seven from the start of the whole text.
     /// </summary>
-    private bool IsPatternInWord(string patternLow, int patternPos, int patternLength, string wordLow, int wordLength)
+    private sealed class TypedText
     {
-        int wordPos = 0;
-        while (patternPos < patternLength && wordPos < wordLength)
+        public TypedText(string text, bool graceful)
         {
-            if (patternLow[patternPos] == wordLow[wordPos])
+            Text = text;
+            Low = Lower(text);
+            while (Start < text.Length && text[Start] is ' ' or '\t')
+                Start++;
+            if (!graceful || text.Length < 3)
+                return;
+            int tries = Math.Min(7, text.Length - 1);
+            var swaps = new List<(string, string)>();
+            for (int moving = Start + 1; moving < tries; moving++)
             {
-                _minWordMatchPos[patternPos] = wordPos;
-                patternPos++;
+                if (text[moving] != text[moving + 1])
+                    swaps.Add((Swapped(text, moving), Swapped(Low, moving)));
             }
-            wordPos++;
+            Swaps = [.. swaps];
         }
-        return patternPos == patternLength;
+
+        public string Text { get; }
+
+        public string Low { get; }
+
+        public int Start { get; }
+
+        /// <summary>The text with a swap, and in lower case, as many as it has.</summary>
+        public (string Text, string Low)[] Swaps { get; } = [];
+
+        /// <summary><paramref name="text"/> with the characters at <paramref name="position"/> and after it swapped.</summary>
+        private static string Swapped(string text, int position) =>
+            string.Create(
+                text.Length,
+                (text, position),
+                static (span, state) =>
+                {
+                    state.text.AsSpan().CopyTo(span);
+                    (span[state.position], span[state.position + 1]) = (span[state.position + 1], span[state.position]);
+                }
+            );
     }
 
-    /// <summary>The last word position that each pattern position can match.</summary>
-    private void FillInMaxWordMatchPos(
-        int patternLength,
-        int wordLength,
-        int patternStart,
-        string patternLow,
-        string wordLow
-    )
+    /// <summary>
+    /// The texts of a ranking's items, each read in lower case once, when matching first needs it, and the typed text
+    /// that items share made ready once.
+    /// </summary>
+    private sealed class RankedTexts(IReadOnlyList<CompletionCandidate> items, bool graceful)
     {
-        int patternPos = patternLength - 1;
-        int wordPos = wordLength - 1;
-        while (patternPos >= patternStart && wordPos >= 0)
+        private readonly IReadOnlyList<CompletionCandidate> _items = items;
+        private readonly bool _graceful = graceful;
+        private readonly string?[] _filterTextLows = new string?[items.Count];
+        private readonly string?[] _labelLows = new string?[items.Count];
+        private TypedText? _typed;
+
+        public int Count => _items.Count;
+
+        public bool FilterTextIsLabel(int index) => _items[index].FilterTextIsLabel;
+
+        /// <summary>The typed text of the item at <paramref name="index"/>: the one before, when the items share it.</summary>
+        public TypedText Typed(int index)
         {
-            if (patternLow[patternPos] == wordLow[wordPos])
-            {
-                _maxWordMatchPos[patternPos] = wordPos;
-                patternPos--;
-            }
-            wordPos--;
+            string text = _items[index].Typed;
+            if (_typed is not { } typed || typed.Text != text)
+                _typed = typed = new TypedText(text, _graceful);
+            return typed;
         }
+
+        public string FilterTextLow(int index) => _filterTextLows[index] ??= Lower(_items[index].FilterText);
+
+        public string LabelLow(int index) => _labelLows[index] ??= Lower(_items[index].Label);
     }
-
-    /// <summary>The score of matching a pattern character at a word position; <see cref="int.MinValue"/> for none.</summary>
-    private static int DoScore(
-        string pattern,
-        string patternLow,
-        int patternPos,
-        int patternStart,
-        string word,
-        string wordLow,
-        int wordPos,
-        int wordLength,
-        bool newMatchStart,
-        ref bool firstMatchIsStrong
-    )
-    {
-        if (patternLow[patternPos] != wordLow[wordPos])
-            return int.MinValue;
-
-        int score = 1;
-        bool isGapLocation = false;
-        if (wordPos == patternPos - patternStart)
-        {
-            // A common prefix: "foobar" for "foobaz".
-            score = pattern[patternPos] == word[wordPos] ? 7 : 5;
-        }
-        else if (IsUpperCaseAt(wordPos, word, wordLow) && (wordPos == 0 || !IsUpperCaseAt(wordPos - 1, word, wordLow)))
-        {
-            // A capital: "foo" for "forOthers".
-            score = pattern[patternPos] == word[wordPos] ? 7 : 5;
-            isGapLocation = true;
-        }
-        else if (IsSeparatorAt(wordLow, wordPos) && (wordPos == 0 || !IsSeparatorAt(wordLow, wordPos - 1)))
-        {
-            // A separator: "." for "foo.bar".
-            score = 5;
-        }
-        else if (IsSeparatorAt(wordLow, wordPos - 1) || IsWhitespaceAt(wordLow, wordPos - 1))
-        {
-            // After a separator: "foo" for "bar_foo".
-            score = 5;
-            isGapLocation = true;
-        }
-
-        if (score > 1 && patternPos == patternStart)
-            firstMatchIsStrong = true;
-        if (!isGapLocation)
-        {
-            isGapLocation =
-                IsUpperCaseAt(wordPos, word, wordLow)
-                || IsSeparatorAt(wordLow, wordPos - 1)
-                || IsWhitespaceAt(wordLow, wordPos - 1);
-        }
-
-        if (patternPos == patternStart)
-        {
-            // The first character, not at the word's start: a penalty for the gap before it.
-            if (wordPos > 0)
-                score -= isGapLocation ? 3 : 5;
-        }
-        else if (newMatchStart)
-        {
-            // The start of a new match, after a gap.
-            score += isGapLocation ? 2 : 0;
-        }
-        else
-        {
-            // Part of a contiguous match: a bonus, unless a gap would be preferred here.
-            score += isGapLocation ? 0 : 1;
-        }
-
-        // A match on the word's last character pretends a gap after it, as every other match has one.
-        if (wordPos + 1 == wordLength)
-            score -= isGapLocation ? 3 : 5;
-        return score;
-    }
-
-    private static bool IsUpperCaseAt(int position, string word, string wordLow) => word[position] != wordLow[position];
-
-    private static bool IsSeparatorAt(string text, int index) =>
-        index >= 0
-        && index < text.Length
-        && text[index]
-            is '_'
-                or '-'
-                or '.'
-                or ' '
-                or '/'
-                or '\\'
-                or '\''
-                or '"'
-                or ':'
-                or '$'
-                or '<'
-                or '>'
-                or '('
-                or ')'
-                or '['
-                or ']'
-                or '{'
-                or '}';
-
-    private static bool IsWhitespaceAt(string text, int index) =>
-        index >= 0 && index < text.Length && text[index] is ' ' or '\t';
-
-    private static int At(int row, int column) => row * Stride + column;
 }
 
 /// <summary>An item to rank: the text typed for it, and its texts.</summary>
