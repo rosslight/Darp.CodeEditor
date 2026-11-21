@@ -5,11 +5,16 @@
     xmlns:ae="using:AvaloniaEdit"
     x:Class="Darp.CodeEditor.CodeEditorStyles"
 >
-    <!-- AvaloniaEdit's templates, in the Fluent variant that takes its colors from the app's theme resources. -->
-    <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
-
     <Styles.Resources>
         <ResourceDictionary>
+            <!--
+              AvaloniaEdit's control templates, without its Fluent or Simple styles: those read the app theme's resources
+              by static lookup, so that an app with the other theme failed to start, and they only color AvaloniaEdit's
+              own search panel, completion window and selection, which the editor does not use or colors itself.
+            -->
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="avares://AvaloniaEdit/Themes/Base.xaml" />
+            </ResourceDictionary.MergedDictionaries>
             <!-- The CodeEditorColorTheme resource, per theme variant, comes from the code: XAML cannot key a static value. -->
             <ControlTheme x:Key="{x:Type ce:CodeEditor}" TargetType="ce:CodeEditor">
                 <Setter Property="ColorTheme" Value="{DynamicResource CodeEditorColorTheme}" />
