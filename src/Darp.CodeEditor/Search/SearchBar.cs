@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
@@ -116,6 +117,14 @@ internal sealed class SearchBar : UserControl
         _replaceAll.Click += (_, _) => ReplaceAll();
         _find.KeyDown += OnFindKeyDown;
         _replace.KeyDown += OnReplaceKeyDown;
+        // Alt alone with a letter types a character on macOS.
+        KeyModifiers toggleKeys = OperatingSystem.IsMacOS() ? KeyModifiers.Alt | KeyModifiers.Meta : KeyModifiers.Alt;
+        KeyBindings.Add(
+            new KeyBinding { Gesture = new KeyGesture(Key.C, toggleKeys), Command = new ToggleCommand(_matchCase) }
+        );
+        KeyBindings.Add(
+            new KeyBinding { Gesture = new KeyGesture(Key.W, toggleKeys), Command = new ToggleCommand(_wholeWord) }
+        );
     }
 
     private enum Move
@@ -316,10 +325,7 @@ internal sealed class SearchBar : UserControl
         var searching = new CancellationTokenSource();
         _searching = searching;
         // Cancelled, the task ends as cancelled, not as failed.
-        Task<SearchResult> search = Task.Run(
-            () => TextSearch.Find(snapshot, query, searching.Token),
-            searching.Token
-        );
+        Task<SearchResult> search = Task.Run(() => TextSearch.Find(snapshot, query, searching.Token), searching.Token);
         search.ContinueWith(
             _ => Dispatcher.Post(() => OnSearched(search, searching)),
             CancellationToken.None,
@@ -471,14 +477,13 @@ internal sealed class SearchBar : UserControl
                 result.IsComplete ? "" : "+"
             ),
         };
-        _message.Text =
-            result is { IsComplete: false }
-                ? string.Format(
-                    culture,
-                    "More than {0:N0} matches: only the first {0:N0} show, and Replace All is off.",
-                    TextSearch.MaxMatches
-                )
-                : null;
+        _message.Text = result is { IsComplete: false }
+            ? string.Format(
+                culture,
+                "More than {0:N0} matches: only the first {0:N0} show, and Replace All is off.",
+                TextSearch.MaxMatches
+            )
+            : null;
         _message.IsVisible = _message.Text is not null;
         _replaceAll.IsEnabled = CurrentResult() is { IsComplete: true, Matches.Count: > 0 };
 
@@ -547,6 +552,20 @@ internal sealed class SearchBar : UserControl
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
         row.Children.AddRange(children);
         return row;
+    }
+
+    /// <summary>Turns one of the bar's toggles on or off, by its key.</summary>
+    private sealed class ToggleCommand(ToggleButton toggle) : ICommand
+    {
+        public event EventHandler? CanExecuteChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public bool CanExecute(object? parameter) => true;
+
+        public void Execute(object? parameter) => toggle.IsChecked = toggle.IsChecked != true;
     }
 
     private static ToggleButton Toggle(string content, string tip)

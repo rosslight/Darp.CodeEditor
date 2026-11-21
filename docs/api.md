@@ -151,7 +151,6 @@ Editor.KeyBindings.RemoveAll(binding => binding.Gesture == replace);
 | `TriggerParameterHints` | Ctrl+Shift+Space |
 | `Find`, `Replace` | Ctrl+F, Ctrl+H (macOS: Alt+Cmd+F) |
 | `FindNext`, `FindPrevious` | F3, Shift+F3 (macOS also Cmd+G, Shift+Cmd+G) |
-| `ToggleFindCaseSensitive`, `ToggleFindWholeWord` | Alt+C, Alt+W (macOS: Alt+Cmd+C, Alt+Cmd+W), while the search bar is open |
 | `CommentLine` | Ctrl+/, the number pad's / |
 | `MoveLinesUp`, `MoveLinesDown` | Alt+Up, Alt+Down |
 | `CopyLinesUp`, `CopyLinesDown` | Shift+Alt+Up, Shift+Alt+Down (Linux: Ctrl+Shift+Alt) |
@@ -165,10 +164,12 @@ Editor.KeyBindings.RemoveAll(binding => binding.Gesture == replace);
 On macOS, Cmd takes Ctrl's place, except in Ctrl+Space.
 
 - **A key whose command does not apply goes on** to the next binding and to the app: Ctrl+Z with nothing to undo,
-  Ctrl+Space without a server that completes, Alt+C and Alt+W with the search bar closed, and every key of an editor
+  Ctrl+Space without a server that completes, and every key of an editor
   without a document. Commands on the text need
   the text to have the keyboard, so the search bar's text boxes keep their own clipboard keys; the find commands work
   from the search bar too.
+- **The search bar's own keys:** Alt+C and Alt+W (macOS: Alt+Cmd+C, Alt+Cmd+W) turn Match Case and Whole Word on or off
+  while the keyboard is in the bar. They are `KeyBindings` of the bar, not commands.
 - **`RunCommand`** skips that focus check, as the keyboard is on the app's button or menu at that moment. Afterwards
   the keyboard goes to the text, unless it is in the editor already, as in the search bar's query after `Find`. An app's
   `KeyBinding` to `RunCommand` always consumes its key, even when the command does not apply.

@@ -31,12 +31,6 @@ public static class CodeEditorCommands
     /// <summary>Selects the previous match, as <see cref="FindNext"/> selects the next one.</summary>
     public const string FindPrevious = "editor.action.previousMatchFindAction";
 
-    /// <summary>Turns the search's Match Case on or off, while the search bar is open.</summary>
-    public const string ToggleFindCaseSensitive = "toggleFindCaseSensitive";
-
-    /// <summary>Turns the search's Match Whole Word on or off, while the search bar is open.</summary>
-    public const string ToggleFindWholeWord = "toggleFindWholeWord";
-
     /// <summary>
     /// Comments the selected lines, or the caret's, with the language's line comment, or uncomments them when all are
     /// commented; in a language without one, toggles its block comment.

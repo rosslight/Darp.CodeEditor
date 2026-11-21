@@ -234,6 +234,24 @@ public sealed class KeyBindingTests(UiFixture ui)
         });
 
     [Fact]
+    public Task The_find_toggles_leave_their_keys_to_the_app_while_the_text_has_the_keyboard() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("|one", CodeLanguage.PlainText);
+            window.Editor.OpenSearch();
+            SearchBar bar = BarOf(window);
+            EditorWindow.PartOf(window.Editor).TextArea.Focus();
+            KeyModifiers toggle = OperatingSystem.IsMacOS() ? KeyModifiers.Alt | KeyModifiers.Meta : KeyModifiers.Alt;
+            var app = new CountingCommand();
+            window.Window.KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.C, toggle), Command = app });
+
+            window.Press(Key.C, toggle);
+
+            app.Runs.ShouldBe(1);
+            bar.MatchCaseToggle.IsChecked.ShouldBe(false);
+        });
+
+    [Fact]
     public Task The_find_keys_also_work_from_the_search_bar() =>
         _ui.Run(async () =>
         {
@@ -345,12 +363,6 @@ public sealed class KeyBindingTests(UiFixture ui)
         keys.ShouldContain((CodeEditorCommands.Replace, new KeyGesture(Key.F, KeyModifiers.Alt | KeyModifiers.Meta)));
         keys.ShouldContain((CodeEditorCommands.FindNext, new KeyGesture(Key.G, KeyModifiers.Meta)));
         keys.ShouldContain((CodeEditorCommands.Redo, new KeyGesture(Key.Y, KeyModifiers.Meta)));
-        keys.ShouldContain(
-            (CodeEditorCommands.ToggleFindCaseSensitive, new KeyGesture(Key.C, KeyModifiers.Alt | KeyModifiers.Meta))
-        );
-        keys.ShouldContain(
-            (CodeEditorCommands.ToggleFindWholeWord, new KeyGesture(Key.W, KeyModifiers.Alt | KeyModifiers.Meta))
-        );
     }
 
     [Fact]
