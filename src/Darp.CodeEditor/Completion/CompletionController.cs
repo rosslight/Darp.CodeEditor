@@ -624,9 +624,8 @@ internal sealed class CompletionController : IEditorFeature
     /// <summary>
     /// Commits an item: its edit, from where it starts to as far past the caret as it reached past where completion was
     /// asked, and its additional edits, in one step that the user undoes; the caret goes after the item's text. A
-    /// snippet goes in as its text, with its variables' values for the text before the commit, and its first stop is
-    /// selected. Additional edits that overlap others are left out, and stay plain text. Additional edits that a resolve
-    /// still under way brings come later.
+    /// snippet goes in as its text, and its first stop is selected. Additional edits that overlap others are left out,
+    /// and stay plain text. Additional edits that a resolve still under way brings come later.
     /// </summary>
     private void Commit(Session session, int index)
     {
