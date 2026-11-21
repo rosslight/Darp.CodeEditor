@@ -1,5 +1,6 @@
 using Avalonia.Input;
 using AvaloniaEdit.Editing;
+using Darp.CodeEditor.Commands;
 using Darp.CodeEditor.Completion;
 using Darp.CodeEditor.Diagnostics;
 using Darp.CodeEditor.Editing;
@@ -12,11 +13,14 @@ namespace Darp.CodeEditor;
 
 /// <summary>
 /// Everything an editor does for the document it shows: created when it shows the document, and disposed when it stops.
+/// It builds the features, which add their commands, and runs those commands for keys and for the app.
 /// </summary>
 internal sealed class EditorView : IDisposable
 {
+    private readonly CodeEditor _editor;
     private readonly TextArea _area;
     private readonly Func<SearchBar?> _searchBar;
+    private readonly CommandTable _commands;
 
     /// <summary>Everything the view made, in the order it made them: disposed the other way round.</summary>
     private readonly IDisposable[] _features;
@@ -35,10 +39,22 @@ internal sealed class EditorView : IDisposable
     /// <param name="area">AvaloniaEdit's text area, which shows <paramref name="document"/>.</param>
     /// <param name="document">The document shown.</param>
     /// <param name="searchBar">The editor's search bar, kept across documents; null until it is first needed.</param>
-    public EditorView(CodeEditor editor, TextArea area, CodeDocument document, Func<SearchBar?> searchBar)
+    /// <param name="createSearchBar">
+    /// The editor's search bar, made the first time it is needed, as few editors are searched; null without a place for
+    /// it in the template.
+    /// </param>
+    public EditorView(
+        CodeEditor editor,
+        TextArea area,
+        CodeDocument document,
+        Func<SearchBar?> searchBar,
+        Func<SearchBar?> createSearchBar
+    )
     {
+        _editor = editor;
         _area = area;
         _searchBar = searchBar;
+        _commands = new CommandTable(area);
         Highlighter = new BackgroundTextMateHighlighter(area.TextView, area.Document, editor.Dispatcher, null);
         _helpers = new EditingHelpers(area, document, Highlighter);
         _brackets = new BracketHighlighter(area, document, Highlighter);
@@ -64,7 +80,11 @@ internal sealed class EditorView : IDisposable
             _completion,
             _signatureHelp,
             _clipboard,
+            new UndoCommands(area, document),
+            new FindCommands(area, createSearchBar),
         ];
+        foreach (IEditorFeature feature in _features.OfType<IEditorFeature>())
+            feature.AddCommands(_commands);
     }
 
     /// <summary>Highlights the document by its grammar.</summary>
@@ -72,6 +92,24 @@ internal sealed class EditorView : IDisposable
 
     /// <summary>Colors the server's semantic tokens.</summary>
     public SemanticHighlighter SemanticHighlighter { get; }
+
+    /// <summary>Whether a default key can run the command now; otherwise the key goes on.</summary>
+    public bool CanRun(string id) => _commands.CanRun(id);
+
+    /// <summary>
+    /// Runs a command for its default key. A key that a binding handles skips <see cref="OnKeyDown"/>, so what a key does
+    /// to the popups happens here: in the text, it closes the hover.
+    /// </summary>
+    public void RunKey(string id)
+    {
+        if (_area.IsFocused)
+            _hover.Close();
+        Run(id, _commands.TryRun);
+    }
+
+    /// <summary>Runs a command for the app, wherever the keyboard is.</summary>
+    /// <returns>Whether it applied.</returns>
+    public bool RunFromApp(string id) => Run(id, _commands.TryRunFromApp);
 
     /// <summary>
     /// A key, before AvaloniaEdit's: Escape, which dismisses, and in the text the keys of completion's list, of
@@ -133,6 +171,17 @@ internal sealed class EditorView : IDisposable
             _features[i].Dispose();
     }
 
+    /// <summary>A command that moves the caret or the selection ends completion: its list was for the word at the caret.</summary>
+    private bool Run(string id, Func<string, bool> run)
+    {
+        TextSelection before = _editor.Selection;
+        if (!run(id))
+            return false;
+        if (_editor.Selection != before)
+            _completion.Close();
+        return true;
+    }
+
     /// <summary>
     /// What Escape closes, one at a time: completion, signature help, a snippet's stops while the text area has the
     /// keyboard, the hover, the search bar, in the order of VS Code's keys. Each also ends what still waits for its
@@ -141,12 +190,7 @@ internal sealed class EditorView : IDisposable
     /// <returns>Whether it closed something the user saw.</returns>
     private bool Dismiss()
     {
-        if (
-            _completion.Close()
-            || _signatureHelp.Close()
-            || (_area.IsFocused && _snippets.End())
-            || _hover.Close()
-        )
+        if (_completion.Close() || _signatureHelp.Close() || (_area.IsFocused && _snippets.End()) || _hover.Close())
         {
             return true;
         }

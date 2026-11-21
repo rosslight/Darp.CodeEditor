@@ -51,6 +51,23 @@ public sealed class SignatureHelpTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Ctrl_Shift_Space_asks_for_the_signature_on_demand() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "call()");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await CompletionTests.StartServingAsync(server, document);
+            window.Editor.Selection = new TextSelection(5);
+
+            window.Press(Key.Space, EditorWindow.Command | KeyModifiers.Shift);
+
+            await WaitForSignatureAsync(window, "first", "Calls with two.");
+            (await fake.WaitForAsync("signatureHelp ")).ShouldContain(" 1 ");
+        });
+
+    [Fact]
     public Task A_retrigger_character_moves_the_active_parameter_at_once() =>
         _ui.Run(async () =>
         {

@@ -5,6 +5,7 @@ using Avalonia.Logging;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
+using Darp.CodeEditor.Commands;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.LanguageClient;
@@ -49,7 +50,7 @@ namespace Darp.CodeEditor.Completion;
 /// <c>$/cancelRequest</c>, and so does a newer request; a late answer is dropped.
 /// </para>
 /// </remarks>
-internal sealed class CompletionController : IDisposable
+internal sealed class CompletionController : IEditorFeature
 {
     private readonly CodeEditor _editor;
     private readonly TextArea _textArea;
@@ -133,19 +134,23 @@ internal sealed class CompletionController : IDisposable
         }
     }
 
+    public void AddCommands(CommandTable commands) =>
+        commands.Add(
+            CodeEditorCommands.TriggerSuggest,
+            () => Ask(new CompletionTrigger(CompletionTriggerKind.Invoked)),
+            CommandNeeds.TextFocus | CommandNeeds.Writable,
+            () =>
+                _document.Features?.Completion is not null
+                && _textArea.ReadOnlySectionProvider.CanInsert(_textArea.Caret.Offset)
+        );
+
     /// <summary>
-    /// The keys of completion, from the editor's key handler while the text area has the keyboard: Ctrl+Space, and
-    /// while the list shows, the keys that select and commit.
+    /// The keys of completion's list, from the editor's key handler while the text area has the keyboard and the list
+    /// shows: those that select and commit.
     /// </summary>
     /// <returns>Whether the key was completion's.</returns>
     public bool OnKeyDown(KeyEventArgs e)
     {
-        // Also on macOS, where Cmd takes Ctrl's place for other keys: Cmd+Space is the system's search.
-        if (e.Key == Key.Space && e.KeyModifiers == KeyModifiers.Control)
-        {
-            Ask(new CompletionTrigger(CompletionTriggerKind.Invoked));
-            return true;
-        }
         if (_session is not { IsShowing: true } session || e.KeyModifiers != KeyModifiers.None)
             return false;
         int count = session.Items.Count;

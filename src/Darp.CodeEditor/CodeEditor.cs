@@ -12,6 +12,7 @@ using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
 using AvaloniaEdit.Search;
+using Darp.CodeEditor.Commands;
 using Darp.CodeEditor.Completion;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
@@ -77,13 +78,19 @@ namespace Darp.CodeEditor;
 /// Replace All then does nothing: it never replaces only some of the matches.
 /// </para>
 /// <para>
-/// The editor handles only its own keys: editing, the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), navigation, search
-/// (Ctrl+F, Ctrl+H, F3, Shift+F3), completion (Ctrl+Space), comments (Ctrl+/) and indentation (Tab, Shift+Tab). On
-/// macOS, Cmd takes Ctrl's place for the clipboard, search and comments, and Cmd+Alt+F opens the replace bar, as
-/// AvaloniaEdit decides by the operating system. Other keys, such as F5 or Ctrl+S, go on to the app's key bindings. A
-/// right click opens the editor's context menu: Cut, Copy, Paste and Select All. For an app's Edit menu,
-/// <see cref="Cut"/>, <see cref="Copy"/>, <see cref="Paste"/> and <see cref="SelectAll"/> do the same, and the
-/// document's <c>Undo</c> and <c>Redo</c> the rest.
+/// The editor's keys are ordinary <c>KeyBindings</c>, for the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), undo (Ctrl+Z,
+/// Ctrl+Y, Ctrl+Shift+Z), search (Ctrl+F, Ctrl+H, F3, Shift+F3), completion (Ctrl+Space, Ctrl+I), signature help
+/// (Ctrl+Shift+Space) and comments (Ctrl+/). On macOS, Cmd takes Ctrl's place, but for Ctrl+Space. They join
+/// <c>KeyBindings</c> when the editor is first attached, after those of the app's XAML, which so run first. An app adds
+/// one later with <c>Insert(0, …)</c>, and removes a default from <c>Loaded</c> on with <c>RemoveAll</c>. A key whose
+/// command does not apply, such as Ctrl+Z with nothing to undo, goes on to the app, as do keys that the editor does not
+/// use, such as F5 or Ctrl+S. Enter, Tab, Escape, the arrows and typing are not bindings, so apps should not bind plain
+/// Enter, Tab or Escape on an ancestor of the editor.
+/// </para>
+/// <para>
+/// A right click opens the editor's context menu: Cut, Copy, Paste and Select All. For an app's own menus and buttons,
+/// <see cref="RunCommand"/> runs any of <see cref="CodeEditorCommands"/>, and <see cref="Cut"/>, <see cref="Copy"/>,
+/// <see cref="Paste"/> and <see cref="SelectAll"/> do the same as their keys.
 /// </para>
 /// <para>Members that take offsets or ranges clamp them to the text.</para>
 /// </remarks>
@@ -152,6 +159,9 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>What the editor does for the shown document; null while it shows none.</summary>
     private EditorView? _view;
+
+    /// <summary>Whether <c>KeyBindings</c> has the default keys, which join it when the editor is first attached.</summary>
+    private bool _hasDefaultKeys;
 
     /// <summary>The template's panel, which the search bar goes into, over the text.</summary>
     private Panel? _root;
@@ -223,10 +233,11 @@ public class CodeEditor : TemplatedControl
         [
             new(ApplicationCommands.Find, (_, _) => OpenSearch()),
             new(ApplicationCommands.Replace, (_, _) => OpenSearch(replace: true)),
-            new(SearchCommands.FindNext, (_, _) => FindNext(previous: false)),
-            new(SearchCommands.FindPrevious, (_, _) => FindNext(previous: true)),
+            new(SearchCommands.FindNext, (_, _) => _view?.RunFromApp(CodeEditorCommands.FindNext)),
+            new(SearchCommands.FindPrevious, (_, _) => _view?.RunFromApp(CodeEditorCommands.FindPrevious)),
         ];
-        // Ahead of AvaloniaEdit's own keys, which its text area handles as they bubble, and of its typed text.
+        // Ahead of AvaloniaEdit's own keys, which its text area handles as they bubble, and of its typed text. Key
+        // bindings run before both.
         AddHandler(KeyDownEvent, OnKeyDownTunnel, RoutingStrategies.Tunnel);
         AddHandler(TextInputEvent, OnTextInputTunnel, RoutingStrategies.Tunnel);
     }
@@ -308,6 +319,9 @@ public class CodeEditor : TemplatedControl
     /// <summary>The semantic colors of the shown document, for benchmarks; null while it shows none.</summary>
     internal SemanticHighlighter? SemanticHighlighter => _view?.SemanticHighlighter;
 
+    /// <summary>What the editor does for the shown document, for its key commands; null while it shows none.</summary>
+    internal EditorView? View => _view;
+
     /// <summary>The clock of the time limit in the background, in the grammars the editor loads: the system's.</summary>
     internal TimeProvider GrammarClock { get; init; } = TimeProvider.System;
 
@@ -373,10 +387,25 @@ public class CodeEditor : TemplatedControl
     /// Opens the search bar, as Ctrl+F does, or the replace bar, as Ctrl+H does, and puts the keyboard in its query. A
     /// selection within one line becomes the search text. A read-only editor opens the search bar either way.
     /// </summary>
-    public void OpenSearch(bool replace = false)
+    public void OpenSearch(bool replace = false) =>
+        _view?.RunFromApp(replace ? CodeEditorCommands.Replace : CodeEditorCommands.Find);
+
+    /// <summary>
+    /// Runs one of <see cref="CodeEditorCommands"/>, as from an app's button, menu or <c>KeyBinding</c>, wherever the
+    /// keyboard is. Afterwards the keyboard goes to the text, unless it is in the editor already, as in the search bar's
+    /// query after <see cref="CodeEditorCommands.Find"/>.
+    /// </summary>
+    /// <param name="id">The command.</param>
+    /// <returns>
+    /// Whether it ran; false when it does not apply, as without a document, or for an id that is none of the commands.
+    /// </returns>
+    public bool RunCommand(string id)
     {
-        if (_part is { } part && CreatedSearchBar() is { } bar)
-            bar.Open(replace && !IsReadOnly, SelectedLineText(part.TextArea));
+        if (_view is not { } view || !view.RunFromApp(id))
+            return false;
+        if (!IsKeyboardFocusWithin)
+            _part?.TextArea.Focus();
+        return true;
     }
 
     /// <summary>Moves the selection to the clipboard, as Ctrl+X does. No effect in a read-only editor.</summary>
@@ -442,8 +471,41 @@ public class CodeEditor : TemplatedControl
             part.TemplateApplied += OnPartTemplateApplied;
             foreach (RoutedCommandBinding binding in _searchCommands)
                 part.TextArea.CommandBindings.Add(binding);
+            RemoveReplacedKeys(part.TextArea);
         }
         UpdateShownDocument();
+    }
+
+    /// <summary>
+    /// Removes the shortcuts of AvaloniaEdit's input handlers that the default keys replace, so that a key whose default
+    /// an app removes, or whose command does not apply, reaches the app: their gestures can't be changed, so the entries
+    /// go. Cut, Copy, Paste and Select All stay callable on the text area, where a command has no key.
+    /// </summary>
+    private static void RemoveReplacedKeys(TextArea textArea)
+    {
+        TextAreaDefaultInputHandler input = textArea.DefaultInputHandler;
+        Remove(input.Editing, AvaloniaEditCommands.IndentSelection);
+        Remove(input.Editing, AvaloniaEditCommands.DeleteLine);
+        Remove(input, ApplicationCommands.Undo);
+        Remove(input, ApplicationCommands.Redo);
+        Move(input.Editing, ApplicationCommands.Cut);
+        Move(input.Editing, ApplicationCommands.Copy);
+        Move(input.Editing, ApplicationCommands.Paste);
+        Move(input.CaretNavigation, ApplicationCommands.SelectAll);
+
+        void Move(TextAreaInputHandler handler, RoutedCommand command)
+        {
+            foreach (RoutedCommandBinding binding in Remove(handler, command))
+                textArea.CommandBindings.Add(binding);
+        }
+
+        static List<RoutedCommandBinding> Remove(TextAreaInputHandler handler, RoutedCommand command)
+        {
+            List<RoutedCommandBinding> removed = [.. handler.CommandBindings.Where(b => b.Command == command)];
+            foreach (RoutedCommandBinding binding in removed)
+                handler.CommandBindings.Remove(binding);
+            return removed;
+        }
     }
 
     /// <inheritdoc />
@@ -451,6 +513,12 @@ public class CodeEditor : TemplatedControl
     {
         base.OnAttachedToVisualTree(e);
         _isAttached = true;
+        // Here and not in the constructor: after the bindings of the app's XAML, which run first.
+        if (!_hasDefaultKeys)
+        {
+            _hasDefaultKeys = true;
+            KeyBindings.AddRange(DefaultKeys.For(this));
+        }
         UpdateShownDocument();
     }
 
@@ -573,7 +641,7 @@ public class CodeEditor : TemplatedControl
         _shown = document;
         Select(part, place?.Selection ?? new TextSelection(0));
         TextView textView = part.TextArea.TextView;
-        _view = new EditorView(this, part.TextArea, document, () => _searchBar);
+        _view = new EditorView(this, part.TextArea, document, () => _searchBar, CreatedSearchBar);
         _view.SetColors(_theme, _colors, _iconColors);
         _searchBar?.Attach(this, part.TextArea, document);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
@@ -619,44 +687,15 @@ public class CodeEditor : TemplatedControl
     /// </summary>
     private void OnDocumentDisposed(object? sender, EventArgs e) => Dispatcher.Post(UpdateShownDocument);
 
-    /// <summary>
-    /// The editor's own keys, before AvaloniaEdit's: search, also in the search bar, as AvaloniaEdit decides them by
-    /// the operating system, and in the text area the keys of completion, of signature help, of a snippet's stops and
-    /// of the editing helpers. Ctrl+F and Ctrl+H are the editor's even without a document, so that AvaloniaEdit's own
-    /// search panel never opens.
-    /// </summary>
+    /// <summary>The keys that are not bindings, before AvaloniaEdit's (<see cref="EditorView.OnKeyDown"/>).</summary>
     private void OnKeyDownTunnel(object? sender, KeyEventArgs e)
     {
-        bool shift = e.KeyModifiers == KeyModifiers.Shift;
-        if (ApplicationCommands.Find.Gesture.Matches(e) || ApplicationCommands.Replace.Gesture.Matches(e))
-        {
-            OpenSearch(replace: ApplicationCommands.Replace.Gesture.Matches(e));
-            e.Handled = true;
-        }
-        else if (e.Key == Key.F3 && (e.KeyModifiers == KeyModifiers.None || shift))
-            e.Handled = FindNext(previous: shift);
-        else if (_view?.OnKeyDown(e) == true)
+        if (_view?.OnKeyDown(e) == true)
             e.Handled = true;
     }
 
     /// <summary>Typed text, before AvaloniaEdit's text area takes it.</summary>
     private void OnTextInputTunnel(object? sender, TextInputEventArgs e) => _view?.OnTextInput(e);
-
-    /// <summary>
-    /// Selects the next or previous match, as F3 and Shift+F3 do, opening the bar for the selection if it is closed.
-    /// </summary>
-    /// <returns>Whether there is a document to search.</returns>
-    private bool FindNext(bool previous)
-    {
-        if (_part is not { } part || CreatedSearchBar() is not { } bar)
-            return false;
-        string? text = bar.IsOpen ? null : SelectedLineText(part.TextArea);
-        if (previous)
-            bar.FindPrevious(text);
-        else
-            bar.FindNext(text);
-        return true;
-    }
 
     /// <summary>
     /// The search bar, made over the text the first time it is needed while the editor shows a document; null without
@@ -683,10 +722,6 @@ public class CodeEditor : TemplatedControl
         if (sender is TextEditor { SearchPanel: { } panel })
             panel.Uninstall();
     }
-
-    /// <summary>The selected text, if it is within one line: what a search starts with.</summary>
-    private static string? SelectedLineText(TextArea textArea) =>
-        textArea.Selection is { IsEmpty: false, IsMultiline: false } selection ? selection.GetText() : null;
 
     /// <summary>Applies a new indentation of the shown document at once. Raised on the UI thread.</summary>
     private void OnDocumentPropertyChanged(object? sender, PropertyChangedEventArgs e)

@@ -7,6 +7,7 @@ using Avalonia.Media;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
+using Darp.CodeEditor.Commands;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.LanguageClient;
@@ -23,7 +24,7 @@ namespace Darp.CodeEditor.Completion;
 /// </summary>
 /// <remarks>
 /// <para>
-/// It opens when the user types one of the server's trigger characters, such as <c>(</c>, and asks again at once on a
+/// It opens on its command, and when the user types one of the server's trigger characters, such as <c>(</c>, and asks again at once on a
 /// retrigger character, such as <c>,</c>, while it is open. While it is open, each edit and caret move restarts a pause
 /// of 120 ms, VS Code's; once it passes, it asks again, telling the server the signature that shows. A newer request,
 /// and every edit, cancels the request under way, and an answer about older text is dropped. Up and Down show the
@@ -35,7 +36,7 @@ namespace Darp.CodeEditor.Completion;
 /// document, new colors, the caret's line scrolling out of view, and the editor no longer showing the document.
 /// </para>
 /// </remarks>
-internal sealed class SignatureHelpController : IDisposable
+internal sealed class SignatureHelpController : IEditorFeature
 {
     /// <summary>The pause after an edit or a caret move before signature help is asked again: VS Code's.</summary>
     private static readonly TimeSpan s_pause = TimeSpan.FromMilliseconds(120);
@@ -97,6 +98,16 @@ internal sealed class SignatureHelpController : IDisposable
 
     /// <summary>Whether signature help shows, waits for an answer, or waits to ask again.</summary>
     private bool IsActive => _shown is not null || _request is not null || _pause is not null;
+
+    public void AddCommands(CommandTable commands) =>
+        commands.Add(
+            CodeEditorCommands.TriggerParameterHints,
+            () => Ask(SignatureHelpTriggerKind.Invoked, null),
+            CommandNeeds.TextFocus | CommandNeeds.Writable,
+            () =>
+                _document.Features?.SignatureHelp is not null
+                && _textArea.ReadOnlySectionProvider.CanInsert(_textArea.Caret.Offset)
+        );
 
     /// <summary>Up and Down, from the editor's key handler, while more than one signature shows: the others.</summary>
     /// <returns>Whether the key was signature help's.</returns>

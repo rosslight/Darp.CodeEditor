@@ -6,6 +6,7 @@ using Avalonia.Logging;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
+using Darp.CodeEditor.Commands;
 using Darp.CodeEditor.Loading;
 
 namespace Darp.CodeEditor.Editing;
@@ -18,7 +19,7 @@ namespace Darp.CodeEditor.Editing;
 /// undo step. Paste is the editor's own, because AvaloniaEdit's opens its undo step before it waits for the clipboard
 /// and closes it on whatever document the editor shows by then; so it raises no <c>TextPasted</c>.
 /// </summary>
-internal sealed class Clipboard : IDisposable
+internal sealed class Clipboard : IEditorFeature
 {
     private readonly TextArea _textArea;
     private readonly CodeDocument _document;
@@ -43,6 +44,15 @@ internal sealed class Clipboard : IDisposable
     }
 
     private TextDocument Buffer => _textArea.Document;
+
+    public void AddCommands(CommandTable commands)
+    {
+        const CommandNeeds writing = CommandNeeds.TextFocus | CommandNeeds.Writable;
+        commands.Add(CodeEditorCommands.Cut, () => ApplicationCommands.Cut.Execute(null, _textArea), writing);
+        commands.Add(CodeEditorCommands.Copy, () => ApplicationCommands.Copy.Execute(null, _textArea));
+        commands.Add(CodeEditorCommands.Paste, Paste, writing, CanPaste);
+        commands.Add(CodeEditorCommands.SelectAll, () => ApplicationCommands.SelectAll.Execute(null, _textArea));
+    }
 
     /// <summary>
     /// Pastes the clipboard's text over the selection in one undo step, once the clipboard has given it, and only into
