@@ -151,6 +151,7 @@ Editor.KeyBindings.RemoveAll(binding => binding.Gesture == replace);
 | `TriggerParameterHints` | Ctrl+Shift+Space |
 | `Find`, `Replace` | Ctrl+F, Ctrl+H (macOS: Alt+Cmd+F) |
 | `FindNext`, `FindPrevious` | F3, Shift+F3 (macOS also Cmd+G, Shift+Cmd+G) |
+| `ToggleFindCaseSensitive`, `ToggleFindWholeWord` | Alt+C, Alt+W (macOS: Alt+Cmd+C, Alt+Cmd+W), while the search bar is open |
 | `CommentLine` | Ctrl+/, the number pad's / |
 | `MoveLinesUp`, `MoveLinesDown` | Alt+Up, Alt+Down |
 | `CopyLinesUp`, `CopyLinesDown` | Shift+Alt+Up, Shift+Alt+Down (Linux: Ctrl+Shift+Alt) |
@@ -164,7 +165,8 @@ Editor.KeyBindings.RemoveAll(binding => binding.Gesture == replace);
 On macOS, Cmd takes Ctrl's place, except in Ctrl+Space.
 
 - **A key whose command does not apply goes on** to the next binding and to the app: Ctrl+Z with nothing to undo,
-  Ctrl+Space without a server that completes, and every key of an editor without a document. Commands on the text need
+  Ctrl+Space without a server that completes, Alt+C and Alt+W with the search bar closed, and every key of an editor
+  without a document. Commands on the text need
   the text to have the keyboard, so the search bar's text boxes keep their own clipboard keys; the find commands work
   from the search bar too.
 - **`RunCommand`** skips that focus check, as the keyboard is on the app's button or menu at that moment. Afterwards
@@ -929,11 +931,12 @@ with Skia:
   13 ms, and commenting all 5,000 lines 41 ms;
 - spaces and tabs show inside the selection only, in the theme's `editorWhitespace.foreground`, in a layer of the text
   view above the selection;
-- search runs in the background, so a regular expression such as `(a+)+$`, which froze the prototype for 21 s, leaves
-  the UI thread free; it stops after the time limit of 1 s with a message. A search keeps 10,000 matches at most. In
-  5,000 lines of JSON, a word on every line takes 1.2 ms and a regular expression with 10,000 matches 2.3 ms, so the
-  time limit leaves about 400 times that; Replace All of 10,000 matches takes the UI thread about 0.1 s with its
-  frame. Tests check that a search at either limit says so, and that Replace All then changes nothing. AvaloniaEdit's
+- search finds plain text, with Match Case and Whole Word, in the background, line by line, and the replacement is
+  literal text. The bar's query starts with the selection within one line, or else with the word at the caret when it
+  opens, and opening leaves the caret where it is. A search keeps 10,000 matches at most, and says so; Replace All is
+  then off. In 5,000 lines of JSON, a word on every line takes 0.45 ms and a word on none 0.04 ms; Replace All of 10,000
+  matches takes the UI thread about 0.08 s with its frame. Tests check that a search at the limit says so, and that
+  Replace All then changes nothing. AvaloniaEdit's
   own search panel could not keep this contract: it creates its search strategy itself, searches on the UI thread at
   every change of the text, and keeps every match. The editor removes it each time AvaloniaEdit's editor is
   templated, and AvaloniaEdit's search commands open the editor's bar instead.
