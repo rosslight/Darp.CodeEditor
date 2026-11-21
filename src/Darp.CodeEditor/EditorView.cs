@@ -33,7 +33,6 @@ internal sealed class EditorView : IDisposable
     private readonly SnippetController _snippets;
     private readonly CompletionController _completion;
     private readonly SignatureHelpController _signatureHelp;
-    private readonly Clipboard _clipboard;
 
     /// <param name="editor">The control that the popups belong to.</param>
     /// <param name="area">AvaloniaEdit's text area, which shows <paramref name="document"/>.</param>
@@ -66,7 +65,6 @@ internal sealed class EditorView : IDisposable
         // After the editing helpers: they see typed text first, so that a typed "(" has its ")" when it asks.
         _completion = new CompletionController(editor, area, document, Highlighter, _snippets);
         _signatureHelp = new SignatureHelpController(editor, area, document, Highlighter);
-        _clipboard = new Clipboard(area, document);
         _features =
         [
             Highlighter,
@@ -79,7 +77,7 @@ internal sealed class EditorView : IDisposable
             _snippets,
             _completion,
             _signatureHelp,
-            _clipboard,
+            new Clipboard(area, document),
             new UndoCommands(area, document),
             new FindCommands(area, createSearchBar),
         ];

@@ -482,7 +482,7 @@ public class CodeEditor : TemplatedControl
     /// <summary>
     /// Removes the shortcuts of AvaloniaEdit's input handlers that the default keys replace, so that a key whose default
     /// an app removes, or whose command does not apply, reaches the app: their gestures can't be changed, so the entries
-    /// go. Cut, Copy, Paste and Select All stay callable on the text area, where a command has no key.
+    /// go. Cut, Copy and Select All stay callable on the text area, where a command has no key. Paste is Clipboard's.
     /// </summary>
     private static void RemoveReplacedKeys(TextArea textArea)
     {
@@ -493,7 +493,7 @@ public class CodeEditor : TemplatedControl
         Remove(input, ApplicationCommands.Redo);
         Move(input.Editing, ApplicationCommands.Cut);
         Move(input.Editing, ApplicationCommands.Copy);
-        Move(input.Editing, ApplicationCommands.Paste);
+        Remove(input.Editing, ApplicationCommands.Paste);
         Move(input.CaretNavigation, ApplicationCommands.SelectAll);
 
         void Move(TextAreaInputHandler handler, RoutedCommand command)
@@ -1020,16 +1020,21 @@ public class CodeEditor : TemplatedControl
         )
             return;
         TextView view = area.TextView;
-        if (
-            e.TryGetPosition(view, out Point point)
-            && view.GetPosition(point + view.ScrollOffset) is { } clicked
-            && !area.Selection.Contains(area.Document.GetOffset(clicked.Location))
-        )
-        {
-            area.ClearSelection();
-            area.Caret.Position = clicked;
-        }
+        if (!e.TryGetPosition(view, out Point point))
+            return;
+        Point inText = point + view.ScrollOffset;
+        // The character under the pointer decides: the nearest caret place can be the selection's edge from outside.
+        if (view.GetPositionFloor(inText) is { } under && IsSelected(area, area.Document.GetOffset(under.Location)))
+            return;
+        area.ClearSelection();
+        area.Caret.Position =
+            view.GetPosition(inText) ?? new TextViewPosition(area.Document.GetLocation(area.Document.TextLength));
     }
+
+    private static bool IsSelected(TextArea area, int offset) =>
+        area.Selection.SurroundingSegment is { } selected
+        && offset < selected.EndOffset
+        && area.Selection.Contains(offset);
 
     /// <summary>The editor's context menu, in the app's look. Apps change it through its <c>Items</c>.</summary>
     private ContextMenu CreateContextMenu()

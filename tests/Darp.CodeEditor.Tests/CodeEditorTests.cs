@@ -443,6 +443,18 @@ public sealed class CodeEditorTests(UiFixture ui)
             window.Click(Before(9), MouseButton.Right);
             menu.Close();
             editor.Selection.ShouldBe(new TextSelection(9));
+
+            // The character right after the selection is outside it.
+            editor.Selection = new TextSelection(4, 7);
+            window.Click(Before(7), MouseButton.Right);
+            menu.Close();
+            editor.Selection.ShouldBe(new TextSelection(7));
+
+            // Below the last line, the caret goes to the end of the text.
+            editor.Selection = new TextSelection(0, 3);
+            window.Click(window.PointAt(0) + new Point(0, 200), MouseButton.Right);
+            menu.Close();
+            editor.Selection.ShouldBe(new TextSelection(13));
         });
 
     [Fact]

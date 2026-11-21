@@ -30,14 +30,13 @@ internal sealed class Clipboard : IEditorFeature
     {
         _textArea = textArea;
         _document = document;
-        // Asked by menus too. Where it cannot run, AvaloniaEdit's binding answers, with the same check.
+        // Asked by menus too.
         _paste = new RoutedCommandBinding(
             ApplicationCommands.Paste,
             (_, _) => Paste(),
             (_, e) => e.CanExecute = CanPaste()
         );
-        // First, as the first binding of a command runs, and AvaloniaEdit's came with the text area.
-        textArea.CommandBindings.Insert(0, _paste);
+        textArea.CommandBindings.Add(_paste);
         textArea.TextCopied += OnTextCopied;
         // After AvaloniaEdit's handler, which the text area has from its start.
         textArea.AddHandler(DragDrop.DropEvent, OnDrop, RoutingStrategies.Bubble, handledEventsToo: true);

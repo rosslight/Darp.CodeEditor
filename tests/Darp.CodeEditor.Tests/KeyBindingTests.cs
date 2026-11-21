@@ -104,6 +104,19 @@ public sealed class KeyBindingTests(UiFixture ui)
         });
 
     [Fact]
+    public Task The_comment_key_goes_on_in_a_language_without_comments() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("text|", CodeLanguage.PlainText);
+            var app = new CountingCommand();
+            window.Window.KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.Oem2, s_command), Command = app });
+
+            window.Press(Key.Oem2, s_command);
+
+            app.Runs.ShouldBe(1);
+        });
+
+    [Fact]
     public Task A_default_removed_before_the_editor_is_attached_stays_removed() =>
         _ui.Run(() =>
         {
@@ -323,7 +336,7 @@ public sealed class KeyBindingTests(UiFixture ui)
         keys.ShouldContain((CodeEditorCommands.TriggerSuggest, new KeyGesture(Key.Escape, KeyModifiers.Alt)));
         keys.ShouldContain((CodeEditorCommands.Replace, new KeyGesture(Key.F, KeyModifiers.Alt | KeyModifiers.Meta)));
         keys.ShouldContain((CodeEditorCommands.FindNext, new KeyGesture(Key.G, KeyModifiers.Meta)));
-        keys.ShouldNotContain(key => key.Gesture == new KeyGesture(Key.Y, KeyModifiers.Meta));
+        keys.ShouldContain((CodeEditorCommands.Redo, new KeyGesture(Key.Y, KeyModifiers.Meta)));
     }
 
     [Fact]
@@ -362,7 +375,7 @@ public sealed class KeyBindingTests(UiFixture ui)
         });
 
     [Fact]
-    public Task Ctrl_Shift_Z_redoes_and_Ctrl_Y_too_outside_macOS() =>
+    public Task Ctrl_Shift_Z_and_Ctrl_Y_redo() =>
         _ui.Run(() =>
         {
             using EditorWindow window = MarkedText.Show("|", CodeLanguage.PlainText);
@@ -376,7 +389,7 @@ public sealed class KeyBindingTests(UiFixture ui)
 
             window.Press(Key.Z, s_command);
             window.Press(Key.Y, s_command);
-            document.Text.ShouldBe(OperatingSystem.IsMacOS() ? "" : "a");
+            document.Text.ShouldBe("a");
         });
 
     [Fact]

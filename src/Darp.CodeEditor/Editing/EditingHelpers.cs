@@ -72,7 +72,12 @@ internal sealed class EditingHelpers : IEditorFeature
     }
 
     public void AddCommands(CommandTable commands) =>
-        commands.Add(CodeEditorCommands.CommentLine, ToggleComment, CommandNeeds.TextFocus | CommandNeeds.Writable);
+        commands.Add(
+            CodeEditorCommands.CommentLine,
+            ToggleComment,
+            CommandNeeds.TextFocus | CommandNeeds.Writable,
+            () => Configuration is { LineComment: not null } or { BlockComment: not null }
+        );
 
     /// <summary>Backspace, from the editor's key handler, while the text area has the keyboard.</summary>
     public void OnKeyDown(KeyEventArgs e)

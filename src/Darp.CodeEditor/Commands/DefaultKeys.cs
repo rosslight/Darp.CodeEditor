@@ -57,8 +57,7 @@ internal static class DefaultKeys
         yield return (CodeEditorCommands.CommentLine, new KeyGesture(Key.Divide, command));
 
         yield return (CodeEditorCommands.Undo, new KeyGesture(Key.Z, command));
-        if (!mac)
-            yield return (CodeEditorCommands.Redo, new KeyGesture(Key.Y, command));
+        yield return (CodeEditorCommands.Redo, new KeyGesture(Key.Y, command));
         yield return (CodeEditorCommands.Redo, new KeyGesture(Key.Z, command | KeyModifiers.Shift));
 
         yield return (CodeEditorCommands.Cut, new KeyGesture(Key.X, command));
