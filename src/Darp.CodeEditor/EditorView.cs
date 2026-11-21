@@ -75,7 +75,7 @@ internal sealed class EditorView : IDisposable
             _changes,
             _pairs,
             _typing,
-            new EditingHelpers(area, document),
+            new Comments(area, document, _changes),
             new LineCommands(area, document, Highlighter, _changes),
             _brackets,
             _whitespace,
