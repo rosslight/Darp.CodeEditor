@@ -426,6 +426,38 @@ public sealed class CodeEditorTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_right_click_moves_the_caret_unless_it_is_in_the_selection() =>
+        _ui.Run(() =>
+        {
+            using var window = new EditorWindow(Editor("one two three"));
+            CodeEditor editor = window.Editor;
+            ContextMenu menu = editor.ContextMenu.ShouldBeOfType<ContextMenu>();
+            // Just after the left edge of a character: the caret goes before it.
+            Point Before(int offset) => window.PointAt(offset) - new Point(window.TextView.WideSpaceWidth / 2 - 1, 0);
+
+            editor.Selection = new TextSelection(4, 7);
+            window.Click(Before(5), MouseButton.Right);
+            menu.Close();
+            editor.Selection.ShouldBe(new TextSelection(4, 7));
+
+            window.Click(Before(9), MouseButton.Right);
+            menu.Close();
+            editor.Selection.ShouldBe(new TextSelection(9));
+        });
+
+    [Fact]
+    public Task An_app_adds_to_the_context_menu_through_its_items() =>
+        _ui.Run(() =>
+        {
+            using var window = new EditorWindow(Editor("one"));
+            ContextMenu menu = window.Editor.ContextMenu.ShouldBeOfType<ContextMenu>();
+
+            menu.Items.Add(new MenuItem { Header = "App" });
+
+            menu.Items.OfType<MenuItem>().Last().Header.ShouldBe("App");
+        });
+
+    [Fact]
     public Task The_context_menu_offers_cut_copy_paste_and_select_all() =>
         _ui.Run(async () =>
         {

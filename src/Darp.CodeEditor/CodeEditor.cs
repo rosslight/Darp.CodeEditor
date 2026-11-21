@@ -88,7 +88,8 @@ namespace Darp.CodeEditor;
 /// Enter, Tab or Escape on an ancestor of the editor.
 /// </para>
 /// <para>
-/// A right click opens the editor's context menu: Cut, Copy, Paste and Select All. For an app's own menus and buttons,
+/// A right click moves the caret, unless it is inside the selection, and opens the editor's <c>ContextMenu</c>: Cut,
+/// Copy, Paste and Select All, which an app changes through its <c>Items</c>. For an app's own menus and buttons,
 /// <see cref="RunCommand"/> runs any of <see cref="CodeEditorCommands"/>, and <see cref="Cut"/>, <see cref="Copy"/>,
 /// <see cref="Paste"/> and <see cref="SelectAll"/> do the same as their keys.
 /// </para>
@@ -240,6 +241,7 @@ public class CodeEditor : TemplatedControl
         // bindings run before both.
         AddHandler(KeyDownEvent, OnKeyDownTunnel, RoutingStrategies.Tunnel);
         AddHandler(TextInputEvent, OnTextInputTunnel, RoutingStrategies.Tunnel);
+        AddHandler(ContextRequestedEvent, OnContextRequestedTunnel, RoutingStrategies.Tunnel);
     }
 
     /// <summary>
@@ -1006,7 +1008,29 @@ public class CodeEditor : TemplatedControl
             TaskScheduler.Default
         );
 
-    /// <summary>The editor's context menu, in the app's look.</summary>
+    /// <summary>A right click in the text moves the caret there, unless it is inside the selection, as in VS Code.</summary>
+    private void OnContextRequestedTunnel(object? sender, ContextRequestedEventArgs e)
+    {
+        if (
+            _shown is null
+            || _part?.TextArea is not { } area
+            || e.Source is not Visual source
+            || (area != source && !area.IsVisualAncestorOf(source))
+        )
+            return;
+        TextView view = area.TextView;
+        if (
+            e.TryGetPosition(view, out Point point)
+            && view.GetPosition(point + view.ScrollOffset) is { } clicked
+            && !area.Selection.Contains(area.Document.GetOffset(clicked.Location))
+        )
+        {
+            area.ClearSelection();
+            area.Caret.Position = clicked;
+        }
+    }
+
+    /// <summary>The editor's context menu, in the app's look. Apps change it through its <c>Items</c>.</summary>
     private ContextMenu CreateContextMenu()
     {
         PlatformHotkeyConfiguration? keys = Application.Current?.PlatformSettings?.HotkeyConfiguration;
@@ -1014,7 +1038,7 @@ public class CodeEditor : TemplatedControl
         MenuItem paste = Item("Paste", keys?.Paste, Paste);
         var menu = new ContextMenu
         {
-            ItemsSource = new Control[]
+            Items =
             {
                 cut,
                 Item("Copy", keys?.Copy, Copy),
