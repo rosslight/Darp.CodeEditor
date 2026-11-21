@@ -3,6 +3,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ce="using:Darp.CodeEditor"
     xmlns:ae="using:AvaloniaEdit"
+    xmlns:popups="using:Darp.CodeEditor.Popups"
     x:Class="Darp.CodeEditor.CodeEditorStyles"
 >
     <Styles.Resources>
@@ -34,6 +35,109 @@
                         </Panel>
                     </ControlTemplate>
                 </Setter>
+            </ControlTheme>
+
+            <!-- The popups' scrolling and list: their colors are resources that PopupFrame.Paint sets on the frame. -->
+            <ControlTheme x:Key="{x:Type popups:PopupScrollViewer}" TargetType="popups:PopupScrollViewer">
+                <Setter Property="Template">
+                    <ControlTemplate>
+                        <popups:PopupDock>
+                            <popups:PopupScrollBar Name="PART_VerticalScrollBar" DockPanel.Dock="Right" />
+                            <ScrollContentPresenter
+                                Name="PART_ContentPresenter"
+                                Background="Transparent"
+                                Padding="{TemplateBinding Padding}"
+                                Content="{TemplateBinding Content}"
+                                ContentTemplate="{TemplateBinding ContentTemplate}"
+                            />
+                        </popups:PopupDock>
+                    </ControlTemplate>
+                </Setter>
+            </ControlTheme>
+
+            <ControlTheme x:Key="{x:Type popups:PopupScrollBar}" TargetType="popups:PopupScrollBar">
+                <Setter Property="Width" Value="10" />
+                <Setter Property="Template">
+                    <ControlTemplate>
+                        <Track
+                            Name="PART_Track"
+                            Minimum="{TemplateBinding Minimum}"
+                            Maximum="{TemplateBinding Maximum}"
+                            Value="{TemplateBinding Value, Mode=TwoWay}"
+                            ViewportSize="{TemplateBinding ViewportSize}"
+                            Orientation="Vertical"
+                            IsDirectionReversed="True"
+                        >
+                            <Track.DecreaseButton>
+                                <popups:PopupTrackButton Name="PART_PageUpButton" />
+                            </Track.DecreaseButton>
+                            <Track.IncreaseButton>
+                                <popups:PopupTrackButton Name="PART_PageDownButton" />
+                            </Track.IncreaseButton>
+                            <popups:PopupThumb />
+                        </Track>
+                    </ControlTemplate>
+                </Setter>
+            </ControlTheme>
+
+            <ControlTheme x:Key="{x:Type popups:PopupThumb}" TargetType="popups:PopupThumb">
+                <Setter Property="MinHeight" Value="20" />
+                <Setter Property="Background" Value="{DynamicResource CodeEditorPopupSlider}" />
+                <Setter Property="Template">
+                    <ControlTemplate>
+                        <popups:PopupBox Background="{TemplateBinding Background}" />
+                    </ControlTemplate>
+                </Setter>
+                <Style Selector="^:pointerover">
+                    <Setter Property="Background" Value="{DynamicResource CodeEditorPopupSliderHover}" />
+                </Style>
+                <Style Selector="^:pressed">
+                    <Setter Property="Background" Value="{DynamicResource CodeEditorPopupSliderActive}" />
+                </Style>
+            </ControlTheme>
+
+            <ControlTheme x:Key="{x:Type popups:PopupTrackButton}" TargetType="popups:PopupTrackButton">
+                <Setter Property="Focusable" Value="False" />
+                <Setter Property="Template">
+                    <ControlTemplate>
+                        <!-- Transparent, not empty: a click on it pages. -->
+                        <popups:PopupBox Background="Transparent" />
+                    </ControlTemplate>
+                </Setter>
+            </ControlTheme>
+
+            <ControlTheme x:Key="{x:Type popups:PopupListBox}" TargetType="popups:PopupListBox">
+                <Setter Property="Template">
+                    <ControlTemplate>
+                        <popups:PopupScrollViewer Name="PART_ScrollViewer">
+                            <ItemsPresenter Name="PART_ItemsPresenter" ItemsPanel="{TemplateBinding ItemsPanel}" />
+                        </popups:PopupScrollViewer>
+                    </ControlTemplate>
+                </Setter>
+            </ControlTheme>
+
+            <ControlTheme x:Key="{x:Type popups:PopupListItem}" TargetType="popups:PopupListItem">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="Padding" Value="4,0" />
+                <Setter Property="Template">
+                    <ControlTemplate>
+                        <ContentPresenter
+                            Name="PART_ContentPresenter"
+                            Background="{TemplateBinding Background}"
+                            Foreground="{TemplateBinding Foreground}"
+                            Padding="{TemplateBinding Padding}"
+                            Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                        />
+                    </ControlTemplate>
+                </Setter>
+                <Style Selector="^:pointerover">
+                    <Setter Property="Background" Value="{DynamicResource CodeEditorPopupRowHover}" />
+                </Style>
+                <Style Selector="^:selected">
+                    <Setter Property="Background" Value="{DynamicResource CodeEditorPopupRowSelected}" />
+                    <Setter Property="Foreground" Value="{DynamicResource CodeEditorPopupRowSelectedText}" />
+                </Style>
             </ControlTheme>
         </ResourceDictionary>
     </Styles.Resources>
