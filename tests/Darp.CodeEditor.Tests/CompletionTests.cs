@@ -526,6 +526,31 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_committed_items_text_takes_the_documents_line_breaks() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [ { "label": "two", "textEdit": { "range": { "start": { "line": 1, "character": 0 },
+                      "end": { "line": 1, "character": 1 } }, "newText": "two\nlines" } } ] }
+                    """
+                )
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "a\r\nt");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await OpenAsync(window, 4);
+
+            window.Press(Key.Enter);
+
+            document.Text.ShouldBe("a\r\ntwo\r\nlines");
+        });
+
+    [Fact]
     public Task An_edit_before_where_completion_was_asked_asks_again_so_that_the_commit_replaces_the_word() =>
         _ui.Run(async () =>
         {
