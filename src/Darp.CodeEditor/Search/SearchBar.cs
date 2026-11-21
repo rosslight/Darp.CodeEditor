@@ -26,9 +26,8 @@ namespace Darp.CodeEditor.Search;
 /// shows the matches, which follow the edits until the next result replaces them.
 /// </para>
 /// <para>
-/// A search has a time limit and a limit on the matches it keeps (<see cref="TextSearch"/>), and the bar says so when
-/// it hits one. Replace All acts only on a complete result for the current text, query and replacement: never on a
-/// partial one.
+/// A search keeps a limited number of matches (<see cref="TextSearch"/>), and the bar says so when it hits the limit.
+/// Replace All acts only on a complete result for the current text and query: never on a partial one.
 /// </para>
 /// </remarks>
 internal sealed class SearchBar : UserControl
@@ -42,7 +41,6 @@ internal sealed class SearchBar : UserControl
     private readonly TextBox _find = new() { PlaceholderText = "Find", Width = 220 };
     private readonly ToggleButton _matchCase = Toggle("Aa", "Match Case");
     private readonly ToggleButton _wholeWord = Toggle("ab", "Match Whole Word");
-    private readonly ToggleButton _regex = Toggle(".*", "Use Regular Expression");
     private readonly TextBlock _count = new() { MinWidth = 80, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBox _replace = new() { PlaceholderText = "Replace", Width = 220 };
     private readonly Button _replaceOne = new() { Content = "Replace" };
@@ -100,7 +98,6 @@ internal sealed class SearchBar : UserControl
                         _find,
                         _matchCase,
                         _wholeWord,
-                        _regex,
                         _count,
                         IconButton(s_previous, "Previous Match (Shift+F3)", FindPrevious),
                         IconButton(s_next, "Next Match (F3)", FindNext),
@@ -115,8 +112,6 @@ internal sealed class SearchBar : UserControl
         _find.TextChanging += (_, _) => OnQueryChanged();
         _matchCase.IsCheckedChanged += (_, _) => OnQueryChanged();
         _wholeWord.IsCheckedChanged += (_, _) => OnQueryChanged();
-        _regex.IsCheckedChanged += (_, _) => OnQueryChanged();
-        _replace.TextChanging += (_, _) => Search(Move.None);
         _replaceOne.Click += (_, _) => ReplaceOne();
         _replaceAll.Click += (_, _) => ReplaceAll();
         _find.KeyDown += OnFindKeyDown;
@@ -153,14 +148,12 @@ internal sealed class SearchBar : UserControl
 
     internal ToggleButton MatchCaseToggle => _matchCase;
 
-    internal ToggleButton RegexToggle => _regex;
-
     internal Button ReplaceAllButton => _replaceAll;
 
     /// <summary>The number of matches, and which one is selected.</summary>
     internal string? Count => _count.Text;
 
-    /// <summary>Why the result is partial, or the regular expression is invalid; null for neither.</summary>
+    /// <summary>Why the result is partial; null when it is complete.</summary>
     internal string? Message => _message.IsVisible ? _message.Text : null;
 
     /// <summary>Searches the document that <paramref name="editor"/> shows now, until <see cref="Detach"/>.</summary>
@@ -221,14 +214,11 @@ internal sealed class SearchBar : UserControl
         _shown?.TextArea.Focus();
     }
 
-    /// <summary>
-    /// Shows the replace row in replace mode, unless the editor is read-only, and searches again for what replaces
-    /// the matches.
-    /// </summary>
+    /// <summary>Shows the replace row in replace mode, unless the editor is read-only.</summary>
     public void UpdateReplaceRow()
     {
-        if (ShowReplaceRow())
-            Search(Move.None);
+        ShowReplaceRow();
+        UpdateStatus();
     }
 
     /// <inheritdoc />
@@ -259,7 +249,7 @@ internal sealed class SearchBar : UserControl
     {
         bool wasOpen = IsOpen;
         _replaceMode = replace;
-        bool rowChanged = ShowReplaceRow();
+        ShowReplaceRow();
         IsVisible = true;
         if (text is not null && text != _find.Text)
         {
@@ -268,7 +258,7 @@ internal sealed class SearchBar : UserControl
             if (move != Move.None)
                 _move = move;
         }
-        else if (!wasOpen || rowChanged)
+        else if (!wasOpen)
             Search(move);
         else if (move != Move.None)
             Go(move, null);
@@ -281,18 +271,7 @@ internal sealed class SearchBar : UserControl
         }
     }
 
-    /// <summary>
-    /// Shows the replace row in replace mode, unless the editor is read-only.
-    /// </summary>
-    /// <returns>Whether that changed, and with it whether searches find what replaces the matches.</returns>
-    private bool ShowReplaceRow()
-    {
-        bool visible = _replaceMode && _shown?.Editor.IsReadOnly == false;
-        if (visible == _replaceRow.IsVisible)
-            return false;
-        _replaceRow.IsVisible = visible;
-        return true;
-    }
+    private void ShowReplaceRow() => _replaceRow.IsVisible = _replaceMode && _shown?.Editor.IsReadOnly == false;
 
     private void Go(Move move, string? text)
     {
@@ -331,19 +310,13 @@ internal sealed class SearchBar : UserControl
             UpdateStatus();
             return;
         }
-        var query = new SearchQuery(
-            text,
-            _matchCase.IsChecked == true,
-            _wholeWord.IsChecked == true,
-            _regex.IsChecked == true
-        );
-        string? replacement = _replaceRow.IsVisible ? _replace.Text ?? "" : null;
+        var query = new SearchQuery(text, _matchCase.IsChecked == true, _wholeWord.IsChecked == true);
         TextSnapshot snapshot = shown.Document.CurrentSnapshot;
         var searching = new CancellationTokenSource();
         _searching = searching;
         // Cancelled, the task ends as cancelled, not as failed.
         Task<SearchResult> search = Task.Run(
-            () => TextSearch.Find(snapshot, query, replacement, searching.Token),
+            () => TextSearch.Find(snapshot, query, searching.Token),
             searching.Token
         );
         search.ContinueWith(
@@ -392,12 +365,12 @@ internal sealed class SearchBar : UserControl
     {
         if (_shown is not { } shown || result.Matches.Count == 0)
             return;
-        TextSegmentCollection<SearchMatch> matches = result.Matches;
+        TextSegmentCollection<TextSegment> matches = result.Matches;
         TextRange selection = shown.Editor.Selection.Range;
-        SearchMatch? match = move switch
+        TextSegment? match = move switch
         {
             Move.First => matches.FindFirstSegmentWithStartAfter(_from) ?? matches.FirstSegment,
-            Move.Next => After(selection),
+            Move.Next => matches.FindFirstSegmentWithStartAfter(selection.End) ?? matches.FirstSegment,
             Move.Previous => matches.FindFirstSegmentWithStartAfter(selection.Start) is { } after
                 ? matches.GetPreviousSegment(after) ?? matches.LastSegment
                 : matches.LastSegment,
@@ -405,18 +378,9 @@ internal sealed class SearchBar : UserControl
         };
         if (match is not null)
             Select(match);
-
-        SearchMatch After(TextRange range)
-        {
-            SearchMatch? next = matches.FindFirstSegmentWithStartAfter(range.End);
-            // An empty match at the caret is the current one.
-            if (next is not null && next.StartOffset == range.Start && next.Length == range.Length)
-                next = matches.GetNextSegment(next);
-            return next ?? matches.FirstSegment;
-        }
     }
 
-    private void Select(SearchMatch match)
+    private void Select(TextSegment match)
     {
         if (_shown is not { } shown)
             return;
@@ -436,8 +400,9 @@ internal sealed class SearchBar : UserControl
             Perform(Move.Next, result);
             return;
         }
-        int end = match.StartOffset + match.Replacement.Length;
-        shown.Buffer.Replace(match.StartOffset, match.Length, match.Replacement);
+        string replacement = _replace.Text ?? "";
+        int end = match.StartOffset + replacement.Length;
+        shown.Buffer.Replace(match.StartOffset, match.Length, replacement);
         // The next search replaces the result; until then, the rest of it.
         result.Matches.Remove(match);
         if ((result.Matches.FindFirstSegmentWithStartAfter(end) ?? result.Matches.FirstSegment) is { } next)
@@ -449,33 +414,30 @@ internal sealed class SearchBar : UserControl
     {
         if (_shown is not { } shown || CurrentResult() is not { IsComplete: true } result)
             return;
-        SearchMatch[] matches = [.. result.Matches];
+        TextSegment[] matches = [.. result.Matches];
+        string replacement = _replace.Text ?? "";
         using (shown.Buffer.RunUpdate())
         {
             // From the end, so that the matches still to replace keep their offsets.
             for (int i = matches.Length - 1; i >= 0; i--)
-                shown.Buffer.Replace(matches[i].StartOffset, matches[i].Length, matches[i].Replacement);
+                shown.Buffer.Replace(matches[i].StartOffset, matches[i].Length, replacement);
         }
     }
 
     /// <summary>
-    /// The result to replace with: one for the text as it is, the query and the replacement as they are, in an editor
-    /// that may change the text. Null while a search is under way.
+    /// The result to replace in: one for the text and the query as they are, in an editor that may change the text. Null
+    /// while a search is under way.
     /// </summary>
-    private SearchResult? CurrentResult()
-    {
-        if (_result is not { Replacement: { } replacement } result || _searching is not null || !_replaceRow.IsVisible)
-            return null;
-        return
-            _shown is { Editor.IsReadOnly: false } shown
-            && result.Version == shown.Document.CurrentSnapshot.Version
-            && replacement == (_replace.Text ?? "")
+    private SearchResult? CurrentResult() =>
+        _searching is null
+        && _result is { } result
+        && _shown is { Editor.IsReadOnly: false } shown
+        && result.Version == shown.Document.CurrentSnapshot.Version
             ? result
             : null;
-    }
 
     /// <summary>The match that is selected; null for none.</summary>
-    private SearchMatch? CurrentMatch(SearchResult result)
+    private TextSegment? CurrentMatch(SearchResult result)
     {
         if (_shown is not { } shown)
             return null;
@@ -498,31 +460,24 @@ internal sealed class SearchBar : UserControl
         CultureInfo culture = CultureInfo.CurrentCulture;
         _count.Text = result switch
         {
-            null or { Outcome: SearchOutcome.InvalidPattern } => null,
+            null => null,
             { Matches.Count: 0 } => "No results",
             _ => string.Format(
                 culture,
                 "{0} of {1:N0}{2}",
                 Index(result) is { } index ? (index + 1).ToString(culture) : "?",
                 count,
-                result.Outcome == SearchOutcome.TooManyMatches ? "+" : ""
+                result.IsComplete ? "" : "+"
             ),
         };
-        _message.Text = result?.Outcome switch
-        {
-            SearchOutcome.TooManyMatches => string.Format(
-                culture,
-                "More than {0:N0} matches: only the first {0:N0} show, and Replace All is off.",
-                TextSearch.MaxMatches
-            ),
-            SearchOutcome.OutOfTime => string.Format(
-                culture,
-                "The search stopped after {0:0.#} s: matches may be missing, and Replace All is off.",
-                TextSearch.TimeLimit.TotalSeconds
-            ),
-            SearchOutcome.InvalidPattern => result.Error,
-            _ => null,
-        };
+        _message.Text =
+            result is { IsComplete: false }
+                ? string.Format(
+                    culture,
+                    "More than {0:N0} matches: only the first {0:N0} show, and Replace All is off.",
+                    TextSearch.MaxMatches
+                )
+                : null;
         _message.IsVisible = _message.Text is not null;
         _replaceAll.IsEnabled = CurrentResult() is { IsComplete: true, Matches.Count: > 0 };
 
@@ -532,7 +487,7 @@ internal sealed class SearchBar : UserControl
                 return null;
             int index = 0;
             for (
-                SearchMatch? match = searched.Matches.FirstSegment;
+                TextSegment? match = searched.Matches.FirstSegment;
                 match != current;
                 match = searched.Matches.GetNextSegment(match)
             )
