@@ -13,7 +13,6 @@ using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
 using AvaloniaEdit.Search;
 using Darp.CodeEditor.Completion;
-using Darp.CodeEditor.Diagnostics;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.Loading;
@@ -151,35 +150,8 @@ public class CodeEditor : TemplatedControl
     /// </summary>
     private readonly TextDocument _emptyBuffer = new();
 
-    /// <summary>Highlights the shown document.</summary>
-    private BackgroundTextMateHighlighter? _highlighter;
-
-    /// <summary>The editing helpers of the shown document.</summary>
-    private EditingHelpers? _helpers;
-
-    /// <summary>Marks the bracket next to the caret in the shown document, and its match.</summary>
-    private BracketHighlighter? _brackets;
-
-    /// <summary>Shows the spaces and tabs inside the selection.</summary>
-    private WhitespaceLayer? _whitespace;
-
-    /// <summary>Draws the squiggles under the shown document's diagnostics.</summary>
-    private SquiggleLayer? _squiggles;
-
-    /// <summary>Colors the server's semantic tokens of the shown document.</summary>
-    private SemanticHighlighter? _semantic;
-
-    /// <summary>Shows the diagnostics and the server's hover where the pointer rests.</summary>
-    private HoverController? _hover;
-
-    /// <summary>The snippet that completion inserted last in the shown document, while the user tabs through it.</summary>
-    private SnippetController? _snippets;
-
-    /// <summary>The server's completion of the shown document.</summary>
-    private CompletionController? _completion;
-
-    /// <summary>The server's signature help of the shown document.</summary>
-    private SignatureHelpController? _signatureHelp;
+    /// <summary>What the editor does for the shown document; null while it shows none.</summary>
+    private EditorView? _view;
 
     /// <summary>The template's panel, which the search bar goes into, over the text.</summary>
     private Panel? _root;
@@ -334,7 +306,7 @@ public class CodeEditor : TemplatedControl
     public TextPosition CaretPosition => _caretPosition;
 
     /// <summary>The semantic colors of the shown document, for benchmarks; null while it shows none.</summary>
-    internal SemanticHighlighter? SemanticHighlighter => _semantic;
+    internal SemanticHighlighter? SemanticHighlighter => _view?.SemanticHighlighter;
 
     /// <summary>The clock of the time limit in the background, in the grammars the editor loads: the system's.</summary>
     internal TimeProvider GrammarClock { get; init; } = TimeProvider.System;
@@ -509,11 +481,8 @@ public class CodeEditor : TemplatedControl
         // Raised as the focus leaves an element inside the editor; it may stay inside, as when it goes to the search bar.
         Dispatcher.Post(() =>
         {
-            if (IsKeyboardFocusWithin)
-                return;
-            _hover?.Close();
-            _completion?.Close();
-            _signatureHelp?.Close();
+            if (!IsKeyboardFocusWithin)
+                _view?.OnFocusLeft();
         });
     }
 
@@ -529,11 +498,7 @@ public class CodeEditor : TemplatedControl
             _searchBar?.UpdateReplaceRow();
             // Nothing completes, asks for signatures or tabs through a snippet where the user cannot type.
             if (IsReadOnly)
-            {
-                _completion?.Close();
-                _signatureHelp?.Close();
-                _snippets?.End();
-            }
+                _view?.OnReadOnly();
         }
         else if (
             change.Property == ColorThemeProperty
@@ -608,21 +573,8 @@ public class CodeEditor : TemplatedControl
         _shown = document;
         Select(part, place?.Selection ?? new TextSelection(0));
         TextView textView = part.TextArea.TextView;
-        _highlighter = new BackgroundTextMateHighlighter(textView, buffer, Dispatcher, null);
-        _helpers = new EditingHelpers(part.TextArea, document, _highlighter);
-        _brackets = new BracketHighlighter(part.TextArea, document, _highlighter) { Colors = _colors };
-        _whitespace = new WhitespaceLayer(part.TextArea) { Colors = _colors };
-        _squiggles = new SquiggleLayer(part.TextArea, document) { Colors = _colors };
-        _semantic = new SemanticHighlighter(textView, document, Dispatcher) { Theme = _theme };
-        _hover = new HoverController(this, part.TextArea, document, _squiggles, _highlighter) { Colors = _colors };
-        _snippets = new SnippetController(part.TextArea, document) { Colors = _colors };
-        // After the editing helpers: they see typed text first, so that a typed "(" has its ")" when it asks.
-        _completion = new CompletionController(this, part.TextArea, document, _highlighter, _snippets)
-        {
-            Colors = _colors,
-            Icons = _iconColors,
-        };
-        _signatureHelp = new SignatureHelpController(this, part.TextArea, document, _highlighter) { Colors = _colors };
+        _view = new EditorView(this, part.TextArea, document, () => _searchBar);
+        _view.SetColors(_theme, _colors, _iconColors);
         _searchBar?.Attach(this, part.TextArea, document);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
         _waitingForLayout = true;
@@ -636,27 +588,9 @@ public class CodeEditor : TemplatedControl
         shown.Disposed -= OnDocumentDisposed;
         shown.PropertyChanged -= OnDocumentPropertyChanged;
         CancelLoading();
-        _helpers?.Dispose();
-        _helpers = null;
-        _brackets?.Dispose();
-        _brackets = null;
-        _whitespace?.Dispose();
-        _whitespace = null;
-        _hover?.Dispose();
-        _hover = null;
-        _completion?.Dispose();
-        _completion = null;
-        _snippets?.Dispose();
-        _snippets = null;
-        _signatureHelp?.Dispose();
-        _signatureHelp = null;
-        _squiggles?.Dispose();
-        _squiggles = null;
-        _semantic?.Dispose();
-        _semantic = null;
         _searchBar?.Detach();
-        _highlighter?.Dispose();
-        _highlighter = null;
+        _view?.Dispose();
+        _view = null;
         part.TextArea.TextView.LayoutUpdated -= OnTextViewLayoutUpdated;
         part.TextArea.TextView.VisualLinesChanged -= OnTextViewLaidOut;
         part.TextArea.TextView.ScrollOffsetChanged -= OnTextViewLaidOut;
@@ -701,51 +635,12 @@ public class CodeEditor : TemplatedControl
         }
         else if (e.Key == Key.F3 && (e.KeyModifiers == KeyModifiers.None || shift))
             e.Handled = FindNext(previous: shift);
-        else if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None && Dismiss())
+        else if (_view?.OnKeyDown(e) == true)
             e.Handled = true;
-        else if (_part is not { TextArea.IsFocused: true })
-            return;
-        else if (
-            _completion?.OnKeyDown(e) == true
-            || _signatureHelp?.OnKeyDown(e) == true
-            || _snippets?.OnKeyDown(e) == true
-        )
-        {
-            e.Handled = true;
-        }
-        else
-            _helpers?.OnKeyDown(e);
     }
 
-    /// <summary>Typed text, before AvaloniaEdit's text area takes it: a commit character commits completion's item.</summary>
-    private void OnTextInputTunnel(object? sender, TextInputEventArgs e)
-    {
-        if (_part is { TextArea.IsFocused: true })
-            _completion?.OnTextInput(e);
-    }
-
-    /// <summary>
-    /// What Escape closes, one at a time: completion, signature help, a snippet's stops while the text area has the
-    /// keyboard, the hover, the search bar, in the order of VS Code's keys. Each also ends what still waits for its
-    /// server.
-    /// </summary>
-    /// <returns>Whether it closed something the user saw.</returns>
-    private bool Dismiss()
-    {
-        if (
-            _completion?.Close() == true
-            || _signatureHelp?.Close() == true
-            || (_part is { TextArea.IsFocused: true } && _snippets?.End() == true)
-            || _hover?.Close() == true
-        )
-        {
-            return true;
-        }
-        if (_searchBar is not { IsOpen: true } bar)
-            return false;
-        bar.Close();
-        return true;
-    }
+    /// <summary>Typed text, before AvaloniaEdit's text area takes it.</summary>
+    private void OnTextInputTunnel(object? sender, TextInputEventArgs e) => _view?.OnTextInput(e);
 
     /// <summary>
     /// Selects the next or previous match, as F3 and Shift+F3 do, opening the bar for the selection if it is closed.
@@ -1052,15 +947,7 @@ public class CodeEditor : TemplatedControl
             TextAreaColors colors = TextAreaColors.From(theme);
             _colors = colors;
             _iconColors = SymbolIconColors.From(theme);
-            _completion?.Colors = colors;
-            _completion?.Icons = _iconColors;
-            _snippets?.Colors = colors;
-            _signatureHelp?.Colors = colors;
-            _brackets?.Colors = colors;
-            _whitespace?.Colors = colors;
-            _squiggles?.Colors = colors;
-            _hover?.Colors = colors;
-            _semantic?.Theme = theme;
+            _view?.SetColors(theme, colors, _iconColors);
             _searchBar?.Colors = colors;
             TextArea textArea = part.TextArea;
             part.Background = colors.Background;
@@ -1071,7 +958,7 @@ public class CodeEditor : TemplatedControl
             textArea.TextView.CurrentLineBackground = colors.CurrentLineBackground;
             textArea.TextView.CurrentLineBorder = colors.CurrentLineBorder;
         }
-        if (_highlighter is { } highlighter && (highlighter.Grammar != grammar || firstScreen is not null))
+        if (_view?.Highlighter is { } highlighter && (highlighter.Grammar != grammar || firstScreen is not null))
             highlighter.SetGrammar(grammar, firstScreen);
     }
 
