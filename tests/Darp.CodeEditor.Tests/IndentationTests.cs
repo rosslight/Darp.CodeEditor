@@ -1,10 +1,8 @@
-using System.Text.RegularExpressions;
 using Avalonia.Controls;
 using Avalonia.Input;
 using AvaloniaEdit;
 using AvaloniaEdit.Rendering;
 using Darp.CodeEditor.Editing;
-using Darp.CodeEditor.Loading;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -69,6 +67,7 @@ public sealed class IndentationTests(UiFixture ui)
             // One level more goes to the next stop of the document's indentation; line breaks stay the document's.
             await CodeLanguage.Json.Loaded;
             using EditorWindow window = MarkedText.Show(marked, CodeLanguage.Json);
+            await window.TokensKnownAsync();
 
             window.Press(Key.Enter);
 
@@ -103,9 +102,10 @@ public sealed class IndentationTests(UiFixture ui)
     ) =>
         _ui.Run(async () =>
         {
-            CodeLanguage codeLanguage = language == "yaml" ? CodeLanguage.Yaml : Pascal;
+            CodeLanguage codeLanguage = language == "yaml" ? YamlByIndentationRules : Pascal;
             await codeLanguage.Loaded;
             using EditorWindow window = MarkedText.Show(marked, codeLanguage);
+            await window.TokensKnownAsync();
 
             window.Press(Key.Enter);
 
@@ -118,6 +118,7 @@ public sealed class IndentationTests(UiFixture ui)
         {
             await CodeLanguage.Json.Loaded;
             using EditorWindow window = MarkedText.Show("{\n    \"a\": 1,\n    |\n}", CodeLanguage.Json);
+            await window.TokensKnownAsync();
             CodeDocument document = window.Editor.Document.ShouldNotBeNull();
 
             window.Type("}");
@@ -159,31 +160,166 @@ public sealed class IndentationTests(UiFixture ui)
             window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(above + "    end");
         });
 
-    [Fact]
-    public void Indentation_out_of_time_reads_no_more_lines()
-    {
-        // As after 500,000 empty lines: the scan for a line with text ends with the time, not only the matching.
-        var rules = new IndentationRules(new Regex("x"), new Regex("y"));
-        int reads = 0;
-        var time = new ManualTime();
-        var matching = new IndentationMatching(rules, time);
-        time.Advance(IndentationRules.TimeLimit);
+    [Theory]
+    // In the indentation, back to the tab stop before the caret.
+    [InlineData("    |alpha", "  |alpha")]
+    [InlineData("   |alpha", "  |alpha")]
+    [InlineData("  |  alpha", "|  alpha")]
+    [InlineData("      |", "    |")]
+    [InlineData("\t  |alpha", "\t|alpha")]
+    [InlineData("\t\t|alpha", "\t|alpha")]
+    // After it, one character.
+    [InlineData("  a|lpha", "  |lpha")]
+    [InlineData("  alpha  |", "  alpha |")]
+    [InlineData("alpha\n|", "alpha|")]
+    public Task Backspace_in_a_lines_indentation_deletes_back_to_the_tab_stop_before(string before, string after) =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show(before, CodeLanguage.PlainText);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            document.Indentation = before.Contains('\t') ? Indentation.Tabs(4) : Indentation.Spaces(2);
 
-        Should.Throw<RegexMatchTimeoutException>(() =>
-            EditingHelpers.InheritedIndentation(
-                matching,
-                500_001,
-                honorIntentional: true,
-                _ =>
+            window.Press(Key.Back);
+
+            MarkedText.Of(window).ShouldBe(after);
+        });
+
+    [Fact]
+    public Task Backspaces_in_the_indentation_are_one_undo_step() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("    |alpha", CodeLanguage.PlainText);
+            CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            document.Indentation = Indentation.Spaces(2);
+
+            window.Press(Key.Back);
+            window.Press(Key.Back, KeyModifiers.Shift);
+            MarkedText.Of(window).ShouldBe("|alpha");
+
+            document.Undo();
+            MarkedText.Of(window).ShouldBe("    |alpha");
+        });
+
+    [Fact]
+    public Task Tab_with_a_whole_line_selected_indents_it_and_keeps_it_selected() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("«alpha»\nbeta", CodeLanguage.PlainText);
+            window.Editor.Document.ShouldNotBeNull().Indentation = Indentation.Spaces(2);
+
+            window.Press(Key.Tab);
+            MarkedText.Of(window).ShouldBe("«  alpha»\nbeta");
+
+            window.Press(Key.Tab, KeyModifiers.Shift);
+            MarkedText.Of(window).ShouldBe("«alpha»\nbeta");
+        });
+
+    [Theory]
+    // Whitespace to the next tab stop from the selection's start.
+    [InlineData("a«lph»a", "a |a")]
+    [InlineData("«alph»a", "  |a")]
+    [InlineData("al«pha»", "al  |")]
+    public Task Tab_with_part_of_a_line_selected_replaces_it(string marked, string expected) =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show(marked, CodeLanguage.PlainText);
+            window.Editor.Document.ShouldNotBeNull().Indentation = Indentation.Spaces(2);
+
+            window.Press(Key.Tab);
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
+    [Theory]
+    [InlineData(Key.Enter)]
+    [InlineData(Key.Tab)]
+    public Task Enter_and_Tab_change_nothing_in_a_long_lines_hidden_tail(Key key) =>
+        _ui.Run(() =>
+        {
+            string line = new('a', VisibleText.LineLimit + 5);
+            using EditorWindow window = MarkedText.Show(
+                line.Insert(VisibleText.LineLimit + 2, "|"),
+                CodeLanguage.PlainText
+            );
+
+            window.Press(key);
+
+            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(line);
+        });
+
+    [Theory]
+    // To the next or the previous stop.
+    [InlineData("«   a»", "«    a»", "«  a»")]
+    // The selection follows the text, and its start stays where it was in the indentation.
+    [InlineData("  «a\n  b»", "  «  a\n    b»", "«a\nb»")]
+    public Task Tab_and_Shift_Tab_shift_selected_lines_by_tab_stops(
+        string marked,
+        string afterTab,
+        string afterShiftTab
+    ) =>
+        _ui.Run(() =>
+        {
+            foreach (
+                (Key key, KeyModifiers modifiers, string expected) in new[]
                 {
-                    reads++;
-                    return "";
+                    (Key.Tab, KeyModifiers.None, afterTab),
+                    (Key.Tab, KeyModifiers.Shift, afterShiftTab),
                 }
             )
-        );
+            {
+                using EditorWindow window = MarkedText.Show(marked, CodeLanguage.PlainText);
+                window.Editor.Document.ShouldNotBeNull().Indentation = Indentation.Spaces(2);
 
-        reads.ShouldBe(0);
-    }
+                window.Press(key, modifiers);
+
+                MarkedText.Of(window).ShouldBe(expected);
+            }
+        });
+
+    [Fact]
+    public Task Tab_leaves_empty_lines_among_the_selected_ones_as_they_are() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("«a\n\nb»", CodeLanguage.PlainText);
+            window.Editor.Document.ShouldNotBeNull().Indentation = Indentation.Spaces(2);
+
+            window.Press(Key.Tab);
+
+            MarkedText.Of(window).ShouldBe("«  a\n\n  b»");
+        });
+
+    [Fact]
+    public Task Tab_and_Shift_Tab_change_nothing_in_a_read_only_editor() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("«  a\n  b»\nc", CodeLanguage.PlainText);
+            window.Editor.IsReadOnly = true;
+
+            window.Press(Key.Tab);
+            window.Press(Key.Tab, KeyModifiers.Shift);
+
+            MarkedText.Of(window).ShouldBe("«  a\n  b»\nc");
+        });
+
+    [Theory]
+    [InlineData("    |alpha", "  |alpha")]
+    [InlineData("   |alpha", "  |alpha")]
+    [InlineData("   al|pha", "  al|pha")]
+    [InlineData("al|pha", "al|pha")]
+    public Task Shift_Tab_outdents_the_carets_line_to_the_tab_stop_before(string marked, string expected) =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show(marked, CodeLanguage.PlainText);
+            window.Editor.Document.ShouldNotBeNull().Indentation = Indentation.Spaces(2);
+
+            window.Press(Key.Tab, KeyModifiers.Shift);
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
+    /// <summary>YAML with its indentation rules, which the built-in language leaves off, as VS Code's YAML extension does.</summary>
+    private static CodeLanguage YamlByIndentationRules { get; } =
+        new("yaml", CodeLanguage.Yaml.Grammar, CodeLanguage.Yaml.Configuration) { AutoIndent = AutoIndent.Full };
 
     /// <summary>A language with word brackets, and indentation patterns that ignore case.</summary>
     private static CodeLanguage Pascal { get; } =

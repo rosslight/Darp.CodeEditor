@@ -25,7 +25,9 @@ internal sealed class EditorView : IDisposable
     /// <summary>Everything the view made, in the order it made them: disposed the other way round.</summary>
     private readonly IDisposable[] _features;
 
-    private readonly EditingHelpers _helpers;
+    private readonly TextChanges _changes;
+    private readonly AutoClosingPairs _pairs;
+    private readonly Typing _typing;
     private readonly BracketHighlighter _brackets;
     private readonly WhitespaceLayer _whitespace;
     private readonly SquiggleLayer _squiggles;
@@ -55,20 +57,25 @@ internal sealed class EditorView : IDisposable
         _searchBar = searchBar;
         _commands = new CommandTable(area);
         Highlighter = new BackgroundTextMateHighlighter(area.TextView, area.Document, editor.Dispatcher, null);
-        _helpers = new EditingHelpers(area, document, Highlighter);
+        _changes = new TextChanges(area);
+        _pairs = new AutoClosingPairs(area, document, Highlighter, _changes, () => editor.AutoClosing);
+        _typing = new Typing(area, document, Highlighter, _changes, _pairs);
         _brackets = new BracketHighlighter(area, document, Highlighter);
         _whitespace = new WhitespaceLayer(area);
         _squiggles = new SquiggleLayer(area, document);
         SemanticHighlighter = new SemanticHighlighter(area.TextView, document, editor.Dispatcher);
         _hover = new HoverController(editor, area, document, _squiggles, Highlighter);
         _snippets = new SnippetController(area, document);
-        // After the editing helpers: they see typed text first, so that a typed "(" has its ")" when it asks.
+        // After typing: it sees typed text first, so that a typed "(" has its ")" when completion asks.
         _completion = new CompletionController(editor, area, document, Highlighter, _snippets);
         _signatureHelp = new SignatureHelpController(editor, area, document, Highlighter);
         _features =
         [
             Highlighter,
-            _helpers,
+            _changes,
+            _pairs,
+            _typing,
+            new EditingHelpers(area, document),
             _brackets,
             _whitespace,
             _squiggles,
@@ -111,7 +118,7 @@ internal sealed class EditorView : IDisposable
 
     /// <summary>
     /// A key, before AvaloniaEdit's: Escape, which dismisses, and in the text the keys of completion's list, of
-    /// signature help, of a snippet's stops and of the editing helpers.
+    /// signature help, of a snippet's stops and of typing.
     /// </summary>
     /// <returns>Whether the key was the view's.</returns>
     public bool OnKeyDown(KeyEventArgs e)
@@ -120,17 +127,23 @@ internal sealed class EditorView : IDisposable
             return true;
         if (!_area.IsFocused)
             return false;
-        if (_completion.OnKeyDown(e) || _signatureHelp.OnKeyDown(e) || _snippets.OnKeyDown(e))
-            return true;
-        _helpers.OnKeyDown(e);
-        return e.Handled;
+        return _completion.OnKeyDown(e)
+            || _signatureHelp.OnKeyDown(e)
+            || _snippets.OnKeyDown(e)
+            || _typing.OnKeyDown(e);
     }
 
-    /// <summary>Typed text, before AvaloniaEdit's text area takes it: a commit character commits completion's item.</summary>
+    /// <summary>
+    /// Typed text, before AvaloniaEdit's text area takes it: a commit character commits completion's item, and the text
+    /// goes in by the rules of typing.
+    /// </summary>
     public void OnTextInput(TextInputEventArgs e)
     {
-        if (_area.IsFocused)
-            _completion.OnTextInput(e);
+        if (!_area.IsFocused)
+            return;
+        _completion.OnTextInput(e);
+        if (!e.Handled)
+            _typing.OnTextInput(e);
     }
 
     /// <summary>Closes the popups, once the keyboard has left the editor.</summary>
