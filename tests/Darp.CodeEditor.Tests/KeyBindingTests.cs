@@ -232,7 +232,7 @@ public sealed class KeyBindingTests(UiFixture ui)
     public Task The_find_keys_also_work_from_the_search_bar() =>
         _ui.Run(async () =>
         {
-            using EditorWindow window = MarkedText.Show("|a b a", CodeLanguage.PlainText);
+            using EditorWindow window = MarkedText.Show("| a b a", CodeLanguage.PlainText);
             window.Press(Key.F, s_command);
             SearchBar bar = BarOf(window);
             window.Type("a");
@@ -240,7 +240,7 @@ public sealed class KeyBindingTests(UiFixture ui)
 
             window.Press(Key.F3);
 
-            window.Editor.Selection.ShouldBe(new TextSelection(4, 5));
+            window.Editor.Selection.ShouldBe(new TextSelection(5, 6));
             bar.FindBox.IsFocused.ShouldBeTrue();
         });
 

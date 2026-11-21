@@ -253,10 +253,9 @@ internal sealed class SearchBar : UserControl
         IsVisible = true;
         if (text is not null && text != _find.Text)
         {
-            // Searches from the selection, as for any new query; the next or previous match from there if asked.
+            // A query that comes with opening leaves the caret where it is, unless a next or previous match is asked.
             _find.Text = text;
-            if (move != Move.None)
-                _move = move;
+            _move = move;
         }
         else if (!wasOpen)
             Search(move);

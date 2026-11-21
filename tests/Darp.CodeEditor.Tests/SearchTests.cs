@@ -160,6 +160,25 @@ public sealed class SearchTests(UiFixture ui)
             document.Text.ShouldBe(" $0 a.b axb");
         });
 
+    [Fact]
+    public Task Without_a_selection_the_query_is_the_word_at_the_caret_and_the_caret_stays() =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = MarkedText.Show("foo ba|r baz bar", CodeLanguage.PlainText);
+
+            window.Editor.OpenSearch();
+            SearchBar bar = BarOf(window);
+
+            bar.FindBox.Text.ShouldBe("bar");
+            await Wait.UntilAsync(() => bar.Count == "? of 2");
+            window.Editor.Selection.ShouldBe(new TextSelection(6));
+
+            // An open bar keeps what the user typed.
+            bar.FindBox.Text = "nothing";
+            window.Editor.OpenSearch();
+            bar.FindBox.Text.ShouldBe("nothing");
+        });
+
     /// <summary>A newer search replaces the query's own before its result is in, with no dispatcher pass between.</summary>
     [Fact]
     public Task A_new_query_selects_its_first_match_also_when_a_newer_search_takes_over() =>

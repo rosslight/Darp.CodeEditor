@@ -1,5 +1,7 @@
+using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using Darp.CodeEditor.Commands;
+using Darp.CodeEditor.Editing;
 
 namespace Darp.CodeEditor.Search;
 
@@ -32,21 +34,35 @@ internal sealed class FindCommands : IEditorFeature
 
     private bool HasBar() => _bar() is not null;
 
-    private void Open(bool replace) => _bar()?.Open(replace && !_area.IsReadOnly, SelectedLineText());
+    private void Open(bool replace)
+    {
+        if (_bar() is { } bar)
+            bar.Open(replace && !_area.IsReadOnly, Query(bar));
+    }
 
-    /// <summary>Selects the next or previous match, opening the bar for the selection if it is closed.</summary>
+    /// <summary>Selects the next or previous match, opening the bar with its query if it is closed.</summary>
     private void Go(bool previous)
     {
         if (_bar() is not { } bar)
             return;
-        string? text = bar.IsOpen ? null : SelectedLineText();
+        string? text = bar.IsOpen ? null : Query(bar);
         if (previous)
             bar.FindPrevious(text);
         else
             bar.FindNext(text);
     }
 
-    /// <summary>The selected text, if it is within one line: what a search starts with.</summary>
-    private string? SelectedLineText() =>
-        _area.Selection is { IsEmpty: false, IsMultiline: false } selection ? selection.GetText() : null;
+    /// <summary>
+    /// What a search starts with: the selected text, if it is within one line; with nothing selected and the bar
+    /// closed, the word at the caret. An open bar keeps what the user typed.
+    /// </summary>
+    private string? Query(SearchBar bar)
+    {
+        if (_area.Selection is { IsEmpty: false } selection)
+            return selection.IsMultiline ? null : selection.GetText();
+        TextDocument text = _area.Document;
+        return !bar.IsOpen && WordRules.WordAt(text, _area.Caret.Offset) is { } word
+            ? text.GetText(word.Start, word.Length)
+            : null;
+    }
 }
