@@ -61,6 +61,13 @@ internal sealed class EditorWindow : IDisposable
         Window.UpdateLayout();
     }
 
+    /// <summary>
+    /// Lets the dispatcher run what was posted to it so far, such as the rest of an async handler, by waiting for a job
+    /// of the lowest priority: the dispatcher runs every job of a higher one first.
+    /// </summary>
+    public static async Task RunPostedJobsAsync() =>
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.ContextIdle);
+
     /// <summary>Renders a frame, after the jobs and layout before it.</summary>
     public void Render() => Window.CaptureRenderedFrame()?.Dispose();
 
