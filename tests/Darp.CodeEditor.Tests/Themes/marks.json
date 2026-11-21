@@ -18,6 +18,9 @@
 		"editorHint.foreground": "#008080",
 		"symbolIcon.methodForeground": "#FF0080",
 		"editor.snippetTabstopHighlightBackground": "#00FF80",
-		"editor.snippetFinalTabstopHighlightBorder": "#804000"
+		"editor.snippetFinalTabstopHighlightBorder": "#804000",
+		"editor.wordHighlightBackground": "#40C080",
+		"editor.wordHighlightStrongBackground": "#8040C0",
+		"editor.wordHighlightTextBackground": "#C04080"
 	}
 }

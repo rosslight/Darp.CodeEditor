@@ -16,6 +16,7 @@ using Darp.CodeEditor.Commands;
 using Darp.CodeEditor.Completion;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
+using Darp.CodeEditor.LanguageClient;
 using Darp.CodeEditor.Loading;
 using Darp.CodeEditor.Popups;
 using Darp.CodeEditor.Search;
@@ -340,6 +341,12 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>What the editor does for the shown document, for its key commands; null while it shows none.</summary>
     internal EditorView? View => _view;
+
+    /// <summary>The occurrences of the symbol at the caret, for tests.</summary>
+    internal IReadOnlyList<Occurrence> Occurrences => _view?.Occurrences ?? [];
+
+    /// <summary>Whether the view asks for the occurrences, for tests.</summary>
+    internal bool IsAskingForOccurrences => _view?.IsAskingForOccurrences ?? false;
 
     /// <summary>The clock of the time limit in the background, in the grammars the editor loads: the system's.</summary>
     internal TimeProvider GrammarClock { get; init; } = TimeProvider.System;

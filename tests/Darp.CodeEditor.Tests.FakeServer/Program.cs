@@ -17,8 +17,11 @@
 // signature help. Resolving an item answers the item with the properties of its "data"
 // added. Signature help answers inside parentheses, "(" asks for it and "," asks again: the signatures that the command
 // "signatures" set, or two of "call", with the parameter at the position active, and the signature that the client
-// says it shows, or the first. Completion in a document with the word "slow" is never answered. A request about a
-// document that is not open is answered with an error.
+// says it shows, or the first. Completion in a document with the word "slow" is never answered. Document highlights
+// are the occurrences of the word at the position, as whole words: one followed by " =" is a write, the others are
+// reads. The word "none" is answered with null, and "nothing" with no highlights; once "hold-document-highlights" holds
+// them, only when "release-document-highlights" releases them. A request about a document that is not open is answered
+// with an error.
 //
 // Arguments:
 //   --initialize never      never answer initialize
@@ -93,6 +96,14 @@ internal sealed class FakeServer
 
     /// <summary>Set by the command <c>completion</c>: the result that completion answers with.</summary>
     private JsonNode? _completion;
+
+    /// <summary>
+    /// Set by the command <c>hold-document-highlights</c>: document highlights wait for the command
+    /// <c>release-document-highlights</c>, which answers them as they would have been answered when they came.
+    /// </summary>
+    private bool _holdDocumentHighlights;
+
+    private readonly List<(JsonNode? Id, JsonNode? Answer)> _heldDocumentHighlights = [];
 
     /// <summary>
     /// Set by the command <c>hold-completion</c>: completion requests wait for the command <c>release-completion</c>,
@@ -224,6 +235,7 @@ internal sealed class FakeServer
                                     ["triggerCharacters"] = new JsonArray("("),
                                     ["retriggerCharacters"] = new JsonArray(","),
                                 },
+                                ["documentHighlightProvider"] = true,
                             },
                         }
                     );
@@ -270,6 +282,9 @@ internal sealed class FakeServer
                 break;
             case "textDocument/signatureHelp":
                 SignatureHelp(id, Required(parameters, "params"));
+                break;
+            case "textDocument/documentHighlight":
+                DocumentHighlights(id, Required(parameters, "params"));
                 break;
             case "workspace/didChangeConfiguration":
                 Log($"configuration changed {parameters?.ToJsonString()}");
@@ -426,6 +441,17 @@ internal sealed class FakeServer
             case ["signatures", var json]:
                 _signatures = JsonNode.Parse(json) ?? throw new InvalidDataException("No signatures.");
                 Log("set signatures");
+                break;
+            case ["hold-document-highlights"]:
+                _holdDocumentHighlights = true;
+                Log("holding document highlights");
+                break;
+            case ["release-document-highlights"]:
+                _holdDocumentHighlights = false;
+                foreach ((JsonNode? id, JsonNode? answer) in _heldDocumentHighlights)
+                    Reply(id, answer);
+                _heldDocumentHighlights.Clear();
+                Log("released document highlights");
                 break;
             case ["peek", var signal]:
                 _peekSignal = signal;
@@ -665,6 +691,37 @@ internal sealed class FakeServer
                 commas++;
         }
         Reply(id, null);
+    }
+
+    /// <summary>
+    /// Answers with the occurrences of the word at the position as whole words, a write where " =" follows, or with
+    /// null for "none" and none for "nothing"; once held, when the hold is released.
+    /// </summary>
+    private void DocumentHighlights(JsonNode? id, JsonNode parameters)
+    {
+        if (Known(id, "documentHighlight", parameters) is not { } document)
+            return;
+        string text = document.Text;
+        (int start, int end) = WordAt(text, Offset(text, Required(parameters["position"], "position")));
+        string word = text[start..end];
+        Log($"documentHighlight {id?.ToJsonString()} {word}");
+        JsonArray? highlights = word is "none" or "" ? null : [];
+        for (
+            int at = word is "nothing" ? -1 : text.IndexOf(word, StringComparison.Ordinal);
+            highlights is not null && at >= 0;
+            at = text.IndexOf(word, at + 1, StringComparison.Ordinal)
+        )
+        {
+            if (WordAt(text, at) != (at, at + word.Length))
+                continue;
+            bool write = text.AsSpan(at + word.Length).StartsWith(" =", StringComparison.Ordinal);
+            JsonObject range = new() { ["start"] = Position(text, at), ["end"] = Position(text, at + word.Length) };
+            highlights.Add((JsonNode)new JsonObject { ["range"] = range, ["kind"] = write ? 3 : 2 });
+        }
+        if (_holdDocumentHighlights)
+            _heldDocumentHighlights.Add((id?.DeepClone(), highlights));
+        else
+            Reply(id, highlights);
     }
 
     /// <summary>The word of letters, digits and underscores at an offset; empty where there is none.</summary>

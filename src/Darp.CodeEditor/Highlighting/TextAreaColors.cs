@@ -30,6 +30,12 @@ namespace Darp.CodeEditor.Highlighting;
 /// <param name="SnippetTabStopBorder">Their border, if the theme has one.</param>
 /// <param name="SnippetFinalTabStop">The background of a snippet's final stop, if the theme has one.</param>
 /// <param name="SnippetFinalTabStopBorder">Its border.</param>
+/// <param name="WordHighlight">The background of an occurrence that reads the symbol at the caret.</param>
+/// <param name="WordHighlightBorder">Its border, if the theme has one.</param>
+/// <param name="WordHighlightStrong">The background of an occurrence that writes it.</param>
+/// <param name="WordHighlightStrongBorder">Its border, if the theme has one.</param>
+/// <param name="WordHighlightText">The background of an occurrence of the word at the caret, without a server's.</param>
+/// <param name="WordHighlightTextBorder">Its border, if the theme has one.</param>
 internal sealed record TextAreaColors(
     IBrush Background,
     IBrush Foreground,
@@ -52,7 +58,13 @@ internal sealed record TextAreaColors(
     IBrush SnippetTabStop,
     IPen? SnippetTabStopBorder,
     IBrush? SnippetFinalTabStop,
-    IPen SnippetFinalTabStopBorder
+    IPen SnippetFinalTabStopBorder,
+    IBrush WordHighlight,
+    IPen? WordHighlightBorder,
+    IBrush WordHighlightStrong,
+    IPen? WordHighlightStrongBorder,
+    IBrush WordHighlightText,
+    IPen? WordHighlightTextBorder
 )
 {
     /// <summary>Reads the colors of <paramref name="theme"/>.</summary>
@@ -61,6 +73,8 @@ internal sealed record TextAreaColors(
         IReadOnlyDictionary<string, Color> colors = theme.Colors;
         bool dark = IsDark(theme);
         ImmutableSolidColorBrush? currentLine = Brush("editor.lineHighlightBackground");
+        ImmutableSolidColorBrush wordHighlight =
+            Brush("editor.wordHighlightBackground") ?? Solid(dark ? 0xB8575757u : 0x40575757u);
         return new TextAreaColors(
             Brush("editor.background") ?? Solid(dark ? 0xFF1E1E1E : 0xFFFFFFFF),
             Brush("editor.foreground") ?? Solid(dark ? 0xFFBBBBBB : 0xFF333333),
@@ -90,7 +104,13 @@ internal sealed record TextAreaColors(
             Brush("editor.snippetFinalTabstopHighlightBackground"),
             new ImmutablePen(
                 Brush("editor.snippetFinalTabstopHighlightBorder") ?? Solid(dark ? 0xFF525252 : 0x800A3264u)
-            )
+            ),
+            wordHighlight,
+            Pen("editor.wordHighlightBorder"),
+            Brush("editor.wordHighlightStrongBackground") ?? Solid(dark ? 0xB8004972u : 0x400E639Cu),
+            Pen("editor.wordHighlightStrongBorder"),
+            Brush("editor.wordHighlightTextBackground") ?? wordHighlight,
+            Pen("editor.wordHighlightTextBorder") ?? Pen("editor.wordHighlightBorder")
         );
 
         ImmutableSolidColorBrush? Brush(string key) =>

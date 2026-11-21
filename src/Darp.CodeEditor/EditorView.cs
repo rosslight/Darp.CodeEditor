@@ -5,6 +5,7 @@ using Darp.CodeEditor.Completion;
 using Darp.CodeEditor.Diagnostics;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
+using Darp.CodeEditor.LanguageClient;
 using Darp.CodeEditor.Loading;
 using Darp.CodeEditor.Popups;
 using Darp.CodeEditor.Search;
@@ -29,6 +30,7 @@ internal sealed class EditorView : IDisposable
     private readonly AutoClosingPairs _pairs;
     private readonly Typing _typing;
     private readonly BracketHighlighter _brackets;
+    private readonly OccurrenceHighlighter _occurrences;
     private readonly WhitespaceLayer _whitespace;
     private readonly SquiggleLayer _squiggles;
     private readonly HoverController _hover;
@@ -61,6 +63,7 @@ internal sealed class EditorView : IDisposable
         _pairs = new AutoClosingPairs(area, document, Highlighter, _changes, () => editor.AutoClosing);
         _typing = new Typing(area, document, Highlighter, _changes, _pairs);
         _brackets = new BracketHighlighter(area, document, Highlighter);
+        _occurrences = new OccurrenceHighlighter(area, document, _changes);
         _whitespace = new WhitespaceLayer(area);
         _squiggles = new SquiggleLayer(area, document);
         SemanticHighlighter = new SemanticHighlighter(area.TextView, document, editor.Dispatcher);
@@ -78,6 +81,7 @@ internal sealed class EditorView : IDisposable
             new Comments(area, document, _changes),
             new LineCommands(area, document, Highlighter, _changes),
             _brackets,
+            _occurrences,
             _whitespace,
             _squiggles,
             SemanticHighlighter,
@@ -148,9 +152,16 @@ internal sealed class EditorView : IDisposable
             _typing.OnTextInput(e);
     }
 
-    /// <summary>Closes the popups, once the keyboard has left the editor.</summary>
+    /// <summary>The occurrences of the symbol at the caret, for tests.</summary>
+    internal IReadOnlyList<Occurrence> Occurrences => _occurrences.Highlights;
+
+    /// <summary>Whether the view asks for the occurrences, for tests.</summary>
+    internal bool IsAskingForOccurrences => _occurrences.IsAsking;
+
+    /// <summary>Closes the popups, and clears the occurrences, once the keyboard has left the editor.</summary>
     public void OnFocusLeft()
     {
+        _occurrences.Clear();
         _hover.Close();
         _completion.Close();
         _signatureHelp.Close();
@@ -172,6 +183,7 @@ internal sealed class EditorView : IDisposable
         _snippets.Colors = colors;
         _signatureHelp.Colors = colors;
         _brackets.Colors = colors;
+        _occurrences.Colors = colors;
         _whitespace.Colors = colors;
         _squiggles.Colors = colors;
         _hover.Colors = colors;
