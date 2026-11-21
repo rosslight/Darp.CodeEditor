@@ -217,8 +217,9 @@ public sealed class KeyBindingTests(UiFixture ui)
             SearchBar bar = BarOf(window);
             window.Type("two");
 
-            window.Press(Key.A, s_command);
-            window.Press(Key.C, s_command);
+            // The headless platform gives text boxes Ctrl's keys on every system, also on macOS.
+            window.Press(Key.A, KeyModifiers.Control);
+            window.Press(Key.C, KeyModifiers.Control);
 
             bar.FindBox.SelectedText.ShouldBe("two");
             window.Editor.Selection.ShouldNotBe(new TextSelection(0, 7));
