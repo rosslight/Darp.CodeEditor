@@ -113,6 +113,12 @@ public class CodeEditor : TemplatedControl
         nameof(WordWrap)
     );
 
+    /// <summary>Defines the <see cref="AutoClosing"/> property.</summary>
+    public static readonly StyledProperty<bool> AutoClosingProperty = AvaloniaProperty.Register<CodeEditor, bool>(
+        nameof(AutoClosing),
+        defaultValue: true
+    );
+
     /// <summary>Defines the <see cref="ShowLineNumbers"/> property.</summary>
     public static readonly StyledProperty<bool> ShowLineNumbersProperty = AvaloniaProperty.Register<CodeEditor, bool>(
         nameof(ShowLineNumbers),
@@ -266,6 +272,16 @@ public class CodeEditor : TemplatedControl
     {
         get => GetValue(WordWrapProperty);
         set => SetValue(WordWrapProperty, value);
+    }
+
+    /// <summary>
+    /// Whether typing an opening bracket or quote also types its closing one, by the language's rules. Default: true.
+    /// Typing over a selection still surrounds it.
+    /// </summary>
+    public bool AutoClosing
+    {
+        get => GetValue(AutoClosingProperty);
+        set => SetValue(AutoClosingProperty, value);
     }
 
     /// <summary>Whether line numbers show in the left margin. Default: true.</summary>

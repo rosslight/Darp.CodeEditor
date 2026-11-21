@@ -57,9 +57,45 @@ internal static class BracketMatcher
     }
 
     /// <summary>
+    /// Whether a closing bracket of <paramref name="pair"/> after <paramref name="offset"/> closes no bracket, among all
+    /// of <paramref name="brackets"/> within <see cref="MaxDistance"/> characters on each side: a closing bracket
+    /// closes the closest open bracket of its kind, and those opened inside it stay unclosed, as VS Code's bracket
+    /// pairs have it.
+    /// </summary>
+    public static bool UnmatchedClosing(
+        TextDocument document,
+        int offset,
+        CharacterPair pair,
+        IReadOnlyList<CharacterPair> brackets,
+        Func<int, int[]?> tokensOf
+    )
+    {
+        var kinds = new BracketKinds(brackets);
+        var nesting = new BracketNesting(kinds.Count);
+        bool unmatched = false;
+        Scan(
+            document,
+            Math.Max(0, offset - MaxDistance),
+            Math.Min(document.TextLength, offset + MaxDistance),
+            forward: true,
+            kinds.Characters,
+            tokensOf,
+            (c, at) =>
+            {
+                if (kinds.Opening(c) is var kind and >= 0)
+                {
+                    nesting.Open(kind, at);
+                    return false;
+                }
+                return nesting.Close(kinds.Closing(c)) is null && (unmatched = at >= offset && c == pair.Close[0]);
+            }
+        );
+        return unmatched;
+    }
+
+    /// <summary>
     /// The bracket that matches the one at <paramref name="from"/>: the next closing bracket at the same depth going
-    /// forward, or the opening one going backward, within <see cref="MaxDistance"/> characters. The text is read in
-    /// blocks into a buffer, and a line's tokens only where a bracket is, so the search allocates nothing per line.
+    /// forward, or the opening one going backward, within <see cref="MaxDistance"/> characters.
     /// </summary>
     private static int? Find(
         TextDocument document,
@@ -70,10 +106,45 @@ internal static class BracketMatcher
         Func<int, int[]?> tokensOf
     )
     {
+        int depth = 0;
+        int? found = null;
         int start = forward ? from + 1 : Math.Max(0, from - MaxDistance);
         int end = forward ? Math.Min(document.TextLength, from + 1 + MaxDistance) : from;
+        Scan(
+            document,
+            start,
+            end,
+            forward,
+            $"{open}{close}",
+            tokensOf,
+            (c, offset) =>
+            {
+                if (c == (forward ? open : close))
+                    depth++;
+                else if (depth-- == 0)
+                    found = offset;
+                return found is not null;
+            }
+        );
+        return found;
+    }
+
+    /// <summary>
+    /// Gives <paramref name="visit"/> each bracket of <paramref name="chars"/> from <paramref name="start"/> to
+    /// <paramref name="end"/>, in code, going forward or backward, until it returns true. The text is read in blocks
+    /// into a buffer, and a line's tokens only where a bracket is, so the scan allocates nothing per line.
+    /// </summary>
+    private static void Scan(
+        TextDocument document,
+        int start,
+        int end,
+        bool forward,
+        string chars,
+        Func<int, int[]?> tokensOf,
+        Func<char, int, bool> visit
+    )
+    {
         Span<char> block = stackalloc char[4096];
-        int depth = 0;
         // The line of the last bracket: its bounds, as DocumentLine computes them anew each time, and its tokens.
         (int Start, int End) line = (-1, -1);
         int[]? tokens = null;
@@ -93,7 +164,6 @@ internal static class BracketMatcher
             ReadOnlySpan<char> text = block[..length];
             for (int index = Next(text, forward ? -1 : length); index >= 0; index = Next(text, index))
             {
-                char c = text[index];
                 int offset = blockStart + index;
                 if (offset < line.Start || offset > line.End)
                 {
@@ -101,24 +171,19 @@ internal static class BracketMatcher
                     line = (found.Offset, found.EndOffset);
                     tokens = tokensOf(found.LineNumber);
                 }
-                if (IsIgnored(tokens, offset - line.Start))
-                    continue;
-                if (c == (forward ? open : close))
-                    depth++;
-                else if (depth-- == 0)
-                    return offset;
+                if (!IsIgnored(tokens, offset - line.Start) && visit(text[index], offset))
+                    return;
             }
             done += length;
         }
-        return null;
 
         // The next bracket after index in the block going forward, or before it going backward; -1 for none.
         int Next(ReadOnlySpan<char> text, int index) =>
             forward
-                ? text[(index + 1)..].IndexOfAny(open, close) is var found and >= 0
+                ? text[(index + 1)..].IndexOfAny(chars) is var found and >= 0
                     ? index + 1 + found
                     : -1
-                : text[..index].LastIndexOfAny(open, close);
+                : text[..index].LastIndexOfAny(chars);
     }
 
     /// <summary>Whether a bracket at <paramref name="column"/> is in a string, comment or regular expression.</summary>
