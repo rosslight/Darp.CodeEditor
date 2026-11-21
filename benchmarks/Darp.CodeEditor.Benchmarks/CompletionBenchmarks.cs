@@ -1,6 +1,7 @@
 // Left out of the baseline's build while the target branch has no completion: see NotInBaselineAttribute.
 #if !BENCHMARK_BASELINE
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
@@ -82,10 +83,10 @@ public class CompletionBenchmarks
         Window window = _window ?? throw new InvalidOperationException("Not set up.");
         window.KeyPress(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
         window.KeyRelease(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
-        RunJobsUntil(() => List(window) is { ItemCount: Items }, "The list did not show.");
+        RunJobsUntil(() => List(window)?.Items.Count == Items, "The list did not show.");
         HeadlessEditor.Render(window);
         // A list that showed nothing would look fast.
-        if (List(window)?.ContainerFromIndex(0) is not ListBoxItem { Content: ShownItem { Item.Label: "alpha0" } })
+        if (List(window)?.RowOf(0)?.Item is not { Item.Label: "alpha0" })
             throw new InvalidOperationException("The frame does not show the list's items.");
     }
 
@@ -99,9 +100,9 @@ public class CompletionBenchmarks
         Window window = _window ?? throw new InvalidOperationException("Not set up.");
         window.KeyTextInput("a");
         // The items that start with "a": one in eight.
-        RunJobsUntil(() => List(window) is { ItemCount: Items / 8 }, "The list was not filtered.");
+        RunJobsUntil(() => List(window)?.Items.Count == Items / 8, "The list was not filtered.");
         HeadlessEditor.Render(window);
-        if (List(window)?.ContainerFromIndex(0) is not ListBoxItem { Content: ShownItem { Highlights.Length: 1 } })
+        if (List(window)?.RowOf(0)?.Item is not { Highlights.Length: 1 })
             throw new InvalidOperationException("The frame does not show the filtered list.");
     }
 
@@ -126,8 +127,26 @@ public class CompletionBenchmarks
         _server?.Dispose();
     }
 
-    internal static ListBox? List(Window window) =>
-        OverlayLayer.GetOverlayLayer(window)?.GetVisualDescendants().OfType<ListBox>().FirstOrDefault();
+    /// <summary>The list that a window showed last: an editor keeps its list, which shows again in the same window.</summary>
+    private static readonly ConditionalWeakTable<Window, CompletionListBox> s_lists = new();
+
+    /// <summary>
+    /// The list that shows in <paramref name="window"/>; null while none does. Found once, as looking through the
+    /// window's popups on each turn of a wait allocated more than the keystroke it waited for.
+    /// </summary>
+    internal static CompletionListBox? List(Window window)
+    {
+        if (s_lists.TryGetValue(window, out CompletionListBox? known) && TopLevel.GetTopLevel(known) == window)
+            return known;
+        CompletionListBox? list = OverlayLayer
+            .GetOverlayLayer(window)
+            ?.GetVisualDescendants()
+            .OfType<CompletionListBox>()
+            .FirstOrDefault();
+        if (list is not null)
+            s_lists.AddOrUpdate(window, list);
+        return list;
+    }
 
     /// <summary>Runs the UI thread's jobs until <paramref name="condition"/> holds; fails after 10 seconds.</summary>
     internal static void RunJobsUntil(Func<bool> condition, string failure)
@@ -211,7 +230,7 @@ public class CompletionWorstCaseBenchmarks
         window.KeyRelease(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
         CompletionBenchmarks.RunJobsUntil(
             () =>
-                CompletionBenchmarks.List(window)?.ItemsSource is IReadOnlyList<ShownItem> { Count: > 0 } items
+                CompletionBenchmarks.List(window)?.Items is { Count: > 0 } items
                 && items[0].Highlights.Length == s_typed.Length,
             "The list was not filtered."
         );

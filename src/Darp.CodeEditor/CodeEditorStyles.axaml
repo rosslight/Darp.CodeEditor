@@ -4,14 +4,8 @@
     xmlns:ce="using:Darp.CodeEditor"
     xmlns:ae="using:AvaloniaEdit"
     xmlns:popups="using:Darp.CodeEditor.Popups"
-    xmlns:completion="using:Darp.CodeEditor.Completion"
     x:Class="Darp.CodeEditor.CodeEditorStyles"
 >
-    <!-- A style, not part of the row's theme: the icon is in the row's content, not in its template. -->
-    <Style Selector="popups|PopupListItem:selected completion|CompletionIcon">
-        <Setter Property="SelectedBrush" Value="{DynamicResource CodeEditorPopupRowSelectedIcon}" />
-    </Style>
-
     <Styles.Resources>
         <ResourceDictionary>
             <!--
@@ -43,7 +37,7 @@
                 </Setter>
             </ControlTheme>
 
-            <!-- The popups' scrolling and list: their colors are resources that PopupFrame.Paint sets on the frame. -->
+            <!-- The popups' scrolling: its colors are resources that PopupFrame.Paint sets on the frame. -->
             <ControlTheme x:Key="{x:Type popups:PopupScrollViewer}" TargetType="popups:PopupScrollViewer">
                 <Setter Property="Template">
                     <ControlTemplate>
@@ -110,40 +104,6 @@
                         <popups:PopupBox Background="Transparent" />
                     </ControlTemplate>
                 </Setter>
-            </ControlTheme>
-
-            <ControlTheme x:Key="{x:Type popups:PopupListBox}" TargetType="popups:PopupListBox">
-                <Setter Property="Template">
-                    <ControlTemplate>
-                        <popups:PopupScrollViewer Name="PART_ScrollViewer">
-                            <ItemsPresenter Name="PART_ItemsPresenter" ItemsPanel="{TemplateBinding ItemsPanel}" />
-                        </popups:PopupScrollViewer>
-                    </ControlTemplate>
-                </Setter>
-            </ControlTheme>
-
-            <ControlTheme x:Key="{x:Type popups:PopupListItem}" TargetType="popups:PopupListItem">
-                <Setter Property="Background" Value="Transparent" />
-                <Setter Property="Padding" Value="4,0" />
-                <Setter Property="Template">
-                    <ControlTemplate>
-                        <ContentPresenter
-                            Name="PART_ContentPresenter"
-                            Background="{TemplateBinding Background}"
-                            Foreground="{TemplateBinding Foreground}"
-                            Padding="{TemplateBinding Padding}"
-                            Content="{TemplateBinding Content}"
-                            ContentTemplate="{TemplateBinding ContentTemplate}"
-                        />
-                    </ControlTemplate>
-                </Setter>
-                <Style Selector="^:pointerover">
-                    <Setter Property="Background" Value="{DynamicResource CodeEditorPopupRowHover}" />
-                </Style>
-                <Style Selector="^:selected">
-                    <Setter Property="Background" Value="{DynamicResource CodeEditorPopupRowSelected}" />
-                    <Setter Property="Foreground" Value="{DynamicResource CodeEditorPopupRowSelectedText}" />
-                </Style>
             </ControlTheme>
         </ResourceDictionary>
     </Styles.Resources>

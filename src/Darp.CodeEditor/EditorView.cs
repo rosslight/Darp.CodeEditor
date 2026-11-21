@@ -70,7 +70,16 @@ internal sealed class EditorView : IDisposable
         _hover = new HoverController(editor, area, document, _squiggles, Highlighter);
         _snippets = new SnippetController(area, document);
         // After typing: it sees typed text first, so that a typed "(" has its ")" when completion asks.
-        _completion = new CompletionController(editor, area, document, Highlighter, _snippets);
+        _completion = new CompletionController(
+            editor,
+            area,
+            document,
+            Highlighter,
+            _snippets,
+            _changes,
+            editor.BackgroundScheduler,
+            PerformKey
+        );
         _signatureHelp = new SignatureHelpController(editor, area, document, Highlighter);
         _features =
         [
@@ -108,13 +117,14 @@ internal sealed class EditorView : IDisposable
 
     /// <summary>
     /// Runs a command for its default key. A key that a binding handles skips <see cref="OnKeyDown"/>, so what a key does
-    /// to the popups happens here: in the text, it closes the hover.
+    /// to the popups happens here: it ends "No suggestions.", and in the text it closes the hover.
     /// </summary>
-    public void RunKey(string id)
+    public void RunKey(string id, KeyGesture gesture)
     {
+        _completion.HideNoSuggestions();
         if (_area.IsFocused)
             _hover.Close();
-        Run(id, _commands.TryRun);
+        Run(id, command => _commands.TryRun(command, gesture));
     }
 
     /// <summary>Runs a command for the app, wherever the keyboard is.</summary>
@@ -178,8 +188,7 @@ internal sealed class EditorView : IDisposable
     /// <summary>The colors of the color theme, once it is loaded.</summary>
     public void SetColors(ColorThemeFile? theme, TextAreaColors? colors, SymbolIconColors? icons, PopupColors popups)
     {
-        _completion.Colors = popups;
-        _completion.Icons = icons;
+        _completion.SetColors(popups, icons);
         _snippets.Colors = colors;
         _signatureHelp.Colors = popups;
         _brackets.Colors = colors;
@@ -205,6 +214,16 @@ internal sealed class EditorView : IDisposable
         if (_editor.Selection != before)
             _completion.Close();
         return true;
+    }
+
+    /// <summary>
+    /// The normal action of <paramref name="gesture"/>, for an accept that waited for completion's filter and found
+    /// nothing to commit: Tab goes through a snippet's stops and then types, and Enter and Shift+Enter break the line.
+    /// </summary>
+    private void PerformKey(KeyGesture gesture)
+    {
+        var key = new KeyEventArgs { Key = gesture.Key, KeyModifiers = gesture.KeyModifiers };
+        _ = _snippets.OnKeyDown(key) || _typing.OnKeyDown(key);
     }
 
     /// <summary>

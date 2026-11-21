@@ -4,7 +4,7 @@ using Avalonia.Controls.Primitives;
 namespace Darp.CodeEditor.Popups;
 
 // The controls inside the editor's popups. A derived control has a style key of its own, so that an app's styles for
-// text blocks, panels, borders, lists and scroll bars don't reach the popups. CodeEditorStyles holds the themes of those
+// text blocks, panels, borders and scroll bars don't reach the popups. CodeEditorStyles holds the themes of those
 // with a template.
 
 /// <summary>Text in a popup.</summary>
@@ -39,18 +39,3 @@ internal sealed class PopupThumb : Thumb;
 
 /// <summary>The part of a <see cref="PopupScrollBar"/> beside its thumb: a click there pages.</summary>
 internal sealed class PopupTrackButton : RepeatButton;
-
-/// <summary>A list in a popup. It takes no keyboard focus: the editor keeps it.</summary>
-internal sealed class PopupListBox : ListBox
-{
-    public PopupListBox() => Focusable = false;
-
-    protected override Control CreateContainerForItemOverride(object? item, int index, object? recycleKey) =>
-        new PopupListItem();
-}
-
-/// <summary>A row of a <see cref="PopupListBox"/>.</summary>
-internal sealed class PopupListItem : ListBoxItem
-{
-    public PopupListItem() => Focusable = false;
-}

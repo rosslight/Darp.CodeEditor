@@ -72,8 +72,8 @@ internal sealed class PopupFrame : Border
     public event Action<Size, Edges>? Resized;
 
     /// <summary>
-    /// Paints the frame, gives its text <paramref name="foreground"/>, and gives the scroll bars and list rows inside it
-    /// their colors, which their themes read as resources.
+    /// Paints the frame, gives its text <paramref name="foreground"/>, and gives the scroll bars inside it their colors,
+    /// which their theme reads as resources.
     /// </summary>
     public void Paint(IBrush background, IBrush border, IBrush foreground, PopupColors colors)
     {
@@ -84,10 +84,6 @@ internal sealed class PopupFrame : Border
         Resources["CodeEditorPopupSlider"] = colors.Slider.Normal;
         Resources["CodeEditorPopupSliderHover"] = colors.Slider.Hover;
         Resources["CodeEditorPopupSliderActive"] = colors.Slider.Active;
-        Resources["CodeEditorPopupRowHover"] = colors.ListHoverBackground;
-        Resources["CodeEditorPopupRowSelected"] = colors.SuggestSelectedBackground;
-        Resources["CodeEditorPopupRowSelectedText"] = colors.SuggestSelectedForeground;
-        Resources["CodeEditorPopupRowSelectedIcon"] = colors.SuggestSelectedIconForeground;
     }
 
     /// <summary>A drag ends without its release too, as when the popup closes under it.</summary>

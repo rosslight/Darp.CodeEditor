@@ -1,3 +1,4 @@
+using Avalonia.Input;
 using AvaloniaEdit.Editing;
 
 namespace Darp.CodeEditor.Commands;
@@ -26,6 +27,12 @@ internal sealed class CommandTable
 
     public CommandTable(TextArea area) => _area = area;
 
+    /// <summary>
+    /// The key whose command runs now; null while the app runs one. A command that decides later what to do, as an
+    /// accept that waits for completion's filter, keeps it to do that key's normal action if it then does nothing.
+    /// </summary>
+    public KeyGesture? Gesture { get; private set; }
+
     /// <summary>Adds a command.</summary>
     /// <param name="id">Its id.</param>
     /// <param name="run">What it does.</param>
@@ -40,13 +47,21 @@ internal sealed class CommandTable
         && (!command.Needs.HasFlag(CommandNeeds.TextFocus) || _area.IsFocused)
         && Applies(command);
 
-    /// <summary>Runs the command for a key, if it can.</summary>
+    /// <summary>Runs the command for the key of <paramref name="gesture"/>, if it can.</summary>
     /// <returns>Whether it ran.</returns>
-    public bool TryRun(string id)
+    public bool TryRun(string id, KeyGesture gesture)
     {
         if (!CanRun(id))
             return false;
-        _commands[id].Run();
+        Gesture = gesture;
+        try
+        {
+            _commands[id].Run();
+        }
+        finally
+        {
+            Gesture = null;
+        }
         return true;
     }
 
