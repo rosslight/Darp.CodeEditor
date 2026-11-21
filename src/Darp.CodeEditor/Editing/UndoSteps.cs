@@ -54,12 +54,8 @@ internal sealed class UndoSteps : IDisposable
             : _previous is EditKind.TypingFirstSpace or EditKind.TypingConsecutiveSpace
                 ? EditKind.TypingConsecutiveSpace
             : EditKind.TypingFirstSpace;
-        // After typing, any other kind of edit starts a step; after a first space, typing goes on; otherwise an edit of
-        // another kind does, with spaces as one kind.
-        bool starts =
-            IsTyping(_previous) && !IsTyping(kind) ? true
-            : _previous == EditKind.TypingFirstSpace ? false
-            : Spaces(_previous) != Spaces(kind);
+        // After a first space, typing goes on; otherwise an edit of another kind starts a step, with spaces as one kind.
+        bool starts = _previous != EditKind.TypingFirstSpace && Spaces(_previous) != Spaces(kind);
         return new EditStep(kind, starts);
     }
 
@@ -91,7 +87,9 @@ internal sealed class UndoSteps : IDisposable
         try
         {
             edit();
-            undo.PushOptional(new RedoSelection(_area));
+            // A change clears redo. A step that changed nothing, as typing over a closing bracket, must not.
+            if (!undo.CanRedo)
+                undo.PushOptional(new RedoSelection(_area));
         }
         finally
         {
@@ -115,9 +113,6 @@ internal sealed class UndoSteps : IDisposable
         _step = null;
         _previous = EditKind.Other;
     }
-
-    private static bool IsTyping(EditKind kind) =>
-        kind is EditKind.TypingOther or EditKind.TypingFirstSpace or EditKind.TypingConsecutiveSpace;
 
     private static EditKind Spaces(EditKind kind) =>
         kind == EditKind.TypingConsecutiveSpace ? EditKind.TypingFirstSpace : kind;

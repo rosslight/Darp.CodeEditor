@@ -84,10 +84,10 @@ internal static class BracketMatcher
             {
                 if (kinds.Opening(c) is var kind and >= 0)
                 {
-                    nesting.Open(kind, at);
+                    nesting.Open(kind);
                     return false;
                 }
-                return nesting.Close(kinds.Closing(c)) is null && (unmatched = at >= offset && c == pair.Close[0]);
+                return !nesting.Close(kinds.Closing(c)) && (unmatched = at >= offset && c == pair.Close[0]);
             }
         );
         return unmatched;
