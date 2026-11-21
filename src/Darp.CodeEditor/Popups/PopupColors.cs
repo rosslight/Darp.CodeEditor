@@ -37,6 +37,12 @@ internal sealed record PopupColors
     /// <summary><c>editorSuggestWidget.selectedIconForeground</c>; null keeps the icon's own color.</summary>
     public required IBrush? SuggestSelectedIconForeground { get; init; }
 
+    /// <summary><c>editorSuggestWidget.highlightForeground</c>: the characters that matched.</summary>
+    public required IBrush SuggestHighlight { get; init; }
+
+    /// <summary><c>editorSuggestWidget.focusHighlightForeground</c>: the characters that matched, in the selected row.</summary>
+    public required IBrush SuggestFocusHighlight { get; init; }
+
     /// <summary><c>list.hoverBackground</c>: the row under the pointer.</summary>
     public required IBrush ListHoverBackground { get; init; }
 
@@ -72,6 +78,11 @@ internal sealed record PopupColors
             Own("editorSuggestWidget.selectedIconForeground")
             ?? Own("quickInputList.focusIconForeground")
             ?? Own("list.activeSelectionIconForeground");
+        Color listHighlight = Own("list.highlightForeground") ?? Hex(dark ? 0xFF2AAAFF : 0xFF0066BF);
+        Color listFocusHighlight =
+            Own("quickInputList.focusHighlightForeground")
+            ?? Own("list.focusHighlightForeground")
+            ?? (dark || colors.ContainsKey("list.activeSelectionBackground") ? listHighlight : Hex(0xFFBBE7FF));
         return new PopupColors
         {
             Shadow = new BoxShadows(
@@ -99,6 +110,8 @@ internal sealed record PopupColors
                     ?? Colors.White
             ),
             SuggestSelectedIconForeground = selectedIcon is { } icon ? Brush(icon) : null,
+            SuggestHighlight = Brush(Own("editorSuggestWidget.highlightForeground") ?? listHighlight),
+            SuggestFocusHighlight = Brush(Own("editorSuggestWidget.focusHighlightForeground") ?? listFocusHighlight),
             ListHoverBackground = Brush(Own("list.hoverBackground") ?? Hex(dark ? 0xFF2A2D2E : 0xFFF0F0F0)),
             HoverBackground = Brush(Own("editorHoverWidget.background") ?? widgetBackground),
             HoverForeground = Brush(Own("editorHoverWidget.foreground") ?? widgetForeground),
