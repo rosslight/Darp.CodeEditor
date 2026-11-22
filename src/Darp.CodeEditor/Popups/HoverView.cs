@@ -6,6 +6,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Media.Immutable;
 using Avalonia.Media.TextFormatting;
 
 namespace Darp.CodeEditor.Popups;
@@ -89,6 +90,8 @@ internal static class HoverView
                 run.TextDecorations = TextDecorations.Underline;
                 links.Add((length, length + span.Text.Length, uri));
             }
+            if (span.Style.HasFlag(SpanStyle.Dimmed))
+                run.Foreground = Dimmed(run.Foreground ?? code.Colors.HoverForeground);
             inlines.Add(run);
             length += span.Text.Length;
         }
@@ -97,6 +100,16 @@ internal static class HoverView
         text.TextWrapping = TextWrapping.Wrap;
         if (links.Count > 0)
             OpenLinks(text, links);
+        if (paragraph.Severity is { } severity)
+        {
+            var icon = new SeverityIcon(severity, code.Colors)
+            {
+                Margin = new Thickness(0, 1, 8, 0),
+                VerticalAlignment = VerticalAlignment.Top,
+            };
+            DockPanel.SetDock(icon, Dock.Left);
+            return new PopupDock { Children = { icon, text } };
+        }
         if (paragraph.Marker is not { } marker)
         {
             text.Margin = new Thickness(ListIndent * paragraph.Level, 0, 0, 0);
@@ -109,6 +122,10 @@ internal static class HoverView
         item.Children.Add(text);
         return item;
     }
+
+    /// <summary><paramref name="brush"/> at VS Code's 60% opacity of a hover's dimmed parts.</summary>
+    private static IBrush Dimmed(IBrush brush) =>
+        brush is ISolidColorBrush solid ? new ImmutableSolidColorBrush(solid.Color, solid.Opacity * 0.6) : brush;
 
     private static Control Code(HoverCode block, CodeLook look, bool selectable)
     {

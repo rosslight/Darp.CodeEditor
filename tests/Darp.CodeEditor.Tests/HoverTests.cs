@@ -48,7 +48,7 @@ public sealed class HoverTests(UiFixture ui)
             PopupFrame popup = await WaitForPopupAsync(window, "is a word in");
             Control[] parts = [.. ((Panel)Content(popup)).Children];
             // The diagnostic's message and code, a line, the server's paragraph, and its code block.
-            TextOf(parts[0]).ShouldBe($"{text} (echo)");
+            TextOf(parts[0].GetVisualDescendants().OfType<TextBlock>().Single()).ShouldBe($"{text} (echo)");
             parts[1].ShouldBeOfType<PopupLine>();
             TextOf(parts[2]).ShouldBe("key is a word in json.");
             ((TextBlock)parts[2]).Inlines.ShouldNotBeNull().OfType<Run>().First().FontWeight.ShouldBe(FontWeight.Bold);
