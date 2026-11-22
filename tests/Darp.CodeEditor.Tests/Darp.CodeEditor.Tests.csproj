@@ -34,5 +34,7 @@
     <ProjectReference Include="..\Darp.CodeEditor.Tests.BeforeSetup\Darp.CodeEditor.Tests.BeforeSetup.csproj" />
     <!-- The language server that the tests start. -->
     <ProjectReference Include="..\Darp.CodeEditor.Tests.FakeServer\Darp.CodeEditor.Tests.FakeServer.csproj" />
+    <!-- Runs in its own process: it starts an app whose only theme is Avalonia's Simple theme. -->
+    <ProjectReference Include="..\Darp.CodeEditor.Tests.SimpleTheme\Darp.CodeEditor.Tests.SimpleTheme.csproj" />
   </ItemGroup>
 </Project>

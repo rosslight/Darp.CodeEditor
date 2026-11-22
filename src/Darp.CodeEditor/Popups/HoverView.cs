@@ -10,8 +10,8 @@ using Avalonia.Media.TextFormatting;
 namespace Darp.CodeEditor.Popups;
 
 /// <summary>
-/// The controls that show a hover's blocks: text in the popup's look, with the app's link and separator looks, and code
-/// in the editor's font, colors and background.
+/// The controls that show a hover's blocks: text in the popup's look, and code in the editor's font, colors and
+/// background.
 /// </summary>
 internal static class HoverView
 {
@@ -21,9 +21,12 @@ internal static class HoverView
     /// <summary>The hand over links, made the first time it is needed.</summary>
     private static Cursor? s_hand;
 
-    public static Control Create(IReadOnlyList<HoverBlock> blocks, CodeLook code)
+    /// <param name="blocks">The blocks.</param>
+    /// <param name="code">How code looks.</param>
+    /// <param name="rule">The color of the line between parts.</param>
+    public static Control Create(IReadOnlyList<HoverBlock> blocks, CodeLook code, IBrush rule)
     {
-        var panel = new StackPanel { Spacing = 6 };
+        var panel = new PopupStack { Spacing = 6 };
         foreach (HoverBlock block in blocks)
         {
             panel.Children.Add(
@@ -31,7 +34,7 @@ internal static class HoverView
                 {
                     HoverParagraph paragraph => Paragraph(paragraph, code),
                     HoverCode codeBlock => Code(codeBlock, code),
-                    HoverRule => new Separator(),
+                    HoverRule => new PopupLine { Background = rule },
                     _ => throw new UnreachableException(),
                 }
             );
@@ -56,8 +59,7 @@ internal static class HoverView
             {
                 run.FontFamily = code.FontFamily;
                 run.Background = code.Background;
-                if (code.Foreground is { } foreground)
-                    run.Foreground = foreground;
+                run.Foreground = code.Foreground;
             }
             if (span.Link is { } uri)
             {
@@ -67,7 +69,7 @@ internal static class HoverView
             inlines.Add(run);
             length += span.Text.Length;
         }
-        var text = new TextBlock { Inlines = inlines, TextWrapping = TextWrapping.Wrap };
+        var text = new PopupText { Inlines = inlines, TextWrapping = TextWrapping.Wrap };
         if (links.Count > 0)
             OpenLinks(text, links);
         if (paragraph.Marker is not { } marker)
@@ -75,8 +77,8 @@ internal static class HoverView
             text.Margin = new Thickness(ListIndent * paragraph.Level, 0, 0, 0);
             return text;
         }
-        var item = new DockPanel { Margin = new Thickness(ListIndent * (paragraph.Level - 1), 0, 0, 0) };
-        var markerText = new TextBlock { Text = marker, Margin = new Thickness(0, 0, 6, 0) };
+        var item = new PopupDock { Margin = new Thickness(ListIndent * (paragraph.Level - 1), 0, 0, 0) };
+        var markerText = new PopupText { Text = marker, Margin = new Thickness(0, 0, 6, 0) };
         DockPanel.SetDock(markerText, Dock.Left);
         item.Children.Add(markerText);
         item.Children.Add(text);
@@ -94,11 +96,11 @@ internal static class HoverView
                 text.Foreground = foreground;
             inlines.Add(text);
         }
-        return new Border
+        return new PopupBox
         {
             Background = look.Background,
             Padding = new Thickness(6, 4),
-            Child = new TextBlock
+            Child = new PopupText
             {
                 Inlines = inlines,
                 FontFamily = look.FontFamily,
@@ -151,6 +153,6 @@ internal static class HoverView
 /// <summary>How code looks in a popup: as in the editor.</summary>
 /// <param name="FontFamily">The editor's font.</param>
 /// <param name="FontSize">The editor's font size.</param>
-/// <param name="Background">The text area's background; null while the color theme loads.</param>
-/// <param name="Foreground">The text area's foreground; null while the color theme loads.</param>
-internal sealed record CodeLook(FontFamily FontFamily, double FontSize, IBrush? Background, IBrush? Foreground);
+/// <param name="Background">The text area's background.</param>
+/// <param name="Foreground">The text area's foreground.</param>
+internal sealed record CodeLook(FontFamily FontFamily, double FontSize, IBrush Background, IBrush Foreground);

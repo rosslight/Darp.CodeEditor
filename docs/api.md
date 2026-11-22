@@ -196,10 +196,13 @@ otherwise (#114).
 - **The text area** takes its colors from `ColorTheme`, a VS Code color theme: syntax and language-server colors,
   background, selection, caret, line numbers, current line, search and bracket matches, squiggles, a snippet's
   stops. Token colors are made for their theme's background, so they come together.
-- **Everything around the text** takes the app's look: completion, hover and signature help look like the app's
-  flyouts and tooltips, and the search bar and scroll bars are the app's controls. They match Avalonia's Fluent
-  theme, FluentAvalonia or any other theme, font, padding and corners included. Code inside popups keeps the editor's
-  colors, background and font.
+- **Completion, hover and signature help** are the editor's own popups (#121). Their frame, rows and scroll bar take
+  their colors from `ColorTheme` by VS Code's keys (`editorSuggestWidget.*`, `editorHoverWidget.*`,
+  `list.hoverBackground`, `scrollbarSlider.*`, `widget.shadow`), with VS Code's defaults for the keys a theme leaves
+  out. An app's styles for flyouts, tooltips, lists, scroll bars, text blocks and panels don't reach them, under
+  Fluent, Simple or any other theme. Their prose takes the app's font; code keeps the editor's colors, background and
+  font.
+- **The search bar and the text's scroll bars** are the app's controls, in its theme.
 - **Popups stay inside the window**, as in the prototype (#19).
 
 Apps add one line to `App.axaml`, after their theme. It brings AvaloniaEdit's styles along:
@@ -228,20 +231,20 @@ theme variants and Dark+ for dark ones. An app with its own colors overrides it 
 So editors follow the app's theme variant through Avalonia's resource lookup, inside a `ThemeVariantScope` too. A
 custom variant gets the colors of the variant it inherits from, unless the app adds an entry for it: FluentAvalonia's
 high contrast inherits from Light, so it shows Light+ without one. To make one editor dark in a light app, wrap it in a
-`ThemeVariantScope`: its popups turn dark too. Setting `ColorTheme` on the editor changes only the text area.
+`ThemeVariantScope`: its popups turn dark too.
 
 - **Errors:** squiggles in the theme's error, warning and info colors. Hovering shows the messages above the
   server's information.
 - **Hover:** Markdown, with emphasis, inline code, lists and links. Code blocks are highlighted with the editor's
   grammar and colors.
 - **Completion:** a list of up to 12 items at once below the word, or above it when only that side has room, in the
-  app's flyout, with rows in the app's look of list items as dense as the editor's lines and labels in the editor's
-  font; the selected item's details in a flyout of their own, beside the list where the window has room for them
+  editor's popup, with rows as dense as the editor's lines and labels in the editor's font; the selected item's details
+  in a frame of their own, beside the list where the window has room for them
   right of the word, narrower if need be, and below the list otherwise, so that the list stays at the word.
 - **Completion icons:** VS Code's codicons, drawn as vector shapes in the theme's `symbolIcon.*` colors, as in VS
   Code, and in VS Code's colors where the theme sets none. Their designs are licensed CC BY 4.0: the package lists
   them in its third-party notices, and apps that show notices of their own include that entry.
-- **Signature help:** in the app's tooltip above the caret's line, so that completion's list shows below it; the
+- **Signature help:** in the editor's popup above the caret's line, so that completion's list shows below it; the
   signature as code, in the editor's font, colors and background.
 
 **Before v1, additive:** marks beside the scroll bar for errors, warnings and search matches, as Monaco's overview
@@ -377,13 +380,13 @@ How the client talks to a server, where the protocol leaves a choice:
   waits for its answer. Ending it cancels the request still under way with `$/cancelRequest`, stops reading the
   answer between lines and paragraphs and highlighting its code between lines, and drops what they would show. The
   popup is placed again when the window or the text it is next to moves, as when the window narrows.
-- **The hover's look:** text in the app's tooltip; code blocks in the editor's font, colors and background,
+- **The hover's look:** text in the editor's popup, in the color theme's hover colors; code blocks in the editor's font, colors and background,
   highlighted with the document's grammar; inline code as a small span in the editor's font family, foreground and
   background, at the size of the text around it, so that it fits its line.
 - **The hover's size:** a hover shows at most 2,000 characters on 50 lines, in 250 runs of one style or color, the
   diagnostics' messages first, the most severe first and at most 50 of them; "…" marks where it was cut. The UI thread builds and lays out every run one by one, at
   about 10 µs a run and 1 µs a character, so the largest hover takes it about 2 ms, with the frame about 7 ms
-  (BenchmarkDotNet, i7-13700), and a tooltip that scrolls gains nothing from more. Every piece of a hover's text, a
+  (BenchmarkDotNet, i7-13700), and a popup that scrolls gains nothing from more. Every piece of a hover's text, a
   diagnostic's message and code as much as the server's answer, is cut in one place before anything else reads it,
   so the work, in the background too, is bounded by these limits and not by what the server sends. Lines are counted
   at `\r\n`, `\n` and `\r`, and also where the layout of text breaks them, such as the Unicode line separator; a cut
@@ -772,9 +775,10 @@ StreamJsonRpc's error hook, and maps a refused call to `ConnectionLostException`
 - **A language service interface.** The prototype's public `ILanguageService` is gone: every language comes through a
   language server. An in-process service could come back later, if a language needs one.
 - **AvaloniaEdit.** `CodeEditor` wraps AvaloniaEdit's editor instead of deriving from it, so AvaloniaEdit's API is not
-  part of ours. `CodeEditorStyles` includes its styles.
+  part of ours. `CodeEditorStyles` includes its control templates, without its Fluent styles, which need Fluent's
+  resources.
 - **Popups and policies.** Completion, hover and signature help have no settings yet, and their parts have no style
-  classes for apps to restyle. They take the app's look instead. Restart and hang timeouts keep the prototype's
+  classes for apps to restyle. They take the color theme's colors instead. Restart and hang timeouts keep the prototype's
   defaults: a restart waits 0.5 s, doubling up to 30 s; a request unanswered for 30 s counts as a hang, a new server
   gets twice that before its first answer, and each hang doubles the limit; no start or request waits longer than 2
   minutes. 30 s of running forgives
@@ -959,8 +963,8 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   a frame with 10,000 errors over all of the text allocates under 1 MB more than one with one such error, where
   reading them for each line in view took 8.4 MB;
 - hover: the diagnostics' messages, with their codes, above the server's Markdown, whose code block is highlighted with
-  the document's grammar in the editor's font, colors and background; in the app's tooltip, in the window's overlay
-  layer, inside a window narrower than the tooltip. An editor in a dark `ThemeVariantScope` of a light window shows a
+  the document's grammar in the editor's font, colors and background; in the editor's popup, in the window's overlay
+  layer, inside a window narrower than the popup. An editor in a dark `ThemeVariantScope` of a light window shows a
   dark popup, in its pixels. Inline code shows in the editor's font, foreground and background, and code without a color
   of its own in the editor's foreground, in the pixels. The popup stays while the pointer is over its word or over the
   popup, and closes when the
@@ -1058,7 +1062,7 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
 - documents that no editor shows ask for nothing, and an editor that loses the keyboard focus cancels its request,
   while the editor that has it gets its list;
 - icons in Light+ and Dark+ in VS Code's light and dark colors, and in a theme's own `symbolIcon.methodForeground`, in
-  the rendered pixels; the list in a dark `ThemeVariantScope` of a light window as a dark flyout, in its pixels,
+  the rendered pixels; the list in a dark `ThemeVariantScope` of a light window as a dark popup, in its pixels,
   inside a small window, and above its line when there is no room below;
 - completion ends on Escape, on leaving the word, on focus loss, when its line scrolls out of view, and when the
   server stops serving the document;
@@ -1102,8 +1106,8 @@ Still open:
 - the list itself moves left of the word it completes when the word is within the list's width of the window's right
   edge; VS Code would show its details on the list's other side too;
 - opening a link through the app's launcher: headless windows have none, so tests check only which links open;
-- code blocks are highlighted with the document's grammar whatever language their fence names, and the hover is as
-  wide as the app's tooltips allow, 320 pixels in Fluent; both wait for a use case that needs more;
+- code blocks are highlighted with the document's grammar whatever language their fence names, and the hover is at
+  most 320 pixels wide; both wait for a use case that needs more;
 
 - runner-side dependencies on arm64 and macOS, the real bridge and contracts loaded once for both sides, two versions
   of one package in the app and the runner side, and the build step that deploys them;

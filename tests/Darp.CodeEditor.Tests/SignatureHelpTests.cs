@@ -12,7 +12,7 @@ namespace Darp.CodeEditor.Tests;
 
 /// <summary>
 /// Signature help: the signature of the call around the caret, with its active parameter in bold, asked for on the
-/// server's characters and after a pause while typing, in the app's tooltip look above the line, beside completion.
+/// server's characters and after a pause while typing, in the editor's popup above the line, beside completion.
 /// The fake server's signatures are "call(first, second)" and "call(first, second, third)".
 /// </summary>
 [Collection(UiFixture.Collection)]
@@ -34,7 +34,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
 
             window.Type("(");
 
-            ToolTip popup = await WaitForSignatureAsync(window, "first", "Calls with two.");
+            PopupFrame popup = await WaitForSignatureAsync(window, "first", "Calls with two.");
             (await fake.WaitForAsync("signatureHelp ")).ShouldEndWith(" 2 ( False - 5");
             Texts(popup).ShouldContain("1/2");
             // The parameter's Markdown.
@@ -152,7 +152,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
             await WaitForSignatureAsync(window, "first", "Calls with two.");
 
             window.Press(Key.Down);
-            ToolTip popup = await WaitForSignatureAsync(window, "first", "Calls with three.");
+            PopupFrame popup = await WaitForSignatureAsync(window, "first", "Calls with three.");
             Texts(popup).ShouldContain("2/2");
             document.Text.ShouldBe("call(");
 
@@ -185,7 +185,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
             using var window = new EditorWindow(new CodeEditor { Document = document });
             window.Editor.Selection = new TextSelection(text.Length);
             window.Type("(");
-            ToolTip popup = await WaitForSignatureAsync(window, "first", "Calls with two.");
+            PopupFrame popup = await WaitForSignatureAsync(window, "first", "Calls with two.");
 
             window.Press(Key.Space, KeyModifiers.Control);
             await CompletionTests.WaitForLabelsAsync(window);
@@ -277,7 +277,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
 
             window.Type("(");
 
-            ToolTip? popup = null;
+            PopupFrame? popup = null;
             await Wait.UntilAsync(() =>
             {
                 window.Render();
@@ -304,9 +304,13 @@ public sealed class SignatureHelpTests(UiFixture ui)
     /// <summary>
     /// Waits for the popup with <paramref name="documentation"/>, whose bold parameter is <paramref name="active"/>.
     /// </summary>
-    private static async Task<ToolTip> WaitForSignatureAsync(EditorWindow window, string active, string documentation)
+    private static async Task<PopupFrame> WaitForSignatureAsync(
+        EditorWindow window,
+        string active,
+        string documentation
+    )
     {
-        ToolTip? popup = null;
+        PopupFrame? popup = null;
         await Wait.UntilAsync(() =>
         {
             window.Render();
@@ -319,14 +323,13 @@ public sealed class SignatureHelpTests(UiFixture ui)
     }
 
     /// <summary>The signature help's popup in the window's overlay layer; null while it is closed.</summary>
-    private static ToolTip? Popup(EditorWindow window) =>
-        OverlayLayer.GetOverlayLayer(window.Window)?.GetVisualDescendants().OfType<ToolTip>().FirstOrDefault();
+    private static PopupFrame? Popup(EditorWindow window) => PopupFrames.Find(window, "SignatureHelp");
 
-    private static TextBlock Signature(ToolTip popup) =>
+    private static TextBlock Signature(PopupFrame popup) =>
         popup.GetVisualDescendants().OfType<TextBlock>().First(t => t.Inlines?.Text?.StartsWith("call(") == true);
 
-    private static IEnumerable<Run> Runs(ToolTip popup) => Signature(popup).Inlines?.OfType<Run>() ?? [];
+    private static IEnumerable<Run> Runs(PopupFrame popup) => Signature(popup).Inlines?.OfType<Run>() ?? [];
 
-    private static IReadOnlyList<string> Texts(ToolTip popup) =>
+    private static IReadOnlyList<string> Texts(PopupFrame popup) =>
         [.. popup.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Inlines?.Text ?? t.Text ?? "")];
 }

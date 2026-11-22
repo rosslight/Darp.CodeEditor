@@ -1,5 +1,4 @@
 using Avalonia;
-using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Logging;
@@ -16,7 +15,7 @@ namespace Darp.CodeEditor.Popups;
 
 /// <summary>
 /// The hover of one editor's view of a document: resting the pointer over text shows the messages of the diagnostics
-/// there, above the server's hover, in a popup that looks like the app's tooltips.
+/// there, above the server's hover, in the editor's popup in the color theme's hover colors.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -44,9 +43,13 @@ internal sealed class HoverController : IDisposable
     private readonly CodeDocument _document;
     private readonly SquiggleLayer _squiggles;
     private readonly BackgroundTextMateHighlighter _highlighter;
-    private readonly ScrollViewer _content = new() { HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+    private readonly PopupScrollViewer _content = new()
+    {
+        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+    };
+    private readonly PopupFrame _frame;
     private readonly EditorPopup _popup;
-    private TextAreaColors? _colors;
+    private PopupColors _colors = PopupColors.Default;
 
     /// <summary>The text hovered now, from the pointer's rest until the popup closes; null for none.</summary>
     private Hovered? _hovered;
@@ -65,7 +68,15 @@ internal sealed class HoverController : IDisposable
         _document = document;
         _squiggles = squiggles;
         _highlighter = highlighter;
-        _popup = new EditorPopup(editor, new AppToolTip { Content = _content });
+        _frame = new PopupFrame
+        {
+            Name = "Hover",
+            Child = _content,
+            MaxWidth = PopupFrame.MaxTextWidth,
+            Padding = new Thickness(8, 4),
+        };
+        Paint();
+        _popup = new EditorPopup(editor, _frame);
         _textView.PointerHover += OnPointerHover;
         _textView.PointerMoved += OnPointerMoved;
         _textView.PointerExited += OnPointerExited;
@@ -75,14 +86,15 @@ internal sealed class HoverController : IDisposable
         _popup.Root.PointerExited += OnPointerExited;
     }
 
-    /// <summary>The colors of the color theme, for code in the popup, once it is loaded. New colors end the hover.</summary>
-    public TextAreaColors? Colors
+    /// <summary>The popup's colors, from the color theme once it is loaded. New colors end the hover.</summary>
+    public PopupColors Colors
     {
         set
         {
             if (value == _colors)
                 return;
             _colors = value;
+            Paint();
             Close();
         }
     }
@@ -182,11 +194,14 @@ internal sealed class HoverController : IDisposable
 
     private void Show(Hovered hovered, IReadOnlyList<HoverBlock> blocks)
     {
-        var code = new CodeLook(_editor.FontFamily, _editor.FontSize, _colors?.Background, _colors?.Foreground);
-        _content.Content = HoverView.Create(blocks, code);
+        var code = new CodeLook(_editor.FontFamily, _editor.FontSize, _colors.CodeBackground, _colors.CodeForeground);
+        _content.Content = HoverView.Create(blocks, code, _colors.HoverBorder);
         // Above the hovered word, where the pointer comes from.
         _popup.Show(_textView, () => TextViewBoxes.CharacterAt(_textView, hovered.Word.Start));
     }
+
+    private void Paint() =>
+        _frame.Paint(_colors.HoverBackground, _colors.HoverBorder, _colors.HoverForeground, _colors);
 
     /// <summary>Closes the popup once the pointer moves over other text.</summary>
     private void OnPointerMoved(object? sender, PointerEventArgs e)

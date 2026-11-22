@@ -22,7 +22,7 @@ namespace Darp.CodeEditor.Benchmarks;
 public class HoverBenchmarks
 {
     private Window? _window;
-    private ScrollViewer? _content;
+    private PopupScrollViewer? _content;
     private IReadOnlyList<HoverBlock> _blocks = [];
     private CodeLook? _look;
 
@@ -30,7 +30,7 @@ public class HoverBenchmarks
     public void SetUp()
     {
         HeadlessEditor.SetUpApp();
-        _content = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        _content = new PopupScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
         _window = new Window
         {
             Width = 800,
@@ -73,8 +73,12 @@ public class HoverBenchmarks
     [Benchmark]
     public void ShowTheLargestHover()
     {
-        ScrollViewer content = _content ?? throw new InvalidOperationException("Not set up.");
-        content.Content = HoverView.Create(_blocks, _look ?? throw new InvalidOperationException("Not set up."));
+        PopupScrollViewer content = _content ?? throw new InvalidOperationException("Not set up.");
+        content.Content = HoverView.Create(
+            _blocks,
+            _look ?? throw new InvalidOperationException("Not set up."),
+            Brushes.Gray
+        );
         HeadlessEditor.Render(_window ?? throw new InvalidOperationException("Not set up."));
     }
 

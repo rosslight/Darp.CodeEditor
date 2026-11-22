@@ -51,9 +51,9 @@ namespace Darp.CodeEditor;
 /// <para>
 /// The editor needs <see cref="CodeEditorStyles"/> in the app's styles. The text area takes its colors from
 /// <see cref="ColorTheme"/>: syntax and language-server colors, background, selection, caret, line numbers, search and
-/// bracket matches, and the squiggles under diagnostics. Everything around the text takes the app's look: completion,
-/// hover and signature help look like the app's flyouts and tooltips, and the search bar and scroll bars are the app's
-/// controls. Code inside popups keeps the editor's colors, background and font.
+/// bracket matches, and the squiggles under diagnostics. Completion, hover and signature help are the editor's own
+/// popups, in the color theme's colors by VS Code's keys, which an app's styles don't reach; their prose takes the app's
+/// font, and code the editor's. The search bar and the text's scroll bars are the app's controls.
 /// </para>
 /// <para>
 /// Built in, with no settings: the current line is highlighted, whitespace shows inside the selection, and the view
@@ -220,6 +220,9 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>The colors of <see cref="_theme"/>'s completion icons.</summary>
     private SymbolIconColors? _iconColors;
+
+    /// <summary>The colors of the popups: <see cref="_theme"/>'s once it is loaded.</summary>
+    private PopupColors _popupColors = PopupColors.Default;
 
     /// <summary>The grammar loaded last, with the theme it was loaded with.</summary>
     private TextMateGrammar? _grammar;
@@ -672,7 +675,7 @@ public class CodeEditor : TemplatedControl
         Select(part, place?.Selection ?? new TextSelection(0));
         TextView textView = part.TextArea.TextView;
         _view = new EditorView(this, part.TextArea, document, () => _searchBar, CreatedSearchBar);
-        _view.SetColors(_theme, _colors, _iconColors);
+        _view.SetColors(_theme, _colors, _iconColors, _popupColors);
         _searchBar?.Attach(this, part.TextArea, document);
         // The scroll position waits for the first layout: until then the view has no size and the document no height.
         _waitingForLayout = true;
@@ -1012,7 +1015,8 @@ public class CodeEditor : TemplatedControl
             TextAreaColors colors = TextAreaColors.From(theme);
             _colors = colors;
             _iconColors = SymbolIconColors.From(theme);
-            _view?.SetColors(theme, colors, _iconColors);
+            _popupColors = PopupColors.From(theme, colors);
+            _view?.SetColors(theme, colors, _iconColors, _popupColors);
             _searchBar?.Colors = colors;
             TextArea textArea = part.TextArea;
             part.Background = colors.Background;

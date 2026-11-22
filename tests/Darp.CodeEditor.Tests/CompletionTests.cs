@@ -15,7 +15,7 @@ namespace Darp.CodeEditor.Tests;
 
 /// <summary>
 /// Completion: how it opens, filters and ranks the server's items, commits them as one step, resolves them, asks again,
-/// and ends; in the app's flyout look with VS Code's icons, inside the window and in the editor's theme variant.
+/// and ends; in the editor's popup with VS Code's icons, inside the window and in the editor's theme variant.
 /// </summary>
 [Collection(UiFixture.Collection)]
 public sealed class CompletionTests(UiFixture ui)
@@ -975,7 +975,7 @@ public sealed class CompletionTests(UiFixture ui)
 
             await OpenAsync(window, text.Length);
 
-            FlyoutPresenter flyout = Flyout(window).ShouldNotBeNull();
+            PopupFrame flyout = Flyout(window).ShouldNotBeNull();
             window.Window.ActualThemeVariant.ShouldBe(ThemeVariant.Light);
             flyout.ActualThemeVariant.ShouldBe(ThemeVariant.Dark);
             Color background = flyout.Background.ShouldBeAssignableTo<ISolidColorBrush>()!.Color;
@@ -1116,8 +1116,8 @@ public sealed class CompletionTests(UiFixture ui)
     internal static ListBox? List(EditorWindow window) =>
         OverlayLayer.GetOverlayLayer(window.Window)?.GetVisualDescendants().OfType<ListBox>().FirstOrDefault();
 
-    /// <summary>The flyout around the list; null while it is closed.</summary>
-    internal static FlyoutPresenter? Flyout(EditorWindow window) => List(window)?.FindAncestorOfType<FlyoutPresenter>();
+    /// <summary>The frame around the list; null while it is closed.</summary>
+    internal static PopupFrame? Flyout(EditorWindow window) => PopupFrames.Find(window, "CompletionList");
 
     internal static Rect BoundsInWindow(Visual visual) =>
         visual.GetTransformedBounds() is { } bounds
@@ -1166,13 +1166,7 @@ public sealed class CompletionTests(UiFixture ui)
         );
 
     /// <summary>The details beside the list; null while none show.</summary>
-    private static FlyoutPresenter? Details(EditorWindow window) =>
-        OverlayLayer
-            .GetOverlayLayer(window.Window)
-            ?.GetVisualDescendants()
-            .OfType<FlyoutPresenter>()
-            .Skip(1)
-            .FirstOrDefault(f => f.IsVisible);
+    private static PopupFrame? Details(EditorWindow window) => PopupFrames.Find(window, "CompletionDetails");
 
     private static IReadOnlyList<string> DetailTexts(EditorWindow window) =>
         Details(window)
