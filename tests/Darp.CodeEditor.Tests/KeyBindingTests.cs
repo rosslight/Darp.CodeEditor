@@ -165,6 +165,11 @@ public sealed class KeyBindingTests(UiFixture ui)
             { Key.X, s_command, true },
             { Key.V, s_command, true },
             { Key.Oem2, s_command, true },
+            // The search bar's toggles, with the bar closed.
+            { Key.C, KeyModifiers.Alt, false },
+            { Key.W, KeyModifiers.Alt, false },
+            { Key.C, KeyModifiers.Alt | s_command, false },
+            { Key.W, KeyModifiers.Alt | s_command, false },
         };
 
     [Theory]
@@ -229,10 +234,28 @@ public sealed class KeyBindingTests(UiFixture ui)
         });
 
     [Fact]
+    public Task The_find_toggles_leave_their_keys_to_the_app_while_the_text_has_the_keyboard() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("|one", CodeLanguage.PlainText);
+            window.Editor.OpenSearch();
+            SearchBar bar = BarOf(window);
+            EditorWindow.PartOf(window.Editor).TextArea.Focus();
+            KeyModifiers toggle = OperatingSystem.IsMacOS() ? KeyModifiers.Alt | KeyModifiers.Meta : KeyModifiers.Alt;
+            var app = new CountingCommand();
+            window.Window.KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.C, toggle), Command = app });
+
+            window.Press(Key.C, toggle);
+
+            app.Runs.ShouldBe(1);
+            bar.MatchCaseToggle.IsChecked.ShouldBe(false);
+        });
+
+    [Fact]
     public Task The_find_keys_also_work_from_the_search_bar() =>
         _ui.Run(async () =>
         {
-            using EditorWindow window = MarkedText.Show("|a b a", CodeLanguage.PlainText);
+            using EditorWindow window = MarkedText.Show("| a b a", CodeLanguage.PlainText);
             window.Press(Key.F, s_command);
             SearchBar bar = BarOf(window);
             window.Type("a");
@@ -240,7 +263,7 @@ public sealed class KeyBindingTests(UiFixture ui)
 
             window.Press(Key.F3);
 
-            window.Editor.Selection.ShouldBe(new TextSelection(4, 5));
+            window.Editor.Selection.ShouldBe(new TextSelection(5, 6));
             bar.FindBox.IsFocused.ShouldBeTrue();
         });
 

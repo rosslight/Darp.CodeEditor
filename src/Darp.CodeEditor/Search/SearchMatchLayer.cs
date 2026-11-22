@@ -15,7 +15,7 @@ namespace Darp.CodeEditor.Search;
 internal sealed class SearchMatchLayer(TextArea textArea) : SelectionOverlay(textArea)
 {
     private TextAreaColors? _colors;
-    private TextSegmentCollection<SearchMatch>? _matches;
+    private TextSegmentCollection<TextSegment>? _matches;
 
     /// <summary>The colors of the color theme, once it is loaded.</summary>
     public TextAreaColors? Colors
@@ -28,7 +28,7 @@ internal sealed class SearchMatchLayer(TextArea textArea) : SelectionOverlay(tex
     }
 
     /// <summary>The matches to highlight; null for none.</summary>
-    public TextSegmentCollection<SearchMatch>? Matches
+    public TextSegmentCollection<TextSegment>? Matches
     {
         set
         {
@@ -46,7 +46,7 @@ internal sealed class SearchMatchLayer(TextArea textArea) : SelectionOverlay(tex
             return;
         int start = first.FirstDocumentLine.Offset;
         Selection selection = TextArea.Selection;
-        foreach (SearchMatch match in matches.FindOverlappingSegments(start, last.LastDocumentLine.EndOffset - start))
+        foreach (TextSegment match in matches.FindOverlappingSegments(start, last.LastDocumentLine.EndOffset - start))
         {
             bool current =
                 !selection.IsEmpty

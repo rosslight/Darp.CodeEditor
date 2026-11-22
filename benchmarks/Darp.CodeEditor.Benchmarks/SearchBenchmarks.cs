@@ -27,24 +27,17 @@ public class SearchBenchmarks
 
     /// <summary>A word on every line: about 5,000 matches.</summary>
     [Benchmark]
-    public int FindAWordOnEveryLine() =>
-        Find(new SearchQuery("value", MatchCase: false, WholeWord: true, UseRegex: false));
-
-    /// <summary>A regular expression with two matches on every line: about 10,000 matches, the limit.</summary>
-    [Benchmark]
-    public int FindARegularExpression() =>
-        Find(new SearchQuery("\\d+", MatchCase: true, WholeWord: false, UseRegex: true));
+    public int FindAWordOnEveryLine() => Find(new SearchQuery("value", MatchCase: false, WholeWord: true));
 
     /// <summary>A word on no line: the search reads all of the text.</summary>
     [Benchmark]
-    public int FindNothing() => Find(new SearchQuery("missing", MatchCase: false, WholeWord: false, UseRegex: false));
+    public int FindNothing() => Find(new SearchQuery("missing", MatchCase: false, WholeWord: false));
 
     private int Find(SearchQuery query)
     {
         SearchResult result = TextSearch.Find(
             _snapshot ?? throw new InvalidOperationException("Not set up."),
             query,
-            null,
             CancellationToken.None
         );
         return result.IsComplete ? result.Matches.Count : throw new InvalidOperationException("The search stopped.");

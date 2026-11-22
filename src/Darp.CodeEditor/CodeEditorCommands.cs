@@ -17,7 +17,8 @@ public static class CodeEditorCommands
     public const string TriggerParameterHints = "editor.action.triggerParameterHints";
 
     /// <summary>
-    /// Opens the search bar and puts the keyboard in its query, which starts with the selection within one line.
+    /// Opens the search bar and puts the keyboard in its query, which starts with the selection within one line or else
+    /// the word at the caret.
     /// </summary>
     public const string Find = "actions.find";
 

@@ -2,26 +2,19 @@ using Darp.CodeEditor.Search;
 
 namespace Darp.CodeEditor.Tests;
 
-/// <summary>The search's limits hold for every match it tries, also those it rejects, and it stops when cancelled.</summary>
+/// <summary>The search takes its query literally, within lines, and stops when cancelled.</summary>
 public sealed class TextSearchTests
 {
-    /// <summary>
-    /// A line on which <c>(a+)+$</c> backtracks at every position, and the alternative <c>a</c> then matches inside a
-    /// word: Match Whole Word rejects every match, each one after milliseconds.
-    /// </summary>
-    private static readonly TextSnapshot s_slowForEveryMatch = TextSnapshot.FromString(
-        string.Join(' ', Enumerable.Repeat(new string('a', 18) + "!", 100))
-    );
-
-    private static readonly SearchQuery s_slowQuery = new("(a+)+$|a", MatchCase: true, WholeWord: true, UseRegex: true);
+    [Theory]
+    [InlineData("a.c abc a.c", "a.c", 2)]
+    [InlineData("(a+)+$ aaa", "(a+)+$", 1)]
+    [InlineData(@"\d 1", @"\d", 1)]
+    public void A_query_is_literal_text(string text, string query, int matches) =>
+        Find(text, new SearchQuery(query, MatchCase: true, WholeWord: false)).Matches.Count.ShouldBe(matches);
 
     [Fact]
-    public void Rejected_matches_count_against_the_time_limit()
-    {
-        SearchResult result = TextSearch.Find(s_slowForEveryMatch, s_slowQuery, null, CancellationToken.None);
-
-        result.Outcome.ShouldBe(SearchOutcome.OutOfTime);
-    }
+    public void A_query_does_not_match_across_lines() =>
+        Find("a\nb", new SearchQuery("a\nb", MatchCase: true, WholeWord: false)).Matches.Count.ShouldBe(0);
 
     [Fact]
     public void A_cancelled_search_stops()
@@ -30,7 +23,14 @@ public sealed class TextSearchTests
         cancelled.Cancel();
 
         Should.Throw<OperationCanceledException>(() =>
-            TextSearch.Find(s_slowForEveryMatch, s_slowQuery, null, cancelled.Token)
+            TextSearch.Find(
+                TextSnapshot.FromString("a"),
+                new SearchQuery("a", MatchCase: true, WholeWord: false),
+                cancelled.Token
+            )
         );
     }
+
+    private static SearchResult Find(string text, SearchQuery query) =>
+        TextSearch.Find(TextSnapshot.FromString(text), query, CancellationToken.None);
 }

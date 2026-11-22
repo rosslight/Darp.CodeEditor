@@ -246,7 +246,10 @@ internal sealed class CompletionList
 /// <param name="FilterTextIsLabel">Whether the whole filter text equals the label, ignoring case.</param>
 /// <param name="SortKey">Where it is in the list before anything is typed.</param>
 /// <param name="Edit">What committing it does to the text: its text as the server wrote it.</param>
-/// <param name="Snippet">Its text as a snippet, for an item whose text is in the snippet syntax; null otherwise.</param>
+/// <param name="Snippet">
+/// Its text as a snippet, for an item whose text is in the snippet syntax; null otherwise, and for a snippet over the
+/// limits, which goes in as plain text.
+/// </param>
 /// <param name="AdditionalEdits">What else committing it changes, such as an import; null when it names none.</param>
 /// <param name="CommitCharacters">The characters that commit it as they are typed.</param>
 /// <param name="Source">The item as the server sent it, for <c>completionItem/resolve</c>.</param>
