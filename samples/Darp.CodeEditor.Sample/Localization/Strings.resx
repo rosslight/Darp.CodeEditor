@@ -147,17 +147,8 @@
   <data name="AppThemeDescription" xml:space="preserve">
     <value>Light, dark, or as the system is set</value>
   </data>
-  <data name="EditorTheme" xml:space="preserve">
-    <value>Editor theme</value>
-  </data>
-  <data name="EditorThemeDescription" xml:space="preserve">
-    <value>The colors of the editor and its popups, independent of the app</value>
-  </data>
   <data name="ThemeSystem" xml:space="preserve">
     <value>Use system setting</value>
-  </data>
-  <data name="ThemeSameAsApp" xml:space="preserve">
-    <value>Same as the app</value>
   </data>
   <data name="ThemeLight" xml:space="preserve">
     <value>Light</value>

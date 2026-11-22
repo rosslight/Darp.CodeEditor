@@ -46,24 +46,6 @@
                     </fa:FASettingsExpander.Footer>
                 </fa:FASettingsExpander>
                 <fa:FASettingsExpander
-                    IconSource="Code"
-                    Header="{Binding Strings.EditorTheme}"
-                    Description="{Binding Strings.EditorThemeDescription}"
-                >
-                    <fa:FASettingsExpander.Footer>
-                        <ComboBox
-                            ItemsSource="{Binding Settings.EditorThemes}"
-                            SelectedItem="{Binding Settings.EditorTheme}"
-                        >
-                            <ComboBox.ItemTemplate>
-                                <DataTemplate x:DataType="settings:ThemeChoice">
-                                    <TextBlock Text="{Binding Name}" />
-                                </DataTemplate>
-                            </ComboBox.ItemTemplate>
-                        </ComboBox>
-                    </fa:FASettingsExpander.Footer>
-                </fa:FASettingsExpander>
-                <fa:FASettingsExpander
                     IconSource="Globe"
                     Header="{Binding Strings.Language}"
                     Description="{Binding Strings.LanguageDescription}"

@@ -6,14 +6,11 @@
     x:Class="Sample.Documents.DocumentView"
     x:DataType="local:MainViewModel"
 >
-    <!-- Default follows the app; Light or Dark turn the editor's colors, popups and search bar so. -->
-    <ThemeVariantScope RequestedThemeVariant="{Binding Settings.EditorTheme.Variant}">
-        <ce:CodeEditor
-            Name="Editor"
-            WordWrap="{Binding Settings.WordWrap}"
-            ShowLineNumbers="{Binding Settings.ShowLineNumbers}"
-            FontSize="{Binding Settings.FontSize}"
-            Padding="8,6,0,0"
-        />
-    </ThemeVariantScope>
+    <ce:CodeEditor
+        Name="Editor"
+        WordWrap="{Binding Settings.WordWrap}"
+        ShowLineNumbers="{Binding Settings.ShowLineNumbers}"
+        FontSize="{Binding Settings.FontSize}"
+        Padding="8,6,0,0"
+    />
 </UserControl>

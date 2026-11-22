@@ -147,17 +147,8 @@
   <data name="AppThemeDescription" xml:space="preserve">
     <value>Hell, dunkel oder wie im System eingestellt</value>
   </data>
-  <data name="EditorTheme" xml:space="preserve">
-    <value>Editor-Design</value>
-  </data>
-  <data name="EditorThemeDescription" xml:space="preserve">
-    <value>Die Farben des Editors und seiner Popups, unabhängig von der App</value>
-  </data>
   <data name="ThemeSystem" xml:space="preserve">
     <value>Systemeinstellung verwenden</value>
-  </data>
-  <data name="ThemeSameAsApp" xml:space="preserve">
-    <value>Wie die App</value>
   </data>
   <data name="ThemeLight" xml:space="preserve">
     <value>Hell</value>
