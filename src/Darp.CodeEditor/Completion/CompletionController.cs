@@ -45,7 +45,7 @@ namespace Darp.CodeEditor.Completion;
 /// is dropped.
 /// </para>
 /// </remarks>
-internal sealed class CompletionController : IEditorFeature, ICompletionOwner
+internal sealed class CompletionController : IEditorFeature
 {
     private readonly TextArea _textArea;
     private readonly TextDocument _buffer;
@@ -113,6 +113,12 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
 
     /// <summary>Whether the list shows items, frozen or not.</summary>
     private bool IsShowing => _session is not null && _filter.IsShowing;
+
+    /// <summary>Whether the user asked by key: when nothing matches, the list freezes or says so.</summary>
+    public bool ByKey => _session?.ByKey == true;
+
+    /// <summary>Whether a newer list is asked for, which may have what the one that shows lacks.</summary>
+    public bool Asking => _session?.Pending is not null;
 
     /// <summary>
     /// The popups' and the icons' colors, from the color theme once it is loaded. New colors end completion.
@@ -196,6 +202,9 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
             Commit(_filter.Selected);
         }
     }
+
+    /// <summary>Does the normal action of a key whose accept waited for the filter and found nothing to commit.</summary>
+    public void PerformKey(KeyGesture key) => _performKey(key);
 
     /// <summary>Ends "No suggestions." of an empty answer, as any key does.</summary>
     public void HideNoSuggestions() => _view.HideNoSuggestions();
@@ -341,7 +350,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
     /// <see cref="CompletionCommit"/>: completion ends first. The resolve of an item whose additional edits are still to
     /// come is taken out of the resolver, so that ending completion does not cancel it.
     /// </summary>
-    private void Commit(int index, bool replace = false)
+    public void Commit(int index, bool replace = false)
     {
         if (_filter.ShownAnswer is not { } answer)
             return;
@@ -384,16 +393,6 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
             Commit(index);
         }
     }
-
-    bool ICompletionOwner.ByKey => _session?.ByKey == true;
-
-    bool ICompletionOwner.Asking => _session?.Pending is not null;
-
-    void ICompletionOwner.End() => Close();
-
-    void ICompletionOwner.Commit(int index, bool replace) => Commit(index, replace);
-
-    void ICompletionOwner.PerformKey(KeyGesture key) => _performKey(key);
 
     /// <summary>Opens completion on the server's trigger characters, and where typing opens it.</summary>
     private void OnTextEntered(object? sender, TextInputEventArgs e)

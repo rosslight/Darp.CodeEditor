@@ -7,25 +7,6 @@ using Darp.CodeEditor.Lsp;
 
 namespace Darp.CodeEditor.Completion;
 
-/// <summary>What completion's filter asks of the completion that owns it, when a filter's result comes.</summary>
-internal interface ICompletionOwner
-{
-    /// <summary>Whether the user asked by key: when nothing matches, the list freezes or says so.</summary>
-    bool ByKey { get; }
-
-    /// <summary>Whether a newer list is asked for, which may have what the one that shows lacks.</summary>
-    bool Asking { get; }
-
-    /// <summary>Ends completion: nothing matches a list opened by typing, and no newer list comes.</summary>
-    void End();
-
-    /// <summary>Commits the item at <paramref name="index"/> of the list, for an accept that waited for the filter.</summary>
-    void Commit(int index, bool replace);
-
-    /// <summary>Does the normal action of a key whose accept waited for the filter and found nothing to commit.</summary>
-    void PerformKey(KeyGesture key);
-}
-
 /// <summary>
 /// Filters completion's answer as the user types, and shows the result. Each change of the text or the caret filters
 /// anew off the UI thread (<see cref="CompletionRanking"/>), the filter under way stops, and the list shows the newest
@@ -44,7 +25,7 @@ internal sealed class CompletionFilter
     private readonly TextArea _textArea;
     private readonly CodeDocument _document;
     private readonly Func<int, TextRange> _wordBefore;
-    private readonly ICompletionOwner _owner;
+    private readonly CompletionController _owner;
 
     /// <summary>The filter under way; null for none.</summary>
     private FilterRun? _filtering;
@@ -75,7 +56,7 @@ internal sealed class CompletionFilter
         TextArea textArea,
         CodeDocument document,
         Func<int, TextRange> wordBefore,
-        ICompletionOwner owner
+        CompletionController owner
     )
     {
         _view = view;
@@ -280,7 +261,7 @@ internal sealed class CompletionFilter
             else if (!byKey && more)
                 Hide();
             else
-                _owner.End();
+                _owner.Close();
             // The key that waited for this filter does as it would have without the list: in VS Code, which filters as
             // the user types, the list is gone before such a key.
             if (pressed is { } gesture)
