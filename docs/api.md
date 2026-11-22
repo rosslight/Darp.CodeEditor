@@ -496,7 +496,8 @@ How the client talks to a server, where the protocol leaves a choice:
     `textEdit` goes over a text edit's range, or the insert range of an insert and replace edit; replacing, over its
     replace range. Its range grows by what was typed since it was asked, as in VS Code. Its `additionalTextEdits`, such
     as an import, apply with it, as one step that the user undoes; ones that overlap another edit are left out. Then
-    the item's `command` runs if it is one of the editor's, such as asking for completion of a property's value.
+    an item's `editor.action.triggerSuggest` command asks for completion again, such as for a property's value. No other
+    command of an item runs.
   - **Resolving:** the selected item is resolved when it is selected, and the resolve of an item that is no longer
     selected is cancelled. Its detail, as code highlighted with the document's grammar, and its documentation show
     beside the list, as much of both as a hover shows: they share one budget of the hover's size, cut before anything

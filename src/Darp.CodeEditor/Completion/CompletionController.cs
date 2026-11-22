@@ -1,4 +1,5 @@
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Logging;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
@@ -60,9 +61,6 @@ internal sealed class CompletionController : IEditorFeature
     /// <summary>Does the normal action of a key whose accept found nothing to commit.</summary>
     private readonly Action<KeyGesture> _performKey;
 
-    /// <summary>Runs one of the editor's commands by its id, where it applies.</summary>
-    private readonly Action<string> _runCommand;
-
     /// <summary>Completion from its first request until it ends; null while there is none.</summary>
     private CompletionSession? _session;
 
@@ -78,8 +76,7 @@ internal sealed class CompletionController : IEditorFeature
         TextChanges changes,
         CaretMoves caretMoves,
         TaskScheduler background,
-        Action<KeyGesture> performKey,
-        Action<string> runCommand
+        Action<KeyGesture> performKey
     )
     {
         _textArea = textArea;
@@ -87,9 +84,8 @@ internal sealed class CompletionController : IEditorFeature
         _document = document;
         _caretMoves = caretMoves;
         _performKey = performKey;
-        _runCommand = runCommand;
         _view = new CompletionView(editor, textArea.TextView);
-        _commit = new CompletionCommit(textArea, document, snippets, changes, RunCommand);
+        _commit = new CompletionCommit(textArea, document, snippets, changes, RunFollowUp);
         _resolver = new CompletionResolver(_view, highlighter);
         _filter = new CompletionFilter(
             _view,
@@ -106,6 +102,7 @@ internal sealed class CompletionController : IEditorFeature
         _buffer.TextChanged += OnBufferTextChanged;
         _textArea.TextEntered += OnTextEntered;
         _textArea.Caret.PositionChanged += OnCaretPositionChanged;
+        _textArea.AddHandler(InputElement.PointerPressedEvent, OnPointerPressed, RoutingStrategies.Tunnel, true);
         _textArea.LostFocus += OnClosingChange;
         _document.LanguageFeaturesChanged += OnClosingChange;
         _view.LeftView += OnClosingChange;
@@ -236,6 +233,7 @@ internal sealed class CompletionController : IEditorFeature
         _buffer.TextChanged -= OnBufferTextChanged;
         _textArea.TextEntered -= OnTextEntered;
         _textArea.Caret.PositionChanged -= OnCaretPositionChanged;
+        _textArea.RemoveHandler(InputElement.PointerPressedEvent, OnPointerPressed);
         _textArea.LostFocus -= OnClosingChange;
         _document.LanguageFeaturesChanged -= OnClosingChange;
         _view.LeftView -= OnClosingChange;
@@ -363,17 +361,13 @@ internal sealed class CompletionController : IEditorFeature
     }
 
     /// <summary>
-    /// Runs a committed item's command, as VS Code does after the commit: asking for completion asks as typing would,
-    /// such as for the value after a property's name; the editor's other commands run as their keys do, such as
-    /// <see cref="CodeEditorCommands.TriggerParameterHints"/>. A server's own commands do not run: the editor has
-    /// nowhere to send them.
+    /// A committed item's command, after the commit: asking for completion asks as typing would, such as for the value
+    /// after a property's name. No other command runs.
     /// </summary>
-    private void RunCommand(string command)
+    private void RunFollowUp(string command)
     {
         if (command == CodeEditorCommands.TriggerSuggest)
             Ask(new CompletionTrigger(CompletionTriggerKind.Invoked));
-        else
-            _runCommand(command);
     }
 
     /// <summary>
@@ -436,6 +430,9 @@ internal sealed class CompletionController : IEditorFeature
     private void OnBufferTextChanged(object? sender, EventArgs e) => Update();
 
     private void OnClosingChange(object? sender, EventArgs e) => Close();
+
+    /// <summary>A click in the text ends completion, also one that leaves the caret where it is.</summary>
+    private void OnPointerPressed(object? sender, PointerPressedEventArgs e) => Close();
 
     private TextRange WordBefore(int caret) => CompletionRequest.WordBefore(_buffer, caret);
 }
