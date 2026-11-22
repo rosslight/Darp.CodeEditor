@@ -206,6 +206,39 @@ public sealed class HoverTests(UiFixture ui)
             // Over another word, though under the same diagnostic.
             await HoverAsync(window, 0, "one is a word in", time);
             window.MoveMouse(window.PointAt(text.IndexOf("two", StringComparison.Ordinal)));
+            Pass(window, time, Delay);
+            Popup(window).ShouldBeNull();
+        });
+
+    [Fact]
+    public Task The_pointer_can_cross_other_text_on_its_way_to_the_popup() =>
+        _ui.Run(async () =>
+        {
+            // The last word is far enough down not to be under the popup.
+            const string text = "one two\n\n\n\n\n\n\n\n\nthree";
+            var time = new ManualTime();
+            var document = new StandaloneDocument(CodeLanguage.PlainText, text, time);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            document.SetDiagnostics([
+                new Diagnostic(
+                    document.CurrentSnapshot,
+                    new TextRange(0, 3),
+                    DiagnosticSeverity.Error,
+                    null,
+                    "problem"
+                ),
+            ]);
+            PopupFrame popup = await HoverAsync(window, 0, "problem", time);
+
+            window.MoveMouse(window.PointAt(text.IndexOf("two", StringComparison.Ordinal)));
+            Pass(window, time, Delay - TimeSpan.FromMilliseconds(1));
+            Popup(window).ShouldBeSameAs(popup);
+            window.MoveMouse(BoundsInWindow(popup).Center);
+            Pass(window, time, Delay);
+            Popup(window).ShouldBeSameAs(popup);
+
+            window.MoveMouse(window.PointAt(text.IndexOf("three", StringComparison.Ordinal)));
+            Pass(window, time, Delay);
             Popup(window).ShouldBeNull();
         });
 
@@ -455,6 +488,7 @@ public sealed class HoverTests(UiFixture ui)
             Popup(window).ShouldBeSameAs(popup);
 
             window.MoveMouse(window.PointAt(text.IndexOf("end", StringComparison.Ordinal)));
+            Pass(window, time, Delay);
             Popup(window).ShouldBeNull();
         });
 
@@ -474,12 +508,14 @@ public sealed class HoverTests(UiFixture ui)
 
             // Over the "...", where the hidden tail starts.
             window.MoveMouse(window.PointAt(VisibleText.LineLimit));
+            Pass(window, time, Delay);
 
             Popup(window).ShouldBeNull();
 
             // Straight on to the next line, past the hidden tail.
             await HoverAsync(window, 5, "long", time);
             window.MoveMouse(window.PointAt(text.Length - 2));
+            Pass(window, time, Delay);
 
             Popup(window).ShouldBeNull();
         });

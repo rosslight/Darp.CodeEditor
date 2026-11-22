@@ -1004,9 +1004,9 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   layer, inside a window narrower than the popup. An editor in a dark `ThemeVariantScope` of a light window shows a
   dark popup, in its pixels. Inline code shows in the editor's font on the theme's code background, and code without a
   color of its own in the editor's foreground, in the pixels. The popup stays while the pointer is over its word or
-  over the popup, and closes when the
-  pointer leaves both, moves on to another word under the same diagnostic, and on typing, Escape, scrolling and focus
-  loss. A click into it holds it, its selection copies, the hover key puts the keyboard into it where the arrows and
+  over the popup. Moved onto other text, it closes after 300 ms unless the pointer reaches it, so that a diagonal move
+  can get there. It closes at once when the pointer leaves both the text and the popup, and on typing, Escape,
+  scrolling and focus loss. A click into it holds it, its selection copies, the hover key puts the keyboard into it where the arrows and
   page keys scroll it, and its edges resize it. F8 and Shift+F8 go by position with wraparound, past hints. Moving on
   to another word cancels the request still under way with `$/cancelRequest`, and so does Escape
   before any popup showed. A server that stops serving the document and new colors end the hover, and reading its

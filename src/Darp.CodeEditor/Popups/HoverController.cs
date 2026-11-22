@@ -248,7 +248,10 @@ internal sealed class HoverController : IEditorFeature
 
     private CodeLook Look() => new(_editor.FontFamily, _editor.FontSize, _colors);
 
-    /// <summary>Over other text, the hover ends, and the wait for that text's hover starts.</summary>
+    /// <summary>
+    /// Over other text, a hover that shows ends soon, so that the pointer can cross text on its way to the popup; one
+    /// that still waits ends at once, and the wait for that text's hover starts.
+    /// </summary>
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
         Point point = e.GetPosition(_textView);
@@ -261,11 +264,39 @@ internal sealed class HoverController : IEditorFeature
         bool pressed = buttons.IsLeftButtonPressed || buttons.IsRightButtonPressed || buttons.IsMiddleButtonPressed;
         int? offset = pressed ? null : OffsetAt(point);
         if (_hovered is { } hovered && offset is { } at && (hovered.IsDue ? hovered.IsOver(at) : hovered.Offset == at))
+        {
+            hovered.StopLeaving();
             return;
+        }
+        if (!pressed && _popup.IsOpen && _hovered is { } shown)
+        {
+            CloseSoon(shown);
+            return;
+        }
         Close();
         if (offset is { } next)
             StartDelayed(next);
     }
+
+    /// <summary>Ends a hover after the delay, unless the pointer reached its popup or came back.</summary>
+    private void CloseSoon(Hovered hovered) =>
+        hovered.Leaving ??= _document.TimeProvider.CreateTimer(
+            _ =>
+                _editor.Dispatcher.Post(() =>
+                {
+                    if (_hovered != hovered || hovered.Leaving is null)
+                        return;
+                    hovered.StopLeaving();
+                    if (_popup.IsHeld || _popup.Root.IsPointerOver)
+                        return;
+                    Close();
+                    if (_pointer is { } point && OffsetAt(point) is { } offset)
+                        StartDelayed(offset);
+                }),
+            null,
+            s_delay,
+            Timeout.InfiniteTimeSpan
+        );
 
     /// <summary>
     /// Ends the hover once the pointer has left both the text and the popup, unless it is held or was asked for by key:

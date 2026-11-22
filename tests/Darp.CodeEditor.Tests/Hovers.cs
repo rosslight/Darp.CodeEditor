@@ -18,7 +18,11 @@ internal static class Hovers
     /// </summary>
     internal static Task<PopupFrame> HoverAsync(EditorWindow window, int offset, string text, ManualTime time)
     {
+        bool showing = Popup(window) is not null;
         window.MoveMouse(window.PointAt(offset) + new Point(0, 200));
+        // A hover that shows stays this long, for the pointer to reach it.
+        if (showing)
+            Pass(window, time, Delay);
         window.MoveMouse(window.PointAt(offset));
         Pass(window, time, Delay);
         return WaitForPopupAsync(window, text);

@@ -45,6 +45,9 @@ internal sealed class Hovered(int offset, TextRange word, TextRange along, TextS
     /// <summary>The wait before the pointer's hover shows; null for a hover asked for by key.</summary>
     public ITimer? Delay { get; set; }
 
+    /// <summary>The time the pointer has to reach the popup after leaving the text; null while it is over it.</summary>
+    public ITimer? Leaving { get; set; }
+
     /// <summary>Whether the delay is over.</summary>
     public bool IsDue { get; set; }
 
@@ -53,9 +56,17 @@ internal sealed class Hovered(int offset, TextRange word, TextRange along, TextS
         (offset >= Range.Start && offset < Math.Max(Range.End, Range.Start + 1))
         || (offset >= _along.Start && offset < _along.End);
 
+    /// <summary>The pointer is back over the hover's text, or the wait is over.</summary>
+    public void StopLeaving()
+    {
+        Leaving?.Dispose();
+        Leaving = null;
+    }
+
     public void Stop()
     {
         Delay?.Dispose();
+        StopLeaving();
         Cancellation.Cancel();
     }
 
