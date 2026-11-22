@@ -72,7 +72,8 @@ public class HoverBenchmarks
         content.Content = HoverView.Create(
             _blocks,
             _look ?? throw new InvalidOperationException("Not set up."),
-            Brushes.Gray
+            Brushes.Gray,
+            selectable: true
         );
         HeadlessEditor.Render(_window ?? throw new InvalidOperationException("Not set up."));
     }
