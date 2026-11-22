@@ -380,4 +380,91 @@ public sealed class CompletionBehaviorTests(UiFixture ui)
             fake.LinesStartingWith("completion ").Count.ShouldBe(asked);
             fake.LinesStartingWith("signatureHelp ").Count.ShouldBe(1);
         });
+
+    [Fact]
+    public Task The_arrow_keys_keep_the_list_on_its_word() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("Console", "Convert"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "Conv");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await OpenAsync(window, 4);
+            await WaitForLabelsAsync(window, ["Convert"]);
+
+            // Left, back past where it was asked: it asks again for the word that is left.
+            window.Press(Key.Left);
+
+            await WaitForLabelsAsync(window, ["Console", "Convert"]);
+            window.Editor.Selection.ShouldBe(new TextSelection(3));
+
+            // Right, on within the word: it filters.
+            window.Press(Key.Right);
+
+            await WaitForLabelsAsync(window, ["Convert"]);
+        });
+
+    [Fact]
+    public Task A_caret_move_that_is_not_the_keyboards_ends_completion() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("Console", "Convert"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, " Co");
+            var editor = new CodeEditor { Document = document };
+            using var window = new EditorWindow(editor);
+
+            // A cursor key filters again; the app's code moving the caret ends completion.
+            await OpenAsync(window, 3);
+            window.Press(Key.Left);
+            (await WaitForLabelsAsync(window)).ShouldBe(["Console", "Convert"]);
+            editor.Selection = new TextSelection(3);
+            List(window).ShouldBeNull();
+
+            // Another editor of the document types at the line's start: the caret moves with the text.
+            await OpenAsync(window, 3);
+            document.Replace(new TextRange(0, 0), "x");
+            List(window).ShouldBeNull();
+
+            // An undo.
+            await OpenAsync(window, 4);
+            window.Type("n");
+            await WaitForLabelsAsync(window);
+            window.Press(Key.Z, EditorWindow.Command);
+            document.Text.ShouldBe("x Co");
+            List(window).ShouldBeNull();
+
+            // A paste, which asks nothing either.
+            await window.Window.Clipboard.ShouldNotBeNull().SetTextAsync("n");
+            await OpenAsync(window, 4);
+            int asked = fake.LinesStartingWith("completion ").Count;
+            window.Press(Key.V, EditorWindow.Command);
+            await Wait.UntilAsync(() => document.Text == "x Con");
+            List(window).ShouldBeNull();
+            await BarrierAsync(server, fake);
+            fake.LinesStartingWith("completion ").Count.ShouldBe(asked);
+        });
+
+    [Fact]
+    public Task A_click_that_moves_the_caret_ends_completion_and_asks_nothing() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(server, fake, Items("print", "property"));
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Type("pri");
+            await WaitForLabelsAsync(window, ["print"]);
+
+            // Between "p" and "r": a quarter of a character right of their boundary.
+            window.Click(window.PointAt(1) - new Point(window.TextView.WideSpaceWidth / 4, 0), MouseButton.Left);
+
+            window.Editor.Selection.ShouldBe(new TextSelection(1));
+            List(window).ShouldBeNull();
+            await BarrierAsync(server, fake);
+            fake.LinesStartingWith("completion ").Count.ShouldBe(1);
+        });
 }

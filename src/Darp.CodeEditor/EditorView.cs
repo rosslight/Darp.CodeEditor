@@ -22,6 +22,7 @@ internal sealed class EditorView : IDisposable
     private readonly TextArea _area;
     private readonly Func<SearchBar?> _searchBar;
     private readonly CommandTable _commands;
+    private readonly CaretMoves _caretMoves;
 
     /// <summary>Everything the view made, in the order it made them: disposed the other way round.</summary>
     private readonly IDisposable[] _features;
@@ -59,6 +60,7 @@ internal sealed class EditorView : IDisposable
         _searchBar = searchBar;
         _commands = new CommandTable(area);
         Highlighter = new BackgroundTextMateHighlighter(area.TextView, area.Document, editor.Dispatcher, null);
+        _caretMoves = new CaretMoves(editor, area);
         _changes = new TextChanges(area);
         _pairs = new AutoClosingPairs(area, document, Highlighter, _changes, () => editor.AutoClosing);
         _typing = new Typing(area, document, Highlighter, _changes, _pairs);
@@ -77,6 +79,7 @@ internal sealed class EditorView : IDisposable
             Highlighter,
             _snippets,
             _changes,
+            _caretMoves,
             editor.BackgroundScheduler,
             PerformKey,
             RunItemCommand
@@ -85,6 +88,7 @@ internal sealed class EditorView : IDisposable
         _features =
         [
             Highlighter,
+            _caretMoves,
             _changes,
             _pairs,
             _typing,
@@ -143,6 +147,10 @@ internal sealed class EditorView : IDisposable
             return true;
         if (!_area.IsFocused)
             return false;
+        // With Ctrl or Cmd, a key that reaches the text runs one of AvaloniaEdit's commands, such as paste, which may
+        // move the caret within the key's event, as when the clipboard answers at once: that is no typing.
+        if ((e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) == 0)
+            _caretMoves.OnKeyboard();
         return _completion.OnKeyDown(e)
             || _signatureHelp.OnKeyDown(e)
             || _snippets.OnKeyDown(e)
@@ -158,6 +166,7 @@ internal sealed class EditorView : IDisposable
     {
         if (!_area.IsFocused)
             return;
+        _caretMoves.OnKeyboard();
         _completion.OnTextInput(e);
         if (!e.Handled)
             _typing.OnTextInput(e);

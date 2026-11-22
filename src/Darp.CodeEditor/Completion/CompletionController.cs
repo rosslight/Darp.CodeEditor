@@ -36,11 +36,13 @@ namespace Darp.CodeEditor.Completion;
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends completion, for every reason it ends: Escape, the caret leaving the line or moving back past
-/// the word, a selection, a command that moves the caret, the editor becoming read-only, the list scrolling out of view,
-/// the text losing the keyboard focus, also to the search bar, which ends an accept that waits for the filter, a server
-/// that starts or stops serving the document, new colors, the list running out of matches, and the editor no longer
-/// showing the document. Ending it hides "No suggestions." too, and cancels the request still under way with
-/// <c>$/cancelRequest</c>, and so does a newer request; a late answer is dropped.
+/// the word, a selection, a command other than completion's that moves the caret, and any other caret move that is not
+/// the keyboard's (<see cref="CaretMoves"/>), as by a click, an undo, code or another editor's edit before the caret, the
+/// editor becoming read-only, the list scrolling out of view, the text losing the keyboard focus, also to the search
+/// bar, which ends an accept that waits for the filter, a server that starts or stops serving the document, new colors,
+/// the list running out of matches, and the editor no longer showing the document. Ending it hides "No suggestions."
+/// too, and cancels the request still under way with <c>$/cancelRequest</c>, and so does a newer request; a late answer
+/// is dropped.
 /// </para>
 /// </remarks>
 internal sealed class CompletionController : IEditorFeature, ICompletionOwner
@@ -53,6 +55,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
     private readonly CompletionResolver _resolver;
     private readonly CompletionFilter _filter;
     private readonly QuickSuggest _quickSuggest;
+    private readonly CaretMoves _caretMoves;
 
     /// <summary>Does the normal action of a key whose accept found nothing to commit.</summary>
     private readonly Action<KeyGesture> _performKey;
@@ -73,6 +76,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         BackgroundTextMateHighlighter highlighter,
         SnippetController snippets,
         TextChanges changes,
+        CaretMoves caretMoves,
         TaskScheduler background,
         Action<KeyGesture> performKey,
         Action<string> runCommand
@@ -81,6 +85,7 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         _textArea = textArea;
         _buffer = textArea.Document;
         _document = document;
+        _caretMoves = caretMoves;
         _performKey = performKey;
         _runCommand = runCommand;
         _view = new CompletionView(editor, textArea.TextView);
@@ -402,7 +407,16 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
             Ask(new CompletionTrigger(CompletionTriggerKind.Invoked));
     }
 
-    private void OnCaretPositionChanged(object? sender, EventArgs e) => Update();
+    /// <summary>
+    /// A caret that the keyboard moves filters, asks again or ends completion; any other move ends it.
+    /// </summary>
+    private void OnCaretPositionChanged(object? sender, EventArgs e)
+    {
+        if (_caretMoves.Mover == CaretMover.Keyboard)
+            Update();
+        else
+            Close();
+    }
 
     /// <summary>A part of a change before where completion was asked makes the request stale.</summary>
     private void OnBufferChanging(object? sender, DocumentChangeEventArgs e)
