@@ -2,6 +2,8 @@
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ce="using:Darp.CodeEditor"
+    xmlns:fa="using:FluentAvalonia.UI.Controls"
+    xmlns:loc="using:Sample.Localization"
     xmlns:local="using:Sample"
     x:Class="Sample.Documents.DocumentView"
     x:DataType="local:MainViewModel"
@@ -12,5 +14,35 @@
         ShowLineNumbers="{Binding Settings.ShowLineNumbers}"
         FontSize="{Binding Settings.FontSize}"
         Padding="8,6,0,0"
-    />
+    >
+        <!-- Replaces the editor's own menu, which is in English, to follow the app's language. -->
+        <ce:CodeEditor.ContextFlyout>
+            <fa:FAMenuFlyout>
+                <fa:FAMenuFlyoutItem
+                    Text="{Binding Cut, Source={x:Static loc:Strings.Default}}"
+                    IconSource="Cut"
+                    InputGesture="Ctrl+X"
+                    Click="OnCut"
+                />
+                <fa:FAMenuFlyoutItem
+                    Text="{Binding Copy, Source={x:Static loc:Strings.Default}}"
+                    IconSource="Copy"
+                    InputGesture="Ctrl+C"
+                    Click="OnCopy"
+                />
+                <fa:FAMenuFlyoutItem
+                    Text="{Binding Paste, Source={x:Static loc:Strings.Default}}"
+                    IconSource="Paste"
+                    InputGesture="Ctrl+V"
+                    Click="OnPaste"
+                />
+                <fa:FAMenuFlyoutSeparator />
+                <fa:FAMenuFlyoutItem
+                    Text="{Binding SelectAll, Source={x:Static loc:Strings.Default}}"
+                    InputGesture="Ctrl+A"
+                    Click="OnSelectAll"
+                />
+            </fa:FAMenuFlyout>
+        </ce:CodeEditor.ContextFlyout>
+    </ce:CodeEditor>
 </UserControl>

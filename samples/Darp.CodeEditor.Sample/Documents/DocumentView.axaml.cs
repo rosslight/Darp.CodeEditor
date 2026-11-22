@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Interactivity;
 using Darp.CodeEditor;
 using Sample.Localization;
 
@@ -30,6 +31,14 @@ public sealed partial class DocumentView : UserControl
                 RaisePropertyChanged(CaretPositionProperty, default, CaretPosition);
         };
     }
+
+    private void OnCut(object? sender, RoutedEventArgs e) => Editor.Cut();
+
+    private void OnCopy(object? sender, RoutedEventArgs e) => Editor.Copy();
+
+    private void OnPaste(object? sender, RoutedEventArgs e) => Editor.Paste();
+
+    private void OnSelectAll(object? sender, RoutedEventArgs e) => Editor.SelectAll();
 
     /// <summary>The caret's line and column, for the status bar.</summary>
     public TextPosition CaretPosition => Editor.CaretPosition;
