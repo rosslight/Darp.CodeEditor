@@ -78,6 +78,9 @@ internal static class DefaultKeys
 
         KeyModifiers copyLines =
             KeyModifiers.Shift | KeyModifiers.Alt | (linux ? KeyModifiers.Control : KeyModifiers.None);
+        // Ahead of moving lines: they apply only while several signatures show.
+        yield return (CodeEditorCommands.ShowPrevParameterHint, new KeyGesture(Key.Up, KeyModifiers.Alt));
+        yield return (CodeEditorCommands.ShowNextParameterHint, new KeyGesture(Key.Down, KeyModifiers.Alt));
         yield return (CodeEditorCommands.MoveLinesUp, new KeyGesture(Key.Up, KeyModifiers.Alt));
         yield return (CodeEditorCommands.MoveLinesDown, new KeyGesture(Key.Down, KeyModifiers.Alt));
         yield return (CodeEditorCommands.CopyLinesUp, new KeyGesture(Key.Up, copyLines));

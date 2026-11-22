@@ -84,7 +84,7 @@ internal sealed class EditorView : IDisposable
             PerformKey,
             RunItemCommand
         );
-        _signatureHelp = new SignatureHelpController(editor, area, document, Highlighter);
+        _signatureHelp = new SignatureHelpController(editor, area, document, Highlighter, _caretMoves);
         _features =
         [
             Highlighter,

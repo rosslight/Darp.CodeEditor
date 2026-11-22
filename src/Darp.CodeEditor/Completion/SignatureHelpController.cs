@@ -1,10 +1,8 @@
 using Avalonia.Controls;
-using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
-using Avalonia.Layout;
 using Avalonia.Logging;
-using Avalonia.Media;
+using Avalonia.Threading;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
@@ -19,22 +17,23 @@ using Darp.CodeEditor.Popups;
 namespace Darp.CodeEditor.Completion;
 
 /// <summary>
-/// Signature help in one editor's view of a document: the signature of the call around the caret, with the parameter
-/// at the caret in bold and its documentation, in the editor's popup in the color theme's hover colors, above the
-/// caret's line, so that completion's list below it shows too.
+/// Signature help in one editor's view of a document: every signature of the call around the caret
+/// (<see cref="SignatureView"/>), with the parameter at the caret in bold and its documentation, in the editor's popup in
+/// the color theme's hover colors, above the caret's line, so that completion's list below it shows too.
 /// </summary>
 /// <remarks>
 /// <para>
 /// It opens on its command, and when the user types one of the server's trigger characters, such as <c>(</c>, and asks again at once on a
 /// retrigger character, such as <c>,</c>, while it is open. While it is open, each edit and caret move restarts a pause
 /// of 120 ms, VS Code's; once it passes, it asks again, telling the server the signature that shows. A newer request,
-/// and every edit, cancels the request under way, and an answer about older text is dropped. Up and Down show the
-/// other signatures, while completion's list is closed.
+/// and every edit, cancels the request under way, and an answer about older text is dropped. Up and Down, while
+/// completion's list is closed, and Alt+Up and Alt+Down choose the active signature while several show.
 /// </para>
 /// <para>
-/// <see cref="Close"/> ends it, for every reason it ends: Escape, leaving the call, when the server answers with none,
-/// the editor becoming read-only, the editor losing the keyboard focus, a server that starts or stops serving the
-/// document, new colors, the caret's line scrolling out of view, and the editor no longer showing the document.
+/// <see cref="Close"/> ends it, for every reason it ends: Escape, leaving the call, a click or drag that moves the caret,
+/// when the server answers with none, the editor becoming read-only, the editor losing the keyboard focus, a server that
+/// starts or stops serving the document, new colors, the caret's line scrolling out of view, and the editor no longer
+/// showing the document.
 /// </para>
 /// </remarks>
 internal sealed class SignatureHelpController : IEditorFeature
@@ -48,6 +47,7 @@ internal sealed class SignatureHelpController : IEditorFeature
     private readonly TextDocument _buffer;
     private readonly CodeDocument _document;
     private readonly BackgroundTextMateHighlighter _highlighter;
+    private readonly CaretMoves _caretMoves;
     private readonly PopupScrollViewer _content = new()
     {
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
@@ -72,10 +72,12 @@ internal sealed class SignatureHelpController : IEditorFeature
         CodeEditor editor,
         TextArea textArea,
         CodeDocument document,
-        BackgroundTextMateHighlighter highlighter
+        BackgroundTextMateHighlighter highlighter,
+        CaretMoves caretMoves
     )
     {
         _editor = editor;
+        _caretMoves = caretMoves;
         _textArea = textArea;
         _textView = textArea.TextView;
         _buffer = textArea.Document;
@@ -91,8 +93,8 @@ internal sealed class SignatureHelpController : IEditorFeature
         Paint();
         _popup = new EditorPopup(editor, _frame);
         _textArea.TextEntered += OnTextEntered;
-        _textArea.Caret.PositionChanged += OnEditOrCaretMove;
-        _buffer.Changed += OnEditOrCaretMove;
+        _textArea.Caret.PositionChanged += OnCaretPositionChanged;
+        _buffer.Changed += OnEdit;
         _document.LanguageFeaturesChanged += OnClosingChange;
         _popup.LeftView += OnClosingChange;
     }
@@ -113,7 +115,11 @@ internal sealed class SignatureHelpController : IEditorFeature
     /// <summary>Whether signature help shows, waits for an answer, or waits to ask again.</summary>
     private bool IsActive => _shown is not null || _request is not null || _pause is not null;
 
-    public void AddCommands(CommandTable commands) =>
+    /// <summary>Whether several signatures show, among which the keys choose.</summary>
+    private bool ShowsSeveral => _popup.IsOpen && _shown is { Signatures.Count: > 1 };
+
+    public void AddCommands(CommandTable commands)
+    {
         commands.Add(
             CodeEditorCommands.TriggerParameterHints,
             () => Ask(SignatureHelpTriggerKind.Invoked, null),
@@ -122,22 +128,37 @@ internal sealed class SignatureHelpController : IEditorFeature
                 _document.Features?.SignatureHelp is not null
                 && _textArea.ReadOnlySectionProvider.CanInsert(_textArea.Caret.Offset)
         );
+        commands.Add(
+            CodeEditorCommands.ShowPrevParameterHint,
+            () => Cycle(forward: false),
+            applies: () => ShowsSeveral
+        );
+        commands.Add(CodeEditorCommands.ShowNextParameterHint, () => Cycle(forward: true), applies: () => ShowsSeveral);
+    }
 
-    /// <summary>Up and Down, from the editor's key handler, while more than one signature shows: the others.</summary>
+    /// <summary>
+    /// Up and Down, from the editor's key handler after completion's list had them, while several signatures show: the
+    /// signature before or after the active one.
+    /// </summary>
     /// <returns>Whether the key was signature help's.</returns>
     public bool OnKeyDown(KeyEventArgs e)
     {
-        if (
-            _shown is not { Signatures.Count: > 1 } shown
-            || e.KeyModifiers != KeyModifiers.None
-            || e.Key is not (Key.Up or Key.Down)
-        )
-        {
+        if (!ShowsSeveral || e.KeyModifiers != KeyModifiers.None || e.Key is not (Key.Up or Key.Down))
             return false;
-        }
-        int count = shown.Signatures.Count;
-        Show(shown with { ActiveSignature = (shown.ActiveSignature + (e.Key == Key.Down ? 1 : count - 1)) % count });
+        Cycle(forward: e.Key == Key.Down);
         return true;
+    }
+
+    /// <summary>
+    /// Makes the signature after or before the active one active, around the ends, which the server learns when it is
+    /// asked again.
+    /// </summary>
+    private void Cycle(bool forward)
+    {
+        if (_shown is not { } shown)
+            return;
+        int count = shown.Signatures.Count;
+        Show(shown with { ActiveSignature = (shown.ActiveSignature + (forward ? 1 : count - 1)) % count });
     }
 
     /// <summary>Ends signature help: closes the popup, and cancels what is under way.</summary>
@@ -157,8 +178,8 @@ internal sealed class SignatureHelpController : IEditorFeature
     {
         Close();
         _textArea.TextEntered -= OnTextEntered;
-        _textArea.Caret.PositionChanged -= OnEditOrCaretMove;
-        _buffer.Changed -= OnEditOrCaretMove;
+        _textArea.Caret.PositionChanged -= OnCaretPositionChanged;
+        _buffer.Changed -= OnEdit;
         _document.LanguageFeaturesChanged -= OnClosingChange;
         _popup.LeftView -= OnClosingChange;
     }
@@ -173,13 +194,19 @@ internal sealed class SignatureHelpController : IEditorFeature
             Ask(SignatureHelpTriggerKind.TriggerCharacter, typed);
     }
 
-    /// <summary>
-    /// While active, an edit, also one that leaves the caret where it was, or a caret move outdates what is asked, and
-    /// restarts the pause.
-    /// </summary>
-    private void OnEditOrCaretMove(object? sender, EventArgs e)
+    /// <summary>While active, an edit, also one that leaves the caret where it was, restarts the pause.</summary>
+    private void OnEdit(object? sender, EventArgs e)
     {
         if (IsActive)
+            Wait();
+    }
+
+    /// <summary>A caret that the pointer moves ends signature help; any other move restarts the pause.</summary>
+    private void OnCaretPositionChanged(object? sender, EventArgs e)
+    {
+        if (_caretMoves.Mover == CaretMover.Pointer)
+            Close();
+        else if (IsActive)
             Wait();
     }
 
@@ -261,8 +288,9 @@ internal sealed class SignatureHelpController : IEditorFeature
     }
 
     /// <summary>
-    /// Shows <paramref name="help"/>'s active signature above the caret, once its documentation is read off the UI
-    /// thread, as the hover reads its Markdown.
+    /// Shows <paramref name="help"/> above the caret, once its documentation is read off the UI thread, as the hover
+    /// reads its Markdown: as much as a hover shows, the active signature first, then the others and the documentation,
+    /// so that a server's long signatures or documentation cost the UI thread no more than the largest hover.
     /// </summary>
     private async void Show(SignatureHelpInfo help)
     {
@@ -280,10 +308,14 @@ internal sealed class SignatureHelpController : IEditorFeature
             }.OfType<HoverText>(),
         ];
         TextMateGrammar? grammar = _highlighter.Grammar;
-        // As much as a hover shows, the signature first: a server's long signature or documentation costs the UI thread
-        // no more than the largest hover.
         var budget = new HoverBudget();
-        string label = budget.Take(signature.Label) ?? "";
+        string?[] labels = new string?[help.Signatures.Count];
+        labels[help.ActiveSignature] = budget.Take(signature.Label);
+        for (int i = 0; i < labels.Length; i++)
+        {
+            if (i != help.ActiveSignature)
+                labels[i] = budget.Take(help.Signatures[i].Label);
+        }
         try
         {
             IReadOnlyList<HoverBlock> blocks =
@@ -301,7 +333,7 @@ internal sealed class SignatureHelpController : IEditorFeature
                 _colors.CodeBackground,
                 _colors.CodeForeground
             );
-            _content.Content = View(help, signature, label, blocks, look, _colors.HoverBorder);
+            _content.Content = SignatureView.Create(help, labels, blocks, look, _colors, out Control active);
             _popup.Show(
                 _textView,
                 () =>
@@ -310,6 +342,8 @@ internal sealed class SignatureHelpController : IEditorFeature
                         Math.Min(_textArea.Caret.Offset, _textArea.Document.TextLength)
                     )
             );
+            // Once it is laid out: until then, it has no place to scroll to.
+            _editor.Dispatcher.Post(active.BringIntoView, DispatcherPriority.Loaded);
         }
         catch (OperationCanceledException) when (reading.IsCancellationRequested) { }
         catch (Exception e)
@@ -318,74 +352,6 @@ internal sealed class SignatureHelpController : IEditorFeature
                 .TryGet(LogEventLevel.Error, AssetFiles.LogArea)
                 ?.Log(this, "Showing signature help failed: {Exception}", e);
         }
-    }
-
-    /// <summary>
-    /// The signature as code, in the editor's font, colors and background, with the active parameter in bold; before
-    /// it which signature of how many, when there are more; below it the documentation.
-    /// </summary>
-    /// <param name="help">The signature help.</param>
-    /// <param name="signature">The signature that shows.</param>
-    /// <param name="label">Its label, as much of it as the budget left, with "…" where it was cut.</param>
-    /// <param name="documentation">The documentation.</param>
-    /// <param name="look">How code looks.</param>
-    /// <param name="rule">The color of a line in the documentation.</param>
-    private static Control View(
-        SignatureHelpInfo help,
-        SignatureInfo signature,
-        string label,
-        IReadOnlyList<HoverBlock> documentation,
-        CodeLook look,
-        IBrush rule
-    )
-    {
-        var inlines = new InlineCollection();
-        // The active parameter, in what is left of the label.
-        int kept = label.Length == signature.Label.Length ? label.Length : label.Length - 1;
-        (int start, int end) =
-            signature.ActiveParameter >= 0 && signature.Parameters[signature.ActiveParameter] is var active
-                ? (Math.Min(active.Start, kept), Math.Min(active.Start + active.Length, kept))
-                : (0, 0);
-        if (end > start)
-        {
-            inlines.Add(new Run(label[..start]));
-            inlines.Add(new Run(label[start..end]) { FontWeight = FontWeight.Bold });
-            inlines.Add(new Run(label[end..]));
-        }
-        else
-        {
-            inlines.Add(new Run(label));
-        }
-        var code = new PopupBox
-        {
-            Background = look.Background,
-            Padding = new Avalonia.Thickness(6, 4),
-            Child = new PopupText
-            {
-                Inlines = inlines,
-                FontFamily = look.FontFamily,
-                FontSize = look.FontSize,
-                Foreground = look.Foreground,
-                TextWrapping = TextWrapping.Wrap,
-            },
-        };
-        var line = new PopupDock();
-        if (help.Signatures.Count > 1)
-        {
-            var counter = new PopupText
-            {
-                Text = $"{help.ActiveSignature + 1}/{help.Signatures.Count}",
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Avalonia.Thickness(0, 0, 6, 0),
-            };
-            DockPanel.SetDock(counter, Dock.Left);
-            line.Children.Add(counter);
-        }
-        line.Children.Add(code);
-        var panel = new PopupStack { Spacing = 6, Children = { line } };
-        if (documentation.Count > 0)
-            panel.Children.Add(HoverView.Create(documentation, look, rule));
-        return panel;
     }
 
     private void Paint() =>

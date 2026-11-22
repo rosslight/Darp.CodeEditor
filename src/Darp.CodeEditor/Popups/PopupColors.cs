@@ -55,6 +55,12 @@ internal sealed record PopupColors
     /// <summary><c>editorHoverWidget.border</c>, also the line between a hover's parts.</summary>
     public required IBrush HoverBorder { get; init; }
 
+    /// <summary><c>editorHoverWidget.highlightForeground</c>: signature help's active parameter.</summary>
+    public required IBrush HoverHighlight { get; init; }
+
+    /// <summary><c>list.inactiveSelectionBackground</c>: behind signature help's active signature.</summary>
+    public required IBrush ListInactiveSelectionBackground { get; init; }
+
     /// <summary>The text area's background: behind code.</summary>
     public required IBrush CodeBackground { get; init; }
 
@@ -116,6 +122,10 @@ internal sealed record PopupColors
             HoverBackground = Brush(Own("editorHoverWidget.background") ?? widgetBackground),
             HoverForeground = Brush(Own("editorHoverWidget.foreground") ?? widgetForeground),
             HoverBorder = Brush(Own("editorHoverWidget.border") ?? widgetBorder),
+            HoverHighlight = Brush(Own("editorHoverWidget.highlightForeground") ?? listHighlight),
+            ListInactiveSelectionBackground = Brush(
+                Own("list.inactiveSelectionBackground") ?? Hex(dark ? 0xFF37373D : 0xFFE4E6F1)
+            ),
             CodeBackground = text.Background,
             CodeForeground = text.Foreground,
             Slider = (

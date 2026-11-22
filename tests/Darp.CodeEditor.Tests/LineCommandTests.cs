@@ -304,8 +304,10 @@ public sealed class LineCommandTests(UiFixture ui)
         KeyModifiers command = mac ? KeyModifiers.Meta : KeyModifiers.Control;
         KeyModifiers copy = KeyModifiers.Shift | KeyModifiers.Alt | (linux ? KeyModifiers.Control : KeyModifiers.None);
 
-        Commands(mac, linux, Keys.Up, KeyModifiers.Alt).ShouldBe([CodeEditorCommands.MoveLinesUp]);
-        Commands(mac, linux, Keys.Down, KeyModifiers.Alt).ShouldBe([CodeEditorCommands.MoveLinesDown]);
+        Commands(mac, linux, Keys.Up, KeyModifiers.Alt)
+            .ShouldBe([CodeEditorCommands.ShowPrevParameterHint, CodeEditorCommands.MoveLinesUp]);
+        Commands(mac, linux, Keys.Down, KeyModifiers.Alt)
+            .ShouldBe([CodeEditorCommands.ShowNextParameterHint, CodeEditorCommands.MoveLinesDown]);
         Commands(mac, linux, Keys.Up, copy).ShouldBe([CodeEditorCommands.CopyLinesUp]);
         Commands(mac, linux, Keys.Down, copy).ShouldBe([CodeEditorCommands.CopyLinesDown]);
         Commands(mac, linux, Keys.K, command | KeyModifiers.Shift).ShouldBe([CodeEditorCommands.DeleteLines]);
