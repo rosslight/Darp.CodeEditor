@@ -7,7 +7,7 @@ using Sample.Localization;
 namespace Sample.Settings;
 
 /// <summary>
-/// The user's choices: the theme and the language on the settings page, and the view's options in the title bar.
+/// The user's choices: the theme, the language and the editor's keys on the settings page, and the view's options in the title bar.
 /// They last as long as the app runs.
 /// </summary>
 public sealed partial class AppSettings : ObservableObject
@@ -28,6 +28,9 @@ public sealed partial class AppSettings : ObservableObject
     /// <summary>The theme variant of the whole app. Editors follow it with Light+ or Dark+.</summary>
     [ObservableProperty]
     public partial ThemeChoice AppTheme { get; set; }
+
+    /// <summary>The keys of the editor's commands.</summary>
+    public EditorHotkeys Hotkeys { get; } = new();
 
     public IReadOnlyList<CultureInfo> Cultures => Strings.Cultures;
 

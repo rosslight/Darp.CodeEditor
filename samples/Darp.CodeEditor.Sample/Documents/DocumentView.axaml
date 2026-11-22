@@ -21,25 +21,25 @@
                 <fa:FAMenuFlyoutItem
                     Text="{Binding Cut, Source={x:Static loc:Strings.Default}}"
                     IconSource="Cut"
-                    InputGesture="Ctrl+X"
+                    InputGesture="{Binding Settings.Hotkeys.Cut.Gesture}"
                     Click="OnCut"
                 />
                 <fa:FAMenuFlyoutItem
                     Text="{Binding Copy, Source={x:Static loc:Strings.Default}}"
                     IconSource="Copy"
-                    InputGesture="Ctrl+C"
+                    InputGesture="{Binding Settings.Hotkeys.Copy.Gesture}"
                     Click="OnCopy"
                 />
                 <fa:FAMenuFlyoutItem
                     Text="{Binding Paste, Source={x:Static loc:Strings.Default}}"
                     IconSource="Paste"
-                    InputGesture="Ctrl+V"
+                    InputGesture="{Binding Settings.Hotkeys.Paste.Gesture}"
                     Click="OnPaste"
                 />
                 <fa:FAMenuFlyoutSeparator />
                 <fa:FAMenuFlyoutItem
                     Text="{Binding SelectAll, Source={x:Static loc:Strings.Default}}"
-                    InputGesture="Ctrl+A"
+                    InputGesture="{Binding Settings.Hotkeys.SelectAll.Gesture}"
                     Click="OnSelectAll"
                 />
             </fa:FAMenuFlyout>

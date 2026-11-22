@@ -3,6 +3,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:fa="using:FluentAvalonia.UI.Controls"
     xmlns:globalization="using:System.Globalization"
+    xmlns:loc="using:Sample.Localization"
     xmlns:local="using:Sample"
     xmlns:settings="using:Sample.Settings"
     x:Class="Sample.Settings.SettingsView"
@@ -15,6 +16,12 @@
         </Style>
         <Style Selector="TextBlock.section.first">
             <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+        <Style Selector="Button.key-action">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="6" />
+            <Setter Property="Margin" Value="4,0,0,0" />
         </Style>
         <Style Selector="fa|FASettingsExpander ComboBox">
             <Setter Property="MinWidth" Value="200" />
@@ -59,6 +66,51 @@
                             </ComboBox.ItemTemplate>
                         </ComboBox>
                     </fa:FASettingsExpander.Footer>
+                </fa:FASettingsExpander>
+
+                <TextBlock Classes="section" Text="{Binding Strings.KeyboardShortcuts}" />
+                <fa:FASettingsExpander
+                    IconSource="Keyboard"
+                    Header="{Binding Strings.EditorCommands}"
+                    Description="{Binding Strings.EditorCommandsDescription}"
+                    ItemsSource="{Binding Settings.Hotkeys.Commands}"
+                >
+                    <fa:FASettingsExpander.Footer>
+                        <Button Content="{Binding Strings.ResetAll}" Click="OnResetAllKeys" />
+                    </fa:FASettingsExpander.Footer>
+                    <fa:FASettingsExpander.ItemTemplate>
+                        <DataTemplate x:DataType="settings:CommandHotkey">
+                            <Grid ColumnDefinitions="*,Auto,36,36">
+                                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+                                <Button
+                                    Grid.Column="1"
+                                    MinWidth="220"
+                                    Content="{Binding KeyText}"
+                                    Classes.accent="{Binding IsRecording}"
+                                    Click="OnRecordKey"
+                                    LostFocus="OnRecordKeyLostFocus"
+                                />
+                                <Button
+                                    Grid.Column="2"
+                                    Classes="key-action"
+                                    IsVisible="{Binding HasKey}"
+                                    ToolTip.Tip="{Binding RemoveKey, Source={x:Static loc:Strings.Default}}"
+                                    Click="OnRemoveKey"
+                                >
+                                    <fa:FASymbolIcon Symbol="Dismiss" />
+                                </Button>
+                                <Button
+                                    Grid.Column="3"
+                                    Classes="key-action"
+                                    IsVisible="{Binding IsChanged}"
+                                    ToolTip.Tip="{Binding ResetKey, Source={x:Static loc:Strings.Default}}"
+                                    Click="OnResetKey"
+                                >
+                                    <fa:FASymbolIcon Symbol="Refresh" />
+                                </Button>
+                            </Grid>
+                        </DataTemplate>
+                    </fa:FASettingsExpander.ItemTemplate>
                 </fa:FASettingsExpander>
 
                 <TextBlock Classes="section" Text="{Binding Strings.About}" />

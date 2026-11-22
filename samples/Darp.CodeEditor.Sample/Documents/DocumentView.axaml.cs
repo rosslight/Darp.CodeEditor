@@ -83,6 +83,7 @@ public sealed partial class DocumentView : UserControl
         if (_workspace is not null)
             _workspace.PropertyChanged -= OnWorkspaceChanged;
         _workspace = (DataContext as MainViewModel)?.Workspace;
+        (DataContext as MainViewModel)?.Settings.Hotkeys.Use(Editor.KeyBindings);
         if (_workspace is not null)
             _workspace.PropertyChanged += OnWorkspaceChanged;
         Show(_workspace?.Current);

@@ -183,6 +183,99 @@
   <data name="FontSize" xml:space="preserve">
     <value>Schriftgröße</value>
   </data>
+  <data name="KeyboardShortcuts" xml:space="preserve">
+    <value>Tastenkürzel</value>
+  </data>
+  <data name="EditorCommands" xml:space="preserve">
+    <value>Editorbefehle</value>
+  </data>
+  <data name="EditorCommandsDescription" xml:space="preserve">
+    <value>Klicken Sie auf eine Taste und drücken Sie die neue. Eine bereits belegte Taste wechselt zum neuen Befehl.</value>
+  </data>
+  <data name="ResetAll" xml:space="preserve">
+    <value>Alle zurücksetzen</value>
+  </data>
+  <data name="PressKey" xml:space="preserve">
+    <value>Taste drücken…</value>
+  </data>
+  <data name="NoKey" xml:space="preserve">
+    <value>Keine Taste</value>
+  </data>
+  <data name="RemoveKey" xml:space="preserve">
+    <value>Taste entfernen</value>
+  </data>
+  <data name="ResetKey" xml:space="preserve">
+    <value>Auf Standard zurücksetzen</value>
+  </data>
+  <data name="CommandFindNext" xml:space="preserve">
+    <value>Weitersuchen</value>
+  </data>
+  <data name="CommandFindPrevious" xml:space="preserve">
+    <value>Rückwärts suchen</value>
+  </data>
+  <data name="CommandCommentLine" xml:space="preserve">
+    <value>Kommentar ein/aus</value>
+  </data>
+  <data name="CommandMoveLinesUp" xml:space="preserve">
+    <value>Zeilen nach oben verschieben</value>
+  </data>
+  <data name="CommandMoveLinesDown" xml:space="preserve">
+    <value>Zeilen nach unten verschieben</value>
+  </data>
+  <data name="CommandCopyLinesUp" xml:space="preserve">
+    <value>Zeilen nach oben kopieren</value>
+  </data>
+  <data name="CommandCopyLinesDown" xml:space="preserve">
+    <value>Zeilen nach unten kopieren</value>
+  </data>
+  <data name="CommandDeleteLines" xml:space="preserve">
+    <value>Zeilen löschen</value>
+  </data>
+  <data name="CommandInsertLineAfter" xml:space="preserve">
+    <value>Zeile darunter einfügen</value>
+  </data>
+  <data name="CommandInsertLineBefore" xml:space="preserve">
+    <value>Zeile darüber einfügen</value>
+  </data>
+  <data name="CommandIndentLines" xml:space="preserve">
+    <value>Zeilen einrücken</value>
+  </data>
+  <data name="CommandOutdentLines" xml:space="preserve">
+    <value>Zeilen ausrücken</value>
+  </data>
+  <data name="CommandExpandLineSelection" xml:space="preserve">
+    <value>Zeile auswählen</value>
+  </data>
+  <data name="CommandTriggerSuggest" xml:space="preserve">
+    <value>Vorschläge anzeigen</value>
+  </data>
+  <data name="CommandToggleSuggestionDetails" xml:space="preserve">
+    <value>Vorschlagsdetails ein/aus</value>
+  </data>
+  <data name="CommandAcceptSuggestion" xml:space="preserve">
+    <value>Vorschlag übernehmen (einfügen)</value>
+  </data>
+  <data name="CommandAcceptAlternative" xml:space="preserve">
+    <value>Vorschlag übernehmen (ersetzen)</value>
+  </data>
+  <data name="CommandTriggerParameterHints" xml:space="preserve">
+    <value>Parameterhinweise anzeigen</value>
+  </data>
+  <data name="CommandPreviousSignature" xml:space="preserve">
+    <value>Vorherige Signatur</value>
+  </data>
+  <data name="CommandNextSignature" xml:space="preserve">
+    <value>Nächste Signatur</value>
+  </data>
+  <data name="CommandShowHover" xml:space="preserve">
+    <value>Hover anzeigen</value>
+  </data>
+  <data name="CommandNextProblem" xml:space="preserve">
+    <value>Nächstes Problem</value>
+  </data>
+  <data name="CommandPreviousProblem" xml:space="preserve">
+    <value>Vorheriges Problem</value>
+  </data>
   <data name="About" xml:space="preserve">
     <value>Info</value>
   </data>

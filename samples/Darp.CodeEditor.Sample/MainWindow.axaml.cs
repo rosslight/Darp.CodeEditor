@@ -550,10 +550,23 @@ public sealed partial class MainWindow : FAAppWindow
     private static OpenDocument? DocumentOf(object? sender) => (sender as Control)?.DataContext as OpenDocument;
 
     private void AddShortcut(string gesture, Action action) =>
-        KeyBindings.Add(new KeyBinding { Gesture = KeyGesture.Parse(gesture), Command = new RelayCommand(action) });
+        KeyBindings.Add(
+            new KeyBinding
+            {
+                Gesture = KeyGesture.Parse(gesture),
+                Command = new RelayCommand(action, IsNotRecordingKey),
+            }
+        );
 
     private void AddShortcut(string gesture, Func<Task> action) =>
         KeyBindings.Add(
-            new KeyBinding { Gesture = KeyGesture.Parse(gesture), Command = new AsyncRelayCommand(action) }
+            new KeyBinding
+            {
+                Gesture = KeyGesture.Parse(gesture),
+                Command = new AsyncRelayCommand(action, IsNotRecordingKey),
+            }
         );
+
+    /// <summary>Key bindings run before key events, so a key being recorded on the settings page must pass them.</summary>
+    private bool IsNotRecordingKey() => Settings?.Hotkeys.Recording is null;
 }
