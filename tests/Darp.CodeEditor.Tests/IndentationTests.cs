@@ -328,7 +328,7 @@ public sealed class IndentationTests(UiFixture ui)
     public Task Enter_replaces_a_selection_around_read_only_text_and_keeps_that_text() =>
         _ui.Run(() =>
         {
-            using EditorWindow window = MarkedText.Show("ab«cdefg»h", CodeLanguage.PlainText);
+            using EditorWindow window = MarkedText.Show("ab«cdefg»h\nz", CodeLanguage.PlainText);
             TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
             var readOnly = new TextSegmentReadOnlySectionProvider<TextSegment>(textArea.Document);
             readOnly.Segments.Add(new TextSegment { StartOffset = 4, Length = 2 });
@@ -336,7 +336,7 @@ public sealed class IndentationTests(UiFixture ui)
 
             window.Press(Key.Enter);
 
-            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe("ab\nefh");
+            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe("ab\nefh\nz");
         });
 
     [Fact]
