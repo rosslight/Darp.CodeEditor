@@ -19,6 +19,8 @@ public sealed class IndentationTests(UiFixture ui)
         _ui.Run(() =>
         {
             CodeDocument document = CodeDocument.Create(CodeLanguage.Json, "ab\n\tx");
+            // Spaces, though the text indents with a tab.
+            document.Indentation = Indentation.Spaces(4);
             var first = new CodeEditor { Document = document };
             var second = new CodeEditor { Document = document };
             using var window = new EditorWindow(first, new StackPanel { Children = { first, second } });
@@ -44,10 +46,11 @@ public sealed class IndentationTests(UiFixture ui)
     public Task Tab_and_Shift_Tab_indent_and_outdent_the_selected_lines() =>
         _ui.Run(() =>
         {
+            // The text indents with 2 spaces, and so does the document.
             using EditorWindow window = MarkedText.Show("«a\n  b»\nc", CodeLanguage.Json);
 
             window.Press(Key.Tab);
-            MarkedText.Of(window).ShouldBe("«    a\n      b»\nc");
+            MarkedText.Of(window).ShouldBe("«  a\n    b»\nc");
 
             window.Press(Key.Tab, KeyModifiers.Shift);
             window.Press(Key.Tab, KeyModifiers.Shift);
@@ -73,6 +76,19 @@ public sealed class IndentationTests(UiFixture ui)
             CodeDocument document = window.Editor.Document.ShouldNotBeNull();
             document.Undo();
             document.Text.ShouldBe(MarkedText.Parse(marked).Text);
+        });
+
+    [Theory]
+    [InlineData("a|\nb\r\nc\r\nd", "a\r\n|\nb\r\nc\r\nd")]
+    [InlineData("a|", "a\n|")]
+    public Task Enter_inserts_the_documents_line_break_whatever_the_line_ends_with(string marked, string expected) =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show(marked, CodeLanguage.PlainText);
+
+            window.Press(Key.Enter);
+
+            MarkedText.Of(window).ShouldBe(NewLines.In(expected, start: marked));
         });
 
     [Theory]

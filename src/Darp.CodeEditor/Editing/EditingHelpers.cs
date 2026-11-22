@@ -4,6 +4,7 @@ using Avalonia.Input;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
+using Darp.CodeEditor.Commands;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.Loading;
 
@@ -26,15 +27,10 @@ namespace Darp.CodeEditor.Editing;
 /// types, found on the UI thread within a short time limit. While they are unknown, such a pair does not close.
 /// </para>
 /// </remarks>
-internal sealed class EditingHelpers : IDisposable
+internal sealed class EditingHelpers : IEditorFeature
 {
     /// <summary>The characters before which a pair closes, as VS Code's default <c>autoCloseBefore</c>.</summary>
     private const string CloseBefore = ";:.,=}])> \n\t";
-
-    /// <summary>The key that commands hold with Ctrl elsewhere, as AvaloniaEdit decides it: Cmd on macOS.</summary>
-    private static readonly KeyModifiers s_command = OperatingSystem.IsMacOS()
-        ? KeyModifiers.Meta
-        : KeyModifiers.Control;
 
     private readonly TextArea _textArea;
     private readonly CodeDocument _document;
@@ -75,26 +71,20 @@ internal sealed class EditingHelpers : IDisposable
         _autoClosed.Clear();
     }
 
-    /// <summary>Backspace and Ctrl+/, from the editor's key handler, while the text area has the keyboard.</summary>
+    public void AddCommands(CommandTable commands) =>
+        commands.Add(
+            CodeEditorCommands.CommentLine,
+            ToggleComment,
+            CommandNeeds.TextFocus | CommandNeeds.Writable,
+            () => Configuration is { LineComment: not null } or { BlockComment: not null }
+        );
+
+    /// <summary>Backspace, from the editor's key handler, while the text area has the keyboard.</summary>
     public void OnKeyDown(KeyEventArgs e)
     {
         if (e.Key == Key.Back && e.KeyModifiers == KeyModifiers.None && TypingOffsets() is { } offsets)
             e.Handled = DeletePairs(offsets);
-        else if (IsToggleComment(e))
-        {
-            ToggleComment();
-            e.Handled = true;
-        }
     }
-
-    /// <summary>
-    /// Ctrl+/, or Cmd+/ on macOS: the key that types a slash, also on layouts where it needs Shift, or the slash key
-    /// of a US layout or the number pad.
-    /// </summary>
-    private static bool IsToggleComment(KeyEventArgs e) =>
-        e.KeyModifiers.HasFlag(s_command)
-        && !e.KeyModifiers.HasFlag(KeyModifiers.Alt)
-        && (e.KeySymbol == "/" || (e.KeyModifiers == s_command && e.Key is Key.Oem2 or Key.Divide));
 
     private void OnTextEntering(object? sender, TextInputEventArgs e)
     {
@@ -117,6 +107,9 @@ internal sealed class EditingHelpers : IDisposable
             else
                 _closing = PairToClose(typed, offsets);
         }
+        // Text of several characters, as from an input method.
+        else if (e.Text is { } text && text.AsSpan().IndexOfAny('\r', '\n') >= 0)
+            e.Text = TextUtilities.NormalizeNewLines(text, _document.LineBreak);
     }
 
     /// <summary>
@@ -402,12 +395,7 @@ internal sealed class EditingHelpers : IDisposable
             _textArea.ClearSelection();
             int caret = _textArea.Caret.Offset;
             DocumentLine line = Buffer.GetLineByOffset(caret);
-            NewLine newLine = NewLineAt(
-                line,
-                Buffer.GetText(line),
-                caret - line.Offset,
-                TextUtilities.GetNewLineFromDocument(Buffer, line.LineNumber)
-            );
+            NewLine newLine = NewLineAt(line, Buffer.GetText(line), caret - line.Offset, _document.LineBreak);
             int replaced = CanChange(caret, newLine.Replaced) ? newLine.Replaced : 0;
             Buffer.Replace(caret, replaced, newLine.Text);
             _textArea.Caret.Offset = caret + newLine.Caret;
@@ -600,7 +588,7 @@ internal sealed class EditingHelpers : IDisposable
     }
 
     /// <summary>
-    /// Ctrl+/: toggles line comments on the selected lines, or the caret's, with the language's line comment, or else
+    /// Toggles line comments on the selected lines, or the caret's, with the language's line comment, or else
     /// with its block comment around them.
     /// </summary>
     private void ToggleComment()

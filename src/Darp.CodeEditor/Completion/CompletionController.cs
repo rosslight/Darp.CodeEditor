@@ -5,6 +5,7 @@ using Avalonia.Logging;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
+using Darp.CodeEditor.Commands;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
 using Darp.CodeEditor.LanguageClient;
@@ -49,7 +50,7 @@ namespace Darp.CodeEditor.Completion;
 /// <c>$/cancelRequest</c>, and so does a newer request; a late answer is dropped.
 /// </para>
 /// </remarks>
-internal sealed class CompletionController : IDisposable
+internal sealed class CompletionController : IEditorFeature
 {
     private readonly CodeEditor _editor;
     private readonly TextArea _textArea;
@@ -133,19 +134,23 @@ internal sealed class CompletionController : IDisposable
         }
     }
 
+    public void AddCommands(CommandTable commands) =>
+        commands.Add(
+            CodeEditorCommands.TriggerSuggest,
+            () => Ask(new CompletionTrigger(CompletionTriggerKind.Invoked)),
+            CommandNeeds.TextFocus | CommandNeeds.Writable,
+            () =>
+                _document.Features?.Completion is not null
+                && _textArea.ReadOnlySectionProvider.CanInsert(_textArea.Caret.Offset)
+        );
+
     /// <summary>
-    /// The keys of completion, from the editor's key handler while the text area has the keyboard: Ctrl+Space, and
-    /// while the list shows, the keys that select and commit.
+    /// The keys of completion's list, from the editor's key handler while the text area has the keyboard and the list
+    /// shows: those that select and commit.
     /// </summary>
     /// <returns>Whether the key was completion's.</returns>
     public bool OnKeyDown(KeyEventArgs e)
     {
-        // Also on macOS, where Cmd takes Ctrl's place for other keys: Cmd+Space is the system's search.
-        if (e.Key == Key.Space && e.KeyModifiers == KeyModifiers.Control)
-        {
-            Ask(new CompletionTrigger(CompletionTriggerKind.Invoked));
-            return true;
-        }
         if (_session is not { IsShowing: true } session || e.KeyModifiers != KeyModifiers.None)
             return false;
         int count = session.Items.Count;
@@ -641,7 +646,7 @@ internal sealed class CompletionController : IDisposable
             Math.Min(_buffer.GetLineByOffset(caret).EndOffset, caret + (item.Edit.Range.End - request.Offset))
         );
         RenderedSnippet? snippet = item.Snippet is { } source ? _snippets.Render(source, range.Start) : null;
-        var main = new CompletionEdit(range, snippet?.Text ?? item.Edit.NewText);
+        var main = new CompletionEdit(range, snippet?.Text ?? InLineBreaks(item.Edit.NewText));
         Resolve? late = null;
         if (item.AdditionalEdits is null && answer.List.Resolves)
         {
@@ -735,7 +740,16 @@ internal sealed class CompletionController : IDisposable
 
     /// <summary>Edits in the text of <paramref name="snapshot"/>, moved to the current text.</summary>
     private IEnumerable<CompletionEdit> Mapped(TextSnapshot snapshot, IEnumerable<CompletionEdit> edits) =>
-        edits.Select(edit => edit with { Range = _document.MapToCurrent(snapshot, edit.Range) });
+        edits.Select(edit =>
+            edit with
+            {
+                Range = _document.MapToCurrent(snapshot, edit.Range),
+                NewText = InLineBreaks(edit.NewText),
+            }
+        );
+
+    /// <summary><paramref name="text"/> from the server in the document's line breaks.</summary>
+    private string InLineBreaks(string text) => TextUtilities.NormalizeNewLines(text, _document.LineBreak);
 
     /// <summary><paramref name="first"/> and the edits that overlap none before them.</summary>
     private static List<CompletionEdit> WithoutOverlaps(List<CompletionEdit> first, IEnumerable<CompletionEdit> more)

@@ -24,6 +24,8 @@ public sealed class CommentTests(UiFixture ui)
             await CodeLanguage.Json.Loaded;
             using EditorWindow window = MarkedText.Show(marked, CodeLanguage.Json);
             CodeDocument document = window.Editor.Document.ShouldNotBeNull();
+            // Tabs 4 columns wide, whatever the text suggests.
+            document.Indentation = Indentation.Spaces(4);
 
             window.Press(Key.Oem2, EditorWindow.Command);
             document.Text.ShouldBe(expected);

@@ -237,6 +237,22 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_default_key_in_the_text_closes_the_hover() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer("--no-diagnostics");
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "word");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await server.StartAsync();
+            await HoverAsync(window, 1, "word is a word in");
+
+            window.Press(Key.C, EditorWindow.Command);
+
+            Popup(window).ShouldBeNull();
+        });
+
+    [Fact]
     public Task Escape_ends_a_hover_that_still_waits_for_its_server() =>
         _ui.Run(async () =>
         {
