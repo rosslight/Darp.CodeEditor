@@ -11,12 +11,15 @@ internal static class DefaultKeys
 {
     /// <summary>The bindings of this operating system, for <paramref name="editor"/>.</summary>
     public static IEnumerable<KeyBinding> For(CodeEditor editor) =>
-        Table(OperatingSystem.IsMacOS(), OperatingSystem.IsLinux())
-            .Select(key => new KeyBinding
-            {
-                Gesture = key.Gesture,
-                Command = new KeyCommand(editor, key.Id, key.Gesture),
-            });
+        Table(OperatingSystem.IsMacOS(), OperatingSystem.IsLinux()).Select(key => Binding(editor, key.Id, key.Gesture));
+
+    /// <summary>A binding that names its command in <c>CommandParameter</c>, so that an app can find and move it.</summary>
+    private static KeyBinding Binding(CodeEditor editor, string id, KeyGesture gesture)
+    {
+        var binding = new KeyBinding { Gesture = gesture, CommandParameter = id };
+        binding.Command = new KeyCommand(editor, id, binding);
+        return binding;
+    }
 
     /// <summary>Puts the defaults that remain behind the app's bindings, in their order.</summary>
     public static void MoveLast(List<KeyBinding> bindings)
@@ -111,13 +114,13 @@ internal static class DefaultKeys
     {
         private readonly CodeEditor _editor;
         private readonly string _id;
-        private readonly KeyGesture _gesture;
+        private readonly KeyBinding _binding;
 
-        public KeyCommand(CodeEditor editor, string id, KeyGesture gesture)
+        public KeyCommand(CodeEditor editor, string id, KeyBinding binding)
         {
             _editor = editor;
             _id = id;
-            _gesture = gesture;
+            _binding = binding;
         }
 
         /// <summary>Never raised: Avalonia asks at each key.</summary>
@@ -129,6 +132,6 @@ internal static class DefaultKeys
 
         public bool CanExecute(object? parameter) => _editor.View?.CanRun(_id) == true;
 
-        public void Execute(object? parameter) => _editor.View?.RunKey(_id, _gesture);
+        public void Execute(object? parameter) => _editor.View?.RunKey(_id, _binding.Gesture);
     }
 }

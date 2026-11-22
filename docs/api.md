@@ -145,6 +145,10 @@ first attached, after those of the app's XAML, so the app's run first:
 // Works from the view's constructor on. A binding added from code after the editor is shown goes first with Insert(0, …).
 var replace = KeyGesture.Parse("Ctrl+H");
 Editor.KeyBindings.RemoveAll(binding => binding.Gesture == replace);
+
+// Each default binding names its command, so an app can show its key or move it.
+KeyBinding cut = Editor.KeyBindings.First(binding => binding.CommandParameter is CodeEditorCommands.Cut);
+cut.Gesture = KeyGesture.Parse("Ctrl+Shift+X");
 ```
 
 | Command (`CodeEditorCommands`) | Default keys |
