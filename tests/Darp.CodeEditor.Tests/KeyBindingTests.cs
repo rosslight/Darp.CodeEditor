@@ -322,6 +322,24 @@ public sealed class KeyBindingTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_default_binding_names_its_command_and_moves_to_another_key() =>
+        _ui.Run(() =>
+        {
+            var editor = new CodeEditor { Document = CodeDocument.Create(CodeLanguage.PlainText, "text") };
+            using var window = new EditorWindow(editor);
+            KeyBinding selectAll = editor.KeyBindings.Single(binding =>
+                binding.CommandParameter is CodeEditorCommands.SelectAll
+            );
+
+            selectAll.Gesture = new KeyGesture(Key.J, s_command);
+            window.Press(Key.A, s_command);
+            editor.Selection.ShouldBe(new TextSelection(0));
+
+            window.Press(Key.J, s_command);
+            editor.Selection.ShouldBe(new TextSelection(0, 4));
+        });
+
+    [Fact]
     public Task RunCommand_from_a_context_menu_runs_on_the_text() =>
         _ui.Run(() =>
         {

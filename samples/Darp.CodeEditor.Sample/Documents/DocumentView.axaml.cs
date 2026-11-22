@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Interactivity;
 using Darp.CodeEditor;
 using Sample.Localization;
 
@@ -31,6 +32,14 @@ public sealed partial class DocumentView : UserControl
         };
     }
 
+    private void OnCut(object? sender, RoutedEventArgs e) => Editor.Cut();
+
+    private void OnCopy(object? sender, RoutedEventArgs e) => Editor.Copy();
+
+    private void OnPaste(object? sender, RoutedEventArgs e) => Editor.Paste();
+
+    private void OnSelectAll(object? sender, RoutedEventArgs e) => Editor.SelectAll();
+
     /// <summary>The caret's line and column, for the status bar.</summary>
     public TextPosition CaretPosition => Editor.CaretPosition;
 
@@ -53,7 +62,7 @@ public sealed partial class DocumentView : UserControl
     public void InsertDateTime()
     {
         // Replaces the selection, as typing does, in one step that the user can undo.
-        Editor.Document?.Replace(Editor.Selection.Range, DateTime.Now.ToString("g", Strings.Current.Culture));
+        Editor.Document?.Replace(Editor.Selection.Range, DateTime.Now.ToString("g", Strings.Default.Culture));
         Editor.Focus();
     }
 
@@ -74,6 +83,7 @@ public sealed partial class DocumentView : UserControl
         if (_workspace is not null)
             _workspace.PropertyChanged -= OnWorkspaceChanged;
         _workspace = (DataContext as MainViewModel)?.Workspace;
+        (DataContext as MainViewModel)?.Settings.Hotkeys.Use(Editor.KeyBindings);
         if (_workspace is not null)
             _workspace.PropertyChanged += OnWorkspaceChanged;
         Show(_workspace?.Current);

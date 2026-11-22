@@ -104,7 +104,7 @@ rather than its view belong to the document, as in Monaco and CodeMirror.
 | `CaretPosition` | the caret's line and column, read-only and bindable, for status bars |
 | `ScrollTo(TextRange)` | brings a range into view: not at all when it is visible, centered when it is not |
 | `OpenSearch(replace)` | the search or replace bar, for a Find button; Ctrl+F and Ctrl+H open them too |
-| `Cut()`, `Copy()`, `Paste()`, `SelectAll()` | for an app's Edit menu; the keys and the editor's context menu do the same, and the document's `Undo` and `Redo` the rest |
+| `Cut()`, `Copy()`, `Paste()`, `SelectAll()` | for an app's Edit menu: shorthands for `RunCommand` with their commands; the document's `Undo` and `Redo` do the rest |
 | `RunCommand(id)` | runs one of `CodeEditorCommands` from an app's button, menu or key binding; false where it does not apply |
 | `SaveViewState()`, `RestoreViewState(state)` | the caret, the selection and the scroll position, for an app that switches one editor between documents |
 
@@ -145,6 +145,10 @@ first attached, after those of the app's XAML, so the app's run first:
 // Works from the view's constructor on. A binding added from code after the editor is shown goes first with Insert(0, …).
 var replace = KeyGesture.Parse("Ctrl+H");
 Editor.KeyBindings.RemoveAll(binding => binding.Gesture == replace);
+
+// Each default binding names its command, so an app can show its key or move it.
+KeyBinding cut = Editor.KeyBindings.First(binding => binding.CommandParameter is CodeEditorCommands.Cut);
+cut.Gesture = KeyGesture.Parse("Ctrl+Shift+X");
 ```
 
 | Command (`CodeEditorCommands`) | Default keys |
@@ -192,8 +196,9 @@ runs.
   with the caret and text unchanged, the key does its normal action: Tab goes to a snippet's next stop or types, and
   Enter and Shift+Enter break the line. `RunCommand` has no key, so it has no such action.
 
-**Context menu:** a plain `ContextMenu` with Cut, Copy, Paste and Select All, which an app changes through its `Items`
-or replaces. A right click moves the caret, unless it is inside the selection.
+**Context menu:** a `MenuFlyout` in the editor's `ContextFlyout`, with Cut, Copy, Paste and Select All, which an app
+changes through its `Items` or replaces. It is a flyout because every theme styles those, and FluentAvalonia has no
+theme for `ContextMenu`. A right click moves the caret, unless it is inside the selection.
 
 **Line breaks:** a document has one line break for new text: `\r\n` when more than half of its lines end in `\r\n` or
 `\r`, `\n` when the others do, and the system's for a text without any. It is read when the document is created and

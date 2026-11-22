@@ -99,6 +99,18 @@
   <data name="ServerStopped" xml:space="preserve">
     <value>stopped</value>
   </data>
+  <data name="Cut" xml:space="preserve">
+    <value>Cut</value>
+  </data>
+  <data name="Copy" xml:space="preserve">
+    <value>Copy</value>
+  </data>
+  <data name="Paste" xml:space="preserve">
+    <value>Paste</value>
+  </data>
+  <data name="SelectAll" xml:space="preserve">
+    <value>Select All</value>
+  </data>
   <data name="CopyPath" xml:space="preserve">
     <value>Copy path</value>
   </data>
@@ -147,17 +159,8 @@
   <data name="AppThemeDescription" xml:space="preserve">
     <value>Light, dark, or as the system is set</value>
   </data>
-  <data name="EditorTheme" xml:space="preserve">
-    <value>Editor theme</value>
-  </data>
-  <data name="EditorThemeDescription" xml:space="preserve">
-    <value>The colors of the editor and its popups, independent of the app</value>
-  </data>
   <data name="ThemeSystem" xml:space="preserve">
     <value>Use system setting</value>
-  </data>
-  <data name="ThemeSameAsApp" xml:space="preserve">
-    <value>Same as the app</value>
   </data>
   <data name="ThemeLight" xml:space="preserve">
     <value>Light</value>
@@ -179,6 +182,99 @@
   </data>
   <data name="FontSize" xml:space="preserve">
     <value>Font size</value>
+  </data>
+  <data name="KeyboardShortcuts" xml:space="preserve">
+    <value>Keyboard shortcuts</value>
+  </data>
+  <data name="EditorCommands" xml:space="preserve">
+    <value>Editor commands</value>
+  </data>
+  <data name="EditorCommandsDescription" xml:space="preserve">
+    <value>Click a key, then press the new one. A key already in use moves to the new command.</value>
+  </data>
+  <data name="ResetAll" xml:space="preserve">
+    <value>Reset all</value>
+  </data>
+  <data name="PressKey" xml:space="preserve">
+    <value>Press a key…</value>
+  </data>
+  <data name="NoKey" xml:space="preserve">
+    <value>No key</value>
+  </data>
+  <data name="RemoveKey" xml:space="preserve">
+    <value>Remove key</value>
+  </data>
+  <data name="ResetKey" xml:space="preserve">
+    <value>Reset to default</value>
+  </data>
+  <data name="CommandFindNext" xml:space="preserve">
+    <value>Find next</value>
+  </data>
+  <data name="CommandFindPrevious" xml:space="preserve">
+    <value>Find previous</value>
+  </data>
+  <data name="CommandCommentLine" xml:space="preserve">
+    <value>Toggle comment</value>
+  </data>
+  <data name="CommandMoveLinesUp" xml:space="preserve">
+    <value>Move lines up</value>
+  </data>
+  <data name="CommandMoveLinesDown" xml:space="preserve">
+    <value>Move lines down</value>
+  </data>
+  <data name="CommandCopyLinesUp" xml:space="preserve">
+    <value>Copy lines up</value>
+  </data>
+  <data name="CommandCopyLinesDown" xml:space="preserve">
+    <value>Copy lines down</value>
+  </data>
+  <data name="CommandDeleteLines" xml:space="preserve">
+    <value>Delete lines</value>
+  </data>
+  <data name="CommandInsertLineAfter" xml:space="preserve">
+    <value>Insert line below</value>
+  </data>
+  <data name="CommandInsertLineBefore" xml:space="preserve">
+    <value>Insert line above</value>
+  </data>
+  <data name="CommandIndentLines" xml:space="preserve">
+    <value>Indent lines</value>
+  </data>
+  <data name="CommandOutdentLines" xml:space="preserve">
+    <value>Outdent lines</value>
+  </data>
+  <data name="CommandExpandLineSelection" xml:space="preserve">
+    <value>Select line</value>
+  </data>
+  <data name="CommandTriggerSuggest" xml:space="preserve">
+    <value>Show suggestions</value>
+  </data>
+  <data name="CommandToggleSuggestionDetails" xml:space="preserve">
+    <value>Toggle suggestion details</value>
+  </data>
+  <data name="CommandAcceptSuggestion" xml:space="preserve">
+    <value>Accept suggestion (insert)</value>
+  </data>
+  <data name="CommandAcceptAlternative" xml:space="preserve">
+    <value>Accept suggestion (replace)</value>
+  </data>
+  <data name="CommandTriggerParameterHints" xml:space="preserve">
+    <value>Show parameter hints</value>
+  </data>
+  <data name="CommandPreviousSignature" xml:space="preserve">
+    <value>Previous signature</value>
+  </data>
+  <data name="CommandNextSignature" xml:space="preserve">
+    <value>Next signature</value>
+  </data>
+  <data name="CommandShowHover" xml:space="preserve">
+    <value>Show hover</value>
+  </data>
+  <data name="CommandNextProblem" xml:space="preserve">
+    <value>Next problem</value>
+  </data>
+  <data name="CommandPreviousProblem" xml:space="preserve">
+    <value>Previous problem</value>
   </data>
   <data name="About" xml:space="preserve">
     <value>About</value>

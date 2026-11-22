@@ -7,7 +7,7 @@ using Sample.Localization;
 namespace Sample.Settings;
 
 /// <summary>
-/// The user's choices: the themes and the language on the settings page, and the view's options in the title bar.
+/// The user's choices: the theme, the language and the editor's keys on the settings page, and the view's options in the title bar.
 /// They last as long as the app runs.
 /// </summary>
 public sealed partial class AppSettings : ObservableObject
@@ -20,14 +20,7 @@ public sealed partial class AppSettings : ObservableObject
             new(ThemeVariant.Light, strings => strings.ThemeLight),
             new(ThemeVariant.Dark, strings => strings.ThemeDark),
         ];
-        EditorThemes =
-        [
-            new(ThemeVariant.Default, strings => strings.ThemeSameAsApp),
-            new(ThemeVariant.Light, strings => strings.ThemeLight),
-            new(ThemeVariant.Dark, strings => strings.ThemeDark),
-        ];
         AppTheme = AppThemes[0];
-        EditorTheme = EditorThemes[0];
     }
 
     public IReadOnlyList<ThemeChoice> AppThemes { get; }
@@ -36,24 +29,18 @@ public sealed partial class AppSettings : ObservableObject
     [ObservableProperty]
     public partial ThemeChoice AppTheme { get; set; }
 
-    public IReadOnlyList<ThemeChoice> EditorThemes { get; }
-
-    /// <summary>
-    /// The theme variant of the editor alone, through a <c>ThemeVariantScope</c> around it, so that its popups and
-    /// search bar match its colors.
-    /// </summary>
-    [ObservableProperty]
-    public partial ThemeChoice EditorTheme { get; set; }
+    /// <summary>The keys of the editor's commands.</summary>
+    public EditorHotkeys Hotkeys { get; } = new();
 
     public IReadOnlyList<CultureInfo> Cultures => Strings.Cultures;
 
     /// <summary>The language of the app's own text.</summary>
     public CultureInfo Culture
     {
-        get => Strings.Current.Culture;
+        get => Strings.Default.Culture ?? Strings.Cultures[0];
         set
         {
-            Strings.Current.Culture = value;
+            Strings.Default.Culture = value;
             OnPropertyChanged();
         }
     }
@@ -80,15 +67,15 @@ public sealed class ThemeChoice : INotifyPropertyChanged
         Variant = variant;
         _name = name;
         // Choices last as long as the app, as the strings do.
-        Strings.Current.PropertyChanged += (_, _) =>
+        Strings.Default.PropertyChanged += (_, _) =>
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Name)));
     }
 
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    /// <summary>The variant; <see cref="ThemeVariant.Default"/> follows the system, or the app around an editor.</summary>
+    /// <summary>The variant; <see cref="ThemeVariant.Default"/> follows the system.</summary>
     public ThemeVariant Variant { get; }
 
-    public string Name => _name(Strings.Current);
+    public string Name => _name(Strings.Default);
 }

@@ -426,34 +426,47 @@ public sealed class CodeEditorTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Select_all_before_the_editor_shows_lasts_until_it_does() =>
+        _ui.Run(() =>
+        {
+            CodeEditor editor = Editor("select me");
+
+            editor.SelectAll();
+            editor.Selection.ShouldBe(new TextSelection(0, 9));
+
+            using var window = new EditorWindow(editor);
+            window.Editor.Selection.ShouldBe(new TextSelection(0, 9));
+        });
+
+    [Fact]
     public Task A_right_click_moves_the_caret_unless_it_is_in_the_selection() =>
         _ui.Run(() =>
         {
             using var window = new EditorWindow(Editor("one two three"));
             CodeEditor editor = window.Editor;
-            ContextMenu menu = editor.ContextMenu.ShouldBeOfType<ContextMenu>();
+            MenuFlyout menu = editor.ContextFlyout.ShouldBeOfType<MenuFlyout>();
             // Just after the left edge of a character: the caret goes before it.
             Point Before(int offset) => window.PointAt(offset) - new Point(window.TextView.WideSpaceWidth / 2 - 1, 0);
 
             editor.Selection = new TextSelection(4, 7);
             window.Click(Before(5), MouseButton.Right);
-            menu.Close();
+            menu.Hide();
             editor.Selection.ShouldBe(new TextSelection(4, 7));
 
             window.Click(Before(9), MouseButton.Right);
-            menu.Close();
+            menu.Hide();
             editor.Selection.ShouldBe(new TextSelection(9));
 
             // The character right after the selection is outside it.
             editor.Selection = new TextSelection(4, 7);
             window.Click(Before(7), MouseButton.Right);
-            menu.Close();
+            menu.Hide();
             editor.Selection.ShouldBe(new TextSelection(7));
 
             // Below the last line, the caret goes to the end of the text.
             editor.Selection = new TextSelection(0, 3);
             window.Click(window.PointAt(0) + new Point(0, 200), MouseButton.Right);
-            menu.Close();
+            menu.Hide();
             editor.Selection.ShouldBe(new TextSelection(13));
         });
 
@@ -462,7 +475,7 @@ public sealed class CodeEditorTests(UiFixture ui)
         _ui.Run(() =>
         {
             using var window = new EditorWindow(Editor("one"));
-            ContextMenu menu = window.Editor.ContextMenu.ShouldBeOfType<ContextMenu>();
+            MenuFlyout menu = window.Editor.ContextFlyout.ShouldBeOfType<MenuFlyout>();
 
             menu.Items.Add(new MenuItem { Header = "App" });
 
@@ -475,7 +488,7 @@ public sealed class CodeEditorTests(UiFixture ui)
         {
             using var window = new EditorWindow(Editor("one two"));
             CodeEditor editor = window.Editor;
-            ContextMenu menu = editor.ContextMenu.ShouldBeOfType<ContextMenu>();
+            MenuFlyout menu = editor.ContextFlyout.ShouldBeOfType<MenuFlyout>();
             MenuItem[] items = [.. menu.Items.OfType<MenuItem>()];
             items.Select(item => item.Header as string).ShouldBe(["Cut", "Copy", "Paste", "Select All"]);
 
@@ -489,7 +502,7 @@ public sealed class CodeEditorTests(UiFixture ui)
             window.Click(new Point(200, 10), MouseButton.Right);
             menu.IsOpen.ShouldBeTrue();
             items.Select(item => item.IsEnabled).ShouldBe([false, true, false, true]);
-            menu.Close();
+            menu.Hide();
         });
 
     [Fact]

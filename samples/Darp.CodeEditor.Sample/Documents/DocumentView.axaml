@@ -2,18 +2,47 @@
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ce="using:Darp.CodeEditor"
+    xmlns:fa="using:FluentAvalonia.UI.Controls"
+    xmlns:loc="using:Sample.Localization"
     xmlns:local="using:Sample"
     x:Class="Sample.Documents.DocumentView"
     x:DataType="local:MainViewModel"
 >
-    <!-- Default follows the app; Light or Dark turn the editor's colors, popups and search bar so. -->
-    <ThemeVariantScope RequestedThemeVariant="{Binding Settings.EditorTheme.Variant}">
-        <ce:CodeEditor
-            Name="Editor"
-            WordWrap="{Binding Settings.WordWrap}"
-            ShowLineNumbers="{Binding Settings.ShowLineNumbers}"
-            FontSize="{Binding Settings.FontSize}"
-            Padding="8,6,0,0"
-        />
-    </ThemeVariantScope>
+    <ce:CodeEditor
+        Name="Editor"
+        WordWrap="{Binding Settings.WordWrap}"
+        ShowLineNumbers="{Binding Settings.ShowLineNumbers}"
+        FontSize="{Binding Settings.FontSize}"
+        Padding="8,6,0,0"
+    >
+        <!-- Replaces the editor's own menu, which is in English, to follow the app's language. -->
+        <ce:CodeEditor.ContextFlyout>
+            <fa:FAMenuFlyout>
+                <fa:FAMenuFlyoutItem
+                    Text="{Binding Cut, Source={x:Static loc:Strings.Default}}"
+                    IconSource="Cut"
+                    InputGesture="{Binding Settings.Hotkeys.Cut.Gesture}"
+                    Click="OnCut"
+                />
+                <fa:FAMenuFlyoutItem
+                    Text="{Binding Copy, Source={x:Static loc:Strings.Default}}"
+                    IconSource="Copy"
+                    InputGesture="{Binding Settings.Hotkeys.Copy.Gesture}"
+                    Click="OnCopy"
+                />
+                <fa:FAMenuFlyoutItem
+                    Text="{Binding Paste, Source={x:Static loc:Strings.Default}}"
+                    IconSource="Paste"
+                    InputGesture="{Binding Settings.Hotkeys.Paste.Gesture}"
+                    Click="OnPaste"
+                />
+                <fa:FAMenuFlyoutSeparator />
+                <fa:FAMenuFlyoutItem
+                    Text="{Binding SelectAll, Source={x:Static loc:Strings.Default}}"
+                    InputGesture="{Binding Settings.Hotkeys.SelectAll.Gesture}"
+                    Click="OnSelectAll"
+                />
+            </fa:FAMenuFlyout>
+        </ce:CodeEditor.ContextFlyout>
+    </ce:CodeEditor>
 </UserControl>
