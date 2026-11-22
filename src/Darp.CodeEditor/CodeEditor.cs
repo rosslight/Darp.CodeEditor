@@ -57,7 +57,7 @@ namespace Darp.CodeEditor;
 /// </para>
 /// <para>
 /// Built in, with no settings: the current line is highlighted, whitespace shows inside the selection, and the view
-/// scrolls past the last line. Squiggles, semantic colors and hovers cover a line's first 3,000 characters.
+/// scrolls past the last line. Squiggles and semantic colors cover a line's first 3,000 characters.
 /// Editing follows the language's rules, as
 /// VS Code applies them and as far as <see cref="CodeLanguage.AutoIndent"/> goes: the bracket next to the caret and its
 /// match are boxed, the occurrences of the symbol at the caret are highlighted, pairs close as you type unless

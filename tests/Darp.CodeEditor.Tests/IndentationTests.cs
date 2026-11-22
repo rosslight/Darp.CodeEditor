@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Input;
 using AvaloniaEdit;
+using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
 using Darp.CodeEditor.Editing;
 
@@ -245,6 +246,40 @@ public sealed class IndentationTests(UiFixture ui)
             window.Press(key);
 
             window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(line);
+        });
+
+    [Theory]
+    [InlineData("«\nb»cd", "\ncd")]
+    [InlineData("«\n»bcd", "\nbcd")]
+    public Task Enter_replaces_a_selection_whose_lines_join_into_a_long_one(string marked, string expected) =>
+        _ui.Run(() =>
+        {
+            string line = new('a', VisibleText.LineLimit);
+            using EditorWindow window = MarkedText.Show(line + marked, CodeLanguage.PlainText);
+
+            window.Press(Key.Enter);
+
+            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(line + expected);
+        });
+
+    [Fact]
+    public Task Enter_keeps_a_rectangle_selection_with_its_caret_in_a_long_lines_hidden_tail() =>
+        _ui.Run(() =>
+        {
+            string text = new string('a', VisibleText.LineLimit) + "\n" + new string('b', VisibleText.LineLimit + 5);
+            using EditorWindow window = MarkedText.Show("|" + text, CodeLanguage.PlainText);
+            TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+            var caret = new TextViewPosition(2, VisibleText.LineLimit + 3);
+            textArea.Caret.Position = caret;
+            textArea.Selection = new RectangleSelection(
+                textArea,
+                new TextViewPosition(1, VisibleText.LineLimit + 1),
+                caret
+            );
+
+            window.Press(Key.Enter);
+
+            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(text);
         });
 
     [Fact]

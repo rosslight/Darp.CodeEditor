@@ -1156,12 +1156,13 @@ Still open:
 - calls that must stay quick, such as prompts, callback replies and stopping a run, while the bridge carries bulk data
   in both directions: a test measures their latency under load;
 - integration tests on GitHub Actions for Windows, Linux and macOS, once the API is decided;
-- lines over 3,000 characters: the editor shows and edits lines of up to 3,000 characters in full, AvaloniaEdit's
-  default, and a longer line collapses its tail (#106). The limit rises once Avalonia's text wrapping and font
-  fallback get faster on long lines;
+- lines over 3,000 characters: from AvaloniaEdit's release after 12.0.0, the editor shows and edits lines of up to
+  3,000 characters in full, AvaloniaEdit's default, and a longer line collapses its tail (#106). The limit rises once
+  Avalonia's text wrapping and font fallback get faster on long lines;
 - what AvaloniaEdit 12.0.0 lacks (#127): it lays out a line over 3,000 characters whole and lets its tail be edited,
   and an editor out of the visual tree stays in memory while it was the last focused element or while the document's
-  undo history holds an edit it showed. The tests of these behaviors are skipped until a release has the fixes;
+  undo history holds an edit it showed. The tests of these behaviors are skipped until a release has the fixes. Where
+  this document speaks of a line's collapsed or hidden tail, or of "...", it describes that release;
 - the parts of VS Code's editing rules that the editor leaves out: brackets of several characters for matching, Tab
   on a blank line going to the expected level, re-indenting moved lines, and a typed closing bracket lining up with its
   opener without a decrease pattern;

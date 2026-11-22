@@ -141,8 +141,10 @@ internal sealed class Typing : IDisposable
     /// <summary>Enter: the selection's text goes, a rectangle selection ends, and the rules' new line goes in.</summary>
     private bool Enter()
     {
-        // The new line can't go there, and AvaloniaEdit 12.0.0 would still delete the selection (design.md #127).
-        int start = _area.Selection.IsEmpty ? _area.Caret.Offset : _area.Selection.SurroundingSegment.Offset;
+        // No new line goes into a hidden tail, and AvaloniaEdit 12.0.0 would still delete the selection (design.md #127).
+        int start = _area.Selection is { IsEmpty: false } and not RectangleSelection
+            ? _area.Selection.SurroundingSegment.Offset
+            : _area.Caret.Offset;
         if (VisibleText.IsInTail(Buffer.GetLineByOffset(start), start))
             return true;
         _changes.Run(
@@ -158,10 +160,12 @@ internal sealed class Typing : IDisposable
                     DocumentLine line = Buffer.GetLineByOffset(caret);
                     NewLine newLine = Rules.Enter(Lines, line.LineNumber, caret - line.Offset);
                     int replaced = _changes.CanChange(caret, newLine.Replaced) ? newLine.Replaced : 0;
-                    _changes.Apply(
-                        [new TextEdit(caret, replaced, newLine.Text)],
-                        new TextSelection(caret + newLine.Caret)
-                    );
+                    // Not by the tail's check: deleting the selection may have joined lines into a long one here.
+                    if (replaced > 0 || _area.ReadOnlySectionProvider.CanInsert(caret))
+                    {
+                        Buffer.Replace(caret, replaced, newLine.Text);
+                        _changes.Select(new TextSelection(caret + newLine.Caret));
+                    }
                 }
             }
         );
