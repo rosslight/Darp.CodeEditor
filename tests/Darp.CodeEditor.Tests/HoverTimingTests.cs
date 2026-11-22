@@ -37,6 +37,24 @@ public sealed class HoverTimingTests(UiFixture ui)
         });
 
     [Fact]
+    public Task The_next_words_hover_shows_after_one_delay() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer("--no-diagnostics");
+            var time = new ManualTime();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await server.StartAsync();
+            await HoverAsync(window, 0, "one is a word in", time);
+
+            window.MoveMouse(window.PointAt(4));
+            Pass(window, time, Delay);
+
+            await WaitForPopupAsync(window, "two is a word in");
+        });
+
+    [Fact]
     public Task The_wait_starts_again_on_another_character() =>
         _ui.Run(async () =>
         {

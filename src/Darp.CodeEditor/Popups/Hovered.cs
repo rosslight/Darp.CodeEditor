@@ -48,6 +48,9 @@ internal sealed class Hovered(int offset, TextRange word, TextRange along, TextS
     /// <summary>The time the pointer has to reach the popup after leaving the text; null while it is over it.</summary>
     public ITimer? Leaving { get; set; }
 
+    /// <summary>The character the pointer is leaving to, while <see cref="Leaving"/> runs; null for none.</summary>
+    public int? LeavingTo { get; set; }
+
     /// <summary>Whether the delay is over.</summary>
     public bool IsDue { get; set; }
 
@@ -61,6 +64,7 @@ internal sealed class Hovered(int offset, TextRange word, TextRange along, TextS
     {
         Leaving?.Dispose();
         Leaving = null;
+        LeavingTo = null;
     }
 
     public void Stop()

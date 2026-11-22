@@ -109,7 +109,12 @@ internal sealed class HoverController : IEditorFeature
         }
     }
 
-    public void AddCommands(CommandTable commands) => commands.Add(CodeEditorCommands.ShowHover, ShowAtCaret);
+    public void AddCommands(CommandTable commands) =>
+        commands.Add(CodeEditorCommands.ShowHover, ShowAtCaret, applies: HasHoverAtCaret);
+
+    /// <summary>Whether the hover key has something to show: otherwise it goes on to the app, as F1 to its help.</summary>
+    private bool HasHoverAtCaret() =>
+        _popup.IsOpen || _document.Features is { Hover: true } || _squiggles.At(CaretOffset(), 1).Count > 0;
 
     /// <summary>
     /// Ends the current hover: closes the popup, cancels the server's request and the reading of its answer if they are
@@ -162,10 +167,14 @@ internal sealed class HoverController : IEditorFeature
             _popup.TakeKeyboard();
             return;
         }
+        Due(Begin(CaretOffset(), fromKeyboard: true));
+    }
+
+    /// <summary>What the caret's hover is about: right after a word, as the caret is when typing ends, that word.</summary>
+    private int CaretOffset()
+    {
         int caret = _textArea.Caret.Offset;
-        // Right after a word, as the caret is when typing ends, the hover is the word's.
-        int offset = WordRules.WordAt(_buffer, caret) is { Length: > 0 } word && word.End == caret ? caret - 1 : caret;
-        Due(Begin(offset, fromKeyboard: true));
+        return WordRules.WordAt(_buffer, caret) is { Length: > 0 } word && word.End == caret ? caret - 1 : caret;
     }
 
     /// <summary>Ends the hover there is, and makes the hover of <paramref name="offset"/> the current one.</summary>
@@ -270,7 +279,7 @@ internal sealed class HoverController : IEditorFeature
         }
         if (!pressed && _popup.IsOpen && _hovered is { } shown)
         {
-            CloseSoon(shown);
+            CloseSoon(shown, offset);
             return;
         }
         Close();
@@ -278,25 +287,36 @@ internal sealed class HoverController : IEditorFeature
             StartDelayed(next);
     }
 
-    /// <summary>Ends a hover after the delay, unless the pointer reached its popup or came back.</summary>
-    private void CloseSoon(Hovered hovered) =>
-        hovered.Leaving ??= _document.TimeProvider.CreateTimer(
+    /// <summary>
+    /// Ends a hover once the pointer has rested on other text for the delay, and shows that text's hover, unless the
+    /// pointer reached the popup or came back.
+    /// </summary>
+    private void CloseSoon(Hovered hovered, int? offset)
+    {
+        if (hovered.Leaving is not null && hovered.LeavingTo == offset)
+            return;
+        hovered.StopLeaving();
+        ITimer? timer = null;
+        timer = _document.TimeProvider.CreateTimer(
             _ =>
                 _editor.Dispatcher.Post(() =>
                 {
-                    if (_hovered != hovered || hovered.Leaving is null)
+                    if (_hovered != hovered || hovered.Leaving != timer)
                         return;
                     hovered.StopLeaving();
                     if (_popup.IsHeld || _popup.Root.IsPointerOver)
                         return;
                     Close();
-                    if (_pointer is { } point && OffsetAt(point) is { } offset)
-                        StartDelayed(offset);
+                    if (offset is { } next)
+                        Due(Begin(next, fromKeyboard: false));
                 }),
             null,
             s_delay,
             Timeout.InfiniteTimeSpan
         );
+        hovered.Leaving = timer;
+        hovered.LeavingTo = offset;
+    }
 
     /// <summary>
     /// Ends the hover once the pointer has left both the text and the popup, unless it is held or was asked for by key:

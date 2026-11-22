@@ -119,6 +119,22 @@ public sealed class KeyBindingTests(UiFixture ui)
         });
 
     [Fact]
+    public Task The_hover_key_goes_on_to_the_app_with_nothing_to_show() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("te|xt", CodeLanguage.PlainText);
+            var app = new CountingCommand();
+            KeyGesture gesture = OperatingSystem.IsWindows()
+                ? new KeyGesture(Key.Q, KeyModifiers.Control)
+                : new KeyGesture(Key.F1);
+            window.Window.KeyBindings.Add(new KeyBinding { Gesture = gesture, Command = app });
+
+            window.Press(gesture.Key, gesture.KeyModifiers);
+
+            app.Runs.ShouldBe(1);
+        });
+
+    [Fact]
     public Task A_default_removed_before_the_editor_is_attached_stays_removed() =>
         _ui.Run(() =>
         {

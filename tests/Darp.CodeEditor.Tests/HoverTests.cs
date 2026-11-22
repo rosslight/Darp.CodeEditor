@@ -203,11 +203,11 @@ public sealed class HoverTests(UiFixture ui)
             window.MoveMouse(outside.TranslatePoint(new Point(50, 50), window.Window)!.Value);
             Popup(window).ShouldBeNull();
 
-            // Over another word, though under the same diagnostic.
+            // Another word gets its own hover, though under the same diagnostic.
             await HoverAsync(window, 0, "one is a word in", time);
             window.MoveMouse(window.PointAt(text.IndexOf("two", StringComparison.Ordinal)));
             Pass(window, time, Delay);
-            Popup(window).ShouldBeNull();
+            await WaitForPopupAsync(window, "two is a word in");
         });
 
     [Fact]
