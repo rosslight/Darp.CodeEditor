@@ -89,8 +89,8 @@ namespace Darp.CodeEditor;
 /// <c>KeyBindings</c> from the start, and go behind the app's XAML bindings when the editor is first attached, so that
 /// those run first. An app adds one later with <c>Insert(0, …)</c>, and removes a default with <c>RemoveAll</c>. A key
 /// whose command does not apply, such as Ctrl+Z with nothing to undo, goes on to the app, as do keys that the editor does
-/// not use, such as F5 or Ctrl+S. Enter, Tab, Escape, the arrows and typing are not bindings, so apps should not bind plain
-/// Enter, Tab or Escape on an ancestor of the editor.
+/// not use, such as F5 or Ctrl+S. Enter and Tab are bindings only while completion's list shows; they, Escape, the arrows
+/// and typing are otherwise not, so apps should not bind plain Enter, Tab or Escape on an ancestor of the editor.
 /// </para>
 /// <para>
 /// A right click moves the caret, unless it is inside the selection, and opens the editor's <c>ContextMenu</c>: Cut,
@@ -348,6 +348,9 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>What the editor does for the shown document, for its key commands; null while it shows none.</summary>
     internal EditorView? View => _view;
+
+    /// <summary>Where the editor's work off the UI thread runs, such as ranking completion's items; tests hold it.</summary>
+    internal TaskScheduler BackgroundScheduler { get; init; } = TaskScheduler.Default;
 
     /// <summary>The occurrences of the symbol at the caret, for tests.</summary>
     internal IReadOnlyList<Occurrence> Occurrences => _view?.Occurrences ?? [];

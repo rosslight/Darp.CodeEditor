@@ -63,6 +63,8 @@ editing rules (comments, brackets, auto-closing pairs). Servers and script envir
 - **How far it indents:** `AutoIndent` is `None`, `Keep`, `Brackets`, `Advanced` (also the rules for Enter) or `Full`
   (also the indentation rules), the default. YAML takes `Advanced`, because its indentation rules would indent the line
   after every key.
+- **Where typing opens completion:** `QuickSuggestions` says in code, comments and strings: in code by default, and
+  also in strings for JSON and YAML, where their keys and values are.
 - **The app's own:** made with the same public constructor as the built-in ones, from a VS Code extension's files.
   They can ship as Avalonia resources, so NativeAOT apps need no loose files:
 
@@ -147,8 +149,12 @@ Editor.KeyBindings.RemoveAll(binding => binding.Gesture == replace);
 
 | Command (`CodeEditorCommands`) | Default keys |
 |---|---|
+| `ToggleSuggestionDetails` | Ctrl+Space, Ctrl+I, and the hover key: Ctrl+Q on Windows, F1 on Linux and macOS; only while completion's list shows |
 | `TriggerSuggest` | Ctrl+Space, Ctrl+I; on macOS also Alt+Escape |
+| `AcceptSelectedSuggestion` | Enter, while completion's list shows: inserts |
+| `AcceptAlternativeSelectedSuggestion` | Tab, Shift+Enter, while completion's list shows: replaces |
 | `TriggerParameterHints` | Ctrl+Shift+Space |
+| `ShowPrevParameterHint`, `ShowNextParameterHint` | Alt+Up, Alt+Down, ahead of moving lines, while several signatures show |
 | `Find`, `Replace` | Ctrl+F, Ctrl+H (macOS: Alt+Cmd+F) |
 | `FindNext`, `FindPrevious` | F3, Shift+F3 (macOS also Cmd+G, Shift+Cmd+G) |
 | `CommentLine` | Ctrl+/, the number pad's / |
@@ -161,7 +167,8 @@ Editor.KeyBindings.RemoveAll(binding => binding.Gesture == replace);
 | `Undo`, `Redo` | Ctrl+Z; Ctrl+Y, Ctrl+Shift+Z |
 | `Cut`, `Copy`, `Paste`, `SelectAll` | Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A |
 
-On macOS, Cmd takes Ctrl's place, except in Ctrl+Space.
+On macOS, Cmd takes Ctrl's place, except in Ctrl+Space. Where a key has two commands, the first listed that applies
+runs.
 
 - **A key whose command does not apply goes on** to the next binding and to the app: Ctrl+Z with nothing to undo,
   Ctrl+Space without a server that completes, and every key of an editor
@@ -173,11 +180,15 @@ On macOS, Cmd takes Ctrl's place, except in Ctrl+Space.
 - **`RunCommand`** skips that focus check, as the keyboard is on the app's button or menu at that moment. Afterwards
   the keyboard goes to the text, unless it is in the editor already, as in the search bar's query after `Find`. An app's
   `KeyBinding` to `RunCommand` always consumes its key, even when the command does not apply.
-- **Other keys are not bindings:** typing, Backspace, Enter, Tab, Shift+Tab, Escape and the arrows. While completion's
-  list shows, Up, Down, Page Up, Page Down, Enter, Tab and Escape are its; while signature help shows several
-  signatures, Up and Down are its; while a snippet's stops are active, Tab and Shift+Tab are theirs, except Shift+Tab on
-  the first stop, and so is Escape after completion and signature help. A binding for the same gesture on an ancestor
-  would take the key first, so apps should not bind plain Enter, Tab or Escape there.
+- **Other keys are not bindings:** typing, Backspace, Enter and Tab where no list shows, Shift+Tab, Escape and the
+  arrows. While completion's list shows, Up, Down, Page Up, Page Down and Escape are its; while signature help shows
+  several signatures, Up and Down are its; while a snippet's stops are active, Tab and Shift+Tab are theirs, except
+  Shift+Tab on the first stop, and so is Escape after completion and signature help. A binding for the same gesture on
+  an ancestor would take the key first, so apps should not bind plain Enter, Tab or Escape there.
+- **An accept that has to wait** for completion's filter decides when the filter has run: it commits the item that
+  then shows, also from a frozen list. With nothing to commit, including when a server's answer ends completion, and
+  with the caret and text unchanged, the key does its normal action: Tab goes to a snippet's next stop or types, and
+  Enter and Shift+Enter break the line. `RunCommand` has no key, so it has no such action.
 
 **Context menu:** a plain `ContextMenu` with Cut, Copy, Paste and Select All, which an app changes through its `Items`
 or replaces. A right click moves the caret, unless it is inside the selection.
@@ -238,14 +249,16 @@ high contrast inherits from Light, so it shows Light+ without one. To make one e
 - **Hover:** Markdown, with emphasis, inline code, lists and links. Code blocks are highlighted with the editor's
   grammar and colors.
 - **Completion:** a list of up to 12 items at once below the word, or above it when only that side has room, in the
-  editor's popup, with rows as dense as the editor's lines and labels in the editor's font; the selected item's details
-  in a frame of their own, beside the list where the window has room for them
-  right of the word, narrower if need be, and below the list otherwise, so that the list stays at the word.
+  editor's popup, with rows exactly as high as the editor's lines, labels in the editor's font, and the matched
+  characters in the theme's highlight colors; the selected item's details in a popup of their own, right of the list,
+  else left of it, narrower if need be, and else below or above it. The list's and the details' outer edges resize them,
+  the list to whole rows, and both keep that size while the editor shows the document.
 - **Completion icons:** VS Code's codicons, drawn as vector shapes in the theme's `symbolIcon.*` colors, as in VS
   Code, and in VS Code's colors where the theme sets none. Their designs are licensed CC BY 4.0: the package lists
   them in its third-party notices, and apps that show notices of their own include that entry.
-- **Signature help:** in the editor's popup above the caret's line, so that completion's list shows below it; the
-  signature as code, in the editor's font, colors and background.
+- **Signature help:** in the editor's popup above the caret's line, so that completion's list shows below it; every
+  signature at once as code, in the editor's font, colors and background, the active one marked and its parameter in
+  the theme's highlight color.
 
 **Before v1, additive:** marks beside the scroll bar for errors, warnings and search matches, as Monaco's overview
 ruler shows them. Scripts of 5,000 lines need them to find errors outside the view. They add to the API without
@@ -437,14 +450,15 @@ How the client talks to a server, where the protocol leaves a choice:
   colors alone take 55 ms for 300 tokens a line. Of that, the UI thread's own work, taking the tokens and laying out
   the lines with their colors, takes 35 ms, and 28 ms with 300 tokens a line, about 4.4 µs a colored token: the limit
   keeps it bounded, not within a frame (BenchmarkDotNet, i7-13700).
-- **Completion** behaves as VS Code's by default. It is asked for at the caret on Ctrl+Space, also on macOS, and when
-  typing starts a word outside a comment, as invoked; and on the server's trigger characters, as a trigger character.
-  VS Code also asks in strings for JSON and YAML, and the editor does not tell strings apart. Typing on in a word does
-  not ask again, also after Escape, until the next word or Ctrl+Space. The word before the caret goes by VS Code's word
-  characters and reaches back at most 1,000 of them, as a hovered word does, and items without an edit replace it up
-  to the caret with their `insertText`, or their label. An item whose edit is not on the caret's line, spans lines, or
-  does not contain the caret, is left out, as VS Code leaves it out, and one without a kind, or with a kind the
-  protocol does not name, shows as a property.
+- **Completion** behaves as VS Code's by default. It is asked for at the caret on Ctrl+Space, also on macOS, as invoked;
+  on the server's trigger characters, as a trigger character; and when typing a word character at a word's end, or as
+  the first character before a word, as invoked, unless the word starts with a digit. Where typing opens it goes by
+  `CodeLanguage.QuickSuggestions`: in code by default, and also in strings for JSON and YAML. A word that an answer
+  opened by typing had nothing for stays quiet while the user types on in it, so that a server is not asked on every
+  key. The word before the caret goes by VS Code's word characters and reaches back at most 1,000 of them, as a hovered
+  word does. Items without an edit insert over it up to the caret, and replace the whole word, with their `insertText`
+  or their label. An item whose edit is not on the caret's line, spans lines, or does not contain the caret, is left
+  out, as VS Code leaves it out, and one without a kind, or with a kind the protocol does not name, shows as a property.
   - **Filtering and ranking** are on the client, as the user types, with VS Code's fuzzy matching (a port of its
     `fuzzyScore`, which the C# server will share): the typed text from where an item's edit starts is matched against
     its `filterText`, or its label, in order and ignoring case, and its first character must match at a word start, a
@@ -454,7 +468,11 @@ How the client talks to a server, where the protocol leaves a choice:
     and otherwise the label's own, by VS Code's more lenient `anyScore`. Case is ignored by .NET's invariant lower
     case, so the few letters whose case depends on their context, such as the Greek final sigma, match differently
     than in VS Code. The first item is selected, or the first that
-    the server preselects among those that match best. There is no typo tolerance. Matching runs off the UI thread,
+    the server preselects among those that match best. Up to 2,000 items tolerate a typo of two neighbouring
+    characters, and typing on ranks only what shows, so a longer list tolerates one once typing has shortened it. When
+    nothing matches a list asked for by key or still being asked for again, it freezes: it keeps its rows, without bold
+    characters, while the caret is in a word. Asked for by key with nothing at all, it says "No suggestions." until the
+    next key or caret move. Matching runs off the UI thread,
     whatever the list's length and the typed text's: each change cancels the filter under way, and the list shows the
     newest result, the previous one meanwhile. The UI thread reads no text for it, and matching reads the first 128
     characters of an item's typed text, as VS Code's does: an edit that starts further before the caret, also when
@@ -467,26 +485,31 @@ How the client talks to a server, where the protocol leaves a choice:
     dropped. An answer that comes after typing is filtered with what was typed since. A trigger character asks again
     also while a list shows, as in VS Code, and the new answer's list replaces it; meanwhile the list shows what still
     matches, and nothing left to show ends completion only once the new answer has nothing either.
-  - **Committing:** Enter, Tab, a click, or one of the item's commit characters, or the server's `allCommitCharacters`
-    for an item that names none, which then goes in, and asks again if it is a trigger character, as in VS Code. While
-    the filter of the current text still runs, they commit the item that shows if it matches the current text, which
-    is checked for that item alone, on the first 128 characters of its typed text; otherwise Enter and Tab commit what
-    that filter selects once it has run, unless the text, by any editor of the document or by code, or the caret
-    changes before, and a commit character goes in as text, as when nothing matches: deciding later would hold back or
-    reorder what the user types. A read-only editor neither completes nor commits. The item's `textEdit` applies: a
-    text edit, or the insert range of an insert and replace edit, as VS Code's default insert mode; its range grows by
-    what was typed since it was asked, as in VS Code. Its `additionalTextEdits`, such as an import, apply with it, as
-    one step that the user undoes; ones that overlap another edit are left out.
+  - **Committing:** Enter inserts, Tab and Shift+Enter replace, and a click or one of the item's commit characters, or
+    the server's `allCommitCharacters` for an item that names none, insert; a commit character then goes in, and asks
+    again if it is a trigger character, as in VS Code. A frozen list commits by keys and clicks, not by commit
+    characters. While the filter of the current text still runs, they commit the item that shows if it matches the
+    current text, which is checked for that item alone, on the first 128 characters of its typed text; otherwise an
+    accept commits what that filter selects once it has run, unless the text, by any editor of the document or by code,
+    or the caret changes before, and a commit character goes in as text, as when nothing matches: deciding later would
+    hold back or reorder what the user types. A read-only editor neither completes nor commits. Inserting, the item's
+    `textEdit` goes over a text edit's range, or the insert range of an insert and replace edit; replacing, over its
+    replace range. Its range grows by what was typed since it was asked, as in VS Code. Its `additionalTextEdits`, such
+    as an import, apply with it, as one step that the user undoes; ones that overlap another edit are left out. Then
+    an item's `editor.action.triggerSuggest` command asks for completion again, such as for a property's value. No other
+    command of an item runs.
   - **Resolving:** the selected item is resolved when it is selected, and the resolve of an item that is no longer
     selected is cancelled. Its detail, as code highlighted with the document's grammar, and its documentation show
     beside the list, as much of both as a hover shows: they share one budget of the hover's size, cut before anything
-    reads them. A row shows at most 256 characters of a label, with "…". Additional edits that the resolve brings only
-    after the item was committed join the commit's undo step while it is the last one; once the user moved on, they
-    are dropped. Items resolve only in the process that sent them, while the document stays open there as it was.
-  - **Ending:** Escape, the caret leaving the line or moving back past the word, a selection, the editor becoming
-    read-only, the list's line scrolling out of view, the editor losing the keyboard focus, a server that starts or
-    stops serving the document, new colors, nothing left that matches a complete list while no newer request is under
-    way, and the editor no longer showing the document.
+    reads them. The details toggle hides them, and the selected row then shows the detail. A row shows at most 256
+    characters of a label, with "…". Additional edits that the resolve brings only after the item was committed join
+    the commit's undo step while it is the last one, and take a step of their own once the user typed on; undoing the
+    commit drops them. Items resolve only in the process that sent them, while the document stays open there as it was.
+  - **Ending:** Escape, the caret leaving the line or moving back past the word, a selection, any caret move that is
+    not the keyboard's, such as a click, an undo or code, the editor becoming read-only, the list's line scrolling out
+    of view, the text losing the keyboard focus, a server that starts or stops serving the document, new colors,
+    nothing left that matches a complete list while no newer request is under way, and the editor no longer showing
+    the document.
 - **Snippets** in completion items, with `insertTextFormat` 2 in a `textEdit` or an `insertText`, go in with their
   tab stops. The client parses them where it reads the answer, off the UI thread: stops `$1` and `${1}`, placeholders
   `${1:text}` with plain text, the final stop `$0`, and the escapes `\$`, `\}` and `\\`. Anything else goes in as the
@@ -524,13 +547,14 @@ How the client talks to a server, where the protocol leaves a choice:
   asks again for a change of the content; the pause runs on the options' `TimeProvider`. Asking again says that it is
   a retrigger and sends the signature help that showed, with the signature the user chose. A newer request, and each
   edit and caret move, cancels the one under way, and an answer about older text is dropped. An answer without
-  signatures, as outside a call, closes it. It shows the active signature, or the first, with the active parameter in
-  bold: the signature's own, or the answer's, or the first; one outside the parameters is none, as in VS Code. A
-  parameter labelled by a string is found as a whole word in the signature. The parameter's documentation shows
-  below, then the signature's, all of it as much as a hover shows, the signature first; with several signatures, which one of how many. Up and Down show the others while
-  completion's list is closed. It ends on Escape, after completion's list, with no signature, when the editor becomes
-  read-only, when the editor loses the keyboard focus, when a server starts or stops serving the document, with new colors, and when its line scrolls
-  out of view.
+  signatures, as outside a call, closes it. It shows every signature at once, the active one marked, with the active
+  parameter in bold: the signature's own, or the answer's, or the first; one outside the parameters is none, as in VS
+  Code. A parameter labelled by a string is found as a whole word in the signature. The active parameter's
+  documentation shows below, then the active signature's, all of it as much as a hover shows, the active signature
+  first. While several show, Up and Down, once completion's list is closed, and Alt+Up and Alt+Down, ahead of moving
+  lines, choose the active one, around the ends. It ends on Escape, after completion's list, on a click or drag that
+  moves the caret, with no signature, when the editor becomes read-only, when the editor loses the keyboard focus, when
+  a server starts or stops serving the document, with new colors, and when its line scrolls out of view.
 - **Token colors** come from the color theme as in VS Code: its `semanticTokenColors`, matched by type, modifiers and
   language with VS Code's scores; otherwise its TextMate color of the scopes that VS Code's standard mapping gives the
   type and modifiers, such as `entity.name.type` for a class or `variable.other.constant` for a read-only variable.

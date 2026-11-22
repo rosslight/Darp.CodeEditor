@@ -32,14 +32,13 @@ public sealed class PopupLookTests(UiFixture ui)
             using var window = new EditorWindow(new CodeEditor { Document = document });
             await OpenAsync(window, 0);
             window.Render();
-            ListBox list = List(window).ShouldNotBeNull();
-            ScrollViewer viewer = list.GetVisualDescendants().OfType<PopupScrollViewer>().Single();
-            ScrollBar bar = viewer.GetVisualDescendants().OfType<PopupScrollBar>().Single();
+            CompletionListBox list = List(window).ShouldNotBeNull();
+            ScrollBar bar = list.GetVisualDescendants().OfType<PopupScrollBar>().Single();
             Thumb thumb = bar.GetVisualDescendants().OfType<PopupThumb>().Single();
 
             window.Window.MouseWheel(BoundsInWindow(list).Center, new Vector(0, -1));
             window.Render();
-            double wheeled = viewer.Offset.Y;
+            int wheeled = list.FirstRow;
             wheeled.ShouldBeGreaterThan(0);
 
             Point grip = BoundsInWindow(thumb).Center;
@@ -48,15 +47,16 @@ public sealed class PopupLookTests(UiFixture ui)
             window.MoveMouse(grip + new Point(0, 30));
             window.Window.MouseUp(grip + new Point(0, 30), MouseButton.Left);
             window.Render();
-            double dragged = viewer.Offset.Y;
+            int dragged = list.FirstRow;
             dragged.ShouldBeGreaterThan(wheeled);
 
             Rect track = BoundsInWindow(bar);
-            var below = new Point(track.Center.X, track.Bottom - 2);
+            // Above the frame's bottom edge, which resizes the list.
+            var below = new Point(track.Center.X, track.Bottom - 8);
             window.MoveMouse(below);
             window.Click(below, MouseButton.Left);
             window.Render();
-            viewer.Offset.Y.ShouldBeGreaterThan(dragged);
+            list.FirstRow.ShouldBeGreaterThan(dragged);
 
             // None of it took the keyboard or ended completion: the keys still move the selected row from the text.
             EditorWindow.PartOf(window.Editor).TextArea.IsFocused.ShouldBeTrue();
@@ -78,13 +78,13 @@ public sealed class PopupLookTests(UiFixture ui)
             using var window = new EditorWindow(new CodeEditor { Document = document });
             await OpenAsync(window, 0);
             window.Render();
-            ListBox list = List(window).ShouldNotBeNull();
+            CompletionListBox list = List(window).ShouldNotBeNull();
             ScrollBar bar = list.GetVisualDescendants().OfType<PopupScrollBar>().Single();
             Thumb thumb = bar.GetVisualDescendants().OfType<PopupThumb>().Single();
-            Control row = list.ContainerFromIndex(0).ShouldNotBeNull();
+            TextBlock label = list.RowOf(0).ShouldNotBeNull().Label;
 
             bar.Bounds.Width.ShouldBe(10);
-            BoundsInWindow(row).Right.ShouldBeLessThanOrEqualTo(BoundsInWindow(bar).Left);
+            BoundsInWindow(label).Right.ShouldBeLessThanOrEqualTo(BoundsInWindow(bar).Left);
             // Light+ leaves them out: VS Code's defaults.
             ColorOf(thumb).ShouldBe(Color.Parse("#66646464"));
             Point grip = BoundsInWindow(thumb).Center;
@@ -110,26 +110,28 @@ public sealed class PopupLookTests(UiFixture ui)
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
             using var window = new EditorWindow(new CodeEditor { Document = document });
             await OpenAsync(window, 0);
-            window.Render();
-            ListBox list = List(window).ShouldNotBeNull();
-            CompletionIcon Icon(int index) =>
-                list.ContainerFromIndex(index)
+            CompletionListBox list = List(window).ShouldNotBeNull();
+            int White(int index)
+            {
+                window.Render();
+                CompletionIcon icon = list.RowOf(index)
                     .ShouldNotBeNull()
                     .GetVisualDescendants()
                     .OfType<CompletionIcon>()
                     .Single();
+                return window.RenderAndCountPixels(Colors.White, BoundsInWindow(icon));
+            }
 
+            // Two rows fit: no bar.
+            list.GetVisualDescendants().OfType<PopupScrollBar>().Single().IsVisible.ShouldBeFalse();
             // Light+ sets list.activeSelectionIconForeground.
-            await Wait.UntilAsync(() =>
-                Icon(0).SelectedBrush is ISolidColorBrush { Color: var c } && c == Colors.White
-            );
-            Icon(1).SelectedBrush.ShouldBeNull();
-            window.RenderAndCountPixels(Colors.White, BoundsInWindow(Icon(0))).ShouldBeGreaterThan(10);
+            await Wait.UntilAsync(() => White(0) > 10);
+            White(1).ShouldBe(0);
 
             window.Press(Key.Down);
 
-            Icon(0).SelectedBrush.ShouldBeNull();
-            Icon(1).SelectedBrush.ShouldNotBeNull();
+            White(0).ShouldBe(0);
+            White(1).ShouldBeGreaterThan(10);
         });
 
     [Fact]
@@ -166,8 +168,8 @@ public sealed class PopupLookTests(UiFixture ui)
             PopupFrame details = PopupFrames.Find(window, "CompletionDetails").ShouldNotBeNull();
             frame.Background.ShouldBeAssignableTo<ISolidColorBrush>()!.Color.ShouldBe(Color.Parse("#F3F3F3"));
             details.Background.ShouldBeAssignableTo<ISolidColorBrush>()!.Color.ShouldBe(Color.Parse("#F3F3F3"));
-            ListBoxItem row = List(window).ShouldNotBeNull().GetVisualDescendants().OfType<ListBoxItem>().Single();
-            row.MinHeight.ShouldBe(0);
+            CompletionListBox.Row row = List(window).ShouldNotBeNull().RowOf(0).ShouldNotBeNull();
+            row.Bounds.Height.ShouldBe(EditorWindow.PartOf(window.Editor).TextArea.TextView.DefaultLineHeight, 0.5);
             foreach (TextBlock text in details.GetVisualDescendants().OfType<TextBlock>())
             {
                 text.FontWeight.ShouldBe(FontWeight.Normal);

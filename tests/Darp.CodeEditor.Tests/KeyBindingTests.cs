@@ -365,6 +365,40 @@ public sealed class KeyBindingTests(UiFixture ui)
         keys.ShouldContain((CodeEditorCommands.Redo, new KeyGesture(Key.Y, KeyModifiers.Meta)));
     }
 
+    [Theory]
+    [InlineData(false, false, Key.Q, KeyModifiers.Control)]
+    [InlineData(false, true, Key.F1, KeyModifiers.None)]
+    [InlineData(true, false, Key.F1, KeyModifiers.None)]
+    public void The_details_toggle_is_tried_before_the_trigger_and_also_takes_the_hover_key(
+        bool mac,
+        bool linux,
+        Key hoverKey,
+        KeyModifiers hoverModifiers
+    )
+    {
+        (string Id, KeyGesture Gesture)[] keys = [.. DefaultKeys.Table(mac, linux)];
+        KeyModifiers command = mac ? KeyModifiers.Meta : KeyModifiers.Control;
+
+        foreach (KeyGesture gesture in (KeyGesture[])[new(Key.Space, KeyModifiers.Control), new(Key.I, command)])
+        {
+            string[] commands = [.. keys.Where(key => key.Gesture == gesture).Select(key => key.Id)];
+            commands.ShouldBe([CodeEditorCommands.ToggleSuggestionDetails, CodeEditorCommands.TriggerSuggest]);
+        }
+        keys.ShouldContain((CodeEditorCommands.ToggleSuggestionDetails, new KeyGesture(hoverKey, hoverModifiers)));
+    }
+
+    [Fact]
+    public void Enter_inserts_and_Tab_and_Shift_Enter_replace()
+    {
+        (string Id, KeyGesture Gesture)[] keys = [.. DefaultKeys.Table(mac: false)];
+
+        keys.ShouldContain((CodeEditorCommands.AcceptSelectedSuggestion, new KeyGesture(Key.Enter)));
+        keys.ShouldContain((CodeEditorCommands.AcceptAlternativeSelectedSuggestion, new KeyGesture(Key.Tab)));
+        keys.ShouldContain(
+            (CodeEditorCommands.AcceptAlternativeSelectedSuggestion, new KeyGesture(Key.Enter, KeyModifiers.Shift))
+        );
+    }
+
     [Fact]
     public Task Ctrl_I_opens_the_servers_list_and_leaves_the_lines_as_they_are() =>
         _ui.Run(async () =>

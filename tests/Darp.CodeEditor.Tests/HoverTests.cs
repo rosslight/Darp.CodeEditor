@@ -350,7 +350,7 @@ public sealed class HoverTests(UiFixture ui)
             var editor = new CodeEditor();
             using var window = new EditorWindow(editor, width: 400, height: 300);
             // Taller than either side, so that its height is limited to the space below its place, 183.4 pixels.
-            var popup = new EditorPopup(editor, new Border { Height = 1_000, Background = Brushes.Gray });
+            var popup = new EditorPopup(editor, new PopupFrame { Height = 1_000, Background = Brushes.Gray });
 
             popup.Show(editor, () => new Rect(10, 100.6, 8, 16));
             window.Layout();

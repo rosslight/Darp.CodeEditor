@@ -22,6 +22,7 @@ internal sealed class EditorView : IDisposable
     private readonly TextArea _area;
     private readonly Func<SearchBar?> _searchBar;
     private readonly CommandTable _commands;
+    private readonly CaretMoves _caretMoves;
 
     /// <summary>Everything the view made, in the order it made them: disposed the other way round.</summary>
     private readonly IDisposable[] _features;
@@ -59,6 +60,7 @@ internal sealed class EditorView : IDisposable
         _searchBar = searchBar;
         _commands = new CommandTable(area);
         Highlighter = new BackgroundTextMateHighlighter(area.TextView, area.Document, editor.Dispatcher, null);
+        _caretMoves = new CaretMoves(editor, area);
         _changes = new TextChanges(area);
         _pairs = new AutoClosingPairs(area, document, Highlighter, _changes, () => editor.AutoClosing);
         _typing = new Typing(area, document, Highlighter, _changes, _pairs);
@@ -70,11 +72,22 @@ internal sealed class EditorView : IDisposable
         _hover = new HoverController(editor, area, document, _squiggles, Highlighter);
         _snippets = new SnippetController(area, document);
         // After typing: it sees typed text first, so that a typed "(" has its ")" when completion asks.
-        _completion = new CompletionController(editor, area, document, Highlighter, _snippets);
-        _signatureHelp = new SignatureHelpController(editor, area, document, Highlighter);
+        _completion = new CompletionController(
+            editor,
+            area,
+            document,
+            Highlighter,
+            _snippets,
+            _changes,
+            _caretMoves,
+            editor.BackgroundScheduler,
+            PerformKey
+        );
+        _signatureHelp = new SignatureHelpController(editor, area, document, Highlighter, _caretMoves);
         _features =
         [
             Highlighter,
+            _caretMoves,
             _changes,
             _pairs,
             _typing,
@@ -108,13 +121,14 @@ internal sealed class EditorView : IDisposable
 
     /// <summary>
     /// Runs a command for its default key. A key that a binding handles skips <see cref="OnKeyDown"/>, so what a key does
-    /// to the popups happens here: in the text, it closes the hover.
+    /// to the popups happens here: it ends "No suggestions.", and in the text it closes the hover.
     /// </summary>
-    public void RunKey(string id)
+    public void RunKey(string id, KeyGesture gesture)
     {
+        _completion.HideNoSuggestions();
         if (_area.IsFocused)
             _hover.Close();
-        Run(id, _commands.TryRun);
+        Run(id, command => _commands.TryRun(command, gesture));
     }
 
     /// <summary>Runs a command for the app, wherever the keyboard is.</summary>
@@ -132,6 +146,10 @@ internal sealed class EditorView : IDisposable
             return true;
         if (!_area.IsFocused)
             return false;
+        // With Ctrl or Cmd, a key that reaches the text runs one of AvaloniaEdit's commands, such as paste, which may
+        // move the caret within the key's event, as when the clipboard answers at once: that is no typing.
+        if ((e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) == 0)
+            _caretMoves.OnKeyboard();
         return _completion.OnKeyDown(e)
             || _signatureHelp.OnKeyDown(e)
             || _snippets.OnKeyDown(e)
@@ -147,6 +165,7 @@ internal sealed class EditorView : IDisposable
     {
         if (!_area.IsFocused)
             return;
+        _caretMoves.OnKeyboard();
         _completion.OnTextInput(e);
         if (!e.Handled)
             _typing.OnTextInput(e);
@@ -178,8 +197,7 @@ internal sealed class EditorView : IDisposable
     /// <summary>The colors of the color theme, once it is loaded.</summary>
     public void SetColors(ColorThemeFile? theme, TextAreaColors? colors, SymbolIconColors? icons, PopupColors popups)
     {
-        _completion.Colors = popups;
-        _completion.Icons = icons;
+        _completion.SetColors(popups, icons);
         _snippets.Colors = colors;
         _signatureHelp.Colors = popups;
         _brackets.Colors = colors;
@@ -205,6 +223,16 @@ internal sealed class EditorView : IDisposable
         if (_editor.Selection != before)
             _completion.Close();
         return true;
+    }
+
+    /// <summary>
+    /// The normal action of <paramref name="gesture"/>, for an accept that waited for completion's filter and found
+    /// nothing to commit: Tab goes through a snippet's stops and then types, and Enter and Shift+Enter break the line.
+    /// </summary>
+    private void PerformKey(KeyGesture gesture)
+    {
+        var key = new KeyEventArgs { Key = gesture.Key, KeyModifiers = gesture.KeyModifiers };
+        _ = _snippets.OnKeyDown(key) || _typing.OnKeyDown(key);
     }
 
     /// <summary>

@@ -194,7 +194,7 @@ public class SnippetBenchmarks
         window.KeyPress(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
         window.KeyRelease(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
         CompletionBenchmarks.RunJobsUntil(
-            () => CompletionBenchmarks.List(window) is { ItemCount: 2 },
+            () => CompletionBenchmarks.List(window)?.Items.Count == 2,
             "The list did not show."
         );
         for (int i = 0; i < index; i++)

@@ -1,6 +1,7 @@
 // Left out of the baseline's build while the target branch has no completion: see NotInBaselineAttribute.
 #if !BENCHMARK_BASELINE
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
@@ -82,10 +83,10 @@ public class CompletionBenchmarks
         Window window = _window ?? throw new InvalidOperationException("Not set up.");
         window.KeyPress(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
         window.KeyRelease(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
-        RunJobsUntil(() => List(window) is { ItemCount: Items }, "The list did not show.");
+        RunJobsUntil(() => List(window)?.Items.Count == Items, "The list did not show.");
         HeadlessEditor.Render(window);
         // A list that showed nothing would look fast.
-        if (List(window)?.ContainerFromIndex(0) is not ListBoxItem { Content: ShownItem { Item.Label: "alpha0" } })
+        if (List(window)?.RowOf(0)?.Item is not { Item.Label: "alpha0" })
             throw new InvalidOperationException("The frame does not show the list's items.");
     }
 
@@ -99,9 +100,9 @@ public class CompletionBenchmarks
         Window window = _window ?? throw new InvalidOperationException("Not set up.");
         window.KeyTextInput("a");
         // The items that start with "a": one in eight.
-        RunJobsUntil(() => List(window) is { ItemCount: Items / 8 }, "The list was not filtered.");
+        RunJobsUntil(() => List(window)?.Items.Count == Items / 8, "The list was not filtered.");
         HeadlessEditor.Render(window);
-        if (List(window)?.ContainerFromIndex(0) is not ListBoxItem { Content: ShownItem { Highlights.Length: 1 } })
+        if (List(window)?.RowOf(0)?.Item is not { Highlights.Length: 1 })
             throw new InvalidOperationException("The frame does not show the filtered list.");
     }
 
@@ -126,8 +127,26 @@ public class CompletionBenchmarks
         _server?.Dispose();
     }
 
-    internal static ListBox? List(Window window) =>
-        OverlayLayer.GetOverlayLayer(window)?.GetVisualDescendants().OfType<ListBox>().FirstOrDefault();
+    /// <summary>The list that a window showed last: an editor keeps its list, which shows again in the same window.</summary>
+    private static readonly ConditionalWeakTable<Window, CompletionListBox> s_lists = new();
+
+    /// <summary>
+    /// The list that shows in <paramref name="window"/>; null while none does. Found once, as looking through the
+    /// window's popups on each turn of a wait allocated more than the keystroke it waited for.
+    /// </summary>
+    internal static CompletionListBox? List(Window window)
+    {
+        if (s_lists.TryGetValue(window, out CompletionListBox? known) && TopLevel.GetTopLevel(known) == window)
+            return known;
+        CompletionListBox? list = OverlayLayer
+            .GetOverlayLayer(window)
+            ?.GetVisualDescendants()
+            .OfType<CompletionListBox>()
+            .FirstOrDefault();
+        if (list is not null)
+            s_lists.AddOrUpdate(window, list);
+        return list;
+    }
 
     /// <summary>Runs the UI thread's jobs until <paramref name="condition"/> holds; fails after 10 seconds.</summary>
     internal static void RunJobsUntil(Func<bool> condition, string failure)
@@ -139,6 +158,229 @@ public class CompletionBenchmarks
             if (Stopwatch.GetElapsedTime(start) > TimeSpan.FromSeconds(10))
                 throw new InvalidOperationException(failure);
         }
+    }
+}
+
+/// <summary>
+/// From typing a character until a rendered frame shows the list filtered, as in <see cref="CompletionBenchmarks"/>,
+/// with as many items as tolerate a typo, 2,000, of 128 characters each, such as long names that a server sends, and a
+/// typed word of 63 characters that every label holds in order, two neighbouring ones swapped: the worst case of
+/// matching, far past what a ranking scores by tables, so that it scores the cheaper way. The budget of 50 ms is the
+/// same.
+/// </summary>
+[NotInBaseline]
+[InvocationCount(1)]
+[WarmupCount(10)]
+[IterationCount(20)]
+public class CompletionLongLabelBenchmarks
+{
+    private const int Items = 2000;
+
+    /// <summary>What is typed before the measured keystroke: 62 of the 63 characters, the second and third swapped.</summary>
+    private static readonly string s_typed = "aabb" + string.Concat(Enumerable.Repeat("ab", 29));
+
+    private LanguageServer? _server;
+    private Window? _window;
+    private CodeDocument? _document;
+
+    [GlobalSetup]
+    public void SetUp()
+    {
+        HeadlessEditor.SetUpApp();
+        string fakeServer = Path.Combine(AppContext.BaseDirectory, "Darp.CodeEditor.Tests.FakeServer.dll");
+        _server = new LanguageServer(
+            new LanguageServerOptions
+            {
+                FileName = Environment.ProcessPath ?? "dotnet",
+                Arguments =
+                [
+                    fakeServer,
+                    "--completion-items",
+                    $"{Items}",
+                    "--completion-label-length",
+                    "128",
+                    "--no-diagnostics",
+                    "--semantic-tokens",
+                    "none",
+                ],
+            }
+        );
+        Task start = _server.StartAsync();
+        CompletionBenchmarks.RunJobsUntil(() => start.IsCompleted, "The language server did not start.");
+        start.GetAwaiter().GetResult();
+        _document = _server.CreateDocument(CodeLanguage.PlainText, s_typed);
+        CodeDocument document = _document;
+        CompletionBenchmarks.RunJobsUntil(
+            () => document.Features is not null,
+            "The document did not open in the server."
+        );
+        var editor = new CodeEditor { Document = _document };
+        _window = HeadlessEditor.Show(editor);
+        HeadlessEditor.Render(_window);
+        editor.Selection = new TextSelection(s_typed.Length);
+        editor.Focus();
+    }
+
+    /// <summary>Opens the list for the 62 characters, and waits until it shows them filtered.</summary>
+    [IterationSetup]
+    public void OpenTheList()
+    {
+        Window window = _window ?? throw new InvalidOperationException("Not set up.");
+        window.KeyPress(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
+        window.KeyRelease(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
+        CompletionBenchmarks.RunJobsUntil(
+            () => CompletionBenchmarks.List(window)?.Items is [{ Highlights.Length: 62 }, ..],
+            "The list was not filtered."
+        );
+        HeadlessEditor.Render(window);
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("CI")]
+    public void TypeACharacterUntilAFrameShowsTheFilteredLongLabels()
+    {
+        Window window = _window ?? throw new InvalidOperationException("Not set up.");
+        window.KeyTextInput("a");
+        CompletionBenchmarks.RunJobsUntil(
+            () => CompletionBenchmarks.List(window)?.Items is [{ Highlights.Length: 63 }, ..],
+            "The list was not filtered."
+        );
+        HeadlessEditor.Render(window);
+    }
+
+    /// <summary>Closes the list, which stops its filter, and deletes the character typed.</summary>
+    [IterationCleanup]
+    public void CloseTheList()
+    {
+        Window window = _window ?? throw new InvalidOperationException("Not set up.");
+        CodeDocument document = _document ?? throw new InvalidOperationException("Not set up.");
+        window.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
+        window.KeyRelease(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
+        if (document.CurrentSnapshot.Length != s_typed.Length)
+            document.Undo();
+        HeadlessEditor.Render(window);
+    }
+
+    [GlobalCleanup]
+    public void Close()
+    {
+        _window?.Close();
+        _document?.Dispose();
+        _server?.Dispose();
+    }
+}
+
+/// <summary>
+/// From Backspace until a rendered frame shows the list ranked again, as in <see cref="CompletionBenchmarks"/>, in the
+/// heaviest ranking that scores by tables: Backspace ranks all of the answer's items, 2,000 of 40 characters, as many
+/// as tolerate a typo, against a typed word of 8 characters that every label holds in order, two neighbouring ones
+/// swapped, so that the word as typed and each of its six swaps fill a table for each item, some 1.9 million cells,
+/// just within the ranking's budget. The budget of 50 ms is the same.
+/// </summary>
+[NotInBaseline]
+[InvocationCount(1)]
+[WarmupCount(10)]
+[IterationCount(20)]
+public class CompletionTableBudgetBenchmarks
+{
+    private const int Items = 2000;
+
+    private const string Typed = "aabbabaa";
+
+    private LanguageServer? _server;
+    private Window? _window;
+    private CodeDocument? _document;
+
+    [GlobalSetup]
+    public void SetUp()
+    {
+        HeadlessEditor.SetUpApp();
+        string fakeServer = Path.Combine(AppContext.BaseDirectory, "Darp.CodeEditor.Tests.FakeServer.dll");
+        _server = new LanguageServer(
+            new LanguageServerOptions
+            {
+                FileName = Environment.ProcessPath ?? "dotnet",
+                Arguments =
+                [
+                    fakeServer,
+                    "--completion-items",
+                    $"{Items}",
+                    "--completion-label-length",
+                    "40",
+                    "--no-diagnostics",
+                    "--semantic-tokens",
+                    "none",
+                ],
+            }
+        );
+        Task start = _server.StartAsync();
+        CompletionBenchmarks.RunJobsUntil(() => start.IsCompleted, "The language server did not start.");
+        start.GetAwaiter().GetResult();
+        _document = _server.CreateDocument(CodeLanguage.PlainText, Typed);
+        CodeDocument document = _document;
+        CompletionBenchmarks.RunJobsUntil(
+            () => document.Features is not null,
+            "The document did not open in the server."
+        );
+        var editor = new CodeEditor { Document = _document };
+        _window = HeadlessEditor.Show(editor);
+        HeadlessEditor.Render(_window);
+        editor.Selection = new TextSelection(Typed.Length);
+        editor.Focus();
+    }
+
+    /// <summary>
+    /// Opens the list for the 8 characters, and types a ninth, which ranks the items that show: Backspace then ranks
+    /// the answer's, which was asked for the 8, without asking again.
+    /// </summary>
+    [IterationSetup]
+    public void OpenTheListAndTypeOn()
+    {
+        Window window = _window ?? throw new InvalidOperationException("Not set up.");
+        window.KeyPress(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
+        window.KeyRelease(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
+        CompletionBenchmarks.RunJobsUntil(
+            () => CompletionBenchmarks.List(window)?.Items is [{ Highlights.Length: 8 }, ..],
+            "The list was not ranked."
+        );
+        window.KeyTextInput("b");
+        CompletionBenchmarks.RunJobsUntil(
+            () => CompletionBenchmarks.List(window)?.Items is [{ Highlights.Length: 9 }, ..],
+            "The list was not filtered."
+        );
+        HeadlessEditor.Render(window);
+    }
+
+    [Benchmark]
+    [BenchmarkCategory("CI")]
+    public void BackspaceUntilAFrameShowsTheListRankedByTables()
+    {
+        Window window = _window ?? throw new InvalidOperationException("Not set up.");
+        window.KeyPress(Key.Back, RawInputModifiers.None, PhysicalKey.Backspace, null);
+        window.KeyRelease(Key.Back, RawInputModifiers.None, PhysicalKey.Backspace, null);
+        CompletionBenchmarks.RunJobsUntil(
+            () => CompletionBenchmarks.List(window)?.Items is [{ Highlights.Length: 8 }, ..],
+            "The list was not ranked."
+        );
+        HeadlessEditor.Render(window);
+    }
+
+    /// <summary>Closes the list; Backspace left the text as it was.</summary>
+    [IterationCleanup]
+    public void CloseTheList()
+    {
+        Window window = _window ?? throw new InvalidOperationException("Not set up.");
+        window.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
+        window.KeyRelease(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
+        HeadlessEditor.Render(window);
+    }
+
+    [GlobalCleanup]
+    public void Close()
+    {
+        _window?.Close();
+        _document?.Dispose();
+        _server?.Dispose();
     }
 }
 
@@ -211,7 +453,7 @@ public class CompletionWorstCaseBenchmarks
         window.KeyRelease(Key.Space, RawInputModifiers.Control, PhysicalKey.Space, null);
         CompletionBenchmarks.RunJobsUntil(
             () =>
-                CompletionBenchmarks.List(window)?.ItemsSource is IReadOnlyList<ShownItem> { Count: > 0 } items
+                CompletionBenchmarks.List(window)?.Items is { Count: > 0 } items
                 && items[0].Highlights.Length == s_typed.Length,
             "The list was not filtered."
         );

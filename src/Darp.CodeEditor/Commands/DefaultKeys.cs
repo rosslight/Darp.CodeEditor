@@ -12,7 +12,11 @@ internal static class DefaultKeys
     /// <summary>The bindings of this operating system, for <paramref name="editor"/>.</summary>
     public static IEnumerable<KeyBinding> For(CodeEditor editor) =>
         Table(OperatingSystem.IsMacOS(), OperatingSystem.IsLinux())
-            .Select(key => new KeyBinding { Gesture = key.Gesture, Command = new KeyCommand(editor, key.Id) });
+            .Select(key => new KeyBinding
+            {
+                Gesture = key.Gesture,
+                Command = new KeyCommand(editor, key.Id, key.Gesture),
+            });
 
     /// <summary>Puts the defaults that remain behind the app's bindings, in their order.</summary>
     public static void MoveLast(List<KeyBinding> bindings)
@@ -32,10 +36,25 @@ internal static class DefaultKeys
     internal static IEnumerable<(string Id, KeyGesture Gesture)> Table(bool mac, bool linux = false)
     {
         KeyModifiers command = mac ? KeyModifiers.Meta : KeyModifiers.Control;
-        yield return (CodeEditorCommands.TriggerSuggest, new KeyGesture(Key.Space, KeyModifiers.Control));
-        yield return (CodeEditorCommands.TriggerSuggest, new KeyGesture(Key.I, command));
+        // The details toggle goes first: it applies while the list shows, and the key asks for completion otherwise.
+        foreach (KeyGesture gesture in (KeyGesture[])[new(Key.Space, KeyModifiers.Control), new(Key.I, command)])
+        {
+            yield return (CodeEditorCommands.ToggleSuggestionDetails, gesture);
+            yield return (CodeEditorCommands.TriggerSuggest, gesture);
+        }
         if (mac)
             yield return (CodeEditorCommands.TriggerSuggest, new KeyGesture(Key.Escape, KeyModifiers.Alt));
+        // The hover's key.
+        yield return (
+            CodeEditorCommands.ToggleSuggestionDetails,
+            mac || linux ? new KeyGesture(Key.F1) : new KeyGesture(Key.Q, KeyModifiers.Control)
+        );
+        yield return (CodeEditorCommands.AcceptSelectedSuggestion, new KeyGesture(Key.Enter));
+        yield return (CodeEditorCommands.AcceptAlternativeSelectedSuggestion, new KeyGesture(Key.Tab));
+        yield return (
+            CodeEditorCommands.AcceptAlternativeSelectedSuggestion,
+            new KeyGesture(Key.Enter, KeyModifiers.Shift)
+        );
         yield return (
             CodeEditorCommands.TriggerParameterHints,
             new KeyGesture(Key.Space, command | KeyModifiers.Shift)
@@ -59,6 +78,9 @@ internal static class DefaultKeys
 
         KeyModifiers copyLines =
             KeyModifiers.Shift | KeyModifiers.Alt | (linux ? KeyModifiers.Control : KeyModifiers.None);
+        // Ahead of moving lines: they apply only while several signatures show.
+        yield return (CodeEditorCommands.ShowPrevParameterHint, new KeyGesture(Key.Up, KeyModifiers.Alt));
+        yield return (CodeEditorCommands.ShowNextParameterHint, new KeyGesture(Key.Down, KeyModifiers.Alt));
         yield return (CodeEditorCommands.MoveLinesUp, new KeyGesture(Key.Up, KeyModifiers.Alt));
         yield return (CodeEditorCommands.MoveLinesDown, new KeyGesture(Key.Down, KeyModifiers.Alt));
         yield return (CodeEditorCommands.CopyLinesUp, new KeyGesture(Key.Up, copyLines));
@@ -88,11 +110,13 @@ internal static class DefaultKeys
     {
         private readonly CodeEditor _editor;
         private readonly string _id;
+        private readonly KeyGesture _gesture;
 
-        public KeyCommand(CodeEditor editor, string id)
+        public KeyCommand(CodeEditor editor, string id, KeyGesture gesture)
         {
             _editor = editor;
             _id = id;
+            _gesture = gesture;
         }
 
         /// <summary>Never raised: Avalonia asks at each key.</summary>
@@ -104,6 +128,6 @@ internal static class DefaultKeys
 
         public bool CanExecute(object? parameter) => _editor.View?.CanRun(_id) == true;
 
-        public void Execute(object? parameter) => _editor.View?.RunKey(_id);
+        public void Execute(object? parameter) => _editor.View?.RunKey(_id, _gesture);
     }
 }

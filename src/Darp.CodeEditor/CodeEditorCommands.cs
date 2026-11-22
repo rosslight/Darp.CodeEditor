@@ -13,8 +13,33 @@ public static class CodeEditorCommands
     /// <summary>Asks the language server for completion at the caret.</summary>
     public const string TriggerSuggest = "editor.action.triggerSuggest";
 
+    /// <summary>Shows or hides the selected item's details beside completion's list, while the list shows.</summary>
+    public const string ToggleSuggestionDetails = "toggleSuggestionDetails";
+
+    /// <summary>
+    /// Commits the selected item of completion's list, while it shows, inserting: its text goes over the word up to the
+    /// caret, and the rest of the word stays after it.
+    /// </summary>
+    public const string AcceptSelectedSuggestion = "acceptSelectedSuggestion";
+
+    /// <summary>
+    /// Commits the selected item of completion's list, while it shows, replacing: its text goes over the rest of the
+    /// word too, as far as the item's replace range reaches.
+    /// </summary>
+    public const string AcceptAlternativeSelectedSuggestion = "acceptAlternativeSelectedSuggestion";
+
     /// <summary>Asks the language server for the signature of the call around the caret.</summary>
     public const string TriggerParameterHints = "editor.action.triggerParameterHints";
+
+    /// <summary>
+    /// Makes the signature before the active one active, or the last, while signature help shows several.
+    /// </summary>
+    public const string ShowPrevParameterHint = "showPrevParameterHint";
+
+    /// <summary>
+    /// Makes the signature after the active one active, or the first, while signature help shows several.
+    /// </summary>
+    public const string ShowNextParameterHint = "showNextParameterHint";
 
     /// <summary>
     /// Opens the search bar and puts the keyboard in its query, which starts with the selection within one line or else
