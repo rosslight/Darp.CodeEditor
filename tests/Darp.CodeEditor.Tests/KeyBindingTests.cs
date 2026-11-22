@@ -384,7 +384,10 @@ public sealed class KeyBindingTests(UiFixture ui)
             string[] commands = [.. keys.Where(key => key.Gesture == gesture).Select(key => key.Id)];
             commands.ShouldBe([CodeEditorCommands.ToggleSuggestionDetails, CodeEditorCommands.TriggerSuggest]);
         }
-        keys.ShouldContain((CodeEditorCommands.ToggleSuggestionDetails, new KeyGesture(hoverKey, hoverModifiers)));
+        var hover = new KeyGesture(hoverKey, hoverModifiers);
+        keys.Where(key => key.Gesture == hover)
+            .Select(key => key.Id)
+            .ShouldBe([CodeEditorCommands.ToggleSuggestionDetails, CodeEditorCommands.ShowHover]);
     }
 
     [Fact]

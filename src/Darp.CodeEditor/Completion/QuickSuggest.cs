@@ -98,7 +98,7 @@ internal sealed class QuickSuggest : IDisposable
     /// </summary>
     private int WordEnd(int caret)
     {
-        int last = Math.Min(_buffer.GetLineByOffset(caret).EndOffset, caret + HoverController.MaxWordReach);
+        int last = Math.Min(_buffer.GetLineByOffset(caret).EndOffset, caret + Hovered.MaxWordReach);
         int end = caret;
         while (end < last && WordCharacters.IsWordCharacter(_buffer.GetCharAt(end)))
             end++;

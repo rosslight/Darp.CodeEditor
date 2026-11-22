@@ -118,7 +118,7 @@ internal sealed class CompletionList
     /// </summary>
     private static int WordEnd(TextSnapshot snapshot, int position)
     {
-        string after = snapshot.GetText(new TextRange(position, HoverController.MaxWordReach));
+        string after = snapshot.GetText(new TextRange(position, Hovered.MaxWordReach));
         int length = 0;
         while (length < after.Length && WordCharacters.IsWordCharacter(after[length]))
             length++;

@@ -102,7 +102,7 @@ internal sealed class CompletionView
     public SymbolIconColors? Icons { get; set; }
 
     /// <summary>How code looks in the popups: the editor's font, on the text area's colors.</summary>
-    public CodeLook Look => new(_editor.FontFamily, _editor.FontSize, Colors.CodeBackground, Colors.CodeForeground);
+    public CodeLook Look => new(_editor.FontFamily, _editor.FontSize, Colors);
 
     /// <summary>
     /// Shows <paramref name="items"/>, with <paramref name="selected"/> selected and in view, at the word that starts at

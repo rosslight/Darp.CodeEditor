@@ -30,13 +30,13 @@ internal sealed class CompletionRequest(TextSnapshot snapshot, TextRange word)
 
     /// <summary>
     /// The word before <paramref name="caret"/>, which completion asks for, by VS Code's word characters, which ends at
-    /// the caret. It reaches back at most <see cref="HoverController.MaxWordReach"/> characters, as a hovered word does:
+    /// the caret. It reaches back at most <see cref="Hovered.MaxWordReach"/> characters, as a hovered word does:
     /// a line of millions of word characters costs no more.
     /// </summary>
     public static TextRange WordBefore(TextDocument buffer, int caret)
     {
         DocumentLine line = buffer.GetLineByOffset(caret);
-        int first = Math.Max(line.Offset, caret - HoverController.MaxWordReach);
+        int first = Math.Max(line.Offset, caret - Hovered.MaxWordReach);
         int start = caret;
         while (start > first && WordCharacters.IsWordCharacter(buffer.GetCharAt(start - 1)))
             start--;

@@ -127,15 +127,18 @@ internal sealed class EditorView : IDisposable
 
     /// <summary>
     /// Runs a command for its default key. A key that a binding handles skips <see cref="OnKeyDown"/>, so what a key does
-    /// to the popups happens here: it ends "No suggestions.", and in the text it closes the hover.
+    /// to the popups happens here: it ends "No suggestions.", and in the text it closes the hover, unless the command is
+    /// one that shows it.
     /// </summary>
     public void RunKey(string id, KeyGesture gesture)
     {
         _completion.HideNoSuggestions();
-        if (_area.IsFocused)
-            _hover.Close();
+        if (_area.IsFocused && !ShowsHover(id))
+            _hover.CloseOnKey();
         Run(id, command => _commands.TryRun(command, gesture));
     }
+
+    private static bool ShowsHover(string id) => id is CodeEditorCommands.ShowHover;
 
     /// <summary>Runs a command for the app, wherever the keyboard is.</summary>
     /// <returns>Whether it applied.</returns>

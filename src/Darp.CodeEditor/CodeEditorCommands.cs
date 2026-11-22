@@ -4,8 +4,8 @@ namespace Darp.CodeEditor;
 /// The ids of the editor's commands, for <see cref="CodeEditor.RunCommand"/>: VS Code's command ids.
 /// </summary>
 /// <remarks>
-/// A command applies only where it can act. Those that change the text or ask a language server don't apply in a
-/// read-only editor. By its default key, a command on the text also needs the text to have the keyboard, and a key whose
+/// A command applies only where it can act. Those that change the text, or complete it, don't apply in a read-only
+/// editor. By its default key, a command on the text also needs the text to have the keyboard, and a key whose
 /// command does not apply goes on to the app.
 /// </remarks>
 public static class CodeEditorCommands
@@ -40,6 +40,12 @@ public static class CodeEditorCommands
     /// Makes the signature after the active one active, or the first, while signature help shows several.
     /// </summary>
     public const string ShowNextParameterHint = "showNextParameterHint";
+
+    /// <summary>
+    /// Shows the hover at the caret, the diagnostics there and the server's hover; when it shows already, puts the
+    /// keyboard into it, where the arrows, Page Up, Page Down, Home and End scroll it.
+    /// </summary>
+    public const string ShowHover = "editor.action.showHover";
 
     /// <summary>
     /// Opens the search bar and puts the keyboard in its query, which starts with the selection within one line or else
