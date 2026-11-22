@@ -153,6 +153,8 @@ Editor.KeyBindings.RemoveAll(binding => binding.Gesture == replace);
 | `TriggerSuggest` | Ctrl+Space, Ctrl+I; on macOS also Alt+Escape |
 | `AcceptSelectedSuggestion` | Enter, while completion's list shows: inserts |
 | `AcceptAlternativeSelectedSuggestion` | Tab, Shift+Enter, while completion's list shows: replaces |
+| `ShowHover` | The hover key, after the details toggle: shows the hover at the caret at once; again, puts the keyboard into it |
+| `NextMarker`, `PreviousMarker` | F8, Shift+F8, while the document has an error, warning or information: by position, wrapping around |
 | `TriggerParameterHints` | Ctrl+Shift+Space |
 | `ShowPrevParameterHint`, `ShowNextParameterHint` | Alt+Up, Alt+Down, ahead of moving lines, while several signatures show |
 | `Find`, `Replace` | Ctrl+F, Ctrl+H (macOS: Alt+Cmd+F) |
@@ -209,7 +211,8 @@ otherwise (#114).
   stops. Token colors are made for their theme's background, so they come together.
 - **Completion, hover and signature help** are the editor's own popups (#121). Their frame, rows and scroll bar take
   their colors from `ColorTheme` by VS Code's keys (`editorSuggestWidget.*`, `editorHoverWidget.*`,
-  `list.hoverBackground`, `scrollbarSlider.*`, `widget.shadow`), with VS Code's defaults for the keys a theme leaves
+  `list.hoverBackground`, `scrollbarSlider.*`, `widget.shadow`, `focusBorder`, `textLink.foreground`,
+  `textCodeBlock.background`, `problems*Icon.foreground`), with VS Code's defaults for the keys a theme leaves
   out. An app's styles for flyouts, tooltips, lists, scroll bars, text blocks and panels don't reach them, under
   Fluent, Simple or any other theme. Their prose takes the app's font; code keeps the editor's colors, background and
   font.
@@ -244,10 +247,14 @@ custom variant gets the colors of the variant it inherits from, unless the app a
 high contrast inherits from Light, so it shows Light+ without one. To make one editor dark in a light app, wrap it in a
 `ThemeVariantScope`: its popups turn dark too.
 
-- **Errors:** squiggles in the theme's error, warning and info colors. Hovering shows the messages above the
-  server's information.
+- **Errors:** squiggles in the theme's error, warning and info colors. Hovering shows each with its severity's icon,
+  its message, and its `Source` and `Code` dimmed, above the server's information. A `Code` with an `http` or `https`
+  `CodeDescription` is a link to that page. F8 and Shift+F8 move the caret through the errors, warnings and information
+  by position, wrapping around, and show each in the hover; hints are not visited.
 - **Hover:** Markdown, with emphasis, inline code, lists and links. Code blocks are highlighted with the editor's
-  grammar and colors.
+  grammar and colors. A click into the hover holds it open until Escape or a click outside, and its text can be
+  selected and copied. The hover key shows it at the caret, and pressed again puts the keyboard into it, where the
+  arrows, Page Up, Page Down, Home and End scroll it. Its edges away from the word resize it.
 - **Completion:** a list of up to 12 items at once below the word, or above it when only that side has room, in the
   editor's popup, with rows exactly as high as the editor's lines, labels in the editor's font, and the matched
   characters in the theme's highlight colors; the selected item's details in a popup of their own, right of the list,
@@ -380,23 +387,29 @@ How the client talks to a server, where the protocol leaves a choice:
   after the start's settings went out: until then they get nothing, and when it opens there, not when the server
   runs, they learn that the server serves it, so a hover, completion and signature help end, and semantic tokens are
   asked for again.
-- **Hover** is asked when the pointer rests on a character for 400 ms, as long as Avalonia's tooltips wait (it is
-  AvaloniaEdit's hover time), at that character's position, or at a line's end within a space's width after it, where
-  an empty diagnostic's squiggle is. A `MarkedString` with a language becomes a Markdown code
+- **Hover** is asked when the pointer has rested on a character for a fixed 300 ms on the document's clock, at that
+  character's position, or at a line's end within a space's width after it, where an empty diagnostic's squiggle is;
+  moving to another character starts the wait again, and no hover starts while a button is down. The diagnostics show
+  at that moment, and the server's hover joins them below when it answers, without touching their selection. A `MarkedString` with a language becomes a Markdown code
   block. The popup stays while the pointer is over the word, the range that the answer names, or the popup itself.
   The word reaches at most 1,000 characters to either side of the pointer, as in VS Code, so a line of millions of
   word characters costs the pointer no more; the popup still stays while the pointer moves on along such a word,
   which the view shows only up to its 3,000th character. How far the word goes on its line is found once, when the
   hover starts, so moving the pointer reads no text.
-  The hover ends when the pointer rests on another word, on typing, scrolling and Escape, when the editor loses the
-  keyboard focus, when a server starts or stops serving the document, and with new colors; also while it still
-  waits for its answer. Ending it cancels the request still under way with `$/cancelRequest`, stops reading the
+  The hover ends when the pointer moves on to another word, on a click outside it, on a default key in the text other
+  than the hover key and F8, on typing, scrolling and Escape, when the keyboard leaves the editor and its popups, when
+  a server starts or stops serving the document, and with new colors; also while it still waits for its answer. A
+  hover that the user clicked into or put the keyboard into stays wherever the pointer goes and through the keys of
+  the text. A hover shown by key ends when the caret moves. The hover is outside the editor's key route, so with the
+  keyboard in it only its own Escape, scroll keys and Ctrl+C work. Ending it cancels the request still under way with `$/cancelRequest`, stops reading the
   answer between lines and paragraphs and highlighting its code between lines, and drops what they would show. The
   popup is placed again when the window or the text it is next to moves, as when the window narrows.
-- **The hover's look:** text in the editor's popup, in the color theme's hover colors; code blocks in the editor's font, colors and background,
-  highlighted with the document's grammar; inline code as a small span in the editor's font family, foreground and
-  background, at the size of the text around it, so that it fits its line.
-- **The hover's size:** a hover shows at most 2,000 characters on 50 lines, in 250 runs of one style or color, the
+- **The hover's look:** text in the editor's popup, in the color theme's hover colors, and links in
+  `textLink.foreground`; code blocks in the editor's font, colors and background, highlighted with the document's
+  grammar; inline code as a small span in the editor's font family on `textCodeBlock.background`, at the size of the
+  text around it, so that it fits its line. While the keyboard is in the popup, its border takes `focusBorder`.
+- **The hover's size:** it is as large as its content, up to two thirds of the editor's width and a quarter of its
+  height, or 750 by 250 pixels where that is more, and scrolls beyond. A hover shows at most 2,000 characters on 50 lines, in 250 runs of one style or color, the
   diagnostics' messages first, the most severe first and at most 50 of them; "…" marks where it was cut. The UI thread builds and lays out every run one by one, at
   about 10 µs a run and 1 µs a character, so the largest hover takes it about 2 ms, with the frame about 7 ms
   (BenchmarkDotNet, i7-13700), and a popup that scrolls gains nothing from more. Every piece of a hover's text, a
@@ -989,11 +1002,13 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
 - hover: the diagnostics' messages, with their codes, above the server's Markdown, whose code block is highlighted with
   the document's grammar in the editor's font, colors and background; in the editor's popup, in the window's overlay
   layer, inside a window narrower than the popup. An editor in a dark `ThemeVariantScope` of a light window shows a
-  dark popup, in its pixels. Inline code shows in the editor's font, foreground and background, and code without a color
-  of its own in the editor's foreground, in the pixels. The popup stays while the pointer is over its word or over the
-  popup, and closes when the
-  pointer leaves both, rests on another word under the same diagnostic, and on typing, Escape, scrolling and focus
-  loss. Resting on another word cancels the request still under way with `$/cancelRequest`, and so does Escape
+  dark popup, in its pixels. Inline code shows in the editor's font on the theme's code background, and code without a
+  color of its own in the editor's foreground, in the pixels. The popup stays while the pointer is over its word or
+  over the popup, and closes when the
+  pointer leaves both, moves on to another word under the same diagnostic, and on typing, Escape, scrolling and focus
+  loss. A click into it holds it, its selection copies, the hover key puts the keyboard into it where the arrows and
+  page keys scroll it, and its edges resize it. F8 and Shift+F8 go by position with wraparound, past hints. Moving on
+  to another word cancels the request still under way with `$/cancelRequest`, and so does Escape
   before any popup showed. A server that stops serving the document and new colors end the hover, and reading its
   Markdown and highlighting its code stop part-way once it ended. A popup stays inside a window that narrows. An empty
   diagnostic at a line's end shows when the pointer rests where its squiggle is. A hover shows at most its characters,
