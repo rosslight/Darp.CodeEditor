@@ -116,13 +116,13 @@ public sealed partial class MainWindow : FAAppWindow
             values.ToList() switch
             {
                 [string noServer, _, null, _] => noServer,
-                [_, _, string name, LanguageServerState state] => $"{name}: {Strings.Current.Describe(state)}",
-                [_, string notInstalled, string name, _] => Strings.Current.Format(notInstalled, name),
+                [_, _, string name, LanguageServerState state] => $"{name}: {Strings.Default.Describe(state)}",
+                [_, string, string name, _] => Strings.Default.FormatServerNotInstalled(name),
                 _ => "",
             }
         );
 
-    private static FilePickerFileType AllFiles => new(Strings.Current.AllFiles) { Patterns = ["*"] };
+    private static FilePickerFileType AllFiles => new(Strings.Default.AllFiles) { Patterns = ["*"] };
 
     private Workspace? Workspace => _viewModel?.Workspace;
 
@@ -187,7 +187,7 @@ public sealed partial class MainWindow : FAAppWindow
     {
         if (sender is not FAMenuFlyout menu)
             return;
-        Strings strings = Strings.Current;
+        Strings strings = Strings.Default;
         bool shows = ShownDocument is not null;
         menu.Items.Clear();
         if (!SaveButton.IsVisible)
@@ -248,23 +248,23 @@ public sealed partial class MainWindow : FAAppWindow
             return;
         var wordWrap = new FAToggleMenuFlyoutItem
         {
-            Text = Strings.Current.WordWrap,
+            Text = Strings.Default.WordWrap,
             IsChecked = settings.WordWrap,
             InputGesture = KeyGesture.Parse("Alt+Z"),
         };
         wordWrap.Click += (_, _) => ToggleWordWrap();
         var lineNumbers = new FAToggleMenuFlyoutItem
         {
-            Text = Strings.Current.LineNumbers,
+            Text = Strings.Default.LineNumbers,
             IsChecked = settings.ShowLineNumbers,
         };
         lineNumbers.Click += (_, _) => settings.ShowLineNumbers = !settings.ShowLineNumbers;
-        var fontSize = new FAMenuFlyoutSubItem { Text = Strings.Current.FontSize };
+        var fontSize = new FAMenuFlyoutSubItem { Text = Strings.Default.FontSize };
         foreach (double size in settings.FontSizes)
         {
             var item = new FARadioMenuFlyoutItem
             {
-                Text = size.ToString(Strings.Current.Culture),
+                Text = size.ToString(Strings.Default.Culture),
                 IsChecked = settings.FontSize == size,
             };
             item.Click += (_, _) => settings.FontSize = size;
@@ -296,7 +296,7 @@ public sealed partial class MainWindow : FAAppWindow
             IReadOnlyList<IStorageFile> files = await StorageProvider.OpenFilePickerAsync(
                 new FilePickerOpenOptions
                 {
-                    Title = Strings.Current.Open,
+                    Title = Strings.Default.Open,
                     AllowMultiple = true,
                     FileTypeFilter = [AllFiles, .. FileType.All.Select(type => type.ToPickerType())],
                 }
@@ -309,7 +309,7 @@ public sealed partial class MainWindow : FAAppWindow
                 }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException)
                 {
-                    await ShowErrorAsync(Strings.Current.Format(Strings.Current.OpenFailed, file.Name), e.Message);
+                    await ShowErrorAsync(Strings.Default.FormatOpenFailed(file.Name), e.Message);
                 }
             }
         });
@@ -329,7 +329,7 @@ public sealed partial class MainWindow : FAAppWindow
             file = await StorageProvider.SaveFilePickerAsync(
                 new FilePickerSaveOptions
                 {
-                    Title = Strings.Current.SaveAs,
+                    Title = Strings.Default.SaveAs,
                     SuggestedFileName = document.File?.Name ?? document.Name + extension,
                     DefaultExtension = extension,
                     FileTypeChoices = [document.Type.ToPickerType(), AllFiles],
@@ -340,10 +340,7 @@ public sealed partial class MainWindow : FAAppWindow
             // Opens and saves run one at a time: no other document takes the path while the file is written.
             if (file.TryGetLocalPath() is { } path && Workspace?.WithPath(path, except: document) is not null)
             {
-                await ShowErrorAsync(
-                    Strings.Current.Format(Strings.Current.SaveFailed, file.Name),
-                    Strings.Current.OpenInAnother
-                );
+                await ShowErrorAsync(Strings.Default.FormatSaveFailed(file.Name), Strings.Default.OpenInAnother);
                 file.Dispose();
                 return false;
             }
@@ -357,7 +354,7 @@ public sealed partial class MainWindow : FAAppWindow
         {
             if (file != document.File)
                 file.Dispose();
-            await ShowErrorAsync(Strings.Current.Format(Strings.Current.SaveFailed, file.Name), e.Message);
+            await ShowErrorAsync(Strings.Default.FormatSaveFailed(file.Name), e.Message);
             return false;
         }
     }
@@ -372,11 +369,11 @@ public sealed partial class MainWindow : FAAppWindow
             {
                 var dialog = new FAContentDialog
                 {
-                    Title = Strings.Current.Format(Strings.Current.SaveChanges, document.Name),
-                    Content = Strings.Current.SaveChangesMessage,
-                    PrimaryButtonText = Strings.Current.Save,
-                    SecondaryButtonText = Strings.Current.DontSave,
-                    CloseButtonText = Strings.Current.Cancel,
+                    Title = Strings.Default.FormatSaveChanges(document.Name),
+                    Content = Strings.Default.SaveChangesMessage,
+                    PrimaryButtonText = Strings.Default.Save,
+                    SecondaryButtonText = Strings.Default.DontSave,
+                    CloseButtonText = Strings.Default.Cancel,
                     DefaultButton = FAContentDialogButton.Primary,
                 };
                 FAContentDialogResult result = await dialog.ShowAsync(this);
@@ -412,7 +409,7 @@ public sealed partial class MainWindow : FAAppWindow
         {
             Title = title,
             Content = message,
-            CloseButtonText = Strings.Current.Ok,
+            CloseButtonText = Strings.Default.Ok,
         }.ShowAsync(this);
 
     private void OnNew(object? sender, RoutedEventArgs e) => ShowAttachedFlyout(sender);
@@ -484,10 +481,9 @@ public sealed partial class MainWindow : FAAppWindow
     }
 
     private static string Describe(Indentation indentation) =>
-        Strings.Current.Format(
-            indentation.UseTabs ? Strings.Current.IndentTabs : Strings.Current.IndentSpaces,
-            indentation.Size
-        );
+        indentation.UseTabs
+            ? Strings.Default.FormatIndentTabs(indentation.Size)
+            : Strings.Default.FormatIndentSpaces(indentation.Size);
 
     // A document's own commands: its right-click menu and a middle click on it.
 

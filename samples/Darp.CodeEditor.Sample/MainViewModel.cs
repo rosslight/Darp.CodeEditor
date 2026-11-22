@@ -21,7 +21,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     public AppSettings Settings { get; }
 
-    public Strings Strings => Strings.Current;
+    public Strings Strings => Strings.Default;
 
     /// <summary>Whether the settings page shows instead of the current document.</summary>
     [ObservableProperty]

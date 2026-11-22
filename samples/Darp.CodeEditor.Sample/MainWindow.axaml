@@ -255,29 +255,29 @@
                                 <fa:FANavigationViewItem.ContextFlyout>
                                     <fa:FAMenuFlyout>
                                         <fa:FAMenuFlyoutItem
-                                            Text="{Binding Save, Source={x:Static loc:Strings.Current}}"
+                                            Text="{Binding Save, Source={x:Static loc:Strings.Default}}"
                                             IconSource="Save"
                                             Click="OnDocumentSave"
                                         />
                                         <fa:FAMenuFlyoutItem
-                                            Text="{Binding SaveAs, Source={x:Static loc:Strings.Current}}"
+                                            Text="{Binding SaveAs, Source={x:Static loc:Strings.Default}}"
                                             IconSource="SaveAs"
                                             Click="OnDocumentSaveAs"
                                         />
                                         <fa:FAMenuFlyoutItem
-                                            Text="{Binding Close, Source={x:Static loc:Strings.Current}}"
+                                            Text="{Binding Close, Source={x:Static loc:Strings.Default}}"
                                             IconSource="Dismiss"
                                             Click="OnDocumentClose"
                                         />
                                         <fa:FAMenuFlyoutSeparator IsVisible="{Binding File, Converter={x:Static ObjectConverters.IsNotNull}}" />
                                         <fa:FAMenuFlyoutItem
-                                            Text="{Binding CopyPath, Source={x:Static loc:Strings.Current}}"
+                                            Text="{Binding CopyPath, Source={x:Static loc:Strings.Default}}"
                                             IconSource="Copy"
                                             IsVisible="{Binding File, Converter={x:Static ObjectConverters.IsNotNull}}"
                                             Click="OnCopyPath"
                                         />
                                         <fa:FAMenuFlyoutItem
-                                            Text="{Binding ShowInFolder, Source={x:Static loc:Strings.Current}}"
+                                            Text="{Binding ShowInFolder, Source={x:Static loc:Strings.Default}}"
                                             IconSource="OpenFolder"
                                             IsVisible="{Binding File, Converter={x:Static ObjectConverters.IsNotNull}}"
                                             Click="OnShowInFolder"

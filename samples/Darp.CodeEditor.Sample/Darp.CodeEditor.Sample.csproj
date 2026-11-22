@@ -22,6 +22,12 @@
       <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
     </PackageReference>
     <PackageReference Include="CommunityToolkit.Mvvm" />
+    <!-- Build time only: the package lists Roslyn as a normal dependency, which would otherwise ship with the app. -->
+    <PackageReference
+      Include="Darp.Utils.ResxSourceGenerator"
+      PrivateAssets="all"
+      IncludeAssets="analyzers;build;buildTransitive"
+    />
     <PackageReference Include="FluentAvaloniaUI" />
   </ItemGroup>
 
@@ -30,6 +36,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The app's text: a generated Strings class, public for the app's XAML. -->
+    <EmbeddedResource Update="Localization\Strings.resx" EmitFormatMethods="true" Public="true" />
     <!-- The app's own language, Python, from VS Code's files. -->
     <AvaloniaResource Include="Languages\*.json" />
     <!-- The documents the app starts with, in memory. -->

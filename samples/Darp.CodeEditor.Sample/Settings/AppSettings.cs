@@ -50,10 +50,10 @@ public sealed partial class AppSettings : ObservableObject
     /// <summary>The language of the app's own text.</summary>
     public CultureInfo Culture
     {
-        get => Strings.Current.Culture;
+        get => Strings.Default.Culture ?? Strings.Cultures[0];
         set
         {
-            Strings.Current.Culture = value;
+            Strings.Default.Culture = value;
             OnPropertyChanged();
         }
     }
@@ -80,7 +80,7 @@ public sealed class ThemeChoice : INotifyPropertyChanged
         Variant = variant;
         _name = name;
         // Choices last as long as the app, as the strings do.
-        Strings.Current.PropertyChanged += (_, _) =>
+        Strings.Default.PropertyChanged += (_, _) =>
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Name)));
     }
 
@@ -90,5 +90,5 @@ public sealed class ThemeChoice : INotifyPropertyChanged
     /// <summary>The variant; <see cref="ThemeVariant.Default"/> follows the system, or the app around an editor.</summary>
     public ThemeVariant Variant { get; }
 
-    public string Name => _name(Strings.Current);
+    public string Name => _name(Strings.Default);
 }
