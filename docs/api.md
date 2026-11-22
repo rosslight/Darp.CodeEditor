@@ -396,14 +396,15 @@ How the client talks to a server, where the protocol leaves a choice:
   word characters costs the pointer no more; the popup still stays while the pointer moves on along such a word,
   which the view shows only up to its 3,000th character. How far the word goes on its line is found once, when the
   hover starts, so moving the pointer reads no text.
-  The hover ends when the pointer moves on to another word, on a click outside it, on a default key in the text other
-  than the hover key and F8, on typing, scrolling and Escape, when the keyboard leaves the editor and its popups, when
-  a server starts or stops serving the document, and with new colors; also while it still waits for its answer. A
-  hover that the user clicked into or put the keyboard into stays wherever the pointer goes and through the keys of
-  the text. A hover shown by key ends when the caret moves. The hover is outside the editor's key route, so with the
-  keyboard in it only its own Escape, scroll keys and Ctrl+C work. Ending it cancels the request still under way with `$/cancelRequest`, stops reading the
-  answer between lines and paragraphs and highlighting its code between lines, and drops what they would show. The
-  popup is placed again when the window or the text it is next to moves, as when the window narrows.
+  The hover ends once the pointer has rested on other text for 300 ms, on a click outside it, on a default key in the
+  text other than the hover key and F8, on typing, scrolling and Escape, when the keyboard leaves the editor and its
+  popups, when a server starts or stops serving the document, and with new colors; also while it still waits for its
+  answer. A hover that the user clicked into or put the keyboard into stays wherever the pointer goes and through the
+  keys of the text. A hover shown by key ends when the caret moves. The hover is outside the editor's key route, so with
+  the keyboard in it only its own Escape, scroll keys and Ctrl+C work. Ending it cancels the request still under way
+  with `$/cancelRequest`, stops reading the answer between lines and paragraphs and highlighting its code between lines,
+  and drops what they would show. The popup is placed again when the window or the text it is next to moves, as when the
+  window narrows.
 - **The hover's look:** text in the editor's popup, in the color theme's hover colors, and links in
   `textLink.foreground`; code blocks in the editor's font, colors and background, highlighted with the document's
   grammar; inline code as a small span in the editor's font family on `textCodeBlock.background`, at the size of the

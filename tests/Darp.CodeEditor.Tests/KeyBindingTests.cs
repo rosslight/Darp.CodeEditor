@@ -135,6 +135,28 @@ public sealed class KeyBindingTests(UiFixture ui)
         });
 
     [Fact]
+    public Task The_hover_key_shows_a_problem_right_after_a_word() =>
+        _ui.Run(async () =>
+        {
+            var document = new StandaloneDocument(CodeLanguage.PlainText, "if True\n", TimeProvider.System);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Editor.Selection = new TextSelection(7);
+            document.SetDiagnostics([
+                new Diagnostic(
+                    document.CurrentSnapshot,
+                    new TextRange(7, 1),
+                    DiagnosticSeverity.Error,
+                    null,
+                    "Expected"
+                ),
+            ]);
+
+            Hovers.PressHoverKey(window);
+
+            await Hovers.WaitForPopupAsync(window, "Expected");
+        });
+
+    [Fact]
     public Task A_default_removed_before_the_editor_is_attached_stays_removed() =>
         _ui.Run(() =>
         {

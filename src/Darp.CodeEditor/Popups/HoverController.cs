@@ -170,11 +170,19 @@ internal sealed class HoverController : IEditorFeature
         Due(Begin(CaretOffset(), fromKeyboard: true));
     }
 
-    /// <summary>What the caret's hover is about: right after a word, as the caret is when typing ends, that word.</summary>
+    /// <summary>
+    /// What the caret's hover is about: a problem at the caret, or else, right after a word, as the caret is when typing
+    /// ends, that word.
+    /// </summary>
     private int CaretOffset()
     {
         int caret = _textArea.Caret.Offset;
-        return WordRules.WordAt(_buffer, caret) is { Length: > 0 } word && word.End == caret ? caret - 1 : caret;
+        return
+            _squiggles.At(caret, 1).Count == 0
+            && WordRules.WordAt(_buffer, caret) is { Length: > 0 } word
+            && word.End == caret
+            ? caret - 1
+            : caret;
     }
 
     /// <summary>Ends the hover there is, and makes the hover of <paramref name="offset"/> the current one.</summary>
