@@ -24,16 +24,34 @@ internal sealed class CompletionCommit : IDisposable
     private readonly SnippetController _snippets;
     private readonly TextChanges _changes;
 
+    /// <summary>Runs a committed item's command.</summary>
+    private readonly Action<string> _runCommand;
+
+    /// <summary>Whether the view ended: a command still posted no longer runs.</summary>
+    private bool _disposed;
+
     /// <summary>Cancels the resolve of the item committed last, whose additional edits are still to come.</summary>
     private CancellationTokenSource? _lateEdits;
 
-    public CompletionCommit(TextArea textArea, CodeDocument document, SnippetController snippets, TextChanges changes)
+    /// <param name="textArea">The text area of the view.</param>
+    /// <param name="document">The view's document.</param>
+    /// <param name="snippets">The view's snippets.</param>
+    /// <param name="changes">How the view edits its document.</param>
+    /// <param name="runCommand">Runs a committed item's command, once the key that committed is handled.</param>
+    public CompletionCommit(
+        TextArea textArea,
+        CodeDocument document,
+        SnippetController snippets,
+        TextChanges changes,
+        Action<string> runCommand
+    )
     {
         _textArea = textArea;
         _buffer = textArea.Document;
         _document = document;
         _snippets = snippets;
         _changes = changes;
+        _runCommand = runCommand;
     }
 
     /// <summary>
@@ -41,7 +59,8 @@ internal sealed class CompletionCommit : IDisposable
     /// <paramref name="replace"/>, ends as the edits since completion was asked moved it, or to the caret where that is
     /// further, and its additional edits, in one step that the user undoes; the caret goes after the item's text. A
     /// snippet goes in as its text, and its first stop is selected. Additional edits that overlap others are left out,
-    /// and stay plain text. Additional edits that a resolve still under way brings come later.
+    /// and stay plain text. Additional edits that a resolve still under way brings come later. Once the item went in,
+    /// and the key that committed it is handled, its command runs.
     /// </summary>
     /// <param name="item">The item, as it was resolved.</param>
     /// <param name="answer">The answer that its list is.</param>
@@ -94,9 +113,21 @@ internal sealed class CompletionCommit : IDisposable
             _snippets.Start(snippet, start, mark);
         if (late is not null)
             ApplyLateEdits(late, step, request.Snapshot);
+        if (item.Command is { } command)
+        {
+            _textArea.Dispatcher.Post(() =>
+            {
+                if (!_disposed)
+                    _runCommand(command);
+            });
+        }
     }
 
-    public void Dispose() => _lateEdits?.Cancel();
+    public void Dispose()
+    {
+        _disposed = true;
+        _lateEdits?.Cancel();
+    }
 
     /// <summary>
     /// Applies the additional edits that a committed item's resolve brings: in the commit's undo step while that is the

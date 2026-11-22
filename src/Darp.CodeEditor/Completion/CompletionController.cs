@@ -31,8 +31,8 @@ namespace Darp.CodeEditor.Completion;
 /// Up, Down, Page Up and Page Down select among the rows that show, while there is more than one item; with one, they
 /// go on to the text, as in VS Code. The accept commands, a click or one of the selected item's commit characters commit
 /// it (<see cref="CompletionCommit"/>): accepting inserts or replaces, a click and a commit character insert, and a
-/// commit character then goes in. A frozen list commits by accepting and by a click, but not by commit characters. A
-/// read-only editor neither completes nor commits.
+/// commit character then goes in. Then the item's command runs, if it is one of the editor's. A frozen list commits by
+/// accepting and by a click, but not by commit characters. A read-only editor neither completes nor commits.
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends completion, for every reason it ends: Escape, the caret leaving the line or moving back past
@@ -57,6 +57,9 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
     /// <summary>Does the normal action of a key whose accept found nothing to commit.</summary>
     private readonly Action<KeyGesture> _performKey;
 
+    /// <summary>Runs one of the editor's commands by its id, where it applies.</summary>
+    private readonly Action<string> _runCommand;
+
     /// <summary>Completion from its first request until it ends; null while there is none.</summary>
     private CompletionSession? _session;
 
@@ -71,15 +74,17 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
         SnippetController snippets,
         TextChanges changes,
         TaskScheduler background,
-        Action<KeyGesture> performKey
+        Action<KeyGesture> performKey,
+        Action<string> runCommand
     )
     {
         _textArea = textArea;
         _buffer = textArea.Document;
         _document = document;
         _performKey = performKey;
+        _runCommand = runCommand;
         _view = new CompletionView(editor, textArea.TextView);
-        _commit = new CompletionCommit(textArea, document, snippets, changes);
+        _commit = new CompletionCommit(textArea, document, snippets, changes, RunCommand);
         _resolver = new CompletionResolver(_view, highlighter);
         _filter = new CompletionFilter(
             _view,
@@ -341,6 +346,20 @@ internal sealed class CompletionController : IEditorFeature, ICompletionOwner
             item.AdditionalEdits is null && answer.List.Resolves ? _resolver.Take(selected, answer.List) : null;
         Close();
         _commit.Commit(item, answer, replace, late);
+    }
+
+    /// <summary>
+    /// Runs a committed item's command, as VS Code does after the commit: asking for completion asks as typing would,
+    /// such as for the value after a property's name; the editor's other commands run as their keys do, such as
+    /// <see cref="CodeEditorCommands.TriggerParameterHints"/>. A server's own commands do not run: the editor has
+    /// nowhere to send them.
+    /// </summary>
+    private void RunCommand(string command)
+    {
+        if (command == CodeEditorCommands.TriggerSuggest)
+            Ask(new CompletionTrigger(CompletionTriggerKind.Invoked));
+        else
+            _runCommand(command);
     }
 
     /// <summary>

@@ -295,4 +295,89 @@ public sealed class CompletionBehaviorTests(UiFixture ui)
                 document.Text.ShouldBe(text);
             }
         });
+
+    [Fact]
+    public Task An_items_command_runs_only_once_the_item_went_in() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [ { "label": "key",
+                      "command": { "title": "Suggest", "command": "editor.action.triggerSuggest" } } ] }
+                    """
+                )
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "keXYZ");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            // The word's end is protected: replacing goes over it, so nothing goes in.
+            TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+            var protectedText = new TextSegmentReadOnlySectionProvider<TextSegment>(textArea.Document);
+            protectedText.Segments.Add(new TextSegment { StartOffset = 2, Length = 3 });
+            textArea.ReadOnlySectionProvider = protectedText;
+
+            await OpenAsync(window, 2);
+            int asked = fake.LinesStartingWith("completion ").Count;
+            window.Press(Key.Tab);
+            await BarrierAsync(server, fake);
+
+            document.Text.ShouldBe("keXYZ");
+            fake.LinesStartingWith("completion ").Count.ShouldBe(asked);
+            List(window).ShouldBeNull();
+        });
+
+    [Fact]
+    public Task An_items_command_runs_after_the_commit_when_it_is_one_of_the_editors() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            // As a JSON server writes a property: its value comes next, so completion asks again.
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [
+                      { "label": "key", "insertText": "\"key\": $1", "insertTextFormat": 2,
+                        "command": { "title": "Suggest", "command": "editor.action.triggerSuggest" } },
+                      { "label": "call", "insertText": "call(",
+                        "command": { "title": "Hints", "command": "editor.action.triggerParameterHints" } },
+                      { "label": "other", "command": { "title": "Other", "command": "fake.command" } } ] }
+                    """
+                )
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            await OpenAsync(window, 0);
+            window.Press(Key.Down);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("\"key\": ");
+            // Asked again as typing asks, not by key: nothing says "No suggestions."
+            (await fake.WaitForAsync("completion ", 2)).ShouldEndWith(" 1 - 7");
+            (await WaitForLabelsAsync(window)).ShouldBe(["call", "key", "other"]);
+            window.Press(Key.Escape);
+
+            document.Text = "";
+            await OpenAsync(window, 0);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("call(");
+            (await fake.WaitForAsync("signatureHelp ")).ShouldEndWith(" 1 - False - 5");
+
+            // A command that is not the editor's runs nowhere.
+            document.Text = "";
+            await OpenAsync(window, 0);
+            int asked = fake.LinesStartingWith("completion ").Count;
+            window.Press(Key.Up);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("other");
+            await BarrierAsync(server, fake);
+            fake.LinesStartingWith("completion ").Count.ShouldBe(asked);
+            fake.LinesStartingWith("signatureHelp ").Count.ShouldBe(1);
+        });
 }

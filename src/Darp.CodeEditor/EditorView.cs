@@ -78,7 +78,8 @@ internal sealed class EditorView : IDisposable
             _snippets,
             _changes,
             editor.BackgroundScheduler,
-            PerformKey
+            PerformKey,
+            RunItemCommand
         );
         _signatureHelp = new SignatureHelpController(editor, area, document, Highlighter);
         _features =
@@ -224,6 +225,13 @@ internal sealed class EditorView : IDisposable
     {
         var key = new KeyEventArgs { Key = gesture.Key, KeyModifiers = gesture.KeyModifiers };
         _ = _snippets.OnKeyDown(key) || _typing.OnKeyDown(key);
+    }
+
+    /// <summary>A command that a committed item names, where its key could run it.</summary>
+    private void RunItemCommand(string id)
+    {
+        if (_commands.CanRun(id))
+            Run(id, _commands.TryRunFromApp);
     }
 
     /// <summary>
