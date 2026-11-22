@@ -104,7 +104,7 @@ rather than its view belong to the document, as in Monaco and CodeMirror.
 | `CaretPosition` | the caret's line and column, read-only and bindable, for status bars |
 | `ScrollTo(TextRange)` | brings a range into view: not at all when it is visible, centered when it is not |
 | `OpenSearch(replace)` | the search or replace bar, for a Find button; Ctrl+F and Ctrl+H open them too |
-| `Cut()`, `Copy()`, `Paste()`, `SelectAll()` | for an app's Edit menu; the keys and the editor's context menu do the same, and the document's `Undo` and `Redo` the rest |
+| `Cut()`, `Copy()`, `Paste()`, `SelectAll()` | for an app's Edit menu: shorthands for `RunCommand` with their commands; the document's `Undo` and `Redo` do the rest |
 | `RunCommand(id)` | runs one of `CodeEditorCommands` from an app's button, menu or key binding; false where it does not apply |
 | `SaveViewState()`, `RestoreViewState(state)` | the caret, the selection and the scroll position, for an app that switches one editor between documents |
 

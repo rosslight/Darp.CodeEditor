@@ -426,6 +426,19 @@ public sealed class CodeEditorTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Select_all_before_the_editor_shows_lasts_until_it_does() =>
+        _ui.Run(() =>
+        {
+            CodeEditor editor = Editor("select me");
+
+            editor.SelectAll();
+            editor.Selection.ShouldBe(new TextSelection(0, 9));
+
+            using var window = new EditorWindow(editor);
+            window.Editor.Selection.ShouldBe(new TextSelection(0, 9));
+        });
+
+    [Fact]
     public Task A_right_click_moves_the_caret_unless_it_is_in_the_selection() =>
         _ui.Run(() =>
         {

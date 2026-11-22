@@ -96,7 +96,7 @@ namespace Darp.CodeEditor;
 /// A right click moves the caret, unless it is inside the selection, and opens the editor's <c>ContextFlyout</c>, a
 /// <c>MenuFlyout</c> with Cut, Copy, Paste and Select All, which an app changes through its <c>Items</c>. For an app's
 /// own menus and buttons, <see cref="RunCommand"/> runs any of <see cref="CodeEditorCommands"/>, and <see cref="Cut"/>,
-/// <see cref="Copy"/>, <see cref="Paste"/> and <see cref="SelectAll"/> do the same as their keys.
+/// <see cref="Copy"/>, <see cref="Paste"/> and <see cref="SelectAll"/> are shorthands for it.
 /// </para>
 /// <para>Members that take offsets or ranges clamp them to the text.</para>
 /// </remarks>
@@ -444,29 +444,24 @@ public class CodeEditor : TemplatedControl
         return true;
     }
 
-    /// <summary>Moves the selection to the clipboard, as Ctrl+X does. No effect in a read-only editor.</summary>
-    public void Cut()
-    {
-        if (_shown is not null)
-            _part?.Cut();
-    }
+    /// <summary>Runs <see cref="CodeEditorCommands.Cut"/>, which moves the selection to the clipboard.</summary>
+    public void Cut() => RunCommand(CodeEditorCommands.Cut);
 
-    /// <summary>Copies the selection to the clipboard, as Ctrl+C does.</summary>
-    public void Copy()
-    {
-        if (_shown is not null)
-            _part?.Copy();
-    }
+    /// <summary>Runs <see cref="CodeEditorCommands.Copy"/>, which copies the selection to the clipboard.</summary>
+    public void Copy() => RunCommand(CodeEditorCommands.Copy);
 
-    /// <summary>Replaces the selection with the clipboard's text, as Ctrl+V does. No effect in a read-only editor.</summary>
-    public void Paste()
-    {
-        if (_shown is not null)
-            _part?.Paste();
-    }
+    /// <summary>Runs <see cref="CodeEditorCommands.Paste"/>, which replaces the selection with the clipboard.</summary>
+    public void Paste() => RunCommand(CodeEditorCommands.Paste);
 
-    /// <summary>Selects the whole text, as Ctrl+A does.</summary>
-    public void SelectAll() => Selection = new TextSelection(0, Document?.CurrentSnapshot.Length ?? 0);
+    /// <summary>
+    /// Runs <see cref="CodeEditorCommands.SelectAll"/>, which selects the whole text. Before the editor is shown, there is
+    /// no command to run, and the text is selected for when it is.
+    /// </summary>
+    public void SelectAll()
+    {
+        if (!RunCommand(CodeEditorCommands.SelectAll))
+            Selection = new TextSelection(0, Document?.CurrentSnapshot.Length ?? 0);
+    }
 
     /// <inheritdoc />
     protected override void OnApplyTemplate(TemplateAppliedEventArgs e)
