@@ -250,7 +250,7 @@ public sealed class PairTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe(expected);
         });
 
-    [Fact]
+    [Fact(Skip = "Needs AvaloniaEdit's long-line protection (design.md #127).")]
     public Task A_pair_doesnt_close_where_a_long_lines_hidden_tail_keeps_its_opening_out() =>
         _ui.Run(async () =>
         {

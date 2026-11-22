@@ -383,7 +383,7 @@ public sealed class CodeEditorTests(UiFixture ui)
             (await clipboard.TryGetTextAsync()).ShouldBe("pasted");
         });
 
-    [Fact]
+    [Fact(Skip = "Needs AvaloniaEdit's long-line protection and its fix at the limit (design.md #127).")]
     public Task Lines_of_up_to_3000_characters_are_edited_in_full_and_longer_ones_up_to_their_collapsed_rest() =>
         _ui.Run(() =>
         {
@@ -597,7 +597,7 @@ public sealed class CodeEditorTests(UiFixture ui)
             EditorWindow.TextViewOf(second).Document.Text.ShouldBe("> hello world");
         });
 
-    [Fact]
+    [Fact(Skip = "Needs AvaloniaEdit's fix for the last focused element (design.md #127).")]
     public Task An_editor_out_of_the_visual_tree_is_collected_while_its_document_lives() =>
         _ui.Run(async () =>
         {
@@ -610,7 +610,7 @@ public sealed class CodeEditorTests(UiFixture ui)
             document.Text.ShouldBe(Texts.Json(500));
         });
 
-    [Fact]
+    [Fact(Skip = "Needs AvaloniaEdit's fixes for undo steps and focus (design.md #127).")]
     public Task An_editor_that_showed_edits_is_collected_while_its_document_lives() =>
         _ui.Run(async () =>
         {

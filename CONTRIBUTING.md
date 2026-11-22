@@ -22,13 +22,3 @@ artifacts/aot-tests/Darp.CodeEditor.Tests
 
 `dotnet run -c Release --project benchmarks/Darp.CodeEditor.Benchmarks -- --filter '*'` runs all benchmarks. Each pull
 request compares only the `CI` category (`--anyCategories CI`) with its target branch.
-
-## AvaloniaEdit preview
-
-Until AvaloniaEdit releases the fixes that the editor needs, `Avalonia.AvaloniaEdit` comes from a preview feed on
-GitHub Packages (`nuget.config`). GitHub Packages needs a token even for public packages: restore reads one with the
-`read:packages` scope from an environment variable, for example the GitHub CLI's:
-
-```sh
-export NuGetPackageSourceCredentials_AvaloniaEditPreview="Username=x;Password=$(gh auth token)"
-```

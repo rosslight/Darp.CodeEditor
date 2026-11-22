@@ -141,6 +141,9 @@ internal sealed class Typing : IDisposable
     /// <summary>Enter: the selection's text goes, a rectangle selection ends, and the rules' new line goes in.</summary>
     private bool Enter()
     {
+        // AvaloniaEdit 12.0.0 would delete a selection there, where the new line can't go (design.md #127).
+        if (TouchesTail())
+            return true;
         _changes.Run(
             new EditStep(EditKind.TypingOther, StartsStep: true),
             () =>
@@ -154,15 +157,25 @@ internal sealed class Typing : IDisposable
                     DocumentLine line = Buffer.GetLineByOffset(caret);
                     NewLine newLine = Rules.Enter(Lines, line.LineNumber, caret - line.Offset);
                     int replaced = _changes.CanChange(caret, newLine.Replaced) ? newLine.Replaced : 0;
-                    _changes.Apply(
-                        [new TextEdit(caret, replaced, newLine.Text)],
-                        new TextSelection(caret + newLine.Caret)
-                    );
+                    // Not through the tail's check: deleting the selection may have joined lines into a long one here.
+                    if (replaced > 0 || _area.ReadOnlySectionProvider.CanInsert(caret))
+                    {
+                        Buffer.Replace(caret, replaced, newLine.Text);
+                        _changes.Select(new TextSelection(caret + newLine.Caret));
+                    }
                 }
             }
         );
         return true;
     }
+
+    /// <summary>Whether the caret, or any of the selection, is in a long line's hidden tail.</summary>
+    private bool TouchesTail() =>
+        _area.Selection.IsEmpty
+            ? VisibleText.TouchesTail(Buffer, _area.Caret.Offset, 0)
+            : _area.Selection.Segments.Any(segment =>
+                VisibleText.TouchesTail(Buffer, segment.StartOffset, segment.Length)
+            );
 
     /// <summary>Tab and Shift+Tab, each a step of its own; in a rectangle selection, AvaloniaEdit's.</summary>
     private bool Tab(bool outdent)
