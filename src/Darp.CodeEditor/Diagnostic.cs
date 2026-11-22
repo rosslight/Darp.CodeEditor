@@ -19,6 +19,15 @@ public sealed record Diagnostic(
 {
     /// <summary>The line and column where <see cref="Range"/> starts, for lists and logs.</summary>
     public TextPosition Start => Snapshot.GetPosition(Range.Start);
+
+    /// <summary>What reported it, such as <c>typescript</c> or <c>json</c>; null if it does not say.</summary>
+    public string? Source { get; init; }
+
+    /// <summary>
+    /// A web page that explains <see cref="Code"/>, as a language server's <c>codeDescription</c> names it: the hover
+    /// shows the code as a link to it. Null for none.
+    /// </summary>
+    public Uri? CodeDescription { get; init; }
 }
 
 /// <summary>How serious a <see cref="Diagnostic"/> is.</summary>
