@@ -1,10 +1,127 @@
 # Darp.CodeEditor
 
-A code editor library for Avalonia desktop apps: syntax highlighting, any language through a language server, and C#
-scripts with a host-defined API that run in a separate process.
+[![NuGet](https://img.shields.io/nuget/v/Darp.CodeEditor.svg)](https://www.nuget.org/packages/Darp.CodeEditor)
+[![Build](https://github.com/rosslight/Darp.CodeEditor/actions/workflows/build-test.yml/badge.svg)](https://github.com/rosslight/Darp.CodeEditor/actions/workflows/build-test.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/rosslight/Darp.CodeEditor/blob/main/LICENSE)
 
-Pre-release: the packages and their API are being designed. Start with [docs/design.md](docs/design.md) for the
-goals and structure and [docs/api.md](docs/api.md) for the API draft. The first prototype, with its decision log and
-measurements, is on the [`draft`](https://github.com/rosslight/Darp.CodeEditor/tree/draft) branch.
+A code editor control for Avalonia desktop apps, with syntax highlighting, search, and completion, hover and
+diagnostics from any language server.
 
-License: Apache 2.0, see [LICENSE](https://github.com/rosslight/Darp.CodeEditor/blob/main/LICENSE).
+Selected language servers will ship as NuGet packages. C# scripting comes first: your app defines what scripts can
+see, and the package brings the language server and a runner that executes scripts in a separate process.
+
+![Completing and hovering Python code, then completing a value and hovering a schema error in JSON](https://raw.githubusercontent.com/rosslight/Darp.CodeEditor/main/docs/images/editor-demo.gif)
+
+> **Status:** 0.x. The editor works today, and its API may still change. The C# scripting packages are in development
+> and not released yet.
+
+## Quickstart
+
+Requires .NET 10 and Avalonia 12.
+
+```sh
+dotnet add package Darp.CodeEditor
+```
+
+Add the editor's styles once, after your app's theme:
+
+```xml
+<!-- App.axaml -->
+<Application xmlns:ce="using:Darp.CodeEditor" ...>
+  <Application.Styles>
+    <FluentTheme />
+    <ce:CodeEditorStyles />
+  </Application.Styles>
+</Application>
+```
+
+Place the editor in a view:
+
+```xml
+<!-- MainWindow.axaml -->
+<Window xmlns:ce="using:Darp.CodeEditor" ...>
+  <ce:CodeEditor Name="Editor" />
+</Window>
+```
+
+Give it a document. Your app owns the document and disposes it:
+
+```csharp
+// MainWindow.axaml.cs
+public partial class MainWindow : Window
+{
+    private readonly CodeDocument _document = CodeDocument.Create(CodeLanguage.Json, """{ "hello": "world" }""");
+
+    public MainWindow()
+    {
+        InitializeComponent();
+        Editor.Document = _document;
+        Closed += (_, _) => _document.Dispose();
+    }
+}
+```
+
+## Packages
+
+| Package | What it adds | Status |
+|---|---|---|
+| [`Darp.CodeEditor`](https://www.nuget.org/packages/Darp.CodeEditor) | The editor, JSON, XML and YAML, and a client for any language server | Available |
+| `Darp.CodeEditor.CSharpScript` | C# scripts with an environment your app defines: language server and compilation | Not released yet |
+| `Darp.CodeEditor.CSharpScript.Runner` | Runs scripts in a separate process, with a typed bridge to your app | Not released yet |
+
+## Features
+
+- **Highlighting:** TextMate grammars and VS Code color themes, with Light+ and Dark+ following your app's theme.
+- **Language servers:** completion, signature help, hover and diagnostics. The UI never waits for a server.
+- **Editing:** auto-indent, bracket matching, auto-closing pairs, comment toggling, rectangle selection and line commands.
+- **Search:** find and replace with regular expressions, running in the background.
+- **Documents:** undo history per document, and several editors can show the same document.
+- **NativeAOT:** the editor works in trimmed, ahead-of-time compiled apps.
+
+Darp.CodeEditor is a light editor for scripts and small files, not an IDE. Rename, quick fixes, refactorings, find
+usages and formatting are out of scope for v1.
+
+## Connect a language server
+
+Any server that speaks the Language Server Protocol over stdio works. For JSON, install one with
+`npm install -g vscode-langservers-extracted`, then let the server create the document:
+
+```csharp
+var server = new LanguageServer(new LanguageServerOptions
+{
+    FileName = "vscode-json-language-server",
+    Arguments = ["--stdio"],
+});
+
+CodeDocument document = server.CreateDocument(CodeLanguage.Json, text, filePath);
+Editor.Document = document;
+```
+
+The process starts with the first document and restarts after a crash. Dispose each document when the user closes it,
+and the server when your app exits.
+
+For another language, create a `CodeLanguage` from a VS Code extension's grammar and language configuration.
+
+## C# scripting
+
+C# scripting is the main use case for the packaged language servers, and is in development. Your app will define the
+globals, references and imports a script sees. The editor checks scripts against that same definition, and the runner
+executes them in a separate process, with a typed bridge back to your app. The planned API is in
+[docs/api.md](https://github.com/rosslight/Darp.CodeEditor/blob/main/docs/api.md#7-sessions).
+
+## Learn more
+
+- **[Sample app](https://github.com/rosslight/Darp.CodeEditor/tree/main/samples/Darp.CodeEditor.Sample):** documents,
+  files, language servers, themes and NativeAOT publishing in one app.
+- **API documentation:** every public member is documented, and shows up in your IDE.
+- **[Design](https://github.com/rosslight/Darp.CodeEditor/blob/main/docs/design.md):** goals, performance budgets and
+  decisions.
+- **AI agents:** the `Darp.CodeEditor` package includes a skill at `skills/darp-codeeditor/SKILL.md`. After a restore,
+  find it in your NuGet packages folder under `darp.codeeditor/<version>/`.
+
+## Contributing and license
+
+See [CONTRIBUTING.md](https://github.com/rosslight/Darp.CodeEditor/blob/main/CONTRIBUTING.md) to build and test the
+project. Darp.CodeEditor is licensed under
+[Apache 2.0](https://github.com/rosslight/Darp.CodeEditor/blob/main/LICENSE) and is a project by
+[rosslight GmbH](https://engineering.rosslight.de/).
