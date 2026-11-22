@@ -11,7 +11,8 @@ namespace Darp.CodeEditor.Benchmarks;
 /// <summary>
 /// The longest search for a matching bracket, which runs on the UI thread when the caret moves next to a bracket: from
 /// the opening bracket of 5,000 lines of JSON, with brackets in strings, through as many characters as the search reads
-/// (<see cref="BracketMatcher.MaxDistance"/>), without finding the match at the end.
+/// (<see cref="BracketMatcher.MaxDistance"/>), without finding the match at the end; and the scan before a typed opening
+/// bracket closes, through brackets of other kinds than the closing ones.
 /// </summary>
 [MemoryDiagnoser]
 [NotInBaseline]
@@ -24,6 +25,9 @@ public class BracketMatchingBenchmarks
     private TextDocument? _document;
     private int[]?[] _tokens = [];
     private IReadOnlyList<CharacterPair> _brackets = [];
+
+    /// <summary>A line of 50,000 curly brackets, then 50,000 round ones that close none of them.</summary>
+    private readonly TextDocument _mismatched = new(new string('{', 50_000) + new string(')', 50_000));
 
     [GlobalSetup]
     public void SetUp()
@@ -61,5 +65,19 @@ public class BracketMatchingBenchmarks
         TextDocument document = _document ?? throw new InvalidOperationException("Not set up.");
         return BracketMatcher.FindPair(document, 0, _brackets, line => _tokens[line - 1]);
     }
+
+    /// <summary>
+    /// Whether a bracket typed in the middle of <see cref="_mismatched"/> has a closing one ahead that closes nothing:
+    /// every closing bracket there finds no opening one of its kind among all the open ones.
+    /// </summary>
+    [Benchmark]
+    public bool ScanPastMismatchedBrackets() =>
+        BracketMatcher.UnmatchedClosing(
+            _mismatched,
+            50_000,
+            new CharacterPair("[", "]"),
+            [new("{", "}"), new("[", "]"), new("(", ")")],
+            _ => null
+        );
 }
 #endif

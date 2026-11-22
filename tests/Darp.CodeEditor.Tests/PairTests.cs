@@ -1,6 +1,7 @@
 using Avalonia.Input;
 using AvaloniaEdit;
 using AvaloniaEdit.Editing;
+using Darp.CodeEditor.Editing;
 
 namespace Darp.CodeEditor.Tests;
 
@@ -95,6 +96,174 @@ public sealed class PairTests(UiFixture ui)
             MarkedText.Of(window).ShouldBe(expected);
         });
 
+    [Theory]
+    // The language's autoCloseBefore.
+    [InlineData("|x", "(", "(|)x")]
+    [InlineData("|y", "(", "(|y")]
+    // A quote not after a word.
+    [InlineData("a|", "\"", "a\"|")]
+    public Task Pairs_close_before_the_languages_autoCloseBefore(string marked, string typed, string expected) =>
+        _ui.Run(async () =>
+        {
+            await Pairs.Loaded;
+            using EditorWindow window = MarkedText.Show(marked, Pairs);
+
+            window.Type(typed);
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
+    [Theory]
+    [InlineData("|", "(", "(|")]
+    [InlineData("|", "\"", "\"|")]
+    // A selection is still surrounded.
+    [InlineData("«a»", "(", "(«a»)")]
+    public Task With_AutoClosing_off_no_pair_closes(string marked, string typed, string expected) =>
+        _ui.Run(async () =>
+        {
+            await Pairs.Loaded;
+            using EditorWindow window = MarkedText.Show(marked, Pairs);
+            window.Editor.AutoClosing = false;
+
+            window.Type(typed);
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
+    [Theory]
+    // Without its own autoCloseBefore, a bracket closes before a quote, and a quote not.
+    [InlineData("|'a'", "(", "(|)'a'")]
+    [InlineData("|'a'", "\"", "\"|'a'")]
+    public Task Brackets_and_quotes_close_before_VS_Codes_characters_for_each(
+        string marked,
+        string typed,
+        string expected
+    ) =>
+        _ui.Run(async () =>
+        {
+            await CodeLanguage.Yaml.Loaded;
+            using EditorWindow window = MarkedText.Show(marked, CodeLanguage.Yaml);
+            await window.TokensKnownAsync();
+
+            window.Type(typed);
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
+    [Theory]
+    // Typed by the user: no step over.
+    [InlineData("(|)", ")", "()|)")]
+    [InlineData("|", "()", "()|")]
+    public Task Typing_steps_over_only_the_closing_characters_that_the_editor_typed(
+        string marked,
+        string typed,
+        string expected
+    ) =>
+        _ui.Run(async () =>
+        {
+            await Pairs.Loaded;
+            using EditorWindow window = MarkedText.Show(marked, Pairs);
+
+            window.Type(typed);
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
+    [Theory]
+    // Typed by the user: Backspace deletes one character, as anywhere else.
+    [InlineData("(|)", "", "|)")]
+    [InlineData("|", "(", "|")]
+    public Task Backspace_deletes_only_the_pairs_that_the_editor_closed(string marked, string typed, string expected) =>
+        _ui.Run(async () =>
+        {
+            await Pairs.Loaded;
+            using EditorWindow window = MarkedText.Show(marked, Pairs);
+
+            window.Type(typed);
+            window.Press(Key.Back);
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
+    [Theory]
+    [InlineData("\"", "\"«a»\"")]
+    [InlineData("(", "(«a»)")]
+    public Task Opening_brackets_and_quotes_surround_the_selection(string typed, string expected) =>
+        _ui.Run(async () =>
+        {
+            await Pairs.Loaded;
+            using EditorWindow window = MarkedText.Show("«a»", Pairs);
+
+            window.Type(typed);
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
+    [Theory]
+    [InlineData("{\n    \"a\": |]\n}", "{\n    \"a\": [|]\n}")]
+    // The first ] closes the [ before it, and the second is the new one's.
+    [InlineData("{\n    \"a\": [|]]\n}", "{\n    \"a\": [[|]]\n}")]
+    // The } closes the {, so that the [ before the caret stays unclosed and the ] closes nothing.
+    [InlineData("{[|}]", "{[[|}]")]
+    public Task An_opening_bracket_doesnt_close_before_a_closing_one_that_no_opening_one_matches(
+        string marked,
+        string expected
+    ) =>
+        _ui.Run(async () =>
+        {
+            using EditorWindow window = await ShowColored(marked, CodeLanguage.Json);
+
+            window.Type("[");
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
+    [Fact]
+    public Task A_pair_that_contains_another_closes_with_the_others_closing_character_after_the_caret() =>
+        _ui.Run(async () =>
+        {
+            await Pairs.Loaded;
+            using EditorWindow window = MarkedText.Show("|", Pairs);
+
+            window.Type("(*");
+
+            MarkedText.Of(window).ShouldBe("(*|*)");
+        });
+
+    [Theory]
+    [InlineData("|;", "(|;")]
+    [InlineData("|", "(|)")]
+    public Task An_empty_autoCloseBefore_closes_pairs_before_no_character(string marked, string expected) =>
+        _ui.Run(async () =>
+        {
+            var language = new CodeLanguage(
+                "close-before-nothing",
+                configuration: new Uri(
+                    "avares://Darp.CodeEditor.Tests/Languages/close-before-nothing.language-configuration.json"
+                )
+            );
+            await language.Loaded;
+            using EditorWindow window = MarkedText.Show(marked, language);
+
+            window.Type("(");
+
+            MarkedText.Of(window).ShouldBe(expected);
+        });
+
+    [Fact]
+    public Task A_pair_doesnt_close_where_a_long_lines_hidden_tail_keeps_its_opening_out() =>
+        _ui.Run(async () =>
+        {
+            await Pairs.Loaded;
+            // The caret is where the line's hidden tail starts, right after the (, and before an x, where pairs close.
+            string line = new string('a', VisibleText.LineLimit - 1) + "(" + new string('x', 6);
+            using EditorWindow window = MarkedText.Show(line.Insert(VisibleText.LineLimit, "|"), Pairs);
+
+            window.Type("*");
+
+            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(line);
+        });
+
     [Fact]
     public Task A_pair_of_several_characters_closes_when_its_last_character_is_typed() =>
         _ui.Run(async () =>
@@ -143,12 +312,12 @@ public sealed class PairTests(UiFixture ui)
             window.Press(Key.Back);
             document.Text.ShouldBe("[1,[3]\n 2,[3]\n]");
 
-            // Each was one step on both lines: Backspace, the second pair, the 3, and the first pair.
+            // Each step on both lines, as VS Code's undo stops go: Backspace, the second pair, and the first pair with
+            // what was typed inside it.
             document.Undo();
             document.Text.ShouldBe("[1,[3][]\n 2,[3][]\n]");
             document.Undo();
-            document.Undo();
-            document.Text.ShouldBe("[1,[]\n 2,[]\n]");
+            document.Text.ShouldBe("[1,[3]\n 2,[3]\n]");
             document.Undo();
             document.Text.ShouldBe("[1,\n 2,\n]");
         });
@@ -211,6 +380,13 @@ public sealed class PairTests(UiFixture ui)
             window.Editor.Document.ShouldNotBeNull().Text.ShouldBe("{\n    \"a\": []\n}");
         });
 
+    /// <summary>Pairs without a grammar, which close before an x too.</summary>
+    private static CodeLanguage Pairs { get; } =
+        new(
+            "pairs",
+            configuration: new Uri("avares://Darp.CodeEditor.Tests/Languages/pairs.language-configuration.json")
+        );
+
     /// <summary>
     /// Shows the marked text once the grammar colors it, with more than one color: pairs that are not closed in
     /// strings or comments wait for the tokens.
@@ -223,6 +399,7 @@ public sealed class PairTests(UiFixture ui)
             window.Render();
             return window.RenderedColors().Count > 1;
         });
+        await window.TokensKnownAsync();
         return window;
     }
 }

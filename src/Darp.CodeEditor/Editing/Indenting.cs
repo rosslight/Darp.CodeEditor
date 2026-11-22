@@ -8,8 +8,15 @@ internal readonly struct Indenting(Indentation indentation)
 {
     private readonly Indentation _indentation = indentation;
 
-    /// <summary>The same width, in tabs and spaces or in spaces, as the document indents.</summary>
-    public string Normalize(string whitespace) => Whitespace(Width(whitespace));
+    /// <summary>
+    /// The leading whitespace of <paramref name="text"/> in the same width, in tabs and spaces or in spaces, as the
+    /// document indents, with the rest after it as it is, such as the <c> * </c> of a doc comment.
+    /// </summary>
+    public string Normalize(string text)
+    {
+        int whitespace = IndentRules.Leading(text);
+        return Whitespace(Width(text.AsSpan(0, whitespace))) + text[whitespace..];
+    }
 
     /// <summary>One level more: to the next stop.</summary>
     public string Shift(string whitespace) =>

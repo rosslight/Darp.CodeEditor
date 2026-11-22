@@ -306,6 +306,19 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
         ?? Task.FromResult<SignatureHelpInfo?>(null);
 
     /// <summary>
+    /// The occurrences of the symbol at the caret of an editor that shows <paramref name="document"/>, from the running
+    /// server; null without one.
+    /// </summary>
+    internal Task<IReadOnlyList<Occurrence>?> DocumentHighlightsAsync(
+        ServerDocument document,
+        TextSnapshot snapshot,
+        int offset,
+        CancellationToken cancellationToken
+    ) =>
+        Connection()?.DocumentHighlightsAsync(document, snapshot, offset, cancellationToken)
+        ?? Task.FromResult<IReadOnlyList<Occurrence>?>(null);
+
+    /// <summary>
     /// What the running server offers the editors of <paramref name="document"/>; null while none runs or the document
     /// is not open in it yet.
     /// </summary>

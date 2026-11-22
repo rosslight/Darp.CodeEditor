@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -6,7 +5,8 @@ namespace Darp.CodeEditor.Loading;
 
 /// <summary>
 /// The editing rules of a language, from VS Code's <c>language-configuration.json</c>: comments, brackets,
-/// auto-closing and surrounding pairs, and indentation rules. Other settings of the file are not read.
+/// auto-closing and surrounding pairs, the characters before which pairs close, indentation rules and the rules for
+/// Enter. Other settings of the file are not read.
 /// </summary>
 internal sealed record LanguageConfiguration(
     string? LineComment,
@@ -19,6 +19,37 @@ internal sealed record LanguageConfiguration(
 {
     /// <summary>No editing rules.</summary>
     public static LanguageConfiguration None { get; } = new(null, null, [], [], [], null);
+
+    /// <summary>The editing rules of <paramref name="language"/>; none while they load.</summary>
+    public static LanguageConfiguration Of(CodeLanguage language) =>
+        language.Loaded is { IsCompletedSuccessfully: true } loaded ? loaded.Result.Configuration : None;
+
+    /// <summary>The rules for Enter, <c>onEnterRules</c>, in their order: the first that matches applies.</summary>
+    public IReadOnlyList<OnEnterRule> OnEnterRules { get; init; } = [];
+
+    /// <summary><c>autoCloseBefore</c>, also empty; null without one, for the defaults.</summary>
+    public string? AutoCloseBefore { get; init; }
+
+    /// <summary>
+    /// The characters before which a quote, or else a bracket, closes: <see cref="AutoCloseBefore"/>, or by default
+    /// those that can't start an expression, and for brackets the quotes too.
+    /// </summary>
+    public string AutoCloseBeforeSet(bool forQuotes) =>
+        AutoCloseBefore ?? (forQuotes ? ";:.,=}])> \n\t" : "'\"`;:.,=}])> \n\t");
+
+    /// <summary>Finds the brackets in any case, those of letters, such as <c>begin</c>, as words; null for none.</summary>
+    public Regex? BracketPattern { get; } = BracketPatternOf(Brackets);
+
+    private static Regex? BracketPatternOf(IReadOnlyList<CharacterPair> pairs)
+    {
+        string[] brackets = [.. pairs.SelectMany(p => new[] { p.Open, p.Close }).Where(b => b.Length > 0).Distinct()];
+        if (brackets.Length == 0)
+            return null;
+        IEnumerable<string> alternatives = brackets.Select(b =>
+            b.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or ' ') ? $@"\b{Regex.Escape(b)}\b" : Regex.Escape(b)
+        );
+        return new Regex(string.Join('|', alternatives), RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
 
     /// <summary>Reads a <c>language-configuration.json</c> file.</summary>
     public static LanguageConfiguration Read(Uri file)
@@ -52,8 +83,66 @@ internal sealed record LanguageConfiguration(
                     Pattern(rules.GetProperty("increaseIndentPattern")),
                     Pattern(rules.GetProperty("decreaseIndentPattern"))
                 )
+                {
+                    IndentNextLinePattern = Property(rules, "indentNextLinePattern") is { } next ? Pattern(next) : null,
+                    UnIndentedLinePattern = Property(rules, "unIndentedLinePattern") is { } un ? Pattern(un) : null,
+                }
                 : null
-        );
+        )
+        {
+            OnEnterRules = Property(root, "onEnterRules") is { ValueKind: JsonValueKind.Array } onEnterRules
+                ? [.. onEnterRules.EnumerateArray().Select(OnEnter).OfType<OnEnterRule>()]
+                : [],
+            // An empty one closes before no character.
+            AutoCloseBefore = Property(root, "autoCloseBefore") is { ValueKind: JsonValueKind.String } closeBefore
+                ? closeBefore.GetString()
+                : null,
+        };
+    }
+
+    /// <summary>
+    /// A rule of <c>onEnterRules</c>; null for one to skip: without an action of a known kind, or with a regular
+    /// expression that is missing or that .NET can't read.
+    /// </summary>
+    private static OnEnterRule? OnEnter(JsonElement rule)
+    {
+        if (Property(rule, "action") is not { ValueKind: JsonValueKind.Object } action)
+            return null;
+        IndentAction? indent = Property(action, "indent") is { ValueKind: JsonValueKind.String } kind
+            ? kind.GetString() switch
+            {
+                "none" => IndentAction.None,
+                "indent" => IndentAction.Indent,
+                "indentOutdent" => IndentAction.IndentOutdent,
+                "outdent" => IndentAction.Outdent,
+                _ => null,
+            }
+            : null;
+        if (indent is not { } indentAction || Property(rule, "beforeText") is not { } beforeText)
+            return null;
+        try
+        {
+            return new OnEnterRule(
+                Pattern(beforeText),
+                Property(rule, "afterText") is { } afterText ? Pattern(afterText) : null,
+                Property(rule, "previousLineText") is { } previousLineText ? Pattern(previousLineText) : null,
+                new EnterAction(
+                    indentAction,
+                    Property(action, "appendText") is { ValueKind: JsonValueKind.String } append
+                        ? append.GetString() ?? ""
+                        : "",
+                    Property(action, "removeText") is { ValueKind: JsonValueKind.Number } remove
+                    && remove.TryGetInt32(out int removed)
+                        ? Math.Max(0, removed)
+                        : 0
+                )
+            );
+        }
+        catch (Exception e)
+            when (e is ArgumentException or InvalidDataException or InvalidOperationException or KeyNotFoundException)
+        {
+            return null;
+        }
     }
 
     private static JsonElement? Property(JsonElement? element, string name) =>
@@ -105,8 +194,11 @@ internal sealed record LanguageConfiguration(
             options |= RegexOptions.Multiline;
         if (flags.Contains('s'))
             options |= RegexOptions.Singleline;
-        return new Regex(source, options, IndentationRules.MatchTimeout);
+        return new Regex(source, options, PatternTimeout);
     }
+
+    /// <summary>The time limit of a match of the rules that load: <see cref="IndentationRules.MatchTimeout"/>.</summary>
+    internal static TimeSpan PatternTimeout { get; set; } = IndentationRules.MatchTimeout;
 
     /// <summary>A string value; anything else makes the file invalid.</summary>
     private static string Text(JsonElement value) =>
@@ -123,55 +215,139 @@ internal readonly record struct CharacterPair(string Open, string Close);
 /// <param name="NotInComment">Not closed automatically inside a comment.</param>
 internal readonly record struct AutoClosingPair(string Open, string Close, bool NotInString, bool NotInComment);
 
+/// <summary>
+/// A rule for Enter: when the text before the caret matches <paramref name="BeforeText"/>, and the text after it and the
+/// line above match the others if given, the new line takes <paramref name="Action"/>.
+/// </summary>
+internal sealed record OnEnterRule(Regex BeforeText, Regex? AfterText, Regex? PreviousLineText, EnterAction Action)
+{
+    /// <summary>Whether the rule applies to the texts around the caret, within the time of one indentation.</summary>
+    public bool Matches(IndentationMatching matching, string previousLineText, string beforeText, string afterText) =>
+        matching.Matches(BeforeText, beforeText)
+        && (AfterText is null || matching.Matches(AfterText, afterText))
+        && (PreviousLineText is null || matching.Matches(PreviousLineText, previousLineText));
+}
+
+/// <summary>What a rule for Enter does to the new line.</summary>
+/// <param name="Indent">How the new line is indented, from the indentation of the caret's line.</param>
+/// <param name="AppendText">Text that goes in after the new line's indentation, such as <c>// </c>.</param>
+/// <param name="RemoveText">How many characters of indentation the new line takes off.</param>
+internal readonly record struct EnterAction(IndentAction Indent, string AppendText, int RemoveText);
+
+/// <summary>How a rule for Enter indents the new line.</summary>
+internal enum IndentAction
+{
+    /// <summary>As the caret's line.</summary>
+    None,
+
+    /// <summary>One level more than the caret's line.</summary>
+    Indent,
+
+    /// <summary>
+    /// Two new lines: the caret goes on the first, one level more, and the text after the caret on the second, at the
+    /// caret's line's indentation, as between brackets.
+    /// </summary>
+    IndentOutdent,
+
+    /// <summary>One level less than the caret's line.</summary>
+    Outdent,
+}
+
 /// <summary>When a line indents or outdents: regular expressions on its text, with the flags the file gives.</summary>
 /// <param name="IncreaseIndentPattern">The lines after a matching line are indented one level more.</param>
 /// <param name="DecreaseIndentPattern">A matching line is indented one level less than the lines before.</param>
 internal sealed record IndentationRules(Regex IncreaseIndentPattern, Regex DecreaseIndentPattern)
 {
-    /// <summary>How long one match may take. Some patterns backtrack on long lines, as JSON's does on nested objects.</summary>
-    public static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(5);
+    /// <summary>
+    /// Only the line after a matching line is indented one level more, as after <c>if (x)</c> without a brace; null
+    /// for none.
+    /// </summary>
+    public Regex? IndentNextLinePattern { get; init; }
 
     /// <summary>
-    /// How long one indentation, of a new line or of a line the user types, may match lines: on the UI thread, about
-    /// 10 ms, and with a match that starts just before then, at most 15 ms. A line above it all needs about a
-    /// microsecond per match.
+    /// A matching line, such as a comment that may stand at any indentation, gives the lines after it no indentation:
+    /// they take theirs from the lines above it. Null for none.
+    /// </summary>
+    public Regex? UnIndentedLinePattern { get; init; }
+
+    /// <summary>
+    /// How long one match may take. It only stops a pattern that backtracks, as JSON's does on long lines of nested
+    /// objects; <see cref="TimeLimit"/>, on a precise clock, budgets the normal work. .NET times a match by
+    /// <see cref="Environment.TickCount64"/>, which on Windows moves in steps of up to 16 ms, and ends it once more than
+    /// its limit less one step has passed: at 5 ms, a step during any match could end it and drop a rule at random. At
+    /// 32 ms, two steps, a match that ends has run for more than 16 ms, longer than the whole budget.
+    /// </summary>
+    public static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(32);
+
+    /// <summary>
+    /// How long one indentation, of a new line or of a line the user types, may read and match lines, with the rules
+    /// for Enter: on the UI thread, about 10 ms, and a match that starts just before then may run on up to
+    /// <see cref="MatchTimeout"/>. A line above it all needs about a microsecond per match.
     /// </summary>
     public static readonly TimeSpan TimeLimit = TimeSpan.FromMilliseconds(10);
 
-    /// <summary>Starts matching lines for one indentation, which may take <see cref="TimeLimit"/>.</summary>
-    public IndentationMatching StartMatching() =>
-        new(this, Stopwatch.GetTimestamp() + (long)(TimeLimit.TotalSeconds * Stopwatch.Frequency));
+    /// <summary>The clock of <see cref="TimeLimit"/> for an indentation that isn't given one.</summary>
+    internal static TimeProvider Clock { get; set; } = TimeProvider.System;
 }
 
 /// <summary>
-/// Reads and matches lines against the indentation rules for one indentation. A line read or a match after its time
-/// limit, or a match that takes longer than <see cref="IndentationRules.MatchTimeout"/>, throws
-/// <see cref="RegexMatchTimeoutException"/>, and the indentation keeps what the line has.
+/// Reads and matches lines for one indentation, against the indentation rules and the rules for Enter. A line read or a
+/// match after <see cref="IndentationRules.TimeLimit"/>, or a match that takes longer than
+/// <see cref="IndentationRules.MatchTimeout"/>, throws <see cref="RegexMatchTimeoutException"/>, and the indentation
+/// keeps what the line has.
 /// </summary>
-internal readonly struct IndentationMatching(IndentationRules rules, long deadline)
+internal readonly struct IndentationMatching
 {
-    private readonly IndentationRules _rules = rules;
+    private readonly IndentationRules? _rules;
+    private readonly TimeProvider _time;
 
-    /// <summary>The <see cref="Stopwatch"/> timestamp after which no match starts.</summary>
-    private readonly long _deadline = deadline;
+    /// <summary>The timestamp of <see cref="_time"/> after which no line is read and no match starts.</summary>
+    private readonly long _deadline;
+
+    /// <summary>Starts the time of one indentation, by <paramref name="time"/>; without indentation rules, none match.</summary>
+    public IndentationMatching(IndentationRules? rules, TimeProvider time)
+    {
+        _rules = rules;
+        _time = time;
+        _deadline = time.GetTimestamp() + (long)(IndentationRules.TimeLimit.TotalSeconds * time.TimestampFrequency);
+    }
 
     /// <summary>
-    /// Reads line <paramref name="number"/> with <paramref name="lineText"/>, within the time limit: a scan over
-    /// whitespace lines reads many without matching any.
+    /// Reads line <paramref name="number"/> with <paramref name="lineText"/>, within the time limit, which a read that
+    /// takes it all, as masking a line that needs tokenizing, uses up too: a scan over whitespace lines reads many
+    /// without matching any.
     /// </summary>
-    public string Read(Func<int, string> lineText, int number) =>
-        Stopwatch.GetTimestamp() < _deadline
-            ? lineText(number)
-            : throw new RegexMatchTimeoutException("", "", IndentationRules.TimeLimit);
+    public string Read(Func<int, string> lineText, int number) => Read(() => lineText(number));
 
-    /// <summary>Whether lines after <paramref name="line"/> are indented one level more.</summary>
-    public bool Increases(string line) => Matches(_rules.IncreaseIndentPattern, line);
+    /// <inheritdoc cref="Read(Func{int, string}, int)"/>
+    public string Read(Func<string> read)
+    {
+        ThrowIfOutOfTime();
+        string text = read();
+        ThrowIfOutOfTime();
+        return text;
+    }
 
-    /// <summary>Whether <paramref name="line"/> is indented one level less than the lines before.</summary>
-    public bool Decreases(string line) => Matches(_rules.DecreaseIndentPattern, line);
+    public bool Increases(string line) => Matches(_rules?.IncreaseIndentPattern, line);
 
-    private bool Matches(Regex pattern, string line) =>
-        Stopwatch.GetTimestamp() < _deadline
-            ? pattern.IsMatch(line)
-            : throw new RegexMatchTimeoutException(line, pattern.ToString(), IndentationRules.TimeLimit);
+    public bool Decreases(string line) => Matches(_rules?.DecreaseIndentPattern, line);
+
+    public bool IndentsNextLine(string line) => Matches(_rules?.IndentNextLinePattern, line);
+
+    public bool IsUnIndented(string line) => Matches(_rules?.UnIndentedLinePattern, line);
+
+    /// <summary>Whether <paramref name="pattern"/> matches <paramref name="text"/>, within the time; none matches nothing.</summary>
+    public bool Matches(Regex? pattern, string text)
+    {
+        if (pattern is null)
+            return false;
+        ThrowIfOutOfTime();
+        return pattern.IsMatch(text);
+    }
+
+    private void ThrowIfOutOfTime()
+    {
+        if (_time.GetTimestamp() >= _deadline)
+            throw new RegexMatchTimeoutException("", "", IndentationRules.TimeLimit);
+    }
 }

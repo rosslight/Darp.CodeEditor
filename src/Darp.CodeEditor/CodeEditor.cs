@@ -16,6 +16,7 @@ using Darp.CodeEditor.Commands;
 using Darp.CodeEditor.Completion;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
+using Darp.CodeEditor.LanguageClient;
 using Darp.CodeEditor.Loading;
 using Darp.CodeEditor.Popups;
 using Darp.CodeEditor.Search;
@@ -58,13 +59,15 @@ namespace Darp.CodeEditor;
 /// Built in, with no settings: the current line is highlighted, whitespace shows inside the selection, and the view
 /// scrolls past the last line. Lines of up to 3,000 characters show and edit in full; a longer line shows its first
 /// 3,000 characters and collapses the rest into "...", which can't be edited. Editing follows the language's rules, as
-/// VS Code applies them: the bracket next to the caret and its match are boxed, pairs close as you type, typing their
-/// closing character steps over it and Backspace deletes an empty pair, opening characters surround the selection, new
-/// lines are indented by the brackets and the indentation rules, a line that comes to match the decrease rule outdents,
-/// and comments toggle with the line comment, or else the block comment. Brackets in strings and comments don't match,
-/// and pairs that the language excludes there don't close. In a rectangle selection, pairs close, step over and delete,
-/// and opening characters surround, on every line; Enter breaks only the caret's line and ends the rectangle. Tab and
-/// new lines indent by the document's <see cref="CodeDocument.Indentation"/>.
+/// VS Code applies them and as far as <see cref="CodeLanguage.AutoIndent"/> goes: the bracket next to the caret and its
+/// match are boxed, the occurrences of the symbol at the caret are highlighted, pairs close as you type unless
+/// <see cref="AutoClosing"/> is off, typing their closing character steps over it and Backspace deletes an empty pair,
+/// opening characters surround the selection, new lines follow the rules for Enter, the brackets and the indentation
+/// rules, a line that comes to match the decrease rule outdents, and comments toggle with the line comment, or else the
+/// block comment. Brackets in strings and comments neither match nor indent, and pairs that the language excludes there
+/// don't close. In a rectangle selection, pairs close, step over and delete, and opening characters surround, on every
+/// line; Enter breaks only the caret's line and ends the rectangle. Tab, Shift+Tab, Backspace in indentation and new
+/// lines go by the document's <see cref="CodeDocument.Indentation"/>. Undo goes by word.
 /// Hover shows the server's Markdown, with code blocks highlighted by the document's grammar, below the messages of
 /// the diagnostics under the pointer. Completion items show VS Code's codicons, in the color theme's symbol colors. An
 /// item in the snippet syntax goes in as VS Code inserts it: its first stop is selected, and Tab and Shift+Tab move
@@ -80,7 +83,9 @@ namespace Darp.CodeEditor;
 /// <para>
 /// The editor's keys are ordinary <c>KeyBindings</c>, for the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), undo (Ctrl+Z,
 /// Ctrl+Y, Ctrl+Shift+Z), search (Ctrl+F, Ctrl+H, F3, Shift+F3), completion (Ctrl+Space, Ctrl+I), signature help
-/// (Ctrl+Shift+Space) and comments (Ctrl+/). On macOS, Cmd takes Ctrl's place, but for Ctrl+Space. They are in
+/// (Ctrl+Shift+Space), comments (Ctrl+/) and whole lines: move (Alt+Up, Alt+Down), copy (Shift+Alt+Up, Shift+Alt+Down,
+/// with Ctrl too on Linux), delete (Ctrl+Shift+K), insert (Ctrl+Enter, Ctrl+Shift+Enter), indent (Ctrl+], Ctrl+[) and
+/// select (Ctrl+L). On macOS, Cmd takes Ctrl's place, but for Ctrl+Space. They are in
 /// <c>KeyBindings</c> from the start, and go behind the app's XAML bindings when the editor is first attached, so that
 /// those run first. An app adds one later with <c>Insert(0, …)</c>, and removes a default with <c>RemoveAll</c>. A key
 /// whose command does not apply, such as Ctrl+Z with nothing to undo, goes on to the app, as do keys that the editor does
@@ -111,6 +116,12 @@ public class CodeEditor : TemplatedControl
     /// <summary>Defines the <see cref="WordWrap"/> property.</summary>
     public static readonly StyledProperty<bool> WordWrapProperty = AvaloniaProperty.Register<CodeEditor, bool>(
         nameof(WordWrap)
+    );
+
+    /// <summary>Defines the <see cref="AutoClosing"/> property.</summary>
+    public static readonly StyledProperty<bool> AutoClosingProperty = AvaloniaProperty.Register<CodeEditor, bool>(
+        nameof(AutoClosing),
+        defaultValue: true
     );
 
     /// <summary>Defines the <see cref="ShowLineNumbers"/> property.</summary>
@@ -268,6 +279,16 @@ public class CodeEditor : TemplatedControl
         set => SetValue(WordWrapProperty, value);
     }
 
+    /// <summary>
+    /// Whether typing an opening bracket or quote also types its closing one, by the language's rules. Default: true.
+    /// Typing over a selection still surrounds it.
+    /// </summary>
+    public bool AutoClosing
+    {
+        get => GetValue(AutoClosingProperty);
+        set => SetValue(AutoClosingProperty, value);
+    }
+
     /// <summary>Whether line numbers show in the left margin. Default: true.</summary>
     public bool ShowLineNumbers
     {
@@ -324,6 +345,12 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>What the editor does for the shown document, for its key commands; null while it shows none.</summary>
     internal EditorView? View => _view;
+
+    /// <summary>The occurrences of the symbol at the caret, for tests.</summary>
+    internal IReadOnlyList<Occurrence> Occurrences => _view?.Occurrences ?? [];
+
+    /// <summary>Whether the view asks for the occurrences, for tests.</summary>
+    internal bool IsAskingForOccurrences => _view?.IsAskingForOccurrences ?? false;
 
     /// <summary>The clock of the time limit in the background, in the grammars the editor loads: the system's.</summary>
     internal TimeProvider GrammarClock { get; init; } = TimeProvider.System;
