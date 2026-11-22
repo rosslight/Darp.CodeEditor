@@ -141,6 +141,10 @@ internal sealed class Typing : IDisposable
     /// <summary>Enter: the selection's text goes, a rectangle selection ends, and the rules' new line goes in.</summary>
     private bool Enter()
     {
+        // The new line can't go there, and AvaloniaEdit 12.0.0 would still delete the selection (design.md #127).
+        int start = _area.Selection.IsEmpty ? _area.Caret.Offset : _area.Selection.SurroundingSegment.Offset;
+        if (VisibleText.IsInTail(Buffer.GetLineByOffset(start), start))
+            return true;
         _changes.Run(
             new EditStep(EditKind.TypingOther, StartsStep: true),
             () =>

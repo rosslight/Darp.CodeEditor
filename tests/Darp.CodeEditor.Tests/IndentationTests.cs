@@ -247,6 +247,21 @@ public sealed class IndentationTests(UiFixture ui)
             window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(line);
         });
 
+    [Fact]
+    public Task Enter_keeps_a_selection_in_a_long_lines_hidden_tail() =>
+        _ui.Run(() =>
+        {
+            string line = new('a', VisibleText.LineLimit + 5);
+            using EditorWindow window = MarkedText.Show(
+                line.Insert(VisibleText.LineLimit + 3, "»").Insert(VisibleText.LineLimit + 1, "«"),
+                CodeLanguage.PlainText
+            );
+
+            window.Press(Key.Enter);
+
+            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(line);
+        });
+
     [Theory]
     // To the next or the previous stop.
     [InlineData("«   a»", "«    a»", "«  a»")]

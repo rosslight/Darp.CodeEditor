@@ -20,6 +20,9 @@ internal static class VisibleText
     /// <summary>Whether <paramref name="line"/> is longer than the editor shows.</summary>
     public static bool IsCollapsed(DocumentLine line) => line.Length > LineLimit;
 
+    /// <summary>Whether <paramref name="offset"/> is in the hidden tail of <paramref name="line"/>.</summary>
+    public static bool IsInTail(DocumentLine line, int offset) => IsCollapsed(line) && offset >= End(line);
+
     /// <summary>
     /// Whether text can go in at <paramref name="offset"/>: not in read-only text, nor in a long line's hidden tail. It
     /// is AvaloniaEdit's check before a paste, <c>TextArea.CanInsert</c>, which is internal.
@@ -27,7 +30,7 @@ internal static class VisibleText
     public static bool CanInsert(TextArea textArea, int offset)
     {
         DocumentLine line = textArea.Document.GetLineByOffset(offset);
-        return textArea.ReadOnlySectionProvider.CanInsert(offset) && (!IsCollapsed(line) || offset < End(line));
+        return textArea.ReadOnlySectionProvider.CanInsert(offset) && !IsInTail(line, offset);
     }
 
     /// <summary>
