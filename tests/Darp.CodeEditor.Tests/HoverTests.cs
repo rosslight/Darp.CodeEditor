@@ -409,6 +409,35 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_popup_whose_content_grows_after_a_layout_stays_inside_the_window() =>
+        _ui.Run(() =>
+        {
+            var editor = new CodeEditor();
+            using var window = new EditorWindow(editor, width: 400, height: 300);
+            var content = new Border { Width = 100, Height = 20 };
+            // With a height limit of its own, as a hover has, measuring it again stops at the parent of what changed.
+            var popup = new EditorPopup(
+                editor,
+                new PopupFrame
+                {
+                    Child = new Border { Child = content },
+                    MaxHeight = 100,
+                    Background = Brushes.Gray,
+                }
+            );
+            var place = new Rect(350, 100, 8, 16);
+            popup.Show(editor, () => place);
+            window.Layout();
+
+            content.Width = 200;
+            popup.Show(editor, () => place);
+            window.Layout();
+
+            BoundsInWindow(popup.Root).Right.ShouldBe(window.Window.ClientSize.Width, 1);
+            popup.Hide();
+        });
+
+    [Fact]
     public Task An_outdated_hover_request_is_cancelled() =>
         _ui.Run(async () =>
         {

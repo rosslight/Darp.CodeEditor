@@ -198,10 +198,12 @@ internal sealed class EditorPopup
             // scrolled out of it sideways.
             Rect line = new Rect(0, anchor.Top, relativeTo.Bounds.Width, anchor.Height).TransformToAABB(toLayer);
             double left = Left ?? anchor.TopLeft.Transform(toLayer).X - Inset;
-            // Placing changes the layout, and the next layout pass finds nothing moved.
-            if (Equals(_placedBy, (space, line, left)))
+            // Placing changes the layout, and the next layout pass finds nothing moved. Content that just changed has its
+            // width only after that pass, which then places the popup again.
+            double laidOutWidth = _root.DesiredSize.Width;
+            if (Equals(_placedBy, (space, line, left, laidOutWidth)))
                 return;
-            _placedBy = (space, line, left);
+            _placedBy = (space, line, left, laidOutWidth);
             _root.MaxHeight = double.PositiveInfinity;
             _root.Measure(new Size(space.Width, double.PositiveInfinity));
             // While the user drags an edge, it stays on its side of the line rather than jump from under the pointer;
