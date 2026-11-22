@@ -141,7 +141,8 @@ internal sealed class Typing : IDisposable
     /// <summary>Enter: the selection's text goes, a rectangle selection ends, and the rules' new line goes in.</summary>
     private bool Enter()
     {
-        if (!CanEnter())
+        // AvaloniaEdit 12.0.0 would delete a selection there, where the new line can't go (design.md #127).
+        if (TouchesTail())
             return true;
         _changes.Run(
             new EditStep(EditKind.TypingOther, StartsStep: true),
@@ -168,15 +169,12 @@ internal sealed class Typing : IDisposable
         return true;
     }
 
-    /// <summary>
-    /// Whether all of the selection can go and the new line can follow. AvaloniaEdit deletes what it can of a selection,
-    /// in 12.0.0 also in a hidden tail (design.md #127), so Enter checks first, to change everything or nothing.
-    /// </summary>
-    private bool CanEnter() =>
+    /// <summary>Whether the caret, or any of the selection, is in a long line's hidden tail.</summary>
+    private bool TouchesTail() =>
         _area.Selection.IsEmpty
-            ? _changes.CanChange(_area.Caret.Offset, 0)
-            : _area.Selection.Segments.All(segment =>
-                _changes.CanChange(segment.StartOffset, 0) && _changes.CanChange(segment.StartOffset, segment.Length)
+            ? VisibleText.TouchesTail(Buffer, _area.Caret.Offset, 0)
+            : _area.Selection.Segments.Any(segment =>
+                VisibleText.TouchesTail(Buffer, segment.StartOffset, segment.Length)
             );
 
     /// <summary>Tab and Shift+Tab, each a step of its own; in a rectangle selection, AvaloniaEdit's.</summary>

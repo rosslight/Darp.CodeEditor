@@ -40,17 +40,25 @@ internal static class VisibleText
     public static bool CanDelete(TextArea textArea, int offset, int length)
     {
         var segment = new TextSegment { StartOffset = offset, Length = length };
-        if (textArea.ReadOnlySectionProvider.GetDeletableSegments(segment).Sum(deletable => deletable.Length) != length)
-            return false;
-        for (
-            DocumentLine? line = textArea.Document.GetLineByOffset(offset);
-            line?.Offset < offset + length;
-            line = line.NextLine
-        )
+        return textArea.ReadOnlySectionProvider.GetDeletableSegments(segment).Sum(deletable => deletable.Length)
+                == length
+            && !TouchesTail(textArea.Document, offset, length);
+    }
+
+    /// <summary>
+    /// Whether the text from <paramref name="offset"/> on, <paramref name="length"/> long, starts in a long line's
+    /// hidden tail, or reaches into one or the line break after it.
+    /// </summary>
+    public static bool TouchesTail(TextDocument document, int offset, int length)
+    {
+        DocumentLine? line = document.GetLineByOffset(offset);
+        if (IsInTail(line, offset))
+            return true;
+        for (; line?.Offset < offset + length; line = line.NextLine)
         {
             if (IsCollapsed(line) && End(line) < offset + length && line.Offset + line.TotalLength > offset)
-                return false;
+                return true;
         }
-        return true;
+        return false;
     }
 }
