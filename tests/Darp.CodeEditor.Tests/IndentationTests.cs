@@ -305,6 +305,26 @@ public sealed class IndentationTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Enter_puts_no_new_line_into_read_only_text_after_a_rectangle_selection() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show(
+                "abcd|efgh\n\tABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                CodeLanguage.PlainText
+            );
+            TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+            var readOnly = new TextSegmentReadOnlySectionProvider<TextSegment>(textArea.Document);
+            readOnly.Segments.Add(new TextSegment { StartOffset = 12, Length = 7 });
+            textArea.ReadOnlySectionProvider = readOnly;
+            window.Press(Key.Right, KeyModifiers.Alt | KeyModifiers.Shift);
+            window.Press(Key.Down, KeyModifiers.Alt | KeyModifiers.Shift);
+
+            window.Press(Key.Enter);
+
+            window.Editor.Document.ShouldNotBeNull().Text.ShouldContain("CDEFGHI");
+        });
+
+    [Fact]
     public Task Enter_keeps_a_selection_that_touches_read_only_text() =>
         _ui.Run(() =>
         {

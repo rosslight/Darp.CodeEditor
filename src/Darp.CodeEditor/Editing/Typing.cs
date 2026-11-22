@@ -157,8 +157,11 @@ internal sealed class Typing : IDisposable
                     NewLine newLine = Rules.Enter(Lines, line.LineNumber, caret - line.Offset);
                     int replaced = _changes.CanChange(caret, newLine.Replaced) ? newLine.Replaced : 0;
                     // Not through the tail's check: deleting the selection may have joined lines into a long one here.
-                    Buffer.Replace(caret, replaced, newLine.Text);
-                    _changes.Select(new TextSelection(caret + newLine.Caret));
+                    if (replaced > 0 || _area.ReadOnlySectionProvider.CanInsert(caret))
+                    {
+                        Buffer.Replace(caret, replaced, newLine.Text);
+                        _changes.Select(new TextSelection(caret + newLine.Caret));
+                    }
                 }
             }
         );
