@@ -1,10 +1,13 @@
 using Avalonia;
-using Avalonia.Controls.Primitives;
+using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Logging;
+using Avalonia.VisualTree;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
+using Darp.CodeEditor.Commands;
 using Darp.CodeEditor.Diagnostics;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.Highlighting;
@@ -15,44 +18,54 @@ namespace Darp.CodeEditor.Popups;
 
 /// <summary>
 /// The hover of one editor's view of a document: resting the pointer over text shows the messages of the diagnostics
-/// there, above the server's hover, in the editor's popup in the color theme's hover colors.
+/// there, above the server's hover, in the editor's popup (<see cref="HoverPopup"/>).
 /// </summary>
 /// <remarks>
 /// <para>
-/// The pointer rests for AvaloniaEdit's hover time, 400 ms, as long as Avalonia's tooltips wait. The diagnostics show
-/// at once, and the server's hover joins them when it answers; its Markdown is read, and its code blocks highlighted,
-/// off the UI thread.
+/// The pointer rests on a character for 300 ms on the document's clock; moving to another character starts the wait
+/// again. Once it is over, the diagnostics show and the server is asked; its hover joins them when it answers. Its
+/// Markdown is read, and its code blocks highlighted, off the UI thread. <c>editor.action.showHover</c> does the same at
+/// the caret at once; pressed again, it puts the keyboard into the popup.
 /// </para>
 /// <para>
 /// The hovered text is the word under the pointer, and the range that the server's hover names. The popup stays while
-/// the pointer is over it or over the popup, so that its links can be clicked and it can be scrolled.
+/// the pointer is over it or over the popup. Clicked into, or with the keyboard put into it, it is held: it stays
+/// wherever the pointer goes, until Escape or a click outside it.
 /// </para>
 /// <para>
 /// <see cref="Close"/> ends the hover, for every reason it ends: the pointer leaves both, also for another word under
-/// the same diagnostic; typing, scrolling and Escape; the editor losing the keyboard focus; a server that starts or
-/// stops serving the document, whose information the hover showed; new colors, which its code was drawn in; and the
-/// editor no longer showing the document. Ending it cancels the server's request and the reading of its answer if they
-/// are still under way, and drops what they would show, also before any popup opened.
+/// the same diagnostic, unless it is held; a click outside the popup; a default key in the text, unless it is held
+/// (<see cref="CloseOnKey"/>); for a hover asked for by key, the caret moving; typing, scrolling and Escape; the keyboard
+/// leaving the editor and its popups; a server that starts or stops serving the document, whose information the hover
+/// showed; new colors, which its code was drawn in; and the editor no longer showing the document. Ending it cancels
+/// the server's request and the reading of its answer if they are still under way, and drops what they would show. No
+/// hover starts while a button is down, or where a click left the pointer.
 /// </para>
 /// </remarks>
-internal sealed class HoverController : IDisposable
+internal sealed class HoverController : IEditorFeature
 {
+    /// <summary>How long the pointer rests on a character before its hover shows.</summary>
+    private static readonly TimeSpan s_delay = TimeSpan.FromMilliseconds(300);
+
     private readonly CodeEditor _editor;
+    private readonly TextArea _textArea;
     private readonly TextView _textView;
     private readonly TextDocument _buffer;
     private readonly CodeDocument _document;
     private readonly SquiggleLayer _squiggles;
     private readonly BackgroundTextMateHighlighter _highlighter;
-    private readonly PopupScrollViewer _content = new()
-    {
-        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-    };
-    private readonly PopupFrame _frame;
-    private readonly EditorPopup _popup;
+    private readonly HoverPopup _popup;
+
+    /// <summary>The window whose clicks end the hover; null outside one.</summary>
+    private readonly TopLevel? _window;
+
     private PopupColors _colors = PopupColors.Default;
 
-    /// <summary>The text hovered now, from the pointer's rest until the popup closes; null for none.</summary>
+    /// <summary>The text hovered now, until the hover ends; null for none. Until its delay is over, it waits.</summary>
     private Hovered? _hovered;
+
+    /// <summary>Where the pointer moved last over the text: a move that stays there, as after a click, starts nothing.</summary>
+    private Point? _pointer;
 
     public HoverController(
         CodeEditor editor,
@@ -63,27 +76,24 @@ internal sealed class HoverController : IDisposable
     )
     {
         _editor = editor;
+        _textArea = textArea;
         _textView = textArea.TextView;
         _buffer = textArea.Document;
         _document = document;
         _squiggles = squiggles;
         _highlighter = highlighter;
-        _frame = new PopupFrame
-        {
-            Name = "Hover",
-            Child = _content,
-            MaxWidth = PopupFrame.MaxTextWidth,
-            Padding = new Thickness(8, 4),
-        };
-        Paint();
-        _popup = new EditorPopup(editor, _frame);
-        _textView.PointerHover += OnPointerHover;
+        _popup = new HoverPopup(editor, textArea, () => Close());
+        _popup.Paint(_colors);
+        _window = TopLevel.GetTopLevel(editor);
         _textView.PointerMoved += OnPointerMoved;
         _textView.PointerExited += OnPointerExited;
         _textView.ScrollOffsetChanged += OnClosingChange;
         _buffer.Changed += OnClosingChange;
         _document.LanguageFeaturesChanged += OnClosingChange;
+        _textArea.Caret.PositionChanged += OnCaretPositionChanged;
         _popup.Root.PointerExited += OnPointerExited;
+        // Also where a part handles the press, as the text does to select.
+        _window?.AddHandler(InputElement.PointerPressedEvent, OnPressed, RoutingStrategies.Tunnel, true);
     }
 
     /// <summary>The popup's colors, from the color theme once it is loaded. New colors end the hover.</summary>
@@ -94,10 +104,17 @@ internal sealed class HoverController : IDisposable
             if (value == _colors)
                 return;
             _colors = value;
-            Paint();
+            _popup.Paint(value);
             Close();
         }
     }
+
+    public void AddCommands(CommandTable commands) =>
+        commands.Add(CodeEditorCommands.ShowHover, ShowAtCaret, applies: HasHoverAtCaret);
+
+    /// <summary>Whether the hover key has something to show: otherwise it goes on to the app, as F1 to its help.</summary>
+    private bool HasHoverAtCaret() =>
+        _popup.IsOpen || _document.Features is { Hover: true } || _squiggles.At(CaretOffset(), 1).Count > 0;
 
     /// <summary>
     /// Ends the current hover: closes the popup, cancels the server's request and the reading of its answer if they are
@@ -107,50 +124,101 @@ internal sealed class HoverController : IDisposable
     public bool Close()
     {
         bool wasOpen = _popup.IsOpen;
-        _hovered?.Cancellation.Cancel();
+        _hovered?.Stop();
         _hovered = null;
         _popup.Hide();
         return wasOpen;
     }
 
+    /// <summary>Ends the hover for a default key in the text, unless it is held.</summary>
+    public void CloseOnKey()
+    {
+        if (!_popup.IsHeld)
+            Close();
+    }
+
     public void Dispose()
     {
         Close();
-        _textView.PointerHover -= OnPointerHover;
         _textView.PointerMoved -= OnPointerMoved;
         _textView.PointerExited -= OnPointerExited;
         _textView.ScrollOffsetChanged -= OnClosingChange;
         _buffer.Changed -= OnClosingChange;
         _document.LanguageFeaturesChanged -= OnClosingChange;
+        _textArea.Caret.PositionChanged -= OnCaretPositionChanged;
         _popup.Root.PointerExited -= OnPointerExited;
+        _window?.RemoveHandler(InputElement.PointerPressedEvent, OnPressed);
+    }
+
+    /// <summary>Shows <paramref name="diagnostic"/>, which F8 went to at <paramref name="offset"/>, as a hover by key.</summary>
+    public void ShowProblem(int offset, Diagnostic diagnostic)
+    {
+        Hovered hovered = Begin(offset, fromKeyboard: true);
+        hovered.IsDue = true;
+        hovered.Messages = HoverBlocks.Of([diagnostic], hovered.Budget);
+        _popup.Show(hovered.Messages, Look(), hovered.Word);
+    }
+
+    /// <summary>Shows the hover at the caret; when one shows already, the keyboard goes into it.</summary>
+    private void ShowAtCaret()
+    {
+        if (_popup.IsOpen)
+        {
+            _popup.TakeKeyboard();
+            return;
+        }
+        Due(Begin(CaretOffset(), fromKeyboard: true));
     }
 
     /// <summary>
-    /// The pointer rests: over the text already hovered, nothing changes; over other text, its diagnostics show, and
-    /// the server is asked for its hover.
+    /// What the caret's hover is about: a problem at the caret, or else, right after a word, as the caret is when typing
+    /// ends, that word.
     /// </summary>
-    private void OnPointerHover(object? sender, PointerEventArgs e)
+    private int CaretOffset()
     {
-        if (
-            OffsetAt(e.GetPosition(_textView)) is not { } offset
-            || (_hovered is { } current && IsHovered(current, offset))
-        )
-            return;
+        int caret = _textArea.Caret.Offset;
+        return
+            _squiggles.At(caret, 1).Count == 0
+            && WordRules.WordAt(_buffer, caret) is { Length: > 0 } word
+            && word.End == caret
+            ? caret - 1
+            : caret;
+    }
+
+    /// <summary>Ends the hover there is, and makes the hover of <paramref name="offset"/> the current one.</summary>
+    private Hovered Begin(int offset, bool fromKeyboard)
+    {
         Close();
-        var budget = new HoverBudget();
-        TextRange word = WordAt(_buffer, offset);
-        var hovered = new Hovered(
-            offset,
-            word,
-            AlongWord(_buffer, word),
-            _document.CurrentSnapshot,
-            // Each diagnostic takes a line at least, so a hover never shows more of them than it has lines.
-            HoverBlocks.Of(_squiggles.At(offset, HoverBudget.MaxLines), budget),
-            budget
-        );
+        var hovered = Hovered.At(_buffer, offset, _document.CurrentSnapshot, fromKeyboard);
         _hovered = hovered;
+        return hovered;
+    }
+
+    /// <summary>The pointer arrived on a character: its hover shows once it has rested there for the delay.</summary>
+    private void StartDelayed(int offset)
+    {
+        Hovered hovered = Begin(offset, fromKeyboard: false);
+        hovered.Delay = _document.TimeProvider.CreateTimer(
+            _ =>
+                _editor.Dispatcher.Post(() =>
+                {
+                    if (_hovered == hovered)
+                        Due(hovered);
+                }),
+            null,
+            s_delay,
+            Timeout.InfiniteTimeSpan
+        );
+    }
+
+    /// <summary>The delay is over: the diagnostics there show, and the server is asked for its hover.</summary>
+    private void Due(Hovered hovered)
+    {
+        hovered.IsDue = true;
+        // Each diagnostic takes a line at least, so a hover never shows more of them than it has lines.
+        hovered.Messages = HoverBlocks.Of(_squiggles.At(hovered.Offset, HoverBudget.MaxLines), hovered.Budget);
         if (hovered.Messages.Count > 0)
-            Show(hovered, hovered.Messages);
+            _popup.Show(hovered.Messages, Look(), hovered.Word);
         ShowServerHover(hovered);
     }
 
@@ -176,11 +244,14 @@ internal sealed class HoverController : IDisposable
                 () => HoverBlocks.Of(hover, grammar, hovered.Budget, cancellation),
                 cancellation
             );
-            if (_hovered != hovered)
+            if (_hovered != hovered || blocks.Count == 0)
                 return;
             if (hover.Range is { } range)
                 hovered.Range = Union(hovered.Range, range);
-            Show(hovered, hovered.Messages.Count > 0 ? [.. hovered.Messages, new HoverRule(), .. blocks] : blocks);
+            if (hovered.Messages.Count > 0)
+                _popup.Append([new HoverRule(), .. blocks], Look());
+            else
+                _popup.Show(blocks, Look(), hovered.Word);
         }
         // The hover ended while its answer was read.
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
@@ -192,36 +263,104 @@ internal sealed class HoverController : IDisposable
         }
     }
 
-    private void Show(Hovered hovered, IReadOnlyList<HoverBlock> blocks)
-    {
-        var code = new CodeLook(_editor.FontFamily, _editor.FontSize, _colors.CodeBackground, _colors.CodeForeground);
-        _content.Content = HoverView.Create(blocks, code, _colors.HoverBorder);
-        // Above the hovered word, where the pointer comes from.
-        _popup.Show(_textView, () => TextViewBoxes.CharacterAt(_textView, hovered.Word.Start));
-    }
+    private CodeLook Look() => new(_editor.FontFamily, _editor.FontSize, _colors);
 
-    private void Paint() =>
-        _frame.Paint(_colors.HoverBackground, _colors.HoverBorder, _colors.HoverForeground, _colors);
-
-    /// <summary>Closes the popup once the pointer moves over other text.</summary>
+    /// <summary>
+    /// Over other text, a hover that shows ends soon, so that the pointer can cross text on its way to the popup; one
+    /// that still waits ends at once, and the wait for that text's hover starts.
+    /// </summary>
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
-        if (_hovered is not { } hovered)
+        Point point = e.GetPosition(_textView);
+        if (point == _pointer)
             return;
-        if (OffsetAt(e.GetPosition(_textView)) is not { } offset || !IsHovered(hovered, offset))
-            Close();
+        _pointer = point;
+        if (_popup.IsHeld || (_hovered is { FromKeyboard: true } && _popup.IsOpen))
+            return;
+        PointerPointProperties buttons = e.GetCurrentPoint(_textView).Properties;
+        bool pressed = buttons.IsLeftButtonPressed || buttons.IsRightButtonPressed || buttons.IsMiddleButtonPressed;
+        int? offset = pressed ? null : OffsetAt(point);
+        if (_hovered is { } hovered && offset is { } at && (hovered.IsDue ? hovered.IsOver(at) : hovered.Offset == at))
+        {
+            hovered.StopLeaving();
+            return;
+        }
+        if (!pressed && _popup.IsOpen && _hovered is { } shown)
+        {
+            CloseSoon(shown, offset);
+            return;
+        }
+        Close();
+        if (offset is { } next)
+            StartDelayed(next);
     }
 
     /// <summary>
-    /// Closes the popup once the pointer has left both the text and the popup: posted, as the pointer enters the other
-    /// only after it left the one.
+    /// Ends a hover once the pointer has rested on other text for the delay, and shows that text's hover, unless the
+    /// pointer reached the popup or came back.
     /// </summary>
-    private void OnPointerExited(object? sender, PointerEventArgs e) =>
+    private void CloseSoon(Hovered hovered, int? offset)
+    {
+        if (hovered.Leaving is not null && hovered.LeavingTo == offset)
+            return;
+        hovered.StopLeaving();
+        ITimer? timer = null;
+        timer = _document.TimeProvider.CreateTimer(
+            _ =>
+                _editor.Dispatcher.Post(() =>
+                {
+                    if (_hovered != hovered || hovered.Leaving != timer)
+                        return;
+                    hovered.StopLeaving();
+                    if (_popup.IsHeld || _popup.Root.IsPointerOver)
+                        return;
+                    Close();
+                    if (offset is { } next)
+                        Due(Begin(next, fromKeyboard: false));
+                }),
+            null,
+            s_delay,
+            Timeout.InfiniteTimeSpan
+        );
+        hovered.Leaving = timer;
+        hovered.LeavingTo = offset;
+    }
+
+    /// <summary>
+    /// Ends the hover once the pointer has left both the text and the popup, unless it is held or was asked for by key:
+    /// posted, as the pointer enters the other only after it left the one.
+    /// </summary>
+    private void OnPointerExited(object? sender, PointerEventArgs e)
+    {
+        if (sender == _textView)
+            _pointer = null;
         _editor.Dispatcher.Post(() =>
         {
-            if (!_textView.IsPointerOver && !_popup.Root.IsPointerOver)
+            if (
+                !_popup.IsHeld
+                && _hovered is { FromKeyboard: false }
+                && !_textView.IsPointerOver
+                && !_popup.Root.IsPointerOver
+            )
                 Close();
         });
+    }
+
+    /// <summary>A click in the popup holds it; anywhere else in the window, it ends the hover.</summary>
+    private void OnPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (e.Source is Visual source && _popup.Root.IsVisualAncestorOf(source))
+            _popup.Hold();
+        else
+            Close();
+    }
+
+    /// <summary>A hover asked for by key closes when the caret moves.</summary>
+    private void OnCaretPositionChanged(object? sender, EventArgs e)
+    {
+        if (_hovered is { FromKeyboard: true })
+            Close();
+    }
 
     private void OnClosingChange(object? sender, EventArgs e) => Close();
 
@@ -244,99 +383,6 @@ internal sealed class HoverController : IDisposable
         return point.X < end.Right ? line.EndOffset : null;
     }
 
-    /// <summary>
-    /// Whether <paramref name="offset"/> is in the hovered text: in its range, or further along a word that
-    /// <see cref="WordAt"/> cut. Reads no text: how far the word goes was found when the hover started.
-    /// </summary>
-    private static bool IsHovered(Hovered hovered, int offset) =>
-        hovered.Contains(offset) || (offset >= hovered.Along.Start && offset < hovered.Along.End);
-
-    /// <summary>
-    /// The word characters around <paramref name="word"/>, beyond where <see cref="WordAt"/> cut it, in the shown part
-    /// of its line, its first 3,000 characters: the pointer may move along them without ending the hover. Just the word
-    /// when it is not one, as a space or a line's end. Reads at most the shown part of one line.
-    /// </summary>
-    internal static TextRange AlongWord(TextDocument buffer, TextRange word)
-    {
-        if (word.Length == 0 || !WordCharacters.IsWordCharacter(buffer.GetCharAt(word.Start)))
-            return word;
-        DocumentLine line = buffer.GetLineByOffset(word.Start);
-        int start = word.Start;
-        while (start > line.Offset && WordCharacters.IsWordCharacter(buffer.GetCharAt(start - 1)))
-            start--;
-        int last = VisibleText.End(line);
-        int end = word.End;
-        while (end < last && WordCharacters.IsWordCharacter(buffer.GetCharAt(end)))
-            end++;
-        return TextRange.FromBounds(start, end);
-    }
-
-    /// <summary>
-    /// How far the hovered word reaches on either side of the pointer, at most, as in VS Code: a longer word is cut
-    /// there, so that a line of millions of word characters costs the pointer no more than this.
-    /// </summary>
-    internal const int MaxWordReach = 1_000;
-
-    /// <summary>
-    /// The word at <paramref name="offset"/>, by VS Code's word characters, reaching at most
-    /// <see cref="MaxWordReach"/> characters to either side, and not into a long line's hidden tail; the character alone
-    /// if it is none, and nothing at a line's end.
-    /// </summary>
-    internal static TextRange WordAt(TextDocument buffer, int offset)
-    {
-        DocumentLine line = buffer.GetLineByOffset(offset);
-        if (offset == line.EndOffset)
-            return new TextRange(offset, 0);
-        if (!WordCharacters.IsWordCharacter(buffer.GetCharAt(offset)))
-            return new TextRange(offset, 1);
-        int first = Math.Max(line.Offset, offset - MaxWordReach);
-        int start = offset;
-        while (start > first && WordCharacters.IsWordCharacter(buffer.GetCharAt(start - 1)))
-            start--;
-        int last = Math.Min(VisibleText.End(line), offset + MaxWordReach);
-        int end = offset;
-        while (end < last && WordCharacters.IsWordCharacter(buffer.GetCharAt(end)))
-            end++;
-        return TextRange.FromBounds(start, end);
-    }
-
     private static TextRange Union(TextRange a, TextRange b) =>
         TextRange.FromBounds(Math.Min(a.Start, b.Start), Math.Max(a.End, b.End));
-
-    /// <summary>The text hovered, in the current text.</summary>
-    /// <param name="offset">The character the pointer rested on.</param>
-    /// <param name="word">The word there, which the popup is next to.</param>
-    /// <param name="along">The word characters around it, which the pointer may move along.</param>
-    /// <param name="snapshot">The text when the pointer rested: the popup closes when it changes.</param>
-    /// <param name="messages">The diagnostics' messages.</param>
-    /// <param name="budget">What is left of the text the hover shows, for the server's hover after the messages.</param>
-    private sealed class Hovered(
-        int offset,
-        TextRange word,
-        TextRange along,
-        TextSnapshot snapshot,
-        IReadOnlyList<HoverBlock> messages,
-        HoverBudget budget
-    )
-    {
-        public int Offset { get; } = offset;
-
-        public TextRange Word { get; } = word;
-
-        public TextRange Along { get; } = along;
-
-        /// <summary>The text that the popup stays open over: the word, and the server's range.</summary>
-        public TextRange Range { get; set; } = word;
-
-        public TextSnapshot Snapshot { get; } = snapshot;
-
-        public IReadOnlyList<HoverBlock> Messages { get; } = messages;
-
-        public HoverBudget Budget { get; } = budget;
-
-        /// <summary>Cancels the server's request and the reading of its answer.</summary>
-        public CancellationTokenSource Cancellation { get; } = new();
-
-        public bool Contains(int offset) => offset >= Range.Start && offset < Math.Max(Range.End, Range.Start + 1);
-    }
 }

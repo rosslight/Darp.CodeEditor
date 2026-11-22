@@ -23,6 +23,7 @@ internal sealed class EditorView : IDisposable
     private readonly Func<SearchBar?> _searchBar;
     private readonly CommandTable _commands;
     private readonly CaretMoves _caretMoves;
+    private readonly EditorPopups _popups;
 
     /// <summary>Everything the view made, in the order it made them: disposed the other way round.</summary>
     private readonly IDisposable[] _features;
@@ -59,6 +60,7 @@ internal sealed class EditorView : IDisposable
         _area = area;
         _searchBar = searchBar;
         _commands = new CommandTable(area);
+        _popups = new EditorPopups(editor, OnFocusLeft);
         Highlighter = new BackgroundTextMateHighlighter(area.TextView, area.Document, editor.Dispatcher, null);
         _caretMoves = new CaretMoves(editor, area);
         _changes = new TextChanges(area);
@@ -86,6 +88,7 @@ internal sealed class EditorView : IDisposable
         _signatureHelp = new SignatureHelpController(editor, area, document, Highlighter, _caretMoves);
         _features =
         [
+            _popups,
             Highlighter,
             _caretMoves,
             _changes,
@@ -99,6 +102,7 @@ internal sealed class EditorView : IDisposable
             _squiggles,
             SemanticHighlighter,
             _hover,
+            new DiagnosticNavigation(editor, area, document, _hover),
             _snippets,
             _completion,
             _signatureHelp,
@@ -116,20 +120,27 @@ internal sealed class EditorView : IDisposable
     /// <summary>Colors the server's semantic tokens.</summary>
     public SemanticHighlighter SemanticHighlighter { get; }
 
+    /// <summary>Whether the keyboard is in the editor or in one of its popups.</summary>
+    public bool HasFocus => _popups.HasFocus;
+
     /// <summary>Whether a default key can run the command now; otherwise the key goes on.</summary>
     public bool CanRun(string id) => _commands.CanRun(id);
 
     /// <summary>
     /// Runs a command for its default key. A key that a binding handles skips <see cref="OnKeyDown"/>, so what a key does
-    /// to the popups happens here: it ends "No suggestions.", and in the text it closes the hover.
+    /// to the popups happens here: it ends "No suggestions.", and in the text it closes the hover, unless the command is
+    /// one that shows it.
     /// </summary>
     public void RunKey(string id, KeyGesture gesture)
     {
         _completion.HideNoSuggestions();
-        if (_area.IsFocused)
-            _hover.Close();
+        if (_area.IsFocused && !ShowsHover(id))
+            _hover.CloseOnKey();
         Run(id, command => _commands.TryRun(command, gesture));
     }
+
+    private static bool ShowsHover(string id) =>
+        id is CodeEditorCommands.ShowHover or CodeEditorCommands.NextMarker or CodeEditorCommands.PreviousMarker;
 
     /// <summary>Runs a command for the app, wherever the keyboard is.</summary>
     /// <returns>Whether it applied.</returns>
@@ -177,15 +188,6 @@ internal sealed class EditorView : IDisposable
     /// <summary>Whether the view asks for the occurrences, for tests.</summary>
     internal bool IsAskingForOccurrences => _occurrences.IsAsking;
 
-    /// <summary>Closes the popups, and clears the occurrences, once the keyboard has left the editor.</summary>
-    public void OnFocusLeft()
-    {
-        _occurrences.Clear();
-        _hover.Close();
-        _completion.Close();
-        _signatureHelp.Close();
-    }
-
     /// <summary>Nothing completes, asks for signatures or tabs through a snippet where the user cannot type.</summary>
     public void OnReadOnly()
     {
@@ -212,6 +214,15 @@ internal sealed class EditorView : IDisposable
     {
         for (int i = _features.Length - 1; i >= 0; i--)
             _features[i].Dispose();
+    }
+
+    /// <summary>Closes the popups, and clears the occurrences, once the keyboard has left the editor and its popups.</summary>
+    private void OnFocusLeft()
+    {
+        _occurrences.Clear();
+        _hover.Close();
+        _completion.Close();
+        _signatureHelp.Close();
     }
 
     /// <summary>A command that moves the caret or the selection ends completion: its list was for the word at the caret.</summary>

@@ -44,11 +44,12 @@ internal static class DefaultKeys
         }
         if (mac)
             yield return (CodeEditorCommands.TriggerSuggest, new KeyGesture(Key.Escape, KeyModifiers.Alt));
-        // The hover's key.
-        yield return (
-            CodeEditorCommands.ToggleSuggestionDetails,
-            mac || linux ? new KeyGesture(Key.F1) : new KeyGesture(Key.Q, KeyModifiers.Control)
-        );
+        // The hover's key: the details toggle applies only while the list shows.
+        KeyGesture hover = mac || linux ? new KeyGesture(Key.F1) : new KeyGesture(Key.Q, KeyModifiers.Control);
+        yield return (CodeEditorCommands.ToggleSuggestionDetails, hover);
+        yield return (CodeEditorCommands.ShowHover, hover);
+        yield return (CodeEditorCommands.NextMarker, new KeyGesture(Key.F8));
+        yield return (CodeEditorCommands.PreviousMarker, new KeyGesture(Key.F8, KeyModifiers.Shift));
         yield return (CodeEditorCommands.AcceptSelectedSuggestion, new KeyGesture(Key.Enter));
         yield return (CodeEditorCommands.AcceptAlternativeSelectedSuggestion, new KeyGesture(Key.Tab));
         yield return (

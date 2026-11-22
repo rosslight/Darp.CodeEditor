@@ -24,9 +24,12 @@ internal enum Edges
 /// that an app's styles for borders, flyouts and tooltips never reach it.
 /// </summary>
 /// <remarks>
+/// <para>While the keyboard is in the popup, its border takes the color theme's <c>focusBorder</c>.</para>
+/// <para>
 /// Dragging one of its <see cref="ResizableEdges"/>, or a corner between two, within a few pixels inside its border,
 /// reports the size dragged to through <see cref="Resized"/>, within the window, with the edges dragged: its owner
 /// applies what they change.
+/// </para>
 /// </remarks>
 internal sealed class PopupFrame : Border
 {
@@ -48,6 +51,9 @@ internal sealed class PopupFrame : Border
 
     /// <summary>A drag under way: where it started in the window, the frame's bounds in the window then, and its edges.</summary>
     private (Point Start, Rect Bounds, Edges Edges)? _drag;
+
+    private IBrush? _border;
+    private IBrush? _focusBorder;
 
     public PopupFrame()
     {
@@ -78,12 +84,20 @@ internal sealed class PopupFrame : Border
     public void Paint(IBrush background, IBrush border, IBrush foreground, PopupColors colors)
     {
         Background = background;
-        BorderBrush = border;
+        (_border, _focusBorder) = (border, colors.FocusBorder);
+        BorderBrush = IsKeyboardFocusWithin ? _focusBorder : _border;
         BoxShadow = colors.Shadow;
         TextElement.SetForeground(this, foreground);
         Resources["CodeEditorPopupSlider"] = colors.Slider.Normal;
         Resources["CodeEditorPopupSliderHover"] = colors.Slider.Hover;
         Resources["CodeEditorPopupSliderActive"] = colors.Slider.Active;
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property == IsKeyboardFocusWithinProperty)
+            BorderBrush = change.GetNewValue<bool>() ? _focusBorder : _border;
     }
 
     /// <summary>A drag ends without its release too, as when the popup closes under it.</summary>

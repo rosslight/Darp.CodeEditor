@@ -62,12 +62,7 @@ public class HoverBenchmarks
         // The largest that a hover shows: nothing of it is cut.
         if (new HoverBudget().Fit(_blocks) is not [HoverCode { Runs.Count: var count }] || count != runs.Count)
             throw new InvalidOperationException("The hover is larger than a hover shows.");
-        _look = new CodeLook(
-            new FontFamily("DejaVu Sans Mono"),
-            14,
-            new ImmutableSolidColorBrush(Colors.White),
-            new ImmutableSolidColorBrush(Colors.Black)
-        );
+        _look = new CodeLook(new FontFamily("DejaVu Sans Mono"), 14, PopupColors.Default);
     }
 
     [Benchmark]
@@ -77,7 +72,8 @@ public class HoverBenchmarks
         content.Content = HoverView.Create(
             _blocks,
             _look ?? throw new InvalidOperationException("Not set up."),
-            Brushes.Gray
+            Brushes.Gray,
+            selectable: true
         );
         HeadlessEditor.Render(_window ?? throw new InvalidOperationException("Not set up."));
     }

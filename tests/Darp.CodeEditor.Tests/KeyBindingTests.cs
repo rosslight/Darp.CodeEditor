@@ -119,6 +119,44 @@ public sealed class KeyBindingTests(UiFixture ui)
         });
 
     [Fact]
+    public Task The_hover_key_goes_on_to_the_app_with_nothing_to_show() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("te|xt", CodeLanguage.PlainText);
+            var app = new CountingCommand();
+            KeyGesture gesture = OperatingSystem.IsWindows()
+                ? new KeyGesture(Key.Q, KeyModifiers.Control)
+                : new KeyGesture(Key.F1);
+            window.Window.KeyBindings.Add(new KeyBinding { Gesture = gesture, Command = app });
+
+            window.Press(gesture.Key, gesture.KeyModifiers);
+
+            app.Runs.ShouldBe(1);
+        });
+
+    [Fact]
+    public Task The_hover_key_shows_a_problem_right_after_a_word() =>
+        _ui.Run(async () =>
+        {
+            var document = new StandaloneDocument(CodeLanguage.PlainText, "if True\n", TimeProvider.System);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            window.Editor.Selection = new TextSelection(7);
+            document.SetDiagnostics([
+                new Diagnostic(
+                    document.CurrentSnapshot,
+                    new TextRange(7, 1),
+                    DiagnosticSeverity.Error,
+                    null,
+                    "Expected"
+                ),
+            ]);
+
+            Hovers.PressHoverKey(window);
+
+            await Hovers.WaitForPopupAsync(window, "Expected");
+        });
+
+    [Fact]
     public Task A_default_removed_before_the_editor_is_attached_stays_removed() =>
         _ui.Run(() =>
         {
@@ -384,7 +422,10 @@ public sealed class KeyBindingTests(UiFixture ui)
             string[] commands = [.. keys.Where(key => key.Gesture == gesture).Select(key => key.Id)];
             commands.ShouldBe([CodeEditorCommands.ToggleSuggestionDetails, CodeEditorCommands.TriggerSuggest]);
         }
-        keys.ShouldContain((CodeEditorCommands.ToggleSuggestionDetails, new KeyGesture(hoverKey, hoverModifiers)));
+        var hover = new KeyGesture(hoverKey, hoverModifiers);
+        keys.Where(key => key.Gesture == hover)
+            .Select(key => key.Id)
+            .ShouldBe([CodeEditorCommands.ToggleSuggestionDetails, CodeEditorCommands.ShowHover]);
     }
 
     [Fact]

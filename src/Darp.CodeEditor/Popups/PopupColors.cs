@@ -67,6 +67,27 @@ internal sealed record PopupColors
     /// <summary>The text area's foreground: code without a token color of its own.</summary>
     public required IBrush CodeForeground { get; init; }
 
+    /// <summary><c>textCodeBlock.background</c>: behind code spans in text.</summary>
+    public required IBrush CodeSpanBackground { get; init; }
+
+    /// <summary><c>textLink.foreground</c>.</summary>
+    public required IBrush Link { get; init; }
+
+    /// <summary><c>problemsErrorIcon.foreground</c>: the icon of an error in a hover.</summary>
+    public required IBrush ErrorIcon { get; init; }
+
+    /// <summary><c>problemsWarningIcon.foreground</c>: the icon of a warning in a hover.</summary>
+    public required IBrush WarningIcon { get; init; }
+
+    /// <summary><c>problemsInfoIcon.foreground</c>: the icon of information or a hint in a hover.</summary>
+    public required IBrush InfoIcon { get; init; }
+
+    /// <summary><c>focusBorder</c>: the border of a popup that has the keyboard.</summary>
+    public required IBrush FocusBorder { get; init; }
+
+    /// <summary>The text area's selection: selected text in a hover.</summary>
+    public required IBrush Selection { get; init; }
+
     /// <summary><c>scrollbarSlider.background</c>, <c>.hoverBackground</c> and <c>.activeBackground</c>.</summary>
     public required (IBrush Normal, IBrush Hover, IBrush Active) Slider { get; init; }
 
@@ -128,6 +149,13 @@ internal sealed record PopupColors
             ),
             CodeBackground = text.Background,
             CodeForeground = text.Foreground,
+            CodeSpanBackground = Brush(Own("textCodeBlock.background") ?? Hex(dark ? 0x660A0A0Au : 0x66DCDCDCu)),
+            Link = Brush(Own("textLink.foreground") ?? Hex(dark ? 0xFF3794FF : 0xFF006AB1)),
+            ErrorIcon = Icon("problemsErrorIcon.foreground", "editorError.foreground", 0xFFF14C4C, 0xFFE51400),
+            WarningIcon = Icon("problemsWarningIcon.foreground", "editorWarning.foreground", 0xFFCCA700, 0xFFBF8803),
+            InfoIcon = Icon("problemsInfoIcon.foreground", "editorInfo.foreground", 0xFF3794FF, 0xFF1A85FF),
+            FocusBorder = Brush(Own("focusBorder") ?? Hex(dark ? 0xFF007FD4 : 0xFF0090F1)),
+            Selection = text.Selection,
             Slider = (
                 Brush(Own("scrollbarSlider.background") ?? Hex(dark ? 0x66797979u : 0x66646464u)),
                 Brush(Own("scrollbarSlider.hoverBackground") ?? Hex(0xB3646464)),
@@ -136,6 +164,10 @@ internal sealed record PopupColors
         };
 
         Color? Own(string key) => colors.TryGetValue(key, out Color color) ? color : null;
+
+        // A problem's icon: its own color, else the editor's for its severity, else VS Code's default.
+        IBrush Icon(string own, string editor, uint onDark, uint onLight) =>
+            Brush(Own(own) ?? Own(editor) ?? Hex(dark ? onDark : onLight));
     }
 
     /// <summary>The colors of a light theme that sets nothing but its background.</summary>

@@ -72,12 +72,20 @@ internal sealed record PublishDiagnosticsParams(
 /// <param name="Message">The text for users.</param>
 /// <param name="Severity">1 for errors, 2 warnings, 3 information, 4 hints; null leaves it to the client.</param>
 /// <param name="Code">A number or a string, read as text.</param>
+/// <param name="Source">What reported it, such as a linter's name.</param>
+/// <param name="CodeDescription">The web page that explains the code.</param>
 internal sealed record LspDiagnostic(
     LspRange Range,
     string Message,
     int? Severity = null,
-    [property: JsonConverter(typeof(DiagnosticCodeConverter))] string? Code = null
+    [property: JsonConverter(typeof(DiagnosticCodeConverter))] string? Code = null,
+    string? Source = null,
+    LspCodeDescription? CodeDescription = null
 );
+
+/// <summary>A diagnostic's <c>codeDescription</c>.</summary>
+/// <param name="Href">The address of the page.</param>
+internal sealed record LspCodeDescription(string Href);
 
 /// <summary>The params of <c>textDocument/hover</c> and <c>textDocument/documentHighlight</c>.</summary>
 internal sealed record TextDocumentPositionParams(TextDocumentIdentifier TextDocument, LspPosition Position);

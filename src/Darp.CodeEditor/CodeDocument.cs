@@ -587,4 +587,8 @@ internal sealed class DiagnosticsBatch
 }
 
 /// <summary>A document without a language server, from <see cref="CodeDocument.Create"/>.</summary>
-internal sealed class StandaloneDocument(CodeLanguage language, string text) : CodeDocument(language, text);
+internal sealed class StandaloneDocument(CodeLanguage language, string text, TimeProvider? time = null)
+    : CodeDocument(language, text)
+{
+    internal override TimeProvider TimeProvider { get; } = time ?? TimeProvider.System;
+}

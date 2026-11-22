@@ -8,7 +8,7 @@
 //
 // Hover over a word answers with Markdown: the word in bold, the document's language as inline code, and the word's
 // line as a code block in that language.
-// Hover over the word "slow" is never answered. Semantic tokens come from words, runs of letters, digits and
+// Hover over the word "slow" is never answered, and "hold-hovers" holds the others until "release-hovers". Semantic tokens come from words, runs of letters, digits and
 // underscores: a word "class_static" is a token of the type "class" with the modifier "static", if the legend names
 // them; other words are not tokens.
 //
@@ -29,6 +29,7 @@
 //   --exit-at-start <code>  exit at start, before reading anything
 //   --unversioned           publish diagnostics without a version
 //   --no-diagnostics        publish no diagnostics for echoed documents
+//   --diagnostic-details    give the echoed diagnostic the source "fake" and a code description
 //   --full-sync             ask for the full text with every change
 //   --text-document-sync <json>  answer initialize with this textDocumentSync capability
 //   --vscode-uris           publish diagnostics with file URIs written as VS Code's URI library writes them
@@ -102,6 +103,9 @@ internal sealed class FakeServer
     /// <c>release-document-highlights</c>, which answers them as they would have been answered when they came.
     /// </summary>
     private bool _holdDocumentHighlights;
+    private bool _diagnosticDetails;
+    private bool _holdHovers;
+    private readonly List<(JsonNode? Id, JsonNode Answer)> _heldHovers = [];
 
     private readonly List<(JsonNode? Id, JsonNode? Answer)> _heldDocumentHighlights = [];
 
@@ -156,6 +160,9 @@ internal sealed class FakeServer
                     break;
                 case "--no-diagnostics":
                     _noDiagnostics = true;
+                    break;
+                case "--diagnostic-details":
+                    _diagnosticDetails = true;
                     break;
                 case "--full-sync":
                     _fullSync = true;
@@ -344,7 +351,13 @@ internal sealed class FakeServer
             if (_noDiagnostics)
                 return;
             (int line, int character) = End(document.Text);
-            Publish(document, !_unversioned, Diagnostic(0, 0, line, character, document.Text));
+            JsonObject echo = Diagnostic(0, 0, line, character, document.Text);
+            if (_diagnosticDetails)
+            {
+                echo["source"] = "fake";
+                echo["codeDescription"] = new JsonObject { ["href"] = "https://example.com/echo" };
+            }
+            Publish(document, !_unversioned, echo);
             return;
         }
         foreach (string command in document.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries))
@@ -442,6 +455,17 @@ internal sealed class FakeServer
                 _signatures = JsonNode.Parse(json) ?? throw new InvalidDataException("No signatures.");
                 Log("set signatures");
                 break;
+            case ["hold-hovers"]:
+                _holdHovers = true;
+                Log("holding hovers");
+                break;
+            case ["release-hovers"]:
+                _holdHovers = false;
+                foreach ((JsonNode? id, JsonNode answer) in _heldHovers)
+                    Reply(id, answer);
+                _heldHovers.Clear();
+                Log("released hovers");
+                break;
             case ["hold-document-highlights"]:
                 _holdDocumentHighlights = true;
                 Log("holding document highlights");
@@ -495,23 +519,24 @@ internal sealed class FakeServer
         if (word == "slow")
             return;
         (int lineStart, int lineEnd) = Lines(document.Text).Last(line => line.Start <= offset);
-        Reply(
-            id,
-            new JsonObject
+        var answer = new JsonObject
+        {
+            ["contents"] = new JsonObject
             {
-                ["contents"] = new JsonObject
-                {
-                    ["kind"] = "markdown",
-                    ["value"] =
-                        $"**{word}** is a word in `{document.LanguageId}`.\n\n```{document.LanguageId}\n{document.Text[lineStart..lineEnd]}\n```",
-                },
-                ["range"] = new JsonObject
-                {
-                    ["start"] = Position(document.Text, start),
-                    ["end"] = Position(document.Text, end),
-                },
-            }
-        );
+                ["kind"] = "markdown",
+                ["value"] =
+                    $"**{word}** is a word in `{document.LanguageId}`.\n\n```{document.LanguageId}\n{document.Text[lineStart..lineEnd]}\n```",
+            },
+            ["range"] = new JsonObject
+            {
+                ["start"] = Position(document.Text, start),
+                ["end"] = Position(document.Text, end),
+            },
+        };
+        if (_holdHovers)
+            _heldHovers.Add((id?.DeepClone(), answer));
+        else
+            Reply(id, answer);
     }
 
     /// <summary>

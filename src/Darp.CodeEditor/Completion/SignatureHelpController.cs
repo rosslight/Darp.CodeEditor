@@ -327,12 +327,7 @@ internal sealed class SignatureHelpController : IEditorFeature
                     );
             if (_reading != reading)
                 return;
-            var look = new CodeLook(
-                _editor.FontFamily,
-                _editor.FontSize,
-                _colors.CodeBackground,
-                _colors.CodeForeground
-            );
+            var look = new CodeLook(_editor.FontFamily, _editor.FontSize, _colors);
             _content.Content = SignatureView.Create(help, labels, blocks, look, _colors, out Control active);
             _popup.Show(
                 _textView,

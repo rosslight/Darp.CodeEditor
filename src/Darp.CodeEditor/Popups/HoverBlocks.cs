@@ -13,8 +13,13 @@ internal abstract record HoverBlock;
 /// <param name="Spans">The text.</param>
 /// <param name="Level">How deep it is in lists: 0 outside them.</param>
 /// <param name="Marker">The list item's marker, such as <c>•</c> or <c>2.</c>; null for none.</param>
-internal sealed record HoverParagraph(IReadOnlyList<HoverSpan> Spans, int Level = 0, string? Marker = null)
-    : HoverBlock;
+/// <param name="Severity">The severity whose icon shows beside it, for a diagnostic; null for none.</param>
+internal sealed record HoverParagraph(
+    IReadOnlyList<HoverSpan> Spans,
+    int Level = 0,
+    string? Marker = null,
+    DiagnosticSeverity? Severity = null
+) : HoverBlock;
 
 /// <summary>A code block, highlighted with the document's grammar.</summary>
 /// <param name="Runs">The text, in runs of one color; line breaks are runs of their own.</param>
@@ -41,6 +46,9 @@ internal enum SpanStyle
     Bold = 1,
     Italic = 2,
     Code = 4,
+
+    /// <summary>At VS Code's 60% opacity, as a diagnostic's source and code.</summary>
+    Dimmed = 8,
 }
 
 /// <summary>What a hover shows: the messages of the diagnostics under the pointer, above the server's hover.</summary>
@@ -50,8 +58,8 @@ internal static class HoverBlocks
     private static readonly TimeSpan s_lineTimeLimit = TimeSpan.FromMilliseconds(50);
 
     /// <summary>
-    /// The messages of <paramref name="diagnostics"/>, each with its code, as plain text, as much of them as
-    /// <paramref name="budget"/> leaves.
+    /// <paramref name="diagnostics"/>, each with its severity's icon, as VS Code writes them: <c>message source(code)</c>,
+    /// the source and code dimmed, as much of them as <paramref name="budget"/> leaves.
     /// </summary>
     public static IReadOnlyList<HoverBlock> Of(IEnumerable<Diagnostic> diagnostics, HoverBudget budget)
     {
@@ -59,14 +67,43 @@ internal static class HoverBlocks
         foreach (Diagnostic diagnostic in diagnostics)
         {
             // Cut before it is put together: the work is bounded by the budget, not by the server's message.
-            string? text = diagnostic.Code is { } code
-                ? budget.Take(diagnostic.Message, " (", code, ")")
-                : budget.Take(diagnostic.Message);
+            string? text = (diagnostic.Source, diagnostic.Code) switch
+            {
+                (null, null) => budget.Take(diagnostic.Message),
+                ({ } source, null) => budget.Take(diagnostic.Message, " ", source),
+                (var source, { } code) => budget.Take(diagnostic.Message, " ", source ?? "", "(", code, ")"),
+            };
             if (text is null)
                 break;
-            blocks.Add(new HoverParagraph([new HoverSpan(text)]));
+            blocks.Add(new HoverParagraph(Line(diagnostic, text), Severity: diagnostic.Severity));
         }
         return budget.Fit(blocks);
+    }
+
+    /// <summary>
+    /// <paramref name="text"/>, a diagnostic's line as far as it was kept, in its spans: the message, then the source and
+    /// code dimmed, the code as a link to its web page where it is whole and has an <c>http</c> or <c>https</c> one.
+    /// </summary>
+    private static List<HoverSpan> Line(Diagnostic diagnostic, string text)
+    {
+        int message = Math.Min(diagnostic.Message.Length, text.Length);
+        var line = new List<HoverSpan> { new(text[..message]) };
+        if (text.Length == message)
+            return line;
+        int code = message + 1 + (diagnostic.Source?.Length ?? 0) + 1;
+        if (
+            diagnostic.Code is not { } whole
+            || diagnostic.CodeDescription is not { Scheme: "http" or "https" } page
+            || text.Length != code + whole.Length + 1
+        )
+        {
+            line.Add(new HoverSpan(text[message..], SpanStyle.Dimmed));
+            return line;
+        }
+        line.Add(new HoverSpan(text[message..code], SpanStyle.Dimmed));
+        line.Add(new HoverSpan(whole, SpanStyle.Dimmed, page));
+        line.Add(new HoverSpan(text[^1..], SpanStyle.Dimmed));
+        return line;
     }
 
     /// <summary>
