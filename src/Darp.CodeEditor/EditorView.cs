@@ -102,6 +102,7 @@ internal sealed class EditorView : IDisposable
             _squiggles,
             SemanticHighlighter,
             _hover,
+            new DiagnosticNavigation(editor, area, document, _hover),
             _snippets,
             _completion,
             _signatureHelp,
@@ -138,7 +139,8 @@ internal sealed class EditorView : IDisposable
         Run(id, command => _commands.TryRun(command, gesture));
     }
 
-    private static bool ShowsHover(string id) => id is CodeEditorCommands.ShowHover;
+    private static bool ShowsHover(string id) =>
+        id is CodeEditorCommands.ShowHover or CodeEditorCommands.NextMarker or CodeEditorCommands.PreviousMarker;
 
     /// <summary>Runs a command for the app, wherever the keyboard is.</summary>
     /// <returns>Whether it applied.</returns>

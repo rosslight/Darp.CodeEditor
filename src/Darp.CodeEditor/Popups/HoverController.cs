@@ -145,6 +145,15 @@ internal sealed class HoverController : IEditorFeature
         _window?.RemoveHandler(InputElement.PointerPressedEvent, OnPressed);
     }
 
+    /// <summary>Shows <paramref name="diagnostic"/>, which F8 went to at <paramref name="offset"/>, as a hover by key.</summary>
+    public void ShowProblem(int offset, Diagnostic diagnostic)
+    {
+        Hovered hovered = Begin(offset, fromKeyboard: true);
+        hovered.IsDue = true;
+        hovered.Messages = HoverBlocks.Of([diagnostic], hovered.Budget);
+        _popup.Show(hovered.Messages, Look(), hovered.Word);
+    }
+
     /// <summary>Shows the hover at the caret; when one shows already, the keyboard goes into it.</summary>
     private void ShowAtCaret()
     {

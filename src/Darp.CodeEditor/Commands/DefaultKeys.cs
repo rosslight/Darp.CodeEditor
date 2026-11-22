@@ -48,6 +48,8 @@ internal static class DefaultKeys
         KeyGesture hover = mac || linux ? new KeyGesture(Key.F1) : new KeyGesture(Key.Q, KeyModifiers.Control);
         yield return (CodeEditorCommands.ToggleSuggestionDetails, hover);
         yield return (CodeEditorCommands.ShowHover, hover);
+        yield return (CodeEditorCommands.NextMarker, new KeyGesture(Key.F8));
+        yield return (CodeEditorCommands.PreviousMarker, new KeyGesture(Key.F8, KeyModifiers.Shift));
         yield return (CodeEditorCommands.AcceptSelectedSuggestion, new KeyGesture(Key.Enter));
         yield return (CodeEditorCommands.AcceptAlternativeSelectedSuggestion, new KeyGesture(Key.Tab));
         yield return (

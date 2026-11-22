@@ -48,6 +48,14 @@ public static class CodeEditorCommands
     public const string ShowHover = "editor.action.showHover";
 
     /// <summary>
+    /// Moves the caret to the next error, warning or information by position, wrapping around, and shows it in the hover.
+    /// </summary>
+    public const string NextMarker = "editor.action.marker.next";
+
+    /// <summary>Moves the caret to the previous problem, as <see cref="NextMarker"/> moves it to the next.</summary>
+    public const string PreviousMarker = "editor.action.marker.prev";
+
+    /// <summary>
     /// Opens the search bar and puts the keyboard in its query, which starts with the selection within one line or else
     /// the word at the caret.
     /// </summary>
