@@ -14,10 +14,10 @@ internal static class VisibleText
     /// <summary>How many characters of a line the editor works on, AvaloniaEdit's <c>VisualLine.LENGTH_LIMIT</c>.</summary>
     public const int LineLimit = 3_000;
 
-    /// <summary>Where the shown part of <paramref name="line"/> ends: at its end, or where its hidden tail starts.</summary>
+    /// <summary>Where the part of <paramref name="line"/> that the editor works on ends: at its end, or where its hidden tail starts.</summary>
     public static int End(DocumentLine line) => line.Offset + Math.Min(line.Length, LineLimit);
 
-    /// <summary>Whether <paramref name="line"/> is longer than the editor shows.</summary>
+    /// <summary>Whether <paramref name="line"/> is longer than the part the editor works on.</summary>
     public static bool IsCollapsed(DocumentLine line) => line.Length > LineLimit;
 
     /// <summary>Whether <paramref name="offset"/> is in the hidden tail of <paramref name="line"/>.</summary>

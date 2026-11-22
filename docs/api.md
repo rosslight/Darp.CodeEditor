@@ -1162,7 +1162,8 @@ Still open:
 - what AvaloniaEdit 12.0.0 lacks (#127): it lays out a line over 3,000 characters whole and lets its tail be edited,
   and an editor out of the visual tree stays in memory while it was the last focused element or while the document's
   undo history holds an edit it showed. The tests of these behaviors are skipped until a release has the fixes. Where
-  this document speaks of a line's collapsed or hidden tail, or of "...", it describes that release;
+  this document speaks of a line's collapsed or hidden tail, of "...", or of the part of a line that the view shows,
+  it describes that release;
 - the parts of VS Code's editing rules that the editor leaves out: brackets of several characters for matching, Tab
   on a blank line going to the expected level, re-indenting moved lines, and a typed closing bracket lining up with its
   opener without a decrease pattern;

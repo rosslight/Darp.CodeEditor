@@ -141,11 +141,7 @@ internal sealed class Typing : IDisposable
     /// <summary>Enter: the selection's text goes, a rectangle selection ends, and the rules' new line goes in.</summary>
     private bool Enter()
     {
-        // No new line goes into a hidden tail, and AvaloniaEdit 12.0.0 would still delete the selection (design.md #127).
-        int start = _area.Selection is { IsEmpty: false } and not RectangleSelection
-            ? _area.Selection.SurroundingSegment.Offset
-            : _area.Caret.Offset;
-        if (VisibleText.IsInTail(Buffer.GetLineByOffset(start), start))
+        if (!CanEnter())
             return true;
         _changes.Run(
             new EditStep(EditKind.TypingOther, StartsStep: true),
@@ -160,17 +156,25 @@ internal sealed class Typing : IDisposable
                     DocumentLine line = Buffer.GetLineByOffset(caret);
                     NewLine newLine = Rules.Enter(Lines, line.LineNumber, caret - line.Offset);
                     int replaced = _changes.CanChange(caret, newLine.Replaced) ? newLine.Replaced : 0;
-                    // Not by the tail's check: deleting the selection may have joined lines into a long one here.
-                    if (replaced > 0 || _area.ReadOnlySectionProvider.CanInsert(caret))
-                    {
-                        Buffer.Replace(caret, replaced, newLine.Text);
-                        _changes.Select(new TextSelection(caret + newLine.Caret));
-                    }
+                    // Not through the tail's check: deleting the selection may have joined lines into a long one here.
+                    Buffer.Replace(caret, replaced, newLine.Text);
+                    _changes.Select(new TextSelection(caret + newLine.Caret));
                 }
             }
         );
         return true;
     }
+
+    /// <summary>
+    /// Whether all of the selection can go and the new line can follow. AvaloniaEdit deletes what it can of a selection,
+    /// in 12.0.0 also in a hidden tail (design.md #127), so Enter checks first, to change everything or nothing.
+    /// </summary>
+    private bool CanEnter() =>
+        _area.Selection.IsEmpty
+            ? _changes.CanChange(_area.Caret.Offset, 0)
+            : _area.Selection.Segments.All(segment =>
+                _changes.CanChange(segment.StartOffset, 0) && _changes.CanChange(segment.StartOffset, segment.Length)
+            );
 
     /// <summary>Tab and Shift+Tab, each a step of its own; in a rectangle selection, AvaloniaEdit's.</summary>
     private bool Tab(bool outdent)

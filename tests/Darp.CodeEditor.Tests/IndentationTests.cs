@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Input;
 using AvaloniaEdit;
+using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
 using Darp.CodeEditor.Editing;
@@ -262,24 +263,60 @@ public sealed class IndentationTests(UiFixture ui)
             window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(line + expected);
         });
 
-    [Fact]
-    public Task Enter_keeps_a_rectangle_selection_with_its_caret_in_a_long_lines_hidden_tail() =>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task Enter_keeps_a_rectangle_selection_that_reaches_a_hidden_tail(bool caretOnTop) =>
         _ui.Run(() =>
         {
-            string text = new string('a', VisibleText.LineLimit) + "\n" + new string('b', VisibleText.LineLimit + 5);
+            string text = new string('a', VisibleText.LineLimit) + "\n" + new string('b', VisibleText.LineLimit + 10);
             using EditorWindow window = MarkedText.Show("|" + text, CodeLanguage.PlainText);
             TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
-            var caret = new TextViewPosition(2, VisibleText.LineLimit + 3);
+            var top = new TextViewPosition(1, VisibleText.LineLimit + 1);
+            var bottom = new TextViewPosition(2, VisibleText.LineLimit + 3);
+            textArea.Caret.Position = caretOnTop ? top : bottom;
+            textArea.Selection = caretOnTop
+                ? new RectangleSelection(textArea, bottom, top)
+                : new RectangleSelection(textArea, top, bottom);
+
+            window.Press(Key.Enter);
+
+            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(text);
+        });
+
+    [Fact]
+    public Task Enter_keeps_a_rectangle_selection_with_a_hidden_tail_above_its_caret() =>
+        _ui.Run(() =>
+        {
+            string text = new string('a', VisibleText.LineLimit + 10) + "\nbbb";
+            using EditorWindow window = MarkedText.Show("|" + text, CodeLanguage.PlainText);
+            TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+            var caret = new TextViewPosition(2, 4, VisibleText.LineLimit + 4);
             textArea.Caret.Position = caret;
             textArea.Selection = new RectangleSelection(
                 textArea,
-                new TextViewPosition(1, VisibleText.LineLimit + 1),
+                new TextViewPosition(1, VisibleText.LineLimit + 3),
                 caret
             );
 
             window.Press(Key.Enter);
 
             window.Editor.Document.ShouldNotBeNull().Text.ShouldBe(text);
+        });
+
+    [Fact]
+    public Task Enter_keeps_a_selection_that_touches_read_only_text() =>
+        _ui.Run(() =>
+        {
+            using EditorWindow window = MarkedText.Show("ab«cdef»gh", CodeLanguage.PlainText);
+            TextArea textArea = EditorWindow.PartOf(window.Editor).TextArea;
+            var readOnly = new TextSegmentReadOnlySectionProvider<TextSegment>(textArea.Document);
+            readOnly.Segments.Add(new TextSegment { StartOffset = 1, Length = 3 });
+            textArea.ReadOnlySectionProvider = readOnly;
+
+            window.Press(Key.Enter);
+
+            window.Editor.Document.ShouldNotBeNull().Text.ShouldBe("abcdefgh");
         });
 
     [Fact]
