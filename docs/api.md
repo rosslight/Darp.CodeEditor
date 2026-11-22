@@ -192,8 +192,9 @@ runs.
   with the caret and text unchanged, the key does its normal action: Tab goes to a snippet's next stop or types, and
   Enter and Shift+Enter break the line. `RunCommand` has no key, so it has no such action.
 
-**Context menu:** a plain `ContextMenu` with Cut, Copy, Paste and Select All, which an app changes through its `Items`
-or replaces. A right click moves the caret, unless it is inside the selection.
+**Context menu:** a `MenuFlyout` in the editor's `ContextFlyout`, with Cut, Copy, Paste and Select All, which an app
+changes through its `Items` or replaces. It is a flyout because every theme styles those, and FluentAvalonia has no
+theme for `ContextMenu`. A right click moves the caret, unless it is inside the selection.
 
 **Line breaks:** a document has one line break for new text: `\r\n` when more than half of its lines end in `\r\n` or
 `\r`, `\n` when the others do, and the system's for a text without any. It is read when the document is created and

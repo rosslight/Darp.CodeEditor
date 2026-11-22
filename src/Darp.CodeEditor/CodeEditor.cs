@@ -93,10 +93,10 @@ namespace Darp.CodeEditor;
 /// and typing are otherwise not, so apps should not bind plain Enter, Tab or Escape on an ancestor of the editor.
 /// </para>
 /// <para>
-/// A right click moves the caret, unless it is inside the selection, and opens the editor's <c>ContextMenu</c>: Cut,
-/// Copy, Paste and Select All, which an app changes through its <c>Items</c>. For an app's own menus and buttons,
-/// <see cref="RunCommand"/> runs any of <see cref="CodeEditorCommands"/>, and <see cref="Cut"/>, <see cref="Copy"/>,
-/// <see cref="Paste"/> and <see cref="SelectAll"/> do the same as their keys.
+/// A right click moves the caret, unless it is inside the selection, and opens the editor's <c>ContextFlyout</c>, a
+/// <c>MenuFlyout</c> with Cut, Copy, Paste and Select All, which an app changes through its <c>Items</c>. For an app's
+/// own menus and buttons, <see cref="RunCommand"/> runs any of <see cref="CodeEditorCommands"/>, and <see cref="Cut"/>,
+/// <see cref="Copy"/>, <see cref="Paste"/> and <see cref="SelectAll"/> do the same as their keys.
 /// </para>
 /// <para>Members that take offsets or ranges clamp them to the text.</para>
 /// </remarks>
@@ -243,7 +243,7 @@ public class CodeEditor : TemplatedControl
         // AvaloniaEdit checks Dispatcher.UIThread: on another dispatcher, the editor would fail later and elsewhere.
         if (Application.Current?.Dispatcher != Dispatcher)
             throw new InvalidOperationException("The editor works only on the app's main UI thread.");
-        ContextMenu = CreateContextMenu();
+        ContextFlyout = CreateContextMenu();
         KeyBindings.AddRange(DefaultKeys.For(this));
         _searchCommands =
         [
@@ -1056,13 +1056,16 @@ public class CodeEditor : TemplatedControl
         && offset < selected.EndOffset
         && area.Selection.Contains(offset);
 
-    /// <summary>The editor's context menu, in the app's look. Apps change it through its <c>Items</c>.</summary>
-    private ContextMenu CreateContextMenu()
+    /// <summary>
+    /// The editor's context menu, in the app's look. Apps change it through its <c>Items</c>. A flyout, because every
+    /// theme styles those: FluentAvalonia has no theme for <c>ContextMenu</c>.
+    /// </summary>
+    private MenuFlyout CreateContextMenu()
     {
         PlatformHotkeyConfiguration? keys = Application.Current?.PlatformSettings?.HotkeyConfiguration;
         MenuItem cut = Item("Cut", keys?.Cut, Cut);
         MenuItem paste = Item("Paste", keys?.Paste, Paste);
-        var menu = new ContextMenu
+        var menu = new MenuFlyout
         {
             Items =
             {
