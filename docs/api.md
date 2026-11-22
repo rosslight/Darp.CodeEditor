@@ -421,8 +421,8 @@ How the client talks to a server, where the protocol leaves a choice:
   hover's text, 0.75 ms for 10,000 on one character in the worst order, where each one found beats those before
   (BenchmarkDotNet, i7-13700).
 - **The shown part of a line.** The editor's views work only on the part of each line that the view shows, its first
-  3,000 characters: AvaloniaEdit collapses the rest of a longer line into "...", which shows none of it (design.md
-  #106). Squiggles are drawn only in the shown part, the hover finds no text over "..." and its word stops where the
+  3,000 characters: from its release after 12.0.0, AvaloniaEdit collapses the rest of a longer line into "...", which
+  shows none of it (design.md #106, #127). Squiggles are drawn only in the shown part, the hover finds no text over "..." and its word stops where the
   tail starts, semantic tokens that start in a tail are dropped as they are read, and those that an edit moves past
   the shown part, as when lines join, go. So their work per line is bounded by 3,000 characters, whatever the line's
   length or what a server puts in its tail; an edit that removes a hidden tail reads none of it either.
@@ -910,10 +910,6 @@ with Skia:
   its line once, and a quote that ends the string colors the line anew;
 - tokenizing 5,000 lines in the background takes about 62 ms for JSON and YAML (BenchmarkDotNet); one screen of 50
   lines takes the UI thread about 0.6 ms of the 4 ms it may spend per frame;
-- an editor out of the visual tree is collected while its document lives on, also one that had the focus and showed
-  edits. That needs AvaloniaEdit 12.0.999-ci3-alpha, a preview with fixes not yet released (see CONTRIBUTING.md):
-  its undo steps no longer keep the text areas that showed an edit, and its commands hold the last focused element
-  weakly;
 - an editor created on another thread than the app's main UI thread fails at once with `InvalidOperationException`;
 - the editing helpers follow VS Code's rules, read from the language's `language-configuration.json`, as far as its
   `AutoIndent` goes: Enter applies the rules for Enter, indents after an opening bracket and by the indentation rules,
@@ -1163,6 +1159,9 @@ Still open:
 - lines over 3,000 characters: the editor shows and edits lines of up to 3,000 characters in full, AvaloniaEdit's
   default, and a longer line collapses its tail (#106). The limit rises once Avalonia's text wrapping and font
   fallback get faster on long lines;
+- what AvaloniaEdit 12.0.0 lacks (#127): it lays out a line over 3,000 characters whole and lets its tail be edited,
+  and an editor out of the visual tree stays in memory while it was the last focused element or while the document's
+  undo history holds an edit it showed. The tests of these behaviors are skipped until a release has the fixes;
 - the parts of VS Code's editing rules that the editor leaves out: brackets of several characters for matching, Tab
   on a blank line going to the expected level, re-indenting moved lines, and a typed closing bracket lining up with its
   opener without a decrease pattern;

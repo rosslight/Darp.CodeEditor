@@ -57,8 +57,8 @@ namespace Darp.CodeEditor;
 /// </para>
 /// <para>
 /// Built in, with no settings: the current line is highlighted, whitespace shows inside the selection, and the view
-/// scrolls past the last line. Lines of up to 3,000 characters show and edit in full; a longer line shows its first
-/// 3,000 characters and collapses the rest into "...", which can't be edited. Editing follows the language's rules, as
+/// scrolls past the last line. Squiggles, semantic colors and hovers cover a line's first 3,000 characters.
+/// Editing follows the language's rules, as
 /// VS Code applies them and as far as <see cref="CodeLanguage.AutoIndent"/> goes: the bracket next to the caret and its
 /// match are boxed, the occurrences of the symbol at the caret are highlighted, pairs close as you type unless
 /// <see cref="AutoClosing"/> is off, typing their closing character steps over it and Backspace deletes an empty pair,
@@ -495,8 +495,6 @@ public class CodeEditor : TemplatedControl
         {
             ShowNothing(part);
             TextEditorOptions options = part.Options;
-            // AvaloniaEdit's default, until Avalonia's wrapping and font fallback get fast on longer wrapped lines.
-            options.LongLineLimit = VisibleText.LineLimit;
             options.HighlightCurrentLine = true;
             options.AllowScrollBelowDocument = true;
             // Links would be drawn in AvaloniaEdit's blue, not in the theme's colors.

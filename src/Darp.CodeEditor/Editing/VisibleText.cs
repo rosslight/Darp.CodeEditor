@@ -4,9 +4,10 @@ using AvaloniaEdit.Editing;
 namespace Darp.CodeEditor.Editing;
 
 /// <summary>
-/// The part of each line that the editor shows and edits: its first <see cref="LineLimit"/> characters. AvaloniaEdit
-/// collapses the rest of a longer line into "...", which shows none of it. The editor's views work on this part only,
-/// so that their work per line is bounded whatever the line's length or what lies in its hidden tail.
+/// The part of each line that the editor shows and edits: its first <see cref="LineLimit"/> characters. From its
+/// release after 12.0.0, AvaloniaEdit collapses the rest of a longer line into "...", which shows none of it (design.md
+/// #127). The editor's views work on this part only, so that their work per line is bounded whatever the line's length
+/// or what lies in its hidden tail.
 /// </summary>
 internal static class VisibleText
 {
