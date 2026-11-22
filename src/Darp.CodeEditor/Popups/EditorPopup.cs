@@ -25,6 +25,10 @@ namespace Darp.CodeEditor.Popups;
 /// line. <see cref="Resized"/> reports the size dragged to and the edges dragged, and its owner shows it again at that
 /// size, on the same side of its line until the user lets go.
 /// </para>
+/// <para>
+/// Its root names the editor as its owner (<see cref="EditorPopups"/>), so that the keyboard in it counts as in the
+/// editor.
+/// </para>
 /// </remarks>
 internal sealed class EditorPopup
 {
@@ -54,6 +58,7 @@ internal sealed class EditorPopup
         Frame = frame;
         frame.Resized += (size, edges) => Resized?.Invoke(size, edges);
         _root = new ThemeVariantScope { Child = frame };
+        EditorPopups.SetOwner(_root, editor);
         _side = side;
     }
 
@@ -68,6 +73,12 @@ internal sealed class EditorPopup
     /// the word; none by default.
     /// </summary>
     public double Inset { get; init; }
+
+    /// <summary>
+    /// Where its left edge goes in place of its place's, within the window, as a hover the user resizes keeps it; null
+    /// for its place's.
+    /// </summary>
+    public double? Left { get; set; }
 
     /// <summary>Whether its edges away from what it is next to resize it, from its next placing on; false by default.</summary>
     public bool IsResizable { get; set; }
@@ -186,7 +197,7 @@ internal sealed class EditorPopup
             // The line as its view shows it, in the layer, as a scaled editor shows it too; the place itself may be
             // scrolled out of it sideways.
             Rect line = new Rect(0, anchor.Top, relativeTo.Bounds.Width, anchor.Height).TransformToAABB(toLayer);
-            double left = anchor.TopLeft.Transform(toLayer).X - Inset;
+            double left = Left ?? anchor.TopLeft.Transform(toLayer).X - Inset;
             // Placing changes the layout, and the next layout pass finds nothing moved.
             if (Equals(_placedBy, (space, line, left)))
                 return;
@@ -248,10 +259,11 @@ internal sealed class EditorPopup
         Frame.ResizableEdges = IsResizable ? EdgesAway(placed) : Edges.None;
     }
 
+    /// <summary>Closes the popup, as its line left the view: its owner first, which may give the keyboard back from it.</summary>
     private void LeaveView()
     {
-        Hide();
         LeftView?.Invoke(this, EventArgs.Empty);
+        Hide();
     }
 
     /// <summary>The popup's height at <paramref name="width"/>.</summary>

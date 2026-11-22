@@ -23,6 +23,7 @@ internal sealed class EditorView : IDisposable
     private readonly Func<SearchBar?> _searchBar;
     private readonly CommandTable _commands;
     private readonly CaretMoves _caretMoves;
+    private readonly EditorPopups _popups;
 
     /// <summary>Everything the view made, in the order it made them: disposed the other way round.</summary>
     private readonly IDisposable[] _features;
@@ -59,6 +60,7 @@ internal sealed class EditorView : IDisposable
         _area = area;
         _searchBar = searchBar;
         _commands = new CommandTable(area);
+        _popups = new EditorPopups(editor, OnFocusLeft);
         Highlighter = new BackgroundTextMateHighlighter(area.TextView, area.Document, editor.Dispatcher, null);
         _caretMoves = new CaretMoves(editor, area);
         _changes = new TextChanges(area);
@@ -86,6 +88,7 @@ internal sealed class EditorView : IDisposable
         _signatureHelp = new SignatureHelpController(editor, area, document, Highlighter, _caretMoves);
         _features =
         [
+            _popups,
             Highlighter,
             _caretMoves,
             _changes,
@@ -115,6 +118,9 @@ internal sealed class EditorView : IDisposable
 
     /// <summary>Colors the server's semantic tokens.</summary>
     public SemanticHighlighter SemanticHighlighter { get; }
+
+    /// <summary>Whether the keyboard is in the editor or in one of its popups.</summary>
+    public bool HasFocus => _popups.HasFocus;
 
     /// <summary>Whether a default key can run the command now; otherwise the key goes on.</summary>
     public bool CanRun(string id) => _commands.CanRun(id);
@@ -177,15 +183,6 @@ internal sealed class EditorView : IDisposable
     /// <summary>Whether the view asks for the occurrences, for tests.</summary>
     internal bool IsAskingForOccurrences => _occurrences.IsAsking;
 
-    /// <summary>Closes the popups, and clears the occurrences, once the keyboard has left the editor.</summary>
-    public void OnFocusLeft()
-    {
-        _occurrences.Clear();
-        _hover.Close();
-        _completion.Close();
-        _signatureHelp.Close();
-    }
-
     /// <summary>Nothing completes, asks for signatures or tabs through a snippet where the user cannot type.</summary>
     public void OnReadOnly()
     {
@@ -212,6 +209,15 @@ internal sealed class EditorView : IDisposable
     {
         for (int i = _features.Length - 1; i >= 0; i--)
             _features[i].Dispose();
+    }
+
+    /// <summary>Closes the popups, and clears the occurrences, once the keyboard has left the editor and its popups.</summary>
+    private void OnFocusLeft()
+    {
+        _occurrences.Clear();
+        _hover.Close();
+        _completion.Close();
+        _signatureHelp.Close();
     }
 
     /// <summary>A command that moves the caret or the selection ends completion: its list was for the word at the caret.</summary>

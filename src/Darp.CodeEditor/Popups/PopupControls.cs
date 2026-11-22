@@ -1,5 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Input;
+using Avalonia.Media;
 
 namespace Darp.CodeEditor.Popups;
 
@@ -9,6 +11,18 @@ namespace Darp.CodeEditor.Popups;
 
 /// <summary>Text in a popup.</summary>
 internal sealed class PopupText : TextBlock;
+
+/// <summary>Text in a popup that the user can select and copy, as in a hover: clicking it gives it the keyboard.</summary>
+internal sealed class PopupSelectableText : SelectableTextBlock
+{
+    private static readonly Cursor s_beam = new(StandardCursorType.Ibeam);
+
+    public PopupSelectableText(IBrush selection)
+    {
+        Cursor = s_beam;
+        SelectionBrush = selection;
+    }
+}
 
 /// <summary>Blocks of a popup, one below the other.</summary>
 internal sealed class PopupStack : StackPanel;

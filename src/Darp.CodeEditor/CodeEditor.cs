@@ -428,8 +428,8 @@ public class CodeEditor : TemplatedControl
 
     /// <summary>
     /// Runs one of <see cref="CodeEditorCommands"/>, as from an app's button, menu or <c>KeyBinding</c>, wherever the
-    /// keyboard is. Afterwards the keyboard goes to the text, unless it is in the editor already, as in the search bar's
-    /// query after <see cref="CodeEditorCommands.Find"/>.
+    /// keyboard is. Afterwards the keyboard goes to the text, unless it is in the editor or its popups already, as in the
+    /// search bar's query after <see cref="CodeEditorCommands.Find"/>.
     /// </summary>
     /// <param name="id">The command.</param>
     /// <returns>
@@ -439,7 +439,7 @@ public class CodeEditor : TemplatedControl
     {
         if (_view is not { } view || !view.RunFromApp(id))
             return false;
-        if (!IsKeyboardFocusWithin)
+        if (!view.HasFocus)
             _part?.TextArea.Focus();
         return true;
     }
@@ -576,18 +576,6 @@ public class CodeEditor : TemplatedControl
         // here: AvaloniaEdit's commands act on the element that got the focus last.
         part.TextArea.Focus(e.NavigationMethod, e.KeyModifiers);
         e.Handled = true;
-    }
-
-    /// <inheritdoc />
-    protected override void OnLostFocus(FocusChangedEventArgs e)
-    {
-        base.OnLostFocus(e);
-        // Raised as the focus leaves an element inside the editor; it may stay inside, as when it goes to the search bar.
-        Dispatcher.Post(() =>
-        {
-            if (!IsKeyboardFocusWithin)
-                _view?.OnFocusLeft();
-        });
     }
 
     /// <inheritdoc />
