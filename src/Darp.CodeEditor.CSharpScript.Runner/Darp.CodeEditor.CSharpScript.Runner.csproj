@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <Description>Runs compiled C# scripts in sessions: separate processes with a typed bridge between the app and its scripts.</Description>
+    <!-- Not released until the script API is implemented. -->
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Darp.CodeEditor.CSharpScript\Darp.CodeEditor.CSharpScript.csproj" />
