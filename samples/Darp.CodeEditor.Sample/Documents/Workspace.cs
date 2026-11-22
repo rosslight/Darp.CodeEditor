@@ -76,6 +76,27 @@ public sealed partial class Workspace : ObservableObject, IDisposable
         Current = Documents.FirstOrDefault();
     }
 
+    /// <summary>
+    /// Opens the YAML example's JSON schema from its file next to the app, right after the example, and keeps the
+    /// shown document. The YAML server reads schemas from files, so edits reach it once they are saved.
+    /// </summary>
+    /// <exception cref="IOException">The file can't be read.</exception>
+    public async Task OpenSchemaAsync(IStorageProvider storage)
+    {
+        if (await storage.TryGetFileFromPathAsync(ServerSettings.PipelineSchema) is not { } file)
+            return;
+        string text = await ReadAsync(file);
+        OpenDocument schema = Create(file.Name, FileType.Json, text, file, ServerSettings.PipelineSchema);
+        Documents.Insert(Documents.ToList().FindIndex(document => document.Name == "Pipeline") + 1, schema);
+    }
+
+    /// <summary>Has the YAML server read its schema again, if <paramref name="document"/> is that schema.</summary>
+    public void NotifySaved(OpenDocument document)
+    {
+        if (document.Document.FilePath is { } path && s_paths.Equals(path, ServerSettings.PipelineSchema))
+            _servers.GetValueOrDefault(FileType.Yaml)?.NotifySettingsChanged();
+    }
+
     /// <summary>Creates an empty document in memory.</summary>
     public void New(FileType type)
     {
@@ -91,18 +112,7 @@ public sealed partial class Workspace : ObservableObject, IDisposable
     /// </exception>
     public async Task OpenAsync(IStorageFile file)
     {
-        string text;
-        try
-        {
-            await using Stream stream = await file.OpenReadAsync();
-            using var reader = new StreamReader(stream);
-            text = await reader.ReadToEndAsync();
-        }
-        catch
-        {
-            file.Dispose();
-            throw;
-        }
+        string text = await ReadAsync(file);
         // After the last await, so that no other open can take the path before the document has it.
         string? path = file.TryGetLocalPath();
         OpenDocument? open = path is not null
@@ -150,11 +160,19 @@ public sealed partial class Workspace : ObservableObject, IDisposable
             server.Dispose();
     }
 
-    /// <summary>
-    /// Adds a document and shows it. A file type whose server is installed gets its documents from that server, which
-    /// serves them from then on; the others get documents without a server.
-    /// </summary>
+    /// <summary>Adds a document and shows it.</summary>
     private void Add(string name, FileType type, string text, IStorageFile? file, string? filePath)
+    {
+        OpenDocument open = Create(name, type, text, file, filePath);
+        Documents.Add(open);
+        Current = open;
+    }
+
+    /// <summary>
+    /// Creates a document. A file type whose server is installed gets its documents from that server, which serves
+    /// them from then on; the others get documents without a server.
+    /// </summary>
+    private OpenDocument Create(string name, FileType type, string text, IStorageFile? file, string? filePath)
     {
         LanguageServer? server = _servers.GetValueOrDefault(type);
         CodeDocument document;
@@ -165,9 +183,23 @@ public sealed partial class Workspace : ObservableObject, IDisposable
             document = CodeDocument.Create(type.Language, text);
             document.FilePath = filePath;
         }
-        var open = new OpenDocument(name, type, document, server, file);
-        Documents.Add(open);
-        Current = open;
+        return new OpenDocument(name, type, document, server, file);
+    }
+
+    /// <summary>Reads the text of <paramref name="file"/>, and disposes the file if that fails.</summary>
+    private static async Task<string> ReadAsync(IStorageFile file)
+    {
+        try
+        {
+            await using Stream stream = await file.OpenReadAsync();
+            using var reader = new StreamReader(stream);
+            return await reader.ReadToEndAsync();
+        }
+        catch
+        {
+            file.Dispose();
+            throw;
+        }
     }
 
     /// <summary>

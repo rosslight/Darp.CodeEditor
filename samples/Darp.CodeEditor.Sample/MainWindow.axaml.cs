@@ -288,6 +288,26 @@ public sealed partial class MainWindow : FAAppWindow
         return item;
     }
 
+    /// <summary>Opens the YAML example's schema, once the window can reach files.</summary>
+    protected override async void OnOpened(EventArgs e)
+    {
+        base.OnOpened(e);
+        if (Workspace is not { } workspace)
+            return;
+        await OneAtATimeAsync(async () =>
+        {
+            try
+            {
+                await workspace.OpenSchemaAsync(StorageProvider);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                string name = Path.GetFileName(ServerSettings.PipelineSchema);
+                await ShowErrorAsync(Strings.Default.FormatOpenFailed(name), exception.Message);
+            }
+        });
+    }
+
     private Task OpenAsync() =>
         OneAtATimeAsync(async () =>
         {
@@ -348,6 +368,7 @@ public sealed partial class MainWindow : FAAppWindow
         try
         {
             await document.SaveAsync(file);
+            Workspace?.NotifySaved(document);
             return true;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
