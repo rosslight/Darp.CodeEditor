@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A script API for one platform: its public member calls a Windows Runtime API, in the runner. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Darp.CodeEditor.CSharpScript.Runner" Version="$(DarpCodeEditorVersion)" />
+    <PackageReference Include="StreamJsonRpc" Version="$(DarpStreamJsonRpcVersion)" />
+  </ItemGroup>
+</Project>

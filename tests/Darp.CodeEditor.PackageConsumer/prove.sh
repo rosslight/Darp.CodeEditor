@@ -15,8 +15,13 @@ cp -R "$repo/tests/Darp.CodeEditor.PackageConsumer/." "$work/"
 cp "$repo/global.json" "$work/"
 dotnet pack "$repo/src/Darp.CodeEditor" -c Release -o "$work/feed" "-p:Version=$version"
 dotnet pack "$repo/src/Darp.CodeEditor.CSharpScript" -c Release -o "$work/feed" "-p:Version=$version" -p:IsPackable=true
+# Packing the runner builds its helper, which is no reference of the package and so needs a restore of its own.
+dotnet restore "$repo/src/Darp.CodeEditor.CSharpScript.Runner.Process"
+dotnet pack "$repo/src/Darp.CodeEditor.CSharpScript.Runner" -c Release -o "$work/feed" "-p:Version=$version" -p:IsPackable=true
 cd "$work"
 export DarpCodeEditorVersion=$version
+DarpStreamJsonRpcVersion=$(sed -n 's/.*Include="StreamJsonRpc" Version="\([^"]*\)".*/\1/p' "$repo/Directory.Packages.props")
+export DarpStreamJsonRpcVersion
 
 # The publish must fail, and say this.
 expect_failure() {
@@ -55,4 +60,11 @@ fi
 echo "=== What must fail"
 expect_failure Incompatible/App NU1107
 expect_failure SharedFramework/App Microsoft.AspNetCore.App
+expect_failure NewerBridge/App "NU1605.*Nerdbank.Streams"
+
+if [[ $rid == win-* ]]; then
+    echo "=== A script calls a Windows Runtime API"
+    dotnet publish WindowsRuntime/App -c Release -r "$rid" --self-contained false -o out/windows
+    DOTNET_ROOT=/nonexistent dotnet out/windows/App.dll
+fi
 echo "All passed."

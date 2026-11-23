@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Needs a newer version of a package of the bridge than the runner loads. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Nerdbank.Streams" Version="2.14.416" />
+  </ItemGroup>
+</Project>

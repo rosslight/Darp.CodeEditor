@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Windows only: prove.sh publishes it there, and a script in it calls a Windows Runtime API. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PublishReadyToRun Condition="'$(_IsPublishing)' == 'true'">true</PublishReadyToRun>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Darp.CodeEditor.CSharpScript.Runner" Version="$(DarpCodeEditorVersion)" />
+    <ProjectReference Include="..\Api\Api.csproj" CSharpScriptReference="true" />
+  </ItemGroup>
+</Project>
