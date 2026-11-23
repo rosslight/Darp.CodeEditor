@@ -54,8 +54,8 @@ internal sealed class ServerDocument
         }
         _changes.Add(
             new TextDocumentContentChangeEvent(
-                new LspRange(Positions.ToLsp(buffer.GetLocation(start)), Positions.ToLsp(buffer.GetLocation(end))),
-                text
+                text,
+                new LspRange(Positions.ToLsp(buffer.GetLocation(start)), Positions.ToLsp(buffer.GetLocation(end)))
             )
         );
     }

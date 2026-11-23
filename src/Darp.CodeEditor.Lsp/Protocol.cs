@@ -57,7 +57,7 @@ internal sealed record VersionedTextDocumentIdentifier(string Uri, int Version);
 internal sealed record DidOpenTextDocumentParams(TextDocumentItem TextDocument);
 
 /// <summary>A change of a document's text: <see cref="Text"/> replaces <see cref="Range"/>, or the whole text without one.</summary>
-internal sealed record TextDocumentContentChangeEvent(LspRange? Range, string Text);
+internal sealed record TextDocumentContentChangeEvent(string Text, LspRange? Range = null);
 
 internal sealed record DidChangeTextDocumentParams(
     VersionedTextDocumentIdentifier TextDocument,
@@ -139,6 +139,69 @@ internal sealed record ConfigurationItem(string? ScopeUri = null, string? Sectio
 /// <param name="Settings">All settings; some servers fail on null.</param>
 internal sealed record DidChangeConfigurationParams(JsonNode Settings);
 
+/// <summary>Text with its format, <c>markdown</c> or <c>plaintext</c>.</summary>
+internal sealed record LspMarkupContent(string Kind, string Value);
+
+/// <summary>The answer to <c>textDocument/hover</c>.</summary>
+internal sealed record LspHover(LspMarkupContent Contents, LspRange? Range = null);
+
+/// <summary>An edit of a document's text.</summary>
+internal sealed record LspTextEdit(LspRange Range, string NewText);
+
+/// <summary>A completion item, as a server answers it and as <c>completionItem/resolve</c> gets it back.</summary>
+/// <param name="Label">What the list shows.</param>
+/// <param name="Kind">A <c>CompletionItemKind</c> number.</param>
+/// <param name="TextEdit">What committing it changes.</param>
+/// <param name="Data">The server's own data, which comes back to resolve the item.</param>
+/// <param name="SortText">What orders the item before anything is typed; null for its label.</param>
+/// <param name="FilterText">What typing is matched against; null for its label.</param>
+/// <param name="Preselect">Whether the item is selected first.</param>
+/// <param name="Detail">Its signature, once resolved.</param>
+/// <param name="Documentation">Its documentation, once resolved.</param>
+internal sealed record LspCompletionItem(
+    string Label,
+    int Kind,
+    LspTextEdit TextEdit,
+    JsonNode? Data = null,
+    string? SortText = null,
+    string? FilterText = null,
+    bool? Preselect = null,
+    string? Detail = null,
+    LspMarkupContent? Documentation = null
+);
+
+/// <summary>The answer to <c>textDocument/completion</c>.</summary>
+internal sealed record LspCompletionList(bool IsIncomplete, IReadOnlyList<LspCompletionItem> Items);
+
+/// <summary>A parameter of a signature.</summary>
+/// <param name="Label">Where it starts and ends in the signature's label.</param>
+internal sealed record LspParameterInformation(IReadOnlyList<int> Label);
+
+/// <summary>A signature of a call.</summary>
+/// <param name="Label">The signature.</param>
+/// <param name="Parameters">Its parameters.</param>
+/// <param name="ActiveParameter">The parameter at the caret; -1 for none.</param>
+internal sealed record LspSignatureInformation(
+    string Label,
+    IReadOnlyList<LspParameterInformation> Parameters,
+    int ActiveParameter
+);
+
+/// <summary>The answer to <c>textDocument/signatureHelp</c>.</summary>
+/// <param name="Signatures">The signatures of the call.</param>
+/// <param name="ActiveSignature">The one that shows.</param>
+/// <param name="Data">
+/// The server's own data, outside the protocol: the client sends the answer back when it asks again.
+/// </param>
+internal sealed record LspSignatureHelp(
+    IReadOnlyList<LspSignatureInformation> Signatures,
+    int ActiveSignature,
+    JsonNode? Data = null
+);
+
+/// <summary>The answer to <c>textDocument/semanticTokens/range</c>, in the protocol's relative format.</summary>
+internal sealed record LspSemanticTokens(IReadOnlyList<int> Data);
+
 /// <summary>Reads a diagnostic's code, a number or a string, as text.</summary>
 internal sealed class DiagnosticCodeConverter : JsonConverter<string>
 {
@@ -193,4 +256,9 @@ internal static class SignatureHelpTriggerKind
 [JsonSerializable(typeof(SignatureHelpParams))]
 [JsonSerializable(typeof(ConfigurationParams))]
 [JsonSerializable(typeof(DidChangeConfigurationParams))]
+[JsonSerializable(typeof(LspHover))]
+[JsonSerializable(typeof(LspCompletionList))]
+[JsonSerializable(typeof(LspCompletionItem))]
+[JsonSerializable(typeof(LspSignatureHelp))]
+[JsonSerializable(typeof(LspSemanticTokens))]
 internal sealed partial class LspJsonContext : JsonSerializerContext;

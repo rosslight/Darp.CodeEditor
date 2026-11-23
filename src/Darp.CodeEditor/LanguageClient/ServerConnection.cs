@@ -1138,7 +1138,7 @@ internal sealed class ServerConnection
                 writer,
                 new DidChangeTextDocumentParams(
                     new VersionedTextDocumentIdentifier(Uri, snapshot.Version),
-                    changes ?? [new TextDocumentContentChangeEvent(null, snapshot.GetText())]
+                    changes ?? [new TextDocumentContentChangeEvent(snapshot.GetText())]
                 ),
                 LspJsonContext.Default.DidChangeTextDocumentParams
             );
