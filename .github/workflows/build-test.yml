@@ -76,10 +76,11 @@ jobs:
         working-directory: ./artifacts/aot-tests
         run: ./Darp.CodeEditor.Tests
 
-      # In a folder of its own: the app's script lists are next to it. Tests that need the server skip until publishing
-      # deploys it.
+      # In a folder of its own: the app's helpers and script lists are next to it, and its fixture runs on them.
       - name: Publish the C# script tests with Native AOT
-        run: dotnet publish tests/Darp.CodeEditor.CSharpScript.Tests -c Release -r linux-x64 -o ./artifacts/aot-script-tests /warnaserror
+        run: |
+          dotnet publish tests/Darp.CodeEditor.CSharpScript.Tests.BeforeSetup -c Release -r linux-x64 -o ./artifacts/aot-script-tests /warnaserror
+          dotnet publish tests/Darp.CodeEditor.CSharpScript.Tests -c Release -r linux-x64 -o ./artifacts/aot-script-tests /warnaserror
       - name: Test the C# script tests with Native AOT
         working-directory: ./artifacts/aot-script-tests
         run: ./Darp.CodeEditor.CSharpScript.Tests
@@ -100,6 +101,36 @@ jobs:
         run: dotnet build -c Debug /warnaserror
       - name: Build warning-free Release
         run: dotnet build -c Release /warnaserror
+
+  package-consumer:
+    strategy:
+      # Each platform runs to its end, so that a failure on one shows every other platform's failures too.
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Linux x64, os: ubuntu-24.04, rid: linux-x64 }
+          - { name: Linux arm64, os: ubuntu-24.04-arm, rid: linux-arm64 }
+          - { name: Windows x64, os: windows-latest, rid: win-x64 }
+          - { name: Windows arm64, os: windows-11-arm, rid: win-arm64 }
+          - { name: macOS arm64, os: macos-latest, rid: osx-arm64 }
+
+    name: Package consumer on ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    # macOS is best effort: it reports without blocking.
+    continue-on-error: ${{ matrix.os == 'macos-latest' }}
+    steps:
+      - name: git configure long path
+        if: runner.os == 'Windows'
+        run: git config --global core.longpaths true
+      - uses: actions/checkout@v6
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+      # In a temporary folder, outside the repository's MSBuild imports.
+      - name: Pack, publish and run the consumer as JIT and NativeAOT
+        shell: bash
+        run: |
+          work=$(mktemp -d "${RUNNER_TEMP//\\//}/consumer.XXXXXX")
+          tests/Darp.CodeEditor.PackageConsumer/prove.sh ${{ matrix.rid }} "$work"
 
   test-other-platforms:
     strategy:

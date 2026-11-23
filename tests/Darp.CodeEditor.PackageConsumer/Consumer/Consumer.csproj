@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- An app that uses the packages as a customer does. prove.sh publishes it as JIT and NativeAOT. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- Publishing compiles the C# helpers with ReadyToRun. Only then: it would otherwise give every build a RID. -->
+    <PublishReadyToRun Condition="'$(_IsPublishing)' == 'true'">true</PublishReadyToRun>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Darp.CodeEditor.CSharpScript" Version="$(DarpCodeEditorVersion)" />
+    <PackageReference Include="Avalonia.Headless" Version="12.1.5" />
+    <!-- A package whose native library the payload's resolver must find. -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" CSharpScriptReference="true" />
+    <ProjectReference Include="..\ScriptApi\ScriptApi.csproj" CSharpScriptReference="true" />
+    <!-- Two references that need different, compatible versions of one dependency. -->
+    <ProjectReference
+      Include="..\CompatibleA\CompatibleA.csproj"
+      CSharpScriptReference="true"
+      Condition="'$(WithoutCompatibleA)' != 'true'"
+    />
+    <ProjectReference Include="..\CompatibleB\CompatibleB.csproj" CSharpScriptReference="true" />
+    <ProjectReference Include="..\MultiTargeted\MultiTargeted.csproj" CSharpScriptReference="true" />
+  </ItemGroup>
+</Project>

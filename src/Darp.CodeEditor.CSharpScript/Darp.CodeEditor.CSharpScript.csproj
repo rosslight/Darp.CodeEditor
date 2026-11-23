@@ -3,18 +3,55 @@
     <Description>C# scripts in Darp.CodeEditor: a host-defined script environment, the C# language server, and compiling scripts to run them.</Description>
     <!-- Not released until the script API is implemented. -->
     <IsPackable>false</IsPackable>
+    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);IncludeProtocolAssembly</TargetsForTfmSpecificBuildOutput>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);IncludeServerHelper</TargetsForTfmSpecificContentInPackage>
+    <!-- The server is portable IL under tools/, which an app compiles for its platform when it publishes. -->
+    <NoWarn>$(NoWarn);NU5100</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Darp.CodeEditor\Darp.CodeEditor.csproj" />
-    <ProjectReference Include="..\Darp.CodeEditor.CSharpScript.Protocol\Darp.CodeEditor.CSharpScript.Protocol.csproj" />
+    <ProjectReference Include="..\Darp.CodeEditor.CSharpScript.Protocol\Darp.CodeEditor.CSharpScript.Protocol.csproj">
+      <!-- Internal: its DLL ships in this package's lib folder, and the package depends on no package of its own. -->
+      <PrivateAssets Condition="'$(_IsPacking)' == 'true'">all</PrivateAssets>
+    </ProjectReference>
+    <!-- Built when packing, to ship in tools/. -->
+    <ProjectReference
+      Include="..\Darp.CodeEditor.CSharpScript.Server\Darp.CodeEditor.CSharpScript.Server.csproj"
+      Condition="'$(_IsPacking)' == 'true'"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      PrivateAssets="all"
+    />
   </ItemGroup>
   <ItemGroup>
     <!-- The C# language, from VS Code. -->
     <AvaloniaResource Include="Languages\*.json" />
     <None Include="THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="/" />
+    <None Include="buildTransitive\*.targets" Pack="true" PackagePath="buildTransitive/" />
   </ItemGroup>
   <ItemGroup>
     <!-- Reads documents' requests and diagnostics in tests, against the real server. -->
     <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript.Tests" />
   </ItemGroup>
+  <Target Name="IncludeProtocolAssembly" DependsOnTargets="ResolveReferences">
+    <ItemGroup>
+      <BuildOutputInPackage
+        Include="@(ReferenceCopyLocalPaths)"
+        Condition="'%(ReferenceCopyLocalPaths.ReferenceSourceTarget)' == 'ProjectReference' and '%(Filename)%(Extension)' == 'Darp.CodeEditor.CSharpScript.Protocol.dll'"
+      />
+    </ItemGroup>
+  </Target>
+  <Target Name="IncludeServerHelper">
+    <MSBuild
+      Projects="..\Darp.CodeEditor.CSharpScript.Server\Darp.CodeEditor.CSharpScript.Server.csproj"
+      Targets="GetCSharpScriptHelperFiles"
+      Properties="Configuration=$(Configuration);BuildProjectReferences=false"
+      RemoveProperties="RuntimeIdentifier;SelfContained;TargetFramework"
+    >
+      <Output TaskParameter="TargetOutputs" ItemName="_PackedHelperFile" />
+    </MSBuild>
+    <ItemGroup>
+      <TfmSpecificPackageFile Include="@(_PackedHelperFile)" PackagePath="tools/%(Helper)/%(HelperPath)" />
+    </ItemGroup>
+  </Target>
 </Project>
