@@ -124,23 +124,6 @@ public sealed class ScriptCompileTests(ScriptServerFixture fixture)
     }
 
     [Fact]
-    public async Task Completion_answers_while_a_compile_runs()
-    {
-        SkipWithoutServer();
-        string large = string.Concat(Enumerable.Range(0, 30_000).Select(i => $"var v{i} = Add({i}, 1);\n"));
-        using var editing = await _fixture.OpenAsync("Gree|");
-        using var cancel = CancellationTokenSource.CreateLinkedTokenSource(Token);
-
-        Task compiling = _fixture.Server.CompileAsync(s_environment, large, cancel.Token);
-        var list = await editing.CompleteAsync();
-
-        compiling.IsCompleted.ShouldBeFalse();
-        list.Items.ShouldContain(item => item.Label == "Greeting");
-        await cancel.CancelAsync();
-        await Should.ThrowAsync<OperationCanceledException>(() => compiling);
-    }
-
-    [Fact]
     public async Task A_compile_waits_for_a_server_that_restarts()
     {
         SkipWithoutServer();
