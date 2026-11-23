@@ -95,7 +95,9 @@ internal sealed class ScriptCompletions
                 last = (span, new LspRange(_script.Lines.ToPosition(span.Start), _script.Lines.ToPosition(span.End)));
             string label = item.DisplayTextPrefix + item.DisplayText + item.DisplayTextSuffix;
             // Roslyn's edit goes over the @ of an escaped word, and the client matches what was typed from the edit's start.
-            bool isEscaped = span.Length > 0 && _script.Text[span.Start] == '@';
+            // A keyword keeps its filter text: committing it would drop the @, so an escaped word doesn't match it.
+            bool isEscaped =
+                span.Length > 0 && _script.Text[span.Start] == '@' && !item.Tags.Contains(WellKnownTags.Keyword);
             string filterText = isEscaped ? "@" + item.FilterText.TrimStart('@') : item.FilterText;
             items.Add(
                 new LspCompletionItem(

@@ -98,6 +98,15 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task An_escaped_word_matches_identifiers_and_no_keyword()
+    {
+        using var script = await _fixture.OpenAsync("@ev|");
+        CompletionList list = await script.CompleteAsync();
+        list.Items.Single(item => item.Edit.NewText == "@event").FilterText.ShouldBe("@event");
+        list.Items.Single(item => item.Kind == KeywordKind && item.Label == "event").FilterText.ShouldBe("event");
+    }
+
+    [Fact]
     public async Task There_is_no_list_after_a_lone_at_sign()
     {
         using var script = await _fixture.OpenAsync("var value = @|");

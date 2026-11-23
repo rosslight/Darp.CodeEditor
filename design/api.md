@@ -605,7 +605,7 @@ app's script environments.
 - **Diagnostics:** the compiler's errors and warnings. `#r`, `#load` and `#line` are errors.
 - **Completion:** Roslyn's list, with keywords and kinds, on `.` and whenever the client asks. Each item has its edit at
   once; its signature and XML docs come with resolve, also after the user typed on, from the version the list was asked
-  for. An escaped word such as `@ev` completes over its `@`, and there is no list after a lone `@`.
+  for. An escaped word such as `@ev` completes identifiers, not keywords, over its `@`, and there is no list after a lone `@`.
 - **Hover:** the symbol as C# code, then its XML docs as text.
 - **Signature help** on `(`, `,` and `)`: the overloads of the call, with the one that overload resolution selects for the
   arguments so far, taking missing arguments as `default`, so that an unfinished call selects too. Asking again follows
