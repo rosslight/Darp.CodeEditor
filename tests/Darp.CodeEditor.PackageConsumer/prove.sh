@@ -35,7 +35,8 @@ dotnet build Consumer -c Debug
 
 echo "=== JIT"
 dotnet publish Consumer -c Release -r "$rid" --self-contained false -o out/jit
-DOTNET_ROOT=/nonexistent "out/jit/Consumer$extension"
+# The app runs on the installed .NET, wherever it is. The variable only proves that its helper looks in ../dotnet.
+DOTNET_ROOT=/nonexistent dotnet out/jit/Consumer.dll
 dotnet build PayloadProbe -c Release -r "$rid" --self-contained false -o out/probe
 DOTNET_ROOT="$PWD/out/jit/helpers/dotnet" DOTNET_MULTILEVEL_LOOKUP=0 "out/probe/PayloadProbe$extension" out/jit
 
