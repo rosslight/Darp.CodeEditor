@@ -4,9 +4,11 @@
     <!-- Not released until the script API is implemented. -->
     <IsPackable>false</IsPackable>
     <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);IncludeProtocolAssembly</TargetsForTfmSpecificBuildOutput>
-    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);IncludeServerHelper</TargetsForTfmSpecificContentInPackage>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);IncludeCSharpScriptHelper</TargetsForTfmSpecificContentInPackage>
     <!-- The server is portable IL under tools/, which an app compiles for its platform when it publishes. -->
     <NoWarn>$(NoWarn);NU5100</NoWarn>
+    <CSharpScriptPackedHelper>..\Darp.CodeEditor.CSharpScript.Server\Darp.CodeEditor.CSharpScript.Server.csproj</CSharpScriptPackedHelper>
+    <CSharpScriptPackedHelperBuildsReferences>false</CSharpScriptPackedHelperBuildsReferences>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Darp.CodeEditor\Darp.CodeEditor.csproj" />
@@ -32,6 +34,8 @@
   <ItemGroup>
     <!-- Reads documents' requests and diagnostics in tests, against the real server. -->
     <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript.Tests" />
+    <!-- Runs what the server compiled, and starts its process the way the server's is started. -->
+    <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript.Runner" />
   </ItemGroup>
   <Target Name="IncludeProtocolAssembly" DependsOnTargets="ResolveReferences">
     <ItemGroup>
@@ -41,17 +45,5 @@
       />
     </ItemGroup>
   </Target>
-  <Target Name="IncludeServerHelper">
-    <MSBuild
-      Projects="..\Darp.CodeEditor.CSharpScript.Server\Darp.CodeEditor.CSharpScript.Server.csproj"
-      Targets="GetCSharpScriptHelperFiles"
-      Properties="Configuration=$(Configuration);BuildProjectReferences=false"
-      RemoveProperties="RuntimeIdentifier;SelfContained;TargetFramework"
-    >
-      <Output TaskParameter="TargetOutputs" ItemName="_PackedHelperFile" />
-    </MSBuild>
-    <ItemGroup>
-      <TfmSpecificPackageFile Include="@(_PackedHelperFile)" PackagePath="tools/%(Helper)/%(HelperPath)" />
-    </ItemGroup>
-  </Target>
+  <Import Project="..\CSharpScriptHelper.targets" />
 </Project>

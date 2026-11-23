@@ -1,0 +1,62 @@
+<Project>
+  <!--
+    A helper process of C# scripts, when CSharpScriptHelperName names it: always a portable JIT build, which the app starts through the
+    dotnet host, or an app host made when the app is published. It stays framework-dependent for a self-contained or
+    NativeAOT app. An app that publishes passes its publish settings to all it references: the libraries a helper shares
+    with it keep them, so that a parallel build makes one copy of each, and the helper's project treats them as local.
+  -->
+  <PropertyGroup Condition="'$(CSharpScriptHelperName)' != ''">
+    <OutputType>Exe</OutputType>
+    <IsAotCompatible>false</IsAotCompatible>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <UseAppHost>false</UseAppHost>
+    <ShouldBeValidatedAsExecutableReference>false</ShouldBeValidatedAsExecutableReference>
+    <PublishAot>false</PublishAot>
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishSingleFile>false</PublishSingleFile>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <!-- Messages in English, instead of a dozen folders of resources next to the app. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <!--
+    What an app needs of the helper next to it, wherever this build put its output: an app's build asks for it, and its
+    own output folder may be shared with other projects.
+  -->
+  <Target
+    Name="GetCSharpScriptHelperFiles"
+    DependsOnTargets="ResolveReferences;$(GetCSharpScriptHelperFilesDependsOn)"
+    Returns="@(_HelperFile)"
+  >
+    <ItemGroup>
+      <_HelperOwnFile Include="$(TargetPath);$(ProjectDepsFilePath);$(ProjectRuntimeConfigFilePath)" />
+      <_HelperFile
+        Include="@(_HelperOwnFile)"
+        Helper="$(CSharpScriptHelperName)"
+        HelperPath="%(_HelperOwnFile.Filename)%(_HelperOwnFile.Extension)"
+      />
+      <_HelperDependency Include="@(ReferenceCopyLocalPaths->WithMetadataValue('Extension', '.dll'))" />
+      <_HelperFile
+        Include="@(_HelperDependency)"
+        Helper="$(CSharpScriptHelperName)"
+        HelperPath="%(_HelperDependency.DestinationSubDirectory)%(_HelperDependency.Filename)%(_HelperDependency.Extension)"
+      />
+    </ItemGroup>
+  </Target>
+
+  <!-- For the library whose package carries a helper under tools/: set CSharpScriptPackedHelper to its project. -->
+  <Target Name="IncludeCSharpScriptHelper">
+    <MSBuild
+      Projects="$(CSharpScriptPackedHelper)"
+      Targets="$(CSharpScriptPackedHelperTargets);GetCSharpScriptHelperFiles"
+      Properties="Configuration=$(Configuration);BuildProjectReferences=$(CSharpScriptPackedHelperBuildsReferences)"
+      RemoveProperties="RuntimeIdentifier;SelfContained;TargetFramework"
+    >
+      <Output TaskParameter="TargetOutputs" ItemName="_PackedHelperOutput" />
+    </MSBuild>
+    <ItemGroup>
+      <_PackedHelperFile Include="@(_PackedHelperOutput)" Condition="'%(_PackedHelperOutput.Helper)' != ''" />
+      <TfmSpecificPackageFile Include="@(_PackedHelperFile)" PackagePath="tools/%(Helper)/%(HelperPath)" />
+    </ItemGroup>
+  </Target>
+</Project>
