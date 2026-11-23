@@ -121,14 +121,15 @@ These work without setup:
 - **Typing:** pairs close as you type unless `AutoClosing` is off. Typing the closing character steps over it, Backspace
   deletes an empty pair, and an opening character surrounds the selection.
 - **Undo:** typing undoes by word.
-- **Highlights:** the current line, the bracket at the caret with its match, the symbol's occurrences, and whitespace
-  inside the selection.
+- **Highlights:** the current line, the bracket at the caret with its match, whitespace inside the selection, and the
+  occurrences of the symbol at the caret, from the server or else by whole word.
 - **Completion snippets:** `$1`, `${1}`, `${1:text}` and `$0` become stops. The first stop is selected, and Tab and
-  Shift+Tab move between stops. Other snippet syntax goes in as plain text.
+  Shift+Tab move between stops. Other snippet syntax adds no stops: a choice inserts its first option, and a variable
+  its default or nothing.
 - **Hover:** shows the messages of the diagnostics under the pointer, above the server's Markdown. Code blocks use the
   document's grammar.
-- **Long lines:** the editor works on a line's first 3,000 characters. Squiggles, semantic colors and the editor's own
-  edits don't reach past them.
+- **Long lines:** the full line shows, but squiggles and semantic colors stop after its first 3,000 characters. With the
+  caret past that point, typing, Delete and Backspace work, while Paste, Enter and Tab do nothing.
 
 ## Context menu
 
