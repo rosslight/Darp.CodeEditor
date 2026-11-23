@@ -31,6 +31,8 @@ internal sealed class ScriptServer
         }
         """;
 
+    // Diagnostics wait for a pause in typing, so that they don't compete with the completion a keystroke asks for.
+    private static readonly TimeSpan s_typingPause = TimeSpan.FromMilliseconds(100);
     private readonly JsonRpcConnection _rpc;
     private readonly Dictionary<string, OpenScript> _scripts = [];
 
@@ -172,7 +174,7 @@ internal sealed class ScriptServer
         }
         var script = new OpenScript(document.Uri, context.Open(document.Text, document.Version));
         _scripts[document.Uri] = script;
-        Analyze(script);
+        Analyze(script, TimeSpan.Zero);
     }
 
     private void Change(DidChangeTextDocumentParams change)
@@ -180,14 +182,14 @@ internal sealed class ScriptServer
         if (!_scripts.TryGetValue(change.TextDocument.Uri, out OpenScript? script))
             return;
         script.Snapshot = script.Snapshot.WithChanges(change.ContentChanges, change.TextDocument.Version);
-        Analyze(script);
+        Analyze(script, s_typingPause);
     }
 
     /// <summary>
     /// Publishes the diagnostics of the script's current version, in place of the work for the version before it, which
     /// then publishes nothing.
     /// </summary>
-    private void Analyze(OpenScript script)
+    private void Analyze(OpenScript script, TimeSpan delay)
     {
         CancellationToken cancellationToken = script.RestartDiagnostics();
         ScriptSnapshot snapshot = script.Snapshot;
@@ -196,6 +198,7 @@ internal sealed class ScriptServer
             {
                 try
                 {
+                    await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
                     IReadOnlyList<LspDiagnostic> diagnostics = await ScriptDiagnostics
                         .GetAsync(snapshot, cancellationToken)
                         .ConfigureAwait(false);
