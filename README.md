@@ -48,6 +48,8 @@ Give it a document. Your app owns the document and disposes it:
 
 ```csharp
 // MainWindow.axaml.cs
+using Darp.CodeEditor;
+
 public partial class MainWindow : Window
 {
     private readonly CodeDocument _document = CodeDocument.Create(CodeLanguage.Json, """{ "hello": "world" }""");

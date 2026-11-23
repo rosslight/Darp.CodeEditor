@@ -12,6 +12,7 @@ using Avalonia.Themes.Fluent;
 using Darp.CodeEditor;
 
 // Needs a JSON language server on PATH: npm install -g vscode-langservers-extracted
+// On Windows, set FileName to the full path of the .cmd script that npm installs.
 AppBuilder.Configure<App>().UsePlatformDetect().StartWithClassicDesktopLifetime(args);
 
 sealed class App : Application

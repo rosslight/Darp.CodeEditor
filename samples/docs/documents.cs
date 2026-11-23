@@ -35,7 +35,7 @@ sealed class App : Application
             var lines = new TextBlock { VerticalAlignment = VerticalAlignment.Center };
             showJson.Click += (_, _) => Show(editor, json);
             showYaml.Click += (_, _) => Show(editor, yaml);
-            save.Click += async (_, _) => await SaveAsync(json, path);
+            save.Click += async (_, _) => lines.Text = await SaveAsync(json, path) ? "Saved" : "Changed, save again";
             insert.Click += (_, _) => InsertAtSelection(editor, "text");
             json.TextChanged += async (_, _) => lines.Text = $"{await CountLinesAsync(json)} lines";
 

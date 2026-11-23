@@ -43,8 +43,8 @@ Add the editor's styles once, after your app's theme:
 
 ## Show a document
 
-The editor shows a `CodeDocument`, which your app creates, owns and disposes. Add this to the `MainWindow` constructor,
-after `InitializeComponent()`:
+The editor shows a `CodeDocument`, which your app creates, owns and disposes. Add `using Darp.CodeEditor;` to
+`MainWindow.axaml.cs`, and this code to its constructor after `InitializeComponent()`:
 
 ```csharp
 --8<-- "first-editor.cs:document"

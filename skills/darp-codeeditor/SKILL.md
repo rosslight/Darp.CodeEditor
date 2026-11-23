@@ -61,6 +61,8 @@ await File.WriteAllTextAsync(path, snapshot.GetText());
 document.MarkUnmodified(snapshot);
 ```
 
+If `MarkUnmodified` returns `false`, the text changed during the write, so save again.
+
 ## Language servers
 
 A server provides completion, hover, signature help and diagnostics for the documents it creates:
