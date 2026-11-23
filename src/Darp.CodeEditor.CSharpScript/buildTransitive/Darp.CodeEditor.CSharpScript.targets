@@ -424,7 +424,8 @@
   <Target Name="_CreateCSharpScriptAppHosts" DependsOnTargets="_GetCSharpScriptHelperFiles;ResolveFrameworkReferences">
     <PropertyGroup>
       <_CSharpScriptAppHostSource>$(AppHostSourcePath)</_CSharpScriptAppHostSource>
-      <_CSharpScriptAppHostSource Condition="'$(_CSharpScriptAppHostSource)' == '' or !Exists('$(_CSharpScriptAppHostSource)')"
+      <_CSharpScriptAppHostSource
+        Condition="'$(_CSharpScriptAppHostSource)' == '' or !Exists('$(_CSharpScriptAppHostSource)')"
         >$([MSBuild]::NormalizePath('$(NetCoreTargetingPackRoot)', 'Microsoft.NETCore.App.Host.$(RuntimeIdentifier)', '$(BundledNETCoreAppPackageVersion)', 'runtimes', '$(RuntimeIdentifier)', 'native', 'apphost$(_NativeExecutableExtension)'))</_CSharpScriptAppHostSource>
     </PropertyGroup>
     <Error
