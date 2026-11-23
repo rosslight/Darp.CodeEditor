@@ -45,6 +45,35 @@ public sealed class ScriptSignatureHelpTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task An_unfinished_conditional_call_keeps_its_receiver()
+    {
+        using var script = await _fixture.OpenAsync("string? s = \"\";\ns?.Replace(\"a\", |)");
+        SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        Active(help).Label.ShouldContain("Replace(string oldValue, string? newValue)");
+        ActiveParameter(Active(help)).ShouldBe("string? newValue");
+    }
+
+    [Fact]
+    public async Task An_unfinished_target_typed_new_keeps_its_type()
+    {
+        using var script = await _fixture.OpenAsync("System.Text.StringBuilder sb = new(10, |");
+        SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        Active(help).Label.ShouldContain("StringBuilder(int capacity, int maxCapacity)");
+        ActiveParameter(Active(help)).ShouldBe("int maxCapacity");
+    }
+
+    [Fact]
+    public async Task An_unfinished_call_selects_among_the_scripts_own_overloads()
+    {
+        using var script = await _fixture.OpenAsync(
+            "int Local(int number, int other) => other;\nint Local(string text, int other) => other;\nLocal(\"a\", |"
+        );
+        SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        help.Signatures.Count.ShouldBe(2);
+        Active(help).Label.ShouldContain("Local(string text, int other)");
+    }
+
+    [Fact]
     public async Task A_named_argument_activates_its_parameter()
     {
         using var script = await _fixture.OpenAsync("Named(name: |");

@@ -35,14 +35,15 @@ internal static class ScriptSignatureHelp
         SyntaxNode root = await model.SyntaxTree.GetRootAsync(cancellationToken).ConfigureAwait(false);
         if (ArgumentListAt(root, position) is not { Parent: ExpressionSyntax call } list)
             return null;
-        List<IMethodSymbol> candidates = Candidates(model, call, position, cancellationToken);
+        var (candidates, resolved) = await BindAsync(script.Document, model, call, list, cancellationToken)
+            .ConfigureAwait(false);
         if (candidates.Count == 0)
             return null;
         int argument = list.Arguments.GetSeparators().Count(separator => separator.SpanStart < position);
         string? name = list.Arguments.ElementAtOrDefault(argument)?.NameColon?.Name.Identifier.ValueText;
 
         int best = 0;
-        if (Resolve(model, call, list, candidates, cancellationToken) is { } resolved)
+        if (resolved is not null)
         {
             best = Math.Max(0, candidates.FindIndex(c => SameMethod(c, resolved)));
             // With its type arguments, as the call infers them.
@@ -84,67 +85,67 @@ internal static class ScriptSignatureHelp
     private static List<IMethodSymbol> Candidates(
         SemanticModel model,
         ExpressionSyntax call,
-        int position,
         CancellationToken cancellationToken
     )
     {
-        IEnumerable<IMethodSymbol> methods = [];
-        if (call is InvocationExpressionSyntax invocation)
+        IEnumerable<IMethodSymbol> methods = call switch
         {
-            methods = model.GetMemberGroup(invocation.Expression, cancellationToken).OfType<IMethodSymbol>();
-            if (
-                !methods.Any()
-                && model.GetTypeInfo(invocation.Expression, cancellationToken).Type
-                    is INamedTypeSymbol { DelegateInvokeMethod: { } invoke }
-            )
-            {
-                methods = [invoke];
-            }
-        }
-        else if (
-            call is BaseObjectCreationExpressionSyntax
-            && model.GetTypeInfo(call, cancellationToken).Type is INamedTypeSymbol type
-        )
-        {
-            methods = type.InstanceConstructors;
-        }
-        return [.. methods.Where(method => model.IsAccessible(position, method))];
+            InvocationExpressionSyntax invocation
+                when model.GetMemberGroup(invocation.Expression, cancellationToken) is { IsEmpty: false } group =>
+                group.OfType<IMethodSymbol>(),
+            InvocationExpressionSyntax invocation
+                when model.GetTypeInfo(invocation.Expression, cancellationToken).Type
+                    is INamedTypeSymbol { DelegateInvokeMethod: { } invoke } => [invoke],
+            BaseObjectCreationExpressionSyntax
+                when model.GetTypeInfo(call, cancellationToken).Type is INamedTypeSymbol type =>
+                type.InstanceConstructors,
+            _ => [],
+        };
+        return [.. methods.Where(method => model.IsAccessible(call.SpanStart, method))];
     }
 
     /// <summary>
-    /// The overload that the arguments so far select. An unfinished call has none yet, so it is bound as if each missing
-    /// argument were <c>default</c>: with the fewest added first, so that what was typed decides.
+    /// The overload the call selects, and the candidates to show it among. An unfinished call is bound as if each missing
+    /// argument were <c>default</c>, with the fewest added first, so that what was typed decides. It binds in a fork of
+    /// the script, where it keeps its receiver and target type. The candidates then come from that fork: the script's own
+    /// methods are symbols of one compilation.
     /// </summary>
-    private static IMethodSymbol? Resolve(
+    private static async Task<(List<IMethodSymbol> Candidates, IMethodSymbol? Selected)> BindAsync(
+        Document document,
         SemanticModel model,
         ExpressionSyntax call,
         ArgumentListSyntax list,
-        List<IMethodSymbol> candidates,
         CancellationToken cancellationToken
     )
     {
+        List<IMethodSymbol> candidates = Candidates(model, call, cancellationToken);
         if (model.GetSymbolInfo(call, cancellationToken).Symbol is IMethodSymbol exact)
-            return exact;
-        int given = list.Arguments.Count;
+            return (candidates, exact);
+        var completed = new SyntaxAnnotation();
         IEnumerable<int> missing = candidates
-            .Select(method => method.Parameters.Count(p => !p.IsOptional && !p.IsParams) - given)
-            .Where(count => count > 0)
-            .Prepend(0)
+            .Select(method =>
+                Math.Max(0, method.Parameters.Count(p => !p.IsOptional && !p.IsParams) - list.Arguments.Count)
+            )
             .Distinct()
             .Order();
         foreach (int added in missing)
         {
-            SymbolInfo info = model.GetSpeculativeSymbolInfo(
-                call.SpanStart,
-                call.ReplaceNode(list, Completed(list, added)),
-                SpeculativeBindingOption.BindAsExpression
+            ExpressionSyntax filled = call.ReplaceNode(list, Completed(list, added))
+                .WithAdditionalAnnotations(completed);
+            Document fork = document.WithSyntaxRoot(
+                call.SyntaxTree.GetRoot(cancellationToken).ReplaceNode(call, filled)
             );
-            if (info.Symbol is IMethodSymbol method)
-                return method;
-            if (info.CandidateReason == CandidateReason.Ambiguous)
-                return info.CandidateSymbols.OfType<IMethodSymbol>().FirstOrDefault();
+            if (await fork.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false) is not { } forked)
+                break;
+            SyntaxNode forkRoot = await forked.SyntaxTree.GetRootAsync(cancellationToken).ConfigureAwait(false);
+            ExpressionSyntax forkCall = forkRoot.GetAnnotatedNodes(completed).OfType<ExpressionSyntax>().Single();
+            SymbolInfo info = forked.GetSymbolInfo(forkCall, cancellationToken);
+            ISymbol? selected =
+                info.CandidateReason == CandidateReason.Ambiguous ? info.CandidateSymbols[0] : info.Symbol;
+            if (selected is IMethodSymbol method)
+                return (Candidates(forked, forkCall, cancellationToken), method);
         }
-        return null;
+        return (candidates, null);
     }
 
     private static ArgumentListSyntax Completed(ArgumentListSyntax list, int added) =>
@@ -199,14 +200,7 @@ internal static class ScriptSignatureHelp
     private static int ActiveParameter(IMethodSymbol method, int argument, string? name)
     {
         if (name is not null)
-        {
-            for (int index = 0; index < method.Parameters.Length; index++)
-            {
-                if (method.Parameters[index].Name == name)
-                    return index;
-            }
-            return -1;
-        }
+            return method.Parameters.Select(parameter => parameter.Name).ToList().IndexOf(name);
         if (argument < method.Parameters.Length)
             return argument;
         return method.Parameters.LastOrDefault()?.IsParams == true ? method.Parameters.Length - 1 : -1;
