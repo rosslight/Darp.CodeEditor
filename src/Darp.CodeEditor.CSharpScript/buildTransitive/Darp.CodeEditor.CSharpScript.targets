@@ -252,6 +252,8 @@
   <PropertyGroup>
     <TargetFramework>$(TargetFramework)</TargetFramework>
     <RuntimeIdentifier>$(RuntimeIdentifier)</RuntimeIdentifier>
+    <TargetPlatformIdentifier>$(TargetPlatformIdentifier)</TargetPlatformIdentifier>
+    <TargetPlatformVersion>$(TargetPlatformVersion)</TargetPlatformVersion>
     <_CSharpScriptIsApiRoot>true</_CSharpScriptIsApiRoot>
     <SelfContained>false</SelfContained>
     <UseAppHost>false</UseAppHost>
@@ -296,14 +298,20 @@
     />
   </Target>
 
-  <!-- The runner starts on the base .NET runtime, so nothing that needs another shared framework can load in it. -->
+  <!--
+    The runner starts on the base .NET runtime, so nothing that needs another shared framework can load in it. The Windows
+    API projection of a versioned Windows target is no shared framework: its assemblies are published with the reference.
+  -->
   <Target
     Name="_CheckCSharpScriptFrameworks"
     AfterTargets="ResolveFrameworkReferences"
     Condition="'$(_CSharpScriptIsApiRoot)' == 'true'"
   >
     <ItemGroup>
-      <_CSharpScriptOtherFramework Include="@(FrameworkReference)" Exclude="Microsoft.NETCore.App" />
+      <_CSharpScriptOtherFramework
+        Include="@(FrameworkReference)"
+        Exclude="Microsoft.NETCore.App;Microsoft.Windows.SDK.NET.Ref;Microsoft.Windows.SDK.NET.Ref.Windows"
+      />
     </ItemGroup>
     <Error
       Condition="'@(_CSharpScriptOtherFramework)' != ''"
@@ -421,7 +429,7 @@
     </PropertyGroup>
     <Error
       Condition="!Exists('$(_CSharpScriptAppHostSource)')"
-      Text="The .NET app host for $(RuntimeIdentifier) is missing, so the C# helpers cannot start. A NativeAOT app that publishes for another platform than the SDK's sets UseAppHost=true, so that restore fetches it."
+      Text="The .NET app host for $(RuntimeIdentifier) is missing, so the C# helpers cannot start. An app without an app host of its own that publishes for another platform than the SDK's sets UseAppHost=true, so that restore fetches it."
     />
     <ItemGroup>
       <!-- A helper's entry assembly is the one with a runtime configuration. -->
