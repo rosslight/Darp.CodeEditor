@@ -1,8 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <Description>Runs compiled C# scripts in sessions: separate processes with a typed bridge between the app and its scripts.</Description>
-    <!-- Not released until the script API is implemented. -->
-    <IsPackable>false</IsPackable>
     <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);IncludeCSharpScriptHelper</TargetsForTfmSpecificContentInPackage>
     <!-- The runner is portable IL under tools/, which an app compiles for its platform when it publishes. -->
     <NoWarn>$(NoWarn);NU5100</NoWarn>
@@ -30,6 +28,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript.Runner.Process" />
     <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript.Tests" />
+    <None Include="THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="/" />
     <None Include="buildTransitive\*.targets" Pack="true" PackagePath="buildTransitive/" />
   </ItemGroup>
   <Import Project="..\CSharpScriptHelper.targets" />

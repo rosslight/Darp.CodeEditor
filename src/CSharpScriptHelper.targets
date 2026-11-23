@@ -57,6 +57,17 @@
     <ItemGroup>
       <_PackedHelperFile Include="@(_PackedHelperOutput)" Condition="'%(_PackedHelperOutput.Helper)' != ''" />
       <TfmSpecificPackageFile Include="@(_PackedHelperFile)" PackagePath="tools/%(Helper)/%(HelperPath)" />
+      <!-- The notices each bundled library carries for code it took from others. -->
+      <_PackedHelperLibrary
+        Include="@(_PackedHelperFile->'%(NuGetPackageId)')"
+        Root="$(NuGetPackageRoot)$([System.String]::Copy('%(_PackedHelperFile.NuGetPackageId)').ToLowerInvariant())/%(_PackedHelperFile.NuGetPackageVersion)/"
+        Condition="'%(_PackedHelperFile.NuGetPackageId)' != ''"
+      />
+      <_PackedHelperNotice
+        Include="%(_PackedHelperLibrary.Root)**/*NOTICE*;%(_PackedHelperLibrary.Root)**/*Notices*"
+        Library="%(_PackedHelperLibrary.Identity)"
+      />
+      <TfmSpecificPackageFile Include="@(_PackedHelperNotice)" PackagePath="licenses/%(_PackedHelperNotice.Library)/" />
     </ItemGroup>
   </Target>
 </Project>

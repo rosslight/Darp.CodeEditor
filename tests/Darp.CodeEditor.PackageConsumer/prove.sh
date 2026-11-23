@@ -14,10 +14,10 @@ version=0.0.0-consumer.$(date +%s)
 cp -R "$repo/tests/Darp.CodeEditor.PackageConsumer/." "$work/"
 cp "$repo/global.json" "$work/"
 dotnet pack "$repo/src/Darp.CodeEditor" -c Release -o "$work/feed" "-p:Version=$version"
-dotnet pack "$repo/src/Darp.CodeEditor.CSharpScript" -c Release -o "$work/feed" "-p:Version=$version" -p:IsPackable=true
+dotnet pack "$repo/src/Darp.CodeEditor.CSharpScript" -c Release -o "$work/feed" "-p:Version=$version"
 # Packing the runner builds its helper, which is no reference of the package and so needs a restore of its own.
 dotnet restore "$repo/src/Darp.CodeEditor.CSharpScript.Runner.Process"
-dotnet pack "$repo/src/Darp.CodeEditor.CSharpScript.Runner" -c Release -o "$work/feed" "-p:Version=$version" -p:IsPackable=true
+dotnet pack "$repo/src/Darp.CodeEditor.CSharpScript.Runner" -c Release -o "$work/feed" "-p:Version=$version"
 cd "$work"
 export DarpCodeEditorVersion=$version
 DarpStreamJsonRpcVersion=$(sed -n 's/.*Include="StreamJsonRpc" Version="\([^"]*\)".*/\1/p' "$repo/Directory.Packages.props")

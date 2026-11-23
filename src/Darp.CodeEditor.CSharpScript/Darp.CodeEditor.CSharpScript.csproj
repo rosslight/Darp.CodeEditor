@@ -1,8 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <Description>C# scripts in Darp.CodeEditor: a host-defined script environment, the C# language server, and compiling scripts to run them.</Description>
-    <!-- Not released until the script API is implemented. -->
-    <IsPackable>false</IsPackable>
     <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);IncludeProtocolAssembly</TargetsForTfmSpecificBuildOutput>
     <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);IncludeCSharpScriptHelper</TargetsForTfmSpecificContentInPackage>
     <!-- The server is portable IL under tools/, which an app compiles for its platform when it publishes. -->
