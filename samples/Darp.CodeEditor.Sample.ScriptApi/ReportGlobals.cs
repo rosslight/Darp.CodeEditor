@@ -8,6 +8,11 @@ public sealed record Entry(string Category, int Amount);
 /// <summary>What a report script sees: its members can be used without qualification.</summary>
 public sealed class ReportGlobals
 {
+    internal ReportGlobals(CancellationToken stop) => Stop = stop;
+
+    /// <summary>Cancelled when the user presses Stop. Pass it to everything that waits.</summary>
+    public CancellationToken Stop { get; }
+
     /// <summary>Yesterday's entries.</summary>
     public IReadOnlyList<Entry> Entries { get; } = [new("Rent", 900), new("Food", 42), new("Food", 18)];
 

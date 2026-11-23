@@ -35,6 +35,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharpScript\Darp.CodeEditor.CSharpScript.csproj" />
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharpScript.Runner\Darp.CodeEditor.CSharpScript.Runner.csproj" />
     <!-- What the app's C# scripts may use. -->
     <ProjectReference
       Include="..\Darp.CodeEditor.Sample.ScriptApi\Darp.CodeEditor.Sample.ScriptApi.csproj"
@@ -71,6 +72,7 @@
     </ItemGroup>
   </Target>
 
-  <!-- A package reference imports this by itself; in this repository the server is built from source. -->
+  <!-- Package references import these by themselves; in this repository the helpers are built from source. -->
+  <Import Project="..\..\src\Darp.CodeEditor.CSharpScript.Runner\buildTransitive\Darp.CodeEditor.CSharpScript.Runner.targets" />
   <Import Project="..\..\src\Darp.CodeEditor.CSharpScript\buildTransitive\Darp.CodeEditor.CSharpScript.targets" />
 </Project>

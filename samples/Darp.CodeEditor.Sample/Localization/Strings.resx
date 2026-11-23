@@ -36,6 +36,15 @@
   <data name="Redo" xml:space="preserve">
     <value>Redo</value>
   </data>
+  <data name="RunScript" xml:space="preserve">
+    <value>Run</value>
+  </data>
+  <data name="StopScript" xml:space="preserve">
+    <value>Stop</value>
+  </data>
+  <data name="ScriptStopped" xml:space="preserve">
+    <value>Stopped.</value>
+  </data>
   <data name="Find" xml:space="preserve">
     <value>Find</value>
   </data>

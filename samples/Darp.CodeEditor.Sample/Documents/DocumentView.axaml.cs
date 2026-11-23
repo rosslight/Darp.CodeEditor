@@ -2,8 +2,13 @@ using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Threading;
 using Darp.CodeEditor;
+using Darp.CodeEditor.CSharpScript;
+using Darp.CodeEditor.CSharpScript.Runner;
 using Sample.Localization;
+using Sample.ScriptApi;
+using StreamJsonRpc;
 
 namespace Sample.Documents;
 
@@ -21,6 +26,15 @@ public sealed partial class DocumentView : UserControl
 
     /// <summary>The document the editor shows.</summary>
     private OpenDocument? _shown;
+
+    /// <summary>Stops the script that runs; null while none does.</summary>
+    private CancellationTokenSource? _scriptStop;
+
+    /// <summary>The last lines of the shown run's output. The UI thread owns it.</summary>
+    private readonly Queue<string> _outputLines = new();
+
+    /// <summary>The run whose lines the output shows: a session's last lines may arrive after its end.</summary>
+    private object? _outputRun;
 
     public DocumentView()
     {
@@ -42,6 +56,76 @@ public sealed partial class DocumentView : UserControl
 
     /// <summary>The caret's line and column, for the status bar.</summary>
     public TextPosition CaretPosition => Editor.CaretPosition;
+
+    /// <summary>Compiles the shown script and runs it in a session of its own, until it ends or the user stops it.</summary>
+    private async void OnRunScript(object? sender, RoutedEventArgs e)
+    {
+        if (_shown?.Document is not CSharpScriptDocument<ReportGlobals> document || _scriptStop is not null)
+            return;
+        using var stop = new CancellationTokenSource();
+        _scriptStop = stop;
+        RunButton.IsEnabled = false;
+        StopButton.IsEnabled = true;
+        _outputRun = stop;
+        _outputLines.Clear();
+        ScriptOutput.Text = "";
+        void Output(string line) =>
+            Dispatcher.UIThread.Post(() => ShowOutput(stop, line), DispatcherPriority.Background);
+        try
+        {
+            CSharpScriptCompilation<ReportGlobals> compilation = await document.CompileAsync(stop.Token);
+            if (compilation.Script is not { } script)
+            {
+                foreach (Diagnostic error in compilation.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error))
+                    Output($"{error.Start.Line},{error.Start.Column}: {error.Message}");
+                return;
+            }
+            await using CSharpScriptSession<IReportSession, ReportSession> session =
+                await CSharpScriptSession.StartAsync<IReportApp, IReportSession, ReportSession>(
+                    new ReportApp(),
+                    new CSharpScriptSessionOptions { Output = Output },
+                    stop.Token
+                );
+            CSharpScriptRun run = await session.StartScriptAsync(script, stop.Token);
+            await run.RunToEndAsync(stop.Token, killSessionAfter: TimeSpan.FromSeconds(2));
+        }
+        catch (OperationCanceledException)
+        {
+            Output(Strings.Default.ScriptStopped);
+        }
+        catch (CSharpScriptException failure)
+        {
+            Output($"{failure.ScriptPosition?.Line}: {failure.ScriptExceptionType}: {failure.Message}");
+        }
+        catch (Exception failure) when (failure is ConnectionLostException or InvalidOperationException)
+        {
+            Output(failure.Message);
+        }
+        finally
+        {
+            _scriptStop = null;
+            RunButton.IsEnabled = true;
+            StopButton.IsEnabled = false;
+        }
+    }
+
+    private void OnStopScript(object? sender, RoutedEventArgs e) => _scriptStop?.Cancel();
+
+    private void ShowOutput(object run, string line)
+    {
+        const int maxLines = 200;
+        if (run != _outputRun)
+            return;
+        if (_outputLines.Count == maxLines)
+            _outputLines.Dequeue();
+        _outputLines.Enqueue(line);
+        ScriptOutput.Text = string.Join(Environment.NewLine, _outputLines);
+        // Keeps the newest line in view.
+        ScriptOutput.CaretIndex = ScriptOutput.Text.Length;
+    }
+
+    /// <summary>The sample's scripts ask nothing of the app.</summary>
+    private sealed class ReportApp : IReportApp;
 
     public void Undo()
     {
@@ -105,7 +189,10 @@ public sealed partial class DocumentView : UserControl
             return;
         if (_shown is not null)
             _shown.ViewState = Editor.SaveViewState();
+        // The output below the editor belongs to the shown script, so a run ends with leaving it.
+        _scriptStop?.Cancel();
         _shown = document;
+        ScriptControls.IsVisible = document?.Document is CSharpScriptDocument<ReportGlobals>;
         Editor.Document = document?.Document;
         if (document?.ViewState is { } state)
             Editor.RestoreViewState(state);
