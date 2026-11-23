@@ -83,6 +83,16 @@ internal sealed class ServerConnection
     /// </summary>
     public Task<Exception?> Initialized => _initialized.Task;
 
+    /// <summary>Completes once this process has ended and the server has moved on to what comes next.</summary>
+    public Task Ended
+    {
+        get
+        {
+            lock (_lock)
+                return _run ?? Task.CompletedTask;
+        }
+    }
+
     /// <summary>Guarded: whether the server answered <c>initialize</c> and the process has not ended.</summary>
     public bool IsRunning => _running is not null;
 
@@ -654,6 +664,20 @@ internal sealed class ServerConnection
     /// killed. Cancelling <paramref name="cancellationToken"/> cancels the request in the server.
     /// </summary>
     /// <exception cref="TimeoutException">The server did not answer in time.</exception>
+    /// <exception cref="IOException">The process ended.</exception>
+    public Task<JsonElement> RequestAsync(
+        string method,
+        Action<Utf8JsonWriter> writeParams,
+        CancellationToken cancellationToken
+    )
+    {
+        JsonRpcConnection rpc;
+        lock (_lock)
+            rpc = _running?.Rpc ?? throw new IOException("The language server ended.");
+        return RequestAsync(rpc, method, writeParams, cancellationToken);
+    }
+
+    /// <inheritdoc cref="RequestAsync(string, Action{Utf8JsonWriter}, CancellationToken)" />
     private async Task<JsonElement> RequestAsync(
         JsonRpcConnection rpc,
         string method,
@@ -748,7 +772,8 @@ internal sealed class ServerConnection
         document.Owner.SetDiagnostics([.. published.Diagnostics.Select(d => ToDiagnostic(snapshot, d))]);
     }
 
-    private static Diagnostic ToDiagnostic(TextSnapshot snapshot, LspDiagnostic diagnostic)
+    /// <summary>A server's diagnostic about <paramref name="snapshot"/>, with its positions read in that text.</summary>
+    internal static Diagnostic ToDiagnostic(TextSnapshot snapshot, LspDiagnostic diagnostic)
     {
         int start = Positions.ToOffset(snapshot, diagnostic.Range.Start);
         int end = Positions.ToOffset(snapshot, diagnostic.Range.End);

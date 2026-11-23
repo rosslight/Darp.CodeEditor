@@ -34,6 +34,13 @@ internal sealed class ScriptContext
         "System.Threading.Tasks",
     ];
 
+    /// <summary>As the .NET SDK does: a library built for an older .NET binds against this one without a warning.</summary>
+    private static readonly KeyValuePair<string, ReportDiagnostic>[] s_quietUnification =
+    [
+        new("CS1701", ReportDiagnostic.Suppress),
+        new("CS1702", ReportDiagnostic.Suppress),
+    ];
+
     /// <summary>.NET's assemblies, from the runtime that runs the server, which is the one that runs the script.</summary>
     private static readonly string[] s_frameworkPaths = (
         AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string ?? ""
@@ -67,6 +74,7 @@ internal sealed class ScriptContext
         _compilationOptions = new CSharpCompilationOptions(
             OutputKind.DynamicallyLinkedLibrary,
             usings: [.. s_implicitImports, .. environment.Imports],
+            specificDiagnosticOptions: s_quietUnification,
             nullableContextOptions: environment.Nullable
                 ? NullableContextOptions.Enable
                 : NullableContextOptions.Disable

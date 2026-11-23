@@ -2,6 +2,8 @@ using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Darp.CodeEditor.CSharpScript.Protocol;
+using Darp.CodeEditor.LanguageClient;
+using Darp.CodeEditor.Lsp;
 
 namespace Darp.CodeEditor.CSharpScript;
 
@@ -92,7 +94,7 @@ public sealed class CSharpScriptServer : INotifyPropertyChanged, IAsyncDisposabl
     {
         CSharpScriptEnvironment<TGlobals> copy = environment.Copy();
         ScriptEnvironmentData data = _appFiles.Value.Describe(copy);
-        var document = new CSharpScriptDocument<TGlobals>(copy, text);
+        var document = new CSharpScriptDocument<TGlobals>(this, copy, text);
         _server.Open(document, JsonSerializer.SerializeToNode(data, ScriptProtocolJson.Default.ScriptEnvironmentData));
         return document;
     }
@@ -102,12 +104,49 @@ public sealed class CSharpScriptServer : INotifyPropertyChanged, IAsyncDisposabl
     /// from any thread. Documents compile themselves, with their <c>CompileAsync</c>.
     /// </summary>
     /// <exception cref="ArgumentException">The environment is invalid, as for <see cref="CreateDocument"/>.</exception>
+    /// <exception cref="InvalidOperationException">The server did not start, answer or finish the compilation.</exception>
     public Task<CSharpScriptCompilation<TGlobals>> CompileAsync<TGlobals>(
         CSharpScriptEnvironment<TGlobals> environment,
         string code,
         CancellationToken cancellationToken = default
     )
-        where TGlobals : class => throw new NotImplementedException();
+        where TGlobals : class => CompileAsync(environment.Copy(), TextSnapshot.FromString(code), cancellationToken);
+
+    /// <summary>Compiles <paramref name="snapshot"/>, whose text the request carries, so that later edits can't reach it.</summary>
+    internal async Task<CSharpScriptCompilation<TGlobals>> CompileAsync<TGlobals>(
+        CSharpScriptEnvironment<TGlobals> environment,
+        TextSnapshot snapshot,
+        CancellationToken cancellationToken
+    )
+        where TGlobals : class
+    {
+        var parameters = new ScriptCompileParams(_appFiles.Value.Describe(environment), snapshot.GetText());
+        JsonElement answer;
+        try
+        {
+            answer = await _server
+                .RequestAsync(
+                    ScriptCompileParams.Method,
+                    writer =>
+                        JsonSerializer.Serialize(writer, parameters, ScriptProtocolJson.Default.ScriptCompileParams),
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+        }
+        // The protocol's exceptions are internal: an app sees that the server could not compile, and why.
+        catch (Exception e) when (e is IOException or TimeoutException or JsonRpcException)
+        {
+            throw new InvalidOperationException($"The C# script server did not compile the script: {e.Message}", e);
+        }
+        ScriptCompileResult result =
+            answer.Deserialize(ScriptProtocolJson.Default.ScriptCompileResult)
+            ?? throw new JsonException("The server answered a compilation with nothing.");
+        return new CSharpScriptCompilation<TGlobals>(
+            [.. result.Diagnostics.Select(d => ServerConnection.ToDiagnostic(snapshot, d))],
+            snapshot,
+            result.Script is { } image ? new CSharpScriptAssembly<TGlobals>(environment, snapshot, image) : null
+        );
+    }
 
     /// <summary>The id of the running process; null without one. Tests use it to end the server.</summary>
     internal int? ProcessId => _server.ProcessId;
@@ -144,23 +183,32 @@ public sealed record CSharpScriptServerOptions
 public sealed class CSharpScriptCompilation<TGlobals>
     where TGlobals : class
 {
-    private CSharpScriptCompilation() { }
+    internal CSharpScriptCompilation(
+        IReadOnlyList<Diagnostic> diagnostics,
+        TextSnapshot snapshot,
+        CSharpScriptAssembly<TGlobals>? script
+    )
+    {
+        Diagnostics = diagnostics;
+        Snapshot = snapshot;
+        Script = script;
+    }
 
     /// <summary>Errors and warnings, each with <see cref="Snapshot"/>, the compiled text.</summary>
-    public IReadOnlyList<Diagnostic> Diagnostics => throw new NotImplementedException();
+    public IReadOnlyList<Diagnostic> Diagnostics { get; }
 
     /// <summary>
     /// The compiled text: the document's snapshot, or one of the compiled string. Compare a document's with its
     /// <see cref="CodeDocument.CurrentSnapshot"/> to tell whether the user changed the script since.
     /// </summary>
-    public TextSnapshot Snapshot => throw new NotImplementedException();
+    public TextSnapshot Snapshot { get; }
 
     /// <summary>Whether the script compiled without errors; <see cref="Script"/> is set then.</summary>
     [MemberNotNullWhen(true, nameof(Script))]
-    public bool Succeeded => throw new NotImplementedException();
+    public bool Succeeded => Script is not null;
 
     /// <summary>The compiled script, ready to run; null when the script has errors.</summary>
-    public CSharpScriptAssembly<TGlobals>? Script => throw new NotImplementedException();
+    public CSharpScriptAssembly<TGlobals>? Script { get; }
 }
 
 /// <summary>
@@ -176,8 +224,23 @@ public sealed class CSharpScriptCompilation<TGlobals>
 public sealed class CSharpScriptAssembly<TGlobals>
     where TGlobals : class
 {
-    private CSharpScriptAssembly() { }
+    internal CSharpScriptAssembly(
+        CSharpScriptEnvironment<TGlobals> environment,
+        TextSnapshot snapshot,
+        ScriptImage image
+    )
+    {
+        Environment = environment;
+        Snapshot = snapshot;
+        Image = image;
+    }
 
     /// <summary>The environment the script was compiled for.</summary>
-    public CSharpScriptEnvironment<TGlobals> Environment => throw new NotImplementedException();
+    public CSharpScriptEnvironment<TGlobals> Environment { get; }
+
+    /// <summary>The compiled text, which the script's failures point into.</summary>
+    internal TextSnapshot Snapshot { get; }
+
+    /// <summary>The emitted assembly and its entry point.</summary>
+    internal ScriptImage Image { get; }
 }

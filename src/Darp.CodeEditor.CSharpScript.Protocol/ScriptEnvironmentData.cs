@@ -22,6 +22,11 @@ internal sealed record ScriptEnvironmentData(
 );
 
 /// <summary>The source-generated serialization of the script protocol, for NativeAOT apps.</summary>
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSourceGenerationOptions(
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+)]
 [JsonSerializable(typeof(ScriptEnvironmentData))]
+[JsonSerializable(typeof(ScriptCompileParams))]
+[JsonSerializable(typeof(ScriptCompileResult))]
 internal sealed partial class ScriptProtocolJson : JsonSerializerContext;

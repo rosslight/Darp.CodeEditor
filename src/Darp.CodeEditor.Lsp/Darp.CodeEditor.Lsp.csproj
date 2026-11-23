@@ -7,6 +7,8 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Darp.CodeEditor" />
+    <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript" />
+    <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript.Protocol" />
     <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript.Server" />
     <InternalsVisibleTo Include="Darp.CodeEditor.Tests" />
     <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript.Tests" />

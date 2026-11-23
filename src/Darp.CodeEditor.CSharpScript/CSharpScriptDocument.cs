@@ -8,8 +8,14 @@ namespace Darp.CodeEditor.CSharpScript;
 public sealed class CSharpScriptDocument<TGlobals> : CodeDocument
     where TGlobals : class
 {
-    internal CSharpScriptDocument(CSharpScriptEnvironment<TGlobals> environment, string text)
-        : base(CodeLanguage.CSharp, text) => Environment = environment;
+    private readonly CSharpScriptServer _server;
+
+    internal CSharpScriptDocument(CSharpScriptServer server, CSharpScriptEnvironment<TGlobals> environment, string text)
+        : base(CodeLanguage.CSharp, text)
+    {
+        _server = server;
+        Environment = environment;
+    }
 
     /// <summary>The environment the document was created in.</summary>
     public CSharpScriptEnvironment<TGlobals> Environment { get; }
@@ -20,5 +26,5 @@ public sealed class CSharpScriptDocument<TGlobals> : CodeDocument
     /// compilation, and disposing the document does not affect it. Safe to call from any thread.
     /// </summary>
     public Task<CSharpScriptCompilation<TGlobals>> CompileAsync(CancellationToken cancellationToken = default) =>
-        throw new NotImplementedException();
+        _server.CompileAsync(Environment, CurrentSnapshot, cancellationToken);
 }

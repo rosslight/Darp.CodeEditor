@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization.Metadata;
 using Darp.CodeEditor.CSharpScript.Protocol;
 using Darp.CodeEditor.Lsp;
+using Microsoft.CodeAnalysis.Text;
 
 namespace Darp.CodeEditor.CSharpScript.Server;
 
@@ -83,6 +84,7 @@ internal sealed class ScriptServer
             ),
             "textDocument/completion" => Complete(parameters, cancellationToken),
             "completionItem/resolve" => Resolve(parameters, cancellationToken),
+            ScriptCompileParams.Method => Compile(parameters, cancellationToken),
             _ => throw new JsonRpcException(JsonRpcErrorCodes.MethodNotFound, $"Unknown method '{method}'."),
         };
 
@@ -132,6 +134,32 @@ internal sealed class ScriptServer
         return Serialized(resolved, LspJsonContext.Default.LspCompletionItem);
     }
 
+    /// <summary>
+    /// Compiles on the thread pool. An open script with this text in this environment lends its snapshot, whose
+    /// compilation the editor's diagnostics already built; other text, as a version the document has left behind, opens
+    /// on its own and takes no part in the document's life.
+    /// </summary>
+    private Task<JsonNode?> Compile(JsonElement json, CancellationToken cancellationToken)
+    {
+        ScriptCompileParams parameters = Read(json, ScriptProtocolJson.Default.ScriptCompileParams);
+        ScriptContext context = ContextOf(parameters.Environment);
+        SourceText text = SourceText.From(parameters.Text);
+        ScriptSnapshot snapshot =
+            _scripts
+                .Values.Where(open => open.Context == context && open.Snapshot.Text.ContentEquals(text))
+                .Select(open => open.Snapshot)
+                .FirstOrDefault()
+            ?? context.Open(parameters.Text, version: 0);
+        return Task.Run(
+            async () =>
+                JsonSerializer.SerializeToNode(
+                    await ScriptCompiler.CompileAsync(snapshot, cancellationToken).ConfigureAwait(false),
+                    ScriptProtocolJson.Default.ScriptCompileResult
+                ),
+            cancellationToken
+        );
+    }
+
     private static async Task<JsonNode?> Serialized<T>(Task<T?> answer, JsonTypeInfo<T> type)
         where T : class =>
         await answer.ConfigureAwait(false) is { } value ? JsonSerializer.SerializeToNode(value, type) : null;
@@ -162,19 +190,22 @@ internal sealed class ScriptServer
 
     private void Open(TextDocumentItem document)
     {
-        if (document.Data is not { } data)
-            throw new JsonException("A script needs its environment.");
-        string key = data.ToJsonString();
-        if (!_contexts.TryGetValue(key, out ScriptContext? context))
-        {
-            ScriptEnvironmentData environment =
-                data.Deserialize(ScriptProtocolJson.Default.ScriptEnvironmentData)
-                ?? throw new JsonException("A script needs its environment.");
-            _contexts[key] = context = new ScriptContext(environment);
-        }
-        var script = new OpenScript(document.Uri, context.Open(document.Text, document.Version));
+        ScriptEnvironmentData environment =
+            document.Data?.Deserialize(ScriptProtocolJson.Default.ScriptEnvironmentData)
+            ?? throw new JsonException("A script needs its environment.");
+        ScriptContext context = ContextOf(environment);
+        var script = new OpenScript(document.Uri, context, context.Open(document.Text, document.Version));
         _scripts[document.Uri] = script;
         Analyze(script, TimeSpan.Zero);
+    }
+
+    /// <summary>The loaded environment with these settings, loading it the first time.</summary>
+    private ScriptContext ContextOf(ScriptEnvironmentData environment)
+    {
+        string key = JsonSerializer.Serialize(environment, ScriptProtocolJson.Default.ScriptEnvironmentData);
+        if (!_contexts.TryGetValue(key, out ScriptContext? context))
+            _contexts[key] = context = new ScriptContext(environment);
+        return context;
     }
 
     private void Change(DidChangeTextDocumentParams change)

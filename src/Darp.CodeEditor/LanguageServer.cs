@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Avalonia;
 using Darp.CodeEditor.LanguageClient;
@@ -105,7 +106,10 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
     /// <exception cref="InvalidOperationException">
     /// The process did not start or did not answer in time. The message says why, with the end of its standard error.
     /// </exception>
-    public async Task StartAsync(CancellationToken cancellationToken = default)
+    public Task StartAsync(CancellationToken cancellationToken = default) => ReadyConnectionAsync(cancellationToken);
+
+    /// <summary>The process that answers now, starting one if none runs, once it has answered <c>initialize</c>.</summary>
+    private async Task<ServerConnection> ReadyConnectionAsync(CancellationToken cancellationToken)
     {
         ServerConnection connection;
         bool changed = false;
@@ -126,6 +130,38 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
         // The process keeps starting for the documents when the caller stops waiting.
         if (await connection.Initialized.WaitAsync(cancellationToken).ConfigureAwait(false) is { } failure)
             throw failure;
+        return connection;
+    }
+
+    /// <summary>
+    /// Sends a request of the server's own, for a server that adds some to the protocol. It waits while the server
+    /// starts or restarts, and asks the next process when the one it asked ends.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The process did not start.</exception>
+    /// <exception cref="IOException">Processes kept ending until the server is <see cref="LanguageServerState.Failed"/>.</exception>
+    /// <exception cref="TimeoutException">The process did not answer in time.</exception>
+    /// <exception cref="JsonRpcException">The server answered with an error.</exception>
+    internal async Task<JsonElement> RequestAsync(
+        string method,
+        Action<Utf8JsonWriter> writeParams,
+        CancellationToken cancellationToken
+    )
+    {
+        while (true)
+        {
+            ServerConnection connection = await ReadyConnectionAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                return await connection.RequestAsync(method, writeParams, cancellationToken).ConfigureAwait(false);
+            }
+            catch (IOException) when (!cancellationToken.IsCancellationRequested)
+            {
+                await connection.Ended.WaitAsync(cancellationToken).ConfigureAwait(false);
+                // A request that ends every process must not start new ones for ever.
+                if (State == LanguageServerState.Failed)
+                    throw;
+            }
+        }
     }
 
     /// <summary>
