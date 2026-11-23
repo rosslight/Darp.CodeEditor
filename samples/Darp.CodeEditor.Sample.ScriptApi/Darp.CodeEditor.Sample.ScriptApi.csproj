@@ -7,4 +7,9 @@
     <!-- Its docs show up in the editor's hover and completion. -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- The bridge's proxies are generated at build time, for NativeAOT. -->
+    <PackageReference Include="StreamJsonRpc" />
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharpScript.Runner\Darp.CodeEditor.CSharpScript.Runner.csproj" />
+  </ItemGroup>
 </Project>

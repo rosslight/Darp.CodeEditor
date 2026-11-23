@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Runtime.InteropServices;
 using Darp.CodeEditor.CSharpScript.Protocol;
 
@@ -9,6 +10,7 @@ namespace Darp.CodeEditor.CSharpScript;
 internal sealed class ScriptAppFiles
 {
     private const string ServerName = "Darp.CodeEditor.CSharpScript.Server";
+    private const string RunnerName = "Darp.CodeEditor.CSharpScript.Runner.Process";
 
     private static readonly string s_helpers = Path.Combine(AppContext.BaseDirectory, "helpers");
 
@@ -24,18 +26,36 @@ internal sealed class ScriptAppFiles
         _framework = framework;
     }
 
+    /// <summary>How to start the server.</summary>
+    public static (string FileName, string[] Arguments) ServerCommand() => HelperCommand("csharp-server", ServerName);
+
+    /// <summary>How to start a session's runner.</summary>
+    public static (string FileName, string[] Arguments) RunnerCommand() => HelperCommand("csharp-runner", RunnerName);
+
     /// <summary>
-    /// How to start the server. A published app has its app host, which runs on the runtime in <c>helpers/dotnet</c>. In
-    /// development the server runs on the <c>dotnet</c> host of the installation whose runtime runs the app, never on one
-    /// from <c>PATH</c>, which may lack that runtime.
+    /// The assembly whose dependency manifest describes what a runner loads: the publish of the marked references, or
+    /// in development the app itself, whose output holds them.
     /// </summary>
-    public static (string FileName, string[] Arguments) ServerCommand()
+    public static string ScriptApiRoot()
     {
-        string server = Path.Combine(s_helpers, "csharp-server", ServerName);
+        string published = Path.Combine(s_helpers, "script-api", "CSharpScriptApiRoot.dll");
+        return File.Exists(published)
+            ? published
+            : Path.Combine(AppContext.BaseDirectory, Assembly.GetEntryAssembly()?.GetName().Name + ".dll");
+    }
+
+    /// <summary>
+    /// How to start a helper. A published app has its app host, which runs on the runtime in <c>helpers/dotnet</c>. In
+    /// development the helper runs on the <c>dotnet</c> host of the installation whose runtime runs the app, never on
+    /// one from <c>PATH</c>, which may lack that runtime.
+    /// </summary>
+    private static (string FileName, string[] Arguments) HelperCommand(string folder, string name)
+    {
+        string helper = Path.Combine(s_helpers, folder, name);
         string extension = OperatingSystem.IsWindows() ? ".exe" : "";
-        string appHost = server + extension;
+        string appHost = helper + extension;
         return !File.Exists(appHost) && InstalledHost(RuntimeEnvironment.GetRuntimeDirectory(), extension) is { } host
-            ? (host, [server + ".dll"])
+            ? (host, [helper + ".dll"])
             : (appHost, []);
     }
 

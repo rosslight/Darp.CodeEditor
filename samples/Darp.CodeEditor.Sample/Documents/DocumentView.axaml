@@ -8,41 +8,60 @@
     x:Class="Sample.Documents.DocumentView"
     x:DataType="local:MainViewModel"
 >
-    <ce:CodeEditor
-        Name="Editor"
-        WordWrap="{Binding Settings.WordWrap}"
-        ShowLineNumbers="{Binding Settings.ShowLineNumbers}"
-        FontSize="{Binding Settings.FontSize}"
-        Padding="8,6,0,0"
-    >
-        <!-- Replaces the editor's own menu, which is in English, to follow the app's language. -->
-        <ce:CodeEditor.ContextFlyout>
-            <fa:FAMenuFlyout>
-                <fa:FAMenuFlyoutItem
-                    Text="{Binding Cut, Source={x:Static loc:Strings.Default}}"
-                    IconSource="Cut"
-                    InputGesture="{Binding Settings.Hotkeys.Cut.Gesture}"
-                    Click="OnCut"
+    <DockPanel>
+        <!-- Only for C# scripts: runs the shown script in a session of its own. -->
+        <StackPanel Name="ScriptControls" DockPanel.Dock="Bottom" IsVisible="False" Margin="8" Spacing="6">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <Button
+                    Name="RunButton"
+                    Content="{Binding RunScript, Source={x:Static loc:Strings.Default}}"
+                    Click="OnRunScript"
                 />
-                <fa:FAMenuFlyoutItem
-                    Text="{Binding Copy, Source={x:Static loc:Strings.Default}}"
-                    IconSource="Copy"
-                    InputGesture="{Binding Settings.Hotkeys.Copy.Gesture}"
-                    Click="OnCopy"
+                <Button
+                    Name="StopButton"
+                    Content="{Binding StopScript, Source={x:Static loc:Strings.Default}}"
+                    IsEnabled="False"
+                    Click="OnStopScript"
                 />
-                <fa:FAMenuFlyoutItem
-                    Text="{Binding Paste, Source={x:Static loc:Strings.Default}}"
-                    IconSource="Paste"
-                    InputGesture="{Binding Settings.Hotkeys.Paste.Gesture}"
-                    Click="OnPaste"
-                />
-                <fa:FAMenuFlyoutSeparator />
-                <fa:FAMenuFlyoutItem
-                    Text="{Binding SelectAll, Source={x:Static loc:Strings.Default}}"
-                    InputGesture="{Binding Settings.Hotkeys.SelectAll.Gesture}"
-                    Click="OnSelectAll"
-                />
-            </fa:FAMenuFlyout>
-        </ce:CodeEditor.ContextFlyout>
-    </ce:CodeEditor>
+            </StackPanel>
+            <TextBox Name="ScriptOutput" IsReadOnly="True" Height="120" FontFamily="monospace" />
+        </StackPanel>
+        <ce:CodeEditor
+            Name="Editor"
+            WordWrap="{Binding Settings.WordWrap}"
+            ShowLineNumbers="{Binding Settings.ShowLineNumbers}"
+            FontSize="{Binding Settings.FontSize}"
+            Padding="8,6,0,0"
+        >
+            <!-- Replaces the editor's own menu, which is in English, to follow the app's language. -->
+            <ce:CodeEditor.ContextFlyout>
+                <fa:FAMenuFlyout>
+                    <fa:FAMenuFlyoutItem
+                        Text="{Binding Cut, Source={x:Static loc:Strings.Default}}"
+                        IconSource="Cut"
+                        InputGesture="{Binding Settings.Hotkeys.Cut.Gesture}"
+                        Click="OnCut"
+                    />
+                    <fa:FAMenuFlyoutItem
+                        Text="{Binding Copy, Source={x:Static loc:Strings.Default}}"
+                        IconSource="Copy"
+                        InputGesture="{Binding Settings.Hotkeys.Copy.Gesture}"
+                        Click="OnCopy"
+                    />
+                    <fa:FAMenuFlyoutItem
+                        Text="{Binding Paste, Source={x:Static loc:Strings.Default}}"
+                        IconSource="Paste"
+                        InputGesture="{Binding Settings.Hotkeys.Paste.Gesture}"
+                        Click="OnPaste"
+                    />
+                    <fa:FAMenuFlyoutSeparator />
+                    <fa:FAMenuFlyoutItem
+                        Text="{Binding SelectAll, Source={x:Static loc:Strings.Default}}"
+                        InputGesture="{Binding Settings.Hotkeys.SelectAll.Gesture}"
+                        Click="OnSelectAll"
+                    />
+                </fa:FAMenuFlyout>
+            </ce:CodeEditor.ContextFlyout>
+        </ce:CodeEditor>
+    </DockPanel>
 </UserControl>

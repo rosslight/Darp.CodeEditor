@@ -11,9 +11,11 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Darp.CodeEditor.CSharpScript" Version="$(DarpCodeEditorVersion)" />
+    <PackageReference Include="Darp.CodeEditor.CSharpScript.Runner" Version="$(DarpCodeEditorVersion)" />
     <PackageReference Include="Avalonia.Headless" Version="12.1.5" />
     <!-- A package whose native library the payload's resolver must find. -->
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" CSharpScriptReference="true" />
+    <ProjectReference Include="..\Bridge\Bridge.csproj" CSharpScriptReference="true" />
     <ProjectReference Include="..\ScriptApi\ScriptApi.csproj" CSharpScriptReference="true" />
     <!-- Two references that need different, compatible versions of one dependency. -->
     <ProjectReference

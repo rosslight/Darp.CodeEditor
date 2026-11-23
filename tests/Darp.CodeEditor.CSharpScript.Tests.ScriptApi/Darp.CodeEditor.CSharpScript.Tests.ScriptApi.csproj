@@ -6,5 +6,9 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Darp.CodeEditor.CSharpScript.Tests.Dependency\Darp.CodeEditor.CSharpScript.Tests.Dependency.csproj" />
+    <!-- For session objects whose creation fails, and a bridge without generated proxies. -->
+    <PackageReference Include="StreamJsonRpc" />
+    <ProjectReference Include="..\..\samples\Darp.CodeEditor.UseCases.ScriptApi\Darp.CodeEditor.UseCases.ScriptApi.csproj" />
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharpScript.Runner\Darp.CodeEditor.CSharpScript.Runner.csproj" />
   </ItemGroup>
 </Project>

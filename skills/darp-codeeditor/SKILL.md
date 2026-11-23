@@ -1,6 +1,6 @@
 ---
 name: darp-codeeditor
-description: Darp.CodeEditor in Avalonia apps. Use when adding a CodeEditor, or working with its documents, language servers, saving, tabs or themes.
+description: Darp.CodeEditor in Avalonia apps. Use when adding a CodeEditor, or working with its documents, language servers, C# scripts, saving, tabs or themes.
 ---
 
 # Darp.CodeEditor
@@ -81,6 +81,24 @@ CodeDocument document = server.CreateDocument(CodeLanguage.Json, text, filePath)
 - Give each open document of a server a different `filePath`, or none.
 - Keep one server for as long as the app needs it. Dispose its documents, then the server: `DisposeAsync()` during
   normal use, `Dispose()` in the app's exit handler.
+
+## C# scripts
+
+`Darp.CodeEditor.CSharpScript` edits and compiles scripts, and `Darp.CodeEditor.CSharpScript.Runner` runs them in a
+separate process, a session. Guide: <https://rosslight.github.io/Darp.CodeEditor/csharp-scripts/>.
+
+- **Projects:** a bridge project with two `[JsonRpcContract, GenerateShape(IncludeMethods = MethodShapeFlags.PublicInstance)]`
+  interfaces and `[assembly: ExportRpcContractProxies]`; a runner-side project with the session object and the globals.
+  The app marks both with `CSharpScriptReference="true"`.
+- **Session object:** implements the session side, `IScriptSessionObject<TSelf, TAppSide>` and one
+  `IScriptGlobalsFactory<TGlobals, TInput>` per kind of script, explicitly. The globals' public members are what scripts
+  see.
+- **Running:** `document.CompileAsync()`, `CSharpScriptSession.StartAsync<TAppSide, TSessionSide, TSessionObject>(...)`,
+  `session.StartScriptAsync(script, input)`, then `run.RunToEndAsync(stop, killSessionAfter)`.
+- **Failures:** a script's is `CSharpScriptException`, with its line. After `ConnectionLostException`, await
+  `session.Exited` for the reason. A session doesn't restart: start a new one.
+- **Publishing:** needs a `RuntimeIdentifier` and `PublishReadyToRun=true`, also in a NativeAOT app.
+- A callback that outlives its run may use only what outlives the run: the session object, not the run's globals.
 
 ## Look and keys
 

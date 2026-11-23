@@ -16,7 +16,7 @@ namespace Darp.CodeEditor.Lsp;
 internal sealed class ServerProcess : IDisposable
 {
     /// <summary>How many of the last lines of standard error stay for error messages.</summary>
-    private const int TailLines = 20;
+    private const int TailLines = 100;
 
     /// <summary>Lines of the tail are cut to this many characters.</summary>
     private const int MaxTailLineLength = 1000;
@@ -26,6 +26,9 @@ internal sealed class ServerProcess : IDisposable
 
     /// <summary>The last lines of standard error; guarded by itself, since the lines arrive on another thread.</summary>
     private readonly Queue<string> _tail = new();
+
+    private readonly TaskCompletionSource _exited = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _standardErrorEnded = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private ServerProcess(Process process, Action<string>? standardError)
     {
@@ -42,8 +45,20 @@ internal sealed class ServerProcess : IDisposable
     /// <summary>The process's standard output.</summary>
     public Stream Output => _process.StandardOutput.BaseStream;
 
-    /// <summary>The exit code, once <see cref="WaitForExitAsync"/> completed.</summary>
+    /// <summary>The exit code, once the process has exited.</summary>
     public int ExitCode => _process.ExitCode;
+
+    /// <summary>Whether the process has exited.</summary>
+    public bool HasExited => _process.HasExited;
+
+    /// <summary>
+    /// Completes when the process has exited, also while a child it left behind holds standard error open, which
+    /// <see cref="WaitForExitAsync"/> waits for.
+    /// </summary>
+    public Task Exited => _exited.Task;
+
+    /// <summary>Completes when standard error has been read to its end.</summary>
+    public Task StandardErrorEnded => _standardErrorEnded.Task;
 
     /// <summary>The last lines that the process wrote to standard error, one per line.</summary>
     public string StandardErrorTail
@@ -67,14 +82,17 @@ internal sealed class ServerProcess : IDisposable
         startInfo.RedirectStandardOutput = true;
         startInfo.RedirectStandardError = true;
         startInfo.StandardErrorEncoding = Encoding.UTF8;
-        var process = new Process { StartInfo = startInfo };
+        var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         var server = new ServerProcess(process, standardError);
         process.ErrorDataReceived += server.OnErrorData;
+        process.Exited += (_, _) => server._exited.TrySetResult();
         process.Start();
         try
         {
             ChildProcessJob.Add(process);
         }
+        // Exited before it could join: the normal way out reports its standard error.
+        catch (Win32Exception) when (process.HasExited) { }
         catch
         {
             server.Dispose();
@@ -110,7 +128,10 @@ internal sealed class ServerProcess : IDisposable
     {
         // Null marks the end of the stream.
         if (e.Data is not { } line)
+        {
+            _standardErrorEnded.TrySetResult();
             return;
+        }
         lock (_tail)
         {
             if (_tail.Count == TailLines)

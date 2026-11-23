@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk" TreatAsLocalProperty="PublishAot;PublishTrimmed;PublishSingleFile;PublishReadyToRun">
+  <PropertyGroup>
+    <!-- It loads the script API's assemblies and compiled scripts, so the runner runs on the JIT. -->
+    <CSharpScriptHelperName>csharp-runner</CSharpScriptHelperName>
+    <GetCSharpScriptHelperFilesDependsOn>WriteBridgePins</GetCSharpScriptHelperFilesDependsOn>
+    <!-- LibraryImport generates unsafe code for moving the standard streams. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- The contracts' own references, the editor and Avalonia, stay out of its folder: nothing here loads them. -->
+    <_FindDependencies>false</_FindDependencies>
+  </PropertyGroup>
+  <Import Project="..\CSharpScriptHelper.targets" />
+  <ItemGroup>
+    <ProjectReference
+      Include="..\Darp.CodeEditor.CSharpScript.Runner\Darp.CodeEditor.CSharpScript.Runner.csproj"
+      ExcludeAssets="all"
+    />
+    <PackageReference Include="StreamJsonRpc" />
+  </ItemGroup>
+  <!-- NuGet excludes Avalonia's assets from the reference above, but not its source generator. -->
+  <Target Name="RemoveAvaloniaGenerators" BeforeTargets="CoreCompile">
+    <ItemGroup>
+      <Analyzer Remove="@(Analyzer)" Condition="'%(Analyzer.NuGetPackageId)' == 'Avalonia'" />
+    </ItemGroup>
+  </Target>
+  <!-- The bridge's packages load once, from here: the publish of the marked references must resolve these versions. -->
+  <Target Name="WriteBridgePins" DependsOnTargets="ResolveReferences">
+    <PropertyGroup>
+      <_BridgePins>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'bridge-pins.txt'))</_BridgePins>
+    </PropertyGroup>
+    <ItemGroup>
+      <_BridgeAsset
+        Include="@(ReferenceCopyLocalPaths)"
+        Condition="'%(ReferenceCopyLocalPaths.NuGetPackageId)' != ''"
+      />
+      <_BridgePackage Include="@(_BridgeAsset->'%(NuGetPackageId) %(NuGetPackageVersion)'->Distinct())" />
+      <_HelperOwnFile Include="$(_BridgePins)" />
+      <FileWrites Include="$(_BridgePins)" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(_BridgePins)" Lines="@(_BridgePackage)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
+</Project>

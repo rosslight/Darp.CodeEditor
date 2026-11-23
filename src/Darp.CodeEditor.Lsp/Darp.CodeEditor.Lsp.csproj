@@ -10,6 +10,7 @@
     <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript" />
     <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript.Protocol" />
     <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript.Server" />
+    <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript.Runner" />
     <InternalsVisibleTo Include="Darp.CodeEditor.Tests" />
     <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript.Tests" />
     <!-- The fake language server starts a child through ServerProcess, for the test of processes ending with the app. -->

@@ -144,4 +144,12 @@ internal static class Wait
         while (!condition())
             await Task.Delay(5, timeout.Token);
     }
+
+    /// <summary>Awaits <paramref name="task"/> for 60 seconds at most: a cap, not a latency.</summary>
+    public static Task ForAsync(Task task) =>
+        task.WaitAsync(TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
+
+    /// <inheritdoc cref="ForAsync(Task)"/>
+    public static Task<T> ForAsync<T>(Task<T> task) =>
+        task.WaitAsync(TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
 }

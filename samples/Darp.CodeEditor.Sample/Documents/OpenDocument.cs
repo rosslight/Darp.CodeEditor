@@ -36,6 +36,12 @@ public sealed partial class OpenDocument : ObservableObject, IDisposable
     /// <summary>The C# script server, for the status bar of a script. The <see cref="Workspace"/> owns it.</summary>
     public CSharpScriptServer? ScriptServer { get; init; }
 
+    /// <summary>Stops the script's run; null while it doesn't run.</summary>
+    public CancellationTokenSource? ScriptStop { get; set; }
+
+    /// <summary>The last lines of the script's latest run. The UI thread owns them.</summary>
+    public Queue<string> ScriptOutput { get; set; } = new();
+
     [ObservableProperty]
     public partial string Name { get; private set; }
 
@@ -77,6 +83,7 @@ public sealed partial class OpenDocument : ObservableObject, IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
+        ScriptStop?.Cancel();
         Document.Dispose();
         File?.Dispose();
     }

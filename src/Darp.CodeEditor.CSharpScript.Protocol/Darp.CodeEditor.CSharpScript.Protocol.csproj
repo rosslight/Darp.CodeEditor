@@ -10,6 +10,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript" />
     <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript.Server" />
+    <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript.Runner" />
     <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript.Tests" />
   </ItemGroup>
 </Project>

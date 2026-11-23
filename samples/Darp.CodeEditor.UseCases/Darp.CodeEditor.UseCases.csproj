@@ -1,7 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!--
-    Use cases written against the API draft. They compile but do not run: the API's members are not implemented yet.
-    Each file is one scenario of a host app.
+    Use cases of the API. Each file is one scenario of a host app; the tests run the sessions of use cases 06 to 08.
   -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -20,8 +19,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharpScript.Runner\Darp.CodeEditor.CSharpScript.Runner.csproj" />
     <!--
-      Planned MSBuild switch: scripts may use the assemblies of references marked CSharpScriptReference, and publish
-      copies their DLLs next to the app, NativeAOT apps included. It does nothing in the draft.
+      Scripts may use the assemblies of references marked CSharpScriptReference, and publishing deploys them for the
+      runner, NativeAOT apps included.
     -->
     <ProjectReference
       Include="..\Darp.CodeEditor.UseCases.ScriptApi\Darp.CodeEditor.UseCases.ScriptApi.csproj"

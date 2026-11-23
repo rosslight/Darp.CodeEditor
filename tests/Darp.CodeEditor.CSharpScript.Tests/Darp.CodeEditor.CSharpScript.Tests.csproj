@@ -15,11 +15,26 @@
     <PackageReference Include="xunit.v3.aot" />
   </ItemGroup>
   <ItemGroup>
+    <!-- The clock that the editor's tests advance by hand. -->
+    <Compile Include="..\Darp.CodeEditor.Tests\ManualTime.cs" Link="ManualTime.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <Using Include="Shouldly" />
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharpScript\Darp.CodeEditor.CSharpScript.csproj" />
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharpScript.Runner\Darp.CodeEditor.CSharpScript.Runner.csproj" />
+    <!-- The use cases run for real, on their script API. -->
+    <ProjectReference Include="..\..\samples\Darp.CodeEditor.UseCases\Darp.CodeEditor.UseCases.csproj" />
+    <ProjectReference
+      Include="..\..\samples\Darp.CodeEditor.UseCases.ScriptApi\Darp.CodeEditor.UseCases.ScriptApi.csproj"
+      CSharpScriptReference="true"
+    />
+    <ProjectReference
+      Include="..\..\samples\Darp.CodeEditor.UseCases.ScriptApi.Runner\Darp.CodeEditor.UseCases.ScriptApi.Runner.csproj"
+      CSharpScriptReference="true"
+    />
     <!-- The editor references it privately; the tests read what the client reads. -->
     <ProjectReference Include="..\..\src\Darp.CodeEditor.Lsp\Darp.CodeEditor.Lsp.csproj" />
     <!-- Runs in its own process: it checks that compiling works before Avalonia is set up. -->
@@ -33,5 +48,6 @@
       CSharpScriptReference="true"
     />
   </ItemGroup>
+  <Import Project="..\..\src\Darp.CodeEditor.CSharpScript.Runner\buildTransitive\Darp.CodeEditor.CSharpScript.Runner.targets" />
   <Import Project="..\..\src\Darp.CodeEditor.CSharpScript\buildTransitive\Darp.CodeEditor.CSharpScript.targets" />
 </Project>

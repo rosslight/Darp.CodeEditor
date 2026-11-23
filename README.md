@@ -12,8 +12,7 @@ see, and the package brings the language server and a runner that executes scrip
 
 ![Completing and hovering Python code, then completing a value and hovering a schema error in JSON](https://raw.githubusercontent.com/rosslight/Darp.CodeEditor/main/docs/images/editor-demo.gif)
 
-> **Status:** 0.x. The editor works today, and its API may still change. The C# scripting packages are in development
-> and not released yet.
+> **Status:** 0.x. The API may still change.
 
 ## Quickstart
 
@@ -71,8 +70,8 @@ More information: [Getting started](https://rosslight.github.io/Darp.CodeEditor/
 | Package | What it adds | Status |
 |---|---|---|
 | [`Darp.CodeEditor`](https://www.nuget.org/packages/Darp.CodeEditor) | The editor, JSON, XML and YAML, and a client for any language server | Available |
-| `Darp.CodeEditor.CSharpScript` | C# scripts with an environment your app defines: language server and compilation | Not released yet |
-| `Darp.CodeEditor.CSharpScript.Runner` | Runs scripts in a separate process, with a typed bridge to your app | Not released yet |
+| `Darp.CodeEditor.CSharpScript` | C# scripts with an environment your app defines: language server and compilation | Available |
+| `Darp.CodeEditor.CSharpScript.Runner` | Runs scripts in a separate process, with a typed bridge to your app | Available |
 
 ## Features
 
@@ -115,10 +114,25 @@ More information: [Language servers](https://rosslight.github.io/Darp.CodeEditor
 
 ## C# scripting
 
-C# scripting is the main use case for the packaged language servers, and is in development. Your app will define the
-globals, references and imports a script sees. The editor checks scripts against that same definition, and the runner
-executes them in a separate process, with a typed bridge back to your app. The planned API is in
-[design/api.md](https://github.com/rosslight/Darp.CodeEditor/blob/main/design/api.md#7-sessions).
+Your app defines the globals, references and imports a script sees. The editor checks scripts against that same
+definition, the C# server compiles them, and a runner executes them in a separate process, with a typed bridge back to
+your app. It works in JIT and NativeAOT apps:
+
+```csharp
+var environment = new CSharpScriptEnvironment<Globals>();
+CSharpScriptDocument<Globals> document = server.CreateDocument(environment, """await AskAsync("Continue?");""");
+Editor.Document = document;
+
+CSharpScriptCompilation<Globals> compilation = await document.CompileAsync(stop);
+if (compilation.Script is { } script)
+{
+    await using var session = await CSharpScriptSession.StartAsync<IAppSide, ISessionSide, Session>(new AppSide(), stop);
+    CSharpScriptRun run = await session.StartScriptAsync(script, new RunInput("first"), stop);
+    await run.RunToEndAsync(stop, killSessionAfter: TimeSpan.FromSeconds(2));
+}
+```
+
+More information: [C# scripts](https://rosslight.github.io/Darp.CodeEditor/csharp-scripts/).
 
 ## Learn more
 

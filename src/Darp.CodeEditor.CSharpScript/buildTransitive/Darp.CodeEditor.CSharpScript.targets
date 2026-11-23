@@ -301,6 +301,7 @@
   <!--
     The runner starts on the base .NET runtime, so nothing that needs another shared framework can load in it. The Windows
     API projection of a versioned Windows target is no shared framework: its assemblies are published with the reference.
+    On Windows the bridge's threading library names WPF, but only in a copy that the runner replaces with its own.
   -->
   <Target
     Name="_CheckCSharpScriptFrameworks"
@@ -310,7 +311,7 @@
     <ItemGroup>
       <_CSharpScriptOtherFramework
         Include="@(FrameworkReference)"
-        Exclude="Microsoft.NETCore.App;Microsoft.Windows.SDK.NET.Ref;Microsoft.Windows.SDK.NET.Ref.Windows"
+        Exclude="Microsoft.NETCore.App;Microsoft.Windows.SDK.NET.Ref;Microsoft.Windows.SDK.NET.Ref.Windows;Microsoft.WindowsDesktop.App.WPF"
       />
     </ItemGroup>
     <Error

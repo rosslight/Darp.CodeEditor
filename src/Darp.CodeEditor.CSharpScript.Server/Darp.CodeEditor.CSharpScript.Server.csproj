@@ -1,24 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk" TreatAsLocalProperty="PublishAot;PublishTrimmed;PublishSingleFile;PublishReadyToRun">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <!-- Roslyn's workspaces compose themselves with reflection: the server always runs on the JIT. -->
-    <IsAotCompatible>false</IsAotCompatible>
-    <GenerateDocumentationFile>false</GenerateDocumentationFile>
-    <!-- The app starts it through the dotnet host, or an app host made when the app is published. -->
-    <UseAppHost>false</UseAppHost>
-    <!-- It stays framework-dependent for a self-contained or NativeAOT app, which starts it and loads none of it. -->
-    <ShouldBeValidatedAsExecutableReference>false</ShouldBeValidatedAsExecutableReference>
-    <!--
-      An app that publishes passes these to all it references. The libraries the server shares with it keep them, so that
-      a parallel build makes one copy of each; the server itself is always a portable JIT build.
-    -->
-    <PublishAot>false</PublishAot>
-    <PublishTrimmed>false</PublishTrimmed>
-    <PublishSingleFile>false</PublishSingleFile>
-    <PublishReadyToRun>false</PublishReadyToRun>
-    <!-- Roslyn's messages in English, instead of a dozen folders of resources next to the app. -->
-    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- Roslyn's workspaces compose themselves with reflection, so the server runs on the JIT. -->
+    <CSharpScriptHelperName>csharp-server</CSharpScriptHelperName>
   </PropertyGroup>
+  <Import Project="..\CSharpScriptHelper.targets" />
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Features" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />
@@ -27,24 +12,4 @@
     <ProjectReference Include="..\Darp.CodeEditor.Lsp\Darp.CodeEditor.Lsp.csproj" />
     <ProjectReference Include="..\Darp.CodeEditor.CSharpScript.Protocol\Darp.CodeEditor.CSharpScript.Protocol.csproj" />
   </ItemGroup>
-  <!--
-    What an app needs of the server next to it, wherever this build put its output: an app's build asks for it, and its
-    own output folder may be shared with other projects.
-  -->
-  <Target Name="GetCSharpScriptHelperFiles" DependsOnTargets="ResolveReferences" Returns="@(_HelperFile)">
-    <ItemGroup>
-      <_HelperOwnFile Include="$(TargetPath);$(ProjectDepsFilePath);$(ProjectRuntimeConfigFilePath)" />
-      <_HelperFile
-        Include="@(_HelperOwnFile)"
-        Helper="csharp-server"
-        HelperPath="%(_HelperOwnFile.Filename)%(_HelperOwnFile.Extension)"
-      />
-      <_HelperDependency Include="@(ReferenceCopyLocalPaths->WithMetadataValue('Extension', '.dll'))" />
-      <_HelperFile
-        Include="@(_HelperDependency)"
-        Helper="csharp-server"
-        HelperPath="%(_HelperDependency.DestinationSubDirectory)%(_HelperDependency.Filename)%(_HelperDependency.Extension)"
-      />
-    </ItemGroup>
-  </Target>
 </Project>
