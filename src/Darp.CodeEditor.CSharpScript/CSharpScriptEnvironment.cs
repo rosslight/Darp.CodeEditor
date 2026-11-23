@@ -18,8 +18,9 @@ namespace Darp.CodeEditor.CSharpScript;
 /// </para>
 /// <para>
 /// Scripts can use the assemblies of references that the app's project marks with <c>CSharpScriptReference="true"</c>,
-/// plus .NET's own. The build writes a list of the marked assemblies, and publishing copies their DLLs next to the
-/// app, NativeAOT apps included: the language server reads those files, and the runner loads them.
+/// plus .NET's own. The build writes a list of the marked assemblies, and publishing puts their DLLs in the app's
+/// <c>helpers/script-api</c> folder, NativeAOT apps included: the language server reads those files, and the runner
+/// loads them.
 /// </para>
 /// <para>
 /// Documents and compilations keep a copy of the environment, so changing its lists afterwards has no effect. Two
