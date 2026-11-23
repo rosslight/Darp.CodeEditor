@@ -91,6 +91,8 @@ internal sealed class ServerProcess : IDisposable
         {
             ChildProcessJob.Add(process);
         }
+        // Exited before it could join: the normal way out reports its standard error.
+        catch (Win32Exception) when (process.HasExited) { }
         catch
         {
             server.Dispose();
