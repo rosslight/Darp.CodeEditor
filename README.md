@@ -17,7 +17,7 @@ see, and the package brings the language server and a runner that executes scrip
 
 ## Quickstart
 
-Requires .NET 10 and Avalonia 12.
+Requires .NET 10 and Avalonia 12.1.5 or later.
 
 ```sh
 dotnet add package Darp.CodeEditor
@@ -48,6 +48,8 @@ Give it a document. Your app owns the document and disposes it:
 
 ```csharp
 // MainWindow.axaml.cs
+using Darp.CodeEditor;
+
 public partial class MainWindow : Window
 {
     private readonly CodeDocument _document = CodeDocument.Create(CodeLanguage.Json, """{ "hello": "world" }""");
@@ -60,6 +62,9 @@ public partial class MainWindow : Window
     }
 }
 ```
+
+More information: [Getting started](https://rosslight.github.io/Darp.CodeEditor/) and
+[Documents and editors](https://rosslight.github.io/Darp.CodeEditor/documents/).
 
 ## Packages
 
@@ -74,12 +79,15 @@ public partial class MainWindow : Window
 - **Highlighting:** TextMate grammars and VS Code color themes, with Light+ and Dark+ following your app's theme.
 - **Language servers:** completion, signature help, hover and diagnostics. The UI never waits for a server.
 - **Editing:** auto-indent, bracket matching, auto-closing pairs, comment toggling, rectangle selection and line commands.
-- **Search:** find and replace with regular expressions, running in the background.
+- **Search:** plain-text find and replace, with Match Case and Match Whole Word, running in the background.
 - **Documents:** undo history per document, and several editors can show the same document.
 - **NativeAOT:** the editor works in trimmed, ahead-of-time compiled apps.
 
 Darp.CodeEditor is a light editor for scripts and small files, not an IDE. Rename, quick fixes, refactorings, find
 usages and formatting are out of scope for v1.
+
+More information: [What the editor covers](https://rosslight.github.io/Darp.CodeEditor/#what-the-editor-covers) and
+[Customizing](https://rosslight.github.io/Darp.CodeEditor/customizing/).
 
 ## Connect a language server
 
@@ -102,19 +110,24 @@ and the server when your app exits.
 
 For another language, create a `CodeLanguage` from a VS Code extension's grammar and language configuration.
 
+More information: [Language servers](https://rosslight.github.io/Darp.CodeEditor/language-servers/) and
+[Languages](https://rosslight.github.io/Darp.CodeEditor/languages/).
+
 ## C# scripting
 
 C# scripting is the main use case for the packaged language servers, and is in development. Your app will define the
 globals, references and imports a script sees. The editor checks scripts against that same definition, and the runner
 executes them in a separate process, with a typed bridge back to your app. The planned API is in
-[docs/api.md](https://github.com/rosslight/Darp.CodeEditor/blob/main/docs/api.md#7-sessions).
+[design/api.md](https://github.com/rosslight/Darp.CodeEditor/blob/main/design/api.md#7-sessions).
 
 ## Learn more
 
+- **[Documentation](https://rosslight.github.io/Darp.CodeEditor/):** focused guides for people and AI agents, with an
+  [`llms.txt`](https://rosslight.github.io/Darp.CodeEditor/llms.txt) index.
 - **[Sample app](https://github.com/rosslight/Darp.CodeEditor/tree/main/samples/Darp.CodeEditor.Sample):** documents,
   files, language servers, themes and NativeAOT publishing in one app.
 - **API documentation:** every public member is documented, and shows up in your IDE.
-- **[Design](https://github.com/rosslight/Darp.CodeEditor/blob/main/docs/design.md):** goals, performance budgets and
+- **[Design](https://github.com/rosslight/Darp.CodeEditor/blob/main/design/design.md):** goals, performance budgets and
   decisions.
 - **AI agents:** the `Darp.CodeEditor` package includes a skill at `skills/darp-codeeditor/SKILL.md`. After a restore,
   find it in your NuGet packages folder under `darp.codeeditor/<version>/`.

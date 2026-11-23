@@ -9,7 +9,9 @@ The app owns each `CodeDocument`: its text, undo history and diagnostics. A `Cod
 with its own caret, selection and scroll position.
 
 Every member is documented in `lib/net10.0/Darp.CodeEditor.xml` in this package. Read a type's `<remarks>` before using
-it in a way this page does not cover.
+it in a way this page does not cover. Task guides for the latest release are at
+<https://rosslight.github.io/Darp.CodeEditor/llms.txt>. Where they differ, the XML documentation matches the installed
+version.
 
 ## Add an editor
 
@@ -51,13 +53,15 @@ The built-in languages are `PlainText`, `Json`, `Xml` and `Yaml`. For another la
 - **Edits:** use `Replace(range, text)` for a change at a position. Editors keep their scroll position, and a caret
   after the range moves with the text.
 
-The app reads and writes files itself. Save from a snapshot, so edits made during the write keep the document modified:
+The app reads and writes files itself. Save from a snapshot, so edits made during the write aren't marked as saved:
 
 ```csharp
 TextSnapshot snapshot = document.CurrentSnapshot;
 await File.WriteAllTextAsync(path, snapshot.GetText());
 document.MarkUnmodified(snapshot);
 ```
+
+If `MarkUnmodified` returns `false`, the text changed during the write, so save again.
 
 ## Language servers
 

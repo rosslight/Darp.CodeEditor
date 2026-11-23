@@ -13,6 +13,9 @@
 .avalonia-build-tasks/
 artifacts/
 
+# Generated documentation
+site/
+
 # Measurement output
 measurements/
 BenchmarkDotNet.Artifacts/

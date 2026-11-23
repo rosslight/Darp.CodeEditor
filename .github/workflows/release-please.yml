@@ -62,3 +62,15 @@ jobs:
       # Pushes each package's .snupkg symbol package with it
       - name: Push packages to NuGet
         run: dotnet nuget push ./artifacts/*.nupkg --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+  # A job here, because a release made with GITHUB_TOKEN doesn't start other workflows.
+  docs:
+    needs:
+      - release-please
+      - publish
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/docs.yml

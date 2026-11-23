@@ -1,0 +1,16 @@
+{
+  "name": "INI",
+  "scopeName": "source.ini",
+  "patterns": [
+    { "name": "comment.line.semicolon.ini", "match": "^\\s*;.*$" },
+    { "name": "entity.name.tag.ini", "match": "^\\s*\\[[^\\]]*\\]" },
+    {
+      "match": "^\\s*([^=;\\[]+?)\\s*(=)\\s*(.*)$",
+      "captures": {
+        "1": { "name": "variable.other.key.ini" },
+        "2": { "name": "keyword.operator.assignment.ini" },
+        "3": { "name": "string.unquoted.value.ini" }
+      }
+    }
+  ]
+}
