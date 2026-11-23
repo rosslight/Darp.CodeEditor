@@ -1,0 +1,32 @@
+<Project>
+  <!--
+    Adds the runner to the helpers an app gets, which Darp.CodeEditor.CSharpScript.targets builds, publishes and starts.
+    Projects in this repository import this file before that one, which turns the helpers into project references.
+  -->
+  <ItemGroup Condition="'$(OutputType)' == 'Exe' or '$(OutputType)' == 'WinExe'">
+    <_CSharpScriptHelper
+      Include="csharp-runner"
+      HelperProject="$(MSBuildThisFileDirectory)..\..\Darp.CodeEditor.CSharpScript.Runner.Process\Darp.CodeEditor.CSharpScript.Runner.Process.csproj"
+      Tools="$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', 'tools', 'csharp-runner'))"
+    />
+  </ItemGroup>
+
+  <!-- The bridge loads once, from the runner: the publish of the marked references must resolve the runner's versions. -->
+  <Target
+    Name="_ReadCSharpScriptBridgePins"
+    BeforeTargets="_PublishCSharpScriptApi"
+    DependsOnTargets="_GetCSharpScriptHelperFiles"
+  >
+    <ReadLinesFromFile File="@(_CSharpScriptHelperFile->WithMetadataValue('HelperPath', 'bridge-pins.txt'))">
+      <Output TaskParameter="Lines" ItemName="_CSharpScriptBridgePinLine" />
+    </ReadLinesFromFile>
+    <ItemGroup>
+      <_CSharpScriptBridgePinPart
+        Include="@(_CSharpScriptBridgePinLine)"
+        PackageId="$([System.String]::Copy('%(Identity)').Split(' ')[0])"
+        Version="$([System.String]::Copy('%(Identity)').Split(' ')[1])"
+      />
+      <_CSharpScriptBridgePin Include="@(_CSharpScriptBridgePinPart->'%(PackageId)')" />
+    </ItemGroup>
+  </Target>
+</Project>

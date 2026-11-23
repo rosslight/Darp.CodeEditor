@@ -6,6 +6,7 @@
     <Project Path="src/Darp.CodeEditor.CSharpScript.Protocol/Darp.CodeEditor.CSharpScript.Protocol.csproj" />
     <Project Path="src/Darp.CodeEditor.CSharpScript.Server/Darp.CodeEditor.CSharpScript.Server.csproj" />
     <Project Path="src/Darp.CodeEditor.CSharpScript.Runner/Darp.CodeEditor.CSharpScript.Runner.csproj" />
+    <Project Path="src/Darp.CodeEditor.CSharpScript.Runner.Process/Darp.CodeEditor.CSharpScript.Runner.Process.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Darp.CodeEditor.Tests/Darp.CodeEditor.Tests.csproj" />
