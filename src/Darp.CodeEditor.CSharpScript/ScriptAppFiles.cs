@@ -25,17 +25,18 @@ internal sealed class ScriptAppFiles
     }
 
     /// <summary>
-    /// How to start the server. In development it runs on the <c>dotnet</c> host of the installation whose runtime runs
-    /// the app, never on one from <c>PATH</c>, which may lack that runtime. An app without such a host, as a NativeAOT
-    /// app, starts the app host that publishing puts there.
+    /// How to start the server. A published app has its app host, which runs on the runtime in <c>helpers/dotnet</c>. In
+    /// development the server runs on the <c>dotnet</c> host of the installation whose runtime runs the app, never on one
+    /// from <c>PATH</c>, which may lack that runtime.
     /// </summary>
     public static (string FileName, string[] Arguments) ServerCommand()
     {
         string server = Path.Combine(s_helpers, "csharp-server", ServerName);
         string extension = OperatingSystem.IsWindows() ? ".exe" : "";
-        return InstalledHost(RuntimeEnvironment.GetRuntimeDirectory(), extension) is { } host
+        string appHost = server + extension;
+        return !File.Exists(appHost) && InstalledHost(RuntimeEnvironment.GetRuntimeDirectory(), extension) is { } host
             ? (host, [server + ".dll"])
-            : (server + extension, []);
+            : (appHost, []);
     }
 
     /// <summary>

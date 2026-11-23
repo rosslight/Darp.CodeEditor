@@ -4,6 +4,10 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <!-- A compilation answers with the protocol's diagnostics. -->
+    <ProjectReference Include="..\Darp.CodeEditor.Lsp\Darp.CodeEditor.Lsp.csproj" />
+  </ItemGroup>
+  <ItemGroup>
     <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript" />
     <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript.Server" />
     <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript.Tests" />

@@ -9,7 +9,7 @@ namespace Darp.CodeEditor.CSharpScript.Server;
 /// <summary>A script's errors and warnings, as the compiler reports them, and its directives that scripts can't use.</summary>
 internal static class ScriptDiagnostics
 {
-    private const int Error = 1;
+    public const int Error = 1;
     private const int Warning = 2;
 
     /// <summary>The diagnostics of <paramref name="script"/>.</summary>
@@ -39,18 +39,20 @@ internal static class ScriptDiagnostics
             {
                 if (diagnostic.Severity < DiagnosticSeverity.Warning || diagnostic.IsSuppressed)
                     continue;
-                diagnostics.Add(
-                    new LspDiagnostic(
-                        ToRange(script, diagnostic.Location.IsInSource ? diagnostic.Location.SourceSpan : default),
-                        diagnostic.GetMessage(),
-                        diagnostic.Severity == DiagnosticSeverity.Error ? Error : Warning,
-                        diagnostic.Id
-                    )
-                );
+                diagnostics.Add(ToLsp(script, diagnostic));
             }
         }
         return diagnostics;
     }
+
+    /// <summary>A compiler diagnostic in the client's positions.</summary>
+    public static LspDiagnostic ToLsp(ScriptSnapshot script, Diagnostic diagnostic) =>
+        new(
+            ToRange(script, diagnostic.Location.IsInSource ? diagnostic.Location.SourceSpan : default),
+            diagnostic.GetMessage(),
+            diagnostic.Severity == DiagnosticSeverity.Error ? Error : Warning,
+            diagnostic.Id
+        );
 
     private static IEnumerable<DirectiveTriviaSyntax> UnsupportedDirectives(SyntaxNode root)
     {

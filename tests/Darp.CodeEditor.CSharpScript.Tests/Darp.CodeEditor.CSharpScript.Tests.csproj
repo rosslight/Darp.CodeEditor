@@ -4,6 +4,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <IsAotCompatible>true</IsAotCompatible>
     <PublishAot>true</PublishAot>
+    <!-- Publishing compiles the C# helpers with ReadyToRun. Only then: it would otherwise give every build a RID. -->
+    <PublishReadyToRun Condition="'$(_IsPublishing)' == 'true'">true</PublishReadyToRun>
     <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
   </PropertyGroup>
   <ItemGroup>
@@ -20,6 +22,8 @@
     <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharpScript\Darp.CodeEditor.CSharpScript.csproj" />
     <!-- The editor references it privately; the tests read what the client reads. -->
     <ProjectReference Include="..\..\src\Darp.CodeEditor.Lsp\Darp.CodeEditor.Lsp.csproj" />
+    <!-- Runs in its own process: it checks that compiling works before Avalonia is set up. -->
+    <ProjectReference Include="..\Darp.CodeEditor.CSharpScript.Tests.BeforeSetup\Darp.CodeEditor.CSharpScript.Tests.BeforeSetup.csproj" />
     <ProjectReference
       Include="..\Darp.CodeEditor.CSharpScript.Tests.ScriptApi\Darp.CodeEditor.CSharpScript.Tests.ScriptApi.csproj"
       CSharpScriptReference="true"

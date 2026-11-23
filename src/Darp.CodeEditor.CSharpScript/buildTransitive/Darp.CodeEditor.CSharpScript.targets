@@ -1,67 +1,90 @@
 <Project>
   <!--
-    What an app needs for C# scripts, next to it. The Darp.CodeEditor.CSharpScript package imports this file into every
-    project that references it, and it acts in apps (OutputType Exe or WinExe); projects in this repository import it
-    from source, where the server is built along with the app.
+    What an app needs for C# scripts, next to it. The package imports this file into every project that references it, and
+    it acts in apps (OutputType Exe or WinExe); projects in this repository import it from source.
 
-      dotnet build    $(OutDir)helpers/csharp-server/         the language server, as portable IL, which runs on the
-                                                              dotnet host of the runtime that runs the app
-                      $(OutDir)helpers/script-references.txt  the assemblies of marked references, relative to the app
-                      $(OutDir)helpers/script-framework.txt   the names of .NET's assemblies
+      dotnet build    helpers/csharp-server/  portable IL, on the dotnet host of the runtime that runs the app
+                      helpers/script-*.txt    the marked assemblies, relative to the app, and the names of .NET's
+      dotnet publish  helpers/dotnet/         one .NET runtime for the app's RID, from the runtime pack
+                      helpers/csharp-server/  ReadyToRun, with an app host that looks only in ../dotnet
+                      helpers/script-api/     all marked references, untrimmed, with one deps.json
+                      helpers/script-*.txt    the lists again, for what was published
 
-    A reference is marked for scripts in the app's project, and its XML docs are copied next to it for hover and
-    completion:
+    Publishing needs a RuntimeIdentifier and PublishReadyToRun=true, NativeAOT apps included: restore then fetches the
+    runtime pack and the ReadyToRun compiler. The helpers join after the app's publish, out of reach of its trimming,
+    NativeAOT and single-file steps. An app marks what scripts may use, and their XML docs come along:
 
       <ProjectReference Include="..\MyApp.ScriptApi\MyApp.ScriptApi.csproj" CSharpScriptReference="true" />
       <PackageReference Include="MyApp.Devices" CSharpScriptReference="true" />
   -->
   <PropertyGroup>
+    <_CSharpScriptTargetsImported>true</_CSharpScriptTargetsImported>
     <_CSharpScriptIsApp Condition="'$(OutputType)' == 'Exe' or '$(OutputType)' == 'WinExe'">true</_CSharpScriptIsApp>
     <_CSharpScriptTools>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', 'tools'))</_CSharpScriptTools>
     <_CSharpScriptFromPackage Condition="Exists('$(_CSharpScriptTools)csharp-server')">true</_CSharpScriptFromPackage>
     <_CSharpScriptHelpers>helpers/</_CSharpScriptHelpers>
+    <_CSharpScriptHelperRemovedProperties>RuntimeIdentifier;SelfContained</_CSharpScriptHelperRemovedProperties>
   </PropertyGroup>
 
-  <!-- From source: one portable build of the server serves every configuration of the app. -->
-  <PropertyGroup Condition="'$(_CSharpScriptFromPackage)' != 'true' and '$(_CSharpScriptIsApp)' == 'true'">
-    <_CSharpScriptServerProject>$(MSBuildThisFileDirectory)..\..\Darp.CodeEditor.CSharpScript.Server\Darp.CodeEditor.CSharpScript.Server.csproj</_CSharpScriptServerProject>
-    <_CSharpScriptServerRemovedProperties>RuntimeIdentifier;SelfContained</_CSharpScriptServerRemovedProperties>
-  </PropertyGroup>
-  <ItemGroup Condition="'$(_CSharpScriptServerProject)' != ''">
-    <ProjectReference
-      Include="$(_CSharpScriptServerProject)"
-      ReferenceOutputAssembly="false"
-      Private="false"
-      PrivateAssets="all"
-      GlobalPropertiesToRemove="$(_CSharpScriptServerRemovedProperties)"
+  <!-- The helpers an app gets. Each is a project in this repository and a folder of portable files in its package. -->
+  <ItemGroup Condition="'$(_CSharpScriptIsApp)' == 'true'">
+    <_CSharpScriptHelper
+      Include="csharp-server"
+      HelperProject="$(MSBuildThisFileDirectory)..\..\Darp.CodeEditor.CSharpScript.Server\Darp.CodeEditor.CSharpScript.Server.csproj"
+      Tools="$(_CSharpScriptTools)csharp-server/"
     />
   </ItemGroup>
 
-  <!-- The server's files, by their path in its folder. -->
-  <Target Name="_GetCSharpScriptServerFiles" Returns="@(_CSharpScriptServerFile)">
+  <!-- From source: one portable build of each helper serves every configuration of the app. -->
+  <ItemGroup Condition="'$(_CSharpScriptFromPackage)' != 'true'">
+    <ProjectReference
+      Include="@(_CSharpScriptHelper->'%(HelperProject)')"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      PrivateAssets="all"
+      GlobalPropertiesToRemove="$(_CSharpScriptHelperRemovedProperties)"
+    />
+  </ItemGroup>
+
+  <!-- The helpers' files, with Helper, their folder, and HelperPath, their path in it. -->
+  <Target Name="_GetCSharpScriptHelperFiles" Returns="@(_CSharpScriptHelperFile)">
     <ItemGroup Condition="'$(_CSharpScriptFromPackage)' == 'true'">
-      <_CSharpScriptPackagedFile Include="$(_CSharpScriptTools)csharp-server/**" />
-      <_CSharpScriptServerFile
+      <_CSharpScriptPackagedFile Include="%(_CSharpScriptHelper.Tools)**" Helper="%(_CSharpScriptHelper.Identity)" />
+      <_CSharpScriptHelperFile
         Include="@(_CSharpScriptPackagedFile)"
-        ServerPath="%(_CSharpScriptPackagedFile.RecursiveDir)%(_CSharpScriptPackagedFile.Filename)%(_CSharpScriptPackagedFile.Extension)"
+        HelperPath="%(_CSharpScriptPackagedFile.RecursiveDir)%(_CSharpScriptPackagedFile.Filename)%(_CSharpScriptPackagedFile.Extension)"
       />
     </ItemGroup>
     <MSBuild
-      Condition="'$(_CSharpScriptServerProject)' != ''"
-      Projects="$(_CSharpScriptServerProject)"
-      Targets="GetCSharpScriptServerFiles"
+      Condition="'$(_CSharpScriptFromPackage)' != 'true'"
+      Projects="@(_CSharpScriptHelper->'%(HelperProject)')"
+      Targets="GetCSharpScriptHelperFiles"
       Properties="Configuration=$(Configuration);BuildProjectReferences=false"
-      RemoveProperties="$(_CSharpScriptServerRemovedProperties);TargetFramework"
+      RemoveProperties="$(_CSharpScriptHelperRemovedProperties);TargetFramework"
     >
-      <Output TaskParameter="TargetOutputs" ItemName="_CSharpScriptServerFile" />
+      <Output TaskParameter="TargetOutputs" ItemName="_CSharpScriptHelperFile" />
     </MSBuild>
+  </Target>
+
+  <!-- The restored packages with their versions, and who depends on whom. -->
+  <Target Name="_ResolveCSharpScriptPackages">
+    <ResolvePackageDependencies
+      ProjectPath="$(MSBuildProjectFullPath)"
+      ProjectAssetsFile="$(ProjectAssetsFile)"
+      ProjectLanguage="$(Language)"
+      TargetFramework="$(TargetFramework)"
+    >
+      <Output TaskParameter="PackageDefinitions" ItemName="_CSharpScriptPackageDefinition" />
+      <Output TaskParameter="PackageDependencies" ItemName="_CSharpScriptPackageEdge" />
+    </ResolvePackageDependencies>
   </Target>
 
   <!--
     The references the app marked: project references as they are written and packages by ID. What they depend on is
-    not listed: it binds their signatures, and scripts can't name it.
+    not listed: it binds their signatures, and scripts can't name it. A marked package without assemblies of its own,
+    such as Microsoft.Data.Sqlite, stands for the packages it depends on directly.
   -->
-  <Target Name="_WriteCSharpScriptLists" DependsOnTargets="ResolveReferences">
+  <Target Name="_WriteCSharpScriptLists" DependsOnTargets="ResolveReferences;_ResolveCSharpScriptPackages">
     <ItemGroup>
       <_CSharpScriptMarked Include="@(ProjectReference->WithMetadataValue('CSharpScriptReference', 'true'))" />
       <_CSharpScriptMarked Include="@(PackageReference->WithMetadataValue('CSharpScriptReference', 'true'))" />
@@ -72,6 +95,16 @@
         Key="%(ReferenceCopyLocalPaths.ProjectReferenceOriginalItemSpec)%(ReferenceCopyLocalPaths.NuGetPackageId)"
       />
       <_CSharpScriptByKey Include="@(_CSharpScriptCandidate->'%(Key)')" />
+      <_CSharpScriptFacade Include="@(_CSharpScriptMarked)" Exclude="@(_CSharpScriptByKey)" />
+      <_CSharpScriptEdge
+        Include="@(_CSharpScriptPackageEdge)"
+        Parent="$([System.String]::Copy('%(_CSharpScriptPackageEdge.ParentPackage)').Split('/')[0])"
+        Child="$([System.String]::Copy('%(_CSharpScriptPackageEdge.Identity)').Split('/')[0])"
+      />
+      <_CSharpScriptFacadeEdge Include="@(_CSharpScriptEdge->'%(Parent)')" />
+      <_CSharpScriptOtherEdge Include="@(_CSharpScriptFacadeEdge)" Exclude="@(_CSharpScriptFacade)" />
+      <_CSharpScriptFacadeEdge Remove="@(_CSharpScriptOtherEdge)" />
+      <_CSharpScriptMarked Include="@(_CSharpScriptFacadeEdge->'%(Child)')" />
       <_CSharpScriptUnmarked Include="@(_CSharpScriptByKey)" Exclude="@(_CSharpScriptMarked)" />
       <_CSharpScriptReference Include="@(_CSharpScriptByKey)" Exclude="@(_CSharpScriptUnmarked)" />
       <_CSharpScriptReferencePath Include="@(_CSharpScriptReference->'%(SourcePath)'->Distinct())" />
@@ -85,37 +118,43 @@
         Condition="Exists('%(RootDir)%(Directory)%(Filename).xml')"
       />
     </ItemGroup>
+    <PropertyGroup>
+      <_CSharpScriptListDirectory Condition="'$(_CSharpScriptListDirectory)' == ''"
+        >$(IntermediateOutputPath)</_CSharpScriptListDirectory>
+    </PropertyGroup>
     <WriteLinesToFile
-      File="$(IntermediateOutputPath)script-references.txt"
-      Lines="@(_CSharpScriptReferencePath->'%(Filename)%(Extension)')"
+      File="$(_CSharpScriptListDirectory)script-references.txt"
+      Lines="@(_CSharpScriptReferencePath->'$(_CSharpScriptReferencePrefix)%(Filename)%(Extension)')"
       Overwrite="true"
       WriteOnlyWhenDifferent="true"
     />
     <WriteLinesToFile
-      File="$(IntermediateOutputPath)script-framework.txt"
+      File="$(_CSharpScriptListDirectory)script-framework.txt"
       Lines="@(_CSharpScriptFramework->'%(Filename)')"
       Overwrite="true"
       WriteOnlyWhenDifferent="true"
     />
+    <Copy
+      Condition="'$(_CSharpScriptIsApiRoot)' == 'true'"
+      SourceFiles="@(_CSharpScriptXmlDoc)"
+      DestinationFolder="$(PublishDir)"
+    />
     <ItemGroup>
-      <FileWrites Include="$(IntermediateOutputPath)script-references.txt;$(IntermediateOutputPath)script-framework.txt" />
+      <FileWrites Include="$(_CSharpScriptListDirectory)script-references.txt;$(_CSharpScriptListDirectory)script-framework.txt" />
     </ItemGroup>
   </Target>
 
-  <!--
-    As ordinary items to copy, so that they also reach the output of a project that references this one. Publishing
-    carries the lists, so that creating a script document keeps working; the server gets its publish step separately.
-  -->
+  <!-- As ordinary items to copy, so that they also reach the output of a project that references this one. -->
   <Target
     Name="_AddCSharpScriptFiles"
     BeforeTargets="AssignTargetPaths"
-    DependsOnTargets="_GetCSharpScriptServerFiles;_WriteCSharpScriptLists"
+    DependsOnTargets="_GetCSharpScriptHelperFiles;_WriteCSharpScriptLists"
     Condition="'$(_CSharpScriptIsApp)' == 'true'"
   >
     <ItemGroup>
       <None
-        Include="@(_CSharpScriptServerFile)"
-        Link="$(_CSharpScriptHelpers)csharp-server/%(_CSharpScriptServerFile.ServerPath)"
+        Include="@(_CSharpScriptHelperFile)"
+        Link="$(_CSharpScriptHelpers)%(_CSharpScriptHelperFile.Helper)/%(_CSharpScriptHelperFile.HelperPath)"
         CopyToOutputDirectory="PreserveNewest"
         CopyToPublishDirectory="Never"
         Visible="false"
@@ -127,20 +166,297 @@
         CopyToPublishDirectory="Never"
         Visible="false"
       />
+      <_CSharpScriptList Include="$(IntermediateOutputPath)script-references.txt;$(IntermediateOutputPath)script-framework.txt" />
       <None
-        Include="$(IntermediateOutputPath)script-references.txt"
-        Link="$(_CSharpScriptHelpers)script-references.txt"
+        Include="@(_CSharpScriptList)"
+        Link="$(_CSharpScriptHelpers)%(_CSharpScriptList.Filename)%(_CSharpScriptList.Extension)"
         CopyToOutputDirectory="PreserveNewest"
-        CopyToPublishDirectory="PreserveNewest"
-        Visible="false"
-      />
-      <None
-        Include="$(IntermediateOutputPath)script-framework.txt"
-        Link="$(_CSharpScriptHelpers)script-framework.txt"
-        CopyToOutputDirectory="PreserveNewest"
-        CopyToPublishDirectory="PreserveNewest"
+        CopyToPublishDirectory="Never"
         Visible="false"
       />
     </ItemGroup>
+  </Target>
+
+  <!-- Before the app's own publish, which can take minutes. -->
+  <Target
+    Name="_CheckCSharpScriptPublish"
+    BeforeTargets="PrepareForPublish"
+    Condition="'$(_CSharpScriptIsApp)' == 'true'"
+  >
+    <Error
+      Condition="'$(RuntimeIdentifier)' == '' or '$(PublishReadyToRun)' != 'true'"
+      Text="Publishing an app with C# scripts needs a RuntimeIdentifier and PublishReadyToRun=true, also in a NativeAOT app: the C# helpers run on a .NET runtime for that RID, compiled with ReadyToRun."
+    />
+  </Target>
+
+  <!-- Publishing: every helper folder is replaced, so that a republish leaves nothing of an earlier one. -->
+  <Target
+    Name="_PublishCSharpScriptHelpers"
+    AfterTargets="Publish"
+    DependsOnTargets="_PublishCSharpScriptApi;_GetCSharpScriptHelperFiles;_ResolveCSharpScriptRuntime;_CompileCSharpScriptHelpers;_CreateCSharpScriptAppHosts"
+    Condition="'$(_CSharpScriptIsApp)' == 'true'"
+  >
+    <ItemGroup>
+      <_CSharpScriptPublishFile Include="@(_CSharpScriptHelperFile)" />
+      <_CSharpScriptPublishFile Remove="@(_CSharpScriptReadyToRunCompile)" />
+      <_CSharpScriptPublishFile Include="@(_CSharpScriptReadyToRunFile);@(_CSharpScriptAppHost)" />
+      <_CSharpScriptPublishPath
+        Include="@(_CSharpScriptPublishFile)"
+        PublishedPath="$(_CSharpScriptPublishHelpers)%(_CSharpScriptPublishFile.Helper)/%(_CSharpScriptPublishFile.HelperPath)"
+      />
+      <_CSharpScriptPublishPath
+        Include="@(_CSharpScriptRuntimeFile)"
+        PublishedPath="$(_CSharpScriptPublishHelpers)dotnet/shared/Microsoft.NETCore.App/$(_CSharpScriptRuntimeVersion)/%(_CSharpScriptRuntimeFile.DestinationSubPath)"
+      />
+      <_CSharpScriptPublishPath
+        Include="@(_CSharpScriptHostFxr)"
+        PublishedPath="$(_CSharpScriptPublishHelpers)dotnet/host/fxr/$(_CSharpScriptRuntimeVersion)/%(_CSharpScriptHostFxr.Filename)%(_CSharpScriptHostFxr.Extension)"
+      />
+    </ItemGroup>
+    <RemoveDir Directories="@(_CSharpScriptHelper->'$(_CSharpScriptPublishHelpers)%(Identity)');$(_CSharpScriptPublishHelpers)dotnet" />
+    <Copy
+      SourceFiles="@(_CSharpScriptPublishPath)"
+      DestinationFiles="@(_CSharpScriptPublishPath->'%(PublishedPath)')"
+    />
+  </Target>
+
+  <!--
+    One project in obj/ references every marked reference, at the version the app resolved, for the app's framework and
+    runtime, so that NuGet resolves one version of each dependency or fails with its error. It stays outside the
+    repository's package settings and the app's publish settings; those pass through it to the marked projects unchanged,
+    so that a parallel build makes one copy of each. The runner loads its own copies of the bridge, so the runner's package
+    pins them with _CSharpScriptBridgePin items: a marked reference that needs a newer one fails with NuGet's error.
+  -->
+  <Target Name="_PublishCSharpScriptApi" DependsOnTargets="_ResolveCSharpScriptPackages">
+    <ItemGroup>
+      <_CSharpScriptApiProject Include="@(ProjectReference->WithMetadataValue('CSharpScriptReference', 'true')->'%(FullPath)')" />
+      <_CSharpScriptApiMarked Include="@(PackageReference->WithMetadataValue('CSharpScriptReference', 'true'))" />
+      <_CSharpScriptApiKnown
+        Include="@(_CSharpScriptPackageDefinition->'%(Name)')"
+        Version="%(_CSharpScriptPackageDefinition.Version)"
+      />
+      <_CSharpScriptApiOther Include="@(_CSharpScriptApiKnown)" Exclude="@(_CSharpScriptApiMarked)" />
+      <_CSharpScriptApiPackage Include="@(_CSharpScriptApiKnown)" Exclude="@(_CSharpScriptApiOther)" />
+    </ItemGroup>
+    <PropertyGroup>
+      <_CSharpScriptApiRoot>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'csharp-script-api'))</_CSharpScriptApiRoot>
+      <_CSharpScriptPublishHelpers>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(PublishDir)', '$(_CSharpScriptHelpers)'))</_CSharpScriptPublishHelpers>
+      <_CSharpScriptApiText>
+        <![CDATA[<Project TreatAsLocalProperty="SelfContained%3BPublishDir%3BPublishAot%3BPublishTrimmed%3BPublishSingleFile%3BPublishReadyToRun%3BUseAppHost">
+  <PropertyGroup>
+    <ImportDirectoryBuildProps>false</ImportDirectoryBuildProps>
+    <ImportDirectoryBuildTargets>false</ImportDirectoryBuildTargets>
+    <ImportDirectoryPackagesProps>false</ImportDirectoryPackagesProps>
+  </PropertyGroup>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+  <PropertyGroup>
+    <TargetFramework>$(TargetFramework)</TargetFramework>
+    <RuntimeIdentifier>$(RuntimeIdentifier)</RuntimeIdentifier>
+    <TargetPlatformIdentifier>$(TargetPlatformIdentifier)</TargetPlatformIdentifier>
+    <TargetPlatformVersion>$(TargetPlatformVersion)</TargetPlatformVersion>
+    <_CSharpScriptIsApiRoot>true</_CSharpScriptIsApiRoot>
+    <SelfContained>false</SelfContained>
+    <UseAppHost>false</UseAppHost>
+    <PublishAot>false</PublishAot>
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishSingleFile>false</PublishSingleFile>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <AssemblyName>CSharpScriptApiRoot</AssemblyName>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <PublishDir>$(_CSharpScriptPublishHelpers.Replace('&', '&amp;'))script-api/</PublishDir>
+    <_CSharpScriptListDirectory>$(_CSharpScriptPublishHelpers.Replace('&', '&amp;'))</_CSharpScriptListDirectory>
+    <_CSharpScriptReferencePrefix>$(_CSharpScriptHelpers)script-api/</_CSharpScriptReferencePrefix>
+  </PropertyGroup>
+  <ItemGroup>
+@(_CSharpScriptApiProject->Replace('&', '&amp;')->'    <ProjectReference Include="%(Identity)" CSharpScriptReference="true" />', '%0A')
+@(_CSharpScriptApiPackage->'    <PackageReference Include="%(Identity)" Version="%(Version)" CSharpScriptReference="true" />', '%0A')
+@(_CSharpScriptBridgePin->'    <PackageReference Include="%(Identity)" Version="[%(Version)]" />', '%0A')
+  </ItemGroup>
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+  <Import Project="$(MSBuildThisFileFullPath.Replace('&', '&amp;'))" Condition="'%24(_CSharpScriptTargetsImported)' != 'true'" />
+</Project>]]>
+      </_CSharpScriptApiText>
+    </PropertyGroup>
+    <WriteLinesToFile
+      File="$(_CSharpScriptApiRoot)CSharpScriptApiRoot.csproj"
+      Lines="$(_CSharpScriptApiText)"
+      Overwrite="true"
+      WriteOnlyWhenDifferent="true"
+    />
+    <RemoveDir Directories="$(_CSharpScriptPublishHelpers)script-api" />
+    <MSBuild
+      Projects="$(_CSharpScriptApiRoot)CSharpScriptApiRoot.csproj"
+      Targets="Restore"
+      Properties="MSBuildRestoreSessionId=$([System.Guid]::NewGuid())"
+      RemoveProperties="TargetFramework;NoBuild"
+    />
+    <MSBuild
+      Projects="$(_CSharpScriptApiRoot)CSharpScriptApiRoot.csproj"
+      Targets="Publish;_WriteCSharpScriptLists"
+      RemoveProperties="TargetFramework;NoBuild"
+    />
+  </Target>
+
+  <!--
+    The runner starts on the base .NET runtime, so nothing that needs another shared framework can load in it. The Windows
+    API projection of a versioned Windows target is no shared framework: its assemblies are published with the reference.
+  -->
+  <Target
+    Name="_CheckCSharpScriptFrameworks"
+    AfterTargets="ResolveFrameworkReferences"
+    Condition="'$(_CSharpScriptIsApiRoot)' == 'true'"
+  >
+    <ItemGroup>
+      <_CSharpScriptOtherFramework
+        Include="@(FrameworkReference)"
+        Exclude="Microsoft.NETCore.App;Microsoft.Windows.SDK.NET.Ref;Microsoft.Windows.SDK.NET.Ref.Windows"
+      />
+    </ItemGroup>
+    <Error
+      Condition="'@(_CSharpScriptOtherFramework)' != ''"
+      Text="A reference marked CSharpScriptReference needs the shared framework @(_CSharpScriptOtherFramework). C# scripts run on the base .NET runtime only: remove the mark or that dependency."
+    />
+  </Target>
+
+  <!-- The .NET runtime the helpers share, by each file's path in a shared framework folder, and its hostfxr. -->
+  <Target Name="_ResolveCSharpScriptRuntime" DependsOnTargets="ResolveFrameworkReferences;ResolveRuntimePackAssets">
+    <ItemGroup>
+      <_CSharpScriptRuntimePack
+        Include="@(ResolvedRuntimePack)"
+        Condition="'%(FrameworkName)' == 'Microsoft.NETCore.App'"
+      />
+    </ItemGroup>
+    <PropertyGroup>
+      <_CSharpScriptRuntimePackId>@(_CSharpScriptRuntimePack->'%(NuGetPackageId)')</_CSharpScriptRuntimePackId>
+      <_CSharpScriptRuntimePackDirectory>@(_CSharpScriptRuntimePack->'%(PackageDirectory)')</_CSharpScriptRuntimePackDirectory>
+      <_CSharpScriptRuntimeVersion>@(_CSharpScriptRuntimePack->'%(NuGetPackageVersion)')</_CSharpScriptRuntimeVersion>
+    </PropertyGroup>
+    <ItemGroup>
+      <_CSharpScriptRuntimeFile
+        Include="@(RuntimePackAsset)"
+        Condition="'%(RuntimePackAsset.NuGetPackageId)' == '$(_CSharpScriptRuntimePackId)' and '%(RuntimePackAsset.AssetType)' != 'pgodata'"
+      />
+      <_CSharpScriptRuntimeJson Include="$(_CSharpScriptRuntimePackDirectory)/runtimes/*/lib/*/Microsoft.NETCore.App.*.json" />
+      <_CSharpScriptRuntimeFile
+        Include="@(_CSharpScriptRuntimeJson)"
+        DestinationSubPath="%(_CSharpScriptRuntimeJson.Filename)%(_CSharpScriptRuntimeJson.Extension)"
+      />
+      <_CSharpScriptHostFxr
+        Include="@(_CSharpScriptRuntimeFile)"
+        Condition="'%(Filename)' == 'hostfxr' or '%(Filename)' == 'libhostfxr'"
+      />
+      <_CSharpScriptRuntimeFile Remove="@(_CSharpScriptHostFxr)" />
+      <_CSharpScriptRuntimeAssembly
+        Include="@(_CSharpScriptRuntimeFile)"
+        Condition="'%(_CSharpScriptRuntimeFile.AssetType)' == 'runtime' and '%(Extension)' == '.dll'"
+      />
+      <_CSharpScriptPgoData
+        Include="@(RuntimePackAsset)"
+        Condition="'%(RuntimePackAsset.NuGetPackageId)' == '$(_CSharpScriptRuntimePackId)' and '%(RuntimePackAsset.AssetType)' == 'pgodata' and '%(Extension)' == '.mibc'"
+      />
+    </ItemGroup>
+  </Target>
+
+  <!-- Each helper's own assemblies compile against its closure and that runtime. Assemblies under runtimes/ stay IL. -->
+  <Target
+    Name="_PrepareCSharpScriptReadyToRun"
+    DependsOnTargets="ResolveReadyToRunCompilers;_GetCSharpScriptHelperFiles;_ResolveCSharpScriptRuntime"
+  >
+    <ItemGroup>
+      <_CSharpScriptReadyToRunInput
+        Include="@(_CSharpScriptHelperFile)"
+        Condition="'%(Extension)' == '.dll' and '%(HelperPath)' == '%(Filename)%(Extension)'"
+        RelativePath="%(Helper)/%(HelperPath)"
+      />
+      <_CSharpScriptReadyToRunInput
+        Include="@(_CSharpScriptRuntimeAssembly)"
+        ReferenceOnly="true"
+        Helper="%(_CSharpScriptHelper.Identity)"
+      />
+    </ItemGroup>
+    <PrepareForReadyToRunCompilation
+      Crossgen2Tool="@(Crossgen2Tool)"
+      OutputPath="$(IntermediateOutputPath)csharp-script-r2r"
+      MainAssembly="@(_CSharpScriptReadyToRunInput->WithMetadataValue('Filename', 'Darp.CodeEditor.CSharpScript.Server'))"
+      Assemblies="@(_CSharpScriptReadyToRunInput)"
+      EmitSymbols="false"
+      IncludeSymbolsInSingleFile="false"
+      ReadyToRunUseCrossgen2="true"
+      Crossgen2Composite="false"
+    >
+      <Output TaskParameter="ReadyToRunCompileList" ItemName="_CSharpScriptReadyToRunCompile" />
+      <Output TaskParameter="ReadyToRunFilesToPublish" ItemName="_CSharpScriptReadyToRunFile" />
+      <Output TaskParameter="ReadyToRunAssembliesToReference" ItemName="_CSharpScriptReadyToRunReference" />
+    </PrepareForReadyToRunCompilation>
+  </Target>
+
+  <Target
+    Name="_CompileCSharpScriptHelpers"
+    DependsOnTargets="_PrepareCSharpScriptReadyToRun"
+    Inputs="@(_CSharpScriptReadyToRunCompile);@(_CSharpScriptPgoData)"
+    Outputs="%(_CSharpScriptReadyToRunCompile.OutputR2RImage)"
+  >
+    <PropertyGroup>
+      <_CSharpScriptCompiledHelper>%(_CSharpScriptReadyToRunCompile.Helper)</_CSharpScriptCompiledHelper>
+    </PropertyGroup>
+    <ItemGroup>
+      <_CSharpScriptHelperReference Remove="@(_CSharpScriptHelperReference)" />
+      <_CSharpScriptHelperReference
+        Include="@(_CSharpScriptReadyToRunReference)"
+        Condition="'%(_CSharpScriptReadyToRunReference.Helper)' == '$(_CSharpScriptCompiledHelper)'"
+      />
+    </ItemGroup>
+    <RunReadyToRunCompiler
+      Crossgen2Tool="@(Crossgen2Tool)"
+      UseCrossgen2="true"
+      Crossgen2PgoFiles="@(_CSharpScriptPgoData)"
+      ImplementationAssemblyReferences="@(_CSharpScriptHelperReference)"
+      ShowCompilerWarnings="false"
+      CompilationEntry="@(_CSharpScriptReadyToRunCompile)"
+    />
+  </Target>
+
+  <!--
+    App hosts that run the helpers on the runtime in ../dotnet and never on another one. A NativeAOT app has none of its
+    own to start from: the SDK ships the one of its own platform, and restore fetches another for UseAppHost=true.
+  -->
+  <Target Name="_CreateCSharpScriptAppHosts" DependsOnTargets="_GetCSharpScriptHelperFiles;ResolveFrameworkReferences">
+    <PropertyGroup>
+      <_CSharpScriptAppHostSource>$(AppHostSourcePath)</_CSharpScriptAppHostSource>
+      <_CSharpScriptAppHostSource
+        Condition="'$(_CSharpScriptAppHostSource)' == '' or !Exists('$(_CSharpScriptAppHostSource)')"
+        >$([MSBuild]::NormalizePath('$(NetCoreTargetingPackRoot)', 'Microsoft.NETCore.App.Host.$(RuntimeIdentifier)', '$(BundledNETCoreAppPackageVersion)', 'runtimes', '$(RuntimeIdentifier)', 'native', 'apphost$(_NativeExecutableExtension)'))</_CSharpScriptAppHostSource>
+    </PropertyGroup>
+    <Error
+      Condition="!Exists('$(_CSharpScriptAppHostSource)')"
+      Text="The .NET app host for $(RuntimeIdentifier) is missing, so the C# helpers cannot start. An app without an app host of its own that publishes for another platform than the SDK's sets UseAppHost=true, so that restore fetches it."
+    />
+    <ItemGroup>
+      <!-- A helper's entry assembly is the one with a runtime configuration. -->
+      <_CSharpScriptHelperConfig
+        Include="@(_CSharpScriptHelperFile)"
+        Condition="$([System.String]::Copy('%(Filename)').EndsWith('.runtimeconfig'))"
+        MainName="$([System.IO.Path]::GetFileNameWithoutExtension('%(Filename)'))"
+      />
+      <_CSharpScriptHelperMain Include="@(_CSharpScriptHelperConfig->'%(RootDir)%(Directory)%(MainName).dll')" />
+      <_CSharpScriptAppHost
+        Include="@(_CSharpScriptHelperMain->'$(IntermediateOutputPath)csharp-script-apphost/%(Helper)/%(Filename)$(_NativeExecutableExtension)')"
+        HelperPath="%(_CSharpScriptHelperMain.Filename)$(_NativeExecutableExtension)"
+        AppBinaryName="%(_CSharpScriptHelperMain.Filename)%(_CSharpScriptHelperMain.Extension)"
+        MainAssembly="%(_CSharpScriptHelperMain.FullPath)"
+      />
+      <FileWrites Include="@(_CSharpScriptAppHost)" />
+    </ItemGroup>
+    <MakeDir Directories="@(_CSharpScriptAppHost->'%(RootDir)%(Directory)')" />
+    <CreateAppHost
+      AppHostSourcePath="$(_CSharpScriptAppHostSource)"
+      AppHostDestinationPath="%(_CSharpScriptAppHost.FullPath)"
+      AppBinaryName="%(_CSharpScriptAppHost.AppBinaryName)"
+      IntermediateAssembly="%(_CSharpScriptAppHost.MainAssembly)"
+      EnableMacOSCodeSign="$(RuntimeIdentifier.StartsWith('osx'))"
+      DotNetSearchLocations="AppRelative"
+      AppRelativeDotNet="../dotnet"
+    />
   </Target>
 </Project>

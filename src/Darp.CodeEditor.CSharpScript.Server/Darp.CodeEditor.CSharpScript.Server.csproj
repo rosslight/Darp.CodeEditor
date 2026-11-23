@@ -31,14 +31,19 @@
     What an app needs of the server next to it, wherever this build put its output: an app's build asks for it, and its
     own output folder may be shared with other projects.
   -->
-  <Target Name="GetCSharpScriptServerFiles" DependsOnTargets="ResolveReferences" Returns="@(_ServerFile)">
+  <Target Name="GetCSharpScriptHelperFiles" DependsOnTargets="ResolveReferences" Returns="@(_HelperFile)">
     <ItemGroup>
-      <_ServerOwnFile Include="$(TargetPath);$(ProjectDepsFilePath);$(ProjectRuntimeConfigFilePath)" />
-      <_ServerFile Include="@(_ServerOwnFile)" ServerPath="%(_ServerOwnFile.Filename)%(_ServerOwnFile.Extension)" />
-      <_ServerDependency Include="@(ReferenceCopyLocalPaths->WithMetadataValue('Extension', '.dll'))" />
-      <_ServerFile
-        Include="@(_ServerDependency)"
-        ServerPath="%(_ServerDependency.DestinationSubDirectory)%(_ServerDependency.Filename)%(_ServerDependency.Extension)"
+      <_HelperOwnFile Include="$(TargetPath);$(ProjectDepsFilePath);$(ProjectRuntimeConfigFilePath)" />
+      <_HelperFile
+        Include="@(_HelperOwnFile)"
+        Helper="csharp-server"
+        HelperPath="%(_HelperOwnFile.Filename)%(_HelperOwnFile.Extension)"
+      />
+      <_HelperDependency Include="@(ReferenceCopyLocalPaths->WithMetadataValue('Extension', '.dll'))" />
+      <_HelperFile
+        Include="@(_HelperDependency)"
+        Helper="csharp-server"
+        HelperPath="%(_HelperDependency.DestinationSubDirectory)%(_HelperDependency.Filename)%(_HelperDependency.Extension)"
       />
     </ItemGroup>
   </Target>

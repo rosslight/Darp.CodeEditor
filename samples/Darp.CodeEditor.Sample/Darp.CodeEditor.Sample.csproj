@@ -11,6 +11,8 @@
     <!-- Reports what NativeAOT can't handle while building, not only when publishing. -->
     <IsAotCompatible>true</IsAotCompatible>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- Publishing compiles the C# helpers with ReadyToRun. Only then: it would otherwise give every build a RID. -->
+    <PublishReadyToRun Condition="'$(_IsPublishing)' == 'true'">true</PublishReadyToRun>
   </PropertyGroup>
 
   <ItemGroup>

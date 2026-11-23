@@ -4,12 +4,16 @@ namespace Darp.CodeEditor.CSharpScript.Server;
 
 /// <summary>A script open in the server. Used only on the connection's read loop.</summary>
 /// <param name="uri">The script's URI.</param>
+/// <param name="context">The environment it is open in.</param>
 /// <param name="snapshot">Its first version.</param>
-internal sealed class OpenScript(string uri, ScriptSnapshot snapshot)
+internal sealed class OpenScript(string uri, ScriptContext context, ScriptSnapshot snapshot)
 {
     private CancellationTokenSource _diagnostics = new();
 
     public string Uri { get; } = uri;
+
+    /// <summary>The environment it is open in.</summary>
+    public ScriptContext Context { get; } = context;
 
     /// <summary>The latest version.</summary>
     public ScriptSnapshot Snapshot { get; set; } = snapshot;

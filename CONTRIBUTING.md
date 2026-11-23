@@ -13,13 +13,17 @@ dotnet publish tests/Darp.CodeEditor.Tests -c Release -r linux-x64 -o artifacts/
 artifacts/aot-tests/Darp.CodeEditor.Tests
 ```
 
-The tests of C# scripts publish into a folder of their own. Those that need the C# server run with `dotnet test`, and
-skip as NativeAOT until publishing deploys the server:
+The tests of C# scripts publish into a folder of their own, with their fixture, and run against the published server:
 
 ```sh
+dotnet publish tests/Darp.CodeEditor.CSharpScript.Tests.BeforeSetup -c Release -r linux-x64 -o artifacts/aot-script-tests
 dotnet publish tests/Darp.CodeEditor.CSharpScript.Tests -c Release -r linux-x64 -o artifacts/aot-script-tests
 artifacts/aot-script-tests/Darp.CodeEditor.CSharpScript.Tests
 ```
+
+`tests/Darp.CodeEditor.PackageConsumer` proves the NuGet packages as a customer uses them. It is outside the solution:
+`prove.sh <rid>` packs them, copies the consumer to a temporary folder outside this repository's MSBuild imports, and
+builds, publishes and runs it as JIT and NativeAOT.
 
 ## Sample app
 
