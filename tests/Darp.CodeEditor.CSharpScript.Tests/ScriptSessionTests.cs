@@ -770,8 +770,14 @@ public sealed class ScriptSessionTests
         await Wait.ForAsync(run.Completion);
 
         string descriptors = await lines.WaitForMatchAsync(line => line.StartsWith('0'));
-        // The standard streams, and the folder that ls is reading.
-        descriptors.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).ShouldBe(["0", "1", "2", "3"]);
+        // What any child of this process gets: the standard streams, the folder ls reads, and what the test run left open.
+        using var baseline = Process.Start(
+            new ProcessStartInfo("ls", ["-C", "-w", "200", "/proc/self/fd"]) { RedirectStandardOutput = true }
+        )!;
+        string inherited = await baseline.StandardOutput.ReadToEndAsync(Token);
+        descriptors
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .ShouldBeSubsetOf(inherited.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
     }
 
     [Fact]
