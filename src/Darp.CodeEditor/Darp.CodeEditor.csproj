@@ -30,6 +30,7 @@
     <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript" />
     <!-- Tests and benchmarks read the loaded grammars and themes. -->
     <InternalsVisibleTo Include="Darp.CodeEditor.Tests" />
+    <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript.Tests" />
     <InternalsVisibleTo Include="Darp.CodeEditor.Tests.BeforeSetup" />
     <InternalsVisibleTo Include="Darp.CodeEditor.Benchmarks" />
   </ItemGroup>

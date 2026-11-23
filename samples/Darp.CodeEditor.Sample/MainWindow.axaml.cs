@@ -108,16 +108,17 @@ public sealed partial class MainWindow : FAAppWindow
 
     /// <summary>
     /// The status bar's text for a document's language server. Its values are the texts for no server and for a
-    /// server that isn't installed, which change with the language, the name of the type's server, and the server's
-    /// state, null without a server.
+    /// server that isn't installed, which change with the language, the name of the type's server, the server's state,
+    /// null without a server, and the state of the C# script server for a script.
     /// </summary>
     public static FuncMultiValueConverter<object?, string> ServerText { get; } =
         new(values =>
             values.ToList() switch
             {
-                [string noServer, _, null, _] => noServer,
-                [_, _, string name, LanguageServerState state] => $"{name}: {Strings.Default.Describe(state)}",
-                [_, string, string name, _] => Strings.Default.FormatServerNotInstalled(name),
+                [_, _, _, _, LanguageServerState script] => $"C#: {Strings.Default.Describe(script)}",
+                [string noServer, _, null, _, _] => noServer,
+                [_, _, string name, LanguageServerState state, _] => $"{name}: {Strings.Default.Describe(state)}",
+                [_, string, string name, _, _] => Strings.Default.FormatServerNotInstalled(name),
                 _ => "",
             }
         );

@@ -28,7 +28,7 @@ public static class ScriptEnvironments
     public static CSharpScriptEnvironment<ScriptGlobals> Default { get; } = new() { Imports = ["UseCases.ScriptApi"] };
 
     /// <summary>Reader scripts: they only read the session's messages and send values on. Their runs take no input.</summary>
-    public static CSharpScriptEnvironment<ReaderGlobals> Reader { get; } = new() { CheckOverflow = true };
+    public static CSharpScriptEnvironment<ReaderGlobals> Reader { get; } = new();
 }
 
 /// <summary>Registers scripting, and starts and stops what runs it.</summary>

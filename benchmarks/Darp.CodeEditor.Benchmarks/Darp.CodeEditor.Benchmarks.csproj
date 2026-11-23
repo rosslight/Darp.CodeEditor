@@ -15,6 +15,12 @@
     <ProjectReference Include="..\..\src\Darp.CodeEditor\Darp.CodeEditor.csproj" />
     <!-- The language server that the completion benchmarks ask; the baseline has no completion to ask for. -->
     <ProjectReference Include="..\..\tests\Darp.CodeEditor.Tests.FakeServer\Darp.CodeEditor.Tests.FakeServer.csproj" />
+    <!-- The real C# script server, over the scripts' API of its tests; the baseline has no scripts to ask. -->
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharpScript\Darp.CodeEditor.CSharpScript.csproj" />
+    <ProjectReference
+      Include="..\..\tests\Darp.CodeEditor.CSharpScript.Tests.ScriptApi\Darp.CodeEditor.CSharpScript.Tests.ScriptApi.csproj"
+      CSharpScriptReference="true"
+    />
   </ItemGroup>
   <!-- Baseline job: benchmark a packed version of the library, without the benchmarks of code it lacks ([NotInBaseline]). -->
   <PropertyGroup Condition="'$(DarpCodeEditorBaselineVersion)' != ''">
@@ -23,4 +29,8 @@
   <ItemGroup Condition="'$(DarpCodeEditorBaselineVersion)' != ''">
     <PackageReference Include="Darp.CodeEditor" VersionOverride="$(DarpCodeEditorBaselineVersion)" />
   </ItemGroup>
+  <Import
+    Project="..\..\src\Darp.CodeEditor.CSharpScript\buildTransitive\Darp.CodeEditor.CSharpScript.targets"
+    Condition="'$(DarpCodeEditorBaselineVersion)' == ''"
+  />
 </Project>

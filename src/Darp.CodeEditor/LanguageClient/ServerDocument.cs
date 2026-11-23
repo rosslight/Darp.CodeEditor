@@ -1,14 +1,15 @@
+using System.Text.Json.Nodes;
 using AvaloniaEdit.Document;
 using Darp.CodeEditor.Lsp;
 
 namespace Darp.CodeEditor.LanguageClient;
 
 /// <summary>
-/// A document from <see cref="LanguageServer.CreateDocument"/>: open in its server from creation until
+/// What ties a <see cref="CodeDocument"/> to the language server that serves it: open there from creation until
 /// <see cref="CodeDocument.Dispose"/>. Each change reaches the server as an incremental change, captured on the thread
 /// that changes the text with work that grows with the change, not with the document.
 /// </summary>
-internal sealed class ServerDocument : CodeDocument
+internal sealed class ServerDocument
 {
     private readonly LanguageServer _server;
 
@@ -18,17 +19,24 @@ internal sealed class ServerDocument : CodeDocument
     /// </summary>
     private List<TextDocumentContentChangeEvent> _changes = [];
 
-    public ServerDocument(LanguageServer server, CodeLanguage language, string text, string? filePath, string uri)
-        : base(language, text, filePath)
+    public ServerDocument(LanguageServer server, CodeDocument owner, string uri, JsonNode? data)
     {
         _server = server;
+        Owner = owner;
         Uri = uri;
+        Data = data;
     }
+
+    /// <summary>The document that the server serves.</summary>
+    public CodeDocument Owner { get; }
+
+    /// <summary>What the server needs beyond the text, in its own format: goes with each <c>didOpen</c>.</summary>
+    public JsonNode? Data { get; }
 
     /// <summary>The document's URI in its server: from its file path, or untitled. Guarded by the server's lock.</summary>
     public string Uri { get; set; }
 
-    private protected override void OnChanging(TextDocument buffer, DocumentChangeEventArgs change)
+    public void OnChanging(TextDocument buffer, DocumentChangeEventArgs change)
     {
         int start = change.Offset;
         int end = change.Offset + change.RemovalLength;
@@ -46,59 +54,59 @@ internal sealed class ServerDocument : CodeDocument
         }
         _changes.Add(
             new TextDocumentContentChangeEvent(
-                new LspRange(Positions.ToLsp(buffer.GetLocation(start)), Positions.ToLsp(buffer.GetLocation(end))),
-                text
+                text,
+                new LspRange(Positions.ToLsp(buffer.GetLocation(start)), Positions.ToLsp(buffer.GetLocation(end)))
             )
         );
     }
 
-    private protected override void OnChanged(TextSnapshot snapshot)
+    public void OnChanged(TextSnapshot snapshot)
     {
         List<TextDocumentContentChangeEvent> changes = _changes;
         _changes = [];
         _server.Changed(this, snapshot, changes);
     }
 
-    private protected override void OnFilePathChanging(string? path) => _server.Move(this, path);
+    public void OnFilePathChanging(string? path) => _server.Move(this, path);
 
-    internal override Task<HoverInfo?> HoverAsync(
+    public Task<HoverInfo?> HoverAsync(
         TextSnapshot snapshot,
         TextPosition position,
         CancellationToken cancellationToken
     ) => _server.HoverAsync(this, snapshot, position, cancellationToken);
 
-    internal override Task<SemanticTokenLines?> SemanticTokensAsync(
+    public Task<SemanticTokenLines?> SemanticTokensAsync(
         TextPosition start,
         TextPosition end,
         int lineCount,
         CancellationToken cancellationToken
     ) => _server.SemanticTokensAsync(this, start, end, lineCount, cancellationToken);
 
-    internal override Task<CompletionList?> CompletionAsync(
+    public Task<CompletionList?> CompletionAsync(
         TextSnapshot snapshot,
         TextRange word,
         CompletionTrigger trigger,
         CancellationToken cancellationToken
     ) => _server.CompletionAsync(this, snapshot, word, trigger, cancellationToken);
 
-    internal override Task<SignatureHelpInfo?> SignatureHelpAsync(
+    public Task<SignatureHelpInfo?> SignatureHelpAsync(
         TextSnapshot snapshot,
         int offset,
         SignatureHelpTrigger trigger,
         CancellationToken cancellationToken
     ) => _server.SignatureHelpAsync(this, snapshot, offset, trigger, cancellationToken);
 
-    internal override Task<IReadOnlyList<Occurrence>?> DocumentHighlightsAsync(
+    public Task<IReadOnlyList<Occurrence>?> DocumentHighlightsAsync(
         TextSnapshot snapshot,
         int offset,
         CancellationToken cancellationToken
     ) => _server.DocumentHighlightsAsync(this, snapshot, offset, cancellationToken);
 
-    internal override ServerFeatures? Features => _server.FeaturesOf(this);
+    public ServerFeatures? Features => _server.FeaturesOf(this);
 
-    internal override TimeProvider TimeProvider => _server.TimeProvider;
+    public TimeProvider TimeProvider => _server.TimeProvider;
 
-    private protected override void OnDisposed() => _server.Close(this);
+    public void OnDisposed() => _server.Close(this);
 
     private static bool IsInsideLineBreak(TextDocument buffer, int offset) =>
         offset > 0

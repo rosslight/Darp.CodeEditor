@@ -46,15 +46,10 @@ public sealed record CSharpScriptEnvironment<TGlobals>
     public IReadOnlyList<string>? References { get; init; }
 
     /// <summary>
-    /// Whether scripts get the .NET SDK's implicit usings: <c>System</c>, <c>System.Collections.Generic</c>,
-    /// <c>System.IO</c>, <c>System.Linq</c>, <c>System.Net.Http</c>, <c>System.Threading</c> and
-    /// <c>System.Threading.Tasks</c>. Default: yes.
-    /// </summary>
-    public bool ImplicitImports { get; init; } = true;
-
-    /// <summary>
     /// Further namespaces every script uses without a <c>using</c> directive, such as the script API's, besides the
-    /// implicit ones.
+    /// .NET SDK's implicit usings, which scripts always get: <c>System</c>, <c>System.Collections.Generic</c>,
+    /// <c>System.IO</c>, <c>System.Linq</c>, <c>System.Net.Http</c>, <c>System.Threading</c> and
+    /// <c>System.Threading.Tasks</c>.
     /// </summary>
     public IReadOnlyList<string> Imports { get; init; } = [];
 
@@ -64,12 +59,37 @@ public sealed record CSharpScriptEnvironment<TGlobals>
     /// <summary>Whether nullable reference types are on, with their warnings. Default: on.</summary>
     public bool Nullable { get; init; } = true;
 
-    /// <summary>Whether integer arithmetic checks for overflow, as in a <c>checked</c> block. Default: no.</summary>
-    public bool CheckOverflow { get; init; }
-
     /// <summary>Compares all settings, lists by content.</summary>
-    public bool Equals(CSharpScriptEnvironment<TGlobals>? other) => throw new NotImplementedException();
+    public bool Equals(CSharpScriptEnvironment<TGlobals>? other) =>
+        other is not null
+        && LanguageVersion == other.LanguageVersion
+        && Nullable == other.Nullable
+        && Imports.SequenceEqual(other.Imports)
+        && (
+            References is null || other.References is null
+                ? References is null && other.References is null
+                : References.SequenceEqual(other.References)
+        );
 
     /// <inheritdoc />
-    public override int GetHashCode() => throw new NotImplementedException();
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(LanguageVersion);
+        hash.Add(Nullable);
+        foreach (string import in Imports)
+            hash.Add(import);
+        hash.Add(References is null);
+        foreach (string reference in References ?? [])
+            hash.Add(reference);
+        return hash.ToHashCode();
+    }
+
+    /// <summary>A copy that keeps its lists when the app changes the ones it passed.</summary>
+    internal CSharpScriptEnvironment<TGlobals> Copy() =>
+        this with
+        {
+            Imports = [.. Imports],
+            References = References is null ? null : [.. References],
+        };
 }

@@ -140,12 +140,26 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
     /// <exception cref="InvalidOperationException">Another open document of this server has <paramref name="filePath"/>.</exception>
     public CodeDocument CreateDocument(CodeLanguage language, string text = "", string? filePath = null)
     {
-        var document = new ServerDocument(this, language, text, filePath, DocumentUris.Of(filePath));
+        var document = new StandaloneDocument(language, text, filePath: filePath);
+        Open(document, data: null);
+        return document;
+    }
+
+    /// <summary>
+    /// Makes <paramref name="owner"/> a document of this server, for a server that creates documents of its own type.
+    /// </summary>
+    /// <param name="owner">The new document, which nothing else has seen yet.</param>
+    /// <param name="data">What the server needs beyond the text; it goes with each <c>didOpen</c>, also after a restart.</param>
+    /// <exception cref="InvalidOperationException">Another open document of this server has its file path.</exception>
+    internal void Open(CodeDocument owner, JsonNode? data)
+    {
+        var document = new ServerDocument(this, owner, DocumentUris.Of(owner.FilePath), data);
         bool changed = false;
         lock (_lock)
         {
             ObjectDisposedException.ThrowIf(_state == LanguageServerState.Stopped, this);
-            ThrowIfOpen(document.Uri, filePath, document);
+            ThrowIfOpen(document.Uri, owner.FilePath, document);
+            owner.ServerBinding = document;
             _documents.Add(document);
             if (_state == LanguageServerState.NotStarted)
                 changed = StartConnection();
@@ -154,7 +168,6 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
         }
         if (changed)
             OnStateChanged();
-        return document;
     }
 
     /// <summary>
@@ -323,6 +336,9 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
     /// is not open in it yet.
     /// </summary>
     internal ServerFeatures? FeaturesOf(ServerDocument document) => Connection()?.FeaturesOf(document);
+
+    /// <summary>The id of the running process; null without one. Tests of a real server use it to end it.</summary>
+    internal int? ProcessId => Connection()?.ProcessId;
 
     /// <summary>The clock of the server and of its documents' editors: the options' <c>TimeProvider</c>.</summary>
     internal TimeProvider TimeProvider => _options.TimeProvider;

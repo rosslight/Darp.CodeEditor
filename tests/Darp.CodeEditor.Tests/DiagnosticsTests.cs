@@ -36,15 +36,18 @@ public sealed class DiagnosticsTests(UiFixture ui)
     public Task Diagnostics_without_a_version_are_about_the_text_last_written() =>
         _ui.Run(async () =>
         {
-            var fake = new FakeServer("--unversioned");
+            var fake = new FakeServer("--unversioned", "--no-diagnostics");
             await using var server = new LanguageServer(fake.Options);
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one");
-            await Wait.UntilAsync(() => document.Diagnostics.Count == 1);
+            await fake.WaitForAsync("open ");
 
             document.Replace(new TextRange(3, 0), " two");
+            TextSnapshot edited = document.CurrentSnapshot;
 
-            await Wait.UntilAsync(() => document.Diagnostics[0].Snapshot == document.CurrentSnapshot);
-            document.Diagnostics[0].Message.ShouldBe("one two");
+            // The client records didChange as written before it sends the command that triggers this publish.
+            using CodeDocument command = server.CreateDocument(FakeServer.Commands, "out-of-range");
+            await Wait.UntilAsync(() => document.Diagnostics.Count == 4);
+            document.Diagnostics.ShouldAllBe(diagnostic => diagnostic.Snapshot == edited);
         });
 
     [Fact]

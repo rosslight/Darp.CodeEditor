@@ -89,6 +89,16 @@ internal sealed class ServerConnection
     /// <summary>Guarded: how long the server has been running since it answered <c>initialize</c>; null before.</summary>
     public TimeSpan? RunningFor => _running is { } running ? _options.TimeProvider.GetElapsedTime(running.Since) : null;
 
+    /// <summary>The process's id, once it started.</summary>
+    public int? ProcessId
+    {
+        get
+        {
+            lock (_lock)
+                return _process?.Id;
+        }
+    }
+
     /// <summary>Guarded: starts the process in the background.</summary>
     public void Start() => _run = Task.Run(RunAsync);
 
@@ -130,7 +140,7 @@ internal sealed class ServerConnection
         if (_running is not { } running || !_areDocumentsOpen)
             return;
         _documents[document] = new OpenDocument(this, running, document);
-        document.OnLanguageFeaturesChanged();
+        document.Owner.OnLanguageFeaturesChanged();
     }
 
     /// <summary>Guarded: sends a change of an open document.</summary>
@@ -498,6 +508,7 @@ internal sealed class ServerConnection
             hung = _hung;
             ranFor = RunningFor;
             _running = null;
+            _process = null;
             failure =
                 _failure
                 ?? (
@@ -508,8 +519,8 @@ internal sealed class ServerConnection
         }
         foreach (ServerDocument document in documents)
         {
-            document.SetDiagnostics([]);
-            document.OnLanguageFeaturesChanged();
+            document.Owner.SetDiagnostics([]);
+            document.Owner.OnLanguageFeaturesChanged();
         }
         string tail = process.StandardErrorTail;
         process.Dispose();
@@ -734,7 +745,7 @@ internal sealed class ServerConnection
         }
         if (document is null || snapshot is null)
             return;
-        document.SetDiagnostics([.. published.Diagnostics.Select(d => ToDiagnostic(snapshot, d))]);
+        document.Owner.SetDiagnostics([.. published.Diagnostics.Select(d => ToDiagnostic(snapshot, d))]);
     }
 
     private static Diagnostic ToDiagnostic(TextSnapshot snapshot, LspDiagnostic diagnostic)
@@ -964,6 +975,7 @@ internal sealed class ServerConnection
         private List<TextDocumentContentChangeEvent>? _changes = [];
 
         private readonly string _languageId;
+        private readonly JsonNode? _data;
         private int _changedLength;
         private bool _isOpened;
         private bool _isQueued;
@@ -973,10 +985,11 @@ internal sealed class ServerConnection
         {
             _connection = connection;
             _running = running;
-            _languageId = document.Language.Id;
+            _languageId = document.Owner.Language.Id;
+            _data = document.Data;
             Uri = document.Uri;
             Identity = DocumentUris.Identity(Uri);
-            _latest = document.CurrentSnapshot;
+            _latest = document.Owner.CurrentSnapshot;
             Queue();
         }
 
@@ -1122,7 +1135,7 @@ internal sealed class ServerConnection
             JsonSerializer.Serialize(
                 writer,
                 new DidOpenTextDocumentParams(
-                    new TextDocumentItem(Uri, _languageId, snapshot.Version, snapshot.GetText())
+                    new TextDocumentItem(Uri, _languageId, snapshot.Version, snapshot.GetText(), _data)
                 ),
                 LspJsonContext.Default.DidOpenTextDocumentParams
             );
@@ -1136,7 +1149,7 @@ internal sealed class ServerConnection
                 writer,
                 new DidChangeTextDocumentParams(
                     new VersionedTextDocumentIdentifier(Uri, snapshot.Version),
-                    changes ?? [new TextDocumentContentChangeEvent(null, snapshot.GetText())]
+                    changes ?? [new TextDocumentContentChangeEvent(snapshot.GetText())]
                 ),
                 LspJsonContext.Default.DidChangeTextDocumentParams
             );

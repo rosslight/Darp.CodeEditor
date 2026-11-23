@@ -74,6 +74,7 @@ internal sealed class JsonRpcConnection : IAsyncDisposable
     private readonly Stream _output;
     private readonly RequestHandler _handleRequest;
     private readonly NotificationHandler _handleNotification;
+    private readonly bool _startRequestsInOrder;
     private readonly int _maxMessageLength;
     private readonly int _maxWaitingMessages;
 
@@ -115,15 +116,21 @@ internal sealed class JsonRpcConnection : IAsyncDisposable
     /// <param name="handleNotification">Handles the peer's notifications.</param>
     /// <param name="maxMessageLength">The largest message the peer may send, in bytes.</param>
     /// <param name="maxWaitingMessages">How many messages may wait to be written or answered.</param>
+    /// <param name="startRequestsInOrder">
+    /// Starts each request's handler on the read loop, for a server whose answers depend on the notifications before
+    /// them: the handler sees them all and none after. It must return quickly, with its work on the thread pool.
+    /// </param>
     public JsonRpcConnection(
         Stream input,
         Stream output,
         RequestHandler handleRequest,
         NotificationHandler handleNotification,
         int maxMessageLength = DefaultMaxMessageLength,
-        int maxWaitingMessages = DefaultMaxWaitingMessages
+        int maxWaitingMessages = DefaultMaxWaitingMessages,
+        bool startRequestsInOrder = false
     )
     {
+        _startRequestsInOrder = startRequestsInOrder;
         _input = input;
         _output = output;
         _handleRequest = handleRequest;
@@ -492,7 +499,9 @@ internal sealed class JsonRpcConnection : IAsyncDisposable
             return;
         }
         // On the thread pool: a handler that blocks, such as the app's settings, does not stop reading.
-        _ = Task.Run(() => RunRequestAsync(id, key, method, parameters, cancellation));
+        _ = _startRequestsInOrder
+            ? RunRequestAsync(id, key, method, parameters, cancellation)
+            : Task.Run(() => RunRequestAsync(id, key, method, parameters, cancellation));
     }
 
     /// <summary>Ends the connection because too many messages wait: the peer does not read what it is sent.</summary>

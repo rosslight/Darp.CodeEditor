@@ -4,7 +4,9 @@ using Avalonia.Platform;
 using Avalonia.Platform.Storage;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Darp.CodeEditor;
+using Darp.CodeEditor.CSharpScript;
 using Sample.Localization;
+using Sample.ScriptApi;
 
 namespace Sample.Documents;
 
@@ -26,6 +28,17 @@ public sealed partial class Workspace : ObservableObject, IDisposable
     /// with its first document.
     /// </summary>
     private readonly Dictionary<FileType, LanguageServer> _servers = [];
+
+    /// <summary>The server of the app's C# scripts, which starts with the first of them.</summary>
+    private readonly CSharpScriptServer _scripts = new(
+        new CSharpScriptServerOptions { StandardError = line => Trace.WriteLine(line, "C# scripts") }
+    );
+
+    /// <summary>What the app's scripts see: its script API, without a <c>using</c>.</summary>
+    private readonly CSharpScriptEnvironment<ReportGlobals> _scriptEnvironment = new()
+    {
+        Imports = ["Sample.ScriptApi"],
+    };
 
     private int _untitledCount;
 
@@ -158,6 +171,7 @@ public sealed partial class Workspace : ObservableObject, IDisposable
         // The app exits, where only synchronous disposal runs: Dispose ends each server's process at once.
         foreach (LanguageServer server in _servers.Values)
             server.Dispose();
+        _scripts.Dispose();
     }
 
     /// <summary>Adds a document and shows it.</summary>
@@ -176,6 +190,12 @@ public sealed partial class Workspace : ObservableObject, IDisposable
     {
         LanguageServer? server = _servers.GetValueOrDefault(type);
         CodeDocument document;
+        if (type == FileType.CSharpScript)
+        {
+            document = _scripts.CreateDocument(_scriptEnvironment, text);
+            document.FilePath = filePath;
+            return new OpenDocument(name, type, document, server, file) { ScriptServer = _scripts };
+        }
         if (server is not null)
             document = server.CreateDocument(type.Language, text, filePath);
         else

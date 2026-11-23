@@ -3,10 +3,16 @@
     <Project Path="src/Darp.CodeEditor/Darp.CodeEditor.csproj" />
     <Project Path="src/Darp.CodeEditor.Lsp/Darp.CodeEditor.Lsp.csproj" />
     <Project Path="src/Darp.CodeEditor.CSharpScript/Darp.CodeEditor.CSharpScript.csproj" />
+    <Project Path="src/Darp.CodeEditor.CSharpScript.Protocol/Darp.CodeEditor.CSharpScript.Protocol.csproj" />
+    <Project Path="src/Darp.CodeEditor.CSharpScript.Server/Darp.CodeEditor.CSharpScript.Server.csproj" />
     <Project Path="src/Darp.CodeEditor.CSharpScript.Runner/Darp.CodeEditor.CSharpScript.Runner.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Darp.CodeEditor.Tests/Darp.CodeEditor.Tests.csproj" />
+    <Project Path="tests/Darp.CodeEditor.CSharpScript.Tests/Darp.CodeEditor.CSharpScript.Tests.csproj" />
+    <Project Path="tests/Darp.CodeEditor.CSharpScript.Tests.Dependency/Darp.CodeEditor.CSharpScript.Tests.Dependency.csproj" />
+    <Project Path="tests/Darp.CodeEditor.CSharpScript.Tests.Extra/Darp.CodeEditor.CSharpScript.Tests.Extra.csproj" />
+    <Project Path="tests/Darp.CodeEditor.CSharpScript.Tests.ScriptApi/Darp.CodeEditor.CSharpScript.Tests.ScriptApi.csproj" />
     <Project Path="tests/Darp.CodeEditor.Tests.BeforeSetup/Darp.CodeEditor.Tests.BeforeSetup.csproj" />
     <Project Path="tests/Darp.CodeEditor.Tests.FakeServer/Darp.CodeEditor.Tests.FakeServer.csproj" />
     <Project Path="tests/Darp.CodeEditor.Tests.SimpleTheme/Darp.CodeEditor.Tests.SimpleTheme.csproj" />
@@ -16,6 +22,7 @@
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/Darp.CodeEditor.Sample/Darp.CodeEditor.Sample.csproj" />
+    <Project Path="samples/Darp.CodeEditor.Sample.ScriptApi/Darp.CodeEditor.Sample.ScriptApi.csproj" />
     <Project Path="samples/Darp.CodeEditor.UseCases/Darp.CodeEditor.UseCases.csproj" />
     <Project Path="samples/Darp.CodeEditor.UseCases.ScriptApi/Darp.CodeEditor.UseCases.ScriptApi.csproj" />
     <Project Path="samples/Darp.CodeEditor.UseCases.ScriptApi.Runner/Darp.CodeEditor.UseCases.ScriptApi.Runner.csproj" />

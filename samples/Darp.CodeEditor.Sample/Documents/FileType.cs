@@ -43,6 +43,9 @@ public sealed record FileType(
 
     public static FileType Yaml { get; } = new("YAML", CodeLanguage.Yaml, [".yaml", ".yml"], "yaml-language-server");
 
+    /// <summary>C# scripts: the C# script server creates their documents, in the app's script environment.</summary>
+    public static FileType CSharpScript { get; } = new("C# script", CodeLanguage.CSharp, [".csx"]);
+
     /// <summary>Every file type, for the file pickers.</summary>
     public static IReadOnlyList<FileType> All { get; } = [Text, Json, Xml, Yaml, Python];
 
@@ -50,7 +53,8 @@ public sealed record FileType(
     public static FileType ForFile(string fileName)
     {
         string extension = Path.GetExtension(fileName);
-        return All.FirstOrDefault(type => type.Extensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
+        return All.Append(CSharpScript)
+                .FirstOrDefault(type => type.Extensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
             ?? Text;
     }
 
