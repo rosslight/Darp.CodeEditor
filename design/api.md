@@ -1,9 +1,8 @@
-# API draft
+# API
 
-Status: draft for discussion, 2026-11-05. Every public type and member of the v1 packages is declared, with its
-documentation, but nothing is implemented. [`samples/Darp.CodeEditor.UseCases`](../samples/Darp.CodeEditor.UseCases)
-compiles against the draft: one file per scenario of a host app, each with the questions it raises. Write your own
-scenarios there to try the API.
+Status: the API of the v1 packages, as implemented. Every public type and member is documented.
+[`samples/Darp.CodeEditor.UseCases`](../samples/Darp.CodeEditor.UseCases) has one file per scenario of a host app, and
+the tests run its sessions for real. Section 9 records what is proven and what is still open.
 
 ## 1. The model
 
@@ -629,8 +628,6 @@ app's script environments.
 
 ## 7. Sessions
 
-Draft for review; not proven yet (section 9).
-
 A **session** is one runner process, with a bridge between the app and its scripts, and one session object that the
 session's scripts share. The script API defines the bridge as two interfaces, one per direction, both
 `[JsonRpcContract]` and `[GenerateShape]`:
@@ -668,11 +665,14 @@ them at the versions the app resolved, outside the repository's package settings
 dependency, and an incompatible pair fails the publish with NuGet's error. The compiler reads the marked assemblies from
 that publish, with everything else under a private alias. The runner loads it through that manifest, with .NET's
 `AssemblyDependencyResolver`, and loads the bridge and the library's contracts only once, so their types are the same on
-both sides; a marked reference that needs a newer version of them than the runner has fails the publish. A NativeAOT
+both sides. The publish pins the packages of the bridge, also the transitive ones, to the versions the runner carries,
+so a marked reference that needs a newer version of one fails it with NuGet's error. A NativeAOT
 app's own output can't serve for this: it holds no managed DLLs. Two limits come with it:
 
 - **Base .NET only.** The runner starts on the base .NET runtime. A runner-side project that needs another shared
-  framework, such as ASP.NET Core, fails the build with a clear error.
+  framework, such as ASP.NET Core, fails the build with a clear error. WPF is the exception: on Windows targets the
+  bridge's threading library names it, in a copy that the runner replaces with its own, so the build can't tell. A
+  runner-side project that really uses WPF fails when it loads it, in the run.
 - **Compatible frameworks.** The app references the runner-side project, so their target frameworks must fit: a
   `net10.0` app can't reference a `net10.0-windows` project (NU1201). The runner itself loads a `net10.0-windows`
   runner side on Windows, so a Windows-only app targets `net10.0-windows` itself.
@@ -805,11 +805,20 @@ again after a kill or a crash, and does not restart by itself: an app that keeps
 `session.Exited.IsCompleted` before it starts a run, and starts a new session then.
 
 **Children of the app.** The C# server and every session's process end when the app ends, even when the app is
-killed, so no runner keeps a device open after a crash. Both watch their standard input and exit when it closes, and
-on Windows they also run in a Job Object that ends them with the app; the Job Object covers a runner that is stuck,
-and standard input covers the moment before the runner is assigned to the Job Object. In a test on Windows, runners
-that did neither kept running after the app was killed; with either, they ended 2 to 3 ms after it, also while busy in
-a loop or blocked in a sleep.
+killed, so no runner keeps a device open after a crash. Both watch the pipe that the app gave them as standard input
+and exit when it closes, and on Windows they also run in a Job Object that ends them with the app; the Job Object
+covers a runner that is stuck, and the pipe covers the moment before the runner is assigned to the Job Object. In a
+test on Windows, runners that did neither kept running after the app was killed; with either, they ended 2 to 3 ms
+after it, also while busy in a loop or blocked in a sleep.
+
+**Programs that scripts start.** Before any code of the script API loads, the runner moves its connection to the app
+onto private descriptors that child processes don't inherit (non-inheritable handles on Windows). Its standard input
+becomes the null device, and its standard output the same log pipe as its standard error. So a program that a script
+starts has valid streams and can't touch the connection: it reads an empty input, and what it or native driver code
+prints arrives in `Output`, unless the script redirects it, as usual in .NET. The runtime's crash reports go straight to
+standard error and reach `Exited`, whose `StandardError` keeps the last 100 lines. A child that outlives the runner may
+hold the log pipe open: `Exited` follows the process, and waits at most 200 ms more for the end of that pipe. `Output`
+never holds up `Exited`: lines wait for a slow callback in a queue that keeps the newest 10,000.
 
 **Isolation.** Each session is its own process, so a kill or a crash takes only its own scripts down. Group scripts
 into sessions by what may fail together: scripts that share objects belong in one session, scripts that must survive
@@ -842,6 +851,7 @@ Streams (`IAsyncEnumerable`) were slower, and one stream in plus one out in a si
 | `StartAsync` | the process does not start or answer | `InvalidOperationException`, with its standard error |
 | `run.Completion` | the globals' `Create` throws | `CSharpScriptException` |
 | `Remote` | the session object throws | `CSharpScriptException` |
+| `Remote` | a session object's method throws `OperationCanceledException` by itself, without the caller's token | the call is cancelled: `OperationCanceledException`, without the original details |
 | `Remote` | the process has ended, or the session is being disposed | `ConnectionLostException` |
 | `DisposeAsync` | the session object's disposal throws | nothing thrown; `Exited`'s `DisposeException` has it |
 | the session | code that a script left running, such as a timer, throws | the process ends, as any .NET app does: `Exited` says `Crashed`, and the session's runs end with `ConnectionLostException` |
@@ -1224,6 +1234,27 @@ blocking:
   ReadyToRun, ten new processes on a machine with other work (load about 4): "C# ready" on 5,000 lines took 845 to
   899 ms, median 862 ms, within the budget of 1.5 s.
 
+Sessions and the runner (section 7) are implemented. Proven on linux-x64 with `dotnet test`, as NativeAOT against
+published helpers, and through the package consumer from an empty NuGet cache, in development, as JIT and as NativeAOT.
+CI runs the same consumer on Linux and Windows, x64 and arm64, and on macOS arm64 without blocking:
+
+- overlapping runs with different globals and their own input, calls in both directions while the other side waits, a
+  script's marked references in the runner, a native library among them, and use cases 06 to 08;
+- failures at their script's line, also from a callback that outlived its run; a `Create` that throws, also its own
+  `OperationCanceledException`, as `CSharpScriptException`;
+- the end of a session, with gates in the transport instead of timing: a kill during a write and with a call still on
+  the pipe, a kill during disposal, new calls refused while disposal waits, also one that reaches the runner after it
+  closed admission, an admitted call getting its whole reply, a caller cancelling during disposal, and `Exited`
+  completing before the failures it explains;
+- private pipes: a child with no redirects printing into `Output` and reading an empty input, no descriptor of the
+  connection in a child (on Linux), a surviving child that doesn't delay `Exited`, a failure before the runner
+  initializes, and a runtime crash whose message is in `Exited`'s tail;
+- one load of the bridge: a publish with the runner's version pins passes, and a marked reference that needs a newer
+  package of the bridge fails with NuGet's error;
+- the runner ending when the app is hard-killed; on Windows, a script makes it ignore the end of its input, so that only
+  the Job Object can end it. A marked `net10.0-windows10.0.19041.0` reference calls a Windows Runtime API from a script.
+  Both Windows cases run only in CI.
+
 Still open:
 
 - hover, semantic tokens, completion and signature help against a third-party server, such as yaml-language-server,
@@ -1238,11 +1269,8 @@ Still open:
 - code blocks are highlighted with the document's grammar whatever language their fence names, and the hover is at
   most 320 pixels wide; both wait for a use case that needs more;
 
-- the real bridge and contracts loaded once for both sides, with the runner;
-- the library's own processes ending with a killed app on Linux and macOS; third-party language servers end there
-  only as the protocol asks them to (section 6);
-- the exit reason rule and `Exited` completing before failures, when causes race: tests that kill the runner at every
-  step of disposing, and call `DisposeAsync` and `KillAsync` together;
+- third-party language servers end with a killed app on Linux and macOS only as the protocol asks them to (section 6);
+- a kill at every step of disposing: the tests force the steps listed above, not all of them;
 - calls that must stay quick, such as prompts, callback replies and stopping a run, while the bridge carries bulk data
   in both directions: a test measures their latency under load;
 - integration tests on GitHub Actions for Windows, Linux and macOS, once the API is decided;

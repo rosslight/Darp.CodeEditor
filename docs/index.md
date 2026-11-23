@@ -84,6 +84,7 @@ dotnet publish -c Release -r linux-x64 -p:PublishAot=true
 - [Documents and editors](documents.md): ownership, saving, tabs and threads.
 - [Languages](languages.md): the built-in languages, and adding your own.
 - [Language servers](language-servers.md): completion, hover and diagnostics.
+- [C# scripts](csharp-scripts.md): scripts that your app defines, checks and runs in a separate process.
 - [Customizing](customizing.md): colors, keys, commands and search.
 
 AI agents can start from [`llms.txt`](llms.txt), or read one file with all guides in

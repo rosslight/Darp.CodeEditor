@@ -7,12 +7,12 @@ repo_url = "https://github.com/rosslight/Darp.CodeEditor"
 repo_name = "rosslight/Darp.CodeEditor"
 copyright = "Copyright &copy; 2026 rosslight GmbH"
 
-# C# scripting gets its page after "Language servers" once its packages are released.
 nav = [
   { "Getting started" = "index.md" },
   { "Documents and editors" = "documents.md" },
   { "Languages" = "languages.md" },
   { "Language servers" = "language-servers.md" },
+  { "C# scripts" = "csharp-scripts.md" },
   { "Customizing" = "customizing.md" },
 ]
 
@@ -71,4 +71,4 @@ markdown_description = "Guides for app developers. Each link is the Markdown of 
 full_output = "llms-full.txt"
 
 [project.plugins.llmstxt.sections]
-Guides = ["index.md", "documents.md", "languages.md", "language-servers.md", "customizing.md"]
+Guides = ["index.md", "documents.md", "languages.md", "language-servers.md", "csharp-scripts.md", "customizing.md"]
