@@ -27,15 +27,6 @@ public sealed partial class DocumentView : UserControl
     /// <summary>The document the editor shows.</summary>
     private OpenDocument? _shown;
 
-    /// <summary>Stops the script that runs; null while none does.</summary>
-    private CancellationTokenSource? _scriptStop;
-
-    /// <summary>The last lines of the shown run's output. The UI thread owns it.</summary>
-    private readonly Queue<string> _outputLines = new();
-
-    /// <summary>The run whose lines the output shows: a session's last lines may arrive after its end.</summary>
-    private object? _outputRun;
-
     public DocumentView()
     {
         InitializeComponent();
@@ -57,20 +48,22 @@ public sealed partial class DocumentView : UserControl
     /// <summary>The caret's line and column, for the status bar.</summary>
     public TextPosition CaretPosition => Editor.CaretPosition;
 
-    /// <summary>Compiles the shown script and runs it in a session of its own, until it ends or the user stops it.</summary>
+    /// <summary>
+    /// Compiles the shown script and runs it in a session of its own, until it ends, the user stops it or its document
+    /// closes. Each script keeps its run and output while the user looks at other documents.
+    /// </summary>
     private async void OnRunScript(object? sender, RoutedEventArgs e)
     {
-        if (_shown?.Document is not CSharpScriptDocument<ReportGlobals> document || _scriptStop is not null)
+        if (_shown is not { Document: CSharpScriptDocument<ReportGlobals> document, ScriptStop: null } tab)
             return;
         using var stop = new CancellationTokenSource();
-        _scriptStop = stop;
-        RunButton.IsEnabled = false;
-        StopButton.IsEnabled = true;
-        _outputRun = stop;
-        _outputLines.Clear();
-        ScriptOutput.Text = "";
+        // A queue per run: a session's last lines may arrive after its end, and must not join the next run's.
+        Queue<string> lines = new();
+        tab.ScriptStop = stop;
+        tab.ScriptOutput = lines;
+        ShowScriptState();
         void Output(string line) =>
-            Dispatcher.UIThread.Post(() => ShowOutput(stop, line), DispatcherPriority.Background);
+            Dispatcher.UIThread.Post(() => AddOutput(tab, lines, line), DispatcherPriority.Background);
         try
         {
             CSharpScriptCompilation<ReportGlobals> compilation = await document.CompileAsync(stop.Token);
@@ -103,23 +96,30 @@ public sealed partial class DocumentView : UserControl
         }
         finally
         {
-            _scriptStop = null;
-            RunButton.IsEnabled = true;
-            StopButton.IsEnabled = false;
+            tab.ScriptStop = null;
+            ShowScriptState();
         }
     }
 
-    private void OnStopScript(object? sender, RoutedEventArgs e) => _scriptStop?.Cancel();
+    private void OnStopScript(object? sender, RoutedEventArgs e) => _shown?.ScriptStop?.Cancel();
 
-    private void ShowOutput(object run, string line)
+    private void AddOutput(OpenDocument tab, Queue<string> lines, string line)
     {
         const int maxLines = 200;
-        if (run != _outputRun)
-            return;
-        if (_outputLines.Count == maxLines)
-            _outputLines.Dequeue();
-        _outputLines.Enqueue(line);
-        ScriptOutput.Text = string.Join(Environment.NewLine, _outputLines);
+        if (lines.Count == maxLines)
+            lines.Dequeue();
+        lines.Enqueue(line);
+        if (tab == _shown && lines == tab.ScriptOutput)
+            ShowScriptState();
+    }
+
+    /// <summary>Shows the run and the output of the shown document, if it is a script.</summary>
+    private void ShowScriptState()
+    {
+        ScriptControls.IsVisible = _shown?.Document is CSharpScriptDocument<ReportGlobals>;
+        RunButton.IsEnabled = _shown?.ScriptStop is null;
+        StopButton.IsEnabled = _shown?.ScriptStop is not null;
+        ScriptOutput.Text = _shown is null ? "" : string.Join(Environment.NewLine, _shown.ScriptOutput);
         // Keeps the newest line in view.
         ScriptOutput.CaretIndex = ScriptOutput.Text.Length;
     }
@@ -189,10 +189,8 @@ public sealed partial class DocumentView : UserControl
             return;
         if (_shown is not null)
             _shown.ViewState = Editor.SaveViewState();
-        // The output below the editor belongs to the shown script, so a run ends with leaving it.
-        _scriptStop?.Cancel();
         _shown = document;
-        ScriptControls.IsVisible = document?.Document is CSharpScriptDocument<ReportGlobals>;
+        ShowScriptState();
         Editor.Document = document?.Document;
         if (document?.ViewState is { } state)
             Editor.RestoreViewState(state);
