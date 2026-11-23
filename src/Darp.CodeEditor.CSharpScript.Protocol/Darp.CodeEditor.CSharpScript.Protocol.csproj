@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Ships inside the Darp.CodeEditor.CSharpScript package: all its types are internal. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript" />
+    <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript.Server" />
+    <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript.Tests" />
+  </ItemGroup>
+</Project>
