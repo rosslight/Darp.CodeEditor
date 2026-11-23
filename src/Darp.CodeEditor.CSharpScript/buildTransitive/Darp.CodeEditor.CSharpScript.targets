@@ -26,8 +26,6 @@
   <PropertyGroup Condition="'$(_CSharpScriptFromPackage)' != 'true' and '$(_CSharpScriptIsApp)' == 'true'">
     <_CSharpScriptServerProject>$(MSBuildThisFileDirectory)..\..\Darp.CodeEditor.CSharpScript.Server\Darp.CodeEditor.CSharpScript.Server.csproj</_CSharpScriptServerProject>
     <_CSharpScriptServerRemovedProperties>RuntimeIdentifier;SelfContained</_CSharpScriptServerRemovedProperties>
-    <!-- The server is a framework-dependent executable, also for an app that is self-contained or NativeAOT. -->
-    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
   </PropertyGroup>
   <ItemGroup Condition="'$(_CSharpScriptServerProject)' != ''">
     <ProjectReference

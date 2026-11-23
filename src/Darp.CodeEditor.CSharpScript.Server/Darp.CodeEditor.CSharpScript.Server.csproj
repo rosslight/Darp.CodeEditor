@@ -6,6 +6,8 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <!-- The app starts it through the dotnet host, or an app host made when the app is published. -->
     <UseAppHost>false</UseAppHost>
+    <!-- It stays framework-dependent for a self-contained or NativeAOT app, which starts it and loads none of it. -->
+    <ShouldBeValidatedAsExecutableReference>false</ShouldBeValidatedAsExecutableReference>
     <!--
       An app that publishes passes these to all it references. The libraries the server shares with it keep them, so that
       a parallel build makes one copy of each; the server itself is always a portable JIT build.
