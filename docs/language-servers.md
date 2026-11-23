@@ -87,6 +87,15 @@ one refers to the snapshot the server analyzed, so map its range before you use 
 --8<-- "language-server.cs:diagnostic"
 ```
 
+Each diagnostic has a `DiagnosticSeverity`: `Error`, `Warning`, `Information` or `Hint`. F8 skips hints. Use the severity
+to summarize problems:
+
+```csharp
+--8<-- "language-server.cs:problems"
+```
+
+`Diagnostics` holds everything the server reported. Editors show at most 10,000 per document, the most severe first.
+
 ## Shut down
 
 Keep one server for as long as your app needs it. Dispose its documents first, then the server. During normal use, stop

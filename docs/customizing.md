@@ -41,26 +41,32 @@ to Avalonia's log.
 
 ## Keys
 
-The editor's keys are ordinary Avalonia `KeyBindings`. On macOS, Cmd takes Ctrl's place, except in Ctrl+Space.
+The editor's keys are ordinary Avalonia `KeyBindings`. On macOS, Cmd takes Ctrl's place, except in Ctrl+Space. The
+Command column names the members of `CodeEditorCommands`.
 
-| Action | Keys |
-|---|---|
-| Completion | Ctrl+Space, Ctrl+I (also Option+Esc on macOS) |
-| Completion details, while the list shows | Ctrl+Space, Ctrl+I, or the hover key |
-| Signature help | Ctrl+Shift+Space |
-| Hover at the caret | Ctrl+Q on Windows, F1 on Linux and macOS |
-| Next or previous problem | F8, Shift+F8 |
-| Find, replace | Ctrl+F, Ctrl+H (Cmd+Option+F on macOS) |
-| Next or previous match | F3, Shift+F3 (also Cmd+G, Cmd+Shift+G on macOS) |
-| Toggle comment | Ctrl+/ |
-| Move lines | Alt+Up, Alt+Down |
-| Copy lines | Shift+Alt+Up, Shift+Alt+Down (with Ctrl on Linux) |
-| Delete lines | Ctrl+Shift+K |
-| Insert a line below or above | Ctrl+Enter, Ctrl+Shift+Enter |
-| Indent, outdent | Ctrl+], Ctrl+[ |
-| Select line | Ctrl+L |
-| Undo, redo | Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z |
-| Clipboard, select all | Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A |
+| Action | Command | Keys |
+|---|---|---|
+| Open completion | `TriggerSuggest` | Ctrl+Space, Ctrl+I (also Option+Esc on macOS) |
+| Toggle completion details | `ToggleSuggestionDetails` | Ctrl+Space, Ctrl+I or the hover key, while the list shows |
+| Accept completion | `AcceptSelectedSuggestion` | Enter, while the list shows |
+| Accept, replacing the rest of the word | `AcceptAlternativeSelectedSuggestion` | Tab, Shift+Enter, while the list shows |
+| Signature help | `TriggerParameterHints` | Ctrl+Shift+Space |
+| Previous or next signature | `ShowPrevParameterHint`, `ShowNextParameterHint` | Alt+Up, Alt+Down, while several show |
+| Hover at the caret | `ShowHover` | Ctrl+Q on Windows, F1 on Linux and macOS |
+| Next or previous problem | `NextMarker`, `PreviousMarker` | F8, Shift+F8 |
+| Find | `Find` | Ctrl+F |
+| Replace | `Replace` | Ctrl+H (Cmd+Option+F on macOS) |
+| Next or previous match | `FindNext`, `FindPrevious` | F3, Shift+F3 (also Cmd+G, Cmd+Shift+G on macOS) |
+| Toggle comment | `CommentLine` | Ctrl+/ |
+| Move lines | `MoveLinesUp`, `MoveLinesDown` | Alt+Up, Alt+Down |
+| Copy lines | `CopyLinesUp`, `CopyLinesDown` | Shift+Alt+Up, Shift+Alt+Down (with Ctrl on Linux) |
+| Delete lines | `DeleteLines` | Ctrl+Shift+K |
+| Insert a line below or above | `InsertLineAfter`, `InsertLineBefore` | Ctrl+Enter, Ctrl+Shift+Enter |
+| Indent, outdent | `IndentLines`, `OutdentLines` | Ctrl+], Ctrl+[ |
+| Select line | `ExpandLineSelection` | Ctrl+L |
+| Undo | `Undo` | Ctrl+Z |
+| Redo | `Redo` | Ctrl+Y, Ctrl+Shift+Z |
+| Cut, copy, paste, select all | `Cut`, `Copy`, `Paste`, `SelectAll` | Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A |
 
 Each default binding names its command in `CommandParameter`. Change a key by setting its `Gesture`:
 
@@ -107,6 +113,22 @@ from code:
 
 A search keeps at most 10,000 matches. Beyond that, the bar says so and Replace All is off, so it never replaces only
 some of the matches.
+
+## Built-in behavior
+
+These work without setup:
+
+- **Typing:** pairs close as you type unless `AutoClosing` is off. Typing the closing character steps over it, Backspace
+  deletes an empty pair, and an opening character surrounds the selection.
+- **Undo:** typing undoes by word.
+- **Highlights:** the current line, the bracket at the caret with its match, the symbol's occurrences, and whitespace
+  inside the selection.
+- **Completion snippets:** `$1`, `${1}`, `${1:text}` and `$0` become stops. The first stop is selected, and Tab and
+  Shift+Tab move between stops. Other snippet syntax goes in as plain text.
+- **Hover:** shows the messages of the diagnostics under the pointer, above the server's Markdown. Code blocks use the
+  document's grammar.
+- **Long lines:** the editor works on a line's first 3,000 characters. Squiggles, semantic colors and the editor's own
+  edits don't reach past them.
 
 ## Context menu
 

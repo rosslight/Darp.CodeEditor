@@ -27,6 +27,12 @@ sealed class App : Application
         string path = Path.Combine(Path.GetTempPath(), "darp-codeeditor-example.json");
         CodeDocument json = CodeDocument.Create(CodeLanguage.Json, """{ "name": "first" }""");
         CodeDocument yaml = CodeDocument.Create(CodeLanguage.Yaml, "name: second\n");
+
+        // --8<-- [start:indentation]
+        json.Indentation = Indentation.Tabs(width: 4);
+        yaml.Indentation = Indentation.Spaces(2);
+        // --8<-- [end:indentation]
+
         var editor = new CodeEditor { Document = json };
 
         var showJson = new Button { Content = "JSON" };
@@ -34,17 +40,26 @@ sealed class App : Application
         var save = new Button { Content = "Save JSON" };
         var insert = new Button { Content = "Insert" };
         var lines = new TextBlock { VerticalAlignment = VerticalAlignment.Center };
+        var caret = new TextBlock { VerticalAlignment = VerticalAlignment.Center };
         showJson.Click += (_, _) => Show(editor, json);
         showYaml.Click += (_, _) => Show(editor, yaml);
         save.Click += async (_, _) => lines.Text = await SaveAsync(json, path) ? "Saved" : "Changed, save again";
         insert.Click += (_, _) => InsertAtSelection(editor, "text");
         json.TextChanged += async (_, _) => lines.Text = $"{await CountLinesAsync(json)} lines";
 
+        // --8<-- [start:caret]
+        editor.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == CodeEditor.CaretPositionProperty)
+                caret.Text = $"Ln {editor.CaretPosition.Line}, Col {editor.CaretPosition.Column}";
+        };
+        // --8<-- [end:caret]
+
         var buttons = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 4,
-            Children = { showJson, showYaml, save, insert, lines },
+            Children = { showJson, showYaml, save, insert, lines, caret },
         };
         DockPanel.SetDock(buttons, Dock.Top);
         var window = new Window

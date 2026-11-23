@@ -34,10 +34,15 @@ the range moves with the text:
 - `TextChanged` fires after every change, by the user or by the app. Read the text only when you need it.
 - `CurrentSnapshot` is an immutable `TextSnapshot` of the text and its version, and costs nothing to take.
 - `Undo()`, `Redo()`, `CanUndo` and `CanRedo` work on the document's history.
-- `Indentation` sets tabs or spaces. It starts as the text indents, and changing it leaves existing text alone.
 
 `PropertyChanged` reports `IsModified`, `CanUndo`, `CanRedo`, `Indentation` and `Diagnostics`, so you can bind them. It
 doesn't report `Text`.
+
+`Indentation` starts as the text indents. Set it to change what Tab and new lines insert. Existing text stays as it is:
+
+```csharp
+--8<-- "documents.cs:indentation"
+```
 
 ## Save a file
 
@@ -74,6 +79,12 @@ the saved state doesn't keep the closed document in memory.
 - `TextPosition` uses a line and a column, both counted from 1, as editors show them.
 - `TextSnapshot.GetPosition` and `GetOffset` convert between them.
 - Members that take offsets or ranges clamp them to the text.
+
+`CodeEditor.CaretPosition` is the caret's line and column. Follow it for a status bar:
+
+```csharp
+--8<-- "documents.cs:caret"
+```
 
 ## Threads
 

@@ -55,6 +55,20 @@ sealed class App : Application
         };
         // --8<-- [end:state]
 
+        var summary = new TextBlock();
+
+        // --8<-- [start:problems]
+        document.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(CodeDocument.Diagnostics))
+                return;
+            int problems = document.Diagnostics.Count(diagnostic =>
+                diagnostic.Severity is DiagnosticSeverity.Error or DiagnosticSeverity.Warning
+            );
+            summary.Text = $"{problems} problems";
+        };
+        // --8<-- [end:problems]
+
         var goToProblem = new Button { Content = "Go to first problem" };
         goToProblem.Click += (_, _) =>
         {
@@ -66,7 +80,7 @@ sealed class App : Application
         {
             Orientation = Avalonia.Layout.Orientation.Horizontal,
             Spacing = 8,
-            Children = { goToProblem, status },
+            Children = { goToProblem, status, summary },
         };
         DockPanel.SetDock(bar, Dock.Top);
         var window = new Window
