@@ -508,6 +508,7 @@ internal sealed class ServerConnection
             hung = _hung;
             ranFor = RunningFor;
             _running = null;
+            _process = null;
             failure =
                 _failure
                 ?? (
