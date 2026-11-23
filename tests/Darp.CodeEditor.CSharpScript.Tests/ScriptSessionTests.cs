@@ -812,6 +812,38 @@ public sealed class ScriptSessionTests
     }
 
     [Fact]
+    public async Task Native_code_writing_to_descriptor_1_reaches_Output_and_leaves_the_connection_alone()
+    {
+        var lines = new LineLog();
+        CSharpScriptAssembly<ReaderGlobals> script = await CompileAs(
+            ScriptEnvironments.Reader,
+            """
+            byte[] text = System.Text.Encoding.ASCII.GetBytes("from-native-code\n");
+            if (OperatingSystem.IsWindows())
+                Native._write(1, text, (uint)text.Length);
+            else
+                Native.write(1, text, (nuint)text.Length);
+
+            static class Native
+            {
+                [System.Runtime.InteropServices.DllImport("ucrtbase")]
+                public static extern int _write(int descriptor, byte[] buffer, uint count);
+
+                [System.Runtime.InteropServices.DllImport("libc")]
+                public static extern nint write(int descriptor, byte[] buffer, nuint count);
+            }
+            """
+        );
+        await using var session = await Start(options: new() { Output = lines.Add });
+        CSharpScriptRun run = await session.StartScriptAsync(script, Token);
+
+        await Wait.ForAsync(run.Completion);
+
+        await lines.WaitForAsync("from-native-code");
+        (await Wait.ForAsync(session.Remote.GetStatusAsync(Token))).ShouldContain("no calculation");
+    }
+
+    [Fact]
     public async Task A_child_inherits_no_descriptor_of_the_connection()
     {
         Assert.SkipUnless(OperatingSystem.IsLinux(), "Reads the descriptors from /proc.");

@@ -11,9 +11,6 @@ using Microsoft.Win32.SafeHandles;
 /// </summary>
 internal static partial class RunnerPipes
 {
-    /// <summary>Keeps the null device open for the process's whole life, as its standard input.</summary>
-    private static SafeFileHandle? s_nullInput;
-
     /// <summary>Returns the connection's streams, on descriptors that child processes don't inherit.</summary>
     public static (Stream Input, Stream Output) TakeConnection()
     {
@@ -38,15 +35,8 @@ internal static partial class RunnerPipes
         const int standardError = 2;
         var input = new SafeFileHandle(Private(standardInput), ownsHandle: true);
         var output = new SafeFileHandle(Private(standardOutput), ownsHandle: true);
-        using (
-            SafeFileHandle nullDevice = File.OpenHandle(
-                "/dev/null",
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.ReadWrite
-            )
-        )
-            Check(dup2((int)nullDevice.DangerousGetHandle(), standardInput));
+        using SafeFileHandle nullDevice = File.OpenHandle("/dev/null", share: FileShare.ReadWrite);
+        Check(dup2((int)nullDevice.DangerousGetHandle(), standardInput));
         Check(dup2(standardError, standardOutput));
         return (input, output);
 
@@ -62,26 +52,32 @@ internal static partial class RunnerPipes
     private static int Check(int result) =>
         result >= 0 ? result : throw new Win32Exception(Marshal.GetLastPInvokeError());
 
+    /// <summary>
+    /// Win32's standard handles and the C runtime's descriptors are two tables, and native code uses either, so both move.
+    /// </summary>
     [SupportedOSPlatform("windows")]
     private static (SafeFileHandle Input, SafeFileHandle Output) MoveOnWindows()
     {
         const int standardInput = -10;
         const int standardOutput = -11;
-        const int standardError = -12;
-        const uint inheritFlag = 1;
-        nint input = GetStdHandle(standardInput);
-        nint output = GetStdHandle(standardOutput);
-        CheckWindows(SetHandleInformation(input, inheritFlag, 0));
-        CheckWindows(SetHandleInformation(output, inheritFlag, 0));
-        s_nullInput = File.OpenHandle(
-            "NUL",
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.ReadWrite | FileShare.Inheritable
-        );
-        CheckWindows(SetStdHandle(standardInput, s_nullInput.DangerousGetHandle()));
-        CheckWindows(SetStdHandle(standardOutput, GetStdHandle(standardError)));
-        return (new SafeFileHandle(input, ownsHandle: true), new SafeFileHandle(output, ownsHandle: true));
+        // Copies first: moving a descriptor closes the handle it held.
+        SafeFileHandle input = Private(GetStdHandle(standardInput));
+        SafeFileHandle output = Private(GetStdHandle(standardOutput));
+        int nullDevice = Check(_open("NUL", 0));
+        Check(_dup2(nullDevice, 0));
+        Check(_close(nullDevice));
+        Check(_dup2(2, 1));
+        CheckWindows(SetStdHandle(standardInput, _get_osfhandle(0)));
+        CheckWindows(SetStdHandle(standardOutput, _get_osfhandle(1)));
+        return (input, output);
+
+        static SafeFileHandle Private(nint handle)
+        {
+            const nint currentProcess = -1;
+            const uint sameAccess = 2;
+            CheckWindows(DuplicateHandle(currentProcess, handle, currentProcess, out nint copy, 0, false, sameAccess));
+            return new SafeFileHandle(copy, ownsHandle: true);
+        }
     }
 
     private static void CheckWindows(bool succeeded)
@@ -111,5 +107,29 @@ internal static partial class RunnerPipes
     [SupportedOSPlatform("windows")]
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool SetHandleInformation(nint handle, uint mask, uint flags);
+    private static partial bool DuplicateHandle(
+        nint sourceProcess,
+        nint source,
+        nint targetProcess,
+        out nint target,
+        uint access,
+        [MarshalAs(UnmanagedType.Bool)] bool inherit,
+        uint options
+    );
+
+    [SupportedOSPlatform("windows")]
+    [LibraryImport("ucrtbase", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int _open(string path, int flags);
+
+    [SupportedOSPlatform("windows")]
+    [LibraryImport("ucrtbase", SetLastError = true)]
+    private static partial int _dup2(int descriptor, int target);
+
+    [SupportedOSPlatform("windows")]
+    [LibraryImport("ucrtbase", SetLastError = true)]
+    private static partial int _close(int descriptor);
+
+    [SupportedOSPlatform("windows")]
+    [LibraryImport("ucrtbase")]
+    private static partial nint _get_osfhandle(int descriptor);
 }
