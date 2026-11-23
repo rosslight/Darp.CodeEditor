@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Darp.CodeEditor.CSharpScript.Runner;
 using Darp.CodeEditor.Lsp;
+using Darp.CodeEditor.Tests;
 using Microsoft.Extensions.Logging;
 using ScriptTests.Api;
 using StreamJsonRpc;
@@ -253,6 +254,64 @@ public sealed class ScriptSessionTests
             await Should.ThrowAsync<ConnectionLostException>(() => run.Completion);
             session.Exited.IsCompletedSuccessfully.ShouldBeTrue();
             (await session.Exited).Reason.ShouldBe(CSharpScriptSessionExitReason.StopTimedOut);
+        }
+    }
+
+    [Fact]
+    public async Task A_stop_deadline_leaves_a_session_alone_once_its_run_has_ended()
+    {
+        string folder = Directory.CreateTempSubdirectory("script-stop").FullName;
+        string endFile = Path.Combine(folder, "end");
+        var stopWriting = Gate();
+        var releaseStop = Gate();
+        var clock = new ManualTime();
+        // The file is the gate: this script ends without anything crossing the pipe that the test holds.
+        CSharpScriptAssembly<ReaderGlobals> script = await CompileAs(
+            ScriptEnvironments.Reader,
+            $$"""while (!File.Exists(@"{{endFile}}")) await Task.Delay(5);"""
+        );
+        await using var session = await SessionConnection.OpenAsync<IAppSide, ISessionSide, Session>(
+            new TestApp(),
+            new CSharpScriptSessionOptions { TimeProvider = clock },
+            Token,
+            (output, input) =>
+                new GatedHandler(
+                    SessionWire.Handler<IAppSide, ISessionSide>(output, input),
+                    write: async (message, _) =>
+                    {
+                        if (
+                            message is JsonRpcRequest
+                            {
+                                Method: SessionWire.ControlPrefix + nameof(IRunnerControl.StopAsync)
+                            }
+                        )
+                        {
+                            stopWriting.TrySetResult();
+                            await releaseStop.Task;
+                        }
+                    }
+                )
+        );
+        try
+        {
+            CSharpScriptRun run = await session.StartScriptAsync(script, Token);
+            Task stopping = run.StopAsync(TimeSpan.FromSeconds(2));
+            await Wait.ForAsync(stopWriting.Task);
+            await File.WriteAllTextAsync(endFile, "", Token);
+            await Wait.ForAsync(run.Completion);
+
+            clock.Advance(TimeSpan.FromSeconds(3));
+
+            await Wait.ForAsync(stopping);
+            releaseStop.SetResult();
+            (await Wait.ForAsync(session.Remote.GetStatusAsync(Token))).ShouldContain("no calculation");
+            await Wait.ForAsync(session.DisposeAsync().AsTask());
+            (await session.Exited).Reason.ShouldBe(CSharpScriptSessionExitReason.Disposed);
+        }
+        finally
+        {
+            releaseStop.TrySetResult();
+            Directory.Delete(folder, recursive: true);
         }
     }
 

@@ -11,9 +11,9 @@ using StreamJsonRpc.Reflection;
 namespace Darp.CodeEditor.CSharpScript.Runner;
 
 /// <summary>
-/// The app's end of a session: its process, its connection and its one lifecycle, under one lock. A session is
-/// <see cref="Lifecycle.Running"/>, then <see cref="Lifecycle.Closing"/> while it is disposed, and
-/// <see cref="Lifecycle.Ended"/> once its process has exited and <see cref="Exited"/> says why.
+/// The app's end of a session: its process, its connection and its one lifecycle, under one lock, which decides what
+/// the session admits. It is <see cref="Lifecycle.Running"/>, then <see cref="Lifecycle.Closing"/> from the moment the
+/// app disposes it, or <see cref="Lifecycle.Ended"/> when its process ended first.
 /// </summary>
 internal sealed class SessionConnection
 {
@@ -38,7 +38,9 @@ internal sealed class SessionConnection
     );
 
     private readonly Lock _lock = new();
-    private readonly List<Task<CSharpScriptRun>> _starts = [];
+
+    /// <summary>The runs that have not ended, by their starts: what closing waits for.</summary>
+    private readonly Dictionary<int, Task<CSharpScriptRun>> _runs = [];
     private Lifecycle _lifecycle;
     private CSharpScriptSessionExitReason? _cause;
     private CSharpScriptException? _disposeFailure;
@@ -110,6 +112,7 @@ internal sealed class SessionConnection
         rpc.AddLocalRpcTarget(RpcTargetMetadata.FromShape<TApp>(), app, null);
         var connection = new SessionConnection(process, rpc, options);
         transport.ConnectionLost = connection.OnConnectionLost;
+        rpc.RefusesBridgeCalls = connection.IsClosing;
         _ = connection.PublishExitAsync(output?.Writer);
         rpc.StartListening();
         try
@@ -200,14 +203,14 @@ internal sealed class SessionConnection
             return Task.FromCanceled<CSharpScriptRun>(cancellationToken);
         lock (_lock)
         {
-            if (_disposal is not null)
+            if (_lifecycle == Lifecycle.Closing)
             {
                 return Task.FromException<CSharpScriptRun>(
                     new ObjectDisposedException(nameof(CSharpScriptSession), "The session is being disposed.")
                 );
             }
-            if (_lifecycle == Lifecycle.Ended || _cause is not null)
-                return ConnectionLostAsync();
+            if (_lifecycle == Lifecycle.Ended)
+                return Task.FromException<CSharpScriptRun>(new ConnectionLostException("The process has ended."));
             int id = ++_lastRun;
             _rpc.Snapshots[id] = script.Snapshot;
             var request = new RunRequest(
@@ -219,65 +222,70 @@ internal sealed class SessionConnection
                 script.Image.EntryType,
                 script.Image.EntryMethod
             );
+            var start = new TaskCompletionSource<CSharpScriptRun>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _runs[id] = start.Task;
             // Registered here, so that disposing waits for it; written outside the lock, as the pipe may be full.
-            Task<CSharpScriptRun> start = Task.Run(() => BeginRunAsync(request));
-            _starts.Add(start);
-            return start;
+            _ = Task.Run(() => FollowRunAsync(request, start));
+            return start.Task;
         }
     }
 
-    private async Task<CSharpScriptRun> ConnectionLostAsync()
+    /// <summary>Starts a run in the runner and follows it to its end.</summary>
+    private async Task FollowRunAsync(RunRequest request, TaskCompletionSource<CSharpScriptRun> start)
     {
-        await _exit.Task.ConfigureAwait(false);
-        throw new ConnectionLostException("The session's process has ended.");
-    }
-
-    private async Task<CSharpScriptRun> BeginRunAsync(RunRequest request)
-    {
-        await _control.BeginAsync(request).ConfigureAwait(false);
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _ = JoinRunAsync(request.Id, completion);
-        return new CSharpScriptRun(completion.Task, limit => StopRunAsync(request.Id, completion.Task, limit));
-    }
-
-    private async Task JoinRunAsync(int id, TaskCompletionSource completion)
-    {
         try
         {
-            RunOutcome outcome = await _control.JoinAsync(id).ConfigureAwait(false);
-            if (outcome.Failures.Length > 0)
-                completion.SetException(outcome.Failures.Select(_rpc.ExceptionFor));
-            else if (outcome.Stopped)
-                completion.SetCanceled();
-            else
-                completion.SetResult();
+            await _control.BeginAsync(request).ConfigureAwait(false);
+            start.SetResult(
+                new CSharpScriptRun(completion.Task, limit => StopRunAsync(request.Id, completion.Task, limit))
+            );
+            RunOutcome outcome = await _control.JoinAsync(request.Id).ConfigureAwait(false);
+            // Under the lock, so that a stop's deadline sees the run either ended or still to kill.
+            lock (_lock)
+            {
+                if (outcome.Failures.Length > 0)
+                    completion.SetException(outcome.Failures.Select(_rpc.ExceptionFor));
+                else if (outcome.Stopped)
+                    completion.SetCanceled();
+                else
+                    completion.SetResult();
+            }
         }
         catch (Exception e)
         {
-            completion.SetException(e);
+            if (!start.TrySetException(e))
+            {
+                lock (_lock)
+                    completion.SetException(e);
+            }
         }
+        lock (_lock)
+            _runs.Remove(request.Id);
     }
 
     private async Task StopRunAsync(int id, Task completion, TimeSpan? killSessionAfter)
     {
         if (completion.IsCompleted)
             return;
-        Task stopped = RequestStopAsync(id, completion);
+        _ = RequestStopAsync(id);
+        // The deadline is for the run's end, however it ends. The stop's acknowledgement has no part in it.
+        Task ended = completion.ContinueWith(static _ => { }, TaskScheduler.Default);
         if (killSessionAfter is { } limit)
         {
             try
             {
-                await stopped.WaitAsync(limit, _options.TimeProvider).ConfigureAwait(false);
+                await ended.WaitAsync(limit, _options.TimeProvider).ConfigureAwait(false);
             }
             catch (TimeoutException)
             {
-                Kill(CSharpScriptSessionExitReason.StopTimedOut);
+                Kill(CSharpScriptSessionExitReason.StopTimedOut, unlessEnded: completion);
             }
         }
-        await stopped.ConfigureAwait(false);
+        await ended.ConfigureAwait(false);
     }
 
-    private async Task RequestStopAsync(int id, Task completion)
+    private async Task RequestStopAsync(int id)
     {
         try
         {
@@ -285,7 +293,6 @@ internal sealed class SessionConnection
         }
         // The run ends with the session then, and its completion says so.
         catch (ConnectionLostException) { }
-        await completion.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
     }
 
     /// <summary>Ends the session in the documented order. Safe to call again.</summary>
@@ -293,11 +300,15 @@ internal sealed class SessionConnection
     {
         lock (_lock)
         {
-            if (_lifecycle == Lifecycle.Running)
-                _lifecycle = Lifecycle.Closing;
-            _rpc.RefusesBridgeCalls = true;
+            _lifecycle = Lifecycle.Closing;
             return _disposal ??= Task.Run(CloseAsync);
         }
+    }
+
+    private bool IsClosing()
+    {
+        lock (_lock)
+            return _lifecycle == Lifecycle.Closing;
     }
 
     private async Task CloseAsync()
@@ -319,7 +330,7 @@ internal sealed class SessionConnection
     {
         Task<CSharpScriptRun>[] starts;
         lock (_lock)
-            starts = [.. _starts];
+            starts = [.. _runs.Values];
         // The runner may dispatch the close ahead of a begin written before it.
         await ((Task)Task.WhenAll(starts)).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         RunFailure? failure = await _control.CloseAsync().ConfigureAwait(false);
@@ -328,7 +339,7 @@ internal sealed class SessionConnection
         lock (_lock)
         {
             _disposeFailure = failure is null ? null : _rpc.ExceptionFor(failure);
-            if (_lifecycle != Lifecycle.Ended && _cause is null && !_process.HasExited)
+            if (!_exit.Task.IsCompleted && _cause is null && !_process.HasExited)
             {
                 _cause = CSharpScriptSessionExitReason.Disposed;
                 // The runner exits when its connection ends.
@@ -345,12 +356,15 @@ internal sealed class SessionConnection
         return AppCallsReturnedAsync();
     }
 
-    /// <summary>Kills the process unless it has ended; an orderly end still under way gives way to this cause.</summary>
-    private void Kill(CSharpScriptSessionExitReason reason)
+    /// <summary>
+    /// Kills the process unless it, or the run that <paramref name="unlessEnded"/> stands for, has ended. An orderly end
+    /// still under way gives way to this cause.
+    /// </summary>
+    private void Kill(CSharpScriptSessionExitReason reason, Task? unlessEnded = null)
     {
         lock (_lock)
         {
-            if (_lifecycle == Lifecycle.Ended || _process.HasExited)
+            if (_exit.Task.IsCompleted || _process.HasExited || unlessEnded is { IsCompleted: true })
                 return;
             if (_cause is null or CSharpScriptSessionExitReason.Disposed)
                 _cause = reason;
@@ -385,18 +399,17 @@ internal sealed class SessionConnection
         await Task.WhenAny(_process.StandardErrorEnded, Task.Delay(s_standardErrorLimit)).ConfigureAwait(false);
         output?.TryComplete();
         int exitCode = _process.ExitCode;
-        CSharpScriptSessionExit exit;
         lock (_lock)
         {
-            _lifecycle = Lifecycle.Ended;
+            if (_lifecycle == Lifecycle.Running)
+                _lifecycle = Lifecycle.Ended;
             // An orderly end that fails on its way out was a crash after all.
             CSharpScriptSessionExitReason reason =
                 _cause is { } cause && (cause != CSharpScriptSessionExitReason.Disposed || exitCode == 0)
                     ? cause
                     : CSharpScriptSessionExitReason.Crashed;
-            exit = new CSharpScriptSessionExit(reason, exitCode, _process.StandardErrorTail, _disposeFailure);
+            _exit.SetResult(new CSharpScriptSessionExit(reason, exitCode, _process.StandardErrorTail, _disposeFailure));
         }
-        _exit.SetResult(exit);
         await _rpc.Completion.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         _process.Dispose();
     }
@@ -408,8 +421,8 @@ internal sealed class SessionRpc(IJsonRpcMessageHandler handler) : JsonRpc(handl
     /// <summary>Each run's compiled text, for failures in it, also long after the run ended.</summary>
     internal ConcurrentDictionary<int, TextSnapshot> Snapshots { get; } = new();
 
-    /// <summary>Set when disposing starts: new calls on the session side fail. Control calls and replies go on.</summary>
-    internal volatile bool RefusesBridgeCalls;
+    /// <summary>Whether new calls on the session side fail. Control calls and replies go on.</summary>
+    internal Func<bool> RefusesBridgeCalls { get; set; } = static () => false;
 
     internal CSharpScriptException ExceptionFor(RunFailure failure) =>
         new(failure, Snapshots.GetValueOrDefault(failure.Run));
@@ -463,9 +476,9 @@ internal sealed class SessionRpc(IJsonRpcMessageHandler handler) : JsonRpc(handl
     protected override ValueTask SendAsync(JsonRpcMessage message, CancellationToken cancellationToken)
     {
         if (
-            RefusesBridgeCalls
-            && message is JsonRpcRequest { IsNotification: false, Method: { } method }
+            message is JsonRpcRequest { IsNotification: false, Method: { } method }
             && !method.StartsWith(SessionWire.ControlPrefix, StringComparison.Ordinal)
+            && RefusesBridgeCalls()
         )
         {
             throw new ConnectionLostException("The session is closing.");

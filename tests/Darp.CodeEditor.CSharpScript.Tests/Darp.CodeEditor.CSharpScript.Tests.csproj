@@ -15,6 +15,10 @@
     <PackageReference Include="xunit.v3.aot" />
   </ItemGroup>
   <ItemGroup>
+    <!-- The clock that the editor's tests advance by hand. -->
+    <Compile Include="..\Darp.CodeEditor.Tests\ManualTime.cs" Link="ManualTime.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <Using Include="Shouldly" />
     <Using Include="Xunit" />
   </ItemGroup>
