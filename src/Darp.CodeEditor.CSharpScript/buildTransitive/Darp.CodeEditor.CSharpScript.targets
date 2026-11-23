@@ -262,17 +262,17 @@
     <AssemblyName>CSharpScriptApiRoot</AssemblyName>
     <EnableDefaultItems>false</EnableDefaultItems>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-    <PublishDir>$(_CSharpScriptPublishHelpers)script-api/</PublishDir>
-    <_CSharpScriptListDirectory>$(_CSharpScriptPublishHelpers)</_CSharpScriptListDirectory>
+    <PublishDir>$(_CSharpScriptPublishHelpers.Replace('&', '&amp;'))script-api/</PublishDir>
+    <_CSharpScriptListDirectory>$(_CSharpScriptPublishHelpers.Replace('&', '&amp;'))</_CSharpScriptListDirectory>
     <_CSharpScriptReferencePrefix>$(_CSharpScriptHelpers)script-api/</_CSharpScriptReferencePrefix>
   </PropertyGroup>
   <ItemGroup>
-@(_CSharpScriptApiProject->'    <ProjectReference Include="%(Identity)" CSharpScriptReference="true" />', '%0A')
+@(_CSharpScriptApiProject->Replace('&', '&amp;')->'    <ProjectReference Include="%(Identity)" CSharpScriptReference="true" />', '%0A')
 @(_CSharpScriptApiPackage->'    <PackageReference Include="%(Identity)" Version="%(Version)" CSharpScriptReference="true" />', '%0A')
 @(_CSharpScriptBridgePin->'    <PackageReference Include="%(Identity)" Version="[%(Version)]" />', '%0A')
   </ItemGroup>
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
-  <Import Project="$(MSBuildThisFileFullPath)" Condition="'%24(_CSharpScriptTargetsImported)' != 'true'" />
+  <Import Project="$(MSBuildThisFileFullPath.Replace('&', '&amp;'))" Condition="'%24(_CSharpScriptTargetsImported)' != 'true'" />
 </Project>]]>
       </_CSharpScriptApiText>
     </PropertyGroup>

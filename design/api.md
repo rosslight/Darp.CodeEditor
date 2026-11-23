@@ -1213,8 +1213,8 @@ NativeAOT and in development. CI runs the same consumer on Linux and Windows, x6
 blocking:
 
 - a compilation keeps its text through edits, disposing the document and another document at its path; an empty or
-  trivia-only script runs; every compilation has its own identity; a server that restarts is waited for; completion
-  answers while a compile runs; compiling before Avalonia is set up leaves its dispatcher alone;
+  trivia-only script runs; every compilation has its own identity; a server that restarts is waited for; compiling
+  before Avalonia is set up leaves its dispatcher alone;
 - one publish of all marked references, loaded through one `AssemblyDependencyResolver`, on the published runtime: a
   marked project with an unmarked dependency, a marked package whose native library is really called (SQLite), two
   references that need 13.0.1 and 13.0.3 of one package and load one, and a multi-targeted library in its `net10.0`
