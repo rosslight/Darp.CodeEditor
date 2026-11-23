@@ -132,7 +132,8 @@ internal sealed class Runner<TApp, TSide, TSession> : IRunnerControl
                 (Task)entry.Invoke(null, BindingFlags.DoNotWrapExceptions, null, [submission], null)!
             ).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (run.Stop.IsCancellationRequested)
+        // Only the script's code can end a run as stopped: a factory that throws has failed, whatever it threw.
+        catch (OperationCanceledException) when (globals is not null && run.Stop.IsCancellationRequested)
         {
             stopped = true;
         }

@@ -316,6 +316,36 @@ public sealed class ScriptSessionTests
     }
 
     [Fact]
+    public async Task A_globals_factory_that_throws_when_stopped_is_a_failure()
+    {
+        var waiting = Gate();
+        CSharpScriptCompilation<ScriptTestGlobals> compilation = await _server.CompileAsync(
+            new CSharpScriptEnvironment<ScriptTestGlobals>(),
+            "",
+            Token
+        );
+        await using var session = await CSharpScriptSession.StartAsync<IAppSide, ISessionSide, StoppedFactorySession>(
+            new TestApp(),
+            new CSharpScriptSessionOptions
+            {
+                Output = line =>
+                {
+                    if (line == "factory waiting")
+                        waiting.TrySetResult();
+                },
+            },
+            Token
+        );
+        CSharpScriptRun run = await session.StartScriptAsync(compilation.Script.ShouldNotBeNull(), Token);
+        await Wait.ForAsync(waiting.Task);
+
+        await Wait.ForAsync(run.StopAsync());
+
+        var failure = await Should.ThrowAsync<CSharpScriptException>(() => run.Completion);
+        failure.ScriptExceptionType.ShouldBe("System.OperationCanceledException");
+    }
+
+    [Fact]
     public async Task Disposing_reports_the_session_objects_failure_in_Exited_without_throwing()
     {
         await using var session = await Start();

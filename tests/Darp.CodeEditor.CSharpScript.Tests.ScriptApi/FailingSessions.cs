@@ -36,6 +36,22 @@ public sealed class CancellingSession : NoSessionSide, IScriptSessionObject<Canc
         throw new OperationCanceledException("The session object gave up.");
 }
 
+/// <summary>A session object whose globals factory waits for the run's stop token, then throws its cancellation.</summary>
+public sealed class StoppedFactorySession
+    : NoSessionSide,
+        IScriptSessionObject<StoppedFactorySession, IAppSide>,
+        IScriptGlobalsFactory<ScriptTestGlobals>
+{
+    static StoppedFactorySession IScriptSessionObject<StoppedFactorySession, IAppSide>.Create(IAppSide app) => new();
+
+    ScriptTestGlobals IScriptGlobalsFactory<ScriptTestGlobals>.CreateGlobals(CancellationToken stop)
+    {
+        Console.WriteLine("factory waiting");
+        stop.WaitHandle.WaitOne();
+        throw new OperationCanceledException(stop);
+    }
+}
+
 /// <summary>A bridge in an assembly without <c>[assembly: ExportRpcContractProxies]</c>.</summary>
 [JsonRpcContract, GenerateShape(IncludeMethods = MethodShapeFlags.PublicInstance)]
 public partial interface IUnexportedSide
