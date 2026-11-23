@@ -17,7 +17,7 @@ see, and the package brings the language server and a runner that executes scrip
 
 ## Quickstart
 
-Requires .NET 10 and Avalonia 12.
+Requires .NET 10 and Avalonia 12.1.5 or later.
 
 ```sh
 dotnet add package Darp.CodeEditor

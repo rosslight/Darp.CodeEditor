@@ -80,11 +80,11 @@ sealed class App : Application
     // --8<-- [end:tabs]
 
     // --8<-- [start:save]
-    private static async Task SaveAsync(CodeDocument document, string path)
+    private static async Task<bool> SaveAsync(CodeDocument document, string path)
     {
         TextSnapshot snapshot = document.CurrentSnapshot;
         await File.WriteAllTextAsync(path, snapshot.GetText());
-        document.MarkUnmodified(snapshot);
+        return document.MarkUnmodified(snapshot);
     }
 
     // --8<-- [end:save]

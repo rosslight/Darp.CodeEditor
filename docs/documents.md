@@ -49,8 +49,11 @@ saved:
 ```
 
 When the text changed after the snapshot, `MarkUnmodified` returns `false` and keeps the previous unmodified point. The
-current text then still needs saving, even if `IsModified` is `false`, as after undoing during the write. Set `FilePath`
-after "Save as". The document keeps its text and undo history.
+current text then still needs saving, even if `IsModified` is `false`, as after undoing during the write, so keep the
+tab open.
+
+For "Save as", reject a path that another open document uses before you write the file. Then set `FilePath`. The
+document keeps its text and undo history.
 
 ## Switch tabs
 
@@ -62,7 +65,8 @@ switch and restore it afterwards:
 ```
 
 A view state follows the edits made since it was saved. It lives in memory only, so it can't be stored across app
-starts. If you keep one editor per tab instead, each editor keeps its own place.
+starts. If you keep one editor per tab instead, each editor keeps its own place. When a tab closes, remove its entry, so
+the saved state doesn't keep the closed document in memory.
 
 ## Positions
 

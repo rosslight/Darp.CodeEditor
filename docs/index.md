@@ -12,7 +12,7 @@ editor.
 
 ## Install the package
 
-The package needs .NET 10 and Avalonia 12.
+The package needs .NET 10 and Avalonia 12.1.5 or later.
 
 ```sh
 dotnet add package Darp.CodeEditor
@@ -43,16 +43,11 @@ Add the editor's styles once, after your app's theme:
 
 ## Show a document
 
-The editor shows a `CodeDocument`, which your app creates and owns:
+The editor shows a `CodeDocument`, which your app creates, owns and disposes. Add this to the `MainWindow` constructor,
+after `InitializeComponent()`:
 
 ```csharp
 --8<-- "first-editor.cs:document"
-```
-
-Dispose the document when the user is done with it:
-
-```csharp
---8<-- "first-editor.cs:dispose"
 ```
 
 To run this as a complete app from a clone of the repository:

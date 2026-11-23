@@ -21,26 +21,25 @@ sealed class App : Application
     public override void OnFrameworkInitializationCompleted()
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
-        {
-            var editor = new CodeEditor();
-
-            // --8<-- [start:document]
-            CodeDocument document = CodeDocument.Create(CodeLanguage.Json, """{ "hello": "world" }""");
-            editor.Document = document;
-            // --8<-- [end:document]
-
-            var window = new Window
-            {
-                Title = "First editor",
-                Width = 720,
-                Height = 420,
-                Content = editor,
-            };
-            // --8<-- [start:dispose]
-            window.Closed += (_, _) => document.Dispose();
-            // --8<-- [end:dispose]
-            desktop.MainWindow = window;
-        }
+            desktop.MainWindow = new MainWindow();
         base.OnFrameworkInitializationCompleted();
+    }
+}
+
+sealed class MainWindow : Window
+{
+    public MainWindow()
+    {
+        Title = "First editor";
+        Width = 720;
+        Height = 420;
+        var editor = new CodeEditor();
+        Content = editor;
+
+        // --8<-- [start:document]
+        CodeDocument document = CodeDocument.Create(CodeLanguage.Json, """{ "hello": "world" }""");
+        editor.Document = document;
+        Closed += (_, _) => document.Dispose();
+        // --8<-- [end:document]
     }
 }
