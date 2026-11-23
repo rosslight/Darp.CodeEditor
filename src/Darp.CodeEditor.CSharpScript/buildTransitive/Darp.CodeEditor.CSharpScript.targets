@@ -409,27 +409,20 @@
     />
   </Target>
 
-  <!-- A NativeAOT app has no app host of its own to start from, so restore fetches the pack for every app with a RID. -->
-  <Target
-    Name="_RestoreCSharpScriptAppHost"
-    AfterTargets="ProcessFrameworkReferences"
-    BeforeTargets="CollectPackageDownloads"
-    Condition="'$(_CSharpScriptIsApp)' == 'true' and '$(RuntimeIdentifier)' != ''"
-  >
-    <ItemGroup>
-      <PackageDownload
-        Include="Microsoft.NETCore.App.Host.$(RuntimeIdentifier)"
-        Version="[@(KnownAppHostPack->WithMetadataValue('TargetFramework', 'net$(_TargetFrameworkVersionWithoutV)')->'%(AppHostPackVersion)')]"
-      />
-    </ItemGroup>
-  </Target>
-
-  <!-- App hosts that run the helpers on the runtime in ../dotnet and never on another one. -->
-  <Target Name="_CreateCSharpScriptAppHosts" DependsOnTargets="_GetCSharpScriptHelperFiles;ProcessFrameworkReferences">
+  <!--
+    App hosts that run the helpers on the runtime in ../dotnet and never on another one. A NativeAOT app has none of its
+    own to start from: the SDK ships the one of its own platform, and restore fetches another for UseAppHost=true.
+  -->
+  <Target Name="_CreateCSharpScriptAppHosts" DependsOnTargets="_GetCSharpScriptHelperFiles;ResolveFrameworkReferences">
     <PropertyGroup>
-      <_CSharpScriptAppHostVersion>@(KnownAppHostPack->WithMetadataValue('TargetFramework', 'net$(_TargetFrameworkVersionWithoutV)')->'%(AppHostPackVersion)')</_CSharpScriptAppHostVersion>
-      <_CSharpScriptAppHostSource>$([MSBuild]::NormalizePath('$(NuGetPackageRoot)', 'microsoft.netcore.app.host.$(RuntimeIdentifier.ToLowerInvariant())', '$(_CSharpScriptAppHostVersion)', 'runtimes', '$(RuntimeIdentifier)', 'native', 'apphost$(_NativeExecutableExtension)'))</_CSharpScriptAppHostSource>
+      <_CSharpScriptAppHostSource>$(AppHostSourcePath)</_CSharpScriptAppHostSource>
+      <_CSharpScriptAppHostSource Condition="'$(_CSharpScriptAppHostSource)' == '' or !Exists('$(_CSharpScriptAppHostSource)')"
+        >$([MSBuild]::NormalizePath('$(NetCoreTargetingPackRoot)', 'Microsoft.NETCore.App.Host.$(RuntimeIdentifier)', '$(BundledNETCoreAppPackageVersion)', 'runtimes', '$(RuntimeIdentifier)', 'native', 'apphost$(_NativeExecutableExtension)'))</_CSharpScriptAppHostSource>
     </PropertyGroup>
+    <Error
+      Condition="!Exists('$(_CSharpScriptAppHostSource)')"
+      Text="The .NET app host for $(RuntimeIdentifier) is missing, so the C# helpers cannot start. A NativeAOT app that publishes for another platform than the SDK's sets UseAppHost=true, so that restore fetches it."
+    />
     <ItemGroup>
       <!-- A helper's entry assembly is the one with a runtime configuration. -->
       <_CSharpScriptHelperConfig
