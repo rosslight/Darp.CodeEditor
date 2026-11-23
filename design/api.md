@@ -47,8 +47,8 @@ if (compilation.Succeeded)
 35 public types in all. Three more things are public without being types of ours:
 
 - **The project file.**
-  - `CSharpScriptReference="true"` on a package or project reference: scripts may use its assemblies. Publishing copies their DLLs next to the app, NativeAOT apps included, with their XML docs, which hover and completion show.
-  - `PublishReadyToRun=true`: publishing needs it to compile the C# helpers with ReadyToRun (prototype #48).
+  - `CSharpScriptReference="true"` on a package or project reference: scripts may use its assemblies. Publishing puts them in `helpers/script-api/` next to the app, NativeAOT apps included, with their XML docs, which hover and completion show. A marked package without assemblies of its own, such as `Microsoft.Data.Sqlite`, stands for the packages it depends on directly.
+  - `PublishReadyToRun=true` and a runtime identifier: publishing needs them to compile the C# helpers with ReadyToRun and to ship their .NET runtime (prototype #48), also in a NativeAOT app. Without them it fails at once and says so.
 - **StreamJsonRpc and PolyType** (#89), for the script API:
   - its attributes: `[JsonRpcContract]` and `[GenerateShape]` on the two interfaces of a session's bridge, `[GenerateShape]` on the data they exchange, and `[assembly: ExportRpcContractProxies]` (section 7 has the checklist);
   - the `IShapeable<T>` constraints on `CSharpScriptSession.StartAsync` and on a run's input. With them, NativeAOT apps call the bridge and copy the input without reflection, and the compiler rejects types without a shape;
@@ -613,11 +613,19 @@ app's script environments.
   parameter. Signatures show no XML docs.
 - **Semantic colors** are answered for ranges, with the protocol's standard token types. A script's top-level variables
   are fields to Roslyn, and are colored as variables.
+- **Compiling** runs on the thread pool beside the editor's requests, so completion keeps answering. The request carries
+  the snapshot's text, so edits, closing the document or opening another at its path can't change what compiles; an open
+  script with the same text in the same environment lends the compilation its diagnostics already built. A compilation
+  waits while the server starts or restarts, and asks the next process when the one it asked ends. It emits an assembly
+  of its own name with an embedded portable PDB. A script of only trivia and usings compiles to an entry point that does
+  nothing.
 - **Where it runs.** `dotnet build` puts the server in `helpers/csharp-server/` next to the app, as portable IL, with the
-  lists of the marked assemblies and of .NET's in `helpers/`, and the marked assemblies' XML docs next to them. The server
-  runs on the `dotnet` host of the installation whose runtime runs the app, found from that runtime's directory, never
-  from `PATH`. A published app has no server yet: its script documents keep their text and TextMate colors, and `State`
-  ends as `Failed`.
+  lists of the marked assemblies and of .NET's in `helpers/`, and the marked assemblies' XML docs next to them. In
+  development it runs on the `dotnet` host of the installation whose runtime runs the app, found from that runtime's
+  directory, never from `PATH`. `dotnet publish` compiles it with ReadyToRun for the app's platform, gives it an app host
+  that looks only in `helpers/dotnet/`, and puts one .NET runtime there from the runtime pack, also for a self-contained
+  or NativeAOT app. These files join after the app's own publish, so its trimming, NativeAOT and single-file steps never
+  see them, and a republish replaces them.
 
 ## 7. Sessions
 
@@ -653,12 +661,15 @@ of sessions: the editor and the compiler need only the globals type. The app nam
 type, the globals types) without compiling any of their code: in a test, naming them added about 700 bytes of
 metadata to a NativeAOT app.
 
-**Deploying the runner side.** Publishing deploys a runner-side project marked `CSharpScriptReference` as its own
-untrimmed publish for the app's platform, next to the app: its DLLs, its dependencies with their native libraries and
-per-platform code under `runtimes/`, and its dependency manifest (`.deps.json`). The runner loads it through that
-manifest, with .NET's `AssemblyDependencyResolver`, and loads the bridge and the library's contracts only once, so
-their types are the same on both sides. A NativeAOT app's own output can't serve for this: it holds no managed DLLs.
-Two limits come with it:
+**Deploying the runner side.** Publishing deploys every reference marked `CSharpScriptReference` as one untrimmed
+publish for the app's framework and platform, in `helpers/script-api/`: their DLLs, their dependencies with native
+libraries and per-platform code, and one dependency manifest (`.deps.json`). A project generated in `obj/` references
+them at the versions the app resolved, outside the repository's package settings, so NuGet resolves one version of each
+dependency, and an incompatible pair fails the publish with NuGet's error. The compiler reads the marked assemblies from
+that publish, with everything else under a private alias. The runner loads it through that manifest, with .NET's
+`AssemblyDependencyResolver`, and loads the bridge and the library's contracts only once, so their types are the same on
+both sides; a marked reference that needs a newer version of them than the runner has fails the publish. A NativeAOT
+app's own output can't serve for this: it holds no managed DLLs. Two limits come with it:
 
 - **Base .NET only.** The runner starts on the base .NET runtime. A runner-side project that needs another shared
   framework, such as ASP.NET Core, fails the build with a clear error.
@@ -1196,11 +1207,27 @@ server process:
   From creating the server to the first completion in a new process, "C# ready": 1.37 to 1.56 s on average, in five of
   six runs under the budget of 1.5 s.
 
+Compiling and deployment (sections 6 and 7) are implemented. Proven on linux-x64, with `dotnet test` and as NativeAOT
+against a published server, and through a package consumer outside the repository's MSBuild imports, as JIT and
+NativeAOT and in development. CI runs the same consumer on Linux and Windows, x64 and arm64, and on macOS arm64 without
+blocking:
+
+- a compilation keeps its text through edits, disposing the document and another document at its path; an empty or
+  trivia-only script runs; every compilation has its own identity; a server that restarts is waited for; completion
+  answers while a compile runs; compiling before Avalonia is set up leaves its dispatcher alone;
+- one publish of all marked references, loaded through one `AssemblyDependencyResolver`, on the published runtime: a
+  marked project with an unmarked dependency, a marked package whose native library is really called (SQLite), two
+  references that need 13.0.1 and 13.0.3 of one package and load one, and a multi-targeted library in its `net10.0`
+  build. An incompatible pair fails with NuGet's NU1107, a reference that needs ASP.NET Core fails by name, and a
+  republish without a reference leaves none of its files;
+- the server's assemblies have ReadyToRun code, and it starts with `DOTNET_ROOT` pointing nowhere. A published app with
+  ReadyToRun, ten new processes on a machine with other work (load about 4): "C# ready" on 5,000 lines took 845 to
+  899 ms, median 862 ms, within the budget of 1.5 s.
+
 Still open:
 
 - hover, semantic tokens, completion and signature help against a third-party server, such as yaml-language-server,
   in the tests;
-- the C# server in a published app, and its budgets with ReadyToRun;
 - a server answers the requests of the documents that editors show in its own order: the client cancels what an
   editor no longer needs and asks for nothing that no editor shows, but cannot put one document's request ahead of
   another's in the server. The C# server starts each request at once on the thread pool, so none waits in a queue
@@ -1211,12 +1238,9 @@ Still open:
 - code blocks are highlighted with the document's grammar whatever language their fence names, and the hover is at
   most 320 pixels wide; both wait for a use case that needs more;
 
-- runner-side dependencies on arm64 and macOS, the real bridge and contracts loaded once for both sides, two versions
-  of one package in the app and the runner side, and the build step that deploys them;
+- the real bridge and contracts loaded once for both sides, with the runner;
 - the library's own processes ending with a killed app on Linux and macOS; third-party language servers end there
   only as the protocol asks them to (section 6);
-- nothing touching Avalonia's dispatcher before Avalonia is set up, for compiling: the test of documents extended
-  with a compilation;
 - the exit reason rule and `Exited` completing before failures, when causes race: tests that kill the runner at every
   step of disposing, and call `DisposeAsync` and `KillAsync` together;
 - calls that must stay quick, such as prompts, callback replies and stopping a run, while the bridge carries bulk data
