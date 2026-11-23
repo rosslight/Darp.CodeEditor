@@ -1,0 +1,74 @@
+[project]
+site_name = "Darp.CodeEditor"
+site_description = "A code editor control for Avalonia desktop apps, with syntax highlighting, search, and language server features."
+site_author = "rosslight GmbH"
+site_url = "https://rosslight.github.io/Darp.CodeEditor/"
+repo_url = "https://github.com/rosslight/Darp.CodeEditor"
+repo_name = "rosslight/Darp.CodeEditor"
+copyright = "Copyright &copy; 2026 rosslight GmbH"
+
+# C# scripting gets its page after "Language servers" once its packages are released.
+nav = [
+  { "Getting started" = "index.md" },
+  { "Documents and editors" = "documents.md" },
+  { "Languages" = "languages.md" },
+  { "Language servers" = "language-servers.md" },
+  { "Customizing" = "customizing.md" },
+]
+
+[project.theme]
+language = "en"
+features = [
+  "content.action.copy",
+  "content.code.copy",
+  "navigation.footer",
+  "navigation.instant",
+  "navigation.top",
+  "navigation.tracking",
+  "search.highlight",
+]
+
+[project.theme.icon]
+repo = "fontawesome/brands/github"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "lucide/sun-moon"
+toggle.name = "Switch to light mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to system preference"
+
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.tables]
+
+[project.markdown_extensions.toc]
+permalink = true
+
+[project.markdown_extensions.pymdownx.highlight]
+pygments_lang_class = true
+
+[project.markdown_extensions.pymdownx.inlinehilite]
+[project.markdown_extensions.pymdownx.superfences]
+
+# Examples come from the single-file apps in samples/docs, which CI compiles. A missing file or region fails the build.
+[project.markdown_extensions.pymdownx.snippets]
+base_path = ["samples/docs"]
+check_paths = true
+dedent_subsections = true
+
+[project.plugins.llmstxt]
+markdown_description = "Guides for app developers. Each link is the Markdown of one page. The XML documentation in the NuGet package is the reference for the installed version."
+full_output = "llms-full.txt"
+
+[project.plugins.llmstxt.sections]
+Guides = ["index.md", "documents.md", "languages.md", "language-servers.md", "customizing.md"]

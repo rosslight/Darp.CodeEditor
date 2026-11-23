@@ -75,10 +75,9 @@ namespace Darp.CodeEditor;
 /// The font defaults to a monospace one; set <c>FontFamily</c> and <c>FontSize</c> as for any control.
 /// </para>
 /// <para>
-/// The search bar searches as the user types, in the background: plain text or a .NET regular expression, line by
-/// line, with Match Case and Match Whole Word. A search stops after 1 second, as a regular expression such as
-/// <c>(a+)+$</c> can take far longer, and keeps 10,000 matches at most. The bar says so when a search stops early, and
-/// Replace All then does nothing: it never replaces only some of the matches.
+/// The search bar searches as the user types, in the background: plain text, line by line, with Match Case and Match
+/// Whole Word. A search keeps 10,000 matches at most. The bar says so when there are more, and Replace All then does
+/// nothing: it never replaces only some of the matches.
 /// </para>
 /// <para>
 /// The editor's keys are ordinary <c>KeyBindings</c>, for the clipboard (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), undo (Ctrl+Z,

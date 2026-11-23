@@ -18,6 +18,19 @@ artifacts/aot-tests/Darp.CodeEditor.Tests
 [`samples/Darp.CodeEditor.Sample`](samples/Darp.CodeEditor.Sample) shows how an app uses the API.
 `dotnet run --project samples/Darp.CodeEditor.Sample` runs it; its README says how to publish it as NativeAOT.
 
+## Documentation
+
+The [guides](https://rosslight.github.io/Darp.CodeEditor/) are in `docs/` and built with Zensical. A pull request that
+changes public behavior updates the page that describes it.
+
+```sh
+uv tool install zensical==0.1.3
+zensical serve
+```
+
+C# examples are regions of the single-file apps in `samples/docs`, which a page includes by file and region name. CI
+compiles the apps and builds the site, so a broken example, region or link fails the pull request.
+
 ## Benchmarks
 
 `dotnet run -c Release --project benchmarks/Darp.CodeEditor.Benchmarks -- --filter '*'` runs all benchmarks. Each pull
