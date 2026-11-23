@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0](https://github.com/rosslight/Darp.CodeEditor/compare/v0.1.0...v0.2.0) (2026-11-22)
+
+
+### Features
+
+* **sample:** add hotkey settings and show the YAML schema ([#56](https://github.com/rosslight/Darp.CodeEditor/issues/56)) ([31bb8df](https://github.com/rosslight/Darp.CodeEditor/commit/31bb8dfd90767f7ba7e5cf5e644a1742ec793328))
+* ship an agent skill and rewrite the README ([#58](https://github.com/rosslight/Darp.CodeEditor/issues/58)) ([56f5f50](https://github.com/rosslight/Darp.CodeEditor/commit/56f5f501557e474562f9867eb12223f3f182de5d))
+
 ## 0.1.0 (2026-11-22)
 
 
