@@ -12,8 +12,7 @@ see, and the package brings the language server and a runner that executes scrip
 
 ![Completing and hovering Python code, then completing a value and hovering a schema error in JSON](https://raw.githubusercontent.com/rosslight/Darp.CodeEditor/main/docs/images/editor-demo.gif)
 
-> **Status:** 0.x. The editor works today, and its API may still change. The C# scripting packages ship with the next
-> release.
+> **Status:** 0.x. The API may still change.
 
 ## Quickstart
 
@@ -71,8 +70,8 @@ More information: [Getting started](https://rosslight.github.io/Darp.CodeEditor/
 | Package | What it adds | Status |
 |---|---|---|
 | [`Darp.CodeEditor`](https://www.nuget.org/packages/Darp.CodeEditor) | The editor, JSON, XML and YAML, and a client for any language server | Available |
-| `Darp.CodeEditor.CSharpScript` | C# scripts with an environment your app defines: language server and compilation | Next release |
-| `Darp.CodeEditor.CSharpScript.Runner` | Runs scripts in a separate process, with a typed bridge to your app | Next release |
+| `Darp.CodeEditor.CSharpScript` | C# scripts with an environment your app defines: language server and compilation | Available |
+| `Darp.CodeEditor.CSharpScript.Runner` | Runs scripts in a separate process, with a typed bridge to your app | Available |
 
 ## Features
 

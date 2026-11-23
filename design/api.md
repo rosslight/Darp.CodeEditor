@@ -671,8 +671,8 @@ app's own output can't serve for this: it holds no managed DLLs. Two limits come
 
 - **Base .NET only.** The runner starts on the base .NET runtime. A runner-side project that needs another shared
   framework, such as ASP.NET Core, fails the build with a clear error. WPF is the exception: on Windows targets the
-  bridge's threading library names it, in a copy that the runner replaces with its own, so the build can't tell. A
-  runner-side project that really uses WPF fails when it loads it, in the run.
+  bridge's threading library names it, in a copy that the runner replaces with its own, so the build lets it pass. A
+  runner-side project that really uses WPF builds and publishes, and fails when it loads WPF in the runner.
 - **Compatible frameworks.** The app references the runner-side project, so their target frameworks must fit: a
   `net10.0` app can't reference a `net10.0-windows` project (NU1201). The runner itself loads a `net10.0-windows`
   runner side on Windows, so a Windows-only app targets `net10.0-windows` itself.
@@ -813,7 +813,8 @@ after it, also while busy in a loop or blocked in a sleep.
 
 **Programs that scripts start.** Before any code of the script API loads, the runner moves its connection to the app
 onto private descriptors that child processes don't inherit (non-inheritable handles on Windows). Its standard input
-becomes the null device, and its standard output the same log pipe as its standard error. So a program that a script
+becomes the null device, and its standard output the same log pipe as its standard error, on Windows in Win32's
+standard handles and in the C runtime's descriptors alike. So a program that a script
 starts has valid streams and can't touch the connection: it reads an empty input, and what it or native driver code
 prints arrives in `Output`, unless the script redirects it, as usual in .NET. The runtime's crash reports go straight to
 standard error and reach `Exited`, whose `StandardError` keeps the last 100 lines. A child that outlives the runner may
@@ -849,7 +850,7 @@ Streams (`IAsyncEnumerable`) were slower, and one stream in plus one out in a si
 | `StartAsync` | the bridge has no build-time proxies | `InvalidOperationException`, in every build |
 | `StartAsync` | the session type's `Create` throws | `CSharpScriptException`, and the process is ended |
 | `StartAsync` | the process does not start or answer | `InvalidOperationException`, with its standard error |
-| `run.Completion` | the globals' `Create` throws | `CSharpScriptException` |
+| `run.Completion` | the globals' factory throws, also `OperationCanceledException` after a stop | `CSharpScriptException` |
 | `Remote` | the session object throws | `CSharpScriptException` |
 | `Remote` | a session object's method throws `OperationCanceledException` by itself, without the caller's token | the call is cancelled: `OperationCanceledException`, without the original details |
 | `Remote` | the process has ended, or the session is being disposed | `ConnectionLostException` |
@@ -1242,12 +1243,14 @@ CI runs the same consumer on Linux and Windows, x64 and arm64, and on macOS arm6
   script's marked references in the runner, a native library among them, and use cases 06 to 08;
 - failures at their script's line, also from a callback that outlived its run; a `Create` that throws, also its own
   `OperationCanceledException`, as `CSharpScriptException`;
+- a stop's deadline that passes after its run ended, with the stop's acknowledgement held back, killing nothing;
 - the end of a session, with gates in the transport instead of timing: a kill during a write and with a call still on
   the pipe, a kill during disposal, new calls refused while disposal waits, also one that reaches the runner after it
   closed admission, an admitted call getting its whole reply, a caller cancelling during disposal, and `Exited`
   completing before the failures it explains;
-- private pipes: a child with no redirects printing into `Output` and reading an empty input, no descriptor of the
-  connection in a child (on Linux), a surviving child that doesn't delay `Exited`, a failure before the runner
+- private pipes: a child with no redirects printing into `Output` and reading an empty input, native code writing to
+  descriptor 1 through the C runtime, no descriptor of the connection in a child (on Linux), a surviving child that
+  doesn't delay `Exited`, a failure before the runner
   initializes, and a runtime crash whose message is in `Exited`'s tail;
 - one load of the bridge: a publish with the runner's version pins passes, and a marked reference that needs a newer
   package of the bridge fails with NuGet's error;

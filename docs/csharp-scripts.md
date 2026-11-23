@@ -3,10 +3,6 @@
 Your app defines what its scripts can see. The editor checks scripts against that definition, the C# server compiles
 them, and a separate process runs them. This page shows how to set that up in a JIT or NativeAOT app.
 
-!!! note
-
-    `Darp.CodeEditor.CSharpScript` and `Darp.CodeEditor.CSharpScript.Runner` ship with the next release.
-
 ## Set up the projects
 
 A script API has two sides. Only the bridge crosses between the app and the process that runs scripts:
