@@ -45,7 +45,8 @@ The editor's keys are ordinary Avalonia `KeyBindings`. On macOS, Cmd takes Ctrl'
 
 | Action | Keys |
 |---|---|
-| Completion | Ctrl+Space, Ctrl+I |
+| Completion | Ctrl+Space, Ctrl+I (also Option+Esc on macOS) |
+| Completion details, while the list shows | Ctrl+Space, Ctrl+I, or the hover key |
 | Signature help | Ctrl+Shift+Space |
 | Hover at the caret | Ctrl+Q on Windows, F1 on Linux and macOS |
 | Next or previous problem | F8, Shift+F8 |

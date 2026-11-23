@@ -29,7 +29,7 @@ zensical serve
 ```
 
 C# examples are regions of the single-file apps in `samples/docs`, which a page includes by file and region name. CI
-compiles the apps and builds the site, so a broken example, region or link fails the pull request.
+compiles the apps and builds the site, so a broken example, region or internal link fails the pull request.
 
 ## Benchmarks
 

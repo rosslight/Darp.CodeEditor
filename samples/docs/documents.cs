@@ -13,8 +13,6 @@ AppBuilder.Configure<App>().UsePlatformDetect().StartWithClassicDesktopLifetime(
 
 sealed class App : Application
 {
-    private readonly Dictionary<CodeDocument, CodeEditorViewState> _places = [];
-
     public override void Initialize()
     {
         Styles.Add(new FluentTheme());
@@ -66,6 +64,8 @@ sealed class App : Application
     }
 
     // --8<-- [start:tabs]
+    private readonly Dictionary<CodeDocument, CodeEditorViewState> _places = [];
+
     private void Show(CodeEditor editor, CodeDocument document)
     {
         if (editor.Document is { } current)

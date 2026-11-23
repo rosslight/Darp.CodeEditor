@@ -1,8 +1,9 @@
 # Language servers
 
 A language server adds completion, signature help, hover, diagnostics, semantic colors and occurrence highlights. This
-page shows how to connect one, configure it, follow its state and shut it down. Any server that speaks the Language
-Server Protocol over stdio works, and your app ships or finds the server itself.
+page shows how to connect one, configure it, follow its state and shut it down. The editor connects to servers over
+stdio and uses the features each one offers. Diagnostics must be pushed with `textDocument/publishDiagnostics`. Your app
+ships or finds the server itself.
 
 ## Connect a server
 
@@ -11,6 +12,8 @@ This example uses VS Code's JSON server:
 ```sh
 npm install -g vscode-langservers-extracted
 ```
+
+On Windows, npm installs a `.cmd` script, so set `FileName` to its full path.
 
 Describe the server, then let it create the document:
 

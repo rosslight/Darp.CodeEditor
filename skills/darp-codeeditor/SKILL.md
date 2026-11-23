@@ -53,7 +53,7 @@ The built-in languages are `PlainText`, `Json`, `Xml` and `Yaml`. For another la
 - **Edits:** use `Replace(range, text)` for a change at a position. Editors keep their scroll position, and a caret
   after the range moves with the text.
 
-The app reads and writes files itself. Save from a snapshot, so edits made during the write keep the document modified:
+The app reads and writes files itself. Save from a snapshot, so edits made during the write aren't marked as saved:
 
 ```csharp
 TextSnapshot snapshot = document.CurrentSnapshot;

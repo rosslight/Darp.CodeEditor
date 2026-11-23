@@ -1,7 +1,7 @@
 # Getting started
 
 Darp.CodeEditor is a code editor control for Avalonia desktop apps. It brings syntax highlighting, search, and
-completion, hover and diagnostics from any language server. This page takes you from an empty Avalonia app to a working
+completion, hover and diagnostics from language servers. This page takes you from an empty Avalonia app to a working
 editor.
 
 ![Completing and hovering Python code, then completing a value and hovering a schema error in JSON](images/editor-demo.gif)

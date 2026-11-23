@@ -41,15 +41,16 @@ doesn't report `Text`.
 
 ## Save a file
 
-The editor never reads or writes files. Save from a snapshot, so that edits made during the write keep the document
-modified:
+The editor never reads or writes files. Save from a snapshot, so that edits made during the write aren't marked as
+saved:
 
 ```csharp
 --8<-- "documents.cs:save"
 ```
 
-`MarkUnmodified` returns `false` and changes nothing when the text changed after the snapshot. Set `FilePath` after
-"Save as". The document keeps its text and undo history.
+When the text changed after the snapshot, `MarkUnmodified` returns `false` and keeps the previous unmodified point. The
+current text then still needs saving, even if `IsModified` is `false`, as after undoing during the write. Set `FilePath`
+after "Save as". The document keeps its text and undo history.
 
 ## Switch tabs
 
@@ -85,5 +86,5 @@ For background work, take a snapshot on the UI thread and pass it along:
 
 - Your app owns each document: keep it across tab switches, and dispose it when it is closed.
 - Change documents and use editors on the UI thread only.
-- Save from a `CurrentSnapshot`, then call `MarkUnmodified` with that snapshot.
+- Save from a `CurrentSnapshot`, then call `MarkUnmodified` with that snapshot and check its result.
 - Listen to `TextChanged` instead of reading `Text` on every change.
