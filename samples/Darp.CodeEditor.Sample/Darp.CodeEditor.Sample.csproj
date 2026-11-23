@@ -32,7 +32,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Darp.CodeEditor\Darp.CodeEditor.csproj" />
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharpScript\Darp.CodeEditor.CSharpScript.csproj" />
+    <!-- What the app's C# scripts may use. -->
+    <ProjectReference
+      Include="..\Darp.CodeEditor.Sample.ScriptApi\Darp.CodeEditor.Sample.ScriptApi.csproj"
+      CSharpScriptReference="true"
+    />
   </ItemGroup>
 
   <ItemGroup>
@@ -63,4 +68,7 @@
       </ManagedAssemblyToLink>
     </ItemGroup>
   </Target>
+
+  <!-- A package reference imports this by itself; in this repository the server is built from source. -->
+  <Import Project="..\..\src\Darp.CodeEditor.CSharpScript\buildTransitive\Darp.CodeEditor.CSharpScript.targets" />
 </Project>

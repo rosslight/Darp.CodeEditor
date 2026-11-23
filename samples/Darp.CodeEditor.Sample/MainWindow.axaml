@@ -389,6 +389,7 @@
                         <Binding Path="Strings.ServerNotInstalled" />
                         <Binding Path="ShownDocument?.Type.ServerName" />
                         <Binding Path="ShownDocument?.Server?.State" />
+                        <Binding Path="ShownDocument?.ScriptServer?.State" />
                     </MultiBinding>
                 </TextBlock.Text>
             </TextBlock>

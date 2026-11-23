@@ -2,6 +2,7 @@ using System.ComponentModel;
 using Avalonia.Platform.Storage;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Darp.CodeEditor;
+using Darp.CodeEditor.CSharpScript;
 
 namespace Sample.Documents;
 
@@ -31,6 +32,9 @@ public sealed partial class OpenDocument : ObservableObject, IDisposable
     /// installed. The <see cref="Workspace"/> owns it.
     /// </summary>
     public LanguageServer? Server { get; }
+
+    /// <summary>The C# script server, for the status bar of a script. The <see cref="Workspace"/> owns it.</summary>
+    public CSharpScriptServer? ScriptServer { get; init; }
 
     [ObservableProperty]
     public partial string Name { get; private set; }

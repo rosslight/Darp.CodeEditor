@@ -22,6 +22,7 @@
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/Darp.CodeEditor.Sample/Darp.CodeEditor.Sample.csproj" />
+    <Project Path="samples/Darp.CodeEditor.Sample.ScriptApi/Darp.CodeEditor.Sample.ScriptApi.csproj" />
     <Project Path="samples/Darp.CodeEditor.UseCases/Darp.CodeEditor.UseCases.csproj" />
     <Project Path="samples/Darp.CodeEditor.UseCases.ScriptApi/Darp.CodeEditor.UseCases.ScriptApi.csproj" />
     <Project Path="samples/Darp.CodeEditor.UseCases.ScriptApi.Runner/Darp.CodeEditor.UseCases.ScriptApi.Runner.csproj" />

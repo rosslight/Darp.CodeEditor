@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- What the sample's scripts see. The app marks it with CSharpScriptReference. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Sample.ScriptApi</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- Its docs show up in the editor's hover and completion. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+</Project>
