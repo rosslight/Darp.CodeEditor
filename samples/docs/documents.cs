@@ -21,45 +21,46 @@ sealed class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
-        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+        if (ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop)
+            throw new InvalidOperationException("This example needs a desktop app.");
+
+        string path = Path.Combine(Path.GetTempPath(), "darp-codeeditor-example.json");
+        CodeDocument json = CodeDocument.Create(CodeLanguage.Json, """{ "name": "first" }""");
+        CodeDocument yaml = CodeDocument.Create(CodeLanguage.Yaml, "name: second\n");
+        var editor = new CodeEditor { Document = json };
+
+        var showJson = new Button { Content = "JSON" };
+        var showYaml = new Button { Content = "YAML" };
+        var save = new Button { Content = "Save JSON" };
+        var insert = new Button { Content = "Insert" };
+        var lines = new TextBlock { VerticalAlignment = VerticalAlignment.Center };
+        showJson.Click += (_, _) => Show(editor, json);
+        showYaml.Click += (_, _) => Show(editor, yaml);
+        save.Click += async (_, _) => lines.Text = await SaveAsync(json, path) ? "Saved" : "Changed, save again";
+        insert.Click += (_, _) => InsertAtSelection(editor, "text");
+        json.TextChanged += async (_, _) => lines.Text = $"{await CountLinesAsync(json)} lines";
+
+        var buttons = new StackPanel
         {
-            string path = Path.Combine(Path.GetTempPath(), "darp-codeeditor-example.json");
-            CodeDocument json = CodeDocument.Create(CodeLanguage.Json, """{ "name": "first" }""");
-            CodeDocument yaml = CodeDocument.Create(CodeLanguage.Yaml, "name: second\n");
-            var editor = new CodeEditor { Document = json };
+            Orientation = Orientation.Horizontal,
+            Spacing = 4,
+            Children = { showJson, showYaml, save, insert, lines },
+        };
+        DockPanel.SetDock(buttons, Dock.Top);
+        var window = new Window
+        {
+            Title = "Documents",
+            Width = 720,
+            Height = 420,
+            Content = new DockPanel { Children = { buttons, editor } },
+        };
+        window.Closed += (_, _) =>
+        {
+            json.Dispose();
+            yaml.Dispose();
+        };
+        desktop.MainWindow = window;
 
-            var showJson = new Button { Content = "JSON" };
-            var showYaml = new Button { Content = "YAML" };
-            var save = new Button { Content = "Save JSON" };
-            var insert = new Button { Content = "Insert" };
-            var lines = new TextBlock { VerticalAlignment = VerticalAlignment.Center };
-            showJson.Click += (_, _) => Show(editor, json);
-            showYaml.Click += (_, _) => Show(editor, yaml);
-            save.Click += async (_, _) => lines.Text = await SaveAsync(json, path) ? "Saved" : "Changed, save again";
-            insert.Click += (_, _) => InsertAtSelection(editor, "text");
-            json.TextChanged += async (_, _) => lines.Text = $"{await CountLinesAsync(json)} lines";
-
-            var buttons = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 4,
-                Children = { showJson, showYaml, save, insert, lines },
-            };
-            DockPanel.SetDock(buttons, Dock.Top);
-            var window = new Window
-            {
-                Title = "Documents",
-                Width = 720,
-                Height = 420,
-                Content = new DockPanel { Children = { buttons, editor } },
-            };
-            window.Closed += (_, _) =>
-            {
-                json.Dispose();
-                yaml.Dispose();
-            };
-            desktop.MainWindow = window;
-        }
         base.OnFrameworkInitializationCompleted();
     }
 
