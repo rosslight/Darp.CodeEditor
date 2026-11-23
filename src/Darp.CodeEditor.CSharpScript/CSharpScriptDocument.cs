@@ -8,11 +8,11 @@ namespace Darp.CodeEditor.CSharpScript;
 public sealed class CSharpScriptDocument<TGlobals> : CodeDocument
     where TGlobals : class
 {
-    private CSharpScriptDocument(string text)
-        : base(CodeLanguage.CSharp, text) { }
+    internal CSharpScriptDocument(CSharpScriptEnvironment<TGlobals> environment, string text)
+        : base(CodeLanguage.CSharp, text) => Environment = environment;
 
     /// <summary>The environment the document was created in.</summary>
-    public CSharpScriptEnvironment<TGlobals> Environment => throw new NotImplementedException();
+    public CSharpScriptEnvironment<TGlobals> Environment { get; }
 
     /// <summary>
     /// Compiles the document's <see cref="CodeDocument.CurrentSnapshot"/> at the time of the call, in its environment,

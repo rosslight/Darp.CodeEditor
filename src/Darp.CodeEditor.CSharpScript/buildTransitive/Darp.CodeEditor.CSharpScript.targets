@@ -1,0 +1,148 @@
+<Project>
+  <!--
+    What an app needs for C# scripts, next to it. The Darp.CodeEditor.CSharpScript package imports this file into every
+    project that references it, and it acts in apps (OutputType Exe or WinExe); projects in this repository import it
+    from source, where the server is built along with the app.
+
+      dotnet build    $(OutDir)helpers/csharp-server/         the language server, as portable IL, which runs on the
+                                                              dotnet host of the runtime that runs the app
+                      $(OutDir)helpers/script-references.txt  the assemblies of marked references, relative to the app
+                      $(OutDir)helpers/script-framework.txt   the names of .NET's assemblies
+
+    A reference is marked for scripts in the app's project, and its XML docs are copied next to it for hover and
+    completion:
+
+      <ProjectReference Include="..\MyApp.ScriptApi\MyApp.ScriptApi.csproj" CSharpScriptReference="true" />
+      <PackageReference Include="MyApp.Devices" CSharpScriptReference="true" />
+  -->
+  <PropertyGroup>
+    <_CSharpScriptIsApp Condition="'$(OutputType)' == 'Exe' or '$(OutputType)' == 'WinExe'">true</_CSharpScriptIsApp>
+    <_CSharpScriptTools>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', 'tools'))</_CSharpScriptTools>
+    <_CSharpScriptFromPackage Condition="Exists('$(_CSharpScriptTools)csharp-server')">true</_CSharpScriptFromPackage>
+    <_CSharpScriptHelpers>helpers/</_CSharpScriptHelpers>
+  </PropertyGroup>
+
+  <!-- From source: one portable build of the server serves every configuration of the app. -->
+  <PropertyGroup Condition="'$(_CSharpScriptFromPackage)' != 'true' and '$(_CSharpScriptIsApp)' == 'true'">
+    <_CSharpScriptServerProject>$(MSBuildThisFileDirectory)..\..\Darp.CodeEditor.CSharpScript.Server\Darp.CodeEditor.CSharpScript.Server.csproj</_CSharpScriptServerProject>
+    <_CSharpScriptServerRemovedProperties>RuntimeIdentifier;SelfContained</_CSharpScriptServerRemovedProperties>
+    <!-- The server is a framework-dependent executable, also for an app that is self-contained or NativeAOT. -->
+    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(_CSharpScriptServerProject)' != ''">
+    <ProjectReference
+      Include="$(_CSharpScriptServerProject)"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      PrivateAssets="all"
+      GlobalPropertiesToRemove="$(_CSharpScriptServerRemovedProperties)"
+    />
+  </ItemGroup>
+
+  <!-- The server's files, by their path in its folder. -->
+  <Target Name="_GetCSharpScriptServerFiles" Returns="@(_CSharpScriptServerFile)">
+    <ItemGroup Condition="'$(_CSharpScriptFromPackage)' == 'true'">
+      <_CSharpScriptPackagedFile Include="$(_CSharpScriptTools)csharp-server/**" />
+      <_CSharpScriptServerFile
+        Include="@(_CSharpScriptPackagedFile)"
+        ServerPath="%(_CSharpScriptPackagedFile.RecursiveDir)%(_CSharpScriptPackagedFile.Filename)%(_CSharpScriptPackagedFile.Extension)"
+      />
+    </ItemGroup>
+    <MSBuild
+      Condition="'$(_CSharpScriptServerProject)' != ''"
+      Projects="$(_CSharpScriptServerProject)"
+      Targets="GetCSharpScriptServerFiles"
+      Properties="Configuration=$(Configuration);BuildProjectReferences=false"
+      RemoveProperties="$(_CSharpScriptServerRemovedProperties);TargetFramework"
+    >
+      <Output TaskParameter="TargetOutputs" ItemName="_CSharpScriptServerFile" />
+    </MSBuild>
+  </Target>
+
+  <!--
+    The references the app marked: project references as they are written and packages by ID. What they depend on is
+    not listed: it binds their signatures, and scripts can't name it.
+  -->
+  <Target Name="_WriteCSharpScriptLists" DependsOnTargets="ResolveReferences">
+    <ItemGroup>
+      <_CSharpScriptMarked Include="@(ProjectReference->WithMetadataValue('CSharpScriptReference', 'true'))" />
+      <_CSharpScriptMarked Include="@(PackageReference->WithMetadataValue('CSharpScriptReference', 'true'))" />
+      <_CSharpScriptCandidate
+        Include="@(ReferenceCopyLocalPaths)"
+        Condition="'%(Extension)' == '.dll' and '%(ReferenceCopyLocalPaths.DestinationSubDirectory)' == ''"
+        SourcePath="%(FullPath)"
+        Key="%(ReferenceCopyLocalPaths.ProjectReferenceOriginalItemSpec)%(ReferenceCopyLocalPaths.NuGetPackageId)"
+      />
+      <_CSharpScriptByKey Include="@(_CSharpScriptCandidate->'%(Key)')" />
+      <_CSharpScriptUnmarked Include="@(_CSharpScriptByKey)" Exclude="@(_CSharpScriptMarked)" />
+      <_CSharpScriptReference Include="@(_CSharpScriptByKey)" Exclude="@(_CSharpScriptUnmarked)" />
+      <_CSharpScriptReferencePath Include="@(_CSharpScriptReference->'%(SourcePath)'->Distinct())" />
+      <_CSharpScriptFramework
+        Include="@(ReferencePath)"
+        Condition="'%(ReferencePath.FrameworkReferenceName)' == 'Microsoft.NETCore.App'"
+      />
+      <_CSharpScriptXmlDoc
+        Include="@(_CSharpScriptReferencePath->'%(RootDir)%(Directory)%(Filename).xml')"
+        Exclude="@(ReferenceCopyLocalPaths)"
+        Condition="Exists('%(RootDir)%(Directory)%(Filename).xml')"
+      />
+    </ItemGroup>
+    <WriteLinesToFile
+      File="$(IntermediateOutputPath)script-references.txt"
+      Lines="@(_CSharpScriptReferencePath->'%(Filename)%(Extension)')"
+      Overwrite="true"
+      WriteOnlyWhenDifferent="true"
+    />
+    <WriteLinesToFile
+      File="$(IntermediateOutputPath)script-framework.txt"
+      Lines="@(_CSharpScriptFramework->'%(Filename)')"
+      Overwrite="true"
+      WriteOnlyWhenDifferent="true"
+    />
+    <ItemGroup>
+      <FileWrites Include="$(IntermediateOutputPath)script-references.txt;$(IntermediateOutputPath)script-framework.txt" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    As ordinary items to copy, so that they also reach the output of a project that references this one. Publishing
+    carries the lists, so that creating a script document keeps working; the server gets its publish step separately.
+  -->
+  <Target
+    Name="_AddCSharpScriptFiles"
+    BeforeTargets="AssignTargetPaths"
+    DependsOnTargets="_GetCSharpScriptServerFiles;_WriteCSharpScriptLists"
+    Condition="'$(_CSharpScriptIsApp)' == 'true'"
+  >
+    <ItemGroup>
+      <None
+        Include="@(_CSharpScriptServerFile)"
+        Link="$(_CSharpScriptHelpers)csharp-server/%(_CSharpScriptServerFile.ServerPath)"
+        CopyToOutputDirectory="PreserveNewest"
+        CopyToPublishDirectory="Never"
+        Visible="false"
+      />
+      <None
+        Include="@(_CSharpScriptXmlDoc)"
+        Link="%(_CSharpScriptXmlDoc.Filename)%(_CSharpScriptXmlDoc.Extension)"
+        CopyToOutputDirectory="PreserveNewest"
+        CopyToPublishDirectory="Never"
+        Visible="false"
+      />
+      <None
+        Include="$(IntermediateOutputPath)script-references.txt"
+        Link="$(_CSharpScriptHelpers)script-references.txt"
+        CopyToOutputDirectory="PreserveNewest"
+        CopyToPublishDirectory="PreserveNewest"
+        Visible="false"
+      />
+      <None
+        Include="$(IntermediateOutputPath)script-framework.txt"
+        Link="$(_CSharpScriptHelpers)script-framework.txt"
+        CopyToOutputDirectory="PreserveNewest"
+        CopyToPublishDirectory="PreserveNewest"
+        Visible="false"
+      />
+    </ItemGroup>
+  </Target>
+</Project>

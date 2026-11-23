@@ -1,5 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
+using Darp.CodeEditor.CSharpScript.Protocol;
 
 namespace Darp.CodeEditor.CSharpScript;
 
@@ -34,14 +36,33 @@ namespace Darp.CodeEditor.CSharpScript;
 /// </remarks>
 public sealed class CSharpScriptServer : INotifyPropertyChanged, IAsyncDisposable, IDisposable
 {
+    private readonly LanguageServer _server;
+
+    /// <summary>What the build says scripts may use, read once, when the first document needs it.</summary>
+    private readonly Lazy<ScriptAppFiles> _appFiles = new(ScriptAppFiles.Read);
+
     /// <summary>Describes the server. The process does not start yet.</summary>
-    public CSharpScriptServer(CSharpScriptServerOptions? options = null) => throw new NotImplementedException();
+    public CSharpScriptServer(CSharpScriptServerOptions? options = null)
+    {
+        options ??= new CSharpScriptServerOptions();
+        (string fileName, string[] arguments) = ScriptAppFiles.ServerCommand();
+        _server = new LanguageServer(
+            new LanguageServerOptions
+            {
+                FileName = fileName,
+                Arguments = arguments,
+                StandardError = options.StandardError,
+                TimeProvider = options.TimeProvider,
+            }
+        );
+        _server.PropertyChanged += (_, e) => PropertyChanged?.Invoke(this, e);
+    }
 
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
 
     /// <summary>Where the server process is in its life, for a status indicator.</summary>
-    public LanguageServerState State => throw new NotImplementedException();
+    public LanguageServerState State => _server.State;
 
     /// <summary>
     /// Starts the process now rather than with the first document, so that C# features are ready sooner. Completes
@@ -50,7 +71,7 @@ public sealed class CSharpScriptServer : INotifyPropertyChanged, IAsyncDisposabl
     /// <exception cref="InvalidOperationException">
     /// The process did not start or did not answer in time. The message says why, with the end of its standard error.
     /// </exception>
-    public Task StartAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task StartAsync(CancellationToken cancellationToken = default) => _server.StartAsync(cancellationToken);
 
     /// <summary>
     /// Creates a C# script document in <paramref name="environment"/>, open in this server until the document's
@@ -67,7 +88,14 @@ public sealed class CSharpScriptServer : INotifyPropertyChanged, IAsyncDisposabl
         CSharpScriptEnvironment<TGlobals> environment,
         string text = ""
     )
-        where TGlobals : class => throw new NotImplementedException();
+        where TGlobals : class
+    {
+        CSharpScriptEnvironment<TGlobals> copy = environment.Copy();
+        ScriptEnvironmentData data = _appFiles.Value.Describe(copy);
+        var document = new CSharpScriptDocument<TGlobals>(copy, text);
+        _server.Open(document, JsonSerializer.SerializeToNode(data, ScriptProtocolJson.Default.ScriptEnvironmentData));
+        return document;
+    }
 
     /// <summary>
     /// Compiles <paramref name="code"/> in <paramref name="environment"/>, with no document or editor. Safe to call
@@ -81,14 +109,17 @@ public sealed class CSharpScriptServer : INotifyPropertyChanged, IAsyncDisposabl
     )
         where TGlobals : class => throw new NotImplementedException();
 
+    /// <summary>The id of the running process; null without one. Tests use it to end the server.</summary>
+    internal int? ProcessId => _server.ProcessId;
+
     /// <summary>Stops the process. Its documents keep their text and lose their language features.</summary>
-    public ValueTask DisposeAsync() => throw new NotImplementedException();
+    public ValueTask DisposeAsync() => _server.DisposeAsync();
 
     /// <summary>
     /// Kills the process at once, for app exits where only synchronous disposal runs. Its documents keep their text
     /// and lose their language features.
     /// </summary>
-    public void Dispose() => throw new NotImplementedException();
+    public void Dispose() => _server.Dispose();
 }
 
 /// <summary>Settings of a <see cref="CSharpScriptServer"/>.</summary>

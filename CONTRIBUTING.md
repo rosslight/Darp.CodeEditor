@@ -13,6 +13,14 @@ dotnet publish tests/Darp.CodeEditor.Tests -c Release -r linux-x64 -o artifacts/
 artifacts/aot-tests/Darp.CodeEditor.Tests
 ```
 
+The tests of C# scripts publish into a folder of their own. Those that need the C# server run with `dotnet test`, and
+skip as NativeAOT until publishing deploys the server:
+
+```sh
+dotnet publish tests/Darp.CodeEditor.CSharpScript.Tests -c Release -r linux-x64 -o artifacts/aot-script-tests
+artifacts/aot-script-tests/Darp.CodeEditor.CSharpScript.Tests
+```
+
 ## Sample app
 
 [`samples/Darp.CodeEditor.Sample`](samples/Darp.CodeEditor.Sample) shows how an app uses the API.

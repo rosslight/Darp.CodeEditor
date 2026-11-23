@@ -337,6 +337,9 @@ public sealed class LanguageServer : INotifyPropertyChanged, IAsyncDisposable, I
     /// </summary>
     internal ServerFeatures? FeaturesOf(ServerDocument document) => Connection()?.FeaturesOf(document);
 
+    /// <summary>The id of the running process; null without one. Tests of a real server use it to end it.</summary>
+    internal int? ProcessId => Connection()?.ProcessId;
+
     /// <summary>The clock of the server and of its documents' editors: the options' <c>TimeProvider</c>.</summary>
     internal TimeProvider TimeProvider => _options.TimeProvider;
 

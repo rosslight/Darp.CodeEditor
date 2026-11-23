@@ -89,6 +89,16 @@ internal sealed class ServerConnection
     /// <summary>Guarded: how long the server has been running since it answered <c>initialize</c>; null before.</summary>
     public TimeSpan? RunningFor => _running is { } running ? _options.TimeProvider.GetElapsedTime(running.Since) : null;
 
+    /// <summary>The process's id, once it started.</summary>
+    public int? ProcessId
+    {
+        get
+        {
+            lock (_lock)
+                return _process?.Id;
+        }
+    }
+
     /// <summary>Guarded: starts the process in the background.</summary>
     public void Start() => _run = Task.Run(RunAsync);
 

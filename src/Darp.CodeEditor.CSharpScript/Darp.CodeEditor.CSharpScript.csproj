@@ -6,5 +6,15 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Darp.CodeEditor\Darp.CodeEditor.csproj" />
+    <ProjectReference Include="..\Darp.CodeEditor.CSharpScript.Protocol\Darp.CodeEditor.CSharpScript.Protocol.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The C# language, from VS Code. -->
+    <AvaloniaResource Include="Languages\*.json" />
+    <None Include="THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Reads documents' requests and diagnostics in tests, against the real server. -->
+    <InternalsVisibleTo Include="Darp.CodeEditor.CSharpScript.Tests" />
   </ItemGroup>
 </Project>

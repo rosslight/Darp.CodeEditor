@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <PublishAot>true</PublishAot>
+    <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Not in the NativeAOT tests: coverlet can't be compiled ahead of time. -->
+    <PackageReference Include="coverlet.MTP" Condition="'$(_IsPublishing)' != 'true'" />
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="xunit.v3.aot" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Shouldly" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.CSharpScript\Darp.CodeEditor.CSharpScript.csproj" />
+    <!-- The editor references it privately; the tests read what the client reads. -->
+    <ProjectReference Include="..\..\src\Darp.CodeEditor.Lsp\Darp.CodeEditor.Lsp.csproj" />
+    <ProjectReference
+      Include="..\Darp.CodeEditor.CSharpScript.Tests.ScriptApi\Darp.CodeEditor.CSharpScript.Tests.ScriptApi.csproj"
+      CSharpScriptReference="true"
+    />
+    <ProjectReference
+      Include="..\Darp.CodeEditor.CSharpScript.Tests.Extra\Darp.CodeEditor.CSharpScript.Tests.Extra.csproj"
+      CSharpScriptReference="true"
+    />
+  </ItemGroup>
+  <Import Project="..\..\src\Darp.CodeEditor.CSharpScript\buildTransitive\Darp.CodeEditor.CSharpScript.targets" />
+</Project>
