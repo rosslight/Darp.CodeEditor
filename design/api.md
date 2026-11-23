@@ -583,6 +583,42 @@ How the client talks to a server, where the protocol leaves a choice:
 - **Messages** from a server that are not valid JSON get an error response. A message over 64 MiB, or broken framing,
   ends the process as a crash: skipping it would lose a request or a response without notice.
 
+### The C# script server
+
+`CSharpScriptServer` is a language server of the library's own, on the client above: one Roslyn process for all of the
+app's script environments.
+
+- **The environment** goes with each document's `didOpen`, as data outside the protocol, so that a restarted server
+  opens the document in it again. Environments with equal settings share their loaded references.
+- **What a script may name:** .NET's assemblies, the globals type's assembly, and the assemblies of references marked
+  `CSharpScriptReference`, which `References` can narrow. What those depend on is loaded under a private alias: it binds
+  their signatures and inherited members, and its types can't be named. An assembly that is neither marked nor .NET's
+  makes `CreateDocument` throw `ArgumentException`. A language version or a file that the server can't load becomes an
+  error at the start of the script.
+- **Imports:** the .NET SDK's implicit usings always, and `Imports` besides them. A script that wants checked arithmetic
+  writes `checked`.
+- **Positions** follow the client's lines. Roslyn also ends lines at `\u0085`, `\u2028` and `\u2029`; a script that may
+  hold one gets its line table from a copy with spaces in their place, and any other script pays nothing.
+- **Requests** see the edits sent before them, in the order of the messages, on an immutable version of the script, and
+  each starts at once on the thread pool. An edit cancels the analysis of the version before it, which then publishes
+  nothing, and `$/cancelRequest` stops a request.
+- **Diagnostics:** the compiler's errors and warnings. `#r`, `#load` and `#line` are errors.
+- **Completion:** Roslyn's list, with keywords and kinds, on `.` and whenever the client asks. Each item has its edit at
+  once; its signature and XML docs come with resolve, also after the user typed on, from the version the list was asked
+  for. An escaped word such as `@ev` completes over its `@`, and there is no list after a lone `@`.
+- **Hover:** the symbol as C# code, then its XML docs as text.
+- **Signature help** on `(`, `,` and `)`: the overloads of the call, with the one that overload resolution selects for the
+  arguments so far, taking missing arguments as `default`, so that an unfinished call selects too. Asking again follows
+  an argument's new type, and keeps a signature that the user chose by key. Named arguments and `params` mark their
+  parameter. Signatures show no XML docs.
+- **Semantic colors** are answered for ranges, with the protocol's standard token types. A script's top-level variables
+  are fields to Roslyn, and are colored as variables.
+- **Where it runs.** `dotnet build` puts the server in `helpers/csharp-server/` next to the app, as portable IL, with the
+  lists of the marked assemblies and of .NET's in `helpers/`, and the marked assemblies' XML docs next to them. The server
+  runs on the `dotnet` host of the installation whose runtime runs the app, found from that runtime's directory, never
+  from `PATH`. A published app has no server yet: its script documents keep their text and TextMate colors, and `State`
+  ends as `Failed`.
+
 ## 7. Sessions
 
 Draft for review; not proven yet (section 9).
@@ -1137,13 +1173,38 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   takes 235 ms off the UI thread (the matcher alone, warm), while a keystroke with its frame takes the UI thread
   10 ms (p95 10.3 ms), no more than with the list closed (12 ms in that run).
 
+C# script editing (section 6) is implemented. Proven on linux-x64 with `dotnet test`, by a real client against a real
+server process:
+
+- the globals, references and imports of an environment in completion and hover, with XML docs, inherited members
+  included; a dependency that binds signatures and whose types can't be named; a reference or globals type that is not
+  marked, rejected; two kinds of script in one server;
+- keywords and item kinds; directive errors; incremental edits; resolving an item after an edit; CR, LF and CRLF
+  positions with the three Unicode line breaks in the text; only the latest of several versions publishing diagnostics;
+  a cancelled request stopping while the server goes on; a killed server reopening its documents in their environment;
+  escaped identifiers;
+- signature help for `Task.Delay(1000, `, unfinished generic calls, a named argument, `params`, an indented continuation
+  line, and asking again after an argument's type changed;
+- once by hand, not in CI: the same 45 tests from a NativeAOT client, with the server and the marked assemblies put next
+  to it, and the sample's script document on a Linux desktop, in completion, its details, signature help, hover,
+  squiggles and semantic colors;
+- on linux-x64 (BenchmarkDotNet, i7-13700, Release, a portable server without ReadyToRun, 5,000 lines, each request right
+  after an edit, while that version's diagnostics run). Six runs, on a machine with other work (load 3.5 to 5.5 on 8
+  cores): completion took 39 to 55 ms at the 95th percentile for a member list, and for the 1,046 items without a
+  receiver 37 to 52 ms, with one run at 114 ms during a burst of other load; the median of its iterations was 34 ms in
+  the quietest run. From an edit to its diagnostics: 142 to 152 ms on average. Colors of 40 visible lines: 20 to 24 ms.
+  From creating the server to the first completion in a new process, "C# ready": 1.37 to 1.56 s on average, in five of
+  six runs under the budget of 1.5 s.
+
 Still open:
 
-- hover, semantic tokens, completion and signature help against a real server, such as yaml-language-server, and the
-  C# server's once it exists, with the completion budget measured there;
+- hover, semantic tokens, completion and signature help against a third-party server, such as yaml-language-server,
+  in the tests;
+- the C# server in a published app, and its budgets with ReadyToRun;
 - a server answers the requests of the documents that editors show in its own order: the client cancels what an
   editor no longer needs and asks for nothing that no editor shows, but cannot put one document's request ahead of
-  another's in the server. The C# server will take the shown document first;
+  another's in the server. The C# server starts each request at once on the thread pool, so none waits in a queue
+  behind another document's;
 - the list itself moves left of the word it completes when the word is within the list's width of the window's right
   edge; VS Code would show its details on the list's other side too;
 - opening a link through the app's launcher: headless windows have none, so tests check only which links open;
