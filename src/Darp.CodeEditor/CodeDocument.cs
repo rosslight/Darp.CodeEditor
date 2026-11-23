@@ -89,7 +89,7 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
         _owner = Application.Current?.Dispatcher;
         // AvaloniaEdit's document belongs to the thread that created it. Unbound, it belongs to none between changes.
         _document.SetOwnerThread(_owner?.Thread);
-        _document.Changing += (_, e) => OnChanging(_document, e);
+        _document.Changing += (_, e) => ServerBinding?.OnChanging(_document, e);
         _document.TextChanged += OnTextChanged;
         _document.Changed += OnBufferChanged;
         _document.UndoStack.PropertyChanged += OnUndoStackPropertyChanged;
@@ -127,7 +127,7 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
             VerifyAccess();
             if (value == _filePath)
                 return;
-            OnFilePathChanging(value);
+            ServerBinding?.OnFilePathChanging(value);
             _filePath = value;
         }
     }
@@ -254,7 +254,7 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     public void Dispose()
     {
         _isDisposed = true;
-        OnDisposed();
+        ServerBinding?.OnDisposed();
         Disposed?.Invoke(this, EventArgs.Empty);
     }
 
@@ -270,6 +270,12 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
             return _document;
         }
     }
+
+    /// <summary>
+    /// The document's place in the language server that serves it; null without one. Set while the server takes it,
+    /// before anything else can see the document.
+    /// </summary>
+    internal ServerDocument? ServerBinding { get; set; }
 
     /// <summary>Whether <see cref="Dispose"/> was called. Editors show nothing of a disposed document.</summary>
     internal bool IsDisposed => _isDisposed;
@@ -288,11 +294,11 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     /// editor; null when there is none, and when <paramref name="cancellationToken"/> cancelled it. Never waits on the
     /// calling thread.
     /// </summary>
-    internal virtual Task<HoverInfo?> HoverAsync(
+    internal Task<HoverInfo?> HoverAsync(
         TextSnapshot snapshot,
         TextPosition position,
         CancellationToken cancellationToken
-    ) => Task.FromResult<HoverInfo?>(null);
+    ) => ServerBinding?.HoverAsync(snapshot, position, cancellationToken) ?? Task.FromResult<HoverInfo?>(null);
 
     /// <summary>
     /// The server's semantic tokens of the current text, for an editor that shows the lines from
@@ -300,12 +306,14 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     /// for a server that answers only for the whole text. Null when there are none, and when
     /// <paramref name="cancellationToken"/> cancelled them. Never waits on the calling thread.
     /// </summary>
-    internal virtual Task<SemanticTokenLines?> SemanticTokensAsync(
+    internal Task<SemanticTokenLines?> SemanticTokensAsync(
         TextPosition start,
         TextPosition end,
         int lineCount,
         CancellationToken cancellationToken
-    ) => Task.FromResult<SemanticTokenLines?>(null);
+    ) =>
+        ServerBinding?.SemanticTokensAsync(start, end, lineCount, cancellationToken)
+        ?? Task.FromResult<SemanticTokenLines?>(null);
 
     /// <summary>
     /// The server's completion at the end of <paramref name="word"/> in <paramref name="snapshot"/>, the current text,
@@ -316,47 +324,53 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     /// <param name="word">The word before the caret, which ends at the caret: what items without an edit replace.</param>
     /// <param name="trigger">How completion was asked for.</param>
     /// <param name="cancellationToken">Cancels the request.</param>
-    internal virtual Task<CompletionList?> CompletionAsync(
+    internal Task<CompletionList?> CompletionAsync(
         TextSnapshot snapshot,
         TextRange word,
         CompletionTrigger trigger,
         CancellationToken cancellationToken
-    ) => Task.FromResult<CompletionList?>(null);
+    ) =>
+        ServerBinding?.CompletionAsync(snapshot, word, trigger, cancellationToken)
+        ?? Task.FromResult<CompletionList?>(null);
 
     /// <summary>
     /// The server's signature help at <paramref name="offset"/> of <paramref name="snapshot"/>, the current text, for an
     /// editor; null when there is none, and when <paramref name="cancellationToken"/> cancelled it. Never waits on the
     /// calling thread.
     /// </summary>
-    internal virtual Task<SignatureHelpInfo?> SignatureHelpAsync(
+    internal Task<SignatureHelpInfo?> SignatureHelpAsync(
         TextSnapshot snapshot,
         int offset,
         SignatureHelpTrigger trigger,
         CancellationToken cancellationToken
-    ) => Task.FromResult<SignatureHelpInfo?>(null);
+    ) =>
+        ServerBinding?.SignatureHelpAsync(snapshot, offset, trigger, cancellationToken)
+        ?? Task.FromResult<SignatureHelpInfo?>(null);
 
     /// <summary>
     /// The server's occurrences of the symbol at <paramref name="offset"/> of <paramref name="snapshot"/>, the current
     /// text, for an editor; null when the server offers none or has no answer, and when
     /// <paramref name="cancellationToken"/> cancelled them. Never waits on the calling thread.
     /// </summary>
-    internal virtual Task<IReadOnlyList<Occurrence>?> DocumentHighlightsAsync(
+    internal Task<IReadOnlyList<Occurrence>?> DocumentHighlightsAsync(
         TextSnapshot snapshot,
         int offset,
         CancellationToken cancellationToken
-    ) => Task.FromResult<IReadOnlyList<Occurrence>?>(null);
+    ) =>
+        ServerBinding?.DocumentHighlightsAsync(snapshot, offset, cancellationToken)
+        ?? Task.FromResult<IReadOnlyList<Occurrence>?>(null);
 
     /// <summary>
     /// What the server that serves the document offers its editors now, such as the characters that ask for
     /// completion; null without a running server.
     /// </summary>
-    internal virtual ServerFeatures? Features => null;
+    internal ServerFeatures? Features => ServerBinding?.Features;
 
     /// <summary>
     /// The clock of the editors' pauses before they ask the server: its options' <c>TimeProvider</c>, so that tests can
     /// pass their own.
     /// </summary>
-    internal virtual TimeProvider TimeProvider => TimeProvider.System;
+    internal virtual TimeProvider TimeProvider => ServerBinding?.TimeProvider ?? TimeProvider.System;
 
     /// <summary>
     /// Raises <see cref="LanguageFeaturesChanged"/> on the UI thread, from any thread. Before Avalonia is set up there
@@ -413,24 +427,6 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
     }
 
     /// <summary>
-    /// Called for each part of a change, before it applies, on the thread that changes the text:
-    /// <paramref name="buffer"/> still holds the text before the change.
-    /// </summary>
-    private protected virtual void OnChanging(TextDocument buffer, DocumentChangeEventArgs change) { }
-
-    /// <summary>
-    /// Called after a change of the text, on the thread that changed it, once <paramref name="snapshot"/> is current and
-    /// before <see cref="TextChanged"/>.
-    /// </summary>
-    private protected virtual void OnChanged(TextSnapshot snapshot) { }
-
-    /// <summary>Called on the UI thread before <see cref="FilePath"/> changes to <paramref name="path"/>; throws to refuse.</summary>
-    private protected virtual void OnFilePathChanging(string? path) { }
-
-    /// <summary>Called by <see cref="Dispose"/>, on the thread that disposes, maybe more than once.</summary>
-    private protected virtual void OnDisposed() { }
-
-    /// <summary>
     /// The versions in AvaloniaEdit of <paramref name="snapshot"/> and of the current text, after checking that the
     /// snapshot is one of this document.
     /// </summary>
@@ -483,7 +479,7 @@ public abstract class CodeDocument : INotifyPropertyChanged, IDisposable
             ref _currentSnapshot,
             new TextSnapshot(_document.CreateSnapshot(), _currentSnapshot.Version + 1)
         );
-        OnChanged(_currentSnapshot);
+        ServerBinding?.OnChanged(_currentSnapshot);
         TextChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -586,9 +582,16 @@ internal sealed class DiagnosticsBatch
     public TextSegmentCollection<DiagnosticMarker> Markers { get; } = new();
 }
 
-/// <summary>A document without a language server, from <see cref="CodeDocument.Create"/>.</summary>
-internal sealed class StandaloneDocument(CodeLanguage language, string text, TimeProvider? time = null)
-    : CodeDocument(language, text)
+/// <summary>
+/// A document of no special kind: from <see cref="CodeDocument.Create"/>, or from a language server's
+/// <see cref="LanguageServer.CreateDocument"/>, which then binds it.
+/// </summary>
+internal sealed class StandaloneDocument : CodeDocument
 {
-    internal override TimeProvider TimeProvider { get; } = time ?? TimeProvider.System;
+    private readonly TimeProvider? _time;
+
+    public StandaloneDocument(CodeLanguage language, string text, TimeProvider? time = null, string? filePath = null)
+        : base(language, text, filePath) => _time = time;
+
+    internal override TimeProvider TimeProvider => _time ?? base.TimeProvider;
 }

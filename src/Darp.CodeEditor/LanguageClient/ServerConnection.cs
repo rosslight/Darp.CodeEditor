@@ -130,7 +130,7 @@ internal sealed class ServerConnection
         if (_running is not { } running || !_areDocumentsOpen)
             return;
         _documents[document] = new OpenDocument(this, running, document);
-        document.OnLanguageFeaturesChanged();
+        document.Owner.OnLanguageFeaturesChanged();
     }
 
     /// <summary>Guarded: sends a change of an open document.</summary>
@@ -508,8 +508,8 @@ internal sealed class ServerConnection
         }
         foreach (ServerDocument document in documents)
         {
-            document.SetDiagnostics([]);
-            document.OnLanguageFeaturesChanged();
+            document.Owner.SetDiagnostics([]);
+            document.Owner.OnLanguageFeaturesChanged();
         }
         string tail = process.StandardErrorTail;
         process.Dispose();
@@ -734,7 +734,7 @@ internal sealed class ServerConnection
         }
         if (document is null || snapshot is null)
             return;
-        document.SetDiagnostics([.. published.Diagnostics.Select(d => ToDiagnostic(snapshot, d))]);
+        document.Owner.SetDiagnostics([.. published.Diagnostics.Select(d => ToDiagnostic(snapshot, d))]);
     }
 
     private static Diagnostic ToDiagnostic(TextSnapshot snapshot, LspDiagnostic diagnostic)
@@ -964,6 +964,7 @@ internal sealed class ServerConnection
         private List<TextDocumentContentChangeEvent>? _changes = [];
 
         private readonly string _languageId;
+        private readonly JsonNode? _data;
         private int _changedLength;
         private bool _isOpened;
         private bool _isQueued;
@@ -973,10 +974,11 @@ internal sealed class ServerConnection
         {
             _connection = connection;
             _running = running;
-            _languageId = document.Language.Id;
+            _languageId = document.Owner.Language.Id;
+            _data = document.Data;
             Uri = document.Uri;
             Identity = DocumentUris.Identity(Uri);
-            _latest = document.CurrentSnapshot;
+            _latest = document.Owner.CurrentSnapshot;
             Queue();
         }
 
@@ -1122,7 +1124,7 @@ internal sealed class ServerConnection
             JsonSerializer.Serialize(
                 writer,
                 new DidOpenTextDocumentParams(
-                    new TextDocumentItem(Uri, _languageId, snapshot.Version, snapshot.GetText())
+                    new TextDocumentItem(Uri, _languageId, snapshot.Version, snapshot.GetText(), _data)
                 ),
                 LspJsonContext.Default.DidOpenTextDocumentParams
             );

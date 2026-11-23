@@ -43,7 +43,12 @@ internal sealed record ServerCapabilities(
     JsonElement? DocumentHighlightProvider = null
 );
 
-internal sealed record TextDocumentItem(string Uri, string LanguageId, int Version, string Text);
+/// <param name="Uri">The document's URI.</param>
+/// <param name="LanguageId">The language's identifier.</param>
+/// <param name="Version">The version of the text.</param>
+/// <param name="Text">The text.</param>
+/// <param name="Data">What the server needs beyond the text, in its own format; not in the protocol, so null for most.</param>
+internal sealed record TextDocumentItem(string Uri, string LanguageId, int Version, string Text, JsonNode? Data = null);
 
 internal sealed record TextDocumentIdentifier(string Uri);
 
