@@ -27,6 +27,15 @@ public class ScriptTestGlobals : DependencyGlobals
     [EditorBrowsable(EditorBrowsableState.Never)]
     public void Write(double value) => _ = value;
 
+    /// <summary>
+    /// Repeats <paramref name="text"/>, or returns <see langword="null"/> for none.
+    /// <para>Each copy follows the last.</para>
+    /// </summary>
+    /// <param name="text">The text, as <see cref="Greeting"/> reads.</param>
+    /// <param name="times">How often.</param>
+    /// <returns>The copies.</returns>
+    public string? Repeat(string text, int times) => times > 0 ? string.Concat(Enumerable.Repeat(text, times)) : null;
+
     /// <summary>Joins values.</summary>
     /// <param name="separator">What goes between them.</param>
     /// <param name="values">The values.</param>

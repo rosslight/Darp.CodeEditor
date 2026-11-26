@@ -294,4 +294,40 @@ public sealed class ScriptSignatureHelpTests(ScriptServerFixture fixture)
         Active(help).Label.ShouldContain("Add(int key, string value)");
         ActiveParameter(Active(help)).ShouldBe("string value");
     }
+
+    [Fact]
+    public async Task A_signature_shows_its_summary_and_the_active_parameters_description_as_text()
+    {
+        using var script = await _fixture.OpenAsync("Repeat(|");
+        SignatureInfo signature = Active((await script.SignatureHelpAsync()).ShouldNotBeNull());
+        signature
+            .Documentation.ShouldNotBeNull()
+            .Text.ShouldBe("Repeats text, or returns null for none.\n\nEach copy follows the last.");
+        signature.Parameters[0].Documentation.ShouldNotBeNull().Text.ShouldBe("The text, as Greeting reads.");
+        signature.Parameters[1].Documentation.ShouldNotBeNull().Text.ShouldBe("How often.");
+    }
+
+    [Fact]
+    public async Task Docs_that_inherit_come_from_the_member_they_implement()
+    {
+        using var script = await _fixture.OpenAsync(
+            """
+            interface IRunner
+            {
+                /// <summary>Runs <paramref name="times"/> times.</summary>
+                /// <param name="times">How often.</param>
+                void Run(int times);
+            }
+            class Runner : IRunner
+            {
+                /// <inheritdoc />
+                public void Run(int times) { }
+            }
+            new Runner().Run(|
+            """
+        );
+        SignatureInfo signature = Active((await script.SignatureHelpAsync()).ShouldNotBeNull());
+        signature.Documentation.ShouldNotBeNull().Text.ShouldBe("Runs times times.");
+        signature.Parameters[0].Documentation.ShouldNotBeNull().Text.ShouldBe("How often.");
+    }
 }

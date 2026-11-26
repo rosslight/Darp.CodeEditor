@@ -616,7 +616,9 @@ app's script environments.
   candidates are those that Roslyn shows: a type's static methods, a value's instance and extension methods, accessible
   through the receiver's type, without members marked `[EditorBrowsable(Never)]` in a referenced assembly or an
   overload that a more specific one hides. Asking again follows an argument's new type, and keeps a signature that the
-  user chose by key. Named arguments and `params` mark their parameter. Signatures show no XML docs.
+  user chose by key. Named arguments and `params` mark their parameter. Each signature has its summary and each
+  parameter its description, a type parameter's included, as plain text from the XML docs, as in hover: a reference
+  reads as the name it refers to, and `<inheritdoc/>` takes what the docs leave out from the member they inherit from.
 - **Semantic colors** are answered for ranges, with the protocol's standard token types. A script's top-level variables
   are fields to Roslyn, and are colored as variables.
 - **Compiling** runs on the thread pool beside the editor's requests, so completion keeps answering. The request carries
@@ -1215,7 +1217,8 @@ server process:
 - signature help for `Task.Delay(1000, `, unfinished generic calls, a named argument, `params`, an indented continuation
   line, and asking again after an argument's type changed; static and instance receivers, access through the
   receiver's type, and hidden overloads; constructor initializers, attributes, indexers, type argument lists and
-  collection initializer entries, with a comparison's `<` quiet;
+  collection initializer entries, with a comparison's `<` quiet; a signature's summary and its parameters'
+  descriptions, also inherited;
 - once by hand, not in CI: the same 45 tests from a NativeAOT client, with the server and the marked assemblies put next
   to it, and the sample's script document on a Linux desktop, in completion, its details, signature help, hover,
   squiggles and semantic colors;

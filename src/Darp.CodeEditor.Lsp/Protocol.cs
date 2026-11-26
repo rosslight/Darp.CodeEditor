@@ -175,16 +175,19 @@ internal sealed record LspCompletionList(bool IsIncomplete, IReadOnlyList<LspCom
 
 /// <summary>A parameter of a signature.</summary>
 /// <param name="Label">Where it starts and ends in the signature's label.</param>
-internal sealed record LspParameterInformation(IReadOnlyList<int> Label);
+/// <param name="Documentation">What it is for; null for nothing.</param>
+internal sealed record LspParameterInformation(IReadOnlyList<int> Label, LspMarkupContent? Documentation = null);
 
 /// <summary>A signature of a call.</summary>
 /// <param name="Label">The signature.</param>
 /// <param name="Parameters">Its parameters.</param>
 /// <param name="ActiveParameter">The parameter at the caret; -1 for none.</param>
+/// <param name="Documentation">What it does; null for nothing.</param>
 internal sealed record LspSignatureInformation(
     string Label,
     IReadOnlyList<LspParameterInformation> Parameters,
-    int ActiveParameter
+    int ActiveParameter,
+    LspMarkupContent? Documentation = null
 );
 
 /// <summary>The answer to <c>textDocument/signatureHelp</c>.</summary>

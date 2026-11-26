@@ -12,7 +12,7 @@ namespace Darp.CodeEditor.CSharpScript.Server;
 /// Signature help on the semantic model, since Roslyn's own service is not public. It shows what the arguments around the
 /// caret go to: the overloads of a call, a constructor, a constructor initializer, an attribute, an indexer or a
 /// collection initializer's entry, or the type parameters of a generic name. Overload resolution says which one the
-/// arguments so far mean.
+/// arguments so far mean. Each signature has its summary, and each parameter its description, from the XML docs.
 /// </summary>
 internal static class ScriptSignatureHelp
 {
@@ -54,7 +54,10 @@ internal static class ScriptSignatureHelp
             // With its type arguments, as the call infers them.
             candidates[index] = selected;
         }
-        List<LspSignatureInformation> signatures = [.. candidates.Select(c => ToSignature(Shape(c, site), site))];
+        List<LspSignatureInformation> signatures =
+        [
+            .. candidates.Select(c => ToSignature(Shape(c, site, model, position, cancellationToken), site)),
+        ];
         return new LspSignatureHelp(
             signatures,
             KeptChoice(parameters.Context.ActiveSignatureHelp, signatures) ?? best,
@@ -389,33 +392,60 @@ internal static class ScriptSignatureHelp
         return index < 0 ? null : index;
     }
 
-    /// <summary>A signature as it shows: its parameters between the text before and after them.</summary>
-    private sealed record SignatureShape(string Before, IReadOnlyList<ParameterShape> Parameters, string After);
+    /// <summary>A signature as it shows: its parameters between the text before and after them, and its summary.</summary>
+    private sealed record SignatureShape(
+        string Before,
+        IReadOnlyList<ParameterShape> Parameters,
+        string After,
+        string? Summary
+    );
 
     /// <param name="Lead">What goes before it, outside its part of the label.</param>
     /// <param name="Text">Its part of the label.</param>
     /// <param name="Name">The name that a named argument gives it.</param>
     /// <param name="IsParams">Whether further arguments go to it too.</param>
+    /// <param name="Description">What it is for; null for nothing.</param>
     /// <param name="IsNamedOnly">Whether only a named argument goes to it, as to an attribute's property.</param>
     private sealed record ParameterShape(
         string Lead,
         string Text,
         string Name,
         bool IsParams,
+        string? Description,
         bool IsNamedOnly = false
     );
 
-    private static SignatureShape Shape(ISymbol symbol, Site site)
+    private static SignatureShape Shape(
+        ISymbol symbol,
+        Site site,
+        SemanticModel model,
+        int position,
+        CancellationToken cancellationToken
+    )
     {
+        // A delegate's parameters are described on the delegate, an extension method's where it is declared.
+        ISymbol documented = symbol switch
+        {
+            IMethodSymbol { MethodKind: MethodKind.DelegateInvoke } invoke => invoke.ContainingType,
+            IMethodSymbol { ReducedFrom: { } declared } => declared,
+            _ => symbol,
+        };
+        XmlDocs docs = XmlDocs.Of(documented.OriginalDefinition, model, position, cancellationToken);
         if (site.TypeArguments)
-            return TypeParameterShape(symbol);
+            return TypeParameterShape(symbol, docs);
         IEnumerable<ParameterShape> parameters = Parameters(symbol)
-            .Select(p => new ParameterShape("", p.ToDisplayString(s_minimal), p.Name, p.IsParams));
+            .Select(p => new ParameterShape(
+                "",
+                p.ToDisplayString(s_minimal),
+                p.Name,
+                p.IsParams,
+                docs.Parameter(p.Name)
+            ));
         if (symbol is IPropertySymbol indexer)
         {
             string before =
                 $"{indexer.Type.ToDisplayString(s_minimal)} {indexer.ContainingType.ToDisplayString(s_minimal)}[";
-            return new SignatureShape(before, [.. parameters], "]");
+            return new SignatureShape(before, [.. parameters], "]", docs.Summary);
         }
         var method = (IMethodSymbol)symbol;
         string heading =
@@ -430,17 +460,18 @@ internal static class ScriptSignatureHelp
                     $"{member.Name} = {TypeOf(member).ToDisplayString(s_minimal)}",
                     member.Name,
                     false,
+                    XmlDocs.Of(member, model, position, cancellationToken).Summary,
                     IsNamedOnly: true
                 )
         );
-        return new SignatureShape(heading + "(", [.. parameters, .. settable], ")");
+        return new SignatureShape(heading + "(", [.. parameters, .. settable], ")", docs.Summary);
     }
 
     private static ITypeSymbol TypeOf(ISymbol member) =>
         member is IFieldSymbol field ? field.Type : ((IPropertySymbol)member).Type;
 
     /// <summary>A generic type or method with its type parameters as the parameters, and its constraints.</summary>
-    private static SignatureShape TypeParameterShape(ISymbol symbol)
+    private static SignatureShape TypeParameterShape(ISymbol symbol, XmlDocs docs)
     {
         List<SymbolDisplayPart> parts = [.. symbol.ToDisplayParts(s_generic)];
         int name = parts.FindIndex(part => SymbolEqualityComparer.Default.Equals(part.Symbol, symbol));
@@ -453,8 +484,17 @@ internal static class ScriptSignatureHelp
         ];
         return new SignatureShape(
             string.Concat(parts[..typeParameters[0]]),
-            [.. typeParameters.Select(i => new ParameterShape("", parts[i].ToString(), parts[i].ToString(), false))],
-            string.Concat(parts[(typeParameters[^1] + 1)..])
+            [
+                .. typeParameters.Select(i => new ParameterShape(
+                    "",
+                    parts[i].ToString(),
+                    parts[i].ToString(),
+                    false,
+                    docs.TypeParameter(parts[i].ToString())
+                )),
+            ],
+            string.Concat(parts[(typeParameters[^1] + 1)..]),
+            docs.Summary
         );
     }
 
@@ -469,15 +509,19 @@ internal static class ScriptSignatureHelp
             label.Append(parameter.Lead);
             int start = label.Length;
             label.Append(parameter.Text);
-            parameters.Add(new LspParameterInformation([start, label.Length]));
+            parameters.Add(new LspParameterInformation([start, label.Length], Documentation(parameter.Description)));
         }
         label.Append(shape.After);
         return new LspSignatureInformation(
             label.ToString(),
             parameters,
-            ActiveParameter(shape.Parameters, site.Argument, site.Name)
+            ActiveParameter(shape.Parameters, site.Argument, site.Name),
+            Documentation(shape.Summary)
         );
     }
+
+    private static LspMarkupContent? Documentation(string? text) =>
+        text is null ? null : new LspMarkupContent("markdown", Markdown.Escape(text));
 
     /// <summary>
     /// The parameter that argument number <paramref name="argument"/> goes to, by its name, or else by its place among
