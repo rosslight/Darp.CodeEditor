@@ -26,6 +26,14 @@ internal sealed class XmlDocs
     /// <summary>How many <c>&lt;inheritdoc/&gt;</c> are followed one after another, as a cycle of them would never end.</summary>
     private const int MaxInherited = 8;
 
+    /// <summary>
+    /// Where code starts and ends in the text as it is written, so that code next to code becomes one code span
+    /// (<see cref="Spans"/>): two spans side by side would read as stray backticks. The docs' own text leaves them out.
+    /// </summary>
+    private const char CodeStart = '\uE000';
+
+    private const char CodeEnd = '\uE001';
+
     private readonly ISymbol _symbol;
     private readonly XElement? _docs;
     private readonly XmlDocs? _inherited;
@@ -152,7 +160,7 @@ internal sealed class XmlDocs
         Append(text, element);
         // Lines without the spaces at their ends, and paragraphs one blank line apart.
         var lines = new List<string>();
-        foreach (string line in text.ToString().Split('\n').Select(line => line.Trim()))
+        foreach (string line in Spans(text.ToString()).Split('\n').Select(line => line.Trim()))
         {
             if (line.Length > 0 || (lines.Count > 0 && lines[^1].Length > 0))
                 lines.Add(line);
@@ -171,6 +179,8 @@ internal sealed class XmlDocs
                     foreach (char c in plain.Value)
                     {
                         // Whitespace, line breaks included, reads as one space.
+                        if (c is CodeStart or CodeEnd)
+                            continue;
                         if (!char.IsWhiteSpace(c))
                             Markdown.AppendEscaped(text, c);
                         else if (text.Length > 0 && text[^1] is not (' ' or '\n'))
@@ -178,7 +188,7 @@ internal sealed class XmlDocs
                     }
                     break;
                 case XElement { Name.LocalName: "c" } code when OneLine(code.Value) is { Length: > 0 } inline:
-                    text.Append(Markdown.Code(inline));
+                    text.Append(Code(inline));
                     break;
                 case XElement { Name.LocalName: "para" or "code" or "list" } block:
                     text.Append("\n\n");
@@ -194,7 +204,7 @@ internal sealed class XmlDocs
                     break;
                 case XElement { Name.LocalName: "paramref" or "typeparamref" } reference
                     when (string?)reference.Attribute("name") is { Length: > 0 } name:
-                    text.Append(Markdown.Code(name));
+                    text.Append(Code(name));
                     break;
                 case XElement { Name.LocalName: "see" or "seealso" } reference when !reference.Nodes().Any():
                     text.Append(Reference(reference));
@@ -210,15 +220,33 @@ internal sealed class XmlDocs
     private string? Reference(XElement see)
     {
         if ((string?)see.Attribute("langword") is { Length: > 0 } keyword)
-            return Markdown.Code(keyword);
+            return Code(keyword);
         if ((string?)see.Attribute("cref") is not { Length: > 0 } cref)
             return (string?)see.Attribute("href") is { } link ? Markdown.Escape(link) : null;
-        return Markdown.Code(
+        return Code(
             DocumentationCommentId.GetFirstSymbolForDeclarationId(cref, _model.Compilation) is { } symbol
                 ? symbol.ToMinimalDisplayString(_model, _position, s_reference)
                 // As written, without the kind before the colon.
                 : cref[(cref.IndexOf(':') + 1)..]
         );
+    }
+
+    /// <summary><paramref name="code"/> marked as code in the text as it is written.</summary>
+    private static string Code(string code) => $"{CodeStart}{code}{CodeEnd}";
+
+    /// <summary><paramref name="text"/> with its marked code as Markdown code spans, code next to code as one.</summary>
+    private static string Spans(string text)
+    {
+        text = text.Replace($"{CodeEnd}{CodeStart}", "");
+        var markdown = new StringBuilder(text.Length);
+        int at = 0;
+        while (text.IndexOf(CodeStart, at) is var start and >= 0)
+        {
+            int end = text.IndexOf(CodeEnd, start);
+            markdown.Append(text, at, start - at).Append(Markdown.Code(text[(start + 1)..end]));
+            at = end + 1;
+        }
+        return markdown.Append(text, at, text.Length - at).ToString();
     }
 
     /// <summary><paramref name="text"/> with each run of whitespace, line breaks included, as one space.</summary>

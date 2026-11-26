@@ -458,6 +458,20 @@ public sealed class ScriptSignatureHelpTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task Code_next_to_code_in_docs_is_one_code_span()
+    {
+        using var script = await _fixture.OpenAsync(
+            """
+            /// <summary>Counts <paramref name="text"/><c>.Length</c> characters.</summary>
+            int Measure(string text) => text.Length;
+            Measure(|
+            """
+        );
+        SignatureInfo signature = Active((await script.SignatureHelpAsync()).ShouldNotBeNull());
+        signature.Documentation.ShouldNotBeNull().Text.ShouldBe("Counts `text.Length` characters.");
+    }
+
+    [Fact]
     public async Task Docs_that_inherit_come_from_the_member_they_implement()
     {
         using var script = await _fixture.OpenAsync(
