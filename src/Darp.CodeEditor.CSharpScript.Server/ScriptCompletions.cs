@@ -37,7 +37,7 @@ internal sealed class ScriptCompletions
     private static readonly FrozenSet<string> s_unsupportedDirectives = FrozenSet.Create("r", "load", "line");
 
     private readonly ScriptSnapshot _script;
-    private readonly Task<Answered?> _answered;
+    private readonly Task<Answer?> _answer;
 
     /// <summary>Starts asking for the list that <paramref name="parameters"/> ask for.</summary>
     public ScriptCompletions(
@@ -50,8 +50,11 @@ internal sealed class ScriptCompletions
         Id = id;
         _script = script;
         int offset = script.Lines.ToOffset(parameters.Position);
-        _answered = Task.Run(() => AskAsync(offset, Trigger(parameters.Context), cancellationToken), cancellationToken);
-        Items = ToLspAsync(offset, cancellationToken);
+        _answer = Task.Run(
+            () => AnswerAsync(offset, Trigger(parameters.Context), cancellationToken),
+            cancellationToken
+        );
+        Items = ItemsAsync();
     }
 
     /// <summary>Names this list among the server's: its items carry it, to resolve in it.</summary>
@@ -60,17 +63,23 @@ internal sealed class ScriptCompletions
     /// <summary>The answer.</summary>
     public Task<LspCompletionList?> Items { get; }
 
-    /// <summary><paramref name="item"/> with its signature and documentation.</summary>
+    /// <summary>
+    /// <paramref name="item"/> with its signature and documentation, and for a type or extension method from a namespace
+    /// that the script does not import, the <c>using</c> that it adds.
+    /// </summary>
     public async Task<LspCompletionItem?> ResolveAsync(
         LspCompletionItem item,
         int index,
         CancellationToken cancellationToken
     )
     {
-        if (await _answered.ConfigureAwait(false) is not { } answered || index >= answered.List.ItemsList.Count)
+        if (await _answer.ConfigureAwait(false) is not { } answer || index >= answer.List.ItemsList.Count)
             return item;
-        CompletionDescription? description = await answered
-            .Service.GetDescriptionAsync(_script.Document, answered.List.ItemsList[index], cancellationToken)
+        CompletionItem roslynItem = answer.List.ItemsList[index];
+        if (answer.Imports.Contains(index))
+            item = item with { AdditionalTextEdits = await ImportAsync(answer.Service, roslynItem, cancellationToken) };
+        CompletionDescription? description = await answer
+            .Service.GetDescriptionAsync(_script.Document, roslynItem, cancellationToken)
             .ConfigureAwait(false);
         if (description is null)
             return item;
@@ -100,22 +109,22 @@ internal sealed class ScriptCompletions
             ? CompletionTrigger.CreateInsertionTrigger(typed)
             : CompletionTrigger.Invoke;
 
-    private async Task<Answered?> AskAsync(int offset, CompletionTrigger trigger, CancellationToken cancellationToken)
+    private async Task<LspCompletionList?> ItemsAsync() => (await _answer.ConfigureAwait(false))?.Items;
+
+    private async Task<Answer?> AnswerAsync(int offset, CompletionTrigger trigger, CancellationToken cancellationToken)
     {
         if (CompletionService.GetService(_script.Document) is not { } service)
             return null;
         CompletionList list = await service
             .GetCompletionsAsync(_script.Document, offset, trigger, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
-        return new Answered(service, list);
-    }
-
-    private async Task<LspCompletionList?> ToLspAsync(int offset, CancellationToken cancellationToken)
-    {
-        if (await _answered.ConfigureAwait(false) is not (var service, var list))
-            return null;
+        // An empty list has no span of its own to take the typed text from.
+        if (list.ItemsList.Count == 0)
+            return new Answer(service, list, new LspCompletionList(IsIncomplete: false, []), FrozenSet<int>.Empty);
+        string typed = _script.Text.ToString(TextSpan.FromBounds(list.Span.Start, offset));
+        var commit = new CommitRules(list, typed);
         var items = new List<LspCompletionItem>(list.ItemsList.Count);
-        var commit = new CommitRules(list, _script.Text.ToString(TextSpan.FromBounds(list.Span.Start, offset)));
+        var imports = new List<int>();
         bool? inDocumentation = null;
         // Nearly every item replaces the same word: one range, written as often, is built once.
         (TextSpan Span, LspRange? Range) last = default;
@@ -127,20 +136,22 @@ internal sealed class ScriptCompletions
                 continue;
             // Edits elsewhere in the text, such as an override's, are out of scope: the client takes no such edit. Those
             // of a documentation comment's tags are complex only as they go over the "<" before the word or put the
-            // caret inside the tag, and go in whole.
+            // caret inside the tag, and go in whole. An import's using comes with resolve.
             if (
                 item.IsComplexTextEdit && !(inDocumentation ??= await IsInDocumentationAsync(offset, cancellationToken))
             )
+            {
+                if (ScriptImports.MayBe(item))
+                    imports.Add(index);
                 continue;
+            }
             CompletionChange change = await service
                 .GetChangeAsync(_script.Document, item, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             if (change.TextChanges.Length > 1)
                 continue;
             TextSpan span = change.TextChange.Span;
-            if (last.Range is null || last.Span != span)
-                last = (span, new LspRange(_script.Lines.ToPosition(span.Start), _script.Lines.ToPosition(span.End)));
-            string label = item.DisplayTextPrefix + item.DisplayText + item.DisplayTextSuffix;
+            string label = Label(item);
             // Roslyn's edit goes over the @ of an escaped word, and the client matches what was typed from the edit's start.
             // A keyword keeps its filter text: committing it would drop the @, so an escaped word doesn't match it.
             bool isEscaped =
@@ -150,31 +161,92 @@ internal sealed class ScriptCompletions
             if (span.Start < list.Span.Start)
                 filterText = _script.Text.ToString(TextSpan.FromBounds(span.Start, list.Span.Start)) + filterText;
             string newText = change.TextChange.NewText ?? "";
-            int? caret = change.NewPosition - span.Start;
+            int caret = change.NewPosition is { } position ? position - span.Start : newText.Length;
             bool isSnippet = caret >= 0 && caret < newText.Length;
             if (isSnippet)
-                newText = Snippets.Escape(newText[..caret!.Value]) + "$0" + Snippets.Escape(newText[caret.Value..]);
+                newText = Snippets.Escape(newText[..caret]) + "$0" + Snippets.Escape(newText[caret..]);
             // Roslyn puts in a named argument's name alone, for the colon to be typed. Committed by a key, the colon goes
             // in too, unless one follows already; typed, it commits the item and goes in once.
             if (item.DisplayTextSuffix == ":" && newText == item.DisplayText && !ColonFollows(span.End))
                 newText = label;
-            items.Add(
-                new LspCompletionItem(
-                    label,
-                    Kind(item),
-                    new LspTextEdit(last.Range, newText),
-                    new JsonArray(Id, index),
-                    item.SortText == label ? null : item.SortText,
-                    filterText == label ? null : filterText,
-                    item.Rules.MatchPriority == MatchPriority.Preselect ? true : null,
-                    Tags: item.Tags.Contains(DeprecatedTag) ? s_deprecated : null,
-                    CommitCharacters: commit.Of(item),
-                    InsertTextFormat: isSnippet ? Snippets.Format : null
-                )
+            items.Add(ToLsp(item, index, span, newText, filterText, isSnippet));
+        }
+        bool asksAgain = commit.AsksAgain;
+        IReadOnlyList<int> sent = [];
+        if (imports.Count > 0)
+        {
+            // Without a typed name, the thousands of them would all be sent; typing one asks again.
+            if (typed.Length == 0)
+                asksAgain = true;
+            else if (
+                await _script.Document.Project.GetCompilationAsync(cancellationToken).ConfigureAwait(false) is
+                { } compilation
+            )
+            {
+                (sent, bool more) = ScriptImports.Best(list.ItemsList, imports, typed, compilation, cancellationToken);
+                foreach (int index in sent)
+                {
+                    CompletionItem item = list.ItemsList[index];
+                    items.Add(ToLsp(item, index, item.Span, item.DisplayText, item.FilterText, isSnippet: false));
+                }
+                asksAgain |= more;
+            }
+        }
+        return new Answer(service, list, new LspCompletionList(asksAgain, items), sent.ToFrozenSet());
+
+        LspCompletionItem ToLsp(
+            CompletionItem item,
+            int index,
+            TextSpan span,
+            string newText,
+            string filterText,
+            bool isSnippet
+        )
+        {
+            if (last.Range is null || last.Span != span)
+                last = (span, Range(span));
+            string label = Label(item);
+            return new LspCompletionItem(
+                label,
+                Kind(item),
+                new LspTextEdit(last.Range, newText),
+                new JsonArray(Id, index),
+                item.SortText == label ? null : item.SortText,
+                filterText == label ? null : filterText,
+                item.Rules.MatchPriority == MatchPriority.Preselect ? true : null,
+                Tags: item.Tags.Contains(DeprecatedTag) ? s_deprecated : null,
+                CommitCharacters: commit.Of(item),
+                InsertTextFormat: isSnippet ? Snippets.Format : null
             );
         }
-        return new LspCompletionList(commit.AsksAgain, items);
     }
+
+    /// <summary>
+    /// The edits besides its name that <paramref name="item"/>, from a namespace that the script does not import, makes:
+    /// the <c>using</c>, where Roslyn puts it among the script's, in the version that the list was asked for.
+    /// </summary>
+    private async Task<LspTextEdit[]> ImportAsync(
+        CompletionService service,
+        CompletionItem item,
+        CancellationToken cancellationToken
+    )
+    {
+        CompletionChange change = await service
+            .GetChangeAsync(_script.Document, item, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+        return
+        [
+            .. change
+                .TextChanges.Where(edit => edit.Span != item.Span)
+                .Select(edit => new LspTextEdit(Range(edit.Span), edit.NewText ?? "")),
+        ];
+    }
+
+    private static string Label(CompletionItem item) =>
+        item.DisplayTextPrefix + item.DisplayText + item.DisplayTextSuffix;
+
+    private LspRange Range(TextSpan span) =>
+        new(_script.Lines.ToPosition(span.Start), _script.Lines.ToPosition(span.End));
 
     /// <summary>Whether <paramref name="offset"/> is in a documentation comment.</summary>
     private async Task<bool> IsInDocumentationAsync(int offset, CancellationToken cancellationToken)
@@ -195,7 +267,17 @@ internal sealed class ScriptCompletions
         return offset < text.Length && text[offset] == ':';
     }
 
-    private sealed record Answered(CompletionService Service, CompletionList List);
+    /// <summary>Roslyn's list, as the client gets it.</summary>
+    /// <param name="Service">The service that answered, which resolves the items.</param>
+    /// <param name="List">Roslyn's list, whose items the client's carry the index of.</param>
+    /// <param name="Items">The list that the client gets.</param>
+    /// <param name="Imports">The indices of the items from namespaces that the script does not import.</param>
+    private sealed record Answer(
+        CompletionService Service,
+        CompletionList List,
+        LspCompletionList Items,
+        FrozenSet<int> Imports
+    );
 
     /// <summary>The protocol's snippets, as the client reads them: plain text, with <c>$0</c> where the caret goes.</summary>
     private static class Snippets

@@ -620,6 +620,12 @@ app's script environments.
   version the list was asked for. An escaped word such as `@ev` completes identifiers, not keywords, over its `@`, and
   there is no list after a lone `@`. An obsolete member's item is tagged deprecated, so it shows struck through. A
   named argument's item, `amount:`, puts in its colon, unless one follows already.
+- **Imports:** a list also has the types and extension methods from namespaces that the script does not import, such
+  as `JsonSerializer` and `GetFromJsonAsync`, from .NET's assemblies and the marked ones, not from what those depend
+  on. Only the best 100 that match the typed name come, as the client ranks them; with more, or before a name is typed,
+  the list is incomplete, so that typing on asks again. Resolving such an item adds its `using` where Roslyn puts it
+  among the script's usings, after a leading comment, as an additional edit in the version that the list was asked
+  for.
 - **Commit characters** are Roslyn's, as its own server gives them to clients that always select an item hard: its
   defaults, which the server names as `allCommitCharacters`, as each item's rules change them. Nothing commits in a
   list that only suggests, as where a lambda's parameter may be named, or after typed punctuation; before a name is

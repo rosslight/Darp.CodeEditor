@@ -1,0 +1,78 @@
+using Darp.CodeEditor.LanguageClient;
+
+namespace Darp.CodeEditor.CSharpScript.Tests;
+
+/// <summary>Completion of types and extension methods from namespaces that a script does not import.</summary>
+[Collection(ScriptServerFixture.Collection)]
+public sealed class ImportCompletionTests(ScriptServerFixture fixture)
+{
+    private readonly ScriptServerFixture _fixture = fixture;
+
+    [Fact]
+    public async Task A_type_completes_with_its_using_after_the_scripts_header()
+    {
+        const string header = "// Reads the options.\n";
+        using var script = await _fixture.OpenAsync(header + "var options = new JsonSerializerOpt|");
+        CompletionList list = await script.CompleteAsync();
+        list.IsIncomplete.ShouldBeFalse();
+        CompletionItem item = list.Items.Single(i => i.Label == "JsonSerializerOptions");
+        item.Edit.NewText.ShouldBe("JsonSerializerOptions");
+
+        CompletionItem resolved = (
+            await list.ResolveAsync(item, TestContext.Current.CancellationToken)
+        ).ShouldNotBeNull();
+        resolved.Detail.ShouldNotBeNull().ShouldContain("System.Text.Json.JsonSerializerOptions");
+        Apply(script, resolved.AdditionalEdits.ShouldNotBeNull())
+            .ShouldBe(header + "using System.Text.Json;\n\nvar options = new JsonSerializerOpt");
+    }
+
+    [Fact]
+    public async Task An_extension_method_completes_with_its_using_among_the_scripts_usings()
+    {
+        const string code = "var data = await new HttpClient().GetFromJson";
+        using var script = await _fixture.OpenAsync("using System.Text;\n" + code + "|");
+        CompletionList list = await script.CompleteAsync();
+        CompletionItem item = list.Items.First(i => i.Label.StartsWith("GetFromJsonAsync", StringComparison.Ordinal));
+
+        CompletionItem resolved = (
+            await list.ResolveAsync(item, TestContext.Current.CancellationToken)
+        ).ShouldNotBeNull();
+        Apply(script, resolved.AdditionalEdits.ShouldNotBeNull())
+            .ShouldBe("using System.Net.Http.Json;\nusing System.Text;\n" + code);
+    }
+
+    [Fact]
+    public async Task Nothing_comes_from_the_assemblies_that_scripts_may_not_name()
+    {
+        using var types = await _fixture.OpenAsync("var unmarked = new UnmarkedTy|");
+        (await types.CompleteAsync()).Items.ShouldNotContain(item => item.Label == "UnmarkedType");
+
+        using var extensions = await _fixture.OpenAsync("var text = Greeting.Repeat|");
+        (await extensions.CompleteAsync()).Items.ShouldNotContain(item => item.Label == "Repeated");
+    }
+
+    [Fact]
+    public async Task Imports_wait_for_a_typed_name_and_the_best_of_many_come_first()
+    {
+        // Nothing typed matches every type: the list leaves them out, and typing a name asks again.
+        using var empty = await _fixture.OpenAsync("var options = |");
+        CompletionList all = await empty.CompleteAsync();
+        all.IsIncomplete.ShouldBeTrue();
+        all.Items.ShouldNotContain(item => item.Label == "JsonSerializerOptions");
+
+        // A short name matches too many to send: the best of them come, and typing on asks again.
+        using var many = await _fixture.OpenAsync("var builder = new Str|");
+        CompletionList best = await many.CompleteAsync();
+        best.IsIncomplete.ShouldBeTrue();
+        best.Items.ShouldContain(item => item.Label == "StringBuilder");
+    }
+
+    /// <summary>The script's text with <paramref name="edits"/> made.</summary>
+    private static string Apply(Script<ScriptTests.Api.ScriptTestGlobals> script, IEnumerable<CompletionEdit> edits)
+    {
+        string text = script.Document.CurrentSnapshot.GetText();
+        foreach (CompletionEdit edit in edits.OrderByDescending(edit => edit.Range.Start))
+            text = text[..edit.Range.Start] + edit.NewText + text[edit.Range.End..];
+        return text;
+    }
+}
