@@ -10,16 +10,18 @@ public sealed class ScriptDiagnosticsTests(ScriptServerFixture fixture)
     private readonly ScriptServerFixture _fixture = fixture;
 
     [Theory]
-    [InlineData("#r \"System.Text.Json\"", "#r")]
-    [InlineData("#load \"other.csx\"", "#load")]
-    [InlineData("#line 100", "#line")]
-    public async Task A_directive_that_scripts_cannot_use_is_an_error(string directive, string name)
+    [InlineData("", "#r \"System.Text.Json\"", "#r")]
+    [InlineData("", "#load \"other.csx\"", "#load")]
+    [InlineData("", "#line 100", "#line")]
+    [InlineData("var first = 1;\n", "#r \"System.Text.Json\"", "#r")]
+    [InlineData("var first = 1;\n", "#load \"other.csx\"", "#load")]
+    public async Task A_directive_that_scripts_cannot_use_is_one_error(string before, string directive, string name)
     {
-        using var script = await _fixture.OpenAsync($"{directive}\n{End}");
-        IReadOnlyList<Diagnostic> diagnostics = await script.DiagnosticsAsync();
-        Diagnostic error = diagnostics.First(d => d.Message.Contains(name, StringComparison.Ordinal));
+        using var script = await _fixture.OpenAsync($"{before}{directive}\n{End}");
+        Diagnostic error = (await script.DiagnosticsAsync()).ShouldHaveSingleItem();
+        error.Message.ShouldContain(name);
         error.Severity.ShouldBe(DiagnosticSeverity.Error);
-        error.Range.Start.ShouldBe(0);
+        error.Range.ShouldBe(new TextRange(before.Length, directive.Length));
     }
 
     [Fact]

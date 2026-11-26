@@ -607,8 +607,9 @@ app's script environments.
 - **Requests** see the edits sent before them, in the order of the messages, on an immutable version of the script, and
   each starts at once on the thread pool. An edit cancels the analysis of the version before it, which then publishes
   nothing, and `$/cancelRequest` stops a request.
-- **Diagnostics:** the compiler's errors and warnings. `#r`, `#load` and `#line` are errors. Each diagnostic names
-  `csharp` as its source, and a compiler diagnostic's code links to the page that its descriptor names.
+- **Diagnostics:** the compiler's errors and warnings. `#r`, `#load` and `#line` are one error each, in place of what
+  the compiler says about them, and completion does not suggest them. Each diagnostic names `csharp` as its source, and
+  a compiler diagnostic's code links to the page that its descriptor names.
 - **Completion:** Roslyn's list, with keywords and kinds, on `.` and whenever the client asks. Each item has its edit at
   once; its signature and XML docs come with resolve, also after the user typed on, from the version the list was asked
   for. An escaped word such as `@ev` completes identifiers, not keywords, over its `@`, and there is no list after a lone `@`.

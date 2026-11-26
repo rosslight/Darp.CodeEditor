@@ -25,12 +25,14 @@ internal static class ScriptDiagnostics
         var diagnostics = new List<LspDiagnostic>();
         if (script.EnvironmentError is { } environmentError)
             diagnostics.Add(new LspDiagnostic(ToRange(script, default), environmentError, Error, Source: Source));
+        var rejected = new List<TextSpan>();
         if (await script.Document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false) is { } root)
         {
             foreach (DirectiveTriviaSyntax directive in UnsupportedDirectives(root))
             {
                 string message = $"The #{directive.DirectiveNameToken.Text} directive is not available in scripts.";
                 diagnostics.Add(new LspDiagnostic(ToRange(script, directive.Span), message, Error, Source: Source));
+                rejected.Add(directive.Span);
             }
         }
         if (
@@ -41,6 +43,13 @@ internal static class ScriptDiagnostics
             foreach (Diagnostic diagnostic in compilation.GetDiagnostics(cancellationToken))
             {
                 if (diagnostic.Severity < DiagnosticSeverity.Warning || diagnostic.IsSuppressed)
+                    continue;
+                // A directive that scripts can't use has one error, its own: the compiler's, such as that #r is not
+                // supported or comes too late, would say the same twice.
+                if (
+                    diagnostic.Location.IsInSource
+                    && rejected.Any(span => span.Contains(diagnostic.Location.SourceSpan))
+                )
                     continue;
                 diagnostics.Add(ToLsp(script, diagnostic));
             }

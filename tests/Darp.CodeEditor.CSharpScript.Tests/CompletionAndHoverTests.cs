@@ -68,6 +68,18 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task Directives_that_scripts_cannot_use_are_not_suggested()
+    {
+        using var script = await _fixture.OpenAsync("int line = 1;\n#|");
+        string[] labels = [.. (await script.CompleteAsync()).Items.Select(item => item.Label)];
+        labels.ShouldContain("region");
+        labels.ShouldContain("nullable");
+        labels.ShouldNotContain("r");
+        labels.ShouldNotContain("load");
+        labels.ShouldNotContain("line");
+    }
+
+    [Fact]
     public async Task A_member_list_completes_the_type_of_the_receiver()
     {
         using var script = await _fixture.OpenAsync("Greeting.|");

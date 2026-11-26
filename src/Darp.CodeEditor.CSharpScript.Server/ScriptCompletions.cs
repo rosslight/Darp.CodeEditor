@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Text.Json.Nodes;
 using Darp.CodeEditor.Lsp;
 using Microsoft.CodeAnalysis;
@@ -17,6 +18,12 @@ internal sealed class ScriptCompletions
     private const string DeprecatedTag = "Deprecated";
 
     private static readonly int[] s_deprecated = [CompletionItemTag.Deprecated];
+
+    /// <summary>
+    /// The keywords of the directives that scripts can't use (<see cref="ScriptDiagnostics"/>). No other context has
+    /// keywords of these names.
+    /// </summary>
+    private static readonly FrozenSet<string> s_unsupportedDirectives = FrozenSet.Create("r", "load", "line");
 
     private readonly ScriptSnapshot _script;
     private readonly Task<Answered?> _answered;
@@ -90,8 +97,13 @@ internal sealed class ScriptCompletions
             cancellationToken.ThrowIfCancellationRequested();
             CompletionItem item = list.ItemsList[index];
             // Edits elsewhere in the text, such as an override's, are out of scope: the client takes no such edit.
-            if (item.IsComplexTextEdit)
+            if (
+                item.IsComplexTextEdit
+                || (item.Tags.Contains(WellKnownTags.Keyword) && s_unsupportedDirectives.Contains(item.DisplayText))
+            )
+            {
                 continue;
+            }
             CompletionChange change = await service
                 .GetChangeAsync(_script.Document, item, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
