@@ -12,6 +12,9 @@ internal static class ScriptDiagnostics
     public const int Error = 1;
     private const int Warning = 2;
 
+    /// <summary>What every diagnostic of the server names as its source.</summary>
+    private const string Source = "csharp";
+
     /// <summary>The diagnostics of <paramref name="script"/>.</summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public static async Task<IReadOnlyList<LspDiagnostic>> GetAsync(
@@ -21,13 +24,13 @@ internal static class ScriptDiagnostics
     {
         var diagnostics = new List<LspDiagnostic>();
         if (script.EnvironmentError is { } environmentError)
-            diagnostics.Add(new LspDiagnostic(ToRange(script, default), environmentError, Error));
+            diagnostics.Add(new LspDiagnostic(ToRange(script, default), environmentError, Error, Source: Source));
         if (await script.Document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false) is { } root)
         {
             foreach (DirectiveTriviaSyntax directive in UnsupportedDirectives(root))
             {
                 string message = $"The #{directive.DirectiveNameToken.Text} directive is not available in scripts.";
-                diagnostics.Add(new LspDiagnostic(ToRange(script, directive.Span), message, Error));
+                diagnostics.Add(new LspDiagnostic(ToRange(script, directive.Span), message, Error, Source: Source));
             }
         }
         if (
@@ -45,13 +48,17 @@ internal static class ScriptDiagnostics
         return diagnostics;
     }
 
-    /// <summary>A compiler diagnostic in the client's positions.</summary>
+    /// <summary>A compiler diagnostic in the client's positions, its code linked to the page its descriptor names.</summary>
     public static LspDiagnostic ToLsp(ScriptSnapshot script, Diagnostic diagnostic) =>
         new(
             ToRange(script, diagnostic.Location.IsInSource ? diagnostic.Location.SourceSpan : default),
             diagnostic.GetMessage(),
             diagnostic.Severity == DiagnosticSeverity.Error ? Error : Warning,
-            diagnostic.Id
+            diagnostic.Id,
+            Source,
+            Uri.IsWellFormedUriString(diagnostic.Descriptor.HelpLinkUri, UriKind.Absolute)
+                ? new LspCodeDescription(diagnostic.Descriptor.HelpLinkUri)
+                : null
         );
 
     private static IEnumerable<DirectiveTriviaSyntax> UnsupportedDirectives(SyntaxNode root)

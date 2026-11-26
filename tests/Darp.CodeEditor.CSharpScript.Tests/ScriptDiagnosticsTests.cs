@@ -23,6 +23,18 @@ public sealed class ScriptDiagnosticsTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task A_compiler_diagnostic_names_its_source_and_links_its_code()
+    {
+        using var script = await _fixture.OpenAsync($"int value = \"text\";\n{End}");
+        Diagnostic error = (await script.DiagnosticsAsync()).ShouldHaveSingleItem();
+        error.Code.ShouldBe("CS0029");
+        error.Source.ShouldBe("csharp");
+        Uri page = error.CodeDescription.ShouldNotBeNull();
+        page.Scheme.ShouldBe("https");
+        page.OriginalString.ShouldContain("CS0029");
+    }
+
+    [Fact]
     public async Task Incremental_edits_reach_the_compiler()
     {
         using var script = await _fixture.OpenAsync($"int value = \"text\";\n{End}");
