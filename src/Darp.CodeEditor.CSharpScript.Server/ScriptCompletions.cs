@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using Darp.CodeEditor.Lsp;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Completion;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Tags;
 using Microsoft.CodeAnalysis.Text;
 
@@ -115,23 +116,27 @@ internal sealed class ScriptCompletions
             return null;
         var items = new List<LspCompletionItem>(list.ItemsList.Count);
         var commit = new CommitRules(list, _script.Text.ToString(TextSpan.FromBounds(list.Span.Start, offset)));
+        bool? inDocumentation = null;
         // Nearly every item replaces the same word: one range, written as often, is built once.
         (TextSpan Span, LspRange? Range) last = default;
         for (int index = 0; index < list.ItemsList.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             CompletionItem item = list.ItemsList[index];
-            // Edits elsewhere in the text, such as an override's, are out of scope: the client takes no such edit.
-            if (
-                item.IsComplexTextEdit
-                || (item.Tags.Contains(WellKnownTags.Keyword) && s_unsupportedDirectives.Contains(item.DisplayText))
-            )
-            {
+            if (item.Tags.Contains(WellKnownTags.Keyword) && s_unsupportedDirectives.Contains(item.DisplayText))
                 continue;
-            }
+            // Edits elsewhere in the text, such as an override's, are out of scope: the client takes no such edit. Those
+            // of a documentation comment's tags are complex only as they go over the "<" before the word or put the
+            // caret inside the tag, and go in whole.
+            if (
+                item.IsComplexTextEdit && !(inDocumentation ??= await IsInDocumentationAsync(offset, cancellationToken))
+            )
+                continue;
             CompletionChange change = await service
                 .GetChangeAsync(_script.Document, item, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
+            if (change.TextChanges.Length > 1)
+                continue;
             TextSpan span = change.TextChange.Span;
             if (last.Range is null || last.Span != span)
                 last = (span, new LspRange(_script.Lines.ToPosition(span.Start), _script.Lines.ToPosition(span.End)));
@@ -141,7 +146,14 @@ internal sealed class ScriptCompletions
             bool isEscaped =
                 span.Length > 0 && _script.Text[span.Start] == '@' && !item.Tags.Contains(WellKnownTags.Keyword);
             string filterText = isEscaped ? "@" + item.FilterText.TrimStart('@') : item.FilterText;
+            // So too over a tag's "<".
+            if (span.Start < list.Span.Start)
+                filterText = _script.Text.ToString(TextSpan.FromBounds(span.Start, list.Span.Start)) + filterText;
             string newText = change.TextChange.NewText ?? "";
+            int? caret = change.NewPosition - span.Start;
+            bool isSnippet = caret >= 0 && caret < newText.Length;
+            if (isSnippet)
+                newText = Snippets.Escape(newText[..caret!.Value]) + "$0" + Snippets.Escape(newText[caret.Value..]);
             // Roslyn puts in a named argument's name alone, for the colon to be typed. Committed by a key, the colon goes
             // in too, unless one follows already; typed, it commits the item and goes in once.
             if (item.DisplayTextSuffix == ":" && newText == item.DisplayText && !ColonFollows(span.End))
@@ -156,11 +168,22 @@ internal sealed class ScriptCompletions
                     filterText == label ? null : filterText,
                     item.Rules.MatchPriority == MatchPriority.Preselect ? true : null,
                     Tags: item.Tags.Contains(DeprecatedTag) ? s_deprecated : null,
-                    CommitCharacters: commit.Of(item)
+                    CommitCharacters: commit.Of(item),
+                    InsertTextFormat: isSnippet ? Snippets.Format : null
                 )
             );
         }
         return new LspCompletionList(commit.AsksAgain, items);
+    }
+
+    /// <summary>Whether <paramref name="offset"/> is in a documentation comment.</summary>
+    private async Task<bool> IsInDocumentationAsync(int offset, CancellationToken cancellationToken)
+    {
+        SyntaxNode? root = await _script.Document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
+        return root
+            ?.FindToken(Math.Max(0, offset - 1), findInsideTrivia: true)
+            .Parent?.FirstAncestorOrSelf<DocumentationCommentTriviaSyntax>()
+            is not null;
     }
 
     /// <summary>Whether a colon follows <paramref name="offset"/>, past white space.</summary>
@@ -173,6 +196,16 @@ internal sealed class ScriptCompletions
     }
 
     private sealed record Answered(CompletionService Service, CompletionList List);
+
+    /// <summary>The protocol's snippets, as the client reads them: plain text, with <c>$0</c> where the caret goes.</summary>
+    private static class Snippets
+    {
+        /// <summary>The <c>InsertTextFormat</c> of a snippet.</summary>
+        public const int Format = 2;
+
+        /// <summary><paramref name="text"/> as a snippet's text that reads as the same text.</summary>
+        public static string Escape(string text) => text.Replace("\\", "\\\\").Replace("$", "\\$").Replace("}", "\\}");
+    }
 
     /// <summary>
     /// Which characters commit the items of a list, as Roslyn's own server decides for clients that always select an

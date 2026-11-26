@@ -160,6 +160,7 @@ internal sealed record LspTextEdit(LspRange Range, string NewText);
 /// <param name="Documentation">Its documentation, once resolved.</param>
 /// <param name="Tags">Its <c>CompletionItemTag</c> numbers, such as <see cref="CompletionItemTag.Deprecated"/>.</param>
 /// <param name="CommitCharacters">The characters that commit it as they are typed; null for the server's.</param>
+/// <param name="InsertTextFormat">2 when its text is a snippet; null for plain text.</param>
 internal sealed record LspCompletionItem(
     string Label,
     int Kind,
@@ -171,7 +172,8 @@ internal sealed record LspCompletionItem(
     string? Detail = null,
     LspMarkupContent? Documentation = null,
     IReadOnlyList<int>? Tags = null,
-    IReadOnlyList<string>? CommitCharacters = null
+    IReadOnlyList<string>? CommitCharacters = null,
+    int? InsertTextFormat = null
 );
 
 /// <summary>The answer to <c>textDocument/completion</c>.</summary>

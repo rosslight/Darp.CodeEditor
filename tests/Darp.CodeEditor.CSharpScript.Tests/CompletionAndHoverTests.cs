@@ -138,6 +138,23 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task A_documentation_comment_completes_its_tags()
+    {
+        using var script = await _fixture.OpenAsync("/// <|\nvoid Report() {}");
+        script.Document.Features.ShouldNotBeNull().Completion.ShouldNotBeNull().TriggerCharacters.ShouldContain('<');
+        CompletionList list = await script.CompleteAsync(
+            new CompletionTrigger(CompletionTriggerKind.TriggerCharacter, '<')
+        );
+
+        list.Items.Single(item => item.Label == "summary").Edit.NewText.ShouldBe("summary");
+        // An element without content goes in whole, over the typed "<", with the caret between its quotes.
+        CompletionItem see = list.Items.Single(item => item.Label == "see");
+        see.Edit.ShouldBe(new CompletionEdit(new TextRange(4, 1), "<see cref=\"$0\"/>"));
+        see.Snippet.ShouldNotBeNull();
+        see.FilterText.ShouldBe("<see");
+    }
+
+    [Fact]
     public async Task A_member_list_completes_the_type_of_the_receiver()
     {
         using var script = await _fixture.OpenAsync("Greeting.|");
