@@ -78,6 +78,12 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
         labels.ShouldNotContain("r");
         labels.ShouldNotContain("load");
         labels.ShouldNotContain("line");
+
+        // Without "r", "region" matches "#r": typing on, as with a space, must not commit it.
+        using var typed = await _fixture.OpenAsync("#r|");
+        CompletionList list = await typed.CompleteAsync();
+        list.Items.ShouldContain(item => item.Label == "region");
+        list.Items.ShouldAllBe(item => item.CommitCharacters.Length == 0);
     }
 
     [Fact]

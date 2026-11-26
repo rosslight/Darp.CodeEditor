@@ -609,8 +609,9 @@ app's script environments.
   each starts at once on the thread pool. An edit cancels the analysis of the version before it, which then publishes
   nothing, and `$/cancelRequest` stops a request.
 - **Diagnostics:** the compiler's errors and warnings. `#r`, `#load` and `#line` are one error each, in place of what
-  the compiler says about them, and completion does not suggest them. Each diagnostic names `csharp` as its source, and
-  a compiler diagnostic's code links to the page that its descriptor names.
+  the compiler says about them, and completion does not suggest them; a list without them commits only by a key, so
+  that `#r ` stays as typed rather than committing `region`. Each diagnostic names `csharp` as its source, and a
+  compiler diagnostic's code links to the page that its descriptor names.
 - **Completion:** Roslyn's list, with keywords and kinds, on `.`, `:` and `<`, and whenever the client asks. A trigger
   character reaches Roslyn as typed, so that it answers only where the character means something: `:` opens a list in
   a format, such as `$"{DateTime.Now:yyyy}"`, and nowhere else, as after a named argument, and `<` in a documentation

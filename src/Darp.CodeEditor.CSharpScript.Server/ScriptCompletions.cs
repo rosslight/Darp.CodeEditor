@@ -122,7 +122,9 @@ internal sealed class ScriptCompletions
         if (list.ItemsList.Count == 0)
             return new Answer(service, list, new LspCompletionList(IsIncomplete: false, []), FrozenSet<int>.Empty);
         string typed = _script.Text.ToString(TextSpan.FromBounds(list.Span.Start, offset));
-        var commit = new CommitRules(list, typed);
+        // Without the directives that scripts can't use, another can match what was typed, as "region" matches "#r":
+        // only a key commits it then, so that "#r " stays as typed.
+        var commit = new CommitRules(list, typed, onlyByKey: list.ItemsList.Any(IsUnsupportedDirective));
         var items = new List<LspCompletionItem>(list.ItemsList.Count);
         var imports = new List<int>();
         bool? inDocumentation = null;
@@ -132,7 +134,7 @@ internal sealed class ScriptCompletions
         {
             cancellationToken.ThrowIfCancellationRequested();
             CompletionItem item = list.ItemsList[index];
-            if (item.Tags.Contains(WellKnownTags.Keyword) && s_unsupportedDirectives.Contains(item.DisplayText))
+            if (IsUnsupportedDirective(item))
                 continue;
             // Edits elsewhere in the text, such as an override's, are out of scope: the client takes no such edit. Those
             // of a documentation comment's tags are complex only as they go over the "<" before the word or put the
@@ -242,6 +244,9 @@ internal sealed class ScriptCompletions
         ];
     }
 
+    private static bool IsUnsupportedDirective(CompletionItem item) =>
+        item.Tags.Contains(WellKnownTags.Keyword) && s_unsupportedDirectives.Contains(item.DisplayText);
+
     private static string Label(CompletionItem item) =>
         item.DisplayTextPrefix + item.DisplayText + item.DisplayTextSuffix;
 
@@ -297,9 +302,10 @@ internal sealed class ScriptCompletions
     /// </summary>
     /// <param name="list">The list.</param>
     /// <param name="typed">The text from where the items' word starts up to the caret.</param>
-    private sealed class CommitRules(CompletionList list, string typed)
+    /// <param name="onlyByKey">Whether nothing in the list commits as it is typed.</param>
+    private sealed class CommitRules(CompletionList list, string typed, bool onlyByKey)
     {
-        private readonly bool _suggests = list.SuggestionModeItem is not null || IsPunctuation(typed);
+        private readonly bool _suggests = onlyByKey || list.SuggestionModeItem is not null || IsPunctuation(typed);
         private readonly bool _typed = typed.Length > 0;
 
         /// <summary>The characters of each set of an item's rules, worked out once: items share their rules.</summary>
