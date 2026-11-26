@@ -905,9 +905,10 @@ public sealed class ScriptSessionTests
     public async Task A_surviving_child_with_one_redirected_stream_does_not_delay_Exited()
     {
         var pid = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
-        // It redirects standard output only, so it holds the log pipe through standard error for all its life.
+        // It redirects standard output only, so it holds the log pipe through standard error for all its life. It
+        // writes nothing, as a write to its standard output would fail once the runner is gone, and end it.
         string command = OperatingSystem.IsWindows()
-            ? """new("ping", "-n 600 127.0.0.1")"""
+            ? """new("cmd", "/c ping -n 600 127.0.0.1 >nul")"""
             : """new("sleep", "600")""";
         CSharpScriptAssembly<ReaderGlobals> script = await CompileAs(
             ScriptEnvironments.Reader,
@@ -938,7 +939,7 @@ public sealed class ScriptSessionTests
         }
         finally
         {
-            child.Kill();
+            child.Kill(entireProcessTree: true);
         }
     }
 
