@@ -234,18 +234,7 @@ internal sealed class ScriptCompletions
                     // which resolve needs.
                     sent[index] = item.AddProperty(nameof(ScriptCompletions), "");
                     items.Add(
-                        ToLsp(
-                            item,
-                            index,
-                            list.Span,
-                            item.DisplayText,
-                            FilterText(item, list.Span),
-                            isSnippet: false
-                        ) with
-                        {
-                            // The namespace that it comes from.
-                            LabelDetails = new LspCompletionItemLabelDetails(Description: item.InlineDescription),
-                        }
+                        ToLsp(item, index, list.Span, item.DisplayText, FilterText(item, list.Span), isSnippet: false)
                     );
                 }
                 asksAgain |= more;

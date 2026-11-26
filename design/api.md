@@ -266,9 +266,8 @@ high contrast inherits from Light, so it shows Light+ without one. To make one e
   selected and copied. The hover key shows it at the caret, and pressed again puts the keyboard into it, where the
   arrows, Page Up, Page Down, Home and End scroll it. Its edges away from the word resize it.
 - **Completion:** a list of up to 12 items at once below the word, or above it when only that side has room, in the
-  editor's popup, with rows exactly as high as the editor's lines, labels in the editor's font, the matched
-  characters in the theme's highlight colors, and a server's label details as VS Code shows them, such as an import's
-  namespace dimmed at the row's right; the selected item's details in a popup of their own, right of the list,
+  editor's popup, with rows exactly as high as the editor's lines, labels in the editor's font, and the matched
+  characters in the theme's highlight colors; the selected item's details in a popup of their own, right of the list,
   else left of it, narrower if need be, and else below or above it. The list's and the details' outer edges resize them,
   the list to whole rows, and both keep that size while the editor shows the document.
 - **Completion icons:** VS Code's codicons, drawn as vector shapes in the theme's `symbolIcon.*` colors, as in VS
@@ -350,9 +349,9 @@ A server that needs pulled diagnostics would add them to v1. The client advertis
 servers fall back where they can: the lifecycle, documents, settings, pushed diagnostics, hover (Markdown and plain
 text), semantic tokens (range and full, in the relative format, with the protocol's standard token types and modifiers),
 completion and signature help. Completion items may have documentation in Markdown or plain text, commit characters,
-a deprecated flag or tag, preselection, an edit that inserts or replaces, label details, and any of the protocol's 25
-kinds; their detail, documentation and additional edits may come when they are resolved, and the request says how
-completion was asked for. Items may be snippets, which go in with their tab stops (below). Signatures may have documentation
+a deprecated flag or tag, preselection, an edit that inserts or replaces, and any of the protocol's 25 kinds; their
+detail, documentation and additional edits may come when they are resolved, and the request says how completion was
+asked for. Items may be snippets, which go in with their tab stops (below). Signatures may have documentation
 in Markdown or plain text, parameters labelled by offsets, and an active parameter of their own, and the request says
 how it was asked for.
 
@@ -488,7 +487,7 @@ How the client talks to a server, where the protocol leaves a choice:
   out, as VS Code leaves it out, and one without a kind, or with a kind the protocol does not name, shows as a property.
   - **Filtering and ranking** are on the client, as the user types, with VS Code's fuzzy matching (a port of its
     `fuzzyScore`, which the C# server will share): the typed text from where an item's edit starts is matched against
-    its `filterText`, or its label, never its label details, in order and ignoring case, and its first character must match at a word start, a
+    its `filterText`, or its label, in order and ignoring case, and its first character must match at a word start, a
     capital or after a separator. Before anything is typed, items are in the order of their `sortText`, or their
     label, ignoring case, then of their label and kind; equal scores keep that order. The characters that matched show
     in bold in the label, as in VS Code: the filter text's, when the whole filter text is the label, ignoring case,
@@ -528,12 +527,10 @@ How the client talks to a server, where the protocol leaves a choice:
     command of an item runs.
   - **Resolving:** the selected item is resolved when it is selected, and the resolve of an item that is no longer
     selected is cancelled. Its detail, as code highlighted with the document's grammar, and below a line its
-    documentation show beside the list, in the look of every popup of code and docs (section 2), as much of both as a hover shows: they share one budget of the hover's size, cut before anything
-    reads them. The details toggle hides them, and the selected row then shows the detail. An item's `labelDetails`
-    show on every row, as in VS Code: their `detail` dimmed right after the label, such as a method's parameters, and
-    their `description` dimmed at the row's right, such as a type's namespace, in place of the detail, where what the
-    label leaves is cut with "…". A row shows at most 256 characters of a label, and of each of its label details,
-    with "…". Additional edits that the resolve brings only after the item was committed join
+    documentation show beside the list, in the look of every popup of code and docs (section 2), as much of both as a
+    hover shows: they share one budget of the hover's size, cut before anything reads them. The details toggle hides
+    them, and the selected row then shows the detail. A row shows at most 256 characters of a label, with "…".
+    Additional edits that the resolve brings only after the item was committed join
     the commit's undo step while it is the last one, and take a step of their own once the user typed on; undoing the
     commit drops them. Each commit gets its own, also when another commit follows before they come. An additional edit
     goes over its whole range, as the edits since its list was asked for moved it, and only while the text there is as
@@ -648,8 +645,7 @@ app's script environments.
   as `JsonSerializer` and `GetFromJsonAsync`, from .NET's assemblies and the marked ones, not from what those depend
   on. Only the best 100 that match the typed name come, as the client ranks them, also with a typo in a list that it
   matches so, and after an escaped name's `@`; with more, or before a name is typed, the list is incomplete, so that
-  typing on asks again. Each names its namespace as its `labelDetails.description`, which shows at the right of its
-  row, as in VS Code. Resolving such an item adds its `using` where Roslyn puts it among the script's usings, after
+  typing on asks again. Resolving such an item adds its `using` where Roslyn puts it among the script's usings, after
   a leading comment, as an additional edit in the version that the list was asked for.
 - **Commit characters** are Roslyn's, as its own server gives them to clients that always select an item hard: its
   defaults, which the server names as `allCommitCharacters`, as each item's rules change them. Nothing commits in a
@@ -1259,9 +1255,7 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   hover background, with none of the text area's white behind it in the pixels, then a line in the popup's border,
   then the docs in the hover's muted foreground; the card's active parameter bold in the highlight color, and the rest
   of its signature in its tokens' colors;
-- the client advertises exactly what it implements, snippets and label details included;
-- an item's label details show right after its label and at the right of every row, in place of the selected item's
-  detail, and typing matches only the label;
+- the client advertises exactly what it implements, snippets included;
 - snippets: stops, placeholders, the final stop and escapes parse; a choice, a variable, a transformation, a nested
   placeholder and a repeated stop go in as their text without a stop; text that does not parse stays text, also text
   nested or unclosed as deep as the limit allows. In the editor, a snippet goes in by its `insertText`, and by a text
@@ -1303,8 +1297,8 @@ server process:
 - Roslyn's commit characters, none right after `.` nor where a lambda's parameter may be named; `:` opening a format's
   list and nothing after a named argument; a named argument's colon, left out where one follows, also after a line break
   or a comment, where it does not commit; a documentation comment's tags, `<see cref=""/>` with the caret between its
-  quotes; types and extension methods from namespaces the script does not import, with their namespace as label details and their
-  `using` after a leading comment or among the usings, none from a dependency under the private alias and none before a name is typed; obsolete
+  quotes; types and extension methods from namespaces the script does not import, with their `using` after a leading
+  comment or among the usings, none from a dependency under the private alias and none before a name is typed; obsolete
   members; one error per rejected directive, none of them suggested; `static` and `readonly` in semantic colors;
   occurrences by symbol, with reads and writes through members, deconstructions and `out`, and both declarations of a
   partial member;

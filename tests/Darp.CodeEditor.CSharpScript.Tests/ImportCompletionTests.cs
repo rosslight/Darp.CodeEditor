@@ -18,7 +18,6 @@ public sealed class ImportCompletionTests(ScriptServerFixture fixture)
         list.IsIncomplete.ShouldBeFalse();
         CompletionItem item = list.Items.Single(i => i.Label == "JsonSerializerOptions");
         item.Edit.NewText.ShouldBe("JsonSerializerOptions");
-        item.LabelDetails.ShouldBe(new CompletionLabelDetails(null, "System.Text.Json"));
 
         CompletionItem resolved = (
             await list.ResolveAsync(item, TestContext.Current.CancellationToken)
@@ -35,7 +34,6 @@ public sealed class ImportCompletionTests(ScriptServerFixture fixture)
         using var script = await _fixture.OpenAsync("using System.Text;\n" + code + "|");
         CompletionList list = await script.CompleteAsync();
         CompletionItem item = list.Items.First(i => i.Label.StartsWith("GetFromJsonAsync", StringComparison.Ordinal));
-        item.LabelDetails.ShouldBe(new CompletionLabelDetails(null, "System.Net.Http.Json"));
 
         CompletionItem resolved = (
             await list.ResolveAsync(item, TestContext.Current.CancellationToken)

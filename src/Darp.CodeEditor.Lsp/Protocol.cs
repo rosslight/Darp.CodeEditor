@@ -162,7 +162,6 @@ internal sealed record LspTextEdit(LspRange Range, string NewText);
 /// <param name="CommitCharacters">The characters that commit it as they are typed; null for the server's.</param>
 /// <param name="InsertTextFormat">2 when its text is a snippet; null for plain text.</param>
 /// <param name="AdditionalTextEdits">What committing it changes besides, such as an import, once resolved.</param>
-/// <param name="LabelDetails">What its row shows besides its label, such as its namespace.</param>
 internal sealed record LspCompletionItem(
     string Label,
     int Kind,
@@ -176,14 +175,8 @@ internal sealed record LspCompletionItem(
     IReadOnlyList<int>? Tags = null,
     IReadOnlyList<string>? CommitCharacters = null,
     int? InsertTextFormat = null,
-    IReadOnlyList<LspTextEdit>? AdditionalTextEdits = null,
-    LspCompletionItemLabelDetails? LabelDetails = null
+    IReadOnlyList<LspTextEdit>? AdditionalTextEdits = null
 );
-
-/// <summary>What a completion item's row shows besides its label.</summary>
-/// <param name="Detail">What shows right after the label, such as a method's parameters.</param>
-/// <param name="Description">What shows at the row's right, such as a type's namespace.</param>
-internal sealed record LspCompletionItemLabelDetails(string? Detail = null, string? Description = null);
 
 /// <summary>The answer to <c>textDocument/completion</c>.</summary>
 internal sealed record LspCompletionList(bool IsIncomplete, IReadOnlyList<LspCompletionItem> Items);
