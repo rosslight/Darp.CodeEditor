@@ -160,6 +160,10 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
     [InlineData("record R(int Greeting);\nvar r = new R(1) with { Gre| };", "Greeting")]
     [InlineData("var list = new System.Collections.Generic.List<int> { Cap| };", "Capacity")]
     [InlineData("class B { protected int Greeting; }\nclass D : B { void M() { base.Gre| } }", "Greeting")]
+    [InlineData(
+        "class B { public static string Pick(int x) => \"\"; public int Pick() => 0; }\nclass D : B { void M() { base.Pic| } }",
+        "Pick"
+    )]
     public async Task An_initializer_and_base_show_the_types_of_their_members(string text, string label)
     {
         // The globals have a string Greeting of their own.

@@ -47,9 +47,9 @@ internal sealed class CompletionSymbols
         {
             return new(entries);
         }
-        // Through "base", its protected members are reachable too.
+        // Through "base", its protected members are reachable too, and its static ones are not.
         if (before.Parent is MemberAccessExpressionSyntax { Expression: BaseExpressionSyntax })
-            return new(model.LookupBaseMembers(position));
+            return new(model.LookupBaseMembers(position).Where(symbol => !symbol.IsStatic));
         if (SignatureCandidates.ReceiverOf(before.Parent) is { } receiver)
         {
             return new(
