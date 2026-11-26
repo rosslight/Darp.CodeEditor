@@ -47,10 +47,17 @@ internal static class SignatureCandidates
                 model.GetTypeInfo(access.Expression, cancellationToken).Type,
                 position
             ),
+            (BracketedArgumentListSyntax, ElementBindingExpressionSyntax binding) => Indexers(
+                model,
+                ReceiverTypeOf(model, binding, cancellationToken),
+                position
+            ),
             (
-                InitializerExpressionSyntax,
-                InitializerExpressionSyntax { Parent: BaseObjectCreationExpressionSyntax creation }
-            ) when model.GetTypeInfo(creation, cancellationToken).Type is { } collection => (
+                BracketedArgumentListSyntax,
+                ImplicitElementAccessSyntax { Parent.Parent: InitializerExpressionSyntax initializer }
+            ) => Indexers(model, InitializedType(model, initializer, cancellationToken), position),
+            (InitializerExpressionSyntax, InitializerExpressionSyntax initializer)
+                when InitializedType(model, initializer, cancellationToken) is { } collection => (
                 model
                     .LookupSymbols(position, collection, "Add", includeReducedExtensionMethods: true)
                     .OfType<IMethodSymbol>()
@@ -127,16 +134,52 @@ internal static class SignatureCandidates
     }
 
     /// <summary>
-    /// The receiver of a member access, <c>a</c> in <c>a.b</c>, or of a member binding, <c>a</c> in <c>a?.b</c>; null for
-    /// anything else.
+    /// The receiver of a member access, <c>a</c> in <c>a.b</c>, or of a binding, <c>a</c> in <c>a?.b</c> or
+    /// <c>a?[b]</c>; null for anything else.
     /// </summary>
     public static ExpressionSyntax? ReceiverOf(SyntaxNode? access) =>
         access switch
         {
             MemberAccessExpressionSyntax memberAccess => memberAccess.Expression,
-            MemberBindingExpressionSyntax binding => binding
+            MemberBindingExpressionSyntax or ElementBindingExpressionSyntax => access
                 .FirstAncestorOrSelf<ConditionalAccessExpressionSyntax>()
                 ?.Expression,
+            _ => null,
+        };
+
+    /// <summary>
+    /// The type whose members <paramref name="access"/> reaches: its receiver's, and after <c>?</c> a nullable value's
+    /// value's; null without a receiver.
+    /// </summary>
+    public static ITypeSymbol? ReceiverTypeOf(
+        SemanticModel model,
+        SyntaxNode? access,
+        CancellationToken cancellationToken
+    )
+    {
+        if (ReceiverOf(access) is not { } receiver)
+            return null;
+        ITypeSymbol? type = model.GetTypeInfo(receiver, cancellationToken).Type;
+        return
+            access is MemberBindingExpressionSyntax or ElementBindingExpressionSyntax
+            && type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable
+            ? nullable.TypeArguments[0]
+            : type;
+    }
+
+    /// <summary>
+    /// The type that an object or collection initializer initializes: a new object's, or a member's that is
+    /// initialized in place, as <c>Names = { "a" }</c>.
+    /// </summary>
+    private static ITypeSymbol? InitializedType(
+        SemanticModel model,
+        InitializerExpressionSyntax initializer,
+        CancellationToken cancellationToken
+    ) =>
+        initializer.Parent switch
+        {
+            BaseObjectCreationExpressionSyntax creation => model.GetTypeInfo(creation, cancellationToken).Type,
+            AssignmentExpressionSyntax member => model.GetTypeInfo(member.Left, cancellationToken).Type,
             _ => null,
         };
 

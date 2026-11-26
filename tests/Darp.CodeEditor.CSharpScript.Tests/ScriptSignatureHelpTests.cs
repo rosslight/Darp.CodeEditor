@@ -262,6 +262,20 @@ public sealed class ScriptSignatureHelpTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task A_conditional_access_and_an_initializer_show_the_indexers_parameters()
+    {
+        using var conditional = await _fixture.OpenAsync("Dictionary<int, string>? d = new();\nvar v = d?[|1];");
+        SignatureHelpInfo help = (await conditional.SignatureHelpAsync()).ShouldNotBeNull();
+        Active(help).Label.ShouldBe("string Dictionary<int, string>[int key]");
+        ActiveParameter(Active(help)).ShouldBe("int key");
+
+        using var initializer = await _fixture.OpenAsync("var e = new Dictionary<int, string> { [|1] = \"\" };");
+        help = (await initializer.SignatureHelpAsync()).ShouldNotBeNull();
+        Active(help).Label.ShouldBe("string Dictionary<int, string>[int key]");
+        ActiveParameter(Active(help)).ShouldBe("int key");
+    }
+
+    [Fact]
     public async Task A_type_argument_list_shows_the_type_parameters()
     {
         using var script = await _fixture.OpenAsync("T Echo<T>(T value) => value;\nEcho<|");

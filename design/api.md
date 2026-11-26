@@ -645,8 +645,8 @@ app's script environments.
   The server reads which types those are with the first request for docs, and a file when one of its members is first
   asked for. Without the files, scripts work as before, without .NET's docs.
 - **Signature help** on `(`, `[`, `<`, `{` and `,`, and again on `)`, `]`, `>` and `}`: the overloads of a call, a
-  constructor, a `this(` or `base(` initializer, an attribute, an indexer and a collection initializer's entry, which go
-  to `Add`, with the one that overload resolution selects for the arguments so far, taking missing arguments as
+  constructor, a `this(` or `base(` initializer, an attribute, an indexer, also after `?` and in an object initializer,
+  and a collection initializer's entry, which go to `Add`, with the one that overload resolution selects for the arguments so far, taking missing arguments as
   `default`, so that an unfinished call selects too. An attribute's settable fields and properties follow its
   constructor's parameters. A generic name's type argument list, also half written, shows its type parameters and
   constraints, of the methods that its receiver can call, as a call's; a `<` after a name that no generic type or method has, as in `a < b`, shows nothing. The innermost

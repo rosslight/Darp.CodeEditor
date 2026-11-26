@@ -293,8 +293,8 @@ internal sealed class ScriptCompletions
     }
 
     /// <summary>
-    /// The type of the receiver whose member the word at <paramref name="word"/> is, as an extension method takes it:
-    /// a nullable value's value after <c>?.</c>. Null without a receiver.
+    /// The type of the receiver whose member the word at <paramref name="word"/> is
+    /// (<see cref="SignatureCandidates.ReceiverTypeOf"/>); null without a receiver.
     /// </summary>
     private async Task<ITypeSymbol?> ReceiverAsync(TextSpan word, CancellationToken cancellationToken)
     {
@@ -302,14 +302,7 @@ internal sealed class ScriptCompletions
             return null;
         SyntaxNode root = await model.SyntaxTree.GetRootAsync(cancellationToken).ConfigureAwait(false);
         SyntaxNode? access = root.FindToken(word.Start).GetPreviousToken().Parent;
-        if (SignatureCandidates.ReceiverOf(access) is not { } receiver)
-            return null;
-        ITypeSymbol? type = model.GetTypeInfo(receiver, cancellationToken).Type;
-        return
-            access is MemberBindingExpressionSyntax
-            && type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable
-            ? nullable.TypeArguments[0]
-            : type;
+        return SignatureCandidates.ReceiverTypeOf(model, access, cancellationToken);
     }
 
     /// <summary>
