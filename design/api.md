@@ -615,6 +615,9 @@ app's script environments.
   for. An escaped word such as `@ev` completes identifiers, not keywords, over its `@`, and there is no list after a lone `@`.
   An obsolete member's item is tagged deprecated, so it shows struck through.
 - **Hover:** the symbol as C# code, then its XML docs as text.
+- **Occurrences** (`textDocument/documentHighlight`) are those of the symbol at the caret, by its identity, so a local
+  and a top-level variable of the same name stay apart. Its declarations are text, as in Roslyn's own server; an
+  assignment, an increment or decrement, an `out` or `ref` argument and a deconstruction write it, and the rest read it.
 - **Signature help** on `(`, `[`, `<`, `{` and `,`, and again on `)`, `]`, `>` and `}`: the overloads of a call, a
   constructor, a `this(` or `base(` initializer, an attribute, an indexer and a collection initializer's entry, which go
   to `Add`, with the one that overload resolution selects for the arguments so far, taking missing arguments as

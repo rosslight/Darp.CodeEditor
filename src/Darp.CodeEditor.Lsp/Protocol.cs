@@ -204,6 +204,11 @@ internal sealed record LspSignatureHelp(
     JsonNode? Data = null
 );
 
+/// <summary>An occurrence of a symbol, in the answer to <c>textDocument/documentHighlight</c>.</summary>
+/// <param name="Range">Where it is.</param>
+/// <param name="Kind">How it uses the symbol, one of <see cref="DocumentHighlightKind"/>.</param>
+internal sealed record LspDocumentHighlight(LspRange Range, int Kind);
+
 /// <summary>The answer to <c>textDocument/semanticTokens/range</c>, in the protocol's relative format.</summary>
 internal sealed record LspSemanticTokens(IReadOnlyList<int> Data);
 
@@ -240,6 +245,16 @@ internal static class CompletionItemTag
     public const int Deprecated = 1;
 }
 
+/// <summary>The kinds of <c>DocumentHighlightKind</c>.</summary>
+internal static class DocumentHighlightKind
+{
+    /// <summary>An occurrence that neither reads nor writes, such as a declaration.</summary>
+    public const int Text = 1;
+
+    public const int Read = 2;
+    public const int Write = 3;
+}
+
 /// <summary>The kinds of <c>SignatureHelpTriggerKind</c>.</summary>
 internal static class SignatureHelpTriggerKind
 {
@@ -273,4 +288,5 @@ internal static class SignatureHelpTriggerKind
 [JsonSerializable(typeof(LspCompletionItem))]
 [JsonSerializable(typeof(LspSignatureHelp))]
 [JsonSerializable(typeof(LspSemanticTokens))]
+[JsonSerializable(typeof(LspDocumentHighlight[]))]
 internal sealed partial class LspJsonContext : JsonSerializerContext;

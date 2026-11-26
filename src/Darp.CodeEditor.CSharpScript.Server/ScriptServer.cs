@@ -19,6 +19,7 @@ internal sealed class ScriptServer
           "capabilities": {
             "textDocumentSync": {{TextDocumentSyncKind.Incremental}},
             "hoverProvider": true,
+            "documentHighlightProvider": true,
             "completionProvider": { "resolveProvider": true, "triggerCharacters": ["."] },
             "signatureHelpProvider": { "triggerCharacters": ["(", ",", "[", "<", "{"], "retriggerCharacters": [")", "]", ">", "}"] },
             "semanticTokensProvider": {
@@ -64,6 +65,14 @@ internal sealed class ScriptServer
                 p => p.TextDocument,
                 LspJsonContext.Default.LspHover,
                 (script, p, token) => ScriptHover.GetAsync(script, p.Position, token),
+                cancellationToken
+            ),
+            "textDocument/documentHighlight" => Answer(
+                parameters,
+                LspJsonContext.Default.TextDocumentPositionParams,
+                p => p.TextDocument,
+                LspJsonContext.Default.LspDocumentHighlightArray,
+                (script, p, token) => ScriptHighlights.GetAsync(script, p.Position, token),
                 cancellationToken
             ),
             "textDocument/semanticTokens/range" => Answer(
