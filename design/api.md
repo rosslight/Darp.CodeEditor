@@ -658,7 +658,8 @@ app's script environments.
   overload that a more specific one hides. Asking again follows an argument's new type, and keeps a signature that the
   user chose by key. Named arguments and `params` mark their parameter. Each signature has its summary and each
   parameter its description, a type parameter's included, as plain text from the XML docs, as in hover: a reference
-  reads as the name it refers to, and `<inheritdoc/>` takes what the docs leave out from the member they inherit from.
+  reads as the name it refers to, and `<inheritdoc/>` takes what the docs leave out from the member they inherit from,
+  the parameters' and type parameters' by their place, as an implementation may rename them.
 - **Semantic colors** are answered for ranges, with the protocol's standard token types. A script's top-level variables
   are fields to Roslyn, and are colored as variables. Static members have the `static` modifier, and constants and
   readonly fields the `readonly` one.

@@ -397,6 +397,34 @@ public sealed class ScriptSignatureHelpTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task Inherited_docs_describe_the_parameters_that_an_implementation_renames()
+    {
+        const string text = """
+            interface IRunner
+            {
+                /// <summary>Runs.</summary>
+                /// <typeparam name="T">What runs.</typeparam>
+                /// <param name="count">How often.</param>
+                void Run<T>(int count);
+            }
+            class Runner : IRunner
+            {
+                /// <inheritdoc />
+                public void Run<TItem>(int times) { }
+            }
+            new Runner().Run<int>(1);
+            """;
+        using var script = await _fixture.OpenAsync(text);
+        script.Caret = text.IndexOf("(1)", StringComparison.Ordinal) + 1;
+        SignatureInfo signature = Active((await script.SignatureHelpAsync()).ShouldNotBeNull());
+        signature.Parameters[0].Documentation.ShouldNotBeNull().Text.ShouldBe("How often.");
+
+        script.Caret = text.IndexOf("<int>", StringComparison.Ordinal) + 1;
+        signature = Active((await script.SignatureHelpAsync()).ShouldNotBeNull());
+        signature.Parameters[0].Documentation.ShouldNotBeNull().Text.ShouldBe("What runs.");
+    }
+
+    [Fact]
     public async Task Docs_that_inherit_come_from_the_member_they_implement()
     {
         using var script = await _fixture.OpenAsync(

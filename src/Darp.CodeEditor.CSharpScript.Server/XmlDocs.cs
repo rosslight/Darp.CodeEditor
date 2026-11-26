@@ -8,7 +8,8 @@ namespace Darp.CodeEditor.CSharpScript.Server;
 /// <summary>
 /// A symbol's XML docs as plain text: its summary, and the description of one of its parameters or type parameters. A
 /// reference reads as the name it refers to, and paragraphs and list items stay on lines of their own. With
-/// <c>&lt;inheritdoc/&gt;</c>, what the docs leave out comes from the member they inherit from, as in hover.
+/// <c>&lt;inheritdoc/&gt;</c>, what the docs leave out comes from the member they inherit from, as in hover, its
+/// parameters and type parameters by their place, as an override or implementation may rename them.
 /// </summary>
 internal sealed class XmlDocs
 {
@@ -24,13 +25,15 @@ internal sealed class XmlDocs
     /// <summary>How many <c>&lt;inheritdoc/&gt;</c> are followed one after another, as a cycle of them would never end.</summary>
     private const int MaxInherited = 8;
 
+    private readonly ISymbol _symbol;
     private readonly XElement? _docs;
     private readonly XmlDocs? _inherited;
     private readonly SemanticModel _model;
     private readonly int _position;
 
-    private XmlDocs(XElement? docs, XmlDocs? inherited, SemanticModel model, int position)
+    private XmlDocs(ISymbol symbol, XElement? docs, XmlDocs? inherited, SemanticModel model, int position)
     {
+        _symbol = symbol;
         _docs = docs;
         _inherited = inherited;
         _model = model;
@@ -67,7 +70,7 @@ internal sealed class XmlDocs
             && InheritedFrom(symbol, inheritdoc, model.Compilation) is { } from
                 ? Of(from, model, position, inheriting - 1, cancellationToken)
                 : null;
-        return new XmlDocs(docs, inherited, model, position);
+        return new XmlDocs(symbol, docs, inherited, model, position);
     }
 
     /// <summary>The member that <c>&lt;inheritdoc/&gt;</c> names, or else the one it overrides or implements.</summary>
@@ -95,9 +98,46 @@ internal sealed class XmlDocs
 
     public string? Summary => Text(_docs?.Element("summary")) ?? _inherited?.Summary;
 
-    public string? Parameter(string name) => Text(Named("param", name)) ?? _inherited?.Parameter(name);
+    public string? Parameter(string name) =>
+        Text(Named("param", name))
+        ?? (_inherited is { } inherited ? inherited.Parameter(InheritedName(name, inherited, ParametersOf)) : null);
 
-    public string? TypeParameter(string name) => Text(Named("typeparam", name)) ?? _inherited?.TypeParameter(name);
+    public string? TypeParameter(string name) =>
+        Text(Named("typeparam", name))
+        ?? (
+            _inherited is { } inherited
+                ? inherited.TypeParameter(InheritedName(name, inherited, TypeParametersOf))
+                : null
+        );
+
+    /// <summary>The name that <paramref name="inherited"/> gives the parameter in the place of <paramref name="name"/>.</summary>
+    private string InheritedName(string name, XmlDocs inherited, Func<ISymbol, IReadOnlyList<ISymbol>> parametersOf)
+    {
+        IReadOnlyList<ISymbol> own = parametersOf(_symbol);
+        IReadOnlyList<ISymbol> theirs = parametersOf(inherited._symbol);
+        for (int place = 0; place < Math.Min(own.Count, theirs.Count); place++)
+        {
+            if (own[place].Name == name)
+                return theirs[place].Name;
+        }
+        return name;
+    }
+
+    private static IReadOnlyList<ISymbol> ParametersOf(ISymbol symbol) =>
+        symbol switch
+        {
+            IMethodSymbol method => method.Parameters,
+            IPropertySymbol property => property.Parameters,
+            _ => [],
+        };
+
+    private static IReadOnlyList<ISymbol> TypeParametersOf(ISymbol symbol) =>
+        symbol switch
+        {
+            IMethodSymbol method => method.TypeParameters,
+            INamedTypeSymbol type => type.TypeParameters,
+            _ => [],
+        };
 
     private XElement? Named(string tag, string name) =>
         _docs?.Elements(tag).FirstOrDefault(element => (string?)element.Attribute("name") == name);
