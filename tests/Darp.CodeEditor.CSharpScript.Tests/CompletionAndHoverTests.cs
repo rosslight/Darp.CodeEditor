@@ -99,6 +99,35 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task The_scripts_variables_come_first_then_members_then_objects_then_types_and_keywords()
+    {
+        using var script = await _fixture.OpenAsync("var zebra = 1;\nforeach (var apple in new[] { 1 })\n{\n    |\n}");
+        CompletionList list = await script.CompleteAsync();
+
+        // As the client orders them before anything is typed.
+        CompletionItem[] items = [.. list.Items.OrderBy(item => item.SortKey)];
+        items.Take(2).Select(item => item.Label).ShouldBe(["apple", "zebra"]);
+        int rest = Array.FindIndex(items, item => item.Kind is KeywordKind or ClassKind);
+        string[] members = [.. items[2..rest].Select(item => item.Label)];
+        string[] objects = ["Equals", "GetHashCode", "GetType", "ReferenceEquals", "ToString"];
+        members[^objects.Length..].ShouldBe(objects);
+        members.ShouldContain("Greeting");
+        members.ShouldContain("Add");
+        items[rest..].ShouldAllBe(item => item.Kind != PropertyKind && item.Kind != MethodKind);
+    }
+
+    [Fact]
+    public async Task Named_arguments_come_after_the_variables_and_before_members()
+    {
+        using var script = await _fixture.OpenAsync("var zebra = 1;\nNamed(|)");
+        CompletionList list = await script.CompleteAsync();
+
+        CompletionItem[] items = [.. list.Items.OrderBy(item => item.SortKey)];
+        items.Take(3).Select(item => item.Label).ShouldBe(["zebra", "name:", "value:"]);
+        items[3].Kind.ShouldBeOneOf([PropertyKind, MethodKind]);
+    }
+
+    [Fact]
     public async Task A_deprecated_item_shows_as_deprecated()
     {
         using var script = await _fixture.OpenAsync("[Obsolete(\"Use New.\")] void Old() {}\nvoid New() {}\nOl|");

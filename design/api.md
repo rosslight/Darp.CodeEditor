@@ -641,6 +641,11 @@ app's script environments.
   struck through. A named argument's item, `amount:`, puts in its colon, and goes over one that follows past white space
   on its line, so that one colon stays, also when it is typed; a colon after a line break or a comment stays where it
   is, after the name alone, and the item has no `:` among its commit characters.
+- **Order:** items come in groups, as Rider orders them: the script's variables, locals and parameters, then named
+  arguments, then members, as the globals', then the methods that every object has, such as `ToString`, then the rest,
+  as types and keywords, and the types from namespaces that the script does not import last. Each item's sort text is
+  its group before Roslyn's, so that the groups order the list before anything is typed and items that match the typed
+  text as well, which the client orders by sort text.
 - **Imports:** a list also has the types and extension methods from namespaces that the script does not import, such
   as `JsonSerializer` and `GetFromJsonAsync`, from .NET's assemblies and the marked ones, not from what those depend
   on. Only the best 100 that match the typed name come, as the client ranks them, also with a typo in a list that it
@@ -1304,7 +1309,8 @@ server process:
   or a comment, where it does not commit; a documentation comment's tags, `<see cref=""/>` with the caret between its
   quotes; types and extension methods from namespaces the script does not import, with their `using` after a leading
   comment or among the usings, none from a dependency under the private alias and none before a name is typed; obsolete
-  members; one error per rejected directive, none of them suggested; `static` and `readonly` in semantic colors;
+  members; one error per rejected directive, none of them suggested; the script's variables, then named arguments,
+  members and object's methods before types and keywords; `static` and `readonly` in semantic colors;
   occurrences by symbol, with reads and writes through members, deconstructions and `out`, and both declarations of a
   partial member;
 - .NET's XML docs in hover and signature help, for `string.Concat`, from the SDK's reference pack, and a missing folder

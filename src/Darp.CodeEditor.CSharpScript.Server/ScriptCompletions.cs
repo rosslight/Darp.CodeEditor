@@ -37,6 +37,15 @@ internal sealed class ScriptCompletions
     /// </summary>
     private static readonly FrozenSet<string> s_unsupportedDirectives = FrozenSet.Create("r", "load", "line");
 
+    /// <summary>The methods that every object has, which <see cref="Group"/> puts after a type's own.</summary>
+    private static readonly FrozenSet<string> s_objectMethods = FrozenSet.Create(
+        nameof(Equals),
+        nameof(GetHashCode),
+        nameof(GetType),
+        nameof(ReferenceEquals),
+        nameof(ToString)
+    );
+
     private readonly ScriptSnapshot _script;
     private readonly Task<Answer?> _answer;
     private readonly CancellationToken _cancellationToken;
@@ -137,6 +146,7 @@ internal sealed class ScriptCompletions
         // Without the directives that scripts can't use, another can match what was typed, as "region" matches "#r":
         // only a key commits it then, so that "#r " stays as typed.
         var commit = new CommitRules(list, typed, onlyByKey: list.ItemsList.Any(IsUnsupportedDirective));
+        FrozenSet<string> variables = await ScriptVariablesAsync(cancellationToken).ConfigureAwait(false);
         var items = new List<LspCompletionItem>(list.ItemsList.Count);
         var imports = new List<int>();
         bool? inDocumentation = null;
@@ -191,7 +201,7 @@ internal sealed class ScriptCompletions
                         span = TextSpan.FromBounds(span.Start, end);
                 }
             }
-            LspCompletionItem lsp = ToLsp(item, index, span, newText, filterText, isSnippet);
+            LspCompletionItem lsp = ToLsp(item, index, span, newText, filterText, isSnippet, Group(item, variables));
             items.Add(
                 colonCommits
                     ? lsp
@@ -230,7 +240,15 @@ internal sealed class ScriptCompletions
                     // which resolve needs.
                     sent[index] = item.AddProperty(nameof(ScriptCompletions), "");
                     items.Add(
-                        ToLsp(item, index, list.Span, item.DisplayText, FilterText(item, list.Span), isSnippet: false)
+                        ToLsp(
+                            item,
+                            index,
+                            list.Span,
+                            item.DisplayText,
+                            FilterText(item, list.Span),
+                            isSnippet: false,
+                            ImportGroup
+                        )
                     );
                 }
                 asksAgain |= more;
@@ -244,7 +262,8 @@ internal sealed class ScriptCompletions
             TextSpan span,
             string newText,
             string filterText,
-            bool isSnippet
+            bool isSnippet,
+            char group
         )
         {
             if (last.Range is null || last.Span != span)
@@ -255,7 +274,7 @@ internal sealed class ScriptCompletions
                 Kind(item),
                 new LspTextEdit(last.Range, newText),
                 new JsonArray(Id, index),
-                item.SortText == label ? null : item.SortText,
+                group + item.SortText,
                 filterText == label ? null : filterText,
                 item.Rules.MatchPriority == MatchPriority.Preselect ? true : null,
                 Tags: item.Tags.Contains(DeprecatedTag) ? s_deprecated : null,
@@ -437,6 +456,54 @@ internal sealed class ScriptCompletions
 
         private static bool IsPunctuation(string typed) => typed.Length > 0 && typed.All(char.IsPunctuation);
     }
+
+    /// <summary>
+    /// Where <paramref name="item"/> goes among items that match what was typed as well, and among all of them before
+    /// anything is typed, as Rider orders them: the script's variables, locals and parameters first, then named
+    /// arguments, then members, as the globals', then those that every object has, then the rest, as types and
+    /// keywords. Roslyn's sort text orders each group. Types from namespaces that the script does not import come last
+    /// (<see cref="ImportGroup"/>).
+    /// </summary>
+    /// <param name="item">The item.</param>
+    /// <param name="variables">The names of the script's variables.</param>
+    private static char Group(CompletionItem item, FrozenSet<string> variables)
+    {
+        foreach (string tag in item.Tags)
+        {
+            switch (tag)
+            {
+                // A named argument is the item of a parameter that puts in its name and a colon.
+                case WellKnownTags.Parameter when item.DisplayTextSuffix == ":":
+                    return '1';
+                case WellKnownTags.Local or WellKnownTags.Parameter or WellKnownTags.RangeVariable:
+                    return '0';
+                case WellKnownTags.Field:
+                    return variables.Contains(item.DisplayText) ? '0' : '2';
+                case WellKnownTags.Method:
+                    return s_objectMethods.Contains(item.DisplayText) ? '3' : '2';
+                case WellKnownTags.Property
+                or WellKnownTags.ExtensionMethod
+                or WellKnownTags.Event
+                or WellKnownTags.Constant
+                or WellKnownTags.EnumMember:
+                    return '2';
+            }
+        }
+        return '4';
+    }
+
+    /// <summary>The group of a type from a namespace that the script does not import (<see cref="Group"/>).</summary>
+    private const char ImportGroup = '5';
+
+    /// <summary>
+    /// The names of the script's variables. Roslyn makes those of a script's top level fields of its class, which
+    /// Roslyn's items tag as fields.
+    /// </summary>
+    private async Task<FrozenSet<string>> ScriptVariablesAsync(CancellationToken cancellationToken) =>
+        await _script.Document.Project.GetCompilationAsync(cancellationToken).ConfigureAwait(false)
+            is { ScriptClass: { } scriptClass }
+            ? scriptClass.GetMembers().OfType<IFieldSymbol>().Select(field => field.Name).ToFrozenSet()
+            : FrozenSet<string>.Empty;
 
     /// <summary>The protocol's <c>CompletionItemKind</c> of Roslyn's first tag that names a kind.</summary>
     private static int Kind(CompletionItem item)
