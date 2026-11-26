@@ -84,15 +84,15 @@ public sealed class ServerLifecycleTests
     }
 
     [Fact]
-    public async Task A_cancelled_request_keeps_the_four_lists_before_it_resolving()
+    public async Task A_cancelled_request_keeps_the_two_lists_before_it_resolving()
     {
         await using var server = RawServer.Start();
         await server.InitializeAsync();
         string request = RawServer.Position("untitled:a", 0, "var builder = new Str".Length);
         await server.WriteAsync([RawServer.Open("untitled:a", "var builder = new Str")]);
-        // The item of the first of four lists that reached the client.
+        // The item of the first of two lists that reached the client.
         string first = "";
-        for (int id = 10; id < 14; id++)
+        for (int id = 10; id < 12; id++)
         {
             await server.WriteAsync([RawServer.Request(id, "textDocument/completion", request)]);
             JsonElement items = (await server.ReadUntilAsync(m => IsAnswerTo(m, id)))[^1]
@@ -106,13 +106,13 @@ public sealed class ServerLifecycleTests
         }
 
         await server.WriteAsync([
-            RawServer.Request(14, "textDocument/completion", request),
-            """{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":14}}""",
+            RawServer.Request(12, "textDocument/completion", request),
+            """{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":12}}""",
         ]);
-        await server.ReadUntilAsync(m => IsAnswerTo(m, 14));
+        await server.ReadUntilAsync(m => IsAnswerTo(m, 12));
 
-        await server.WriteAsync([RawServer.Request(15, "completionItem/resolve", first)]);
-        JsonElement resolved = (await server.ReadUntilAsync(m => IsAnswerTo(m, 15)))[^1].GetProperty("result");
+        await server.WriteAsync([RawServer.Request(13, "completionItem/resolve", first)]);
+        JsonElement resolved = (await server.ReadUntilAsync(m => IsAnswerTo(m, 13)))[^1].GetProperty("result");
         resolved.TryGetProperty("additionalTextEdits", out JsonElement edits).ShouldBeTrue();
         edits.GetArrayLength().ShouldBe(1);
     }

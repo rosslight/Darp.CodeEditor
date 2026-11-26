@@ -9,10 +9,10 @@ namespace Darp.CodeEditor.CSharpScript.Server;
 internal sealed class OpenScript(string uri, ScriptContext context, ScriptSnapshot snapshot)
 {
     /// <summary>
-    /// How many answered lists the script keeps for resolving: the one that the client shows, the one it asked for
-    /// meanwhile, and room for those whose answer crossed their cancellation.
+    /// How many answered lists the script keeps for resolving: the one that the client shows, and the one it asked for
+    /// meanwhile. Each keeps its own version of the script, so every list kept costs memory and completion time.
     /// </summary>
-    private const int MaxCompletions = 4;
+    private const int MaxCompletions = 2;
 
     /// <summary>
     /// The lists whose items the client may still commit, oldest first: those under way, and the last

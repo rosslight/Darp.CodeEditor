@@ -624,7 +624,7 @@ app's script environments.
   comment. A tag there goes in as Roslyn writes it, also over the `<`, with the caret where Roslyn puts it, such as
   between the quotes of `<see cref=""/>`; other edits beyond the item's word, such as an override's, are left out. Each
   item has its edit at once; its signature and XML docs come with resolve, also after the user typed on, from the
-  version the list was asked for. The lists of a script still under way and its last four answered ones that the client
+  version the list was asked for. The lists of a script still under way and its last two answered ones that the client
   did not cancel resolve their items, so that the list that shows still resolves while a newer one is asked for; a
   request that is cancelled or fails pushes none out. An escaped word such as `@ev` completes identifiers, not keywords,
   over its `@`, and there is no list after a lone `@`. An obsolete member's item is tagged deprecated, so it shows
