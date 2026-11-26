@@ -526,7 +526,11 @@ How the client talks to a server, where the protocol leaves a choice:
     reads them. The details toggle hides them, and the selected row then shows the detail. A row shows at most 256
     characters of a label, with "…". Additional edits that the resolve brings only after the item was committed join
     the commit's undo step while it is the last one, and take a step of their own once the user typed on; undoing the
-    commit drops them. Each commit gets its own, also when another commit follows before they come. Items resolve only in the process that sent them, while the document stays open there as it was.
+    commit drops them. Each commit gets its own, also when another commit follows before they come. Additional edits
+    go in as the least change that makes their text, so that two imports that each rewrite the same block of imports
+    both stay; when one goes over text that changed since its list was asked for, by the user or by another commit's
+    additional edits, none of the item's goes in. Items resolve only in the process that sent them, while the document
+    stays open there as it was.
   - **Ending:** Escape, the caret leaving the line or moving back past the word, a selection, any caret move that is
     not the keyboard's, such as a click, an undo or code, the editor becoming read-only, the list's line scrolling out
     of view, the text losing the keyboard focus, a server that starts or stops serving the document, new colors,
@@ -1207,7 +1211,8 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   below it in a window of 420 pixels, narrower beside it in one of 640, wrapped inside the window, with the list at
   the word it completes;
   additional edits apply with the item in one step, and ones that come after the commit join its step, and are
-  dropped once the user typed on;
+  dropped once the user typed on; two that come late and each rewrite the same block of imports both stay, and one
+  over text that changed since stays out;
 - an incomplete list is asked for again on each character typed, for incomplete completions; a newer request and
   Escape cancel the one under way with `$/cancelRequest`, and selecting another item cancels the resolve under way,
   also when it is an item resolved already;
