@@ -313,7 +313,7 @@ public sealed class CompletionBehaviorTests(UiFixture ui)
         });
 
     [Fact]
-    public Task Additional_edits_that_come_late_and_each_replace_the_same_lines_keep_what_the_other_put_in() =>
+    public Task Of_two_late_additional_edits_that_replace_the_same_lines_only_the_first_goes_in() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
@@ -349,11 +349,13 @@ public sealed class CompletionBehaviorTests(UiFixture ui)
             }
             using (await CommandAsync(server, fake, "release-resolve", "released resolve"))
             {
-                await Wait.UntilAsync(() =>
-                    document.Text
-                        is "using Common;\nusing System;\nusing Other;\nConsole\nBuilder"
-                            or "using Common;\nusing Other;\nusing System;\nConsole\nBuilder"
-                );
+                // A list shows after the late answers: the client has read them by then. The first changed the lines
+                // that the second goes over, so the second item's import stays out rather than take the first's place.
+                await OpenAsync(window, document.Text.Length);
+                document.Text.ShouldBeOneOf([
+                    "using Common;\nusing System;\nConsole\nBuilder",
+                    "using Common;\nusing Other;\nConsole\nBuilder",
+                ]);
             }
         });
 
@@ -390,6 +392,44 @@ public sealed class CompletionBehaviorTests(UiFixture ui)
                 // A list shows after the late answer: the client has read it by then.
                 await OpenAsync(window, document.Text.Length);
                 document.Text.ShouldBe("using Commons;\nConsole");
+            }
+        });
+
+    [Fact]
+    public Task Additional_edits_that_come_late_go_over_lines_that_were_replaced_and_restored_since_as_they_were() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [ { "label": "Console", "data": { "additionalTextEdits": [
+                      { "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 2, "character": 0 } },
+                        "newText": "using Common;\nusing System;\nusing Zed;\n" } ] } } ] }
+                    """
+                )
+            );
+            const string imports = "using Common;\r\nusing Zed;\r\n";
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, imports + "Con");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            using (await CommandAsync(server, fake, "hold-resolve", "holding resolve"))
+            {
+                await OpenAsync(window, document.Text.Length);
+                await fake.WaitForAsync("resolve ");
+                window.Press(Key.Enter);
+                document.Replace(new TextRange(0, imports.Length), "// imports\r\n");
+                document.Undo();
+                document.Text.ShouldBe(imports + "Console");
+            }
+            using (await CommandAsync(server, fake, "release-resolve", "released resolve"))
+            {
+                // A list shows after the late answer: the client has read it by then.
+                await OpenAsync(window, document.Text.Length);
+                document.Text.ShouldBe("using Common;\r\nusing System;\r\nusing Zed;\r\nConsole");
             }
         });
 

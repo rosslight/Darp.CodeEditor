@@ -12,11 +12,10 @@ namespace Darp.CodeEditor.Completion;
 /// that the user undoes, with the caret after its text. Inserting, the item's text goes over its edit's range, its insert
 /// range, or the word up to the caret; replacing, over its replace range, or the whole word, as far as the edits since
 /// completion was asked left it. Additional edits that a resolve still under way brings come later, as in VS Code,
-/// unless the commit was undone. Additional edits go in as the least change that makes their text, so that what went in
-/// at their edges since stays, as another commit's import in the same block. The edits go in through
-/// <see cref="TextChanges"/>: an item whose text would touch read-only text, such as protected text or a long line's
-/// hidden tail, does not go in. When one of its additional edits would, or would go over text that changed since its
-/// list was asked for, none of them does, as VS Code applies them together, and the item's own text still goes in.
+/// unless the commit was undone. The edits go in through <see cref="TextChanges"/>: an item whose text would touch
+/// read-only text, such as protected text or a long line's hidden tail, does not go in. When one of its additional
+/// edits would, or would go over text that changed since its list was asked for, none of them does, as VS Code applies
+/// them together, and the item's own text still goes in.
 /// </summary>
 internal sealed class CompletionCommit : IDisposable
 {
@@ -88,7 +87,7 @@ internal sealed class CompletionCommit : IDisposable
             late?.Cancellation.Cancel();
             return;
         }
-        List<CompletionEdit> edits = Rebased(request.Snapshot, item.AdditionalEdits ?? []) is { } additional
+        List<CompletionEdit> edits = Mapped(request.Snapshot, item.AdditionalEdits ?? []) is { } additional
             ? WithoutOverlaps([main], additional)
             : [main];
         if (!edits.TrueForAll(CanChange))
@@ -145,10 +144,10 @@ internal sealed class CompletionCommit : IDisposable
             if (
                 late.Cancellation.IsCancellationRequested
                 || item?.AdditionalEdits is not { Count: > 0 } additional
-                || Rebased(snapshot, additional) is not { } rebased
+                || Mapped(snapshot, additional) is not { } mapped
             )
                 return;
-            List<CompletionEdit> edits = WithoutOverlaps([], rebased);
+            List<CompletionEdit> edits = WithoutOverlaps([], mapped);
             bool last = _buffer.UndoStack.LastGroupDescriptor == step;
             if (edits.TrueForAll(CanChange))
                 Apply(last ? step : new object(), continued: last, edits, []);
@@ -195,30 +194,22 @@ internal sealed class CompletionCommit : IDisposable
     }
 
     /// <summary>
-    /// Edits in the text of <paramref name="snapshot"/>, moved to the current text, with the document's line breaks: each
-    /// the least change that makes its text, so that text put in at its edges since stays, as two imports that each
-    /// write the whole block of usings both stay. Null when the text that one goes over changed since, by the user or
-    /// by another commit's edits: going over it would undo that change.
+    /// Edits in the text of <paramref name="snapshot"/>, each over its whole range moved to the current text, with the
+    /// document's line breaks. Null when the text that one goes over changed since, by the user or by another commit's
+    /// edits: going over it would undo that change.
     /// </summary>
-    private List<CompletionEdit>? Rebased(TextSnapshot snapshot, IEnumerable<CompletionEdit> edits)
+    private List<CompletionEdit>? Mapped(TextSnapshot snapshot, IEnumerable<CompletionEdit> edits)
     {
         var since = new SnapshotEdits(snapshot, _document.CurrentSnapshot);
-        var rebased = new List<CompletionEdit>();
+        var mapped = new List<CompletionEdit>();
         foreach (CompletionEdit edit in edits)
         {
-            (int start, int length) = snapshot.Clamp(edit.Range);
-            string old = snapshot.GetText(edit.Range);
-            if (_document.CurrentSnapshot.GetText(since.Map(edit.Range)) != old)
+            TextRange range = since.Map(edit.Range);
+            if (_document.CurrentSnapshot.GetText(range) != snapshot.GetText(edit.Range))
                 return null;
-            string text = InLineBreaks(edit.NewText);
-            int prefix = old.AsSpan().CommonPrefixLength(text);
-            int suffix = 0;
-            while (suffix < Math.Min(old.Length, text.Length) - prefix && old[^(suffix + 1)] == text[^(suffix + 1)])
-                suffix++;
-            var least = new TextRange(start + prefix, length - prefix - suffix);
-            rebased.Add(new CompletionEdit(since.Map(least), text[prefix..^suffix]));
+            mapped.Add(new CompletionEdit(range, InLineBreaks(edit.NewText)));
         }
-        return rebased;
+        return mapped;
     }
 
     private string InLineBreaks(string text) => TextUtilities.NormalizeNewLines(text, _document.LineBreak);

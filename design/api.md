@@ -531,11 +531,12 @@ How the client talks to a server, where the protocol leaves a choice:
     label leaves is cut with "…". A row shows at most 256 characters of a label, and of each of its label details,
     with "…". Additional edits that the resolve brings only after the item was committed join
     the commit's undo step while it is the last one, and take a step of their own once the user typed on; undoing the
-    commit drops them. Each commit gets its own, also when another commit follows before they come. Additional edits
-    go in as the least change that makes their text, so that two imports that each rewrite the same block of imports
-    both stay; when one goes over text that changed since its list was asked for, by the user or by another commit's
-    additional edits, none of the item's goes in. Items resolve only in the process that sent them, while the document
-    stays open there as it was.
+    commit drops them. Each commit gets its own, also when another commit follows before they come. An additional edit
+    goes over its whole range, as the edits since its list was asked for moved it, and only while the text there is as
+    it was then; when one goes over text that changed since, by the user or by another commit's additional edits, none
+    of the item's goes in, and its own text stays. Of two items whose late edits each rewrite the same block of
+    imports, only the first's goes in; the C# server inserts an import alone, so both of its imports stay. Items
+    resolve only in the process that sent them, while the document stays open there as it was.
   - **Ending:** Escape, the caret leaving the line or moving back past the word, a selection, any caret move that is
     not the keyboard's, such as a click, an undo or code, the editor becoming read-only, the list's line scrolling out
     of view, the text losing the keyboard focus, a server that starts or stops serving the document, new colors,
@@ -1221,8 +1222,9 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   below it in a window of 420 pixels, narrower beside it in one of 640, wrapped inside the window, with the list at
   the word it completes;
   additional edits apply with the item in one step, and ones that come after the commit join its step, and are
-  dropped once the user typed on; two that come late and each rewrite the same block of imports both stay, and one
-  over text that changed since stays out;
+  dropped once the user typed on; of two that come late and each rewrite the same block of imports only the first
+  goes in, one over text that changed since stays out, and one over lines that were replaced and restored since goes
+  over them as they were;
 - an incomplete list is asked for again on each character typed, for incomplete completions; a newer request and
   Escape cancel the one under way with `$/cancelRequest`, and selecting another item cancels the resolve under way,
   also when it is an item resolved already;
