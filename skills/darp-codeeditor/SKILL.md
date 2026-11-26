@@ -98,6 +98,7 @@ separate process, a session. Guide: <https://rosslight.github.io/Darp.CodeEditor
 - **Failures:** a script's is `CSharpScriptException`, with its line. After `ConnectionLostException`, await
   `session.Exited` for the reason. A session doesn't restart: start a new one.
 - **Publishing:** needs a `RuntimeIdentifier` and `PublishReadyToRun=true`, also in a NativeAOT app.
+  `PublishCSharpScriptFrameworkDocs=false` leaves out .NET's XML docs, 31 MB, which scripts then don't show.
 - A callback that outlives its run may use only what outlives the run: the session object, not the run's globals.
 
 ## Look and keys

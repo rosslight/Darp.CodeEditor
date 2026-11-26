@@ -158,6 +158,11 @@ internal sealed record LspTextEdit(LspRange Range, string NewText);
 /// <param name="Preselect">Whether the item is selected first.</param>
 /// <param name="Detail">Its signature, once resolved.</param>
 /// <param name="Documentation">Its documentation, once resolved.</param>
+/// <param name="Tags">Its <c>CompletionItemTag</c> numbers, such as <see cref="CompletionItemTag.Deprecated"/>.</param>
+/// <param name="CommitCharacters">The characters that commit it as they are typed; null for the server's.</param>
+/// <param name="InsertTextFormat">2 when its text is a snippet; null for plain text.</param>
+/// <param name="AdditionalTextEdits">What committing it changes besides, such as an import, once resolved.</param>
+/// <param name="LabelDetails">What its row shows besides its label, such as its type.</param>
 internal sealed record LspCompletionItem(
     string Label,
     int Kind,
@@ -167,24 +172,37 @@ internal sealed record LspCompletionItem(
     string? FilterText = null,
     bool? Preselect = null,
     string? Detail = null,
-    LspMarkupContent? Documentation = null
+    LspMarkupContent? Documentation = null,
+    IReadOnlyList<int>? Tags = null,
+    IReadOnlyList<string>? CommitCharacters = null,
+    int? InsertTextFormat = null,
+    IReadOnlyList<LspTextEdit>? AdditionalTextEdits = null,
+    LspCompletionItemLabelDetails? LabelDetails = null
 );
+
+/// <summary>What a completion item's row shows besides its label.</summary>
+/// <param name="Detail">What shows right after the label, such as a method's parameters.</param>
+/// <param name="Description">What shows at the row's right, such as a variable's type.</param>
+internal sealed record LspCompletionItemLabelDetails(string? Detail = null, string? Description = null);
 
 /// <summary>The answer to <c>textDocument/completion</c>.</summary>
 internal sealed record LspCompletionList(bool IsIncomplete, IReadOnlyList<LspCompletionItem> Items);
 
 /// <summary>A parameter of a signature.</summary>
 /// <param name="Label">Where it starts and ends in the signature's label.</param>
-internal sealed record LspParameterInformation(IReadOnlyList<int> Label);
+/// <param name="Documentation">What it is for; null for nothing.</param>
+internal sealed record LspParameterInformation(IReadOnlyList<int> Label, LspMarkupContent? Documentation = null);
 
 /// <summary>A signature of a call.</summary>
 /// <param name="Label">The signature.</param>
 /// <param name="Parameters">Its parameters.</param>
 /// <param name="ActiveParameter">The parameter at the caret; -1 for none.</param>
+/// <param name="Documentation">What it does; null for nothing.</param>
 internal sealed record LspSignatureInformation(
     string Label,
     IReadOnlyList<LspParameterInformation> Parameters,
-    int ActiveParameter
+    int ActiveParameter,
+    LspMarkupContent? Documentation = null
 );
 
 /// <summary>The answer to <c>textDocument/signatureHelp</c>.</summary>
@@ -198,6 +216,11 @@ internal sealed record LspSignatureHelp(
     int ActiveSignature,
     JsonNode? Data = null
 );
+
+/// <summary>An occurrence of a symbol, in the answer to <c>textDocument/documentHighlight</c>.</summary>
+/// <param name="Range">Where it is.</param>
+/// <param name="Kind">How it uses the symbol, one of <see cref="DocumentHighlightKind"/>.</param>
+internal sealed record LspDocumentHighlight(LspRange Range, int Kind);
 
 /// <summary>The answer to <c>textDocument/semanticTokens/range</c>, in the protocol's relative format.</summary>
 internal sealed record LspSemanticTokens(IReadOnlyList<int> Data);
@@ -226,6 +249,23 @@ internal static class CompletionTriggerKind
     public const int Invoked = 1;
     public const int TriggerCharacter = 2;
     public const int TriggerForIncompleteCompletions = 3;
+}
+
+/// <summary>The tags of <c>CompletionItemTag</c>.</summary>
+internal static class CompletionItemTag
+{
+    /// <summary>The item is deprecated: it shows struck through.</summary>
+    public const int Deprecated = 1;
+}
+
+/// <summary>The kinds of <c>DocumentHighlightKind</c>.</summary>
+internal static class DocumentHighlightKind
+{
+    /// <summary>An occurrence that neither reads nor writes, such as a declaration.</summary>
+    public const int Text = 1;
+
+    public const int Read = 2;
+    public const int Write = 3;
 }
 
 /// <summary>The kinds of <c>SignatureHelpTriggerKind</c>.</summary>
@@ -261,4 +301,5 @@ internal static class SignatureHelpTriggerKind
 [JsonSerializable(typeof(LspCompletionItem))]
 [JsonSerializable(typeof(LspSignatureHelp))]
 [JsonSerializable(typeof(LspSemanticTokens))]
+[JsonSerializable(typeof(LspDocumentHighlight[]))]
 internal sealed partial class LspJsonContext : JsonSerializerContext;

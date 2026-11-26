@@ -79,6 +79,10 @@ internal static class Hovers
     internal static IEnumerable<string> Texts(PopupFrame popup) =>
         popup.GetVisualDescendants().OfType<TextBlock>().Select(TextOf);
 
-    internal static string TextOf(Control control) =>
-        control is TextBlock { Inlines: { } inlines } ? inlines.Text ?? "" : ((TextBlock)control).Text ?? "";
+    /// <summary>The text that <paramref name="control"/> shows, with the spaces that code shows as no-break spaces.</summary>
+    internal static string TextOf(Control control)
+    {
+        var text = (TextBlock)control;
+        return (text.Inlines?.Text ?? text.Text ?? "").Replace('\u00A0', ' ');
+    }
 }

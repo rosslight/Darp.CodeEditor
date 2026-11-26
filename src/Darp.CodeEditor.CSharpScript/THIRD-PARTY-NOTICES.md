@@ -4,9 +4,10 @@ Darp.CodeEditor.CSharpScript ships files from other projects. Their licenses fol
 
 ## Visual Studio Code
 
-`Languages/csharp.tmLanguage.json` and `Languages/csharp.language-configuration.json` are copied unchanged from Visual
-Studio Code, release tag `1.145.0` (https://github.com/microsoft/vscode/tree/1.145.0/extensions/csharp): the extension
-`csharp`'s `syntaxes/csharp.tmLanguage.json` and `language-configuration.json`. Only the file names changed.
+`Languages/csharp.tmLanguage.json` and `Languages/csharp.language-configuration.json` are copied from Visual Studio
+Code, release tag `1.145.0` (https://github.com/microsoft/vscode/tree/1.145.0/extensions/csharp): the extension
+`csharp`'s `syntaxes/csharp.tmLanguage.json` and `language-configuration.json`. The file names changed, and in the
+grammar, a `'` begins a `char-literal` only where one character or escape and a closing `'` follow.
 
 ```
 MIT License

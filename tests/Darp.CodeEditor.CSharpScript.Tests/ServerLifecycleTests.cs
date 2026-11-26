@@ -84,6 +84,56 @@ public sealed class ServerLifecycleTests
     }
 
     [Fact]
+    public async Task A_cancelled_request_keeps_the_two_lists_before_it_resolving()
+    {
+        await using var server = RawServer.Start();
+        await server.InitializeAsync();
+        string request = RawServer.Position("untitled:a", 0, "var builder = new Str".Length);
+        await server.WriteAsync([RawServer.Open("untitled:a", "var builder = new Str")]);
+        // The item of the first of two lists that reached the client.
+        string first = "";
+        for (int id = 10; id < 12; id++)
+        {
+            await server.WriteAsync([RawServer.Request(id, "textDocument/completion", request)]);
+            JsonElement items = (await server.ReadUntilAsync(m => IsAnswerTo(m, id)))[^1]
+                .GetProperty("result")
+                .GetProperty("items");
+            if (id == 10)
+                first = items
+                    .EnumerateArray()
+                    .Single(i => i.GetProperty("label").ValueEquals("StringBuilder"))
+                    .GetRawText();
+        }
+
+        await server.WriteAsync([
+            RawServer.Request(12, "textDocument/completion", request),
+            """{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":12}}""",
+        ]);
+        await server.ReadUntilAsync(m => IsAnswerTo(m, 12));
+
+        await server.WriteAsync([RawServer.Request(13, "completionItem/resolve", first)]);
+        JsonElement resolved = (await server.ReadUntilAsync(m => IsAnswerTo(m, 13)))[^1].GetProperty("result");
+        resolved.TryGetProperty("additionalTextEdits", out JsonElement edits).ShouldBeTrue();
+        edits.GetArrayLength().ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Without_the_folder_of_dotnet_docs_hover_answers_without_them()
+    {
+        string missing = Path.Combine(AppContext.BaseDirectory, "missing-dotnet-docs");
+        await using var server = RawServer.Start(ScriptAppFiles.ServerCommand(frameworkDocs: missing));
+        await server.InitializeAsync();
+        await server.WriteAsync([
+            RawServer.Open("untitled:a", "var text = string.Concat(\"a\", \"b\");"),
+            RawServer.Request(2, "textDocument/hover", RawServer.Position("untitled:a", 0, 20)),
+        ]);
+        JsonElement answer = (await server.ReadUntilAsync(m => IsAnswerTo(m, 2)))[^1];
+        string hover = answer.GetProperty("result").GetProperty("contents").GetProperty("value").GetString() ?? "";
+        hover.ShouldContain("string.Concat(");
+        hover.ShouldNotContain("Concatenates");
+    }
+
+    [Fact]
     public void The_server_runs_on_the_host_of_the_installed_runtime_only()
     {
         string root = Directory.CreateTempSubdirectory("script-host").FullName;
@@ -125,10 +175,12 @@ public sealed class ServerLifecycleTests
             _frames = new PipeFrames(process.Output);
         }
 
-        public static RawServer Start()
+        public static RawServer Start() => Start(ScriptAppFiles.ServerCommand());
+
+        public static RawServer Start((string FileName, string[] Arguments) command)
         {
             Assert.SkipUnless(ScriptServerFixture.HasServer, "This app has no C# script server next to it.");
-            (string fileName, string[] arguments) = ScriptAppFiles.ServerCommand();
+            (string fileName, string[] arguments) = command;
             var startInfo = new ProcessStartInfo(fileName);
             foreach (string argument in arguments)
                 startInfo.ArgumentList.Add(argument);

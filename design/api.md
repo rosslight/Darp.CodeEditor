@@ -48,6 +48,7 @@ if (compilation.Succeeded)
 - **The project file.**
   - `CSharpScriptReference="true"` on a package or project reference: scripts may use its assemblies. Publishing puts them in `helpers/script-api/` next to the app, NativeAOT apps included, with their XML docs, which hover and completion show. A marked package without assemblies of its own, such as `Microsoft.Data.Sqlite`, stands for the packages it depends on directly.
   - `PublishReadyToRun=true` and a runtime identifier: publishing needs them to compile the C# helpers with ReadyToRun and to ship their .NET runtime (prototype #48), also in a NativeAOT app. Without them it fails at once and says so.
+  - `PublishCSharpScriptFrameworkDocs=false`: publishing leaves out .NET's XML docs, 31 MB, which it otherwise puts next to the helpers' runtime. Scripts then show docs for the marked references only.
 - **StreamJsonRpc and PolyType** (#89), for the script API:
   - its attributes: `[JsonRpcContract]` and `[GenerateShape]` on the two interfaces of a session's bridge, `[GenerateShape]` on the data they exchange, and `[assembly: ExportRpcContractProxies]` (section 7 has the checklist);
   - the `IShapeable<T>` constraints on `CSharpScriptSession.StartAsync` and on a run's input. With them, NativeAOT apps call the bridge and copy the input without reflection, and the compiler rejects types without a shape;
@@ -218,8 +219,14 @@ otherwise (#114).
   `list.hoverBackground`, `scrollbarSlider.*`, `widget.shadow`, `focusBorder`, `textLink.foreground`,
   `textCodeBlock.background`, `problems*Icon.foreground`), with VS Code's defaults for the keys a theme leaves
   out. An app's styles for flyouts, tooltips, lists, scroll bars, text blocks and panels don't reach them, under
-  Fluent, Simple or any other theme. Their prose takes the app's font; code keeps the editor's colors, background and
-  font.
+  Fluent, Simple or any other theme. Their prose takes the app's font. Completion's list is in `editorSuggestWidget.*`.
+  Every popup of code and docs, the hover with or without problems, completion's details and signature help's card,
+  has one look, the card's: the hover's colors (`editorHoverWidget.background`, `.border` and `.foreground`) and 8 by
+  4 pixels of padding; code highlighted with the document's grammar, in the editor's font and token colors, on the
+  popup's background, filling each line and breaking at any character, as VS Code's completion details, though still
+  after a hyphen or a slash, where Unicode's rules break; a line in `editorHoverWidget.border` between the code that opens a part, as a signature, and
+  the docs below it; and the docs as text in the muted `editorHoverWidget.foreground`. Signature help's active
+  parameter is bold in `editorHoverWidget.highlightForeground`, over its tokens' colors.
 - **The search bar and the text's scroll bars** are the app's controls, in its theme.
 - **Popups stay inside the window**, as in the prototype (#19).
 
@@ -260,16 +267,19 @@ high contrast inherits from Light, so it shows Light+ without one. To make one e
   selected and copied. The hover key shows it at the caret, and pressed again puts the keyboard into it, where the
   arrows, Page Up, Page Down, Home and End scroll it. Its edges away from the word resize it.
 - **Completion:** a list of up to 12 items at once below the word, or above it when only that side has room, in the
-  editor's popup, with rows exactly as high as the editor's lines, labels in the editor's font, and the matched
-  characters in the theme's highlight colors; the selected item's details in a popup of their own, right of the list,
+  editor's popup, with rows exactly as high as the editor's lines, labels in the editor's font, the matched
+  characters in the theme's highlight colors, and a server's label details as VS Code shows them, such as a variable's
+  type dimmed at the row's right; the selected item's details in a popup of their own, right of the list,
   else left of it, narrower if need be, and else below or above it. The list's and the details' outer edges resize them,
   the list to whole rows, and both keep that size while the editor shows the document.
 - **Completion icons:** VS Code's codicons, drawn as vector shapes in the theme's `symbolIcon.*` colors, as in VS
   Code, and in VS Code's colors where the theme sets none. Their designs are licensed CC BY 4.0: the package lists
   them in its third-party notices, and apps that show notices of their own include that entry.
-- **Signature help:** in the editor's popup above the caret's line, so that completion's list shows below it; every
-  signature at once as code, in the editor's font, colors and background, the active one marked and its parameter in
-  the theme's highlight color.
+- **Signature help:** in the editor's popup above the caret's line, so that completion's list shows below it; a card
+  with one signature at a time, as VS Code's parameter hints: the signature in the editor's font, its active parameter
+  in the theme's highlight color, and below it the parameter's and the signature's documentation. It is as wide as its
+  content, up to a hover's width, where its text wraps. While the call has several signatures, a column at its left
+  gives the shown one's number, as `2/5`, between buttons for the one before and after.
 
 **Before v1, additive:** marks beside the scroll bar for errors, warnings and search matches, as Monaco's overview
 ruler shows them. Scripts of 5,000 lines need them to find errors outside the view. They add to the API without
@@ -341,7 +351,8 @@ A server that needs pulled diagnostics would add them to v1. The client advertis
 servers fall back where they can: the lifecycle, documents, settings, pushed diagnostics, hover (Markdown and plain
 text), semantic tokens (range and full, in the relative format, with the protocol's standard token types and modifiers),
 completion and signature help. Completion items may have documentation in Markdown or plain text, commit characters,
-a deprecated flag or tag, preselection, an edit that inserts or replaces, and any of the protocol's 25 kinds; their
+a deprecated flag or tag, preselection, an edit that inserts or replaces, label details, and any of the protocol's 25
+kinds; their
 detail, documentation and additional edits may come when they are resolved, and the request says how completion was
 asked for. Items may be snippets, which go in with their tab stops (below). Signatures may have documentation
 in Markdown or plain text, parameters labelled by offsets, and an active parameter of their own, and the request says
@@ -409,9 +420,9 @@ How the client talks to a server, where the protocol leaves a choice:
   with `$/cancelRequest`, stops reading the answer between lines and paragraphs and highlighting its code between lines,
   and drops what they would show. The popup is placed again when the window or the text it is next to moves, as when the
   window narrows.
-- **The hover's look:** text in the editor's popup, in the color theme's hover colors, and links in
-  `textLink.foreground`; code blocks in the editor's font, colors and background, highlighted with the document's
-  grammar; inline code as a small span in the editor's font family on `textCodeBlock.background`, at the size of the
+- **The hover's look:** that of every popup of code and docs (section 2), with links in `textLink.foreground`;
+  code blocks highlighted with the document's grammar on the popup's background, the one that opens a part, as a
+  symbol's signature, with a line below it before the docs; inline code as a small span in the editor's font family on `textCodeBlock.background`, at the size of the
   text around it, so that it fits its line. While the keyboard is in the popup, its border takes `focusBorder`.
 - **The hover's size:** it is as large as its content, up to two thirds of the editor's width and a quarter of its
   height, or 750 by 250 pixels where that is more, and scrolls beyond. A hover shows at most 2,000 characters on 50 lines, in 250 runs of one style or color, the
@@ -479,7 +490,7 @@ How the client talks to a server, where the protocol leaves a choice:
   out, as VS Code leaves it out, and one without a kind, or with a kind the protocol does not name, shows as a property.
   - **Filtering and ranking** are on the client, as the user types, with VS Code's fuzzy matching (a port of its
     `fuzzyScore`, which the C# server will share): the typed text from where an item's edit starts is matched against
-    its `filterText`, or its label, in order and ignoring case, and its first character must match at a word start, a
+    its `filterText`, or its label, never its label details, in order and ignoring case, and its first character must match at a word start, a
     capital or after a separator. Before anything is typed, items are in the order of their `sortText`, or their
     label, ignoring case, then of their label and kind; equal scores keep that order. The characters that matched show
     in bold in the label, as in VS Code: the filter text's, when the whole filter text is the label, ignoring case,
@@ -505,7 +516,8 @@ How the client talks to a server, where the protocol leaves a choice:
     matches, and nothing left to show ends completion only once the new answer has nothing either.
   - **Committing:** Enter inserts, Tab and Shift+Enter replace, and a click or one of the item's commit characters, or
     the server's `allCommitCharacters` for an item that names none, insert; a commit character then goes in, and asks
-    again if it is a trigger character, as in VS Code. A frozen list commits by keys and clicks, not by commit
+    again if it is a trigger character, as in VS Code, unless the item's text already ends with it, as the `:` that
+    commits a named argument's `amount:`: then it goes in once. A frozen list commits by keys and clicks, not by commit
     characters. While the filter of the current text still runs, they commit the item that shows if it matches the
     current text, which is checked for that item alone, on the first 128 characters of its typed text; otherwise an
     accept commits what that filter selects once it has run, unless the text, by any editor of the document or by code,
@@ -517,12 +529,21 @@ How the client talks to a server, where the protocol leaves a choice:
     an item's `editor.action.triggerSuggest` command asks for completion again, such as for a property's value. No other
     command of an item runs.
   - **Resolving:** the selected item is resolved when it is selected, and the resolve of an item that is no longer
-    selected is cancelled. Its detail, as code highlighted with the document's grammar, and its documentation show
-    beside the list, as much of both as a hover shows: they share one budget of the hover's size, cut before anything
-    reads them. The details toggle hides them, and the selected row then shows the detail. A row shows at most 256
-    characters of a label, with "…". Additional edits that the resolve brings only after the item was committed join
+    selected is cancelled. Its detail, as code highlighted with the document's grammar, and below a line its
+    documentation show beside the list, in the look of every popup of code and docs (section 2), as much of both as a
+    hover shows: they share one budget of the hover's size, cut before anything reads them. The details toggle hides
+    them, and the selected row then shows the detail. An item's `labelDetails` show on every row, as in VS Code: their
+    `detail` dimmed right after the label, such as a method's parameters, and their `description` dimmed at the row's
+    right, such as a variable's type, in place of the detail, where what the label leaves is cut with "…". A row shows
+    at most 256 characters of a label, and of each of its label details, with "…".
+    Additional edits that the resolve brings only after the item was committed join
     the commit's undo step while it is the last one, and take a step of their own once the user typed on; undoing the
-    commit drops them. Items resolve only in the process that sent them, while the document stays open there as it was.
+    commit drops them. Each commit gets its own, also when another commit follows before they come. An additional edit
+    goes over its whole range, as the edits since its list was asked for moved it, and only while the text there is as
+    it was then; when one goes over text that changed since, by the user or by another commit's additional edits, none
+    of the item's goes in, and its own text stays. Of two items whose late edits each rewrite the same block of
+    imports, only the first's goes in; the C# server inserts an import alone, so both of its imports stay. Items
+    resolve only in the process that sent them, while the document stays open there as it was.
   - **Ending:** Escape, the caret leaving the line or moving back past the word, a selection, any caret move that is
     not the keyboard's, such as a click, an undo or code, the editor becoming read-only, the list's line scrolling out
     of view, the text losing the keyboard focus, a server that starts or stops serving the document, new colors,
@@ -562,17 +583,25 @@ How the client talks to a server, where the protocol leaves a choice:
     text as plain text 21.0 ms. A keystroke in a stop takes 13.6 ms, and the same keystroke without a session 12.6 ms.
 - **Signature help** is asked for on the server's trigger characters, and again at once on its retrigger characters
   while it is open. While it is open, each edit and caret move restarts a pause of 120 ms, VS Code's, after which it
-  asks again for a change of the content; the pause runs on the options' `TimeProvider`. Asking again says that it is
-  a retrigger and sends the signature help that showed, with the signature the user chose. A newer request, and each
-  edit and caret move, cancels the one under way, and an answer about older text is dropped. An answer without
-  signatures, as outside a call, closes it. It shows every signature at once, the active one marked, with the active
-  parameter in bold: the signature's own, or the answer's, or the first; one outside the parameters is none, as in VS
-  Code. A parameter labelled by a string is found as a whole word in the signature. The active parameter's
-  documentation shows below, then the active signature's, all of it as much as a hover shows, the active signature
-  first. While several show, Up and Down, once completion's list is closed, and Alt+Up and Alt+Down, ahead of moving
-  lines, choose the active one, around the ends. It ends on Escape, after completion's list, on a click or drag that
-  moves the caret, with no signature, when the editor becomes read-only, when the editor loses the keyboard focus, when
-  a server starts or stops serving the document, with new colors, and when its line scrolls out of view.
+  asks again for a change of the content; the pause runs on the options' `TimeProvider`. Asking again says that it is a
+  retrigger and sends the signature help that showed, with the signature the user chose. A newer request, and each edit
+  and caret move, cancels the one under way, and an answer about older text is dropped. An answer without signatures, as
+  outside a call, closes it. It shows one signature at a time, the active one, on a card as VS Code's parameter hints
+  (#124), as code highlighted with the document's grammar, with the active parameter bold in
+  `editorHoverWidget.highlightForeground`: the signature's own, or the answer's, or the first; one outside the
+  parameters is none, as in VS Code. A parameter labelled by a string is found as a whole word in the signature. Below
+  the signature and a line, the active parameter's documentation, then the signature's, all of it as much as a hover
+  shows, the signature first. The card is as wide as its content, up to a hover's width, two thirds of the editor or
+  750 pixels where that is more; a longer signature wraps there, and what is taller than the
+  room scrolls. While the call has several signatures, a column at the card's left, which does not scroll, gives the
+  shown one's number and the count, as `2/5`, between buttons that choose the one before and after; a click on them
+  leaves the keyboard in the editor. Up and Down, once completion's list is closed, and Alt+Up and Alt+Down, ahead of
+  moving lines, choose the signature too, around the ends. Choosing keeps the card's left edge and its side of the
+  line, where its content wraps and scrolls to fit, and the column keeps to the card's edge next to the line, which
+  stays where it is: the buttons stay under the pointer. Once the window narrows past the card's right edge, it is
+  placed anew inside the window. It ends on Escape, after completion's list, on a click or drag that moves the caret,
+  with no signature, when the editor becomes read-only, when the editor loses the keyboard focus, when a server starts
+  or stops serving the document, with new colors, and when its line scrolls out of view.
 - **Token colors** come from the color theme as in VS Code: its `semanticTokenColors`, matched by type, modifiers and
   language with VS Code's scores; otherwise its TextMate color of the scopes that VS Code's standard mapping gives the
   type and modifiers, such as `entity.name.type` for a class or `variable.other.constant` for a read-only variable.
@@ -601,17 +630,81 @@ app's script environments.
 - **Requests** see the edits sent before them, in the order of the messages, on an immutable version of the script, and
   each starts at once on the thread pool. An edit cancels the analysis of the version before it, which then publishes
   nothing, and `$/cancelRequest` stops a request.
-- **Diagnostics:** the compiler's errors and warnings. `#r`, `#load` and `#line` are errors.
-- **Completion:** Roslyn's list, with keywords and kinds, on `.` and whenever the client asks. Each item has its edit at
-  once; its signature and XML docs come with resolve, also after the user typed on, from the version the list was asked
-  for. An escaped word such as `@ev` completes identifiers, not keywords, over its `@`, and there is no list after a lone `@`.
-- **Hover:** the symbol as C# code, then its XML docs as text.
-- **Signature help** on `(`, `,` and `)`: the overloads of the call, with the one that overload resolution selects for the
-  arguments so far, taking missing arguments as `default`, so that an unfinished call selects too. Asking again follows
-  an argument's new type, and keeps a signature that the user chose by key. Named arguments and `params` mark their
-  parameter. Signatures show no XML docs.
+- **Diagnostics:** the compiler's errors and warnings. `#r`, `#load` and `#line` are one error each, in place of what
+  the compiler says about them, and completion does not suggest them; a list without them commits only by a key, so
+  that `#r ` stays as typed rather than committing `region`. Each diagnostic names `csharp` as its source, and a
+  compiler diagnostic's code links to the page that its descriptor names.
+- **Completion:** Roslyn's list, with keywords and kinds, on `.`, `:` and `<`, and whenever the client asks. A trigger
+  character reaches Roslyn as typed, so that it answers only where the character means something: `:` opens a list in a
+  format, such as `$"{DateTime.Now:yyyy}"`, and nowhere else, as after a named argument, and `<` in a documentation
+  comment. A tag there goes in as Roslyn writes it, also over the `<`, with the caret where Roslyn puts it, such as
+  between the quotes of `<see cref=""/>`; other edits beyond the item's word, such as an override's, are left out. Each
+  item has its edit at once; its signature and XML docs come with resolve, also after the user typed on, from the
+  version the list was asked for. The lists of a script still under way and its last two answered ones that the client
+  did not cancel resolve their items, so that the list that shows still resolves while a newer one is asked for; a
+  request that is cancelled or fails pushes none out. An escaped word such as `@ev` completes identifiers, not keywords,
+  over its `@`, and there is no list after a lone `@`. An obsolete member's item is tagged deprecated, so it shows
+  struck through. A named argument's item, `amount:`, puts in its colon, and goes over one that follows past white space
+  on its line, so that one colon stays, also when it is typed; a colon after a line break or a comment stays where it
+  is, after the name alone, and the item has no `:` among its commit characters.
+- **Order:** items come in groups, as Rider orders them: the script's variables, locals and parameters, then named
+  arguments, then members, as the globals', then the methods that every object has, such as `ToString`, then the rest,
+  as types and keywords, and the types from namespaces that the script does not import last. A variable, field or
+  property names its type, and a method its return type, as its `labelDetails.description`, which shows at the right
+  of its row, as in Rider: `int`, `string?`, `void`. Types, keywords, named arguments and a query's range variables
+  name none. An item's symbols are those of its name among what its word can name: the members of an object
+  initializer's or a `with` expression's type, a collection initializer's values and then its members, the members
+  that `base` or a receiver reaches, a type its static ones and a value its instance and extension ones, and what is
+  in scope otherwise; a generic method's item, `Pick<>`, names its generic methods, and of overloads the first names
+  the type. Its group follows them too: a field of the script's class is a script's variable, and a method of
+  `object`'s or an override of one is one that every object has. Each item's sort text is
+  its group before Roslyn's, so that the groups order the list before anything is typed and items that match the typed
+  text as well, which the client orders by sort text.
+- **Imports:** a list also has the types and extension methods from namespaces that the script does not import, such
+  as `JsonSerializer` and `GetFromJsonAsync`, from .NET's assemblies and the marked ones, not from what those depend
+  on. An extension method names its return type as the receiver calls it, a generic one's item its generic overloads'. Only the best 100 that match the typed name come, as the client ranks them, also with a typo in a list that it
+  matches so, and after an escaped name's `@`; with more, or before a name is typed, the list is incomplete, so that
+  typing on asks again. Resolving such an item adds its `using` where Roslyn puts it among the script's usings, after
+  a leading comment, as an additional edit in the version that the list was asked for.
+- **Commit characters** are Roslyn's, as its own server gives them to clients that always select an item hard: its
+  defaults, which the server names as `allCommitCharacters`, as each item's rules change them. Nothing commits in a
+  list that only suggests, as where a lambda's parameter may be named, or after typed punctuation; before a name is
+  typed, as right after `.`, only the items that Roslyn selects hard commit, and the list is incomplete, so that typing
+  the name asks for the list whose items commit. With `Count` selected, `.` commits it and asks for its members.
+- **Hover:** the symbol as C# code, then its XML docs as Markdown. In hover, completion's details and signature help
+  alike, a reference, a keyword, a parameter's name and the text of `<c>` are code spans, and a section's label, as
+  `Returns:`, `Types:` or `Exceptions:`, is bold before what it labels.
+- **Occurrences** (`textDocument/documentHighlight`) are those of the symbol at the caret, by its identity, so a local
+  and a top-level variable of the same name stay apart, and so do the implementations of an interface's member, and a
+  property and its accessors. Its declarations are text, as in Roslyn's own server, both parts of a partial method or
+  property among them, also from the part that implements it; an assignment, also after `?.`, an increment or decrement,
+  an `out` or `ref` argument and a deconstruction write it, and the rest read it.
+- **XML docs** of the marked assemblies are next to them. .NET's are the reference pack's English files, which don't
+  match the runtime's assemblies one to one: `string` is in `System.Private.CoreLib`, and its docs in
+  `System.Runtime.xml`. A member's file is the one named after a runtime assembly that defines or forwards its type.
+  The server reads which types those are with the first request for docs, and a file when one of its members is first
+  asked for. Without the files, scripts work as before, without .NET's docs.
+- **Signature help** on `(`, `[`, `<`, `{` and `,`, and again on `)`, `]`, `>` and `}`: the overloads of a call, a
+  constructor, a `this(` or `base(` initializer, an attribute, an indexer, also after `?` and in an object initializer,
+  and a collection initializer's entry, which go to `Add`, with the one that overload resolution selects for the
+  arguments so far, taking missing arguments as `default`, so that an unfinished call selects too; before the first
+  argument, only a call that binds as it is selects. Without one selected, the first signature with a parameter at the
+  caret shows, as in Roslyn's own server. An attribute's fields and properties that its named arguments may set, as
+  the compiler allows them, also by their type, follow its
+  constructor's parameters. A generic name's type argument list, also half written, shows its type parameters and
+  constraints, of the methods that its receiver can call, as a call's; a `<` after a name that no generic type or method
+  has, as in `a < b`, shows nothing. The innermost arguments around the caret win, and brackets with nothing to show, as
+  an array's, leave the call around them. The candidates are those that Roslyn shows: a type's static methods, a value's
+  instance and extension methods, accessible through the receiver's type, without members marked
+  `[EditorBrowsable(Never)]` in a referenced assembly or an overload that a more specific one hides. Asking again
+  follows an argument's new type, and keeps a signature that the user chose by key. Named arguments and `params` mark
+  their parameter. Each signature has its summary and each parameter its description, a type parameter's included, as
+  Markdown from the XML docs, as in hover: a reference reads as the name it refers to, and `<inheritdoc/>` takes what
+  the docs leave out from the member they inherit from, the parameters' and type parameters' by their place, as an
+  implementation may rename them.
 - **Semantic colors** are answered for ranges, with the protocol's standard token types. A script's top-level variables
-  are fields to Roslyn, and are colored as variables.
+  are fields to Roslyn, and are colored as variables. Static members have the `static` modifier, and constants and
+  readonly fields the `readonly` one.
 - **Compiling** runs on the thread pool beside the editor's requests, so completion keeps answering. The request carries
   the snapshot's text, so edits, closing the document or opening another at its path can't change what compiles; an open
   script with the same text in the same environment lends the compilation its diagnostics already built. A compilation
@@ -621,10 +714,12 @@ app's script environments.
 - **Where it runs.** `dotnet build` puts the server in `helpers/csharp-server/` next to the app, as portable IL, with the
   lists of the marked assemblies and of .NET's in `helpers/`, and the marked assemblies' XML docs next to them. In
   development it runs on the `dotnet` host of the installation whose runtime runs the app, found from that runtime's
-  directory, never from `PATH`. `dotnet publish` compiles it with ReadyToRun for the app's platform, gives it an app host
-  that looks only in `helpers/dotnet/`, and puts one .NET runtime there from the runtime pack, also for a self-contained
-  or NativeAOT app. These files join after the app's own publish, so its trimming, NativeAOT and single-file steps never
-  see them, and a republish replaces them.
+  directory, never from `PATH`, and reads .NET's XML docs in the folder of the reference assemblies that the build
+  resolved, which `helpers/script-framework-docs.txt` names, copying nothing. `dotnet publish` compiles it with
+  ReadyToRun for the app's platform, gives it an app host that looks only in `helpers/dotnet/`, and puts one .NET
+  runtime there from the runtime pack, also for a self-contained or NativeAOT app, with the reference pack's XML docs
+  next to the runtime's assemblies. These files join after the app's own publish, so its trimming, NativeAOT and
+  single-file steps never see them, and a republish replaces them.
 
 ## 7. Sessions
 
@@ -1060,10 +1155,12 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   a frame with 10,000 errors over all of the text allocates under 1 MB more than one with one such error, where
   reading them for each line in view took 8.4 MB;
 - hover: the diagnostics' messages, with their codes, above the server's Markdown, whose code block is highlighted with
-  the document's grammar in the editor's font, colors and background; in the editor's popup, in the window's overlay
-  layer, inside a window narrower than the popup. An editor in a dark `ThemeVariantScope` of a light window shows a
-  dark popup, in its pixels. Inline code shows in the editor's font on the theme's code background, and code without a
-  color of its own in the editor's foreground, in the pixels. The popup stays while the pointer is over its word or
+  the document's grammar in the editor's font and colors; in the editor's popup, in the window's overlay layer, inside
+  a window narrower than the popup. An editor in a dark `ThemeVariantScope` of a light window shows a dark popup, its
+  code on the popup's background and not the text area's, in its pixels. The code that opens a part, also the server's
+  below the diagnostics, has a line below it when more follows in its part, and code among the docs has none. Inline code shows in the editor's font on the theme's code background, and code without a
+  color of its own in the editor's foreground, in the pixels. Code fills each line, breaking at any character, and
+  copies as written, also its own no-break spaces. The popup stays while the pointer is over its word or
   over the popup. Moved onto other text, it stays until the pointer has rested there for 300 ms, so that a
   diagonal move can reach it, and then that text's hover takes its place. It closes at once when the pointer leaves both the text and the popup, and on typing, Escape,
   scrolling and focus loss. A click into it holds it, its selection copies, the hover key puts the keyboard into it where the arrows and
@@ -1121,7 +1218,7 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   typing starts a word; not on typing on in a word, nor at the start of one that goes on, nor in a comment. A trigger
   character typed while a word's list shows asks again, and the new list shows, also when the server answers only
   after the word's list, filtered for the trigger character, has nothing left; one that is also the selected item's
-  commit character commits it, goes in, and then asks again;
+  commit character commits it, goes in, and then asks again; one that the item's text ends with goes in once;
 - the ranking that the C# server will share gives the scores and the matched characters of VS Code's `fuzzyScore`
   and `anyScore`: compared with VS Code 1.145's own code, without its emoji separators, on 25,000 random texts, also
   beyond 128 characters, they agreed on all of them. Tests check prefixes before capitals inside words, equal scores
@@ -1152,7 +1249,9 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   below it in a window of 420 pixels, narrower beside it in one of 640, wrapped inside the window, with the list at
   the word it completes;
   additional edits apply with the item in one step, and ones that come after the commit join its step, and are
-  dropped once the user typed on;
+  dropped once the user typed on; of two that come late and each rewrite the same block of imports only the first
+  goes in, one over text that changed since stays out, and one over lines that were replaced and restored since goes
+  over them as they were;
 - an incomplete list is asked for again on each character typed, for incomplete completions; a newer request and
   Escape cancel the one under way with `$/cancelRequest`, and selecting another item cancels the resolve under way,
   also when it is an item resolved already;
@@ -1170,8 +1269,19 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   the caret where it was, shows the other signatures on
   Up and Down, tells the server the one that shows, which keeps it, and leaves Up and Down to an open completion
   list; it shows above the line while completion's list shows below, and ends on Escape, on leaving the call, on
-  focus loss and when the server stops serving the document;
-- the client advertises exactly what it implements, snippets included;
+  focus loss and when the server stops serving the document; it shows one signature at a time, with the active
+  parameter's documentation and the signature's below it; its count and buttons choose the signature, leave the
+  keyboard in the editor, and stay under the pointer near the window's edge on both sides of the line, also when
+  the next signature's documentation is longer than the room; the card is as wide as a short signature, and a
+  signature wider than a hover wraps at the hover's width, and a card that kept its place stays inside a window that
+  narrowed past it;
+- completion's details and signature help's card look as the hover does: the code in its token colors on Light+'s
+  hover background, with none of the text area's white behind it in the pixels, then a line in the popup's border,
+  then the docs in the hover's muted foreground; the card's active parameter bold in the highlight color, and the rest
+  of its signature in its tokens' colors;
+- the client advertises exactly what it implements, snippets and label details included;
+- an item's label details show right after its label and at the right of every row, in place of the selected item's
+  detail, and typing matches only the label;
 - snippets: stops, placeholders, the final stop and escapes parse; a choice, a variable, a transformation, a nested
   placeholder and a repeated stop go in as their text without a stop; text that does not parse stays text, also text
   nested or unclosed as deep as the limit allows. In the editor, a snippet goes in by its `insertText`, and by a text
@@ -1206,7 +1316,22 @@ server process:
   a cancelled request stopping while the server goes on; a killed server reopening its documents in their environment;
   escaped identifiers;
 - signature help for `Task.Delay(1000, `, unfinished generic calls, a named argument, `params`, an indented continuation
-  line, and asking again after an argument's type changed;
+  line, and asking again after an argument's type changed; static and instance receivers, access through the
+  receiver's type, and hidden overloads; constructor initializers, attributes, indexers, type argument lists and
+  collection initializer entries, with a comparison's `<` quiet; a signature's summary and its parameters'
+  descriptions, also inherited;
+- Roslyn's commit characters, none right after `.` nor where a lambda's parameter may be named; `:` opening a format's
+  list and nothing after a named argument; a named argument's colon, left out where one follows, also after a line break
+  or a comment, where it does not commit; a documentation comment's tags, `<see cref=""/>` with the caret between its
+  quotes; types and extension methods from namespaces the script does not import, with their `using` after a leading
+  comment or among the usings, none from a dependency under the private alias and none before a name is typed; obsolete
+  members; one error per rejected directive, none of them suggested; the script's variables, then named arguments,
+  members and object's methods before types and keywords; the types of variables and members and the return types
+  of methods, also after a dot, and none for types; `static` and `readonly` in semantic colors;
+  occurrences by symbol, with reads and writes through members, deconstructions and `out`, and both declarations of a
+  partial member;
+- .NET's XML docs in hover and signature help, for `string.Concat`, from the SDK's reference pack, and a missing folder
+  of docs leaving hover without them;
 - once by hand, not in CI: the same 45 tests from a NativeAOT client, with the server and the marked assemblies put next
   to it, and the sample's script document on a Linux desktop, in completion, its details, signature help, hover,
   squiggles and semantic colors;
@@ -1231,6 +1356,8 @@ blocking:
   references that need 13.0.1 and 13.0.3 of one package and load one, and a multi-targeted library in its `net10.0`
   build. An incompatible pair fails with NuGet's NU1107, a reference that needs ASP.NET Core fails by name, and a
   republish without a reference leaves none of its files;
+- .NET's XML docs: a development build names the SDK's reference pack, a JIT and a NativeAOT publish put the docs next
+  to the helpers' runtime, and a republish with `PublishCSharpScriptFrameworkDocs=false` leaves none;
 - the server's assemblies have ReadyToRun code, and it starts with `DOTNET_ROOT` pointing nowhere. A published app with
   ReadyToRun, ten new processes on a machine with other work (load about 4): "C# ready" on 5,000 lines took 845 to
   899 ms, median 862 ms, within the budget of 1.5 s.

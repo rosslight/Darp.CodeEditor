@@ -45,7 +45,7 @@ public sealed class HoverTimingTests(UiFixture ui)
             await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two");
             using var window = new EditorWindow(new CodeEditor { Document = document });
-            await server.StartAsync();
+            await CompletionTests.StartServingAsync(server, document);
             await HoverAsync(window, 0, "one is a word in", time);
 
             window.MoveMouse(window.PointAt(4));
@@ -63,7 +63,7 @@ public sealed class HoverTimingTests(UiFixture ui)
             await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two");
             using var window = new EditorWindow(new CodeEditor { Document = document });
-            await server.StartAsync();
+            await CompletionTests.StartServingAsync(server, document);
 
             window.MoveMouse(window.PointAt(1));
             Pass(window, time, TimeSpan.FromMilliseconds(200));

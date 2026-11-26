@@ -3,54 +3,62 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
+using Avalonia.Logging;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
 using Avalonia.Media.TextFormatting;
+using Darp.CodeEditor.Loading;
 
 namespace Darp.CodeEditor.Popups;
 
 /// <summary>
-/// The controls that show a hover's blocks: text in the popup's look, links in <c>textLink.foreground</c>, code spans on
-/// <c>textCodeBlock.background</c>, and code blocks in the editor's font, colors and background. A hover's text is
-/// selectable.
+/// The controls that show the blocks of every popup of code and docs, so that they look alike: the hover, with or
+/// without problems, completion's details and signature help's card. Code sits on the popup's background in the
+/// editor's font, its tokens in the editor's colors; the code that opens a part, as a signature, has a line below it,
+/// between it and the docs; the docs are text in the popup's own, muted color, with links in
+/// <c>textLink.foreground</c> and code spans on <c>textCodeBlock.background</c>. Lines are in <c>editorHoverWidget.border</c>, the border of these popups
+/// (<see cref="PopupFrame.PaintDocs"/>). A hover's text is selectable.
 /// </summary>
 internal static class HoverView
 {
     /// <summary>How far each level of a list is indented.</summary>
     private const double ListIndent = 16;
 
+    /// <summary>
+    /// What code shows for a space. Code fills each line and breaks at any character, as VS Code's completion details:
+    /// by Unicode's rules a line of code breaks only at a space, so a qualified name too long for what follows
+    /// <c>enum </c> went whole to a line of its own and was cut there still. A no-break space leaves code no place to
+    /// break, and a line that doesn't fit breaks where it is full.
+    /// </summary>
+    private const char NoBreakSpace = ' ';
+
     /// <summary>The hand over links, made the first time it is needed.</summary>
     private static Cursor? s_hand;
 
     /// <param name="blocks">The blocks.</param>
     /// <param name="code">How code looks.</param>
-    /// <param name="rule">The color of the line between parts.</param>
     /// <param name="selectable">Whether the user can select and copy the text, as in a hover.</param>
-    public static PopupStack Create(
-        IReadOnlyList<HoverBlock> blocks,
-        CodeLook code,
-        IBrush rule,
-        bool selectable = false
-    )
+    public static PopupStack Create(IReadOnlyList<HoverBlock> blocks, CodeLook code, bool selectable = false)
     {
         var panel = new PopupStack { Spacing = 6 };
-        Append(panel, blocks, code, rule, selectable);
+        Append(panel, blocks, code, selectable);
         return panel;
     }
 
-    /// <summary>Adds blocks below those that show, which keep their selection and scroll position.</summary>
-    public static void Append(
-        PopupStack panel,
-        IReadOnlyList<HoverBlock> blocks,
-        CodeLook code,
-        IBrush rule,
-        bool selectable
-    )
+    /// <summary>
+    /// Adds blocks below those that show, which keep their selection and scroll position. The blocks start a part where
+    /// nothing shows yet.
+    /// </summary>
+    public static void Append(PopupStack panel, IReadOnlyList<HoverBlock> blocks, CodeLook code, bool selectable)
     {
-        foreach (HoverBlock block in blocks)
+        IBrush rule = code.Colors.HoverBorder;
+        bool opensPart = panel.Children.Count == 0;
+        for (int i = 0; i < blocks.Count; i++)
         {
+            HoverBlock block = blocks[i];
             panel.Children.Add(
                 block switch
                 {
@@ -60,6 +68,10 @@ internal static class HoverView
                     _ => throw new UnreachableException(),
                 }
             );
+            // The code that opens a part, as a signature, stands apart from the docs below it.
+            if (opensPart && block is HoverCode && i + 1 < blocks.Count && blocks[i + 1] is not HoverRule)
+                panel.Children.Add(new PopupLine { Background = rule });
+            opensPart = block is HoverRule;
         }
     }
 
@@ -127,29 +139,55 @@ internal static class HoverView
     private static IBrush Dimmed(IBrush brush) =>
         brush is ISolidColorBrush solid ? new ImmutableSolidColorBrush(solid.Color, solid.Opacity * 0.6) : brush;
 
-    private static Control Code(HoverCode block, CodeLook look, bool selectable)
+    private static TextBlock Code(HoverCode block, CodeLook look, bool selectable)
     {
         var inlines = new InlineCollection();
         foreach (CodeRun run in block.Runs)
         {
             // A run without a color of its own takes the block's, the editor's foreground.
-            var text = new Run(run.Text);
+            var text = new Run(run.Text.Replace(' ', NoBreakSpace));
             if (run.Foreground is { } foreground)
                 text.Foreground = foreground;
+            if (run.Bold)
+                text.FontWeight = FontWeight.Bold;
             inlines.Add(text);
         }
         TextBlock code = Text(look, selectable);
         code.Inlines = inlines;
         code.FontFamily = look.FontFamily;
         code.FontSize = look.FontSize;
-        code.Foreground = look.Foreground;
+        code.Foreground = look.Colors.CodeForeground;
         code.TextWrapping = TextWrapping.Wrap;
-        return new PopupBox
+        if (code is SelectableTextBlock copied)
         {
-            Background = look.Background,
-            Padding = new Thickness(6, 4),
-            Child = code,
-        };
+            string original = string.Concat(block.Runs.Select(run => run.Text));
+            copied.CopyingToClipboard += (_, e) => Copy(copied, original, e);
+        }
+        return code;
+    }
+
+    /// <summary>
+    /// Copies the selected part of <paramref name="original"/>, the code that <paramref name="code"/> shows with its
+    /// spaces as no-break spaces: the two have the same length.
+    /// </summary>
+    private static async void Copy(SelectableTextBlock code, string original, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        int start = Math.Clamp(Math.Min(code.SelectionStart, code.SelectionEnd), 0, original.Length);
+        int end = Math.Clamp(Math.Max(code.SelectionStart, code.SelectionEnd), start, original.Length);
+        string text = original[start..end];
+        try
+        {
+            if (TopLevel.GetTopLevel(code)?.Clipboard is { } clipboard)
+                await clipboard.SetTextAsync(text);
+        }
+        catch (Exception exception)
+        {
+            // The platform's clipboard fails now and then; the text is then not copied, as in the editor.
+            Logger
+                .TryGet(LogEventLevel.Warning, AssetFiles.LogArea)
+                ?.Log(code, "Writing to the clipboard failed: {Exception}", exception);
+        }
     }
 
     /// <summary>
@@ -199,15 +237,8 @@ internal static class HoverView
     private static async void Open(TopLevel topLevel, Uri uri) => await topLevel.Launcher.LaunchUriAsync(uri);
 }
 
-/// <summary>How code looks in a popup: as in the editor.</summary>
+/// <summary>How code looks in a popup: in the editor's font.</summary>
 /// <param name="FontFamily">The editor's font.</param>
 /// <param name="FontSize">The editor's font size.</param>
 /// <param name="Colors">The popups' colors.</param>
-internal sealed record CodeLook(FontFamily FontFamily, double FontSize, PopupColors Colors)
-{
-    /// <summary>The text area's background.</summary>
-    public IBrush Background => Colors.CodeBackground;
-
-    /// <summary>The text area's foreground.</summary>
-    public IBrush Foreground => Colors.CodeForeground;
-}
+internal sealed record CodeLook(FontFamily FontFamily, double FontSize, PopupColors Colors);

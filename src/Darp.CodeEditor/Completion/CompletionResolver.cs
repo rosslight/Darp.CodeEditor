@@ -144,7 +144,7 @@ internal sealed class CompletionResolver
                 cancellation.Token
             );
             if (!cancellation.IsCancellationRequested)
-                _view.ShowDetails(HoverView.Create(blocks, _view.Look, _view.Colors.SuggestBorder));
+                _view.ShowDetails(HoverView.Create(blocks, _view.Look));
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception e)
@@ -169,11 +169,7 @@ internal sealed class CompletionResolver
         var budget = new HoverBudget();
         var blocks = new List<HoverBlock>();
         if (item.Detail is { } detail && budget.Take(detail) is { } kept)
-        {
-            // Lines end at \r\n, \n or \r, as everywhere in the library.
-            string[] lines = kept.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-            blocks.AddRange(budget.Fit([HoverBlocks.Highlight(lines, grammar, cancellationToken)]));
-        }
+            blocks.AddRange(budget.Fit([HoverBlocks.Highlight(kept, grammar, cancellationToken)]));
         if (item.Documentation is { } documentation)
             blocks.AddRange(HoverBlocks.Of(new HoverInfo([documentation], null), grammar, budget, cancellationToken));
         return blocks;

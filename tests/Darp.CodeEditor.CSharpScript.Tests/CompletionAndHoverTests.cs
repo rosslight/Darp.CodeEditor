@@ -1,4 +1,5 @@
 using Darp.CodeEditor.LanguageClient;
+using Darp.CodeEditor.Lsp;
 using ScriptTests.Api;
 
 namespace Darp.CodeEditor.CSharpScript.Tests;
@@ -35,6 +36,45 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task Dotnet_members_hover_with_their_xml_docs()
+    {
+        // At runtime string is in System.Private.CoreLib, and its docs are in the reference pack's System.Runtime.xml.
+        using var script = await _fixture.OpenAsync("var text = string.Con|cat(\"a\", \"b\");");
+        string hover = HoverText((await script.HoverAsync()).ShouldNotBeNull());
+        hover.ShouldContain("string.Concat(");
+        hover.ShouldContain("Concatenates two specified instances of");
+    }
+
+    [Fact]
+    public async Task Dotnet_docs_show_code_as_code_spans()
+    {
+        // Its returns: An <c>IEnumerable<IGrouping<TKey, TSource>></c> in C# or ... where each <see cref="..."/> ...
+        using var script = await _fixture.OpenAsync("var groups = new[] { 1 }.Group|By(n => n % 2);");
+        string hover = HoverText((await script.HoverAsync()).ShouldNotBeNull());
+        hover.ShouldContain("**Returns:** An `IEnumerable<IGrouping<TKey, TSource>>` in C\\# or");
+        hover.ShouldContain("each `IGrouping<out TKey, out TElement>` object");
+        hover.ShouldContain("**Exceptions:** `ArgumentNullException`");
+    }
+
+    [Fact]
+    public async Task Docs_name_code_as_code_spans_and_label_sections_in_bold()
+    {
+        using var script = await _fixture.OpenAsync("var copies = Repeat|(\"a\", 2);");
+        string hover = HoverText((await script.HoverAsync(script.Caret - 1)).ShouldNotBeNull());
+        hover.ShouldContain("Repeats `text`, or returns `null` for none.\n\nEach copy follows the last.");
+        hover.ShouldContain("**Returns:** The copies.");
+
+        CompletionList list = await script.CompleteAsync();
+        CompletionItem resolved = (
+            await list.ResolveAsync(
+                list.Items.Single(item => item.Label == "Repeat"),
+                TestContext.Current.CancellationToken
+            )
+        ).ShouldNotBeNull();
+        resolved.Documentation.ShouldNotBeNull().Text.ShouldContain("Repeats `text`, or returns `null` for none.");
+    }
+
+    [Fact]
     public async Task Inherited_globals_members_complete_and_hover()
     {
         using var script = await _fixture.OpenAsync("var value = InheritedValue|;");
@@ -56,6 +96,259 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
         list.Items.First(item => item.Label == "Add").Kind.ShouldBe(MethodKind);
         list.Items.First(item => item.Label == "Greeting").Kind.ShouldBe(PropertyKind);
         list.Items.First(item => item.Label == "Task").Kind.ShouldBe(ClassKind);
+    }
+
+    [Fact]
+    public async Task The_scripts_variables_come_first_then_members_then_objects_then_types_and_keywords()
+    {
+        using var script = await _fixture.OpenAsync("var zebra = 1;\nforeach (var apple in new[] { 1 })\n{\n    |\n}");
+        CompletionList list = await script.CompleteAsync();
+
+        // As the client orders them before anything is typed.
+        CompletionItem[] items = [.. list.Items.OrderBy(item => item.SortKey)];
+        items.Take(2).Select(item => item.Label).ShouldBe(["apple", "zebra"]);
+        int rest = Array.FindIndex(items, item => item.Kind is KeywordKind or ClassKind);
+        string[] members = [.. items[2..rest].Select(item => item.Label)];
+        string[] objects = ["Equals", "GetHashCode", "GetType", "ReferenceEquals", "ToString"];
+        members[^objects.Length..].ShouldBe(objects);
+        members.ShouldContain("Greeting");
+        members.ShouldContain("Add");
+        items[rest..].ShouldAllBe(item => item.Kind != PropertyKind && item.Kind != MethodKind);
+    }
+
+    [Fact]
+    public async Task Named_arguments_come_after_the_variables_and_before_members()
+    {
+        using var script = await _fixture.OpenAsync("var zebra = 1;\nNamed(|)");
+        CompletionList list = await script.CompleteAsync();
+
+        CompletionItem[] items = [.. list.Items.OrderBy(item => item.SortKey)];
+        items.Take(3).Select(item => item.Label).ShouldBe(["zebra", "name:", "value:"]);
+        items[3].Kind.ShouldBeOneOf([PropertyKind, MethodKind]);
+        // A named argument shows no type.
+        items[1].LabelDetails.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task A_method_shows_the_return_type_of_an_overload_that_its_receiver_reaches()
+    {
+        using var script = await _fixture.OpenAsync(
+            """
+            class C
+            {
+                public string Get() => "";
+                public static int Get(int x) => x;
+                public int Make() => 0;
+                public T Make<T>() => default!;
+            }
+            C.|
+            """
+        );
+        CompletionList statics = await script.CompleteAsync();
+        statics.Items.Single(item => item.Label == "Get").LabelDetails.ShouldNotBeNull().Description.ShouldBe("int");
+
+        using var instance = await _fixture.OpenAsync(script.Document.Text.Replace("C.", "new C().") + "|");
+        CompletionList members = await instance.CompleteAsync();
+        members.Items.Single(item => item.Label == "Get").LabelDetails.ShouldNotBeNull().Description.ShouldBe("string");
+        members.Items.Single(item => item.Label == "Make").LabelDetails.ShouldNotBeNull().Description.ShouldBe("int");
+        members.Items.Single(item => item.Label == "Make<>").LabelDetails.ShouldNotBeNull().Description.ShouldBe("T");
+    }
+
+    [Theory]
+    [InlineData("class C { public int Greeting { get; set; } }\nvar c = new C { Gre| };", "Greeting")]
+    [InlineData("class C { public int Greeting { get; set; } }\nvar c = new C { | };", "Greeting")]
+    [InlineData("record R(int Greeting);\nvar r = new R(1) with { Gre| };", "Greeting")]
+    [InlineData("var list = new System.Collections.Generic.List<int> { Cap| };", "Capacity")]
+    [InlineData("class B { protected int Greeting; }\nclass D : B { void M() { base.Gre| } }", "Greeting")]
+    [InlineData(
+        "class B { public static string Pick(int x) => \"\"; public int Pick() => 0; }\nclass D : B { void M() { base.Pic| } }",
+        "Pick"
+    )]
+    public async Task An_initializer_and_base_show_the_types_of_their_members(string text, string label)
+    {
+        // The globals have a string Greeting of their own.
+        using var script = await _fixture.OpenAsync(text);
+        CompletionList list = await script.CompleteAsync();
+        list.Items.Single(item => item.Label == label).LabelDetails.ShouldNotBeNull().Description.ShouldBe("int");
+    }
+
+    [Fact]
+    public async Task Groups_follow_the_symbols_not_the_names()
+    {
+        // An escaped name is a script's variable.
+        using var escaped = await _fixture.OpenAsync("int @object = 1;\n|");
+        CompletionItem[] items = [.. (await escaped.CompleteAsync()).Items.OrderBy(item => item.SortKey)];
+        items[0].Label.ShouldBe("@object");
+
+        // A type's field of a script variable's name is a member.
+        using var field = await _fixture.OpenAsync(
+            "class C { public int Apple; public int Zebra; }\nvar Zebra = 2;\nnew C().|"
+        );
+        items = [.. (await field.CompleteAsync()).Items.OrderBy(item => item.SortKey)];
+        items.Take(2).Select(item => item.Label).ShouldBe(["Apple", "Zebra"]);
+
+        // A static method of object's names is the type's own.
+        using var statics = await _fixture.OpenAsync("class C { public static string ToString(int x) => \"\"; }\nC.|");
+        items = [.. (await statics.CompleteAsync()).Items.OrderBy(item => item.SortKey)];
+        items.Select(item => item.Label).ShouldBe(["ToString", "Equals", "ReferenceEquals"]);
+    }
+
+    [Fact]
+    public async Task Variables_and_members_show_their_type_and_methods_their_return_type()
+    {
+        using var script = await _fixture.OpenAsync(
+            "var zebra = 1;\nforeach (var apple in new[] { \"a\" })\n{\n    |\n}"
+        );
+        CompletionList list = await script.CompleteAsync();
+        string? TypeOf(string label) => list.Items.First(item => item.Label == label).LabelDetails?.Description;
+        // A var of a reference type is nullable, as its hover says.
+        TypeOf("apple").ShouldBe("string?");
+        TypeOf("zebra").ShouldBe("int");
+        TypeOf("Greeting").ShouldBe("string");
+        TypeOf("Add").ShouldBe("int");
+        TypeOf("Write").ShouldBe("void");
+        TypeOf("Repeat").ShouldBe("string?");
+        TypeOf("Pick<>").ShouldBe("T");
+        TypeOf("@class").ShouldBe("int");
+        // As .NET declares object's.
+        TypeOf("ToString").ShouldBe("string?");
+        TypeOf("Task").ShouldBeNull();
+        TypeOf("await").ShouldBeNull();
+
+        // After a dot, the receiver's members, also extension methods.
+        using var access = await _fixture.OpenAsync("using System.Linq;\nGreeting.|");
+        CompletionList members = await access.CompleteAsync();
+        string? MemberTypeOf(string label) =>
+            members.Items.First(item => item.Label == label).LabelDetails?.Description;
+        MemberTypeOf("Length").ShouldBe("int");
+        MemberTypeOf("ToUpper").ShouldBe("string");
+        MemberTypeOf("Count<>").ShouldBe("int");
+    }
+
+    [Fact]
+    public async Task A_deprecated_item_shows_as_deprecated()
+    {
+        using var script = await _fixture.OpenAsync("[Obsolete(\"Use New.\")] void Old() {}\nvoid New() {}\nOl|");
+        CompletionList list = await script.CompleteAsync();
+        list.Items.Single(item => item.Label == "Old").IsDeprecated.ShouldBeTrue();
+        list.Items.Single(item => item.Label == "New").IsDeprecated.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Directives_that_scripts_cannot_use_are_not_suggested()
+    {
+        using var script = await _fixture.OpenAsync("int line = 1;\n#|");
+        string[] labels = [.. (await script.CompleteAsync()).Items.Select(item => item.Label)];
+        labels.ShouldContain("region");
+        labels.ShouldContain("nullable");
+        labels.ShouldNotContain("r");
+        labels.ShouldNotContain("load");
+        labels.ShouldNotContain("line");
+
+        // Without "r", "region" matches "#r": typing on, as with a space, must not commit it.
+        using var typed = await _fixture.OpenAsync("#r|");
+        CompletionList list = await typed.CompleteAsync();
+        list.Items.ShouldContain(item => item.Label == "region");
+        list.Items.ShouldAllBe(item => item.CommitCharacters.Length == 0);
+    }
+
+    [Fact]
+    public async Task Punctuation_commits_a_member_once_its_name_is_typed()
+    {
+        using var script = await _fixture.OpenAsync("var length = Greeting.|");
+        // Right after the dot, punctuation goes in as it is, and typing a name asks again.
+        CompletionList afterDot = await script.CompleteAsync(
+            new CompletionTrigger(CompletionTriggerKind.TriggerCharacter, '.')
+        );
+        afterDot.IsIncomplete.ShouldBeTrue();
+        afterDot.Items.Single(item => item.Label == "Length").CommitCharacters.ShouldBeEmpty();
+
+        script.Document.Replace(new TextRange(script.Caret, 0), "Le");
+        script.Caret += 2;
+        CompletionList typed = await script.CompleteAsync(
+            new CompletionTrigger(CompletionTriggerKind.TriggerForIncompleteCompletions)
+        );
+        typed.IsIncomplete.ShouldBeFalse();
+        string commit = typed.Items.Single(item => item.Label == "Length").CommitCharacters;
+        commit.ShouldContain('.');
+        commit.ShouldContain(';');
+        commit.ShouldContain('(');
+    }
+
+    [Fact]
+    public async Task Nothing_commits_by_punctuation_where_a_new_name_may_be_typed()
+    {
+        using var script = await _fixture.OpenAsync("var upper = Greeting.Where(c|");
+        CompletionList list = await script.CompleteAsync();
+        list.Items.ShouldNotBeEmpty();
+        list.Items.ShouldAllBe(item => item.CommitCharacters.Length == 0);
+    }
+
+    [Fact]
+    public async Task A_named_argument_puts_in_its_colon_and_over_one_that_follows()
+    {
+        using var script = await _fixture.OpenAsync("var sum = Add(le|");
+        CompletionItem left = (await script.CompleteAsync()).Items.Single(item => item.Label == "left:");
+        left.Edit.NewText.ShouldBe("left:");
+        // Typed, the colon commits it, and goes in once.
+        left.CommitCharacters.ShouldContain(':');
+
+        // One colon stays, also when it is typed.
+        const string text = "var sum = Add(le : 1, right: 2);";
+        using var followed = await _fixture.OpenAsync(text.Insert(text.IndexOf(" :", StringComparison.Ordinal), "|"));
+        left = (await followed.CompleteAsync()).Items.Single(item => item.Label == "left:");
+        left.Edit.ShouldBe(
+            new CompletionEdit(
+                TextRange.FromBounds(text.IndexOf("le", StringComparison.Ordinal), text.IndexOf(':') + 1),
+                "left:"
+            )
+        );
+        left.CommitCharacters.ShouldContain(':');
+
+        // After a line break or a comment, the colon stays where it is, and typing another commits nothing.
+        foreach (string apart in new[] { "var sum = Add(le|\n: 1, right: 2);", "var sum = Add(le| /* l */ : 1);" })
+        {
+            using var separated = await _fixture.OpenAsync(apart);
+            left = (await separated.CompleteAsync()).Items.Single(item => item.Label == "left:");
+            left.Edit.ShouldBe(new CompletionEdit(TextRange.FromBounds(separated.Caret - 2, separated.Caret), "left"));
+            left.CommitCharacters.ShouldNotContain(':');
+        }
+    }
+
+    [Fact]
+    public async Task A_colon_opens_a_list_only_in_a_format()
+    {
+        var colon = new CompletionTrigger(CompletionTriggerKind.TriggerCharacter, ':');
+        using var format = await _fixture.OpenAsync("var now = $\"{DateTime.Now:|}\";");
+        format.Document.Features.ShouldNotBeNull().Completion.ShouldNotBeNull().TriggerCharacters.ShouldContain(':');
+        (await format.CompleteAsync(colon)).Items.ShouldContain(item => item.Label == "d");
+
+        using var argument = await _fixture.OpenAsync("var sum = Add(left:|");
+        (await argument.CompleteAsync(colon)).Items.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_documentation_comment_completes_its_tags()
+    {
+        using var script = await _fixture.OpenAsync("/// <|\nvoid Report() {}");
+        script.Document.Features.ShouldNotBeNull().Completion.ShouldNotBeNull().TriggerCharacters.ShouldContain('<');
+        CompletionList list = await script.CompleteAsync(
+            new CompletionTrigger(CompletionTriggerKind.TriggerCharacter, '<')
+        );
+
+        CompletionItem summary = list.Items.Single(item => item.Label == "summary");
+        summary.Edit.NewText.ShouldBe("summary");
+        // Roslyn describes a tag with nothing: it resolves without a detail to show.
+        CompletionItem resolved = (
+            await list.ResolveAsync(summary, TestContext.Current.CancellationToken)
+        ).ShouldNotBeNull();
+        resolved.Detail.ShouldBeNull();
+        resolved.Documentation.ShouldBeNull();
+        // An element without content goes in whole, over the typed "<", with the caret between its quotes.
+        CompletionItem see = list.Items.Single(item => item.Label == "see");
+        see.Edit.ShouldBe(new CompletionEdit(new TextRange(4, 1), "<see cref=\"$0\"/>"));
+        see.Snippet.ShouldNotBeNull();
+        see.FilterText.ShouldBe("<see");
     }
 
     [Fact]
@@ -145,6 +438,51 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
         ];
         names.ShouldBe(["sum", "Add", "first", "Greeting", "Length"]);
         types.ShouldBe(["variable", "method", "variable", "property", "property"]);
+    }
+
+    [Fact]
+    public async Task Semantic_tokens_mark_static_members_and_readonly_fields()
+    {
+        using var script = await _fixture.OpenAsync(
+            "class C { public static readonly int Field = 1; public readonly int Inst = 2; public static int M() => 1; }\n"
+                + "const int K = 2;\n"
+                + "var sum = C.M() + C.Field + new C().Inst + K;"
+        );
+        SemanticTokenLines tokens = (
+            await script.Document.SemanticTokensAsync(
+                new TextPosition(3, 1),
+                new TextPosition(3, 46),
+                3,
+                TestContext.Current.CancellationToken
+            )
+        ).ShouldNotBeNull();
+        string line = script.Document.CurrentSnapshot.GetText().Split('\n')[2];
+        string[] described =
+        [
+            .. tokens
+                .Lines.ShouldHaveSingleItem()
+                .Chunk(SemanticTokenLines.Stride)
+                .Select(t =>
+                    string.Join(
+                        ' ',
+                        [
+                            line.Substring(t[0], t[1]),
+                            tokens.Legend.TokenTypes[t[2]],
+                            .. tokens.Legend.TokenModifiers.Where((_, bit) => (t[3] & (1 << bit)) != 0),
+                        ]
+                    )
+                ),
+        ];
+        described.ShouldBe([
+            "sum variable",
+            "C class",
+            "M method static",
+            "C class",
+            "Field variable readonly static",
+            "C class",
+            "Inst variable readonly",
+            "K variable readonly static",
+        ]);
     }
 
     [Fact]

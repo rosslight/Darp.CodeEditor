@@ -21,6 +21,11 @@ namespace Darp.CodeEditor.Popups;
 /// is in or the window, which <see cref="LeftView"/> reports.
 /// </para>
 /// <para>
+/// Shown again in place, it keeps the left edge and the side of its line that it had, so that a button that changed its
+/// content stays under the pointer: content wider than the room right of it wraps, and content taller than the room on
+/// its side scrolls. Once the window leaves it less room right of that edge than it had, it is placed anew.
+/// </para>
+/// <para>
 /// A resizable popup resizes by its edges away from what it is next to: its outer side and the edge away from the
 /// line. <see cref="Resized"/> reports the size dragged to and the edges dragged, and its owner shows it again at that
 /// size, on the same side of its line until the user lets go.
@@ -42,6 +47,11 @@ internal sealed class EditorPopup
 
     /// <summary>The visual of the place, and the place: a character's box in it, read again at each placing.</summary>
     private (Visual RelativeTo, Func<Rect> Anchor)? _line;
+
+    /// <summary>
+    /// Where it was, shown again in place: it keeps that left edge and side of the line; null to place it anew.
+    /// </summary>
+    private PopupBounds? _kept;
 
     /// <summary>The popup it is beside, and the width it would like there; null while it is next to a line.</summary>
     private (EditorPopup Owner, double Width)? _beside;
@@ -67,6 +77,9 @@ internal sealed class EditorPopup
 
     /// <summary>Raised while the user drags an edge, with the size the popup would have.</summary>
     public event Action<Size, Edges>? Resized;
+
+    /// <summary>Raised when the popup was placed: <see cref="Placed"/> says where.</summary>
+    public event EventHandler? PlacedChanged;
 
     /// <summary>
     /// How far left of its place's left edge the popup's left edge goes, as completion's list lines its labels up with
@@ -98,8 +111,14 @@ internal sealed class EditorPopup
     /// Opens the popup next to <paramref name="anchor"/>, a character's box in <paramref name="relativeTo"/>, or moves
     /// it there; also after its content changed.
     /// </summary>
-    public void Show(Visual relativeTo, Func<Rect> anchor)
+    /// <param name="relativeTo">The visual of the place.</param>
+    /// <param name="anchor">The place: a character's box in <paramref name="relativeTo"/>, read again at each placing.</param>
+    /// <param name="inPlace">
+    /// Whether an open popup keeps its left edge and its side of the line, until it is shown otherwise.
+    /// </param>
+    public void Show(Visual relativeTo, Func<Rect> anchor, bool inPlace = false)
     {
+        _kept = inPlace ? Placed : null;
         _line = (relativeTo, anchor);
         _beside = null;
         _placedBy = null;
@@ -197,21 +216,25 @@ internal sealed class EditorPopup
             // The line as its view shows it, in the layer, as a scaled editor shows it too; the place itself may be
             // scrolled out of it sideways.
             Rect line = new Rect(0, anchor.Top, relativeTo.Bounds.Width, anchor.Height).TransformToAABB(toLayer);
-            double left = Left ?? anchor.TopLeft.Transform(toLayer).X - Inset;
+            // A window that narrowed past it leaves it less room where it was: it takes a place anew.
+            if (_kept is { } was && was.Bounds.Left > space.Width - was.Bounds.Width)
+                _kept = null;
+            double left = _kept?.Bounds.Left ?? Left ?? anchor.TopLeft.Transform(toLayer).X - Inset;
             // Placing changes the layout, and the next layout pass finds nothing moved. Content that just changed has its
             // width only after that pass, which then places the popup again.
             double laidOutWidth = _root.DesiredSize.Width;
             if (Equals(_placedBy, (space, line, left, laidOutWidth)))
                 return;
             _placedBy = (space, line, left, laidOutWidth);
+            _root.MaxWidth = _kept is null ? double.PositiveInfinity : space.Width - left;
             _root.MaxHeight = double.PositiveInfinity;
             _root.Measure(new Size(space.Width, double.PositiveInfinity));
             // While the user drags an edge, it stays on its side of the line rather than jump from under the pointer;
             // it takes a side again at its first placing after they let go.
-            (PopupSide side, bool keepSide) =
-                Frame.IsDragging && Placed is { } shown
-                    ? (shown.Above ? PopupSide.Above : PopupSide.Below, true)
-                    : (_side, false);
+            bool? above = _kept?.Above ?? (Frame.IsDragging && Placed is { } shown ? shown.Above : null);
+            (PopupSide side, bool keepSide) = above is { } kept
+                ? (kept ? PopupSide.Above : PopupSide.Below, true)
+                : (_side, false);
             if (PopupPlacement.Place(line, left, _root.DesiredSize, window, side, keepSide) is not { } next)
             {
                 LeaveView();
@@ -259,6 +282,7 @@ internal sealed class EditorPopup
             Canvas.SetTop(_root, placed.Bounds.Top);
         }
         Frame.ResizableEdges = IsResizable ? EdgesAway(placed) : Edges.None;
+        PlacedChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>Closes the popup, as its line left the view: its owner first, which may give the keyboard back from it.</summary>

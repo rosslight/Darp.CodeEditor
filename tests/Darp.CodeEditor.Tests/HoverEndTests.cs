@@ -29,7 +29,7 @@ public sealed class HoverEndTests(UiFixture ui)
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
             var editor = new CodeEditor { Document = document };
             using var window = new EditorWindow(editor);
-            await server.StartAsync();
+            await CompletionTests.StartServingAsync(server, document);
             int three = text.IndexOf("three", StringComparison.Ordinal);
             SelectableTextBlock paragraph = Paragraph(await HoverAsync(window, three, "three is a word in", time));
             Rect box = BoundsInWindow(paragraph);
@@ -80,7 +80,7 @@ public sealed class HoverEndTests(UiFixture ui)
             const string text = "one two three";
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
             using var window = new EditorWindow(new CodeEditor { Document = document });
-            await server.StartAsync();
+            await CompletionTests.StartServingAsync(server, document);
             int two = text.IndexOf("two", StringComparison.Ordinal);
 
             await HoverAsync(window, two, "two is a word in", time);
@@ -105,7 +105,7 @@ public sealed class HoverEndTests(UiFixture ui)
             await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two three");
             using var window = new EditorWindow(new CodeEditor { Document = document });
-            await server.StartAsync();
+            await CompletionTests.StartServingAsync(server, document);
 
             window.Window.MouseDown(window.PointAt(1), MouseButton.Left);
             window.Window.MouseMove(window.PointAt(5), RawInputModifiers.LeftMouseButton);
@@ -155,7 +155,7 @@ public sealed class HoverEndTests(UiFixture ui)
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "one two");
             var editor = new CodeEditor { Document = document };
             using var window = new EditorWindow(editor);
-            await server.StartAsync();
+            await CompletionTests.StartServingAsync(server, document);
             editor.Selection = new TextSelection(1);
             PressHoverKey(window);
             await WaitForPopupAsync(window, "one is a word in");
@@ -176,7 +176,7 @@ public sealed class HoverEndTests(UiFixture ui)
             string line = string.Concat(Enumerable.Repeat("word ", 4_000)).TrimEnd();
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, line);
             using var window = new EditorWindow(new CodeEditor { Document = document });
-            await server.StartAsync();
+            await CompletionTests.StartServingAsync(server, document);
             PopupFrame popup = await HoverAsync(window, 1, "word is a word in", time);
             PressHoverKey(window);
             window.Layout();

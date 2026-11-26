@@ -26,8 +26,19 @@ internal sealed class ScriptAppFiles
         _framework = framework;
     }
 
-    /// <summary>How to start the server.</summary>
-    public static (string FileName, string[] Arguments) ServerCommand() => HelperCommand("csharp-server", ServerName);
+    /// <summary>How to start the server, with the folder of .NET's XML docs that a development build names.</summary>
+    public static (string FileName, string[] Arguments) ServerCommand() =>
+        ServerCommand(Lines("script-framework-docs.txt") is [string folder] ? folder : null);
+
+    /// <summary>
+    /// How to start the server with .NET's XML docs from <paramref name="frameworkDocs"/>. Without it, the server reads
+    /// them next to its runtime, where a published app has them.
+    /// </summary>
+    internal static (string FileName, string[] Arguments) ServerCommand(string? frameworkDocs)
+    {
+        (string fileName, string[] arguments) = HelperCommand("csharp-server", ServerName);
+        return (fileName, frameworkDocs is null ? arguments : [.. arguments, frameworkDocs]);
+    }
 
     /// <summary>How to start a session's runner.</summary>
     public static (string FileName, string[] Arguments) RunnerCommand() => HelperCommand("csharp-runner", RunnerName);
@@ -81,10 +92,11 @@ internal sealed class ScriptAppFiles
         foreach (string file in Lines("script-references.txt"))
             marked[Path.GetFileNameWithoutExtension(file)] = Path.Combine(AppContext.BaseDirectory, file);
         return new ScriptAppFiles(marked, [.. Lines("script-framework.txt")]);
-
-        static string[] Lines(string name) =>
-            Path.Combine(s_helpers, name) is var path && File.Exists(path) ? File.ReadAllLines(path) : [];
     }
+
+    /// <summary>The lines of a file that the build wrote in <c>helpers/</c>; none without it.</summary>
+    private static string[] Lines(string name) =>
+        Path.Combine(s_helpers, name) is var path && File.Exists(path) ? File.ReadAllLines(path) : [];
 
     /// <summary>What the server gets of <paramref name="environment"/>, once its references are checked.</summary>
     /// <exception cref="ArgumentException">An assembly is neither .NET's nor marked.</exception>

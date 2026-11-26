@@ -1,6 +1,5 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using AvaloniaEdit.Editing;
@@ -21,8 +20,7 @@ namespace Darp.CodeEditor.Popups;
 /// </remarks>
 internal sealed class HoverPopup
 {
-    // VS Code's: the least of the hover's most width and height, which grow with the editor, and its least width.
-    private const double MinMaxWidth = 750;
+    // VS Code's: the least of the hover's most height, which grows with the editor, and its least width.
     private const double MinMaxHeight = 250;
     private const double MinResizedWidth = 150;
 
@@ -30,10 +28,7 @@ internal sealed class HoverPopup
     private readonly TextArea _textArea;
     private readonly TextView _textView;
     private readonly Action _close;
-    private readonly PopupScrollViewer _content = new()
-    {
-        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-    };
+    private readonly PopupScrollViewer _content = new();
     private readonly PopupFrame _frame;
     private readonly EditorPopup _popup;
 
@@ -52,12 +47,7 @@ internal sealed class HoverPopup
         _textArea = textArea;
         _textView = textArea.TextView;
         _close = close;
-        _frame = new PopupFrame
-        {
-            Name = "Hover",
-            Child = _content,
-            Padding = new Thickness(8, 4),
-        };
+        _frame = new PopupFrame { Name = "Hover", Child = _content };
         _popup = new EditorPopup(editor, _frame) { IsResizable = true };
         _popup.Resized += OnResized;
         _popup.LeftView += (_, _) => _close();
@@ -72,18 +62,17 @@ internal sealed class HoverPopup
     /// <summary>Whether the user clicked into the popup, or put the keyboard into it: it stays wherever the pointer goes.</summary>
     public bool IsHeld { get; private set; }
 
-    public void Paint(PopupColors colors) =>
-        _frame.Paint(colors.HoverBackground, colors.HoverBorder, colors.HoverForeground, colors);
+    public void Paint(PopupColors colors) => _frame.PaintDocs(colors);
 
     /// <summary>Shows <paramref name="blocks"/> above <paramref name="word"/>, within the hover's limits.</summary>
     public void Show(IReadOnlyList<HoverBlock> blocks, CodeLook look, TextRange word)
     {
         if (!_resized)
         {
-            _frame.MaxWidth = Math.Max(MinMaxWidth, Math.Floor(_editor.Bounds.Width * 0.66));
+            _frame.MaxWidth = PopupFrame.MaxTextWidth(_editor.Bounds.Width);
             _frame.MaxHeight = Math.Max(MinMaxHeight, Math.Floor(_editor.Bounds.Height / 4));
         }
-        _shown = HoverView.Create(blocks, look, look.Colors.HoverBorder, selectable: true);
+        _shown = HoverView.Create(blocks, look, selectable: true);
         _content.Content = _shown;
         _word = word;
         Place();
@@ -96,7 +85,7 @@ internal sealed class HoverPopup
     {
         if (_shown is not { } shown)
             return;
-        HoverView.Append(shown, blocks, look, look.Colors.HoverBorder, selectable: true);
+        HoverView.Append(shown, blocks, look, selectable: true);
         Place();
     }
 
@@ -140,7 +129,7 @@ internal sealed class HoverPopup
             _frame.Width = _frame.MaxWidth = Math.Max(MinResizedWidth, size.Width);
         if ((edges & (Edges.Top | Edges.Bottom)) != 0)
         {
-            double line = _textView.DefaultLineHeight + _frame.Padding.Top + _frame.Padding.Bottom;
+            double line = _textView.DefaultLineHeight + _content.Padding.Top + _content.Padding.Bottom;
             _frame.Height = _frame.MaxHeight = Math.Max(line, size.Height);
         }
         Place();

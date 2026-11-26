@@ -4,11 +4,13 @@
     it acts in apps (OutputType Exe or WinExe); projects in this repository import it from source.
 
       dotnet build    helpers/csharp-server/  portable IL, on the dotnet host of the runtime that runs the app
-                      helpers/script-*.txt    the marked assemblies, relative to the app, and the names of .NET's
-      dotnet publish  helpers/dotnet/         one .NET runtime for the app's RID, from the runtime pack
+                      helpers/script-*.txt    the marked assemblies, relative to the app, the names of .NET's, and
+                                              the folder of their XML docs in the SDK's reference pack
+      dotnet publish  helpers/dotnet/         one .NET runtime for the app's RID, from the runtime pack, with the
+                                              reference pack's XML docs, unless PublishCSharpScriptFrameworkDocs=false
                       helpers/csharp-server/  ReadyToRun, with an app host that looks only in ../dotnet
                       helpers/script-api/     all marked references, untrimmed, with one deps.json
-                      helpers/script-*.txt    the lists again, for what was published
+                      helpers/script-*.txt    the lists again, for what was published, without the folder of docs
 
     Publishing needs a RuntimeIdentifier and PublishReadyToRun=true, NativeAOT apps included: restore then fetches the
     runtime pack and the ReadyToRun compiler. The helpers join after the app's publish, out of reach of its trimming,
@@ -24,6 +26,9 @@
     <_CSharpScriptFromPackage Condition="Exists('$(_CSharpScriptTools)csharp-server')">true</_CSharpScriptFromPackage>
     <_CSharpScriptHelpers>helpers/</_CSharpScriptHelpers>
     <_CSharpScriptHelperRemovedProperties>RuntimeIdentifier;SelfContained</_CSharpScriptHelperRemovedProperties>
+    <!-- .NET's XML docs, which hover, completion and signature help show, take 31 MB of a published app. -->
+    <PublishCSharpScriptFrameworkDocs Condition="'$(PublishCSharpScriptFrameworkDocs)' == ''"
+      >true</PublishCSharpScriptFrameworkDocs>
   </PropertyGroup>
 
   <!-- The helpers an app gets. Each is a project in this repository and a folder of portable files in its package. -->
@@ -134,6 +139,14 @@
       Overwrite="true"
       WriteOnlyWhenDifferent="true"
     />
+    <!-- In development the server reads .NET's XML docs next to the reference assemblies that the build resolved. -->
+    <WriteLinesToFile
+      Condition="'$(_CSharpScriptIsApiRoot)' != 'true'"
+      File="$(_CSharpScriptListDirectory)script-framework-docs.txt"
+      Lines="@(_CSharpScriptFramework->'%(RootDir)%(Directory)'->Distinct())"
+      Overwrite="true"
+      WriteOnlyWhenDifferent="true"
+    />
     <Copy
       Condition="'$(_CSharpScriptIsApiRoot)' == 'true'"
       SourceFiles="@(_CSharpScriptXmlDoc)"
@@ -141,6 +154,10 @@
     />
     <ItemGroup>
       <FileWrites Include="$(_CSharpScriptListDirectory)script-references.txt;$(_CSharpScriptListDirectory)script-framework.txt" />
+      <FileWrites
+        Include="$(_CSharpScriptListDirectory)script-framework-docs.txt"
+        Condition="'$(_CSharpScriptIsApiRoot)' != 'true'"
+      />
     </ItemGroup>
   </Target>
 
@@ -166,7 +183,7 @@
         CopyToPublishDirectory="Never"
         Visible="false"
       />
-      <_CSharpScriptList Include="$(IntermediateOutputPath)script-references.txt;$(IntermediateOutputPath)script-framework.txt" />
+      <_CSharpScriptList Include="$(IntermediateOutputPath)script-references.txt;$(IntermediateOutputPath)script-framework.txt;$(IntermediateOutputPath)script-framework-docs.txt" />
       <None
         Include="@(_CSharpScriptList)"
         Link="$(_CSharpScriptHelpers)%(_CSharpScriptList.Filename)%(_CSharpScriptList.Extension)"
@@ -189,14 +206,21 @@
     />
   </Target>
 
-  <!-- Publishing: every helper folder is replaced, so that a republish leaves nothing of an earlier one. -->
+  <!--
+    Publishing: every helper folder is replaced, so that a republish leaves nothing of an earlier one. .NET's XML docs go
+    next to its runtime, in English, from the reference pack that the lists of the app's build came from.
+  -->
   <Target
     Name="_PublishCSharpScriptHelpers"
     AfterTargets="Publish"
-    DependsOnTargets="_PublishCSharpScriptApi;_GetCSharpScriptHelperFiles;_ResolveCSharpScriptRuntime;_CompileCSharpScriptHelpers;_CreateCSharpScriptAppHosts"
+    DependsOnTargets="_PublishCSharpScriptApi;_GetCSharpScriptHelperFiles;_WriteCSharpScriptLists;_ResolveCSharpScriptRuntime;_CompileCSharpScriptHelpers;_CreateCSharpScriptAppHosts"
     Condition="'$(_CSharpScriptIsApp)' == 'true'"
   >
     <ItemGroup>
+      <_CSharpScriptFrameworkDoc
+        Include="@(_CSharpScriptFramework->'%(RootDir)%(Directory)%(Filename).xml')"
+        Condition="'$(PublishCSharpScriptFrameworkDocs)' == 'true' and Exists('%(RootDir)%(Directory)%(Filename).xml')"
+      />
       <_CSharpScriptPublishFile Include="@(_CSharpScriptHelperFile)" />
       <_CSharpScriptPublishFile Remove="@(_CSharpScriptReadyToRunCompile)" />
       <_CSharpScriptPublishFile Include="@(_CSharpScriptReadyToRunFile);@(_CSharpScriptAppHost)" />
@@ -207,6 +231,10 @@
       <_CSharpScriptPublishPath
         Include="@(_CSharpScriptRuntimeFile)"
         PublishedPath="$(_CSharpScriptPublishHelpers)dotnet/shared/Microsoft.NETCore.App/$(_CSharpScriptRuntimeVersion)/%(_CSharpScriptRuntimeFile.DestinationSubPath)"
+      />
+      <_CSharpScriptPublishPath
+        Include="@(_CSharpScriptFrameworkDoc)"
+        PublishedPath="$(_CSharpScriptPublishHelpers)dotnet/shared/Microsoft.NETCore.App/$(_CSharpScriptRuntimeVersion)/%(Filename)%(Extension)"
       />
       <_CSharpScriptPublishPath
         Include="@(_CSharpScriptHostFxr)"

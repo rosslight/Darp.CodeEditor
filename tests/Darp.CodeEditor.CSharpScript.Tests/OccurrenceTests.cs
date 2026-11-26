@@ -1,0 +1,148 @@
+using Darp.CodeEditor.LanguageClient;
+
+namespace Darp.CodeEditor.CSharpScript.Tests;
+
+[Collection(ScriptServerFixture.Collection)]
+public sealed class OccurrenceTests(ScriptServerFixture fixture)
+{
+    private const string Text = "int x = 0;\nvoid F() { int x = 1; Console.WriteLine(x); x = 2; }\nx++;";
+
+    private readonly ScriptServerFixture _fixture = fixture;
+
+    [Fact]
+    public async Task A_local_has_its_own_occurrences_with_reads_and_writes()
+    {
+        using var script = await _fixture.OpenAsync(Text);
+        int read = Text.IndexOf("(x)", StringComparison.Ordinal) + 1;
+        (await OccurrencesAsync(script, read + 1)).ShouldBe([
+            (Text.IndexOf("x = 1", StringComparison.Ordinal), OccurrenceKind.Text),
+            (read, OccurrenceKind.Read),
+            (Text.IndexOf("x = 2", StringComparison.Ordinal), OccurrenceKind.Write),
+        ]);
+    }
+
+    [Fact]
+    public async Task A_top_level_variable_is_apart_from_a_local_of_its_name()
+    {
+        using var script = await _fixture.OpenAsync(Text);
+        int increment = Text.IndexOf("x++", StringComparison.Ordinal);
+        (await OccurrencesAsync(script, increment)).ShouldBe([
+            (Text.IndexOf('x', StringComparison.Ordinal), OccurrenceKind.Text),
+            (increment, OccurrenceKind.Write),
+        ]);
+    }
+
+    [Fact]
+    public async Task A_member_written_through_access_deconstruction_or_out_is_written()
+    {
+        const string text =
+            "class P { public int Value; }\nvar p = new P();\np.Value = 1;\n(p.Value, var y) = (2, 3);\n"
+            + "int.TryParse(\"4\", out p.Value);\nConsole.WriteLine(p.Value);";
+        using var script = await _fixture.OpenAsync(text);
+        int[] values = [.. Enumerable.Range(0, text.Length).Where(i => text.AsSpan(i).StartsWith("Value"))];
+        (await OccurrencesAsync(script, values[^1])).ShouldBe([
+            (values[0], OccurrenceKind.Text),
+            (values[1], OccurrenceKind.Write),
+            (values[2], OccurrenceKind.Write),
+            (values[3], OccurrenceKind.Write),
+            (values[4], OccurrenceKind.Read),
+        ]);
+    }
+
+    [Fact]
+    public async Task A_member_assigned_after_a_null_check_is_written_and_its_receiver_read()
+    {
+        const string text = "class A { public int X; }\nvar x = new A();\nx?.X = 1;\n_ = x.X;";
+        using var script = await _fixture.OpenAsync(text);
+        int[] members = [.. Enumerable.Range(0, text.Length).Where(i => text[i] == 'X')];
+        (await OccurrencesAsync(script, members[1])).ShouldBe([
+            (members[0], OccurrenceKind.Text),
+            (members[1], OccurrenceKind.Write),
+            (members[2], OccurrenceKind.Read),
+        ]);
+        int receiver = text.IndexOf("x?", StringComparison.Ordinal);
+        (await OccurrencesAsync(script, receiver)).ShouldContain((receiver, OccurrenceKind.Read));
+    }
+
+    [Fact]
+    public async Task Another_implementation_of_an_interfaces_member_is_apart()
+    {
+        const string text =
+            "interface I { void M(); }\nclass A : I { public void M() {} }\nclass B : I { public void M() {} }\n"
+            + "new A().M(); new B().M();";
+        using var script = await _fixture.OpenAsync(text);
+        int[] names = [.. Enumerable.Range(0, text.Length).Where(i => text.AsSpan(i).StartsWith("M("))];
+        (await OccurrencesAsync(script, names[3])).ShouldBe([
+            (names[1], OccurrenceKind.Text),
+            (names[3], OccurrenceKind.Read),
+        ]);
+    }
+
+    [Fact]
+    public async Task A_generic_method_has_its_occurrences_whatever_its_type_arguments()
+    {
+        const string text = "T Echo<T>(T value) => value;\nEcho(1);\nEcho(\"b\");";
+        using var script = await _fixture.OpenAsync(text);
+        int[] names = [.. Enumerable.Range(0, text.Length).Where(i => text.AsSpan(i).StartsWith("Echo"))];
+        (await OccurrencesAsync(script, names[1])).ShouldBe([
+            (names[0], OccurrenceKind.Text),
+            (names[1], OccurrenceKind.Read),
+            (names[2], OccurrenceKind.Read),
+        ]);
+    }
+
+    [Fact]
+    public async Task A_propertys_accessors_are_no_occurrences_of_it()
+    {
+        const string text = "class P { public int Value { get; set; } }\nvar p = new P { Value = 1 };\np.Value++;";
+        using var script = await _fixture.OpenAsync(text);
+        int[] values = [.. Enumerable.Range(0, text.Length).Where(i => text.AsSpan(i).StartsWith("Value"))];
+        (await OccurrencesAsync(script, values[2])).ShouldBe([
+            (values[0], OccurrenceKind.Text),
+            (values[1], OccurrenceKind.Write),
+            (values[2], OccurrenceKind.Write),
+        ]);
+    }
+
+    [Theory]
+    [InlineData(
+        "partial class C { public partial void P(); }\npartial class C { public partial void P() {} }\nnew C().P();"
+    )]
+    [InlineData(
+        "partial class C { public partial int P { get; } }\npartial class C { public partial int P => 1; }\n_ = new C().P;"
+    )]
+    public async Task A_partial_member_has_both_its_declarations_from_either_part(string text)
+    {
+        using var script = await _fixture.OpenAsync(text);
+        int[] names = [.. Enumerable.Range(0, text.Length).Where(i => text[i] == 'P')];
+        (int, OccurrenceKind)[] expected =
+        [
+            (names[0], OccurrenceKind.Text),
+            (names[1], OccurrenceKind.Text),
+            (names[2], OccurrenceKind.Read),
+        ];
+        (await OccurrencesAsync(script, names[2])).ShouldBe(expected);
+        (await OccurrencesAsync(script, names[1])).ShouldBe(expected);
+    }
+
+    [Fact]
+    public async Task Text_without_a_symbol_has_no_occurrences()
+    {
+        using var script = await _fixture.OpenAsync("// x marks the spot\nint x = 0;");
+        (await OccurrencesAsync(script, 3)).ShouldBeEmpty();
+    }
+
+    /// <summary>Where the occurrences at <paramref name="offset"/> start, each over the same name.</summary>
+    private static async Task<(int Start, OccurrenceKind Kind)[]> OccurrencesAsync(
+        Script<ScriptTests.Api.ScriptTestGlobals> script,
+        int offset
+    )
+    {
+        TextSnapshot snapshot = script.Document.CurrentSnapshot;
+        IReadOnlyList<Occurrence> occurrences = (
+            await script.Document.DocumentHighlightsAsync(snapshot, offset, TestContext.Current.CancellationToken)
+        ).ShouldNotBeNull();
+        occurrences.Select(occurrence => snapshot.GetText(occurrence.Range)).Distinct().Count().ShouldBeLessThan(2);
+        return [.. occurrences.Select(occurrence => (occurrence.Range.Start, occurrence.Kind))];
+    }
+}

@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Input;
@@ -182,6 +183,71 @@ public sealed class PopupLookTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Completions_details_and_signature_helps_card_look_as_the_hover_code_on_the_popup_a_line_and_docs() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """{ "items": [ { "label": "key", "data": { "detail": "\"key\": 1", "documentation": "The key." } } ] }"""
+                )
+            );
+            var signatures = new JsonArray(
+                new JsonObject
+                {
+                    ["label"] = "call(\"first\", 2)",
+                    ["documentation"] = "Calls.",
+                    ["parameters"] = new JsonArray(new JsonObject { ["label"] = new JsonArray(5, 12) }),
+                }
+            );
+            using CodeDocument command = server.CreateDocument(
+                FakeServer.Commands,
+                $"signatures {signatures.ToJsonString()}"
+            );
+            await fake.WaitForAsync("set signatures");
+            // JSON colors strings and numbers: the code's tokens have colors of their own.
+            using CodeDocument document = server.CreateDocument(CodeLanguage.Json, "call");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await window.TokensKnownAsync();
+
+            await OpenAsync(window, 0);
+            PopupFrame? details = null;
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                details = PopupFrames.Find(window, "CompletionDetails");
+                return details is not null && Hovers.Texts(details).Contains("The key.");
+            });
+            TextBlock detail = ShouldShowCodeThenDocs(window, details!, "\"key\": 1", "The key.");
+            Run[] detailRuns = [.. detail.Inlines.ShouldNotBeNull().OfType<Run>()];
+            detailRuns.ShouldContain(run => run.Text == "\"key\"" && ColorOf(run) == s_string);
+            window.Press(Key.Escape);
+
+            window.Editor.Selection = new TextSelection(4);
+            window.Type("(");
+            PopupFrame? card = null;
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                card = PopupFrames.Find(window, "SignatureHelp");
+                return card is not null && Hovers.Texts(card).Contains("Calls.");
+            });
+            TextBlock signature = ShouldShowCodeThenDocs(window, card!, "call(\"first\", 2)", "Calls.");
+            // The active parameter is bold in editorHoverWidget.highlightForeground, over its token's color; the rest
+            // keeps its tokens' colors.
+            Run[] runs = [.. signature.Inlines.ShouldNotBeNull().OfType<Run>()];
+            Run parameter = runs.Single(run => run.Text == "\"first\"");
+            parameter.FontWeight.ShouldBe(FontWeight.Bold);
+            ColorOf(parameter).ShouldBe(Color.Parse("#0066BF"));
+            Run number = runs.Single(run => run.Text == "2");
+            number.FontWeight.ShouldBe(FontWeight.Normal);
+            ColorOf(number).ShouldBe(s_number);
+        });
+
+    [Fact]
     public Task App_styles_for_tooltips_scroll_bars_and_text_do_not_reach_a_long_popup_of_text() =>
         _ui.Run(() =>
         {
@@ -196,7 +262,7 @@ public sealed class PopupLookTests(UiFixture ui)
             var frame = new PopupFrame
             {
                 Name = "Hover",
-                MaxWidth = PopupFrame.MaxTextWidth,
+                MaxWidth = PopupFrame.MaxTextWidth(editor.Bounds.Width),
                 Child = new PopupScrollViewer
                 {
                     Content = text,
@@ -220,6 +286,35 @@ public sealed class PopupLookTests(UiFixture ui)
             window.RenderAndCountPixels(Colors.Red, BoundsInWindow(frame)).ShouldBe(0);
             popup.Hide();
         });
+
+    /// <summary>Light+'s colors of JSON's strings and numbers out of an object.</summary>
+    private static readonly Color s_string = Color.Parse("#A31515");
+
+    private static readonly Color s_number = Color.Parse("#098658");
+
+    /// <summary>
+    /// Checks the look that every popup of code and docs shares, the hover's (its own tests check it): on Light+'s hover
+    /// background, <paramref name="code"/> in the editor's font with no background of its own, a line in the popup's
+    /// border below it, then <paramref name="docs"/> as text in the hover's muted foreground. Returns the code.
+    /// </summary>
+    private static TextBlock ShouldShowCodeThenDocs(EditorWindow window, PopupFrame frame, string code, string docs)
+    {
+        Control[] parts = [.. ((Panel)PopupFrames.Content(frame)).Children];
+        parts.Length.ShouldBe(3);
+        TextBlock codeBlock = parts[0].ShouldBeAssignableTo<TextBlock>().ShouldNotBeNull();
+        Hovers.TextOf(codeBlock).ShouldBe(code);
+        codeBlock.FontFamily.ShouldBe(window.Editor.FontFamily);
+        parts[1].ShouldBeOfType<PopupLine>().Background.ShouldBeSameAs(frame.BorderBrush);
+        TextBlock docsBlock = parts[2].ShouldBeAssignableTo<TextBlock>().ShouldNotBeNull();
+        Hovers.TextOf(docsBlock).ShouldBe(docs);
+        docsBlock.Foreground.ShouldBeAssignableTo<ISolidColorBrush>()!.Color.ShouldBe(Color.Parse("#616161"));
+        frame.Background.ShouldBeAssignableTo<ISolidColorBrush>()!.Color.ShouldBe(Color.Parse("#F3F3F3"));
+        // None of the text area's white behind the code, in the pixels.
+        window.RenderAndCountPixels(Colors.White, BoundsInWindow(codeBlock)).ShouldBe(0);
+        return codeBlock;
+    }
+
+    private static Color? ColorOf(Run run) => (run.Foreground as ISolidColorBrush)?.Color;
 
     private static JsonObject ManyItems() => Items([.. Enumerable.Range(0, 100).Select(i => $"item{i:D3}")]);
 

@@ -42,7 +42,7 @@ public class CSharpScriptBenchmarks
         _server = new CSharpScriptServer();
         _document = _server.CreateDocument(new CSharpScriptEnvironment<ScriptTestGlobals>(), text);
         ScriptText.WaitUntilOpen(_document);
-        _editedDigit = text.IndexOf(ScriptText.EditedLine, StringComparison.Ordinal) + ScriptText.EditedLine.Length - 2;
+        _editedDigit = ScriptText.EditedDigitIn(text);
         _memberCaret =
             text.IndexOf(ScriptText.MemberLine, StringComparison.Ordinal)
             + ScriptText.MemberLine.Length
@@ -53,13 +53,14 @@ public class CSharpScriptBenchmarks
     }
 
     [IterationSetup(
-        Targets = [nameof(CompletionOfAMemberList), nameof(CompletionWithoutAReceiver), nameof(ColorsOfTheVisibleLines)]
+        Targets = [
+            nameof(CompletionOfAMemberList),
+            nameof(CompletionWithoutAReceiver),
+            nameof(CompletionOfATypedName),
+            nameof(ColorsOfTheVisibleLines),
+        ]
     )]
-    public void Edit() =>
-        Document.Replace(
-            new TextRange(_editedDigit, 1),
-            (++_edits % 10).ToString(System.Globalization.CultureInfo.InvariantCulture)
-        );
+    public void Edit() => ScriptText.EditDigit(Document, _editedDigit, ++_edits);
 
     [Benchmark]
     [BenchmarkCategory("CI")]
@@ -76,6 +77,17 @@ public class CSharpScriptBenchmarks
     public int CompletionWithoutAReceiver()
     {
         int items = Complete(new TextRange(_wordCaret, 0));
+        return items >= 500 ? items : throw new InvalidOperationException($"The list has {items} items.");
+    }
+
+    /// <summary>
+    /// As typing the first letters of a name asks, with the best of the types and extension methods from namespaces
+    /// that the script does not import that match them.
+    /// </summary>
+    [Benchmark]
+    public int CompletionOfATypedName()
+    {
+        int items = Complete(new TextRange(_wordCaret, 2));
         return items >= 500 ? items : throw new InvalidOperationException($"The list has {items} items.");
     }
 
@@ -162,8 +174,17 @@ public class CSharpScriptColdStartBenchmarks
 /// <summary>A script of ordinary code, with lines that the benchmarks work on in its middle.</summary>
 internal static class ScriptText
 {
-    public const string EditedLine = "int edited = 0;";
+    private const string EditedLine = "int edited = 0;";
     public const string MemberLine = "var probe = Greeting.Length;";
+
+    public static int EditedDigitIn(string text) =>
+        text.IndexOf(EditedLine, StringComparison.Ordinal) + EditedLine.Length - 2;
+
+    public static void EditDigit(CodeDocument document, int digit, int edit) =>
+        document.Replace(
+            new TextRange(digit, 1),
+            (edit % 10).ToString(System.Globalization.CultureInfo.InvariantCulture)
+        );
 
     /// <summary>A text of <paramref name="lines"/> lines, with one error, so that every version has diagnostics.</summary>
     public static string OfLines(int lines)

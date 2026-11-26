@@ -8,6 +8,18 @@ namespace Darp.CodeEditor.CSharpScript.Server;
 /// <param name="snapshot">Its first version.</param>
 internal sealed class OpenScript(string uri, ScriptContext context, ScriptSnapshot snapshot)
 {
+    /// <summary>
+    /// How many answered lists the script keeps for resolving: the one that the client shows, and the one it asked for
+    /// meanwhile. Each keeps its own version of the script, so every list kept costs memory and completion time.
+    /// </summary>
+    private const int MaxCompletions = 2;
+
+    /// <summary>
+    /// The lists whose items the client may still commit, oldest first: those under way, and the last
+    /// <see cref="MaxCompletions"/> answered; none of them cancelled or failed.
+    /// </summary>
+    private readonly List<ScriptCompletions> _completions = [];
+
     private CancellationTokenSource _diagnostics = new();
 
     public string Uri { get; } = uri;
@@ -18,12 +30,25 @@ internal sealed class OpenScript(string uri, ScriptContext context, ScriptSnapsh
     /// <summary>The latest version.</summary>
     public ScriptSnapshot Snapshot { get; set; } = snapshot;
 
-    /// <summary>The completion list answered last, which the client resolves items of.</summary>
-    public ScriptCompletions? Completions { get; private set; }
+    /// <summary>
+    /// Starts a completion request. Its list resolves items from now on, beside the latest lists before it that the
+    /// client did not cancel: it shows one of them until the new answer comes, and may commit from it meanwhile. A
+    /// list takes room among those kept only once it is answered, so that one that is cancelled or fails pushes none
+    /// out.
+    /// </summary>
+    public ScriptCompletions Complete(CompletionParams parameters, int id, CancellationToken cancellationToken)
+    {
+        var list = new ScriptCompletions(id, Snapshot, parameters, cancellationToken);
+        _completions.RemoveAll(kept => kept.IsDropped);
+        List<ScriptCompletions> answered = [.. _completions.Where(kept => kept.IsAnswered)];
+        foreach (ScriptCompletions oldest in answered.Take(answered.Count - MaxCompletions))
+            _completions.Remove(oldest);
+        _completions.Add(list);
+        return list;
+    }
 
-    /// <summary>Starts a completion request, which from now on is the list that items resolve in.</summary>
-    public ScriptCompletions Complete(CompletionParams parameters, int id, CancellationToken cancellationToken) =>
-        Completions = new ScriptCompletions(id, Snapshot, parameters.Position, cancellationToken);
+    /// <summary>The list with <paramref name="id"/>, while the script keeps it; null otherwise.</summary>
+    public ScriptCompletions? Completions(int id) => _completions.Find(list => list.Id == id);
 
     /// <summary>Cancels the diagnostics under way and returns the token of the next ones.</summary>
     public CancellationToken RestartDiagnostics()

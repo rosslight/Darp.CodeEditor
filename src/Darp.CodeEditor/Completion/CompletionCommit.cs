@@ -12,9 +12,10 @@ namespace Darp.CodeEditor.Completion;
 /// that the user undoes, with the caret after its text. Inserting, the item's text goes over its edit's range, its insert
 /// range, or the word up to the caret; replacing, over its replace range, or the whole word, as far as the edits since
 /// completion was asked left it. Additional edits that a resolve still under way brings come later, as in VS Code,
-/// unless the commit was undone. The edits go in through <see cref="TextChanges"/>: an item whose text would touch read-only text, such as protected text or a long
-/// line's hidden tail, does not go in. When one of its additional edits would, none of them does, as VS Code applies them
-/// together, and the item's own text still goes in.
+/// unless the commit was undone. The edits go in through <see cref="TextChanges"/>: an item whose text would touch
+/// read-only text, such as protected text or a long line's hidden tail, does not go in. When one of its additional
+/// edits would, or would go over text that changed since its list was asked for, none of them does, as VS Code applies
+/// them together, and the item's own text still goes in.
 /// </summary>
 internal sealed class CompletionCommit : IDisposable
 {
@@ -30,8 +31,8 @@ internal sealed class CompletionCommit : IDisposable
     /// <summary>Whether the view ended: a command still posted no longer runs.</summary>
     private bool _disposed;
 
-    /// <summary>Cancels the resolve of the item committed last, whose additional edits are still to come.</summary>
-    private CancellationTokenSource? _lateEdits;
+    /// <summary>Cancel the resolves of the committed items whose additional edits are still to come, one per commit.</summary>
+    private readonly HashSet<CancellationTokenSource> _lateEdits = [];
 
     /// <param name="textArea">The text area of the view.</param>
     /// <param name="document">The view's document.</param>
@@ -86,7 +87,9 @@ internal sealed class CompletionCommit : IDisposable
             late?.Cancellation.Cancel();
             return;
         }
-        List<CompletionEdit> edits = WithoutOverlaps([main], Mapped(request.Snapshot, item.AdditionalEdits ?? []));
+        List<CompletionEdit> edits = Mapped(request.Snapshot, item.AdditionalEdits ?? []) is { } additional
+            ? WithoutOverlaps([main], additional)
+            : [main];
         if (!edits.TrueForAll(CanChange))
             edits = [main];
         // The item's text moved by the additional edits before it.
@@ -101,8 +104,7 @@ internal sealed class CompletionCommit : IDisposable
         // Undoing the commit drops the additional edits still to come, as they would go in without the item.
         if (late is not null)
         {
-            _lateEdits?.Cancel();
-            _lateEdits = late.Cancellation;
+            _lateEdits.Add(late.Cancellation);
             marks.Add(new LateEditsMark(late.Cancellation));
         }
         Apply(step, continued: false, edits, marks);
@@ -126,7 +128,8 @@ internal sealed class CompletionCommit : IDisposable
     public void Dispose()
     {
         _disposed = true;
-        _lateEdits?.Cancel();
+        foreach (CancellationTokenSource lateEdits in _lateEdits)
+            lateEdits.Cancel();
     }
 
     /// <summary>
@@ -138,9 +141,13 @@ internal sealed class CompletionCommit : IDisposable
         try
         {
             CompletionItem? item = await late.Task;
-            if (late.Cancellation.IsCancellationRequested || item?.AdditionalEdits is not { Count: > 0 } additional)
+            if (
+                late.Cancellation.IsCancellationRequested
+                || item?.AdditionalEdits is not { Count: > 0 } additional
+                || Mapped(snapshot, additional) is not { } mapped
+            )
                 return;
-            List<CompletionEdit> edits = WithoutOverlaps([], Mapped(snapshot, additional));
+            List<CompletionEdit> edits = WithoutOverlaps([], mapped);
             bool last = _buffer.UndoStack.LastGroupDescriptor == step;
             if (edits.TrueForAll(CanChange))
                 Apply(last ? step : new object(), continued: last, edits, []);
@@ -153,8 +160,7 @@ internal sealed class CompletionCommit : IDisposable
         }
         finally
         {
-            if (_lateEdits == late.Cancellation)
-                _lateEdits = null;
+            _lateEdits.Remove(late.Cancellation);
         }
     }
 
@@ -188,13 +194,23 @@ internal sealed class CompletionCommit : IDisposable
     }
 
     /// <summary>
-    /// Edits in the text of <paramref name="snapshot"/>, moved to the current text, with the document's line breaks.
+    /// Edits in the text of <paramref name="snapshot"/>, each over its whole range moved to the current text, with the
+    /// document's line breaks. Null when the text that one goes over changed since, by the user or by another commit's
+    /// edits: going over it would undo that change.
     /// </summary>
-    private IEnumerable<CompletionEdit> Mapped(TextSnapshot snapshot, IEnumerable<CompletionEdit> edits) =>
-        edits.Select(edit => new CompletionEdit(
-            _document.MapToCurrent(snapshot, edit.Range),
-            InLineBreaks(edit.NewText)
-        ));
+    private List<CompletionEdit>? Mapped(TextSnapshot snapshot, IEnumerable<CompletionEdit> edits)
+    {
+        var since = new SnapshotEdits(snapshot, _document.CurrentSnapshot);
+        var mapped = new List<CompletionEdit>();
+        foreach (CompletionEdit edit in edits)
+        {
+            TextRange range = since.Map(edit.Range);
+            if (_document.CurrentSnapshot.GetText(range) != snapshot.GetText(edit.Range))
+                return null;
+            mapped.Add(new CompletionEdit(range, InLineBreaks(edit.NewText)));
+        }
+        return mapped;
+    }
 
     private string InLineBreaks(string text) => TextUtilities.NormalizeNewLines(text, _document.LineBreak);
 

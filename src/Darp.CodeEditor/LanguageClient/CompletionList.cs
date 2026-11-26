@@ -178,8 +178,18 @@ internal sealed class CompletionList
         )
         {
             Command = Command(item),
+            LabelDetails = LabelDetails(item),
         };
     }
+
+    /// <summary>An item's <c>labelDetails</c>; null without them.</summary>
+    private static CompletionLabelDetails? LabelDetails(JsonElement item) =>
+        item.TryGetProperty("labelDetails", out JsonElement details) && details.ValueKind == JsonValueKind.Object
+            ? new CompletionLabelDetails(
+                ServerJson.String(details, "detail"),
+                ServerJson.String(details, "description")
+            )
+            : null;
 
     /// <summary>The id of the command that committing an item runs after; null for none.</summary>
     private static string? Command(JsonElement item) =>
@@ -268,7 +278,9 @@ internal sealed class CompletionList
         item.TryGetProperty("tags", out JsonElement tags)
         && tags.ValueKind == JsonValueKind.Array
         && tags.EnumerateArray()
-            .Any(tag => tag.ValueKind == JsonValueKind.Number && tag.TryGetInt32(out int t) && t == 1);
+            .Any(tag =>
+                tag.ValueKind == JsonValueKind.Number && tag.TryGetInt32(out int t) && t == CompletionItemTag.Deprecated
+            );
 }
 
 /// <summary>A server's completion item, with its edits in offsets of the text its list was asked for.</summary>
@@ -316,7 +328,17 @@ internal sealed record CompletionItem(
     /// The id of the command that committing it runs after, such as <c>editor.action.triggerSuggest</c>; null for none.
     /// </summary>
     public string? Command { get; init; }
+
+    /// <summary>What its row shows besides its label, such as its type; null for none.</summary>
+    public CompletionLabelDetails? LabelDetails { get; init; }
 }
+
+/// <summary>
+/// What a completion item's row shows besides its label, as a server's <c>labelDetails</c>. Typing matches neither.
+/// </summary>
+/// <param name="Detail">What shows right after the label, such as a method's parameters; null for nothing.</param>
+/// <param name="Description">What shows dimmed at the row's right, such as a variable's type; null for nothing.</param>
+internal sealed record CompletionLabelDetails(string? Detail, string? Description);
 
 /// <summary>A change of the text: <paramref name="Range"/> becomes <paramref name="NewText"/>.</summary>
 internal readonly record struct CompletionEdit(TextRange Range, string NewText);

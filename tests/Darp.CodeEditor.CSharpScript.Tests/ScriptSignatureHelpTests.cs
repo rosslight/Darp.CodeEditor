@@ -28,6 +28,23 @@ public sealed class ScriptSignatureHelpTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task An_ambiguous_empty_call_starts_at_the_first_signature_with_a_parameter()
+    {
+        using var script = await _fixture.OpenAsync("var text = string.Concat(|);");
+        SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        help.ActiveSignature.ShouldBe(0);
+        Active(help).Label.ShouldContain("Concat(object? arg0)");
+    }
+
+    [Fact]
+    public async Task An_empty_call_that_binds_selects_its_overload()
+    {
+        using var script = await _fixture.OpenAsync("var builder = new System.Text.StringBuilder(|);");
+        SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        Active(help).Label.ShouldContain("StringBuilder()");
+    }
+
+    [Fact]
     public async Task An_unfinished_generic_call_infers_its_type_arguments()
     {
         using var script = await _fixture.OpenAsync("var picked = Pick(new[] { 1, 2 }|");
@@ -145,5 +162,350 @@ public sealed class ScriptSignatureHelpTests(ScriptServerFixture fixture)
         using var script = await _fixture.OpenAsync("var builder = new System.Text.StringBuilder(|");
         SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
         help.Signatures.Count.ShouldBeGreaterThan(1);
+    }
+
+    [Fact]
+    public async Task A_type_receiver_shows_its_static_methods_and_no_extension_methods()
+    {
+        using var script = await _fixture.OpenAsync("string.Concat(|1);");
+        SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        help.Signatures.ShouldAllBe(signature => signature.Label.StartsWith("string string.Concat"));
+    }
+
+    [Fact]
+    public async Task A_value_receiver_shows_no_static_methods()
+    {
+        using var script = await _fixture.OpenAsync("var text = \"a\";\ntext.Equals(|");
+        SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        help.Signatures.ShouldContain(signature => signature.Label.Contains("Equals(string? value)"));
+        help.Signatures.ShouldNotContain(signature => signature.Label.Contains("Equals(string? a, string? b)"));
+    }
+
+    [Fact]
+    public async Task A_protected_method_shows_only_through_a_receiver_of_the_calling_type()
+    {
+        using var script = await _fixture.OpenAsync(
+            """
+            class Base
+            {
+                protected void Run(int number) { }
+                public void Run(string text) { }
+            }
+            class Derived : Base
+            {
+                void Call(Base other) => other.Run(|);
+            }
+            """
+        );
+        SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        help.Signatures.ShouldHaveSingleItem().Label.ShouldContain("Run(string text)");
+    }
+
+    [Fact]
+    public async Task A_method_that_a_more_specific_overload_hides_and_one_hidden_from_editors_do_not_show()
+    {
+        using var script = await _fixture.OpenAsync(
+            """
+            class Box<T>
+            {
+                public void Put(T value) { }
+                public void Put(int value) { }
+            }
+            new Box<int>().Put(|);
+            """
+        );
+        SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        help.Signatures.ShouldHaveSingleItem();
+
+        using var globals = await _fixture.OpenAsync("Write(|");
+        SignatureHelpInfo written = (await globals.SignatureHelpAsync()).ShouldNotBeNull();
+        written.Signatures.ShouldNotContain(signature => signature.Label.Contains("double"));
+        written.Signatures.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task A_constructor_initializer_shows_the_other_constructors()
+    {
+        using var script = await _fixture.OpenAsync(
+            """
+            class Base
+            {
+                public Base(string name) { }
+            }
+            class Derived : Base
+            {
+                Derived(int number) : base("") { }
+                Derived() : this(|) { }
+            }
+            """
+        );
+        SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        Active(help).Label.ShouldContain("Derived(int number)");
+        help.Signatures.ShouldHaveSingleItem();
+        ActiveParameter(Active(help)).ShouldBe("int number");
+
+        script.Caret = script.Document.Text.IndexOf("base(", StringComparison.Ordinal) + 5;
+        help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        Active(help).Label.ShouldContain("Base(string name)");
+    }
+
+    [Fact]
+    public async Task An_attribute_shows_its_constructors_and_settable_members()
+    {
+        using var script = await _fixture.OpenAsync("[Obsolete(\"old\", |)] class Old { }");
+        SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        Active(help).Label.ShouldContain("ObsoleteAttribute(string? message, bool error");
+        ActiveParameter(Active(help)).ShouldBe("bool error");
+
+        script.Document.Replace(new TextRange(script.Caret, 0), "DiagnosticId = ");
+        script.Caret += "DiagnosticId = ".Length;
+        help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        ActiveParameter(Active(help)).ShouldBe("DiagnosticId = string?");
+
+        // An argument by place goes to no property.
+        using var empty = await _fixture.OpenAsync("[Obsolete(|)] class Old { }");
+        help = (await empty.SignatureHelpAsync()).ShouldNotBeNull();
+        Active(help).Label.ShouldStartWith("ObsoleteAttribute(Properties: ");
+        ActiveParameter(Active(help)).ShouldBe("");
+    }
+
+    [Fact]
+    public async Task An_attribute_shows_only_the_members_that_its_named_arguments_may_set()
+    {
+        using var script = await _fixture.OpenAsync(
+            """
+            class Base : Attribute { public int Hidden { get; set; } public int Inherited; }
+            class A : Base
+            {
+                public new int Hidden => 1;
+                public int WriteOnly { set { } }
+                internal int Internal { get; set; }
+                public int Both { get; private set; }
+                public int Settable { get; set; }
+                public int Field;
+                public decimal Price { get; set; }
+                public int[,] Grid { get; set; }
+                public int?[] Optional { get; set; }
+                public Type[] Types { get; set; }
+                public DayOfWeek[] Days;
+            }
+            [A(|)] class C { }
+            """
+        );
+        SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        Active(help)
+            .Label.ShouldBe(
+                "A(Properties: Days = DayOfWeek[], Field = int, Inherited = int, Settable = int, Types = Type[])"
+            );
+    }
+
+    [Fact]
+    public async Task An_indexer_shows_its_parameters()
+    {
+        using var script = await _fixture.OpenAsync("var numbers = new Dictionary<string, int>();\nvar n = numbers[|");
+        SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        Active(help).Label.ShouldBe("int Dictionary<string, int>[string key]");
+        ActiveParameter(Active(help)).ShouldBe("string key");
+    }
+
+    [Fact]
+    public async Task A_conditional_access_and_an_initializer_show_the_indexers_parameters()
+    {
+        using var conditional = await _fixture.OpenAsync("Dictionary<int, string>? d = new();\nvar v = d?[|1];");
+        SignatureHelpInfo help = (await conditional.SignatureHelpAsync()).ShouldNotBeNull();
+        Active(help).Label.ShouldBe("string Dictionary<int, string>[int key]");
+        ActiveParameter(Active(help)).ShouldBe("int key");
+
+        using var initializer = await _fixture.OpenAsync("var e = new Dictionary<int, string> { [|1] = \"\" };");
+        help = (await initializer.SignatureHelpAsync()).ShouldNotBeNull();
+        Active(help).Label.ShouldBe("string Dictionary<int, string>[int key]");
+        ActiveParameter(Active(help)).ShouldBe("int key");
+    }
+
+    [Fact]
+    public async Task A_type_argument_list_shows_the_type_parameters()
+    {
+        using var script = await _fixture.OpenAsync("T Echo<T>(T value) => value;\nEcho<|");
+        SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        Active(help).Label.ShouldBe("T Echo<T>(T value)");
+        ActiveParameter(Active(help)).ShouldBe("T");
+
+        using var type = await _fixture.OpenAsync("var numbers = new Dictionary<string, |");
+        help = (await type.SignatureHelpAsync()).ShouldNotBeNull();
+        Active(help).Label.ShouldBe("Dictionary<TKey, TValue> where TKey : notnull");
+        ActiveParameter(Active(help)).ShouldBe("TValue");
+    }
+
+    [Theory]
+    [InlineData("var d = new Dictionary<(int, int), |string>();", "TValue")]
+    [InlineData("var d = new Dictionary<(int a, List<int> b)|, string>();", "TKey")]
+    [InlineData("var d = new Dictionary<int[,]|, string>();", "TKey")]
+    [InlineData("var d = new Dictionary<int[,], |string>();", "TValue")]
+    [InlineData("var d = new Dictionary<string, (int, |", "TValue")]
+    [InlineData("var d = new Dictionary<int[,|", "TKey")]
+    public async Task Commas_in_a_tuple_or_an_array_rank_separate_no_type_arguments(string text, string active)
+    {
+        using var script = await _fixture.OpenAsync(text);
+        SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        ActiveParameter(Active(help)).ShouldBe(active);
+    }
+
+    [Fact]
+    public async Task A_type_argument_list_shows_what_its_receiver_can_call()
+    {
+        const string staticFirst =
+            "class Holder { public static void Pick<T>(T value) {} public void Pick<T>(T x, int y) {} }";
+        using var type = await _fixture.OpenAsync(staticFirst + "\nHolder.Pick<|");
+        (await type.SignatureHelpAsync())
+            .ShouldNotBeNull()
+            .Signatures.ShouldHaveSingleItem()
+            .Label.ShouldContain("Pick<T>(T value)");
+
+        const string instanceFirst =
+            "class Holder { public void Pick<T>(T value) {} public static void Pick<T>(T x, int y) {} }";
+        using var value = await _fixture.OpenAsync(instanceFirst + "\nnew Holder().Pick<|");
+        (await value.SignatureHelpAsync())
+            .ShouldNotBeNull()
+            .Signatures.ShouldHaveSingleItem()
+            .Label.ShouldContain("Pick<T>(T value)");
+
+        // Not the globals' Pick: the receiver is the value before "?.".
+        using var conditional = await _fixture.OpenAsync(
+            "class Holder { public void Pick<T>(T value) {} }\nHolder h = new();\nh?.Pick<|"
+        );
+        (await conditional.SignatureHelpAsync())
+            .ShouldNotBeNull()
+            .Signatures.ShouldHaveSingleItem()
+            .Label.ShouldContain("Holder.Pick<T>(T value)");
+
+        // After "?." a nullable value's methods are its value's.
+        using var nullable = await _fixture.OpenAsync(
+            "struct V { public T Pick<T>(T x) => x; }\nV? v = new();\nv?.Pick<|int>(1);"
+        );
+        SignatureHelpInfo help = (await nullable.SignatureHelpAsync()).ShouldNotBeNull();
+        Active(help).Label.ShouldContain("V.Pick<T>(T x)");
+        ActiveParameter(Active(help)).ShouldBe("T");
+    }
+
+    [Fact]
+    public async Task A_comparison_has_no_type_argument_list_and_keeps_the_call_around_it()
+    {
+        using var script = await _fixture.OpenAsync("int a = 1, b = 2;\nvar less = a <|");
+        (await script.SignatureHelpAsync()).ShouldBeNull();
+
+        using var call = await _fixture.OpenAsync("int a = 1, b = 2;\nNamed(a <|");
+        SignatureHelpInfo help = (await call.SignatureHelpAsync()).ShouldNotBeNull();
+        ActiveParameter(Active(help)).ShouldBe("int value");
+    }
+
+    [Fact]
+    public async Task A_collection_initializer_entry_shows_its_Add_method()
+    {
+        using var script = await _fixture.OpenAsync("var names = new Dictionary<int, string> { { 1, |\"a\" } };");
+        SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        Active(help).Label.ShouldContain("Add(int key, string value)");
+        ActiveParameter(Active(help)).ShouldBe("string value");
+    }
+
+    [Fact]
+    public async Task A_signature_shows_its_summary_and_the_active_parameters_description_with_names_as_code()
+    {
+        using var script = await _fixture.OpenAsync("Repeat(|");
+        SignatureInfo signature = Active((await script.SignatureHelpAsync()).ShouldNotBeNull());
+        signature
+            .Documentation.ShouldNotBeNull()
+            .Text.ShouldBe("Repeats `text`, or returns `null` for none.\n\nEach copy follows the last.");
+        signature.Parameters[0].Documentation.ShouldNotBeNull().Text.ShouldBe("The text, as `Greeting` reads.");
+        signature.Parameters[1].Documentation.ShouldNotBeNull().Text.ShouldBe("How often.");
+    }
+
+    [Fact]
+    public async Task A_dotnet_method_shows_its_xml_docs()
+    {
+        using var script = await _fixture.OpenAsync("var text = string.Concat(\"a\", |");
+        SignatureInfo signature = Active((await script.SignatureHelpAsync()).ShouldNotBeNull());
+        signature.Label.ShouldContain("Concat(string? str0, string? str1)");
+        signature.Documentation.ShouldNotBeNull().Text.ShouldBe("Concatenates two specified instances of `string`.");
+        signature.Parameters[1].Documentation.ShouldNotBeNull().Text.ShouldBe("The second string to concatenate.");
+    }
+
+    [Fact]
+    public async Task Inherited_docs_describe_the_parameters_that_an_implementation_renames()
+    {
+        const string text = """
+            interface IRunner
+            {
+                /// <summary>Runs.</summary>
+                /// <typeparam name="T">What runs.</typeparam>
+                /// <param name="count">How often.</param>
+                void Run<T>(int count);
+            }
+            class Runner : IRunner
+            {
+                /// <inheritdoc />
+                public void Run<TItem>(int times) { }
+            }
+            new Runner().Run<int>(1);
+            """;
+        using var script = await _fixture.OpenAsync(text);
+        script.Caret = text.IndexOf("(1)", StringComparison.Ordinal) + 1;
+        SignatureInfo signature = Active((await script.SignatureHelpAsync()).ShouldNotBeNull());
+        signature.Parameters[0].Documentation.ShouldNotBeNull().Text.ShouldBe("How often.");
+
+        script.Caret = text.IndexOf("<int>", StringComparison.Ordinal) + 1;
+        signature = Active((await script.SignatureHelpAsync()).ShouldNotBeNull());
+        signature.Parameters[0].Documentation.ShouldNotBeNull().Text.ShouldBe("What runs.");
+    }
+
+    [Fact]
+    public async Task Code_next_to_code_in_docs_is_one_code_span()
+    {
+        using var script = await _fixture.OpenAsync(
+            """
+            /// <summary>Counts <paramref name="text"/><c>.Length</c> characters.</summary>
+            int Measure(string text) => text.Length;
+            Measure(|
+            """
+        );
+        SignatureInfo signature = Active((await script.SignatureHelpAsync()).ShouldNotBeNull());
+        signature.Documentation.ShouldNotBeNull().Text.ShouldBe("Counts `text.Length` characters.");
+    }
+
+    [Fact]
+    public async Task Docs_with_the_characters_that_mark_code_still_show()
+    {
+        using var script = await _fixture.OpenAsync(
+            """
+            /// <summary>See <see href="https://example.com/&#xE000;"/> and <c>a&#xE001;b</c>, not the <c>&#xE000;</c> glyph.</summary>
+            int Measure(string text) => text.Length;
+            Measure(|
+            """
+        );
+        SignatureInfo signature = Active((await script.SignatureHelpAsync()).ShouldNotBeNull());
+        signature.Documentation.ShouldNotBeNull().Text.ShouldBe("See https://example.com/ and `ab`, not the glyph.");
+    }
+
+    [Fact]
+    public async Task Docs_that_inherit_come_from_the_member_they_implement()
+    {
+        using var script = await _fixture.OpenAsync(
+            """
+            interface IRunner
+            {
+                /// <summary>Runs <paramref name="times"/> times.</summary>
+                /// <param name="times">How often.</param>
+                void Run(int times);
+            }
+            class Runner : IRunner
+            {
+                /// <inheritdoc />
+                public void Run(int times) { }
+            }
+            new Runner().Run(|
+            """
+        );
+        SignatureInfo signature = Active((await script.SignatureHelpAsync()).ShouldNotBeNull());
+        signature.Documentation.ShouldNotBeNull().Text.ShouldBe("Runs `times` times.");
+        signature.Parameters[0].Documentation.ShouldNotBeNull().Text.ShouldBe("How often.");
     }
 }

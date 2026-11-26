@@ -37,7 +37,8 @@ internal readonly record struct HoverSpan(string Text, SpanStyle Style = SpanSty
 /// <summary>Code of one color.</summary>
 /// <param name="Text">The code.</param>
 /// <param name="Foreground">Its token's color; null for the editor's foreground.</param>
-internal readonly record struct CodeRun(string Text, IBrush? Foreground);
+/// <param name="Bold">Whether it is bold, as signature help's active parameter.</param>
+internal readonly record struct CodeRun(string Text, IBrush? Foreground, bool Bold = false);
 
 [Flags]
 internal enum SpanStyle
@@ -138,6 +139,15 @@ internal static class HoverBlocks
         }
         return budget.Fit(blocks);
     }
+
+    /// <summary>
+    /// <paramref name="code"/>, whose lines end at <c>\r\n</c>, <c>\n</c> or <c>\r</c> as everywhere in the library, as
+    /// a code block in the colors of <paramref name="grammar"/>'s tokens, as <see cref="Highlight(IEnumerable{string},
+    /// TextMateGrammar?, CancellationToken)"/> colors its lines.
+    /// </summary>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    public static HoverCode Highlight(string code, TextMateGrammar? grammar, CancellationToken cancellationToken) =>
+        Highlight(code.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'), grammar, cancellationToken);
 
     /// <summary>
     /// A code block in the colors of <paramref name="grammar"/>'s tokens, line by line, with neighbors of one color in

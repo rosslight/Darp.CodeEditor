@@ -686,6 +686,65 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_commit_character_that_ends_the_items_text_goes_in_once() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            // A named argument, whose colon also commits it.
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [ { "label": "amount:", "filterText": "amount", "insertText": "amount:",
+                                   "commitCharacters": [":"] } ] }
+                    """
+                )
+            );
+            const string text = "Report(amo";
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            await OpenAsync(window, 10);
+            window.Type(":");
+            document.Text.ShouldBe("Report(amount:");
+            window.Editor.Selection.Caret.ShouldBe(14);
+            document.Undo();
+            document.Text.ShouldBe(text);
+
+            await OpenAsync(window, 10);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("Report(amount:");
+
+            // With a colon after the word, the item's edit goes over it, so that one stays.
+            using CodeDocument followed = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [ { "label": "amount:", "filterText": "amount", "commitCharacters": [":"],
+                      "textEdit": { "range": { "start": { "line": 0, "character": 7 }, "end": { "line": 0, "character": 12 } },
+                                    "newText": "amount:" } } ] }
+                    """
+                )
+            );
+            const string spaced = "Report(amo : 3)";
+            document.Text = spaced;
+            await OpenAsync(window, 10);
+            window.Type(":");
+            document.Text.ShouldBe("Report(amount: 3)");
+            window.Editor.Selection.Caret.ShouldBe(14);
+            document.Undo();
+            document.Text.ShouldBe(spaced);
+
+            await OpenAsync(window, 10);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("Report(amount: 3)");
+            window.Editor.Selection.Caret.ShouldBe(14);
+        });
+
+    [Fact]
     public Task Edits_replace_their_range_also_with_what_was_typed_since_and_an_insert_replace_edit_inserts_or_replaces() =>
         _ui.Run(async () =>
         {
@@ -1974,6 +2033,48 @@ public sealed class CompletionTests(UiFixture ui)
             await Wait.UntilAsync(() => DetailTexts(window).Contains("class System.Console"));
         });
 
+    [Fact]
+    public Task Label_details_show_after_the_label_and_on_the_right_of_every_row_and_typing_matches_only_the_label() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [
+                      { "label": "Join", "labelDetails": { "detail": "(string separator)", "description": "System.String" } },
+                      { "label": "JsonNode", "detail": "class System.Text.Json.Nodes.JsonNode" },
+                      { "label": "JsonSerializer", "detail": "class System.Text.Json.JsonSerializer",
+                        "labelDetails": { "description": "System.Text.Json" } } ] }
+                    """
+                )
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "J");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await OpenAsync(window, 1);
+            // Without the details beside the list, the selected row shows the detail of an item without label details.
+            window.Press(Key.Space, KeyModifiers.Control);
+            await Wait.UntilAsync(() => Details(window) is null);
+
+            Row(window, "Join").Label.Inlines?.Text.ShouldBe("Join(string separator)");
+            Row(window, "Join").Right.Text.ShouldBe("System.String");
+            Row(window, "JsonNode").Right.IsVisible.ShouldBeFalse();
+            Row(window, "JsonSerializer").Right.Text.ShouldBe("System.Text.Json");
+            window.Press(Key.Down);
+            await Wait.UntilAsync(() => Row(window, "JsonNode").Right.Text == "class System.Text.Json.Nodes.JsonNode");
+            window.Press(Key.Down);
+            await Wait.UntilAsync(() => !Row(window, "JsonNode").Right.IsVisible);
+            Row(window, "JsonSerializer").Right.Text.ShouldBe("System.Text.Json");
+
+            // "Js" is in "Join(string", not in "Join".
+            window.Type("s");
+
+            await WaitForLabelsAsync(window, ["JsonNode", "JsonSerializer"]);
+        });
+
     /// <summary>Makes the fake server answer completion with <paramref name="result"/>, until the document is disposed.</summary>
     /// <summary>
     /// Starts the server, and waits until <paramref name="document"/> is open in it: editors ask only then, once the
@@ -2147,12 +2248,7 @@ public sealed class CompletionTests(UiFixture ui)
     private static PopupFrame? Details(EditorWindow window) => PopupFrames.Find(window, "CompletionDetails");
 
     private static IReadOnlyList<string> DetailTexts(EditorWindow window) =>
-        Details(window)
-            ?.GetVisualDescendants()
-            .OfType<TextBlock>()
-            .Select(t => t.Inlines?.Text ?? t.Text ?? "")
-            .ToList()
-        ?? [];
+        Details(window)?.GetVisualDescendants().OfType<TextBlock>().Select(Hovers.TextOf).ToList() ?? [];
 
     /// <summary>The runs of the label of the row of <paramref name="label"/>, each with whether it is bold.</summary>
     internal static IReadOnlyList<(string Text, bool Bold)> RowRuns(EditorWindow window, string label) =>

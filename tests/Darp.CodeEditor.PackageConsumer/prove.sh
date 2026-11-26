@@ -23,6 +23,11 @@ export DarpCodeEditorVersion=$version
 DarpStreamJsonRpcVersion=$(sed -n 's/.*Include="StreamJsonRpc" Version="\([^"]*\)".*/\1/p' "$repo/Directory.Packages.props")
 export DarpStreamJsonRpcVersion
 
+# Whether a published app has .NET's XML docs next to its helpers' runtime.
+has_framework_docs() {
+    compgen -G "$1/helpers/dotnet/shared/Microsoft.NETCore.App/*/System.Runtime.xml" >/dev/null
+}
+
 # The publish must fail, and say this.
 expect_failure() {
     local project=$1 message=$2 log
@@ -37,23 +42,33 @@ expect_failure() {
 echo "=== Development launch"
 dotnet build Consumer -c Debug
 "Consumer/bin/Debug/net10.0/Consumer$extension"
+# The server reads .NET's XML docs where the build found .NET's reference assemblies.
+docs=$(tr -d '\r' <Consumer/bin/Debug/net10.0/helpers/script-framework-docs.txt)
+[[ -f $docs/System.Runtime.xml ]] || { echo "The build named '$docs' for .NET's XML docs." >&2; exit 1; }
 
 echo "=== JIT"
 dotnet publish Consumer -c Release -r "$rid" --self-contained false -o out/jit
 # The app runs on the installed .NET, wherever it is. The variable only proves that its helper looks in ../dotnet.
 DOTNET_ROOT=/nonexistent dotnet out/jit/Consumer.dll
+has_framework_docs out/jit || { echo "The JIT publish has no XML docs of .NET." >&2; exit 1; }
 dotnet build PayloadProbe -c Release -r "$rid" --self-contained false -o out/probe
 DOTNET_ROOT="$PWD/out/jit/helpers/dotnet" DOTNET_MULTILEVEL_LOOKUP=0 "out/probe/PayloadProbe$extension" out/jit
 
 echo "=== NativeAOT"
 dotnet publish Consumer -c Release -r "$rid" -p:PublishAot=true -o out/aot
 DOTNET_ROOT=/nonexistent "out/aot/Consumer$extension"
+has_framework_docs out/aot || { echo "The NativeAOT publish has no XML docs of .NET." >&2; exit 1; }
 DOTNET_ROOT="$PWD/out/aot/helpers/dotnet" DOTNET_MULTILEVEL_LOOKUP=0 "out/probe/PayloadProbe$extension" out/aot
 
-echo "=== A republish leaves nothing stale"
-dotnet publish Consumer -c Release -r "$rid" --self-contained false -o out/jit -p:WithoutCompatibleA=true
+echo "=== A republish without a reference and without .NET's XML docs leaves nothing of them"
+dotnet publish Consumer -c Release -r "$rid" --self-contained false -o out/jit -p:WithoutCompatibleA=true \
+    -p:PublishCSharpScriptFrameworkDocs=false
 if [[ -e out/jit/helpers/script-api/CompatibleA.dll ]] || grep -q CompatibleA out/jit/helpers/script-references.txt; then
     echo "A removed reference stayed in the payload." >&2
+    exit 1
+fi
+if has_framework_docs out/jit; then
+    echo "The XML docs of .NET stayed in the payload." >&2
     exit 1
 fi
 
