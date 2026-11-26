@@ -645,8 +645,9 @@ app's script environments.
 - **Hover:** the symbol as C# code, then its XML docs as text.
 - **Occurrences** (`textDocument/documentHighlight`) are those of the symbol at the caret, by its identity, so a local
   and a top-level variable of the same name stay apart, and so do the implementations of an interface's member, and a
-  property and its accessors. Its declarations are text, as in Roslyn's own server; an assignment, also after `?.`, an
-  increment or decrement, an `out` or `ref` argument and a deconstruction write it, and the rest read it.
+  property and its accessors. Its declarations are text, as in Roslyn's own server, both parts of a partial method or
+  property among them, also from the part that implements it; an assignment, also after `?.`, an increment or decrement,
+  an `out` or `ref` argument and a deconstruction write it, and the rest read it.
 - **XML docs** of the marked assemblies are next to them. .NET's are the reference pack's English files, which don't
   match the runtime's assemblies one to one: `string` is in `System.Private.CoreLib`, and its docs in
   `System.Runtime.xml`. A member's file is the one named after a runtime assembly that defines or forwards its type.
@@ -1279,7 +1280,8 @@ server process:
   quotes; types and extension methods from namespaces the script does not import, with their `using` after a leading
   comment or among the usings, none from a dependency under the private alias and none before a name is typed; obsolete
   members; one error per rejected directive, none of them suggested; `static` and `readonly` in semantic colors;
-  occurrences by symbol, with reads and writes through members, deconstructions and `out`;
+  occurrences by symbol, with reads and writes through members, deconstructions and `out`, and both declarations of a
+  partial member;
 - .NET's XML docs in hover and signature help, for `string.Concat`, from the SDK's reference pack, and a missing folder
   of docs leaving hover without them;
 - once by hand, not in CI: the same 45 tests from a NativeAOT client, with the server and the marked assemblies put next

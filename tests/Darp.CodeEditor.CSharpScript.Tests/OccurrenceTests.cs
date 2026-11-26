@@ -104,6 +104,27 @@ public sealed class OccurrenceTests(ScriptServerFixture fixture)
         ]);
     }
 
+    [Theory]
+    [InlineData(
+        "partial class C { public partial void P(); }\npartial class C { public partial void P() {} }\nnew C().P();"
+    )]
+    [InlineData(
+        "partial class C { public partial int P { get; } }\npartial class C { public partial int P => 1; }\n_ = new C().P;"
+    )]
+    public async Task A_partial_member_has_both_its_declarations_from_either_part(string text)
+    {
+        using var script = await _fixture.OpenAsync(text);
+        int[] names = [.. Enumerable.Range(0, text.Length).Where(i => text[i] == 'P')];
+        (int, OccurrenceKind)[] expected =
+        [
+            (names[0], OccurrenceKind.Text),
+            (names[1], OccurrenceKind.Text),
+            (names[2], OccurrenceKind.Read),
+        ];
+        (await OccurrencesAsync(script, names[2])).ShouldBe(expected);
+        (await OccurrencesAsync(script, names[1])).ShouldBe(expected);
+    }
+
     [Fact]
     public async Task Text_without_a_symbol_has_no_occurrences()
     {

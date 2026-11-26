@@ -75,10 +75,16 @@ internal static class ScriptHighlights
     }
 
     /// <summary>
-    /// The symbol as it is declared: a generic one without its type arguments, an extension method as a static method.
+    /// The symbol as it is declared: a generic one without its type arguments, an extension method as a static method,
+    /// and a partial member as the part that defines it.
     /// </summary>
     private static ISymbol Identity(ISymbol symbol) =>
-        (symbol is IMethodSymbol { ReducedFrom: { } declared } ? declared : symbol).OriginalDefinition;
+        (symbol is IMethodSymbol { ReducedFrom: { } declared } ? declared : symbol).OriginalDefinition switch
+        {
+            IMethodSymbol { PartialDefinitionPart: { } definition } => definition,
+            IPropertySymbol { PartialDefinitionPart: { } definition } => definition,
+            var declaration => declaration,
+        };
 
     /// <summary>
     /// Whether the name at <paramref name="span"/> is written: assigned, also as a member or in a deconstruction,
