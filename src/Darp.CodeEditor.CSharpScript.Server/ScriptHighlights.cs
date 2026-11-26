@@ -10,7 +10,8 @@ namespace Darp.CodeEditor.CSharpScript.Server;
 
 /// <summary>
 /// The occurrences of the symbol at a position, by the symbol's identity: its declarations in the script, as text, as
-/// Roslyn's own server answers, and its references, as reads or writes.
+/// Roslyn's own server answers, and its references, as reads or writes. Roslyn's search also finds the symbols it
+/// cascades to, as the other implementations of an interface's member, or a property's accessors: those are left out.
 /// </summary>
 internal static class ScriptHighlights
 {
@@ -39,8 +40,11 @@ internal static class ScriptHighlights
             )
             .ConfigureAwait(false);
         var occurrences = new Dictionary<TextSpan, int>();
+        ISymbol selected = Identity(symbol);
         foreach (ReferencedSymbol referenced in found)
         {
+            if (!SymbolEqualityComparer.Default.Equals(Identity(referenced.Definition), selected))
+                continue;
             foreach (Location location in referenced.Definition.Locations)
             {
                 if (location.SourceTree == root.SyntaxTree)
@@ -69,6 +73,12 @@ internal static class ScriptHighlights
                 )),
         ];
     }
+
+    /// <summary>
+    /// The symbol as it is declared: a generic one without its type arguments, an extension method as a static method.
+    /// </summary>
+    private static ISymbol Identity(ISymbol symbol) =>
+        (symbol is IMethodSymbol { ReducedFrom: { } declared } ? declared : symbol).OriginalDefinition;
 
     /// <summary>
     /// Whether the name at <paramref name="span"/> is written: assigned, also as a member or in a deconstruction,

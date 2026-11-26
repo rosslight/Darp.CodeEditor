@@ -50,6 +50,46 @@ public sealed class OccurrenceTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task Another_implementation_of_an_interfaces_member_is_apart()
+    {
+        const string text =
+            "interface I { void M(); }\nclass A : I { public void M() {} }\nclass B : I { public void M() {} }\n"
+            + "new A().M(); new B().M();";
+        using var script = await _fixture.OpenAsync(text);
+        int[] names = [.. Enumerable.Range(0, text.Length).Where(i => text.AsSpan(i).StartsWith("M("))];
+        (await OccurrencesAsync(script, names[3])).ShouldBe([
+            (names[1], OccurrenceKind.Text),
+            (names[3], OccurrenceKind.Read),
+        ]);
+    }
+
+    [Fact]
+    public async Task A_generic_method_has_its_occurrences_whatever_its_type_arguments()
+    {
+        const string text = "T Echo<T>(T value) => value;\nEcho(1);\nEcho(\"b\");";
+        using var script = await _fixture.OpenAsync(text);
+        int[] names = [.. Enumerable.Range(0, text.Length).Where(i => text.AsSpan(i).StartsWith("Echo"))];
+        (await OccurrencesAsync(script, names[1])).ShouldBe([
+            (names[0], OccurrenceKind.Text),
+            (names[1], OccurrenceKind.Read),
+            (names[2], OccurrenceKind.Read),
+        ]);
+    }
+
+    [Fact]
+    public async Task A_propertys_accessors_are_no_occurrences_of_it()
+    {
+        const string text = "class P { public int Value { get; set; } }\nvar p = new P { Value = 1 };\np.Value++;";
+        using var script = await _fixture.OpenAsync(text);
+        int[] values = [.. Enumerable.Range(0, text.Length).Where(i => text.AsSpan(i).StartsWith("Value"))];
+        (await OccurrencesAsync(script, values[2])).ShouldBe([
+            (values[0], OccurrenceKind.Text),
+            (values[1], OccurrenceKind.Write),
+            (values[2], OccurrenceKind.Write),
+        ]);
+    }
+
+    [Fact]
     public async Task Text_without_a_symbol_has_no_occurrences()
     {
         using var script = await _fixture.OpenAsync("// x marks the spot\nint x = 0;");
