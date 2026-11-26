@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using System.Collections.Immutable;
 using System.Text.Json.Nodes;
 using Darp.CodeEditor.Lsp;
 using Microsoft.CodeAnalysis;
@@ -14,6 +15,15 @@ namespace Darp.CodeEditor.CSharpScript.Server;
 /// </summary>
 internal sealed class ScriptCompletions
 {
+    /// <summary>
+    /// The characters that commit an item as they are typed, unless its rules change them: Roslyn's, which its own server
+    /// gives clients too.
+    /// </summary>
+    public static readonly string[] CommitCharacters =
+    [
+        .. CompletionRules.Default.DefaultCommitCharacters.Select(c => c.ToString()),
+    ];
+
     /// <summary>Roslyn's tag of an obsolete symbol's item, which its public <see cref="WellKnownTags"/> lacks.</summary>
     private const string DeprecatedTag = "Deprecated";
 
@@ -28,13 +38,19 @@ internal sealed class ScriptCompletions
     private readonly ScriptSnapshot _script;
     private readonly Task<Answered?> _answered;
 
-    /// <summary>Starts asking for the list at <paramref name="position"/>.</summary>
-    public ScriptCompletions(int id, ScriptSnapshot script, LspPosition position, CancellationToken cancellationToken)
+    /// <summary>Starts asking for the list that <paramref name="parameters"/> ask for.</summary>
+    public ScriptCompletions(
+        int id,
+        ScriptSnapshot script,
+        CompletionParams parameters,
+        CancellationToken cancellationToken
+    )
     {
         Id = id;
         _script = script;
-        _answered = Task.Run(() => AskAsync(position, cancellationToken), cancellationToken);
-        Items = ToLspAsync(cancellationToken);
+        int offset = script.Lines.ToOffset(parameters.Position);
+        _answered = Task.Run(() => AskAsync(offset, Trigger(parameters.Context), cancellationToken), cancellationToken);
+        Items = ToLspAsync(offset, cancellationToken);
     }
 
     /// <summary>Names this list among the server's: its items carry it, to resolve in it.</summary>
@@ -74,22 +90,31 @@ internal sealed class ScriptCompletions
         };
     }
 
-    private async Task<Answered?> AskAsync(LspPosition position, CancellationToken cancellationToken)
+    /// <summary>
+    /// Roslyn's trigger for the client's: a trigger character as typed, so that Roslyn answers only where it means
+    /// something, and anything else as asked for.
+    /// </summary>
+    private static CompletionTrigger Trigger(Lsp.CompletionContext context) =>
+        context is { TriggerKind: Lsp.CompletionTriggerKind.TriggerCharacter, TriggerCharacter: [char typed] }
+            ? CompletionTrigger.CreateInsertionTrigger(typed)
+            : CompletionTrigger.Invoke;
+
+    private async Task<Answered?> AskAsync(int offset, CompletionTrigger trigger, CancellationToken cancellationToken)
     {
         if (CompletionService.GetService(_script.Document) is not { } service)
             return null;
-        int offset = _script.Lines.ToOffset(position);
         CompletionList list = await service
-            .GetCompletionsAsync(_script.Document, offset, cancellationToken: cancellationToken)
+            .GetCompletionsAsync(_script.Document, offset, trigger, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
         return new Answered(service, list);
     }
 
-    private async Task<LspCompletionList?> ToLspAsync(CancellationToken cancellationToken)
+    private async Task<LspCompletionList?> ToLspAsync(int offset, CancellationToken cancellationToken)
     {
         if (await _answered.ConfigureAwait(false) is not (var service, var list))
             return null;
         var items = new List<LspCompletionItem>(list.ItemsList.Count);
+        var commit = new CommitRules(list, _script.Text.ToString(TextSpan.FromBounds(list.Span.Start, offset)));
         // Nearly every item replaces the same word: one range, written as often, is built once.
         (TextSpan Span, LspRange? Range) last = default;
         for (int index = 0; index < list.ItemsList.Count; index++)
@@ -125,14 +150,79 @@ internal sealed class ScriptCompletions
                     item.SortText == label ? null : item.SortText,
                     filterText == label ? null : filterText,
                     item.Rules.MatchPriority == MatchPriority.Preselect ? true : null,
-                    Tags: item.Tags.Contains(DeprecatedTag) ? s_deprecated : null
+                    Tags: item.Tags.Contains(DeprecatedTag) ? s_deprecated : null,
+                    CommitCharacters: commit.Of(item)
                 )
             );
         }
-        return new LspCompletionList(IsIncomplete: false, items);
+        return new LspCompletionList(commit.AsksAgain, items);
     }
 
     private sealed record Answered(CompletionService Service, CompletionList List);
+
+    /// <summary>
+    /// Which characters commit the items of a list, as Roslyn's own server decides for clients that always select an
+    /// item hard. Nothing commits in a list that only suggests, as where a lambda's parameter may be named, or after
+    /// typed punctuation. Before a name is typed, only the items that Roslyn selects hard commit, and typing the name
+    /// asks again, for the list whose items commit.
+    /// </summary>
+    /// <param name="list">The list.</param>
+    /// <param name="typed">The text from where the items' word starts up to the caret.</param>
+    private sealed class CommitRules(CompletionList list, string typed)
+    {
+        private readonly bool _suggests = list.SuggestionModeItem is not null || IsPunctuation(typed);
+        private readonly bool _typed = typed.Length > 0;
+
+        /// <summary>The characters of each set of an item's rules, worked out once: items share their rules.</summary>
+        private readonly Dictionary<ImmutableArray<CharacterSetModificationRule>, string[]> _characters = [];
+
+        /// <summary>Whether the list must be asked for again as the user types: the client asks on each key then.</summary>
+        public bool AsksAgain { get; } =
+            IsPunctuation(typed)
+            || (
+                typed.Length == 0
+                && list.SuggestionModeItem is null
+                && list.ItemsList.Any(item =>
+                    item.Rules.SelectionBehavior != CompletionItemSelectionBehavior.HardSelection
+                )
+            );
+
+        /// <summary>The characters that commit <paramref name="item"/>; null for <see cref="CommitCharacters"/>.</summary>
+        public string[]? Of(CompletionItem item)
+        {
+            if (_suggests || (!_typed && item.Rules.SelectionBehavior != CompletionItemSelectionBehavior.HardSelection))
+                return [];
+            ImmutableArray<CharacterSetModificationRule> rules = item.Rules.CommitCharacterRules;
+            if (rules.IsEmpty)
+                return null;
+            if (!_characters.TryGetValue(rules, out string[]? characters))
+                _characters[rules] = characters = Apply(rules);
+            return characters;
+        }
+
+        private static string[] Apply(ImmutableArray<CharacterSetModificationRule> rules)
+        {
+            var characters = new HashSet<char>(CompletionRules.Default.DefaultCommitCharacters);
+            foreach (CharacterSetModificationRule rule in rules)
+            {
+                switch (rule.Kind)
+                {
+                    case CharacterSetModificationKind.Add:
+                        characters.UnionWith(rule.Characters);
+                        break;
+                    case CharacterSetModificationKind.Remove:
+                        characters.ExceptWith(rule.Characters);
+                        break;
+                    case CharacterSetModificationKind.Replace:
+                        characters = [.. rule.Characters];
+                        break;
+                }
+            }
+            return [.. characters.Select(c => c.ToString())];
+        }
+
+        private static bool IsPunctuation(string typed) => typed.Length > 0 && typed.All(char.IsPunctuation);
+    }
 
     /// <summary>The protocol's <c>CompletionItemKind</c> of Roslyn's first tag that names a kind.</summary>
     private static int Kind(CompletionItem item)

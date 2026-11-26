@@ -75,8 +75,11 @@ internal sealed class Script<TGlobals> : IDisposable
         return script;
     }
 
-    /// <summary>The list at the caret, with the word before it as an editor passes it.</summary>
-    public async Task<CompletionList> CompleteAsync()
+    /// <summary>
+    /// The list at the caret, with the word before it as an editor passes it, asked for as <paramref name="trigger"/>
+    /// says, or by the user.
+    /// </summary>
+    public async Task<CompletionList> CompleteAsync(CompletionTrigger? trigger = null)
     {
         TextSnapshot snapshot = Document.CurrentSnapshot;
         string text = snapshot.GetText();
@@ -86,7 +89,7 @@ internal sealed class Script<TGlobals> : IDisposable
         CompletionList? list = await Document.CompletionAsync(
             snapshot,
             TextRange.FromBounds(start, Caret),
-            new CompletionTrigger(CompletionTriggerKind.Invoked),
+            trigger ?? new CompletionTrigger(CompletionTriggerKind.Invoked),
             TestContext.Current.CancellationToken
         );
         return list.ShouldNotBeNull();

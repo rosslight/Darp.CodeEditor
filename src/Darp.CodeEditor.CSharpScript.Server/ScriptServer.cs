@@ -20,7 +20,11 @@ internal sealed class ScriptServer
             "textDocumentSync": {{TextDocumentSyncKind.Incremental}},
             "hoverProvider": true,
             "documentHighlightProvider": true,
-            "completionProvider": { "resolveProvider": true, "triggerCharacters": ["."] },
+            "completionProvider": {
+              "resolveProvider": true,
+              "triggerCharacters": ["."],
+              "allCommitCharacters": {{JsonSerializer.Serialize(ScriptCompletions.CommitCharacters)}}
+            },
             "signatureHelpProvider": { "triggerCharacters": ["(", ",", "[", "<", "{"], "retriggerCharacters": [")", "]", ">", "}"] },
             "semanticTokensProvider": {
               "legend": {

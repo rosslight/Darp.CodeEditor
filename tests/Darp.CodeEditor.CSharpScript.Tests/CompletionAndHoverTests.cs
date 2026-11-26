@@ -1,4 +1,5 @@
 using Darp.CodeEditor.LanguageClient;
+using Darp.CodeEditor.Lsp;
 using ScriptTests.Api;
 
 namespace Darp.CodeEditor.CSharpScript.Tests;
@@ -77,6 +78,38 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
         labels.ShouldNotContain("r");
         labels.ShouldNotContain("load");
         labels.ShouldNotContain("line");
+    }
+
+    [Fact]
+    public async Task Punctuation_commits_a_member_once_its_name_is_typed()
+    {
+        using var script = await _fixture.OpenAsync("var length = Greeting.|");
+        // Right after the dot, punctuation goes in as it is, and typing a name asks again.
+        CompletionList afterDot = await script.CompleteAsync(
+            new CompletionTrigger(CompletionTriggerKind.TriggerCharacter, '.')
+        );
+        afterDot.IsIncomplete.ShouldBeTrue();
+        afterDot.Items.Single(item => item.Label == "Length").CommitCharacters.ShouldBeEmpty();
+
+        script.Document.Replace(new TextRange(script.Caret, 0), "Le");
+        script.Caret += 2;
+        CompletionList typed = await script.CompleteAsync(
+            new CompletionTrigger(CompletionTriggerKind.TriggerForIncompleteCompletions)
+        );
+        typed.IsIncomplete.ShouldBeFalse();
+        string commit = typed.Items.Single(item => item.Label == "Length").CommitCharacters;
+        commit.ShouldContain('.');
+        commit.ShouldContain(';');
+        commit.ShouldContain('(');
+    }
+
+    [Fact]
+    public async Task Nothing_commits_by_punctuation_where_a_new_name_may_be_typed()
+    {
+        using var script = await _fixture.OpenAsync("var upper = Greeting.Where(c|");
+        CompletionList list = await script.CompleteAsync();
+        list.Items.ShouldNotBeEmpty();
+        list.Items.ShouldAllBe(item => item.CommitCharacters.Length == 0);
     }
 
     [Fact]

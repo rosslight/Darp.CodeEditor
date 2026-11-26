@@ -23,7 +23,7 @@ internal sealed class OpenScript(string uri, ScriptContext context, ScriptSnapsh
 
     /// <summary>Starts a completion request, which from now on is the list that items resolve in.</summary>
     public ScriptCompletions Complete(CompletionParams parameters, int id, CancellationToken cancellationToken) =>
-        Completions = new ScriptCompletions(id, Snapshot, parameters.Position, cancellationToken);
+        Completions = new ScriptCompletions(id, Snapshot, parameters, cancellationToken);
 
     /// <summary>Cancels the diagnostics under way and returns the token of the next ones.</summary>
     public CancellationToken RestartDiagnostics()

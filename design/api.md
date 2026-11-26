@@ -610,10 +610,16 @@ app's script environments.
 - **Diagnostics:** the compiler's errors and warnings. `#r`, `#load` and `#line` are one error each, in place of what
   the compiler says about them, and completion does not suggest them. Each diagnostic names `csharp` as its source, and
   a compiler diagnostic's code links to the page that its descriptor names.
-- **Completion:** Roslyn's list, with keywords and kinds, on `.` and whenever the client asks. Each item has its edit at
+- **Completion:** Roslyn's list, with keywords and kinds, on `.` and whenever the client asks; a trigger character
+  reaches Roslyn as typed, so that it answers only where the character means something. Each item has its edit at
   once; its signature and XML docs come with resolve, also after the user typed on, from the version the list was asked
   for. An escaped word such as `@ev` completes identifiers, not keywords, over its `@`, and there is no list after a lone `@`.
   An obsolete member's item is tagged deprecated, so it shows struck through.
+- **Commit characters** are Roslyn's, as its own server gives them to clients that always select an item hard: its
+  defaults, which the server names as `allCommitCharacters`, as each item's rules change them. Nothing commits in a
+  list that only suggests, as where a lambda's parameter may be named, or after typed punctuation; before a name is
+  typed, as right after `.`, only the items that Roslyn selects hard commit, and the list is incomplete, so that typing
+  the name asks for the list whose items commit. With `Count` selected, `.` commits it and asks for its members.
 - **Hover:** the symbol as C# code, then its XML docs as text.
 - **Occurrences** (`textDocument/documentHighlight`) are those of the symbol at the caret, by its identity, so a local
   and a top-level variable of the same name stay apart. Its declarations are text, as in Roslyn's own server; an
