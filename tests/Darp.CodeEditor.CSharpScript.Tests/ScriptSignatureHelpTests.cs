@@ -289,6 +289,20 @@ public sealed class ScriptSignatureHelpTests(ScriptServerFixture fixture)
         ActiveParameter(Active(help)).ShouldBe("TValue");
     }
 
+    [Theory]
+    [InlineData("var d = new Dictionary<(int, int), |string>();", "TValue")]
+    [InlineData("var d = new Dictionary<(int a, List<int> b)|, string>();", "TKey")]
+    [InlineData("var d = new Dictionary<int[,]|, string>();", "TKey")]
+    [InlineData("var d = new Dictionary<int[,], |string>();", "TValue")]
+    [InlineData("var d = new Dictionary<string, (int, |", "TValue")]
+    [InlineData("var d = new Dictionary<int[,|", "TKey")]
+    public async Task Commas_in_a_tuple_or_an_array_rank_separate_no_type_arguments(string text, string active)
+    {
+        using var script = await _fixture.OpenAsync(text);
+        SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        ActiveParameter(Active(help)).ShouldBe(active);
+    }
+
     [Fact]
     public async Task A_type_argument_list_shows_what_its_receiver_can_call()
     {

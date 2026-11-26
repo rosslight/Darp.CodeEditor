@@ -118,7 +118,8 @@ internal static class ScriptSignatureHelp
     /// <summary>
     /// The type argument list that the caret is in, written or partly written: the tokens between its <c>&lt;</c> and
     /// the caret could all be type arguments, and the name before it is generic. A <c>&lt;</c> that compares, as in
-    /// <c>a &lt; b</c>, has no generic name before it.
+    /// <c>a &lt; b</c>, has no generic name before it. Only the commas outside nested brackets, a tuple's and an array
+    /// rank's too, separate type arguments.
     /// </summary>
     private static Site? TypeArgumentsAt(
         SemanticModel model,
@@ -139,10 +140,17 @@ internal static class ScriptSignatureHelp
                         || token.GetPreviousToken() is not { RawKind: (int)SyntaxKind.IdentifierToken } name
                         ? null
                         : GenericSite(model, name, position, argument, cancellationToken);
-                case SyntaxKind.LessThanToken:
+                case SyntaxKind.LessThanToken
+                or SyntaxKind.OpenParenToken
+                or SyntaxKind.OpenBracketToken when depth > 0:
                     depth--;
                     break;
-                case SyntaxKind.GreaterThanToken:
+                // The caret is in a tuple or an array's rank, which are part of one type argument: the commas so far
+                // were theirs.
+                case SyntaxKind.OpenParenToken or SyntaxKind.OpenBracketToken:
+                    argument = 0;
+                    break;
+                case SyntaxKind.GreaterThanToken or SyntaxKind.CloseParenToken or SyntaxKind.CloseBracketToken:
                     depth++;
                     break;
                 case SyntaxKind.GreaterThanGreaterThanToken:
@@ -155,9 +163,7 @@ internal static class ScriptSignatureHelp
                 or SyntaxKind.DotToken
                 or SyntaxKind.ColonColonToken
                 or SyntaxKind.QuestionToken
-                or SyntaxKind.AsteriskToken
-                or SyntaxKind.OpenBracketToken
-                or SyntaxKind.CloseBracketToken:
+                or SyntaxKind.AsteriskToken:
                     break;
                 case var kind when SyntaxFacts.IsPredefinedType(kind):
                     break;
