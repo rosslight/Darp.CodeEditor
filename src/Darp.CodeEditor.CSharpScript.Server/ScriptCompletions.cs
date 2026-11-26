@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using Darp.CodeEditor.Lsp;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Completion;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Tags;
 using Microsoft.CodeAnalysis.Text;
@@ -174,19 +175,30 @@ internal sealed class ScriptCompletions
             if (isSnippet)
                 newText = Snippets.Escape(newText[..caret]) + "$0" + Snippets.Escape(newText[caret..]);
             // Roslyn puts in a named argument's name alone, for the colon to be typed. The item puts in the colon too,
-            // and goes over one that follows on the line, so that one stays, also when it is typed: the typed colon
-            // commits the item and goes in once. A colon on a later line stays where it is, after the name alone.
+            // and goes over one that follows past white space on the line, so that one stays, also when it is typed:
+            // the typed colon commits the item and goes in once. A colon after a line break or a comment stays where
+            // it is, after the name alone, and typing another commits nothing.
+            bool colonCommits = true;
             if (item.DisplayTextSuffix == ":" && newText == item.DisplayText)
             {
-                (int Offset, bool OnLaterLine)? colon = ColonAfter(span.End);
-                if (colon is not { OnLaterLine: true })
+                (int End, bool Apart)? colon = await ColonAfterAsync(span.End, cancellationToken).ConfigureAwait(false);
+                colonCommits = colon is not { Apart: true };
+                if (colonCommits)
                 {
                     newText = label;
-                    if (colon is { Offset: var end })
-                        span = TextSpan.FromBounds(span.Start, end + 1);
+                    if (colon is { End: var end })
+                        span = TextSpan.FromBounds(span.Start, end);
                 }
             }
-            items.Add(ToLsp(item, index, span, newText, filterText, isSnippet));
+            LspCompletionItem lsp = ToLsp(item, index, span, newText, filterText, isSnippet);
+            items.Add(
+                colonCommits
+                    ? lsp
+                    : lsp with
+                    {
+                        CommitCharacters = [.. (lsp.CommitCharacters ?? CommitCharacters).Where(c => c != ":")],
+                    }
+            );
         }
         bool asksAgain = commit.AsksAgain;
         var sent = new Dictionary<int, CompletionItem>();
@@ -316,16 +328,24 @@ internal sealed class ScriptCompletions
     }
 
     /// <summary>
-    /// The colon that follows <paramref name="offset"/>, past white space, and whether a line ends before it; null for
-    /// none.
+    /// The colon that is the next token after <paramref name="offset"/>: where it ends, and whether a line break or a
+    /// comment comes before it; null for none.
     /// </summary>
-    private (int Offset, bool OnLaterLine)? ColonAfter(int offset)
+    private async Task<(int End, bool Apart)?> ColonAfterAsync(int offset, CancellationToken cancellationToken)
     {
+        if (await _script.Document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false) is not { } root)
+            return null;
+        // In the trivia after a word, the token found is the word.
+        SyntaxToken next = root.FindToken(offset);
+        if (next.SpanStart < offset)
+            next = next.GetNextToken();
+        if (!next.IsKind(SyntaxKind.ColonToken))
+            return null;
         SourceText text = _script.Text;
-        bool onLaterLine = false;
-        while (offset < text.Length && char.IsWhiteSpace(text[offset]))
-            onLaterLine |= text[offset++] is '\n' or '\r';
-        return offset < text.Length && text[offset] == ':' ? (offset, onLaterLine) : null;
+        bool apart =
+            text.Lines.IndexOf(offset) != text.Lines.IndexOf(next.SpanStart)
+            || !string.IsNullOrWhiteSpace(text.ToString(TextSpan.FromBounds(offset, next.SpanStart)));
+        return (next.Span.End, apart);
     }
 
     /// <summary>Roslyn's list, as the client gets it.</summary>

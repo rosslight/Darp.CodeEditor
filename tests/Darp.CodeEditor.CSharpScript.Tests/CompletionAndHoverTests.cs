@@ -149,9 +149,14 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
         );
         left.CommitCharacters.ShouldContain(':');
 
-        // On a later line, the colon stays where it is.
-        using var below = await _fixture.OpenAsync("var sum = Add(le|\n: 1, right: 2);");
-        (await below.CompleteAsync()).Items.Single(item => item.Label == "left:").Edit.NewText.ShouldBe("left");
+        // After a line break or a comment, the colon stays where it is, and typing another commits nothing.
+        foreach (string apart in new[] { "var sum = Add(le|\n: 1, right: 2);", "var sum = Add(le| /* l */ : 1);" })
+        {
+            using var separated = await _fixture.OpenAsync(apart);
+            left = (await separated.CompleteAsync()).Items.Single(item => item.Label == "left:");
+            left.Edit.ShouldBe(new CompletionEdit(TextRange.FromBounds(separated.Caret - 2, separated.Caret), "left"));
+            left.CommitCharacters.ShouldNotContain(':');
+        }
     }
 
     [Fact]

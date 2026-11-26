@@ -623,8 +623,9 @@ app's script environments.
   version the list was asked for. The last four lists of a script that the client did not cancel resolve their items,
   so that the list that shows still resolves while a newer one is asked for. An escaped word such as `@ev` completes identifiers, not keywords, over its `@`, and
   there is no list after a lone `@`. An obsolete member's item is tagged deprecated, so it shows struck through. A
-  named argument's item, `amount:`, puts in its colon, and goes over one that follows on its line, so that one colon
-  stays, also when it is typed; after the name alone, a colon on a later line stays where it is.
+  named argument's item, `amount:`, puts in its colon, and goes over one that follows past white space on its line, so
+  that one colon stays, also when it is typed; a colon after a line break or a comment stays where it is, after the
+  name alone, and the item has no `:` among its commit characters.
 - **Imports:** a list also has the types and extension methods from namespaces that the script does not import, such
   as `JsonSerializer` and `GetFromJsonAsync`, from .NET's assemblies and the marked ones, not from what those depend
   on. Only the best 100 that match the typed name come, as the client ranks them, also with a typo in a list that it
@@ -1267,12 +1268,12 @@ server process:
   collection initializer entries, with a comparison's `<` quiet; a signature's summary and its parameters'
   descriptions, also inherited;
 - Roslyn's commit characters, none right after `.` nor where a lambda's parameter may be named; `:` opening a format's
-  list and nothing after a named argument; a named argument's colon, left out where one follows; a documentation
-  comment's tags, `<see cref=""/>` with the caret between its quotes; types and extension methods from namespaces the
-  script does not import, with their `using` after a leading comment or among the usings, none from a dependency under
-  the private alias and none before a name is typed; obsolete members; one error per rejected directive, none of them
-  suggested; `static` and `readonly` in semantic colors; occurrences by symbol, with reads and writes through members,
-  deconstructions and `out`;
+  list and nothing after a named argument; a named argument's colon, left out where one follows, also after a line break
+  or a comment, where it does not commit; a documentation comment's tags, `<see cref=""/>` with the caret between its
+  quotes; types and extension methods from namespaces the script does not import, with their `using` after a leading
+  comment or among the usings, none from a dependency under the private alias and none before a name is typed; obsolete
+  members; one error per rejected directive, none of them suggested; `static` and `readonly` in semantic colors;
+  occurrences by symbol, with reads and writes through members, deconstructions and `out`;
 - .NET's XML docs in hover and signature help, for `string.Concat`, from the SDK's reference pack, and a missing folder
   of docs leaving hover without them;
 - once by hand, not in CI: the same 45 tests from a NativeAOT client, with the server and the marked assemblies put next
