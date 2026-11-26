@@ -159,16 +159,23 @@ internal static class HoverView
         code.Foreground = look.Colors.CodeForeground;
         code.TextWrapping = TextWrapping.Wrap;
         if (code is SelectableTextBlock copied)
-            copied.CopyingToClipboard += CopyWithSpaces;
+        {
+            string original = string.Concat(block.Runs.Select(run => run.Text));
+            copied.CopyingToClipboard += (_, e) => Copy(copied, original, e);
+        }
         return code;
     }
 
-    /// <summary>Copies the selected code with the spaces that <see cref="Code"/> shows as no-break spaces.</summary>
-    private static async void CopyWithSpaces(object? sender, RoutedEventArgs e)
+    /// <summary>
+    /// Copies the selected part of <paramref name="original"/>, the code that <paramref name="code"/> shows with its
+    /// spaces as no-break spaces: the two have the same length.
+    /// </summary>
+    private static async void Copy(SelectableTextBlock code, string original, RoutedEventArgs e)
     {
-        var code = (SelectableTextBlock)sender!;
         e.Handled = true;
-        string text = code.SelectedText.Replace(NoBreakSpace, ' ');
+        int start = Math.Clamp(Math.Min(code.SelectionStart, code.SelectionEnd), 0, original.Length);
+        int end = Math.Clamp(Math.Max(code.SelectionStart, code.SelectionEnd), start, original.Length);
+        string text = original[start..end];
         try
         {
             if (TopLevel.GetTopLevel(code)?.Clipboard is { } clipboard)

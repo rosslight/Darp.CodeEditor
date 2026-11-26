@@ -98,6 +98,36 @@ public sealed class HoverTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Code_copies_as_written_also_its_own_no_break_spaces() =>
+        _ui.Run(async () =>
+        {
+            var look = new CodeLook(new FontFamily("DejaVu Sans Mono"), 14, PopupColors.Default);
+            const string written = "var text = \"a\u00A0b\";";
+            PopupStack panel = HoverView.Create([new HoverCode([new CodeRun(written, null)])], look, selectable: true);
+            var window = new Window
+            {
+                Width = 800,
+                Height = 200,
+                Content = panel,
+            };
+            window.Show();
+            try
+            {
+                window.UpdateLayout();
+                var code = (SelectableTextBlock)panel.Children.Single();
+
+                code.SelectAll();
+                code.Copy();
+
+                (await window.Clipboard.ShouldNotBeNull().TryGetTextAsync()).ShouldBe(written);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+
+    [Fact]
     public Task Code_fills_each_line_breaking_at_any_character_and_copies_with_its_spaces() =>
         _ui.Run(async () =>
         {
