@@ -152,7 +152,14 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
             new CompletionTrigger(CompletionTriggerKind.TriggerCharacter, '<')
         );
 
-        list.Items.Single(item => item.Label == "summary").Edit.NewText.ShouldBe("summary");
+        CompletionItem summary = list.Items.Single(item => item.Label == "summary");
+        summary.Edit.NewText.ShouldBe("summary");
+        // Roslyn describes a tag with nothing: it resolves without a detail to show.
+        CompletionItem resolved = (
+            await list.ResolveAsync(summary, TestContext.Current.CancellationToken)
+        ).ShouldNotBeNull();
+        resolved.Detail.ShouldBeNull();
+        resolved.Documentation.ShouldBeNull();
         // An element without content goes in whole, over the typed "<", with the caret between its quotes.
         CompletionItem see = list.Items.Single(item => item.Label == "see");
         see.Edit.ShouldBe(new CompletionEdit(new TextRange(4, 1), "<see cref=\"$0\"/>"));

@@ -94,7 +94,7 @@ internal sealed class ScriptCompletions
                 : string.Concat(description.TaggedParts[(lineBreak + 1)..].Select(part => part.Text)).Trim();
         return item with
         {
-            Detail = detail,
+            Detail = detail.Length == 0 ? null : detail,
             Documentation =
                 documentation.Length == 0 ? null : new LspMarkupContent("markdown", Markdown.Escape(documentation)),
         };
