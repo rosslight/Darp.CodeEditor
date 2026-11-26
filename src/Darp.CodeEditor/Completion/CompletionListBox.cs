@@ -16,9 +16,9 @@ namespace Darp.CodeEditor.Completion;
 /// <see cref="MaxRows"/> of them, and no more than fit the height that the list gets. The rows that show, the
 /// selection, paging and scrolling all go by that height, so that the selected row is always one the window shows. A
 /// row is the item's icon and its label in the editor's font, the characters that matched in bold and the highlight
-/// color, struck through when deprecated; and, while the details beside the list are closed, the selected item's
-/// detail on the right. It takes no keyboard focus: the editor keeps it. A click commits a row's item; the wheel and the
-/// scroll bar scroll.
+/// color, struck through when deprecated, and its label details as VS Code shows them; and, while the details beside
+/// the list are closed, the detail of the selected item without label details on the right. It takes no keyboard
+/// focus: the editor keeps it. A click commits a row's item; the wheel and the scroll bar scroll.
 /// </summary>
 internal sealed class CompletionListBox : Control
 {
@@ -297,8 +297,9 @@ internal sealed class CompletionListBox : Control
     }
 
     /// <summary>
-    /// A row: the item's icon, its label, and on the right the selected item's detail while the details beside the list
-    /// are closed. The list reuses it for other items.
+    /// A row: the item's icon, its label, and the detail of its label details right after it, dimmed. On the right,
+    /// dimmed, the description of its label details, or for an item without label details, the selected item's detail
+    /// while the details beside the list are closed, as in VS Code. The list reuses it for other items.
     /// </summary>
     internal sealed class Row : Control
     {
@@ -326,10 +327,10 @@ internal sealed class CompletionListBox : Control
         /// <summary>The item the row shows; null for a message.</summary>
         public ShownItem? Item { get; private set; }
 
-        /// <summary>The label, or the message.</summary>
+        /// <summary>The label with its label details' detail, or the message.</summary>
         public TextBlock Label { get; } = Text();
 
-        /// <summary>The text on the right: the selected item's detail.</summary>
+        /// <summary>The text on the right: the label details' description, or the selected item's detail.</summary>
         public TextBlock Right { get; } = Text();
 
         public void Show(ShownItem shown, CodeLook look, PopupColors colors, bool selected, bool hovered)
@@ -349,12 +350,17 @@ internal sealed class CompletionListBox : Control
                 shown.Highlights,
                 selected ? colors.SuggestFocusHighlight : colors.SuggestHighlight
             );
+            if (item.LabelDetails?.Detail is { Length: > 0 } labelDetail)
+                Label.Inlines.Add(new Run(OneLine(labelDetail)) { Foreground = Dimmed(foreground) });
             // As VS Code shows deprecated items.
             Label.TextDecorations = item.IsDeprecated ? TextDecorations.Strikethrough : null;
             Label.Opacity = item.IsDeprecated ? 0.66 : 1;
-            string? detail = selected && !_list._detailsOpen ? item.Detail : null;
-            Right.IsVisible = !string.IsNullOrEmpty(detail);
-            Right.Text = Right.IsVisible ? Shortened(detail ?? "").ReplaceLineEndings(" ") : null;
+            string? right =
+                item.LabelDetails is { } details ? details.Description
+                : selected && !_list._detailsOpen ? item.Detail
+                : null;
+            Right.IsVisible = !string.IsNullOrEmpty(right);
+            Right.Text = Right.IsVisible ? OneLine(right ?? "") : null;
             Right.FontSize = Math.Round(look.FontSize * 0.85);
             Right.Foreground = Dimmed(foreground);
             _icon.IsVisible = _list._icons is not null;
@@ -460,6 +466,9 @@ internal sealed class CompletionListBox : Control
             int end = char.IsHighSurrogate(text[MaxLength - 1]) ? MaxLength - 1 : MaxLength;
             return string.Concat(text.AsSpan(0, end), "…");
         }
+
+        /// <summary><paramref name="text"/> as <see cref="Shortened"/> leaves it, on one line.</summary>
+        private static string OneLine(string text) => Shortened(text).ReplaceLineEndings(" ");
 
         /// <summary>Text dimmed as VS Code dims a row's detail and its messages.</summary>
         private static IBrush Dimmed(IBrush brush) =>
