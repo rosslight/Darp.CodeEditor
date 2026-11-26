@@ -158,6 +158,7 @@ internal sealed record LspTextEdit(LspRange Range, string NewText);
 /// <param name="Preselect">Whether the item is selected first.</param>
 /// <param name="Detail">Its signature, once resolved.</param>
 /// <param name="Documentation">Its documentation, once resolved.</param>
+/// <param name="Tags">Its <c>CompletionItemTag</c> numbers, such as <see cref="CompletionItemTag.Deprecated"/>.</param>
 internal sealed record LspCompletionItem(
     string Label,
     int Kind,
@@ -167,7 +168,8 @@ internal sealed record LspCompletionItem(
     string? FilterText = null,
     bool? Preselect = null,
     string? Detail = null,
-    LspMarkupContent? Documentation = null
+    LspMarkupContent? Documentation = null,
+    IReadOnlyList<int>? Tags = null
 );
 
 /// <summary>The answer to <c>textDocument/completion</c>.</summary>
@@ -229,6 +231,13 @@ internal static class CompletionTriggerKind
     public const int Invoked = 1;
     public const int TriggerCharacter = 2;
     public const int TriggerForIncompleteCompletions = 3;
+}
+
+/// <summary>The tags of <c>CompletionItemTag</c>.</summary>
+internal static class CompletionItemTag
+{
+    /// <summary>The item is deprecated: it shows struck through.</summary>
+    public const int Deprecated = 1;
 }
 
 /// <summary>The kinds of <c>SignatureHelpTriggerKind</c>.</summary>

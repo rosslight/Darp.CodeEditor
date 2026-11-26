@@ -268,7 +268,9 @@ internal sealed class CompletionList
         item.TryGetProperty("tags", out JsonElement tags)
         && tags.ValueKind == JsonValueKind.Array
         && tags.EnumerateArray()
-            .Any(tag => tag.ValueKind == JsonValueKind.Number && tag.TryGetInt32(out int t) && t == 1);
+            .Any(tag =>
+                tag.ValueKind == JsonValueKind.Number && tag.TryGetInt32(out int t) && t == CompletionItemTag.Deprecated
+            );
 }
 
 /// <summary>A server's completion item, with its edits in offsets of the text its list was asked for.</summary>

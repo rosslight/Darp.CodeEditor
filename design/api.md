@@ -611,6 +611,7 @@ app's script environments.
 - **Completion:** Roslyn's list, with keywords and kinds, on `.` and whenever the client asks. Each item has its edit at
   once; its signature and XML docs come with resolve, also after the user typed on, from the version the list was asked
   for. An escaped word such as `@ev` completes identifiers, not keywords, over its `@`, and there is no list after a lone `@`.
+  An obsolete member's item is tagged deprecated, so it shows struck through.
 - **Hover:** the symbol as C# code, then its XML docs as text.
 - **Signature help** on `(`, `[`, `<`, `{` and `,`, and again on `)`, `]`, `>` and `}`: the overloads of a call, a
   constructor, a `this(` or `base(` initializer, an attribute, an indexer and a collection initializer's entry, which go

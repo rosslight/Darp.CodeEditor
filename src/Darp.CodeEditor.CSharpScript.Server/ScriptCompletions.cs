@@ -13,6 +13,11 @@ namespace Darp.CodeEditor.CSharpScript.Server;
 /// </summary>
 internal sealed class ScriptCompletions
 {
+    /// <summary>Roslyn's tag of an obsolete symbol's item, which its public <see cref="WellKnownTags"/> lacks.</summary>
+    private const string DeprecatedTag = "Deprecated";
+
+    private static readonly int[] s_deprecated = [CompletionItemTag.Deprecated];
+
     private readonly ScriptSnapshot _script;
     private readonly Task<Answered?> _answered;
 
@@ -107,7 +112,8 @@ internal sealed class ScriptCompletions
                     new JsonArray(Id, index),
                     item.SortText == label ? null : item.SortText,
                     filterText == label ? null : filterText,
-                    item.Rules.MatchPriority == MatchPriority.Preselect ? true : null
+                    item.Rules.MatchPriority == MatchPriority.Preselect ? true : null,
+                    Tags: item.Tags.Contains(DeprecatedTag) ? s_deprecated : null
                 )
             );
         }

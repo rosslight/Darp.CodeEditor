@@ -59,6 +59,15 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task A_deprecated_item_shows_as_deprecated()
+    {
+        using var script = await _fixture.OpenAsync("[Obsolete(\"Use New.\")] void Old() {}\nvoid New() {}\nOl|");
+        CompletionList list = await script.CompleteAsync();
+        list.Items.Single(item => item.Label == "Old").IsDeprecated.ShouldBeTrue();
+        list.Items.Single(item => item.Label == "New").IsDeprecated.ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task A_member_list_completes_the_type_of_the_receiver()
     {
         using var script = await _fixture.OpenAsync("Greeting.|");
