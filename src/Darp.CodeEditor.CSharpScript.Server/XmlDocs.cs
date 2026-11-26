@@ -6,8 +6,9 @@ using Microsoft.CodeAnalysis;
 namespace Darp.CodeEditor.CSharpScript.Server;
 
 /// <summary>
-/// A symbol's XML docs as plain text: its summary, and the description of one of its parameters or type parameters. A
-/// reference reads as the name it refers to, and paragraphs and list items stay on lines of their own. With
+/// A symbol's XML docs as Markdown: its summary, and the description of one of its parameters or type parameters. A
+/// reference reads as the name it refers to, and it, a keyword, a parameter's name and <c>&lt;c&gt;</c> are code
+/// spans; paragraphs and list items stay on lines of their own. With
 /// <c>&lt;inheritdoc/&gt;</c>, what the docs leave out comes from the member they inherit from, as in hover, its
 /// parameters and type parameters by their place, as an override or implementation may rename them.
 /// </summary>
@@ -171,10 +172,13 @@ internal sealed class XmlDocs
                     {
                         // Whitespace, line breaks included, reads as one space.
                         if (!char.IsWhiteSpace(c))
-                            text.Append(c);
+                            Markdown.AppendEscaped(text, c);
                         else if (text.Length > 0 && text[^1] is not (' ' or '\n'))
                             text.Append(' ');
                     }
+                    break;
+                case XElement { Name.LocalName: "c" } code when OneLine(code.Value) is { Length: > 0 } inline:
+                    text.Append(Markdown.Code(inline));
                     break;
                 case XElement { Name.LocalName: "para" or "code" or "list" } block:
                     text.Append("\n\n");
@@ -188,8 +192,9 @@ internal sealed class XmlDocs
                 case XElement { Name.LocalName: "br" }:
                     text.Append('\n');
                     break;
-                case XElement { Name.LocalName: "paramref" or "typeparamref" } reference:
-                    text.Append((string?)reference.Attribute("name"));
+                case XElement { Name.LocalName: "paramref" or "typeparamref" } reference
+                    when (string?)reference.Attribute("name") is { Length: > 0 } name:
+                    text.Append(Markdown.Code(name));
                     break;
                 case XElement { Name.LocalName: "see" or "seealso" } reference when !reference.Nodes().Any():
                     text.Append(Reference(reference));
@@ -201,16 +206,22 @@ internal sealed class XmlDocs
         }
     }
 
-    /// <summary>What a <c>see</c> without text of its own reads as: its keyword, its symbol, or its link.</summary>
+    /// <summary>What a <c>see</c> without text of its own reads as: its keyword or its symbol as code, or its link.</summary>
     private string? Reference(XElement see)
     {
-        if ((string?)see.Attribute("langword") is { } keyword)
-            return keyword;
-        if ((string?)see.Attribute("cref") is not { } cref)
-            return (string?)see.Attribute("href");
-        return DocumentationCommentId.GetFirstSymbolForDeclarationId(cref, _model.Compilation) is { } symbol
-            ? symbol.ToMinimalDisplayString(_model, _position, s_reference)
-            // As written, without the kind before the colon.
-            : cref[(cref.IndexOf(':') + 1)..];
+        if ((string?)see.Attribute("langword") is { Length: > 0 } keyword)
+            return Markdown.Code(keyword);
+        if ((string?)see.Attribute("cref") is not { Length: > 0 } cref)
+            return (string?)see.Attribute("href") is { } link ? Markdown.Escape(link) : null;
+        return Markdown.Code(
+            DocumentationCommentId.GetFirstSymbolForDeclarationId(cref, _model.Compilation) is { } symbol
+                ? symbol.ToMinimalDisplayString(_model, _position, s_reference)
+                // As written, without the kind before the colon.
+                : cref[(cref.IndexOf(':') + 1)..]
+        );
     }
+
+    /// <summary><paramref name="text"/> with each run of whitespace, line breaks included, as one space.</summary>
+    private static string OneLine(string text) =>
+        string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 }

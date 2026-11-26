@@ -46,6 +46,35 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task Dotnet_docs_show_code_as_code_spans()
+    {
+        // Its returns: An <c>IEnumerable<IGrouping<TKey, TSource>></c> in C# or ... where each <see cref="..."/> ...
+        using var script = await _fixture.OpenAsync("var groups = new[] { 1 }.Group|By(n => n % 2);");
+        string hover = HoverText((await script.HoverAsync()).ShouldNotBeNull());
+        hover.ShouldContain("**Returns:** An `IEnumerable<IGrouping<TKey, TSource>>` in C\\# or");
+        hover.ShouldContain("each `IGrouping<out TKey, out TElement>` object");
+        hover.ShouldContain("**Exceptions:** `ArgumentNullException`");
+    }
+
+    [Fact]
+    public async Task Docs_name_code_as_code_spans_and_label_sections_in_bold()
+    {
+        using var script = await _fixture.OpenAsync("var copies = Repeat|(\"a\", 2);");
+        string hover = HoverText((await script.HoverAsync(script.Caret - 1)).ShouldNotBeNull());
+        hover.ShouldContain("Repeats `text`, or returns `null` for none.\n\nEach copy follows the last.");
+        hover.ShouldContain("**Returns:** The copies.");
+
+        CompletionList list = await script.CompleteAsync();
+        CompletionItem resolved = (
+            await list.ResolveAsync(
+                list.Items.Single(item => item.Label == "Repeat"),
+                TestContext.Current.CancellationToken
+            )
+        ).ShouldNotBeNull();
+        resolved.Documentation.ShouldNotBeNull().Text.ShouldContain("Repeats `text`, or returns `null` for none.");
+    }
+
+    [Fact]
     public async Task Inherited_globals_members_complete_and_hover()
     {
         using var script = await _fixture.OpenAsync("var value = InheritedValue|;");

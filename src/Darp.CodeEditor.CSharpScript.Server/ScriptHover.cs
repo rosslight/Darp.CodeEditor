@@ -4,7 +4,7 @@ using Microsoft.CodeAnalysis.QuickInfo;
 
 namespace Darp.CodeEditor.CSharpScript.Server;
 
-/// <summary>Hover from Roslyn's quick info: the symbol as code, then its documentation.</summary>
+/// <summary>Hover from Roslyn's quick info: the symbol as code, then its documentation in Markdown.</summary>
 internal static class ScriptHover
 {
     /// <summary>The hover at <paramref name="position"/>; null where there is nothing to say.</summary>
@@ -30,28 +30,11 @@ internal static class ScriptHover
             if (section.Kind == QuickInfoSectionKinds.Description)
                 markdown.Append("```csharp\n").Append(section.Text).Append("\n```");
             else
-                markdown.Append(Markdown.Escape(section.Text));
+                markdown.Append(Markdown.Of(section.TaggedParts));
         }
         return new LspHover(
             new LspMarkupContent("markdown", markdown.ToString()),
             new LspRange(script.Lines.ToPosition(info.Span.Start), script.Lines.ToPosition(info.Span.End))
         );
-    }
-}
-
-/// <summary>Documentation comes as plain text, and goes out inside Markdown.</summary>
-internal static class Markdown
-{
-    /// <summary><paramref name="text"/> as Markdown that reads as the same text.</summary>
-    public static string Escape(string text)
-    {
-        var escaped = new StringBuilder(text.Length);
-        foreach (char c in text)
-        {
-            if (c is '\\' or '`' or '*' or '_' or '[' or ']' or '<' or '#')
-                escaped.Append('\\');
-            escaped.Append(c);
-        }
-        return escaped.ToString();
     }
 }

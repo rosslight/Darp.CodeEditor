@@ -557,7 +557,7 @@ internal static class ScriptSignatureHelp
     }
 
     private static LspMarkupContent? Documentation(string? text) =>
-        text is null ? null : new LspMarkupContent("markdown", Markdown.Escape(text));
+        text is null ? null : new LspMarkupContent("markdown", text);
 
     /// <summary>
     /// The parameter that argument number <paramref name="argument"/> goes to, by its name, or else by its place among

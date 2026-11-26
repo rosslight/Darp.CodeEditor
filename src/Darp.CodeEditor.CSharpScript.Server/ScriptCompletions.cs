@@ -99,15 +99,11 @@ internal sealed class ScriptCompletions
         string detail = string.Concat(
             (lineBreak < 0 ? description.TaggedParts : description.TaggedParts[..lineBreak]).Select(part => part.Text)
         );
-        string documentation =
-            lineBreak < 0
-                ? ""
-                : string.Concat(description.TaggedParts[(lineBreak + 1)..].Select(part => part.Text)).Trim();
+        string documentation = lineBreak < 0 ? "" : Markdown.Of(description.TaggedParts[(lineBreak + 1)..]).Trim();
         return item with
         {
             Detail = detail.Length == 0 ? null : detail,
-            Documentation =
-                documentation.Length == 0 ? null : new LspMarkupContent("markdown", Markdown.Escape(documentation)),
+            Documentation = documentation.Length == 0 ? null : new LspMarkupContent("markdown", documentation),
         };
     }
 

@@ -408,14 +408,14 @@ public sealed class ScriptSignatureHelpTests(ScriptServerFixture fixture)
     }
 
     [Fact]
-    public async Task A_signature_shows_its_summary_and_the_active_parameters_description_as_text()
+    public async Task A_signature_shows_its_summary_and_the_active_parameters_description_with_names_as_code()
     {
         using var script = await _fixture.OpenAsync("Repeat(|");
         SignatureInfo signature = Active((await script.SignatureHelpAsync()).ShouldNotBeNull());
         signature
             .Documentation.ShouldNotBeNull()
-            .Text.ShouldBe("Repeats text, or returns null for none.\n\nEach copy follows the last.");
-        signature.Parameters[0].Documentation.ShouldNotBeNull().Text.ShouldBe("The text, as Greeting reads.");
+            .Text.ShouldBe("Repeats `text`, or returns `null` for none.\n\nEach copy follows the last.");
+        signature.Parameters[0].Documentation.ShouldNotBeNull().Text.ShouldBe("The text, as `Greeting` reads.");
         signature.Parameters[1].Documentation.ShouldNotBeNull().Text.ShouldBe("How often.");
     }
 
@@ -425,7 +425,7 @@ public sealed class ScriptSignatureHelpTests(ScriptServerFixture fixture)
         using var script = await _fixture.OpenAsync("var text = string.Concat(\"a\", |");
         SignatureInfo signature = Active((await script.SignatureHelpAsync()).ShouldNotBeNull());
         signature.Label.ShouldContain("Concat(string? str0, string? str1)");
-        signature.Documentation.ShouldNotBeNull().Text.ShouldBe("Concatenates two specified instances of string.");
+        signature.Documentation.ShouldNotBeNull().Text.ShouldBe("Concatenates two specified instances of `string`.");
         signature.Parameters[1].Documentation.ShouldNotBeNull().Text.ShouldBe("The second string to concatenate.");
     }
 
@@ -477,7 +477,7 @@ public sealed class ScriptSignatureHelpTests(ScriptServerFixture fixture)
             """
         );
         SignatureInfo signature = Active((await script.SignatureHelpAsync()).ShouldNotBeNull());
-        signature.Documentation.ShouldNotBeNull().Text.ShouldBe("Runs times times.");
+        signature.Documentation.ShouldNotBeNull().Text.ShouldBe("Runs `times` times.");
         signature.Parameters[0].Documentation.ShouldNotBeNull().Text.ShouldBe("How often.");
     }
 }

@@ -652,7 +652,9 @@ app's script environments.
   list that only suggests, as where a lambda's parameter may be named, or after typed punctuation; before a name is
   typed, as right after `.`, only the items that Roslyn selects hard commit, and the list is incomplete, so that typing
   the name asks for the list whose items commit. With `Count` selected, `.` commits it and asks for its members.
-- **Hover:** the symbol as C# code, then its XML docs as text.
+- **Hover:** the symbol as C# code, then its XML docs as Markdown. In hover, completion's details and signature help
+  alike, a reference, a keyword, a parameter's name and the text of `<c>` are code spans, and a section's label, as
+  `Returns:`, `Types:` or `Exceptions:`, is bold before what it labels.
 - **Occurrences** (`textDocument/documentHighlight`) are those of the symbol at the caret, by its identity, so a local
   and a top-level variable of the same name stay apart, and so do the implementations of an interface's member, and a
   property and its accessors. Its declarations are text, as in Roslyn's own server, both parts of a partial method or
@@ -678,7 +680,7 @@ app's script environments.
   `[EditorBrowsable(Never)]` in a referenced assembly or an overload that a more specific one hides. Asking again
   follows an argument's new type, and keeps a signature that the user chose by key. Named arguments and `params` mark
   their parameter. Each signature has its summary and each parameter its description, a type parameter's included, as
-  plain text from the XML docs, as in hover: a reference reads as the name it refers to, and `<inheritdoc/>` takes what
+  Markdown from the XML docs, as in hover: a reference reads as the name it refers to, and `<inheritdoc/>` takes what
   the docs leave out from the member they inherit from, the parameters' and type parameters' by their place, as an
   implementation may rename them.
 - **Semantic colors** are answered for ranges, with the protocol's standard token types. A script's top-level variables
