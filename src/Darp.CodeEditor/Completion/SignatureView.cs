@@ -1,7 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
-using Avalonia.Layout;
 using Avalonia.Media;
 using Darp.CodeEditor.LanguageClient;
 using Darp.CodeEditor.Popups;
@@ -9,92 +8,44 @@ using Darp.CodeEditor.Popups;
 namespace Darp.CodeEditor.Completion;
 
 /// <summary>
-/// What signature help shows: every signature of the call at once, in the editor's font on the editor's background, the
-/// active one on <c>list.inactiveSelectionBackground</c> while there are more, with its active parameter bold in
-/// <c>editorHoverWidget.highlightForeground</c>. Right below the active signature, the active parameter's and the
-/// signature's documentation, so that it stays in view with the signature it is about. Signatures take the width they
-/// need, as code is read line by line; the documentation wraps as a hover's text does, and while several signatures
-/// show, within the widest of them, so that choosing another leaves the popup as wide, and its buttons where they are.
+/// What signature help's card shows of one signature, as VS Code's parameter hints: the signature in the editor's font,
+/// its active parameter bold in <c>editorHoverWidget.highlightForeground</c>, and below a line, the active parameter's
+/// documentation, then the signature's. All of it wraps as a hover's text.
 /// </summary>
 internal static class SignatureView
 {
-    /// <param name="help">The signature help.</param>
-    /// <param name="labels">
-    /// Each signature's label, as much of it as the budget left, with "…" where it was cut; null for one that does not
-    /// show.
-    /// </param>
-    /// <param name="documentation">The documentation of the active parameter and signature.</param>
-    /// <param name="documentationWidth">The most width of the documentation.</param>
+    /// <param name="signature">The signature.</param>
+    /// <param name="label">As much of its label as the budget left, with "…" where it was cut.</param>
+    /// <param name="documentation">The documentation of its active parameter, then its own.</param>
     /// <param name="look">How code looks.</param>
-    /// <param name="colors">The popups' colors.</param>
-    /// <param name="active">The active signature's row with its documentation, to scroll into view.</param>
     public static Control Create(
-        SignatureHelpInfo help,
-        IReadOnlyList<string?> labels,
+        SignatureInfo signature,
+        string label,
         IReadOnlyList<HoverBlock> documentation,
-        double documentationWidth,
-        CodeLook look,
-        PopupColors colors,
-        out Control active
+        CodeLook look
     )
     {
-        var rows = new PopupStack();
-        active = rows;
-        Control? activeRow = null;
-        for (int i = 0; i < help.Signatures.Count; i++)
+        var card = new PopupStack
         {
-            if (labels[i] is not { } label)
-                continue;
-            bool isActive = i == help.ActiveSignature;
-            // On the text's background, as its colors are chosen for it.
-            Control row = new PopupBox
+            Children =
             {
-                Background = look.Background,
-                Padding = new Thickness(0, 1),
-                Child = new PopupBox
+                new PopupText
                 {
-                    Background = isActive && help.Signatures.Count > 1 ? colors.ListInactiveSelectionBackground : null,
-                    Padding = new Thickness(6, 2),
-                    CornerRadius = new CornerRadius(2),
-                    Child = new PopupText
-                    {
-                        Inlines = Label(help.Signatures[i], label, colors.HoverHighlight),
-                        FontFamily = look.FontFamily,
-                        FontSize = look.FontSize,
-                        Foreground = look.Foreground,
-                        TextWrapping = TextWrapping.Wrap,
-                    },
+                    Inlines = Label(signature, label, look.Colors.HoverHighlight),
+                    FontFamily = look.FontFamily,
+                    FontSize = look.FontSize,
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 0, 0, 4),
                 },
-            };
-            if (isActive)
-                activeRow = row;
-            rows.Children.Add(row);
-        }
-        if (activeRow is null)
-            return rows;
-        active = activeRow;
+            },
+        };
         if (documentation.Count == 0)
-            return rows;
-        double width = documentationWidth;
-        if (help.Signatures.Count > 1)
-        {
-            foreach (Control row in rows.Children)
-                row.Measure(Size.Infinity);
-            width = Math.Min(width, rows.Children.Max(row => row.DesiredSize.Width));
-        }
-        PopupStack docs = HoverView.Create(documentation, look, colors.HoverBorder);
-        docs.Margin = new Thickness(0, 6);
-        // The text wraps; the lines between its parts span the popup.
-        foreach (Control block in docs.Children.Where(block => block is not PopupLine))
-        {
-            block.MaxWidth = width;
-            block.HorizontalAlignment = HorizontalAlignment.Left;
-        }
-        int at = rows.Children.IndexOf(activeRow);
-        rows.Children.RemoveAt(at);
-        active = new PopupStack { Children = { activeRow, docs } };
-        rows.Children.Insert(at, active);
-        return rows;
+            return card;
+        card.Children.Add(new PopupLine { Background = look.Colors.HoverBorder });
+        PopupStack docs = HoverView.Create(documentation, look, look.Colors.HoverBorder);
+        docs.Margin = new Thickness(0, 6, 0, 2);
+        card.Children.Add(docs);
+        return card;
     }
 
     /// <summary><paramref name="label"/>, what shows of the signature's, with its active parameter in bold.</summary>

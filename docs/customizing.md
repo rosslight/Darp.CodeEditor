@@ -51,7 +51,7 @@ Command column names the members of `CodeEditorCommands`.
 | Accept completion | `AcceptSelectedSuggestion` | Enter, while the list shows |
 | Accept, replacing the rest of the word | `AcceptAlternativeSelectedSuggestion` | Tab, Shift+Enter, while the list shows |
 | Signature help | `TriggerParameterHints` | Ctrl+Shift+Space |
-| Previous or next signature | `ShowPrevParameterHint`, `ShowNextParameterHint` | Alt+Up, Alt+Down, while several show |
+| Previous or next signature | `ShowPrevParameterHint`, `ShowNextParameterHint` | Alt+Up, Alt+Down, while the call has several |
 | Hover at the caret | `ShowHover` | Ctrl+Q on Windows, F1 on Linux and macOS |
 | Next or previous problem | `NextMarker`, `PreviousMarker` | F8, Shift+F8 |
 | Find | `Find` | Ctrl+F |

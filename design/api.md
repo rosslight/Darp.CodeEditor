@@ -220,7 +220,8 @@ otherwise (#114).
   `textCodeBlock.background`, `problems*Icon.foreground`), with VS Code's defaults for the keys a theme leaves
   out. An app's styles for flyouts, tooltips, lists, scroll bars, text blocks and panels don't reach them, under
   Fluent, Simple or any other theme. Their prose takes the app's font; code keeps the editor's colors, background and
-  font.
+  font. Signature help's signature, plain text without token colors, takes the editor's font in the hover's colors, as
+  VS Code's parameter hints.
 - **The search bar and the text's scroll bars** are the app's controls, in its theme.
 - **Popups stay inside the window**, as in the prototype (#19).
 
@@ -268,11 +269,11 @@ high contrast inherits from Light, so it shows Light+ without one. To make one e
 - **Completion icons:** VS Code's codicons, drawn as vector shapes in the theme's `symbolIcon.*` colors, as in VS
   Code, and in VS Code's colors where the theme sets none. Their designs are licensed CC BY 4.0: the package lists
   them in its third-party notices, and apps that show notices of their own include that entry.
-- **Signature help:** in the editor's popup above the caret's line, so that completion's list shows below it; every
-  signature at once as code, in the editor's font, colors and background, the active one marked and its parameter in
-  the theme's highlight color, and the documentation right below the active one. It is as wide as its longest
-  signature, within the window, and the documentation wraps as a hover's text. While several show, a bar above them
-  gives the active one's number, as `2/5`, between buttons for the one before and after.
+- **Signature help:** in the editor's popup above the caret's line, so that completion's list shows below it; a card
+  with one signature at a time, as VS Code's parameter hints: the signature in the editor's font, its active parameter
+  in the theme's highlight color, and below it the parameter's and the signature's documentation. It is as wide as its
+  content, up to a hover's width, where its text wraps. While the call has several signatures, a column at its left
+  gives the shown one's number, as `2/5`, between buttons for the one before and after.
 
 **Before v1, additive:** marks beside the scroll bar for errors, warnings and search matches, as Monaco's overview
 ruler shows them. Scripts of 5,000 lines need them to find errors outside the view. They add to the API without
@@ -573,17 +574,18 @@ How the client talks to a server, where the protocol leaves a choice:
   asks again for a change of the content; the pause runs on the options' `TimeProvider`. Asking again says that it is a
   retrigger and sends the signature help that showed, with the signature the user chose. A newer request, and each edit
   and caret move, cancels the one under way, and an answer about older text is dropped. An answer without signatures, as
-  outside a call, closes it. It shows every signature at once, the active one marked, with the active parameter in bold:
-  the signature's own, or the answer's, or the first; one outside the parameters is none, as in VS Code. A parameter
-  labelled by a string is found as a whole word in the signature. The active parameter's documentation shows right below
-  the active signature, then the active signature's, so that it scrolls into view with it, all of it as much as a hover
-  shows, the active signature first. The popup is as wide as its longest signature, within the window, so that each
-  keeps to one line; the documentation's text wraps at a hover's width, two thirds of the editor or 750 pixels where
-  that is more, and while several signatures show, at their longest's, so that choosing another leaves the popup as
-  wide and its buttons where they are. While several show, a bar above them, which does not scroll, gives the active one's number and the
-  count, as `2/5`, between buttons that choose the one before and after; a click on them leaves the keyboard in the
-  editor. Up and Down, once completion's list is closed, and Alt+Up and Alt+Down, ahead of moving lines, choose the
-  active one too, around the ends. It ends on Escape, after completion's list, on a click or drag that moves the caret,
+  outside a call, closes it. It shows one signature at a time, the active one, on a card as VS Code's parameter hints
+  (#124), with the active parameter in bold: the signature's own, or the answer's, or the first; one outside the
+  parameters is none, as in VS Code. A parameter labelled by a string is found as a whole word in the signature. Below
+  the signature and a line, the active parameter's documentation, then the signature's, all of it as much as a hover
+  shows, the signature first. The card is as wide as its content, up to a hover's width, two thirds of the editor or
+  750 pixels where that is more; a longer signature wraps there, as the documentation does, and what is taller than the
+  room scrolls. While the call has several signatures, a column at the card's left, which does not scroll, gives the
+  shown one's number and the count, as `2/5`, between buttons that choose the one before and after; a click on them
+  leaves the keyboard in the editor. Up and Down, once completion's list is closed, and Alt+Up and Alt+Down, ahead of
+  moving lines, choose the signature too, around the ends. Choosing keeps the card's left edge and its side of the
+  line, where its content wraps and scrolls to fit, and the column keeps to the card's edge next to the line, which
+  stays where it is: the buttons stay under the pointer. It ends on Escape, after completion's list, on a click or drag that moves the caret,
   with no signature, when the editor becomes read-only, when the editor loses the keyboard focus, when a server starts
   or stops serving the document, with new colors, and when its line scrolls out of view.
 - **Token colors** come from the color theme as in VS Code: its `semanticTokenColors`, matched by type, modifiers and
@@ -1233,9 +1235,11 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   the caret where it was, shows the other signatures on
   Up and Down, tells the server the one that shows, which keeps it, and leaves Up and Down to an open completion
   list; it shows above the line while completion's list shows below, and ends on Escape, on leaving the call, on
-  focus loss and when the server stops serving the document; its count and buttons choose the signature and leave the
-  keyboard in the editor, the documentation shows right below the active signature, and a signature wider than a
-  hover stays on one line while its documentation wraps as a hover's text;
+  focus loss and when the server stops serving the document; it shows one signature at a time, with the active
+  parameter's documentation and the signature's below it; its count and buttons choose the signature, leave the
+  keyboard in the editor, and stay under the pointer near the window's edge on both sides of the line, also when
+  the next signature's documentation is longer than the room; the card is as wide as a short signature, and a
+  signature wider than a hover wraps at the hover's width;
 - the client advertises exactly what it implements, snippets included;
 - snippets: stops, placeholders, the final stop and escapes parse; a choice, a variable, a transformation, a nested
   placeholder and a repeated stop go in as their text without a stop; text that does not parse stays text, also text
