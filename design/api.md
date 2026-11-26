@@ -223,7 +223,7 @@ otherwise (#114).
   Every popup of code and docs, the hover with or without problems, completion's details and signature help's card,
   has one look, the card's: the hover's colors (`editorHoverWidget.background`, `.border` and `.foreground`) and 8 by
   4 pixels of padding; code highlighted with the document's grammar, in the editor's font and token colors, on the
-  popup's background; a line in `editorHoverWidget.border` between the code that opens a part, as a signature, and
+  popup's background, filling each line and breaking at any character, as VS Code's completion details; a line in `editorHoverWidget.border` between the code that opens a part, as a signature, and
   the docs below it; and the docs as text in the muted `editorHoverWidget.foreground`. Signature help's active
   parameter is bold in `editorHoverWidget.highlightForeground`, over its tokens' colors.
 - **The search bar and the text's scroll bars** are the app's controls, in its theme.
@@ -586,7 +586,7 @@ How the client talks to a server, where the protocol leaves a choice:
   parameters is none, as in VS Code. A parameter labelled by a string is found as a whole word in the signature. Below
   the signature and a line, the active parameter's documentation, then the signature's, all of it as much as a hover
   shows, the signature first. The card is as wide as its content, up to a hover's width, two thirds of the editor or
-  750 pixels where that is more; a longer signature wraps there, as the documentation does, and what is taller than the
+  750 pixels where that is more; a longer signature wraps there, and what is taller than the
   room scrolls. While the call has several signatures, a column at the card's left, which does not scroll, gives the
   shown one's number and the count, as `2/5`, between buttons that choose the one before and after; a click on them
   leaves the keyboard in the editor. Up and Down, once completion's list is closed, and Alt+Up and Alt+Down, ahead of
@@ -1140,7 +1140,8 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   a window narrower than the popup. An editor in a dark `ThemeVariantScope` of a light window shows a dark popup, its
   code on the popup's background and not the text area's, in its pixels. The code that opens a part, also the server's
   below the diagnostics, has a line below it when more follows in its part, and code among the docs has none. Inline code shows in the editor's font on the theme's code background, and code without a
-  color of its own in the editor's foreground, in the pixels. The popup stays while the pointer is over its word or
+  color of its own in the editor's foreground, in the pixels. Code fills each line, breaking at any character, and
+  copies with its spaces. The popup stays while the pointer is over its word or
   over the popup. Moved onto other text, it stays until the pointer has rested there for 300 ms, so that a
   diagonal move can reach it, and then that text's hover takes its place. It closes at once when the pointer leaves both the text and the popup, and on typing, Escape,
   scrolling and focus loss. A click into it holds it, its selection copies, the hover key puts the keyboard into it where the arrows and

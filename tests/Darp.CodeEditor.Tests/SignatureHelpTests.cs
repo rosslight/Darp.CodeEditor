@@ -63,7 +63,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
                     && Runs(popup).Any(run => run.Text == "first" && run.FontWeight == FontWeight.Bold);
             });
             // The signature uses up the budget: the documentation does not show.
-            string label = Signature(popup!).Inlines?.Text ?? "";
+            string label = Hovers.TextOf(Signature(popup!));
             label.Length.ShouldBe(HoverBudget.MaxCharacters + 1);
             label.ShouldEndWith("…");
             Texts(popup!).Sum(text => text.Length).ShouldBe(label.Length);
@@ -108,7 +108,7 @@ public sealed class SignatureHelpTests(UiFixture ui)
             window.Press(Key.Down);
 
             popup = await WaitForCountAsync(window, "2/2");
-            Signature(popup).Inlines?.Text.ShouldBe(label);
+            Hovers.TextOf(Signature(popup)).ShouldBe(label);
             Signature(popup).Bounds.Height.ShouldBeGreaterThan(1.5 * window.TextView.DefaultLineHeight);
             popup.Bounds.Width.ShouldBeLessThanOrEqualTo(hover);
         });
@@ -657,13 +657,16 @@ public sealed class SignatureHelpTests(UiFixture ui)
 
     /// <summary>The signature's text block.</summary>
     private static TextBlock Signature(PopupFrame popup) =>
-        popup.GetVisualDescendants().OfType<TextBlock>().First(t => t.Inlines?.Text?.StartsWith("call(") == true);
+        popup
+            .GetVisualDescendants()
+            .OfType<TextBlock>()
+            .First(t => Hovers.TextOf(t).StartsWith("call(", StringComparison.Ordinal));
 
     private static IEnumerable<Run> Runs(PopupFrame popup) => Signature(popup).Inlines?.OfType<Run>() ?? [];
 
     /// <summary>The text block that shows <paramref name="text"/>.</summary>
     private static TextBlock Text(PopupFrame popup, string text) =>
-        popup.GetVisualDescendants().OfType<TextBlock>().First(t => (t.Inlines?.Text ?? t.Text) == text);
+        popup.GetVisualDescendants().OfType<TextBlock>().First(t => Hovers.TextOf(t) == text);
 
     /// <summary>The buttons that show: the one that chooses the signature before, then the one after.</summary>
     private static IReadOnlyList<PopupButton> Buttons(PopupFrame popup) =>
@@ -671,14 +674,8 @@ public sealed class SignatureHelpTests(UiFixture ui)
 
     /// <summary>The texts that show.</summary>
     private static IReadOnlyList<string> Texts(PopupFrame popup) =>
-        [
-            .. popup
-                .GetVisualDescendants()
-                .OfType<TextBlock>()
-                .Where(t => t.IsEffectivelyVisible)
-                .Select(t => t.Inlines?.Text ?? t.Text ?? ""),
-        ];
+        [.. popup.GetVisualDescendants().OfType<TextBlock>().Where(t => t.IsEffectivelyVisible).Select(Hovers.TextOf)];
 
     /// <summary>The signature that shows.</summary>
-    private static string? Shown(PopupFrame popup) => Signature(popup).Inlines?.Text;
+    private static string Shown(PopupFrame popup) => Hovers.TextOf(Signature(popup));
 }

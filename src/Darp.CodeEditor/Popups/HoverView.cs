@@ -3,11 +3,14 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
+using Avalonia.Logging;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
 using Avalonia.Media.TextFormatting;
+using Darp.CodeEditor.Loading;
 
 namespace Darp.CodeEditor.Popups;
 
@@ -23,6 +26,14 @@ internal static class HoverView
 {
     /// <summary>How far each level of a list is indented.</summary>
     private const double ListIndent = 16;
+
+    /// <summary>
+    /// What code shows for a space. Code fills each line and breaks at any character, as VS Code's completion details:
+    /// by Unicode's rules a line of code breaks only at a space, so a qualified name too long for what follows
+    /// <c>enum </c> went whole to a line of its own and was cut there still. A no-break space leaves code no place to
+    /// break, and a line that doesn't fit breaks where it is full.
+    /// </summary>
+    private const char NoBreakSpace = ' ';
 
     /// <summary>The hand over links, made the first time it is needed.</summary>
     private static Cursor? s_hand;
@@ -134,7 +145,7 @@ internal static class HoverView
         foreach (CodeRun run in block.Runs)
         {
             // A run without a color of its own takes the block's, the editor's foreground.
-            var text = new Run(run.Text);
+            var text = new Run(run.Text.Replace(' ', NoBreakSpace));
             if (run.Foreground is { } foreground)
                 text.Foreground = foreground;
             if (run.Bold)
@@ -147,7 +158,29 @@ internal static class HoverView
         code.FontSize = look.FontSize;
         code.Foreground = look.Colors.CodeForeground;
         code.TextWrapping = TextWrapping.Wrap;
+        if (code is SelectableTextBlock copied)
+            copied.CopyingToClipboard += CopyWithSpaces;
         return code;
+    }
+
+    /// <summary>Copies the selected code with the spaces that <see cref="Code"/> shows as no-break spaces.</summary>
+    private static async void CopyWithSpaces(object? sender, RoutedEventArgs e)
+    {
+        var code = (SelectableTextBlock)sender!;
+        e.Handled = true;
+        string text = code.SelectedText.Replace(NoBreakSpace, ' ');
+        try
+        {
+            if (TopLevel.GetTopLevel(code)?.Clipboard is { } clipboard)
+                await clipboard.SetTextAsync(text);
+        }
+        catch (Exception exception)
+        {
+            // The platform's clipboard fails now and then; the text is then not copied, as in the editor.
+            Logger
+                .TryGet(LogEventLevel.Warning, AssetFiles.LogArea)
+                ?.Log(code, "Writing to the clipboard failed: {Exception}", exception);
+        }
     }
 
     /// <summary>

@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
@@ -94,6 +95,39 @@ public sealed class HoverTests(UiFixture ui)
 
             static HoverCode Code(string text) => new([new CodeRun(text, null)]);
             static HoverParagraph Text(string text) => new([new HoverSpan(text)]);
+        });
+
+    [Fact]
+    public Task Code_fills_each_line_breaking_at_any_character_and_copies_with_its_spaces() =>
+        _ui.Run(async () =>
+        {
+            var look = new CodeLook(new FontFamily("DejaVu Sans Mono"), 14, PopupColors.Default);
+            const string detail = "enum Microsoft.VisualBasic.FileIO.RecycleOption";
+            PopupStack panel = HoverView.Create([new HoverCode([new CodeRun(detail, null)])], look, selectable: true);
+            // Narrower than the name, which Unicode's rules keep whole after the space.
+            var window = new Window
+            {
+                Width = 300,
+                Height = 200,
+                Content = panel,
+            };
+            window.Show();
+            try
+            {
+                window.UpdateLayout();
+                var code = (SelectableTextBlock)panel.Children.Single();
+
+                code.TextLayout.TextLines.Count.ShouldBe(2);
+                code.TextLayout.TextLines[0].Length.ShouldBeGreaterThan("enum ".Length);
+
+                code.SelectAll();
+                code.Copy();
+                (await window.Clipboard.ShouldNotBeNull().TryGetTextAsync()).ShouldBe(detail);
+            }
+            finally
+            {
+                window.Close();
+            }
         });
 
     [Fact]

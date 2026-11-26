@@ -2206,12 +2206,7 @@ public sealed class CompletionTests(UiFixture ui)
     private static PopupFrame? Details(EditorWindow window) => PopupFrames.Find(window, "CompletionDetails");
 
     private static IReadOnlyList<string> DetailTexts(EditorWindow window) =>
-        Details(window)
-            ?.GetVisualDescendants()
-            .OfType<TextBlock>()
-            .Select(t => t.Inlines?.Text ?? t.Text ?? "")
-            .ToList()
-        ?? [];
+        Details(window)?.GetVisualDescendants().OfType<TextBlock>().Select(Hovers.TextOf).ToList() ?? [];
 
     /// <summary>The runs of the label of the row of <paramref name="label"/>, each with whether it is bold.</summary>
     internal static IReadOnlyList<(string Text, bool Bold)> RowRuns(EditorWindow window, string label) =>
