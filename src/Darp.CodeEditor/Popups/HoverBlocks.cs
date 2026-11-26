@@ -37,7 +37,8 @@ internal readonly record struct HoverSpan(string Text, SpanStyle Style = SpanSty
 /// <summary>Code of one color.</summary>
 /// <param name="Text">The code.</param>
 /// <param name="Foreground">Its token's color; null for the editor's foreground.</param>
-internal readonly record struct CodeRun(string Text, IBrush? Foreground);
+/// <param name="Bold">Whether it is bold, as signature help's active parameter.</param>
+internal readonly record struct CodeRun(string Text, IBrush? Foreground, bool Bold = false);
 
 [Flags]
 internal enum SpanStyle

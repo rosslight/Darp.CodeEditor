@@ -224,8 +224,8 @@ otherwise (#114).
   has one look, the card's: the hover's colors (`editorHoverWidget.background`, `.border` and `.foreground`) and 8 by
   4 pixels of padding; code highlighted with the document's grammar, in the editor's font and token colors, on the
   popup's background; a line in `editorHoverWidget.border` between the code that opens a part, as a signature, and
-  the docs below it; and the docs as text in the muted `editorHoverWidget.foreground`. Signature help's signature,
-  plain text without token colors, takes the editor's font, as VS Code's parameter hints.
+  the docs below it; and the docs as text in the muted `editorHoverWidget.foreground`. Signature help's active
+  parameter is bold in `editorHoverWidget.highlightForeground`, over its tokens' colors.
 - **The search bar and the text's scroll bars** are the app's controls, in its theme.
 - **Popups stay inside the window**, as in the prototype (#19).
 
@@ -584,7 +584,8 @@ How the client talks to a server, where the protocol leaves a choice:
   retrigger and sends the signature help that showed, with the signature the user chose. A newer request, and each edit
   and caret move, cancels the one under way, and an answer about older text is dropped. An answer without signatures, as
   outside a call, closes it. It shows one signature at a time, the active one, on a card as VS Code's parameter hints
-  (#124), with the active parameter in bold: the signature's own, or the answer's, or the first; one outside the
+  (#124), as code highlighted with the document's grammar, with the active parameter bold in
+  `editorHoverWidget.highlightForeground`: the signature's own, or the answer's, or the first; one outside the
   parameters is none, as in VS Code. A parameter labelled by a string is found as a whole word in the signature. Below
   the signature and a line, the active parameter's documentation, then the signature's, all of it as much as a hover
   shows, the signature first. The card is as wide as its content, up to a hover's width, two thirds of the editor or
@@ -1254,9 +1255,10 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   the next signature's documentation is longer than the room; the card is as wide as a short signature, and a
   signature wider than a hover wraps at the hover's width, and a card that kept its place stays inside a window that
   narrowed past it;
-- completion's details look as the hover does: the detail in its token colors on Light+'s hover background, with
-  none of the text area's white behind it in the pixels, then a line in the popup's border, then the docs in the
-  hover's muted foreground;
+- completion's details and signature help's card look as the hover does: the code in its token colors on Light+'s
+  hover background, with none of the text area's white behind it in the pixels, then a line in the popup's border,
+  then the docs in the hover's muted foreground; the card's active parameter bold in the highlight color, and the rest
+  of its signature in its tokens' colors;
 - the client advertises exactly what it implements, snippets and label details included;
 - an item's label details show right after its label and at the right of every row, in place of the selected item's
   detail, and typing matches only the label;

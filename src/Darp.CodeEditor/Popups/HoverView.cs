@@ -137,6 +137,8 @@ internal static class HoverView
             var text = new Run(run.Text);
             if (run.Foreground is { } foreground)
                 text.Foreground = foreground;
+            if (run.Bold)
+                text.FontWeight = FontWeight.Bold;
             inlines.Add(text);
         }
         TextBlock code = Text(look, selectable);

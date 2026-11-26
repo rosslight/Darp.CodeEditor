@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Logging;
+using Avalonia.Media;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Rendering;
@@ -19,7 +20,7 @@ namespace Darp.CodeEditor.Completion;
 
 /// <summary>
 /// Signature help in one editor's view of a document: a card with one signature of the call around the caret at a time
-/// (<see cref="SignatureView"/>), its parameter at the caret in bold, and its documentation, in the editor's popup in
+/// (<see cref="SignatureBlocks"/>), its parameter at the caret in bold, and its documentation, in the editor's popup in
 /// the color theme's hover colors, above the caret's line, so that completion's list below it shows too. It is as wide as
 /// its content, up to a hover's width, where its text wraps. While the call has several signatures, a column at its left
 /// says which one shows, as <c>2/5</c>, between buttons that choose the one before and after, as Up and Down do.
@@ -316,9 +317,8 @@ internal sealed class SignatureHelpController : IEditorFeature
     }
 
     /// <summary>
-    /// Shows <paramref name="help"/>'s active signature above the caret, once its documentation is read off the UI
-    /// thread, as the hover reads its Markdown: as much as a hover shows, the signature first, so that a server's long
-    /// signatures or documentation cost the UI thread no more than the largest hover.
+    /// Shows <paramref name="help"/>'s active signature above the caret, once it and its documentation are read off the
+    /// UI thread.
     /// </summary>
     /// <param name="help">The signature help.</param>
     /// <param name="inPlace">Whether the card keeps its place, as when the user chose another signature.</param>
@@ -329,26 +329,19 @@ internal sealed class SignatureHelpController : IEditorFeature
         var reading = new CancellationTokenSource();
         _reading = reading;
         SignatureInfo signature = help.Signatures[help.ActiveSignature];
-        HoverText? parameter =
-            signature.ActiveParameter >= 0 ? signature.Parameters[signature.ActiveParameter].Documentation : null;
         TextMateGrammar? grammar = _highlighter.Grammar;
-        var budget = new HoverBudget();
-        string label = budget.Take(signature.Label) ?? "";
+        IBrush highlight = _colors.HoverHighlight;
         try
         {
-            IReadOnlyList<HoverBlock> documentation =
-                parameter is null && signature.Documentation is null
-                    ? []
-                    : await Task.Run(
-                        // Apart, without the line between a hover's parts.
-                        () => (IReadOnlyList<HoverBlock>)[.. Read(parameter), .. Read(signature.Documentation)],
-                        reading.Token
-                    );
+            IReadOnlyList<HoverBlock> blocks = await Task.Run(
+                () => SignatureBlocks.Of(signature, grammar, highlight, reading.Token),
+                reading.Token
+            );
             if (_reading != reading)
                 return;
             var look = new CodeLook(_editor.FontFamily, _editor.FontSize, _colors);
             _frame.MaxWidth = PopupFrame.MaxTextWidth(_editor.Bounds.Width);
-            _content.Content = SignatureView.Create(signature, label, documentation, look);
+            _content.Content = HoverView.Create(blocks, look);
             _content.Offset = default;
             _column.IsVisible = help.Signatures.Count > 1;
             // As wide for each signature, in the editor's font, so that the buttons stay where they are.
@@ -376,9 +369,6 @@ internal sealed class SignatureHelpController : IEditorFeature
                 .TryGet(LogEventLevel.Error, AssetFiles.LogArea)
                 ?.Log(this, "Showing signature help failed: {Exception}", e);
         }
-
-        IReadOnlyList<HoverBlock> Read(HoverText? text) =>
-            text is { } part ? HoverBlocks.Of(new HoverInfo([part], null), grammar, budget, reading.Token) : [];
     }
 
     private void Paint()

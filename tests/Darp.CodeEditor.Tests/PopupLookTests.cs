@@ -183,7 +183,7 @@ public sealed class PopupLookTests(UiFixture ui)
         });
 
     [Fact]
-    public Task Completions_details_look_as_the_hover_code_on_the_popup_a_line_and_docs() =>
+    public Task Completions_details_and_signature_helps_card_look_as_the_hover_code_on_the_popup_a_line_and_docs() =>
         _ui.Run(async () =>
         {
             var fake = new FakeServer();
@@ -195,6 +195,19 @@ public sealed class PopupLookTests(UiFixture ui)
                     """{ "items": [ { "label": "key", "data": { "detail": "\"key\": 1", "documentation": "The key." } } ] }"""
                 )
             );
+            var signatures = new JsonArray(
+                new JsonObject
+                {
+                    ["label"] = "call(\"first\", 2)",
+                    ["documentation"] = "Calls.",
+                    ["parameters"] = new JsonArray(new JsonObject { ["label"] = new JsonArray(5, 12) }),
+                }
+            );
+            using CodeDocument command = server.CreateDocument(
+                FakeServer.Commands,
+                $"signatures {signatures.ToJsonString()}"
+            );
+            await fake.WaitForAsync("set signatures");
             // JSON colors strings and numbers: the code's tokens have colors of their own.
             using CodeDocument document = server.CreateDocument(CodeLanguage.Json, "call");
             using var window = new EditorWindow(new CodeEditor { Document = document });
@@ -211,6 +224,27 @@ public sealed class PopupLookTests(UiFixture ui)
             TextBlock detail = ShouldShowCodeThenDocs(window, details!, "\"key\": 1", "The key.");
             Run[] detailRuns = [.. detail.Inlines.ShouldNotBeNull().OfType<Run>()];
             detailRuns.ShouldContain(run => run.Text == "\"key\"" && ColorOf(run) == s_string);
+            window.Press(Key.Escape);
+
+            window.Editor.Selection = new TextSelection(4);
+            window.Type("(");
+            PopupFrame? card = null;
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                card = PopupFrames.Find(window, "SignatureHelp");
+                return card is not null && Hovers.Texts(card).Contains("Calls.");
+            });
+            TextBlock signature = ShouldShowCodeThenDocs(window, card!, "call(\"first\", 2)", "Calls.");
+            // The active parameter is bold in editorHoverWidget.highlightForeground, over its token's color; the rest
+            // keeps its tokens' colors.
+            Run[] runs = [.. signature.Inlines.ShouldNotBeNull().OfType<Run>()];
+            Run parameter = runs.Single(run => run.Text == "\"first\"");
+            parameter.FontWeight.ShouldBe(FontWeight.Bold);
+            ColorOf(parameter).ShouldBe(Color.Parse("#0066BF"));
+            Run number = runs.Single(run => run.Text == "2");
+            number.FontWeight.ShouldBe(FontWeight.Normal);
+            ColorOf(number).ShouldBe(s_number);
         });
 
     [Fact]
@@ -253,8 +287,10 @@ public sealed class PopupLookTests(UiFixture ui)
             popup.Hide();
         });
 
-    /// <summary>Light+'s color of JSON's strings out of an object.</summary>
+    /// <summary>Light+'s colors of JSON's strings and numbers out of an object.</summary>
     private static readonly Color s_string = Color.Parse("#A31515");
+
+    private static readonly Color s_number = Color.Parse("#098658");
 
     /// <summary>
     /// Checks the look that every popup of code and docs shares, the hover's (its own tests check it): on Light+'s hover
