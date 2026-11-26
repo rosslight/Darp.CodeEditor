@@ -222,7 +222,7 @@ internal sealed class XmlDocs
         if ((string?)see.Attribute("langword") is { Length: > 0 } keyword)
             return Code(keyword);
         if ((string?)see.Attribute("cref") is not { Length: > 0 } cref)
-            return (string?)see.Attribute("href") is { } link ? Markdown.Escape(link) : null;
+            return (string?)see.Attribute("href") is { } link ? Markdown.Escape(Plain(link)) : null;
         return Code(
             DocumentationCommentId.GetFirstSymbolForDeclarationId(cref, _model.Compilation) is { } symbol
                 ? symbol.ToMinimalDisplayString(_model, _position, s_reference)
@@ -232,7 +232,12 @@ internal sealed class XmlDocs
     }
 
     /// <summary><paramref name="code"/> marked as code in the text as it is written.</summary>
-    private static string Code(string code) => $"{CodeStart}{code}{CodeEnd}";
+    private static string Code(string code) => $"{CodeStart}{Plain(code)}{CodeEnd}";
+
+    /// <summary><paramref name="text"/> of the docs without the characters that mark code.</summary>
+    private static string Plain(string text) =>
+        text.Replace(CodeStart.ToString(), "", StringComparison.Ordinal)
+            .Replace(CodeEnd.ToString(), "", StringComparison.Ordinal);
 
     /// <summary><paramref name="text"/> with its marked code as Markdown code spans, code next to code as one.</summary>
     private static string Spans(string text)

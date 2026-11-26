@@ -472,6 +472,20 @@ public sealed class ScriptSignatureHelpTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task Docs_with_the_characters_that_mark_code_still_show()
+    {
+        using var script = await _fixture.OpenAsync(
+            """
+            /// <summary>See <see href="https://example.com/&#xE000;"/> and <c>a&#xE001;b</c>.</summary>
+            int Measure(string text) => text.Length;
+            Measure(|
+            """
+        );
+        SignatureInfo signature = Active((await script.SignatureHelpAsync()).ShouldNotBeNull());
+        signature.Documentation.ShouldNotBeNull().Text.ShouldBe("See https://example.com/ and `ab`.");
+    }
+
+    [Fact]
     public async Task Docs_that_inherit_come_from_the_member_they_implement()
     {
         using var script = await _fixture.OpenAsync(
