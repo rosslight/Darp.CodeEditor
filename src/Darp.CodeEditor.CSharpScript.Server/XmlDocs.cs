@@ -231,8 +231,9 @@ internal sealed class XmlDocs
         );
     }
 
-    /// <summary><paramref name="code"/> marked as code in the text as it is written.</summary>
-    private static string Code(string code) => $"{CodeStart}{Plain(code)}{CodeEnd}";
+    /// <summary><paramref name="code"/> marked as code in the text as it is written; nothing for no code.</summary>
+    private static string Code(string code) =>
+        Plain(code) is { Length: > 0 } plain ? $"{CodeStart}{plain}{CodeEnd}" : "";
 
     /// <summary><paramref name="text"/> of the docs without the characters that mark code.</summary>
     private static string Plain(string text) =>

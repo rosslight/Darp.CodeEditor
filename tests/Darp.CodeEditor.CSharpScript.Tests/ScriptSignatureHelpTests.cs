@@ -476,13 +476,13 @@ public sealed class ScriptSignatureHelpTests(ScriptServerFixture fixture)
     {
         using var script = await _fixture.OpenAsync(
             """
-            /// <summary>See <see href="https://example.com/&#xE000;"/> and <c>a&#xE001;b</c>.</summary>
+            /// <summary>See <see href="https://example.com/&#xE000;"/> and <c>a&#xE001;b</c>, not the <c>&#xE000;</c> glyph.</summary>
             int Measure(string text) => text.Length;
             Measure(|
             """
         );
         SignatureInfo signature = Active((await script.SignatureHelpAsync()).ShouldNotBeNull());
-        signature.Documentation.ShouldNotBeNull().Text.ShouldBe("See https://example.com/ and `ab`.");
+        signature.Documentation.ShouldNotBeNull().Text.ShouldBe("See https://example.com/ and `ab`, not the glyph.");
     }
 
     [Fact]
