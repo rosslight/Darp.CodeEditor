@@ -46,7 +46,10 @@ internal sealed class CompletionMatcher
     /// </summary>
     public const int MaxLength = 128;
 
-    /// <summary>The most items that <see cref="Rank"/> matches gracefully, tolerating a typo; longer lists strictly.</summary>
+    /// <summary>
+    /// The most items that <see cref="Rank(IReadOnlyList{CompletionCandidate}, CancellationToken)"/> matches gracefully,
+    /// tolerating a typo; longer lists strictly.
+    /// </summary>
     public const int MaxGracefulItems = 2000;
 
     /// <summary>The most cells of the scoring tables that one ranking fills (<see cref="FuzzyScorer.Cells"/>).</summary>
@@ -74,9 +77,21 @@ internal sealed class CompletionMatcher
     public List<RankedCompletion> Rank(
         IReadOnlyList<CompletionCandidate> items,
         CancellationToken cancellationToken = default
+    ) => Rank(items, items.Count <= MaxGracefulItems, cancellationToken);
+
+    /// <summary>
+    /// The items that match, best first, as <see cref="Rank(IReadOnlyList{CompletionCandidate}, CancellationToken)"/>
+    /// ranks them, tolerating a typo when <paramref name="graceful"/>, whatever their number: for a part of a list whose
+    /// length decides.
+    /// </summary>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    public List<RankedCompletion> Rank(
+        IReadOnlyList<CompletionCandidate> items,
+        bool graceful,
+        CancellationToken cancellationToken = default
     )
     {
-        var texts = new RankedTexts(items, items.Count <= MaxGracefulItems);
+        var texts = new RankedTexts(items, graceful);
         bool exact = Cells(texts, cancellationToken) <= _cellsPerRank;
         var ranked = new List<RankedCompletion>();
         for (int i = 0; i < items.Count; i++)

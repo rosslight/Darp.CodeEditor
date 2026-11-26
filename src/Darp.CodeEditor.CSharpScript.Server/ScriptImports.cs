@@ -8,8 +8,8 @@ namespace Darp.CodeEditor.CSharpScript.Server;
 /// <summary>
 /// Roslyn's items of types and extension methods from namespaces that a script does not import. A list has thousands of
 /// them, which it already computes, so the server sends only the best that match the typed name, as the client ranks
-/// them, and only those that the script may name: from .NET and the app's marked assemblies, not from what those
-/// depend on.
+/// them, also with a typo where the client tolerates one, and only those that the script may name: from .NET and the
+/// app's marked assemblies, not from what those depend on.
 /// </summary>
 internal static class ScriptImports
 {
@@ -33,6 +33,12 @@ internal static class ScriptImports
     /// <param name="items">The list's items.</param>
     /// <param name="candidates">The indices of the items that <see cref="MayBe"/> are imports.</param>
     /// <param name="typed">The text from the items' word's start up to the caret; not empty.</param>
+    /// <param name="filterText">The text that the client matches an item by.</param>
+    /// <param name="others">
+    /// How many other items the list sends. The client tolerates a typo in a list of up to
+    /// <see cref="CompletionMatcher.MaxGracefulItems"/> items, so the ranking does too while these and the most imports
+    /// stay within it.
+    /// </param>
     /// <param name="compilation">The script's compilation.</param>
     /// <param name="receiver">The type of the receiver whose member the word is; null for none.</param>
     /// <param name="cancellationToken">Stops the ranking.</param>
@@ -41,6 +47,8 @@ internal static class ScriptImports
         IReadOnlyList<CompletionItem> items,
         IReadOnlyList<int> candidates,
         string typed,
+        Func<CompletionItem, string> filterText,
+        int others,
         Compilation compilation,
         ITypeSymbol? receiver,
         CancellationToken cancellationToken
@@ -51,16 +59,19 @@ internal static class ScriptImports
         {
             CompletionItem item = items[candidates[i]];
             string label = item.DisplayTextPrefix + item.DisplayText + item.DisplayTextSuffix;
+            string filter = filterText(item);
             texts[i] = new CompletionCandidate(
                 typed,
                 label,
-                item.FilterText,
-                string.Equals(item.FilterText, label, StringComparison.OrdinalIgnoreCase)
+                filter,
+                string.Equals(filter, label, StringComparison.OrdinalIgnoreCase)
             );
         }
         var namespaces = new Dictionary<string, INamespaceSymbol?>();
         var best = new List<int>(MaxItems);
-        foreach (RankedCompletion match in (t_matcher ??= new CompletionMatcher()).Rank(texts, cancellationToken))
+        bool graceful = others + MaxItems <= CompletionMatcher.MaxGracefulItems;
+        t_matcher ??= new CompletionMatcher();
+        foreach (RankedCompletion match in t_matcher.Rank(texts, graceful, cancellationToken))
         {
             int index = candidates[match.Index];
             if (!IsNameable(items[index], compilation, receiver, namespaces))

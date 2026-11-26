@@ -164,12 +164,8 @@ internal sealed class ScriptCompletions
                 continue;
             TextSpan span = change.TextChange.Span;
             string label = Label(item);
-            // Roslyn's edit goes over the @ of an escaped word, and the client matches what was typed from the edit's start.
-            // A keyword keeps its filter text: committing it would drop the @, so an escaped word doesn't match it.
-            bool isEscaped =
-                span.Length > 0 && _script.Text[span.Start] == '@' && !item.Tags.Contains(WellKnownTags.Keyword);
-            string filterText = isEscaped ? "@" + item.FilterText.TrimStart('@') : item.FilterText;
-            // So too over a tag's "<".
+            string filterText = FilterText(item, span);
+            // The client matches what was typed from the edit's start: so too over a tag's "<".
             if (span.Start < list.Span.Start)
                 filterText = _script.Text.ToString(TextSpan.FromBounds(span.Start, list.Span.Start)) + filterText;
             string newText = change.TextChange.NewText ?? "";
@@ -208,6 +204,8 @@ internal sealed class ScriptCompletions
                     list.ItemsList,
                     imports,
                     typed,
+                    item => FilterText(item, list.Span),
+                    items.Count,
                     compilation,
                     await ReceiverAsync(list.Span, cancellationToken).ConfigureAwait(false),
                     cancellationToken
@@ -218,7 +216,9 @@ internal sealed class ScriptCompletions
                     // Roslyn's lists share these items, and each list moves them to its span: a copy keeps this one's,
                     // which resolve needs.
                     sent[index] = item.AddProperty(nameof(ScriptCompletions), "");
-                    items.Add(ToLsp(item, index, list.Span, item.DisplayText, item.FilterText, isSnippet: false));
+                    items.Add(
+                        ToLsp(item, index, list.Span, item.DisplayText, FilterText(item, list.Span), isSnippet: false)
+                    );
                 }
                 asksAgain |= more;
             }
@@ -272,6 +272,16 @@ internal sealed class ScriptCompletions
                 .Select(edit => new LspTextEdit(Range(edit.Span), edit.NewText ?? "")),
         ];
     }
+
+    /// <summary>
+    /// The text that the client matches <paramref name="item"/> by, whose edit goes over <paramref name="span"/>: Roslyn's
+    /// edit goes over the @ of an escaped word, and the client matches what was typed from the edit's start. A keyword
+    /// keeps its filter text: committing it would drop the @, so an escaped word doesn't match it.
+    /// </summary>
+    private string FilterText(CompletionItem item, TextSpan span) =>
+        span.Length > 0 && _script.Text[span.Start] == '@' && !item.Tags.Contains(WellKnownTags.Keyword)
+            ? "@" + item.FilterText.TrimStart('@')
+            : item.FilterText;
 
     private static bool IsUnsupportedDirective(CompletionItem item) =>
         item.Tags.Contains(WellKnownTags.Keyword) && s_unsupportedDirectives.Contains(item.DisplayText);

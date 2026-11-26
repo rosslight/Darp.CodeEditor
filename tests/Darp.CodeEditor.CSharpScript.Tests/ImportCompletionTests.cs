@@ -63,6 +63,23 @@ public sealed class ImportCompletionTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task An_escaped_name_completes_a_type_with_its_using_as_other_identifiers()
+    {
+        using var script = await _fixture.OpenAsync("var json = new @JsonSerializ|");
+        CompletionItem item = (await script.CompleteAsync()).Items.Single(i => i.Label == "JsonSerializer");
+        item.Edit.Range.ShouldBe(TextRange.FromBounds(script.Caret - "@JsonSerializ".Length, script.Caret));
+        item.Edit.NewText.ShouldBe("JsonSerializer");
+        item.FilterText.ShouldBe("@JsonSerializer");
+    }
+
+    [Fact]
+    public async Task A_name_with_two_neighbouring_characters_swapped_completes_a_type_as_the_editor_matches_it()
+    {
+        using var script = await _fixture.OpenAsync("var json = new JsnoSerializ|");
+        (await script.CompleteAsync()).Items.ShouldContain(item => item.Label == "JsonSerializer");
+    }
+
+    [Fact]
     public async Task Nothing_comes_from_the_assemblies_that_scripts_may_not_name()
     {
         using var types = await _fixture.OpenAsync("var unmarked = new UnmarkedTy|");
