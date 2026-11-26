@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json.Nodes;
 using Darp.CodeEditor.Lsp;
@@ -8,21 +9,28 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 namespace Darp.CodeEditor.CSharpScript.Server;
 
 /// <summary>
-/// Signature help on the semantic model, since Roslyn's own service is not public. It shows the overloads of the call
-/// around the caret, and asks overload resolution which one the arguments so far mean.
+/// Signature help on the semantic model, since Roslyn's own service is not public. It shows what the arguments around the
+/// caret go to: the overloads of a call, a constructor, a constructor initializer, an attribute, an indexer or a
+/// collection initializer's entry, or the type parameters of a generic name. Overload resolution says which one the
+/// arguments so far mean.
 /// </summary>
 internal static class ScriptSignatureHelp
 {
-    private static readonly SymbolDisplayFormat s_heading =
-        SymbolDisplayFormat.MinimallyQualifiedFormat.WithMemberOptions(
-            SymbolDisplayMemberOptions.IncludeContainingType | SymbolDisplayMemberOptions.IncludeType
-        );
+    private static readonly SymbolDisplayFormat s_minimal = SymbolDisplayFormat.MinimallyQualifiedFormat;
+
+    private static readonly SymbolDisplayFormat s_heading = s_minimal.WithMemberOptions(
+        SymbolDisplayMemberOptions.IncludeContainingType | SymbolDisplayMemberOptions.IncludeType
+    );
+
+    private static readonly SymbolDisplayFormat s_generic = s_heading
+        .AddMemberOptions(SymbolDisplayMemberOptions.IncludeParameters)
+        .AddGenericsOptions(SymbolDisplayGenericsOptions.IncludeTypeConstraints);
 
     private static readonly ExpressionSyntax s_default = SyntaxFactory.LiteralExpression(
         SyntaxKind.DefaultLiteralExpression
     );
 
-    /// <summary>The signatures of the call at the caret; null outside a call.</summary>
+    /// <summary>The signatures that the arguments at the caret go to; null outside arguments.</summary>
     public static async Task<LspSignatureHelp?> GetAsync(
         ScriptSnapshot script,
         SignatureHelpParams parameters,
@@ -32,24 +40,21 @@ internal static class ScriptSignatureHelp
         int position = script.Lines.ToOffset(parameters.Position);
         if (await script.Document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false) is not { } model)
             return null;
-        SyntaxNode root = await model.SyntaxTree.GetRootAsync(cancellationToken).ConfigureAwait(false);
-        if (ArgumentListAt(root, position) is not { Parent: ExpressionSyntax call } list)
+        if (
+            await SiteAtAsync(script.Document, model, position, cancellationToken).ConfigureAwait(false) is not { } site
+        )
             return null;
-        var (candidates, resolved) = await BindAsync(script.Document, model, call, list, cancellationToken)
-            .ConfigureAwait(false);
-        if (candidates.Count == 0)
-            return null;
-        int argument = list.Arguments.GetSeparators().Count(separator => separator.SpanStart < position);
-        string? name = list.Arguments.ElementAtOrDefault(argument)?.NameColon?.Name.Identifier.ValueText;
 
+        List<ISymbol> candidates = [.. site.Candidates];
         int best = 0;
-        if (resolved is not null)
+        // A selected symbol outside the candidates, as a constructor that calls itself, selects none.
+        if (site.Selected is { } selected && candidates.FindIndex(c => SameSymbol(c, selected)) is >= 0 and var index)
         {
-            best = Math.Max(0, candidates.FindIndex(c => SameMethod(c, resolved)));
+            best = index;
             // With its type arguments, as the call infers them.
-            candidates[best] = resolved;
+            candidates[index] = selected;
         }
-        List<LspSignatureInformation> signatures = [.. candidates.Select(c => ToSignature(c, argument, name))];
+        List<LspSignatureInformation> signatures = [.. candidates.Select(c => ToSignature(Shape(c, site), site))];
         return new LspSignatureHelp(
             signatures,
             KeptChoice(parameters.Context.ActiveSignatureHelp, signatures) ?? best,
@@ -57,104 +62,312 @@ internal static class ScriptSignatureHelp
         );
     }
 
-    /// <summary>The argument list that the caret is in; in whitespace, the one that goes on there.</summary>
-    private static ArgumentListSyntax? ArgumentListAt(SyntaxNode root, int position)
+    /// <summary>
+    /// The arguments at the caret and what they can go to.
+    /// </summary>
+    /// <param name="Candidates">What they can go to: methods, indexers, or generic types and methods; at least one.</param>
+    /// <param name="Selected">The candidate that overload resolution selects; null for none.</param>
+    /// <param name="Argument">The argument at the caret, from 0.</param>
+    /// <param name="Name">The name of the argument at the caret, for a named one; null otherwise.</param>
+    /// <param name="Settable">An attribute's fields and properties, which named arguments set; empty otherwise.</param>
+    /// <param name="TypeArguments">Whether the arguments are type arguments.</param>
+    private sealed record Site(
+        IReadOnlyList<ISymbol> Candidates,
+        ISymbol? Selected,
+        int Argument,
+        string? Name,
+        IReadOnlyList<ISymbol> Settable,
+        bool TypeArguments = false
+    );
+
+    /// <summary>
+    /// The innermost arguments around the caret that go somewhere: a type argument list, or else the argument list
+    /// nearest the caret that has candidates, as an array's brackets have none.
+    /// </summary>
+    private static async Task<Site?> SiteAtAsync(
+        Document document,
+        SemanticModel model,
+        int position,
+        CancellationToken cancellationToken
+    )
     {
-        SyntaxToken token = root.FindToken(position);
-        // Before a token, as on an indented continuation line: what the caret continues ends on the left.
-        if (position <= token.SpanStart)
-            token = token.GetPreviousToken();
-        for (SyntaxNode? node = token.Parent; node is not null; node = node.Parent)
+        SyntaxNode root = await model.SyntaxTree.GetRootAsync(cancellationToken).ConfigureAwait(false);
+        if (TypeArgumentsAt(model, root, position, cancellationToken) is { } typeArguments)
+            return typeArguments;
+        foreach (SyntaxNode list in ArgumentListsAround(root, position))
         {
-            // Statements inside a lambda are not arguments of the call around it.
-            if (node is BlockSyntax)
-                return null;
             if (
-                node is ArgumentListSyntax list
-                && position >= list.OpenParenToken.Span.End
-                && (list.CloseParenToken.IsMissing || position <= list.CloseParenToken.SpanStart)
+                await ArgumentsAsync(document, model, list, position, cancellationToken).ConfigureAwait(false) is
+                { } site
             )
-            {
-                return list;
-            }
+                return site;
         }
         return null;
     }
 
-    /// <summary>What the call can mean: a method group, a delegate's invoke method or a type's constructors.</summary>
-    private static List<IMethodSymbol> Candidates(
-        SemanticModel model,
-        ExpressionSyntax call,
-        CancellationToken cancellationToken
-    )
+    /// <summary>The token that the caret continues: the one before it, also in the whitespace before the next.</summary>
+    private static SyntaxToken TokenBefore(SyntaxNode root, int position)
     {
-        IEnumerable<IMethodSymbol> methods = call switch
-        {
-            InvocationExpressionSyntax invocation
-                when model.GetMemberGroup(invocation.Expression, cancellationToken) is { IsEmpty: false } group =>
-                group.OfType<IMethodSymbol>(),
-            InvocationExpressionSyntax invocation
-                when model.GetTypeInfo(invocation.Expression, cancellationToken).Type
-                    is INamedTypeSymbol { DelegateInvokeMethod: { } invoke } => [invoke],
-            BaseObjectCreationExpressionSyntax
-                when model.GetTypeInfo(call, cancellationToken).Type is INamedTypeSymbol type =>
-                type.InstanceConstructors,
-            _ => [],
-        };
-        return [.. methods.Where(method => model.IsAccessible(call.SpanStart, method))];
+        SyntaxToken token = root.FindToken(position);
+        return position <= token.SpanStart ? token.GetPreviousToken() : token;
     }
 
     /// <summary>
-    /// The overload the call selects, and the candidates to show it among. An unfinished call is bound as if each missing
-    /// argument were <c>default</c>, with the fewest added first, so that what was typed decides. It binds in a fork of
-    /// the script, where it keeps its receiver and target type. The candidates then come from that fork: the script's own
-    /// methods are symbols of one compilation.
+    /// The type argument list that the caret is in, written or partly written: the tokens between its <c>&lt;</c> and
+    /// the caret could all be type arguments, and the name before it is generic. A <c>&lt;</c> that compares, as in
+    /// <c>a &lt; b</c>, has no generic name before it.
     /// </summary>
-    private static async Task<(List<IMethodSymbol> Candidates, IMethodSymbol? Selected)> BindAsync(
-        Document document,
+    private static Site? TypeArgumentsAt(
         SemanticModel model,
-        ExpressionSyntax call,
-        ArgumentListSyntax list,
+        SyntaxNode root,
+        int position,
         CancellationToken cancellationToken
     )
     {
-        List<IMethodSymbol> candidates = Candidates(model, call, cancellationToken);
-        if (model.GetSymbolInfo(call, cancellationToken).Symbol is IMethodSymbol exact)
-            return (candidates, exact);
+        int argument = 0;
+        int depth = 0;
+        for (SyntaxToken token = TokenBefore(root, position); !token.IsKind(SyntaxKind.None); )
+        {
+            switch (token.Kind())
+            {
+                case SyntaxKind.LessThanToken when depth == 0:
+                    return
+                        token.Parent is TypeParameterListSyntax
+                        || token.GetPreviousToken() is not { RawKind: (int)SyntaxKind.IdentifierToken } name
+                        ? null
+                        : GenericSite(model, name, position, argument, cancellationToken);
+                case SyntaxKind.LessThanToken:
+                    depth--;
+                    break;
+                case SyntaxKind.GreaterThanToken:
+                    depth++;
+                    break;
+                case SyntaxKind.GreaterThanGreaterThanToken:
+                    depth += 2;
+                    break;
+                case SyntaxKind.CommaToken:
+                    argument += depth == 0 ? 1 : 0;
+                    break;
+                case SyntaxKind.IdentifierToken
+                or SyntaxKind.DotToken
+                or SyntaxKind.ColonColonToken
+                or SyntaxKind.QuestionToken
+                or SyntaxKind.AsteriskToken
+                or SyntaxKind.OpenBracketToken
+                or SyntaxKind.CloseBracketToken:
+                    break;
+                case var kind when SyntaxFacts.IsPredefinedType(kind):
+                    break;
+                default:
+                    return null;
+            }
+            token = token.GetPreviousToken();
+        }
+        return null;
+    }
+
+    /// <summary>The generic types or methods that <paramref name="name"/> can mean, as Roslyn looks them up.</summary>
+    private static Site? GenericSite(
+        SemanticModel model,
+        SyntaxToken name,
+        int position,
+        int argument,
+        CancellationToken cancellationToken
+    )
+    {
+        if (name.Parent is not SimpleNameSyntax simpleName)
+            return null;
+        ExpressionSyntax? left = simpleName.Parent switch
+        {
+            MemberAccessExpressionSyntax access when access.Name == simpleName => access.Expression,
+            QualifiedNameSyntax qualified when qualified.Right == simpleName => qualified.Left,
+            _ => null,
+        };
+        ISymbol? leftSymbol = left is null ? null : model.GetSymbolInfo(left, cancellationToken).Symbol;
+        ITypeSymbol? leftType = left is null ? null : model.GetTypeInfo(left, cancellationToken).Type;
+        INamespaceOrTypeSymbol? container = leftSymbol as INamespaceOrTypeSymbol ?? leftType;
+        IEnumerable<ISymbol> found = SyntaxFacts.IsInNamespaceOrTypeContext(simpleName)
+            ? model.LookupNamespacesAndTypes(position, container, name.ValueText)
+            : model.LookupSymbols(
+                position,
+                container,
+                name.ValueText,
+                includeReducedExtensionMethods: leftSymbol is not INamespaceOrTypeSymbol && leftType is not null
+            );
+        List<ISymbol> candidates =
+        [
+            .. found.Where(symbol =>
+                symbol is INamedTypeSymbol { Arity: > 0 } or IMethodSymbol { Arity: > 0 }
+                && SignatureCandidates.IsBrowsable(symbol)
+            ),
+        ];
+        if (candidates.Count == 0)
+            return null;
+        ISymbol selected = candidates.FirstOrDefault(c => TypeParameters(c).Length > argument) ?? candidates[0];
+        return new Site(candidates, selected, argument, null, [], TypeArguments: true);
+    }
+
+    private static ImmutableArray<ITypeParameterSymbol> TypeParameters(ISymbol symbol) =>
+        symbol is IMethodSymbol method ? method.TypeParameters : ((INamedTypeSymbol)symbol).TypeParameters;
+
+    /// <summary>
+    /// The argument lists around the caret, innermost first; in whitespace, those that go on there. Statements inside a
+    /// lambda are not arguments of the call around it.
+    /// </summary>
+    private static IEnumerable<SyntaxNode> ArgumentListsAround(SyntaxNode root, int position)
+    {
+        for (SyntaxNode? node = TokenBefore(root, position).Parent; node is not null; node = node.Parent)
+        {
+            if (node is BlockSyntax)
+                yield break;
+            (SyntaxToken open, SyntaxToken close) = node switch
+            {
+                ArgumentListSyntax list => (list.OpenParenToken, list.CloseParenToken),
+                BracketedArgumentListSyntax list => (list.OpenBracketToken, list.CloseBracketToken),
+                AttributeArgumentListSyntax list => (list.OpenParenToken, list.CloseParenToken),
+                InitializerExpressionSyntax entry when entry.IsKind(SyntaxKind.ComplexElementInitializerExpression) => (
+                    entry.OpenBraceToken,
+                    entry.CloseBraceToken
+                ),
+                _ => default,
+            };
+            if (
+                !open.IsKind(SyntaxKind.None)
+                && position >= open.Span.End
+                && (close.IsMissing || position <= close.SpanStart)
+            )
+            {
+                yield return node;
+            }
+        }
+    }
+
+    /// <summary>
+    /// What the arguments in <paramref name="list"/> can go to; null for nothing. An unfinished list is bound as if each
+    /// missing argument were <c>default</c>, with the fewest added first, so that what was typed decides. It binds in a
+    /// fork of the script, where it keeps its receiver and target type. The candidates then come from that fork: the
+    /// script's own methods are symbols of one compilation.
+    /// </summary>
+    private static async Task<Site?> ArgumentsAsync(
+        Document document,
+        SemanticModel model,
+        SyntaxNode list,
+        int position,
+        CancellationToken cancellationToken
+    )
+    {
+        List<ISymbol> candidates = SignatureCandidates.Of(model, list, cancellationToken);
+        if (candidates.Count == 0)
+            return null;
+        (int argument, string? name) = ArgumentAt(list, position);
+        IReadOnlyList<ISymbol> settable =
+            list.Parent is AttributeSyntax attribute
+            && model.GetTypeInfo(attribute, cancellationToken).Type is INamedTypeSymbol attributeType
+                ? SignatureCandidates.Settable(attributeType, model, position)
+                : [];
+        if (Bound(model, list, cancellationToken) is { } exact)
+            return new Site(candidates, exact, argument, name, settable);
+
+        int written = Arguments(list).Count();
         var completed = new SyntaxAnnotation();
         IEnumerable<int> missing = candidates
-            .Select(method =>
-                Math.Max(0, method.Parameters.Count(p => !p.IsOptional && !p.IsParams) - list.Arguments.Count)
-            )
+            .Select(c => Math.Max(0, Parameters(c).Count(p => !p.IsOptional && !p.IsParams) - written))
             .Distinct()
             .Order();
         foreach (int added in missing)
         {
-            ExpressionSyntax filled = call.ReplaceNode(list, Completed(list, added))
-                .WithAdditionalAnnotations(completed);
             Document fork = document.WithSyntaxRoot(
-                call.SyntaxTree.GetRoot(cancellationToken).ReplaceNode(call, filled)
+                list.SyntaxTree.GetRoot(cancellationToken)
+                    .ReplaceNode(list, Completed(list, added).WithAdditionalAnnotations(completed))
             );
             if (await fork.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false) is not { } forked)
                 break;
             SyntaxNode forkRoot = await forked.SyntaxTree.GetRootAsync(cancellationToken).ConfigureAwait(false);
-            ExpressionSyntax forkCall = forkRoot.GetAnnotatedNodes(completed).OfType<ExpressionSyntax>().Single();
-            SymbolInfo info = forked.GetSymbolInfo(forkCall, cancellationToken);
-            ISymbol? selected =
-                info.CandidateReason == CandidateReason.Ambiguous ? info.CandidateSymbols[0] : info.Symbol;
-            if (selected is IMethodSymbol method)
-                return (Candidates(forked, forkCall, cancellationToken), method);
+            SyntaxNode forkList = forkRoot.GetAnnotatedNodes(completed).Single();
+            if (Bound(forked, forkList, cancellationToken) is { } selected)
+                return new Site(
+                    SignatureCandidates.Of(forked, forkList, cancellationToken),
+                    selected,
+                    argument,
+                    name,
+                    settable
+                );
         }
-        return (candidates, null);
+        return new Site(candidates, null, argument, name, settable);
     }
 
-    private static ArgumentListSyntax Completed(ArgumentListSyntax list, int added) =>
-        list.WithArguments(
-            SyntaxFactory.SeparatedList([
-                .. list.Arguments.Select(a => a.Expression.IsMissing ? a.WithExpression(s_default) : a),
-                .. Enumerable.Repeat(SyntaxFactory.Argument(s_default), added),
-            ])
-        );
+    /// <summary>The argument at the caret, from 0, and its name, for a named one.</summary>
+    private static (int Argument, string? Name) ArgumentAt(SyntaxNode list, int position)
+    {
+        (IReadOnlyList<SyntaxNode> arguments, IEnumerable<SyntaxToken> separators) = list switch
+        {
+            BaseArgumentListSyntax l => (l.Arguments, l.Arguments.GetSeparators()),
+            AttributeArgumentListSyntax l => (l.Arguments, l.Arguments.GetSeparators()),
+            InitializerExpressionSyntax l => ((IReadOnlyList<SyntaxNode>)l.Expressions, l.Expressions.GetSeparators()),
+            _ => ([], []),
+        };
+        int argument = separators.Count(separator => separator.SpanStart < position);
+        string? name = arguments.ElementAtOrDefault(argument) switch
+        {
+            ArgumentSyntax { NameColon: { } colon } => colon.Name.Identifier.ValueText,
+            AttributeArgumentSyntax { NameColon: { } colon } => colon.Name.Identifier.ValueText,
+            AttributeArgumentSyntax { NameEquals: { } equals } => equals.Name.Identifier.ValueText,
+            _ => null,
+        };
+        return (argument, name);
+    }
+
+    private static IEnumerable<SyntaxNode> Arguments(SyntaxNode list) =>
+        list switch
+        {
+            BaseArgumentListSyntax arguments => arguments.Arguments,
+            // Positional ones: named ones set members.
+            AttributeArgumentListSyntax arguments => arguments.Arguments.Where(a => a.NameEquals is null),
+            InitializerExpressionSyntax entry => entry.Expressions,
+            _ => [],
+        };
+
+    /// <summary><paramref name="list"/> with <c>default</c> for each missing argument, and <paramref name="added"/> more.</summary>
+    private static SyntaxNode Completed(SyntaxNode list, int added) =>
+        list switch
+        {
+            BaseArgumentListSyntax arguments => arguments.WithArguments(
+                SyntaxFactory.SeparatedList([
+                    .. arguments.Arguments.Select(a => a.Expression.IsMissing ? a.WithExpression(s_default) : a),
+                    .. Enumerable.Repeat(SyntaxFactory.Argument(s_default), added),
+                ])
+            ),
+            AttributeArgumentListSyntax arguments => arguments.WithArguments(
+                SyntaxFactory.SeparatedList([
+                    .. arguments.Arguments.Select(a => a.Expression.IsMissing ? a.WithExpression(s_default) : a),
+                    .. Enumerable.Repeat(SyntaxFactory.AttributeArgument(s_default), added),
+                ])
+            ),
+            InitializerExpressionSyntax entry => entry.WithExpressions(
+                SyntaxFactory.SeparatedList([
+                    .. entry.Expressions.Select(e => e.IsMissing ? s_default : e),
+                    .. Enumerable.Repeat(s_default, added),
+                ])
+            ),
+            _ => list,
+        };
+
+    /// <summary>The method or indexer that overload resolution selects for the arguments in <paramref name="list"/>.</summary>
+    private static ISymbol? Bound(SemanticModel model, SyntaxNode list, CancellationToken cancellationToken)
+    {
+        SymbolInfo info = list is InitializerExpressionSyntax entry
+            ? model.GetCollectionInitializerSymbolInfo(entry, cancellationToken)
+            : model.GetSymbolInfo(list.Parent ?? list, cancellationToken);
+        return info.CandidateReason == CandidateReason.Ambiguous ? info.CandidateSymbols[0] : info.Symbol;
+    }
+
+    private static IReadOnlyList<IParameterSymbol> Parameters(ISymbol symbol) =>
+        symbol switch
+        {
+            IMethodSymbol method => method.Parameters,
+            IPropertySymbol property => property.Parameters,
+            _ => [],
+        };
 
     /// <summary>
     /// The signature the user chose by key, when it still exists. The answer before says which one the server chose, so
@@ -176,36 +389,110 @@ internal static class ScriptSignatureHelp
         return index < 0 ? null : index;
     }
 
-    private static LspSignatureInformation ToSignature(IMethodSymbol method, int argument, string? argumentName)
+    /// <summary>A signature as it shows: its parameters between the text before and after them.</summary>
+    private sealed record SignatureShape(string Before, IReadOnlyList<ParameterShape> Parameters, string After);
+
+    /// <param name="Lead">What goes before it, outside its part of the label.</param>
+    /// <param name="Text">Its part of the label.</param>
+    /// <param name="Name">The name that a named argument gives it.</param>
+    /// <param name="IsParams">Whether further arguments go to it too.</param>
+    /// <param name="IsNamedOnly">Whether only a named argument goes to it, as to an attribute's property.</param>
+    private sealed record ParameterShape(
+        string Lead,
+        string Text,
+        string Name,
+        bool IsParams,
+        bool IsNamedOnly = false
+    );
+
+    private static SignatureShape Shape(ISymbol symbol, Site site)
     {
-        var label = new StringBuilder(method.ToDisplayString(s_heading)).Append('(');
-        var parameters = new List<LspParameterInformation>(method.Parameters.Length);
-        foreach (IParameterSymbol parameter in method.Parameters)
+        if (site.TypeArguments)
+            return TypeParameterShape(symbol);
+        IEnumerable<ParameterShape> parameters = Parameters(symbol)
+            .Select(p => new ParameterShape("", p.ToDisplayString(s_minimal), p.Name, p.IsParams));
+        if (symbol is IPropertySymbol indexer)
         {
-            if (parameters.Count > 0)
-                label.Append(", ");
-            int start = label.Length;
-            label.Append(parameter.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat));
-            parameters.Add(new LspParameterInformation([start, label.Length]));
+            string before =
+                $"{indexer.Type.ToDisplayString(s_minimal)} {indexer.ContainingType.ToDisplayString(s_minimal)}[";
+            return new SignatureShape(before, [.. parameters], "]");
         }
-        label.Append(')');
-        return new LspSignatureInformation(
-            label.ToString(),
-            parameters,
-            ActiveParameter(method, argument, argumentName)
+        var method = (IMethodSymbol)symbol;
+        string heading =
+            method.MethodKind == MethodKind.Constructor
+                ? method.ContainingType.ToDisplayString(s_minimal)
+                : method.ToDisplayString(s_heading);
+        // An attribute's settable members follow its constructor's parameters, as Roslyn shows them.
+        IEnumerable<ParameterShape> settable = site.Settable.Select(
+            (member, index) =>
+                new ParameterShape(
+                    index == 0 ? "Properties: " : "",
+                    $"{member.Name} = {TypeOf(member).ToDisplayString(s_minimal)}",
+                    member.Name,
+                    false,
+                    IsNamedOnly: true
+                )
+        );
+        return new SignatureShape(heading + "(", [.. parameters, .. settable], ")");
+    }
+
+    private static ITypeSymbol TypeOf(ISymbol member) =>
+        member is IFieldSymbol field ? field.Type : ((IPropertySymbol)member).Type;
+
+    /// <summary>A generic type or method with its type parameters as the parameters, and its constraints.</summary>
+    private static SignatureShape TypeParameterShape(ISymbol symbol)
+    {
+        List<SymbolDisplayPart> parts = [.. symbol.ToDisplayParts(s_generic)];
+        int name = parts.FindIndex(part => SymbolEqualityComparer.Default.Equals(part.Symbol, symbol));
+        List<int> typeParameters =
+        [
+            .. Enumerable
+                .Range(name + 1, parts.Count - name - 1)
+                .Where(i => parts[i].Kind == SymbolDisplayPartKind.TypeParameterName)
+                .Take(TypeParameters(symbol).Length),
+        ];
+        return new SignatureShape(
+            string.Concat(parts[..typeParameters[0]]),
+            [.. typeParameters.Select(i => new ParameterShape("", parts[i].ToString(), parts[i].ToString(), false))],
+            string.Concat(parts[(typeParameters[^1] + 1)..])
         );
     }
 
-    /// <summary>The parameter that argument number <paramref name="argument"/> goes to; -1 for none.</summary>
-    private static int ActiveParameter(IMethodSymbol method, int argument, string? name)
+    private static LspSignatureInformation ToSignature(SignatureShape shape, Site site)
     {
-        if (name is not null)
-            return method.Parameters.Select(parameter => parameter.Name).ToList().IndexOf(name);
-        if (argument < method.Parameters.Length)
-            return argument;
-        return method.Parameters.LastOrDefault()?.IsParams == true ? method.Parameters.Length - 1 : -1;
+        var label = new StringBuilder(shape.Before);
+        var parameters = new List<LspParameterInformation>(shape.Parameters.Count);
+        foreach (ParameterShape parameter in shape.Parameters)
+        {
+            if (parameters.Count > 0)
+                label.Append(", ");
+            label.Append(parameter.Lead);
+            int start = label.Length;
+            label.Append(parameter.Text);
+            parameters.Add(new LspParameterInformation([start, label.Length]));
+        }
+        label.Append(shape.After);
+        return new LspSignatureInformation(
+            label.ToString(),
+            parameters,
+            ActiveParameter(shape.Parameters, site.Argument, site.Name)
+        );
     }
 
-    private static bool SameMethod(IMethodSymbol a, IMethodSymbol b) =>
+    /// <summary>
+    /// The parameter that argument number <paramref name="argument"/> goes to, by its name, or else by its place among
+    /// those that take an argument by place; -1 for none.
+    /// </summary>
+    private static int ActiveParameter(IReadOnlyList<ParameterShape> parameters, int argument, string? name)
+    {
+        if (name is not null)
+            return parameters.Select(parameter => parameter.Name).ToList().IndexOf(name);
+        int byPlace = parameters.Count(parameter => !parameter.IsNamedOnly);
+        if (argument < byPlace)
+            return argument;
+        return byPlace > 0 && parameters[byPlace - 1].IsParams ? byPlace - 1 : -1;
+    }
+
+    private static bool SameSymbol(ISymbol a, ISymbol b) =>
         SymbolEqualityComparer.Default.Equals(a.OriginalDefinition, b.OriginalDefinition);
 }

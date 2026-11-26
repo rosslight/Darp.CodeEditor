@@ -606,10 +606,17 @@ app's script environments.
   once; its signature and XML docs come with resolve, also after the user typed on, from the version the list was asked
   for. An escaped word such as `@ev` completes identifiers, not keywords, over its `@`, and there is no list after a lone `@`.
 - **Hover:** the symbol as C# code, then its XML docs as text.
-- **Signature help** on `(`, `,` and `)`: the overloads of the call, with the one that overload resolution selects for the
-  arguments so far, taking missing arguments as `default`, so that an unfinished call selects too. Asking again follows
-  an argument's new type, and keeps a signature that the user chose by key. Named arguments and `params` mark their
-  parameter. Signatures show no XML docs.
+- **Signature help** on `(`, `[`, `<`, `{` and `,`, and again on `)`, `]`, `>` and `}`: the overloads of a call, a
+  constructor, a `this(` or `base(` initializer, an attribute, an indexer and a collection initializer's entry, which go
+  to `Add`, with the one that overload resolution selects for the arguments so far, taking missing arguments as
+  `default`, so that an unfinished call selects too. An attribute's settable fields and properties follow its
+  constructor's parameters. A generic name's type argument list, also half written, shows its type parameters and
+  constraints; a `<` after a name that no generic type or method has, as in `a < b`, shows nothing. The innermost
+  arguments around the caret win, and brackets with nothing to show, as an array's, leave the call around them. The
+  candidates are those that Roslyn shows: a type's static methods, a value's instance and extension methods, accessible
+  through the receiver's type, without members marked `[EditorBrowsable(Never)]` in a referenced assembly or an
+  overload that a more specific one hides. Asking again follows an argument's new type, and keeps a signature that the
+  user chose by key. Named arguments and `params` mark their parameter. Signatures show no XML docs.
 - **Semantic colors** are answered for ranges, with the protocol's standard token types. A script's top-level variables
   are fields to Roslyn, and are colored as variables.
 - **Compiling** runs on the thread pool beside the editor's requests, so completion keeps answering. The request carries
@@ -1206,7 +1213,9 @@ server process:
   a cancelled request stopping while the server goes on; a killed server reopening its documents in their environment;
   escaped identifiers;
 - signature help for `Task.Delay(1000, `, unfinished generic calls, a named argument, `params`, an indented continuation
-  line, and asking again after an argument's type changed;
+  line, and asking again after an argument's type changed; static and instance receivers, access through the
+  receiver's type, and hidden overloads; constructor initializers, attributes, indexers, type argument lists and
+  collection initializer entries, with a comparison's `<` quiet;
 - once by hand, not in CI: the same 45 tests from a NativeAOT client, with the server and the marked assemblies put next
   to it, and the sample's script document on a Linux desktop, in completion, its details, signature help, hover,
   squiggles and semantic colors;

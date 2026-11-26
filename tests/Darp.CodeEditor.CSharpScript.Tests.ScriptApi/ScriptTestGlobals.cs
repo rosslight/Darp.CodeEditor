@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using ScriptTests.Dependency;
 
 namespace ScriptTests.Api;
@@ -20,6 +21,11 @@ public class ScriptTestGlobals : DependencyGlobals
     /// <summary>Writes a value.</summary>
     /// <param name="value">The value.</param>
     public void Write(string value) => _ = value;
+
+    /// <summary>An overload that scripts don't see.</summary>
+    /// <param name="value">The value.</param>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public void Write(double value) => _ = value;
 
     /// <summary>Joins values.</summary>
     /// <param name="separator">What goes between them.</param>
