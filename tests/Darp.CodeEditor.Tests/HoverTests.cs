@@ -356,7 +356,7 @@ public sealed class HoverTests(UiFixture ui)
             DockPanel.SetDock(button, Dock.Top);
             var editor = new CodeEditor { Document = document };
             using var window = new EditorWindow(editor, new DockPanel { Children = { button, editor } });
-            await server.StartAsync();
+            await CompletionTests.StartServingAsync(server, document);
 
             await HoverAsync(window, 1, "word0 is a word in", time);
             window.Type("x");
@@ -387,7 +387,7 @@ public sealed class HoverTests(UiFixture ui)
             await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "word");
             using var window = new EditorWindow(new CodeEditor { Document = document });
-            await server.StartAsync();
+            await CompletionTests.StartServingAsync(server, document);
             await HoverAsync(window, 1, "word is a word in", time);
 
             window.Press(Key.C, EditorWindow.Command);
@@ -406,7 +406,7 @@ public sealed class HoverTests(UiFixture ui)
             await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
             using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "slow");
             using var window = new EditorWindow(new CodeEditor { Document = document });
-            await server.StartAsync();
+            await CompletionTests.StartServingAsync(server, document);
             window.MoveMouse(window.PointAt(1));
             Pass(window, time, Delay);
             string id = (await fake.WaitForAsync("hover "))["hover ".Length..].Split(' ')[0];
