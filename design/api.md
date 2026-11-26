@@ -638,8 +638,8 @@ app's script environments.
 - **Hover:** the symbol as C# code, then its XML docs as text.
 - **Occurrences** (`textDocument/documentHighlight`) are those of the symbol at the caret, by its identity, so a local
   and a top-level variable of the same name stay apart, and so do the implementations of an interface's member, and a
-  property and its accessors. Its declarations are text, as in Roslyn's own server; an
-  assignment, an increment or decrement, an `out` or `ref` argument and a deconstruction write it, and the rest read it.
+  property and its accessors. Its declarations are text, as in Roslyn's own server; an assignment, also after `?.`, an
+  increment or decrement, an `out` or `ref` argument and a deconstruction write it, and the rest read it.
 - **XML docs** of the marked assemblies are next to them. .NET's are the reference pack's English files, which don't
   match the runtime's assemblies one to one: `string` is in `System.Private.CoreLib`, and its docs in
   `System.Runtime.xml`. A member's file is the one named after a runtime assembly that defines or forwards its type.

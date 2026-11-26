@@ -50,6 +50,21 @@ public sealed class OccurrenceTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task A_member_assigned_after_a_null_check_is_written_and_its_receiver_read()
+    {
+        const string text = "class A { public int X; }\nvar x = new A();\nx?.X = 1;\n_ = x.X;";
+        using var script = await _fixture.OpenAsync(text);
+        int[] members = [.. Enumerable.Range(0, text.Length).Where(i => text[i] == 'X')];
+        (await OccurrencesAsync(script, members[1])).ShouldBe([
+            (members[0], OccurrenceKind.Text),
+            (members[1], OccurrenceKind.Write),
+            (members[2], OccurrenceKind.Read),
+        ]);
+        int receiver = text.IndexOf("x?", StringComparison.Ordinal);
+        (await OccurrencesAsync(script, receiver)).ShouldContain((receiver, OccurrenceKind.Read));
+    }
+
+    [Fact]
     public async Task Another_implementation_of_an_interfaces_member_is_apart()
     {
         const string text =

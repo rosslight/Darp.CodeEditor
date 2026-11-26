@@ -103,13 +103,14 @@ internal static class ScriptHighlights
     }
 
     /// <summary>
-    /// Whether <paramref name="parent"/> is written where <paramref name="child"/> is: the name of a member access, in
-    /// parentheses or in a tuple.
+    /// Whether <paramref name="parent"/> is written where <paramref name="child"/> is: the name of a member access, also
+    /// after <c>?.</c>, in parentheses or in a tuple.
     /// </summary>
     private static bool IsPartOfTarget(SyntaxNode parent, SyntaxNode child) =>
         parent switch
         {
             MemberAccessExpressionSyntax access => access.Name == child,
+            MemberBindingExpressionSyntax binding => binding.Name == child,
             ParenthesizedExpressionSyntax
             or TupleExpressionSyntax
             or ArgumentSyntax { Parent: TupleExpressionSyntax } => true,
