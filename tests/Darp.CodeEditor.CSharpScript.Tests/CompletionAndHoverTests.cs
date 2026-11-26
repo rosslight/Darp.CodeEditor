@@ -113,6 +113,19 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task A_named_argument_puts_in_its_colon_unless_one_follows()
+    {
+        using var script = await _fixture.OpenAsync("var sum = Add(le|");
+        CompletionItem left = (await script.CompleteAsync()).Items.Single(item => item.Label == "left:");
+        left.Edit.NewText.ShouldBe("left:");
+        // Typed, the colon commits it, and goes in once.
+        left.CommitCharacters.ShouldContain(':');
+
+        using var followed = await _fixture.OpenAsync("var sum = Add(le| : 1, right: 2);");
+        (await followed.CompleteAsync()).Items.Single(item => item.Label == "left:").Edit.NewText.ShouldBe("left");
+    }
+
+    [Fact]
     public async Task A_colon_opens_a_list_only_in_a_format()
     {
         var colon = new CompletionTrigger(CompletionTriggerKind.TriggerCharacter, ':');

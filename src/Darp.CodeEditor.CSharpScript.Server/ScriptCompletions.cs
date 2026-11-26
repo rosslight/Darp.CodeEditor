@@ -141,11 +141,16 @@ internal sealed class ScriptCompletions
             bool isEscaped =
                 span.Length > 0 && _script.Text[span.Start] == '@' && !item.Tags.Contains(WellKnownTags.Keyword);
             string filterText = isEscaped ? "@" + item.FilterText.TrimStart('@') : item.FilterText;
+            string newText = change.TextChange.NewText ?? "";
+            // Roslyn puts in a named argument's name alone, for the colon to be typed. Committed by a key, the colon goes
+            // in too, unless one follows already; typed, it commits the item and goes in once.
+            if (item.DisplayTextSuffix == ":" && newText == item.DisplayText && !ColonFollows(span.End))
+                newText = label;
             items.Add(
                 new LspCompletionItem(
                     label,
                     Kind(item),
-                    new LspTextEdit(last.Range, change.TextChange.NewText ?? ""),
+                    new LspTextEdit(last.Range, newText),
                     new JsonArray(Id, index),
                     item.SortText == label ? null : item.SortText,
                     filterText == label ? null : filterText,
@@ -156,6 +161,15 @@ internal sealed class ScriptCompletions
             );
         }
         return new LspCompletionList(commit.AsksAgain, items);
+    }
+
+    /// <summary>Whether a colon follows <paramref name="offset"/>, past white space.</summary>
+    private bool ColonFollows(int offset)
+    {
+        SourceText text = _script.Text;
+        while (offset < text.Length && char.IsWhiteSpace(text[offset]))
+            offset++;
+        return offset < text.Length && text[offset] == ':';
     }
 
     private sealed record Answered(CompletionService Service, CompletionList List);

@@ -616,7 +616,8 @@ app's script environments.
   a format, such as `$"{DateTime.Now:yyyy}"`, and nowhere else, as after a named argument. Each item has its edit at
   once; its signature and XML docs come with resolve, also after the user typed on, from the version the list was asked
   for. An escaped word such as `@ev` completes identifiers, not keywords, over its `@`, and there is no list after a lone `@`.
-  An obsolete member's item is tagged deprecated, so it shows struck through.
+  An obsolete member's item is tagged deprecated, so it shows struck through. A named argument's item, `amount:`, puts
+  in its colon, unless one follows already.
 - **Commit characters** are Roslyn's, as its own server gives them to clients that always select an item hard: its
   defaults, which the server names as `allCommitCharacters`, as each item's rules change them. Nothing commits in a
   list that only suggests, as where a lambda's parameter may be named, or after typed punctuation; before a name is
