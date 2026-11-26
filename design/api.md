@@ -656,18 +656,19 @@ app's script environments.
 - **Signature help** on `(`, `[`, `<`, `{` and `,`, and again on `)`, `]`, `>` and `}`: the overloads of a call, a
   constructor, a `this(` or `base(` initializer, an attribute, an indexer, also after `?` and in an object initializer,
   and a collection initializer's entry, which go to `Add`, with the one that overload resolution selects for the
-  arguments so far, taking missing arguments as `default`, so that an unfinished call selects too. An attribute's
-  fields and properties that its named arguments may set, as the compiler allows them, follow its constructor's
-  parameters. A generic name's type argument list, also half written, shows its type parameters and constraints, of
-  the methods that its receiver can call, as a call's; a `<` after a name that no generic type or method has, as in
-  `a < b`, shows nothing. The innermost arguments around the caret win, and brackets with nothing to show, as an
-  array's, leave the call around them. The candidates are those that Roslyn shows: a type's static methods, a value's instance and extension methods, accessible
-  through the receiver's type, without members marked `[EditorBrowsable(Never)]` in a referenced assembly or an
-  overload that a more specific one hides. Asking again follows an argument's new type, and keeps a signature that the
-  user chose by key. Named arguments and `params` mark their parameter. Each signature has its summary and each
-  parameter its description, a type parameter's included, as plain text from the XML docs, as in hover: a reference
-  reads as the name it refers to, and `<inheritdoc/>` takes what the docs leave out from the member they inherit from,
-  the parameters' and type parameters' by their place, as an implementation may rename them.
+  arguments so far, taking missing arguments as `default`, so that an unfinished call selects too. An attribute's fields
+  and properties that its named arguments may set, as the compiler allows them, also by their type, follow its
+  constructor's parameters. A generic name's type argument list, also half written, shows its type parameters and
+  constraints, of the methods that its receiver can call, as a call's; a `<` after a name that no generic type or method
+  has, as in `a < b`, shows nothing. The innermost arguments around the caret win, and brackets with nothing to show, as
+  an array's, leave the call around them. The candidates are those that Roslyn shows: a type's static methods, a value's
+  instance and extension methods, accessible through the receiver's type, without members marked
+  `[EditorBrowsable(Never)]` in a referenced assembly or an overload that a more specific one hides. Asking again
+  follows an argument's new type, and keeps a signature that the user chose by key. Named arguments and `params` mark
+  their parameter. Each signature has its summary and each parameter its description, a type parameter's included, as
+  plain text from the XML docs, as in hover: a reference reads as the name it refers to, and `<inheritdoc/>` takes what
+  the docs leave out from the member they inherit from, the parameters' and type parameters' by their place, as an
+  implementation may rename them.
 - **Semantic colors** are answered for ranges, with the protocol's standard token types. A script's top-level variables
   are fields to Roslyn, and are colored as variables. Static members have the `static` modifier, and constants and
   readonly fields the `readonly` one.

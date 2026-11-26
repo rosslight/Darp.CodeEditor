@@ -285,7 +285,7 @@ internal static class ScriptSignatureHelp
         IReadOnlyList<ISymbol> settable =
             list.Parent is AttributeSyntax attribute
             && model.GetTypeInfo(attribute, cancellationToken).Type is INamedTypeSymbol attributeType
-                ? SignatureCandidates.Settable(attributeType)
+                ? SignatureCandidates.Settable(attributeType, model.Compilation)
                 : [];
         if (Bound(model, list, cancellationToken) is { } exact)
             return new Site(candidates, exact, argument, name, settable);

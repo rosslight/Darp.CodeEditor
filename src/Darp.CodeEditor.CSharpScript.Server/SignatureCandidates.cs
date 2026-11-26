@@ -202,30 +202,37 @@ internal static class SignatureCandidates
     /// <summary>
     /// The fields and properties that an attribute's named arguments can set, by name, as the compiler allows: public
     /// instance fields that are neither read-only nor constant, and public instance properties whose first declaration
-    /// has a public getter and setter. A member hides those of its name in the base types.
+    /// has a public getter and setter, of a type that an attribute's argument may have. A member hides those of its name
+    /// in the base types.
     /// </summary>
-    public static List<ISymbol> Settable(INamedTypeSymbol attribute)
+    public static List<ISymbol> Settable(INamedTypeSymbol attribute, Compilation compilation)
     {
+        INamedTypeSymbol? systemType = compilation.GetTypeByMetadataName("System.Type");
         var settable = new List<ISymbol>();
         var hidden = new HashSet<string>();
         for (INamedTypeSymbol? type = attribute; type is not null; type = type.BaseType)
         {
             ImmutableArray<ISymbol> members = type.GetMembers();
             settable.AddRange(
-                members.Where(member => !hidden.Contains(member.Name) && IsSettable(member) && IsBrowsable(member))
+                members.Where(member =>
+                    !hidden.Contains(member.Name) && IsSettable(member, systemType) && IsBrowsable(member)
+                )
             );
             hidden.UnionWith(members.Select(member => member.Name));
         }
         return [.. settable.OrderBy(member => member.Name, StringComparer.Ordinal)];
     }
 
-    private static bool IsSettable(ISymbol member)
+    private static bool IsSettable(ISymbol member, INamedTypeSymbol? systemType)
     {
         if (member.DeclaredAccessibility != Accessibility.Public || member.IsStatic)
             return false;
         if (member is IFieldSymbol field)
-            return !field.IsReadOnly && !field.IsConst;
-        if (member is not IPropertySymbol { IsIndexer: false } property)
+            return !field.IsReadOnly && !field.IsConst && IsAttributeArgumentType(field.Type, systemType);
+        if (
+            member is not IPropertySymbol { IsIndexer: false } property
+            || !IsAttributeArgumentType(property.Type, systemType)
+        )
             return false;
         while (property.OverriddenProperty is { } overridden)
             property = overridden;
@@ -235,6 +242,34 @@ internal static class SignatureCandidates
                 SetMethod.DeclaredAccessibility: Accessibility.Public,
             };
     }
+
+    /// <summary>
+    /// Whether an attribute's argument may have <paramref name="type"/>, as the compiler allows: a primitive type other
+    /// than <c>decimal</c>, <c>string</c>, <c>object</c>, <see cref="Type"/> or an enum, or a one-dimensional array of
+    /// one.
+    /// </summary>
+    private static bool IsAttributeArgumentType(ITypeSymbol type, INamedTypeSymbol? systemType) =>
+        (type is IArrayTypeSymbol { IsSZArray: true } array ? array.ElementType : type) switch
+        {
+            { TypeKind: TypeKind.Enum } => true,
+            {
+                SpecialType: SpecialType.System_Boolean
+                    or SpecialType.System_Char
+                    or SpecialType.System_SByte
+                    or SpecialType.System_Byte
+                    or SpecialType.System_Int16
+                    or SpecialType.System_UInt16
+                    or SpecialType.System_Int32
+                    or SpecialType.System_UInt32
+                    or SpecialType.System_Int64
+                    or SpecialType.System_UInt64
+                    or SpecialType.System_Single
+                    or SpecialType.System_Double
+                    or SpecialType.System_String
+                    or SpecialType.System_Object
+            } => true,
+            var element => SymbolEqualityComparer.Default.Equals(element, systemType),
+        };
 
     /// <summary>The type whose code is at <paramref name="position"/>, which access is checked within.</summary>
     private static ISymbol Within(SemanticModel model, int position, CancellationToken cancellationToken)

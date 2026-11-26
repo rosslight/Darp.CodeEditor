@@ -266,12 +266,20 @@ public sealed class ScriptSignatureHelpTests(ScriptServerFixture fixture)
                 public int Both { get; private set; }
                 public int Settable { get; set; }
                 public int Field;
+                public decimal Price { get; set; }
+                public int[,] Grid { get; set; }
+                public int?[] Optional { get; set; }
+                public Type[] Types { get; set; }
+                public DayOfWeek[] Days;
             }
             [A(|)] class C { }
             """
         );
         SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
-        Active(help).Label.ShouldBe("A(Properties: Field = int, Inherited = int, Settable = int)");
+        Active(help)
+            .Label.ShouldBe(
+                "A(Properties: Days = DayOfWeek[], Field = int, Inherited = int, Settable = int, Types = Type[])"
+            );
     }
 
     [Fact]
