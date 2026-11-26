@@ -169,6 +169,51 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task Semantic_tokens_mark_static_members_and_readonly_fields()
+    {
+        using var script = await _fixture.OpenAsync(
+            "class C { public static readonly int Field = 1; public readonly int Inst = 2; public static int M() => 1; }\n"
+                + "const int K = 2;\n"
+                + "var sum = C.M() + C.Field + new C().Inst + K;"
+        );
+        SemanticTokenLines tokens = (
+            await script.Document.SemanticTokensAsync(
+                new TextPosition(3, 1),
+                new TextPosition(3, 46),
+                3,
+                TestContext.Current.CancellationToken
+            )
+        ).ShouldNotBeNull();
+        string line = script.Document.CurrentSnapshot.GetText().Split('\n')[2];
+        string[] described =
+        [
+            .. tokens
+                .Lines.ShouldHaveSingleItem()
+                .Chunk(SemanticTokenLines.Stride)
+                .Select(t =>
+                    string.Join(
+                        ' ',
+                        [
+                            line.Substring(t[0], t[1]),
+                            tokens.Legend.TokenTypes[t[2]],
+                            .. tokens.Legend.TokenModifiers.Where((_, bit) => (t[3] & (1 << bit)) != 0),
+                        ]
+                    )
+                ),
+        ];
+        described.ShouldBe([
+            "sum variable",
+            "C class",
+            "M method static",
+            "C class",
+            "Field variable readonly static",
+            "C class",
+            "Inst variable readonly",
+            "K variable readonly static",
+        ]);
+    }
+
+    [Fact]
     public async Task Documents_of_two_kinds_of_script_see_their_own_globals()
     {
         using var other = await Script<OtherGlobals>.OpenAsync(

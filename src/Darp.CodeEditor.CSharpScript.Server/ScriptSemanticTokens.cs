@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using Darp.CodeEditor.Lsp;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Classification;
 using Microsoft.CodeAnalysis.Text;
 
@@ -9,6 +10,7 @@ namespace Darp.CodeEditor.CSharpScript.Server;
 internal static class ScriptSemanticTokens
 {
     private const int ReadonlyModifier = 1;
+    private const int StaticModifier = 2;
 
     /// <summary>The token types of the server's legend, the protocol's standard names, which color themes know.</summary>
     public static readonly string[] TokenTypes =
@@ -28,7 +30,7 @@ internal static class ScriptSemanticTokens
     ];
 
     /// <summary>The token modifiers of the server's legend.</summary>
-    public static readonly string[] TokenModifiers = ["readonly"];
+    public static readonly string[] TokenModifiers = ["readonly", "static"];
 
     private static readonly FrozenDictionary<string, (int Type, int Modifiers)> s_tokens = new Dictionary<
         string,
@@ -63,25 +65,50 @@ internal static class ScriptSemanticTokens
     )
     {
         var span = TextSpan.FromBounds(script.Lines.ToOffset(range.Start), script.Lines.ToOffset(range.End));
-        IEnumerable<ClassifiedSpan> spans = await Classifier
-            .GetClassifiedSpansAsync(script.Document, span, cancellationToken)
-            .ConfigureAwait(false);
+        List<ClassifiedSpan> spans =
+        [
+            .. await Classifier.GetClassifiedSpansAsync(script.Document, span, cancellationToken).ConfigureAwait(false),
+        ];
+        // A static member's name has a second classification over the same text, before or after its kind's.
+        HashSet<TextSpan> statics =
+        [
+            .. spans.Where(s => s.ClassificationType == ClassificationTypeNames.StaticSymbol).Select(s => s.TextSpan),
+        ];
+        SemanticModel? model = null;
         var data = new List<int>();
         (int line, int column) = (0, 0);
         foreach (ClassifiedSpan classified in spans.OrderBy(s => s.TextSpan.Start))
         {
             if (!s_tokens.TryGetValue(classified.ClassificationType, out (int Type, int Modifiers) token))
                 continue;
+            int modifiers = token.Modifiers | (statics.Contains(classified.TextSpan) ? StaticModifier : 0);
+            // Roslyn has no classification of its own for a readonly field.
+            if (classified.ClassificationType == ClassificationTypeNames.FieldName)
+            {
+                model ??= await script.Document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
+                if (model is not null && IsReadonlyField(model, classified.TextSpan, cancellationToken))
+                    modifiers |= ReadonlyModifier;
+            }
             LspPosition start = script.Lines.ToPosition(classified.TextSpan.Start);
             data.AddRange(
                 start.Line - line,
                 start.Line == line ? start.Character - column : start.Character,
                 classified.TextSpan.Length,
                 token.Type,
-                token.Modifiers
+                modifiers
             );
             (line, column) = (start.Line, start.Character);
         }
         return new LspSemanticTokens(data);
+    }
+
+    /// <summary>Whether the name at <paramref name="span"/>, declared or referred to, is of a readonly field.</summary>
+    private static bool IsReadonlyField(SemanticModel model, TextSpan span, CancellationToken cancellationToken)
+    {
+        if (model.SyntaxTree.GetRoot(cancellationToken).FindToken(span.Start).Parent is not { } name)
+            return false;
+        ISymbol? symbol =
+            model.GetDeclaredSymbol(name, cancellationToken) ?? model.GetSymbolInfo(name, cancellationToken).Symbol;
+        return symbol is IFieldSymbol { IsReadOnly: true };
     }
 }

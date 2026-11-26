@@ -629,7 +629,8 @@ app's script environments.
   parameter its description, a type parameter's included, as plain text from the XML docs, as in hover: a reference
   reads as the name it refers to, and `<inheritdoc/>` takes what the docs leave out from the member they inherit from.
 - **Semantic colors** are answered for ranges, with the protocol's standard token types. A script's top-level variables
-  are fields to Roslyn, and are colored as variables.
+  are fields to Roslyn, and are colored as variables. Static members have the `static` modifier, and constants and
+  readonly fields the `readonly` one.
 - **Compiling** runs on the thread pool beside the editor's requests, so completion keeps answering. The request carries
   the snapshot's text, so edits, closing the document or opening another at its path can't change what compiles; an open
   script with the same text in the same environment lends the compilation its diagnostics already built. A compilation
