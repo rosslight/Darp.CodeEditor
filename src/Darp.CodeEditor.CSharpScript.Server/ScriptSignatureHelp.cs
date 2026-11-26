@@ -46,7 +46,8 @@ internal static class ScriptSignatureHelp
             return null;
 
         List<ISymbol> candidates = [.. site.Candidates];
-        int best = 0;
+        // Without one selected, the first that has a parameter at the caret, as Roslyn's own server picks.
+        int best = Math.Max(0, candidates.FindIndex(c => Parameters(c).Count > site.Argument));
         // A selected symbol outside the candidates, as a constructor that calls itself, selects none.
         if (site.Selected is { } selected && candidates.FindIndex(c => SameSymbol(c, selected)) is >= 0 and var index)
         {
@@ -287,10 +288,14 @@ internal static class ScriptSignatureHelp
             && model.GetTypeInfo(attribute, cancellationToken).Type is INamedTypeSymbol attributeType
                 ? SignatureCandidates.Settable(attributeType, model.Compilation)
                 : [];
-        if (Bound(model, list, cancellationToken) is { } exact)
-            return new Site(candidates, exact, argument, name, settable);
-
         int written = Arguments(list).Count();
+        // Before the first argument only a call that binds as it is selects, as in Roslyn's own server: of an ambiguous
+        // empty call, as string.Concat(), the overload that comes first is no better a guess than the first one listed.
+        if (Bound(model, list, firstOfAmbiguous: written > 0, cancellationToken) is { } exact)
+            return new Site(candidates, exact, argument, name, settable);
+        if (written == 0)
+            return new Site(candidates, null, argument, name, settable);
+
         var completed = new SyntaxAnnotation();
         IEnumerable<int> missing = candidates
             .Select(c => Math.Max(0, Parameters(c).Count(p => !p.IsOptional && !p.IsParams) - written))
@@ -306,7 +311,7 @@ internal static class ScriptSignatureHelp
                 break;
             SyntaxNode forkRoot = await forked.SyntaxTree.GetRootAsync(cancellationToken).ConfigureAwait(false);
             SyntaxNode forkList = forkRoot.GetAnnotatedNodes(completed).Single();
-            if (Bound(forked, forkList, cancellationToken) is { } selected)
+            if (Bound(forked, forkList, firstOfAmbiguous: true, cancellationToken) is { } selected)
                 return new Site(
                     SignatureCandidates.Of(forked, forkList, cancellationToken),
                     selected,
@@ -374,13 +379,25 @@ internal static class ScriptSignatureHelp
             _ => list,
         };
 
-    /// <summary>The method or indexer that overload resolution selects for the arguments in <paramref name="list"/>.</summary>
-    private static ISymbol? Bound(SemanticModel model, SyntaxNode list, CancellationToken cancellationToken)
+    /// <summary>
+    /// The method or indexer that overload resolution selects for the arguments in <paramref name="list"/>; of an
+    /// ambiguous call the first that it names when <paramref name="firstOfAmbiguous"/>, else none.
+    /// </summary>
+    private static ISymbol? Bound(
+        SemanticModel model,
+        SyntaxNode list,
+        bool firstOfAmbiguous,
+        CancellationToken cancellationToken
+    )
     {
         SymbolInfo info = list is InitializerExpressionSyntax entry
             ? model.GetCollectionInitializerSymbolInfo(entry, cancellationToken)
             : model.GetSymbolInfo(list.Parent ?? list, cancellationToken);
-        return info.CandidateReason == CandidateReason.Ambiguous ? info.CandidateSymbols[0] : info.Symbol;
+        return info.CandidateReason == CandidateReason.Ambiguous
+            ? firstOfAmbiguous
+                ? info.CandidateSymbols[0]
+                : null
+            : info.Symbol;
     }
 
     private static IReadOnlyList<IParameterSymbol> Parameters(ISymbol symbol) =>

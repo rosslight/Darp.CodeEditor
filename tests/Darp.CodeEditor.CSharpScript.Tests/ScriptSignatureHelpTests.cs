@@ -28,6 +28,23 @@ public sealed class ScriptSignatureHelpTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task An_ambiguous_empty_call_starts_at_the_first_signature_with_a_parameter()
+    {
+        using var script = await _fixture.OpenAsync("var text = string.Concat(|);");
+        SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        help.ActiveSignature.ShouldBe(0);
+        Active(help).Label.ShouldContain("Concat(object? arg0)");
+    }
+
+    [Fact]
+    public async Task An_empty_call_that_binds_selects_its_overload()
+    {
+        using var script = await _fixture.OpenAsync("var builder = new System.Text.StringBuilder(|);");
+        SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        Active(help).Label.ShouldContain("StringBuilder()");
+    }
+
+    [Fact]
     public async Task An_unfinished_generic_call_infers_its_type_arguments()
     {
         using var script = await _fixture.OpenAsync("var picked = Pick(new[] { 1, 2 }|");
