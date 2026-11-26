@@ -686,6 +686,39 @@ public sealed class CompletionTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_commit_character_that_ends_the_items_text_goes_in_once() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            // A named argument, whose colon also commits it.
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [ { "label": "amount:", "filterText": "amount", "insertText": "amount:",
+                                   "commitCharacters": [":"] } ] }
+                    """
+                )
+            );
+            const string text = "Report(amo";
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, text);
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+
+            await OpenAsync(window, 10);
+            window.Type(":");
+            document.Text.ShouldBe("Report(amount:");
+            window.Editor.Selection.Caret.ShouldBe(14);
+            document.Undo();
+            document.Text.ShouldBe(text);
+
+            await OpenAsync(window, 10);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("Report(amount:");
+        });
+
+    [Fact]
     public Task Edits_replace_their_range_also_with_what_was_typed_since_and_an_insert_replace_edit_inserts_or_replaces() =>
         _ui.Run(async () =>
         {

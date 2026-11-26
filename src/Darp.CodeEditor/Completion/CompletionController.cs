@@ -184,7 +184,9 @@ internal sealed class CompletionController : IEditorFeature
 
     /// <summary>
     /// Text the user types, before it goes in: one of the selected item's commit characters commits it, and then goes in
-    /// after it, if the item is known to match the current text. A frozen list commits nothing so, as in VS Code.
+    /// after it, if the item is known to match the current text. A frozen list commits nothing so, as in VS Code. A
+    /// commit character that the item's text already ends with, as the colon of a named argument's <c>amount:</c>, goes
+    /// in once.
     /// </summary>
     public void OnTextInput(TextInputEventArgs e)
     {
@@ -192,11 +194,14 @@ internal sealed class CompletionController : IEditorFeature
             _session is { } session
             && _filter is { IsShowing: true, IsFrozen: false }
             && e.Text is [char typed]
-            && _filter.Items[_filter.Selected].Item.CommitCharacters.Contains(typed)
+            && _filter.Items[_filter.Selected].Item is { } item
+            && item.CommitCharacters.Contains(typed)
             && _filter.CanCommit(_filter.Selected, session.Answer)
         )
         {
+            TextSnapshot before = _document.CurrentSnapshot;
             Commit(_filter.Selected);
+            e.Handled = _document.CurrentSnapshot != before && item.Edit.NewText.EndsWith(typed);
         }
     }
 

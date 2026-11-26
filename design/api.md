@@ -507,7 +507,8 @@ How the client talks to a server, where the protocol leaves a choice:
     matches, and nothing left to show ends completion only once the new answer has nothing either.
   - **Committing:** Enter inserts, Tab and Shift+Enter replace, and a click or one of the item's commit characters, or
     the server's `allCommitCharacters` for an item that names none, insert; a commit character then goes in, and asks
-    again if it is a trigger character, as in VS Code. A frozen list commits by keys and clicks, not by commit
+    again if it is a trigger character, as in VS Code, unless the item's text already ends with it, as the `:` that
+    commits a named argument's `amount:`: then it goes in once. A frozen list commits by keys and clicks, not by commit
     characters. While the filter of the current text still runs, they commit the item that shows if it matches the
     current text, which is checked for that item alone, on the first 128 characters of its typed text; otherwise an
     accept commits what that filter selects once it has run, unless the text, by any editor of the document or by code,
@@ -1150,7 +1151,7 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   typing starts a word; not on typing on in a word, nor at the start of one that goes on, nor in a comment. A trigger
   character typed while a word's list shows asks again, and the new list shows, also when the server answers only
   after the word's list, filtered for the trigger character, has nothing left; one that is also the selected item's
-  commit character commits it, goes in, and then asks again;
+  commit character commits it, goes in, and then asks again; one that the item's text ends with goes in once;
 - the ranking that the C# server will share gives the scores and the matched characters of VS Code's `fuzzyScore`
   and `anyScore`: compared with VS Code 1.145's own code, without its emoji separators, on 25,000 random texts, also
   beyond 128 characters, they agreed on all of them. Tests check prefixes before capitals inside words, equal scores
