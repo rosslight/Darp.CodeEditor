@@ -590,7 +590,8 @@ How the client talks to a server, where the protocol leaves a choice:
   leaves the keyboard in the editor. Up and Down, once completion's list is closed, and Alt+Up and Alt+Down, ahead of
   moving lines, choose the signature too, around the ends. Choosing keeps the card's left edge and its side of the
   line, where its content wraps and scrolls to fit, and the column keeps to the card's edge next to the line, which
-  stays where it is: the buttons stay under the pointer. It ends on Escape, after completion's list, on a click or drag that moves the caret,
+  stays where it is: the buttons stay under the pointer. Once the window narrows past the card's right edge, it is
+  placed anew inside the window. It ends on Escape, after completion's list, on a click or drag that moves the caret,
   with no signature, when the editor becomes read-only, when the editor loses the keyboard focus, when a server starts
   or stops serving the document, with new colors, and when its line scrolls out of view.
 - **Token colors** come from the color theme as in VS Code: its `semanticTokenColors`, matched by type, modifiers and
@@ -1246,7 +1247,8 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   parameter's documentation and the signature's below it; its count and buttons choose the signature, leave the
   keyboard in the editor, and stay under the pointer near the window's edge on both sides of the line, also when
   the next signature's documentation is longer than the room; the card is as wide as a short signature, and a
-  signature wider than a hover wraps at the hover's width;
+  signature wider than a hover wraps at the hover's width, and a card that kept its place stays inside a window that
+  narrowed past it;
 - the client advertises exactly what it implements, snippets and label details included;
 - an item's label details show right after its label and at the right of every row, in place of the selected item's
   detail, and typing matches only the label;

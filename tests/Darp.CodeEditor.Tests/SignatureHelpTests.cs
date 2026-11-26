@@ -365,6 +365,33 @@ public sealed class SignatureHelpTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_card_that_keeps_its_place_takes_a_place_anew_inside_a_window_that_narrowed_past_it() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await CompletionTests.StartServingAsync(server, document);
+            document.Text = new string(' ', (int)(540 / window.TextView.WideSpaceWidth)) + "call";
+            window.Editor.Selection = new TextSelection(document.Text.Length);
+            window.Type("(");
+            await WaitForCountAsync(window, "1/2");
+            window.Press(Key.Down);
+            PopupFrame popup = await WaitForCountAsync(window, "2/2");
+
+            // Its line stays in view; its left edge does not.
+            window.Window.Width = 480;
+            window.Layout();
+            window.Render();
+
+            Popup(window).ShouldBeSameAs(popup);
+            Rect bounds = CompletionTests.BoundsInWindow(popup);
+            bounds.Width.ShouldBeGreaterThan(0);
+            new Rect(window.Window.ClientSize).Contains(bounds).ShouldBeTrue($"{bounds} in {window.Window.ClientSize}");
+        });
+
+    [Fact]
     public Task The_active_parameters_description_and_the_signatures_summary_show_below_the_signature() =>
         _ui.Run(async () =>
         {

@@ -23,7 +23,7 @@ namespace Darp.CodeEditor.Popups;
 /// <para>
 /// Shown again in place, it keeps the left edge and the side of its line that it had, so that a button that changed its
 /// content stays under the pointer: content wider than the room right of it wraps, and content taller than the room on
-/// its side scrolls.
+/// its side scrolls. Once the window leaves it less room right of that edge than it had, it is placed anew.
 /// </para>
 /// <para>
 /// A resizable popup resizes by its edges away from what it is next to: its outer side and the edge away from the
@@ -48,8 +48,10 @@ internal sealed class EditorPopup
     /// <summary>The visual of the place, and the place: a character's box in it, read again at each placing.</summary>
     private (Visual RelativeTo, Func<Rect> Anchor)? _line;
 
-    /// <summary>The left edge and the side of the line that it keeps, shown again in place; null to place it anew.</summary>
-    private (double Left, bool Above)? _kept;
+    /// <summary>
+    /// Where it was, shown again in place: it keeps that left edge and side of the line; null to place it anew.
+    /// </summary>
+    private PopupBounds? _kept;
 
     /// <summary>The popup it is beside, and the width it would like there; null while it is next to a line.</summary>
     private (EditorPopup Owner, double Width)? _beside;
@@ -116,7 +118,7 @@ internal sealed class EditorPopup
     /// </param>
     public void Show(Visual relativeTo, Func<Rect> anchor, bool inPlace = false)
     {
-        _kept = inPlace && Placed is { } placed ? (placed.Bounds.Left, placed.Above) : null;
+        _kept = inPlace ? Placed : null;
         _line = (relativeTo, anchor);
         _beside = null;
         _placedBy = null;
@@ -214,14 +216,17 @@ internal sealed class EditorPopup
             // The line as its view shows it, in the layer, as a scaled editor shows it too; the place itself may be
             // scrolled out of it sideways.
             Rect line = new Rect(0, anchor.Top, relativeTo.Bounds.Width, anchor.Height).TransformToAABB(toLayer);
-            double left = _kept?.Left ?? Left ?? anchor.TopLeft.Transform(toLayer).X - Inset;
+            // A window that narrowed past it leaves it less room where it was: it takes a place anew.
+            if (_kept is { } was && was.Bounds.Left > space.Width - was.Bounds.Width)
+                _kept = null;
+            double left = _kept?.Bounds.Left ?? Left ?? anchor.TopLeft.Transform(toLayer).X - Inset;
             // Placing changes the layout, and the next layout pass finds nothing moved. Content that just changed has its
             // width only after that pass, which then places the popup again.
             double laidOutWidth = _root.DesiredSize.Width;
             if (Equals(_placedBy, (space, line, left, laidOutWidth)))
                 return;
             _placedBy = (space, line, left, laidOutWidth);
-            _root.MaxWidth = _kept is null ? double.PositiveInfinity : Math.Max(0, space.Width - left);
+            _root.MaxWidth = _kept is null ? double.PositiveInfinity : space.Width - left;
             _root.MaxHeight = double.PositiveInfinity;
             _root.Measure(new Size(space.Width, double.PositiveInfinity));
             // While the user drags an edge, it stays on its side of the line rather than jump from under the pointer;
