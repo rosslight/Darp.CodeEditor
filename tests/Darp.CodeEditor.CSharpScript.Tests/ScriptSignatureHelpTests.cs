@@ -276,6 +276,35 @@ public sealed class ScriptSignatureHelpTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task A_type_argument_list_shows_what_its_receiver_can_call()
+    {
+        const string staticFirst =
+            "class Holder { public static void Pick<T>(T value) {} public void Pick<T>(T x, int y) {} }";
+        using var type = await _fixture.OpenAsync(staticFirst + "\nHolder.Pick<|");
+        (await type.SignatureHelpAsync())
+            .ShouldNotBeNull()
+            .Signatures.ShouldHaveSingleItem()
+            .Label.ShouldContain("Pick<T>(T value)");
+
+        const string instanceFirst =
+            "class Holder { public void Pick<T>(T value) {} public static void Pick<T>(T x, int y) {} }";
+        using var value = await _fixture.OpenAsync(instanceFirst + "\nnew Holder().Pick<|");
+        (await value.SignatureHelpAsync())
+            .ShouldNotBeNull()
+            .Signatures.ShouldHaveSingleItem()
+            .Label.ShouldContain("Pick<T>(T value)");
+
+        // Not the globals' Pick: the receiver is the value before "?.".
+        using var conditional = await _fixture.OpenAsync(
+            "class Holder { public void Pick<T>(T value) {} }\nHolder h = new();\nh?.Pick<|"
+        );
+        (await conditional.SignatureHelpAsync())
+            .ShouldNotBeNull()
+            .Signatures.ShouldHaveSingleItem()
+            .Label.ShouldContain("Holder.Pick<T>(T value)");
+    }
+
+    [Fact]
     public async Task A_comparison_has_no_type_argument_list_and_keeps_the_call_around_it()
     {
         using var script = await _fixture.OpenAsync("int a = 1, b = 2;\nvar less = a <|");

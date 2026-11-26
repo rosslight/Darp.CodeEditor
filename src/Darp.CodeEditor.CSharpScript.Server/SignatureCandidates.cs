@@ -70,9 +70,8 @@ internal static class SignatureCandidates
     }
 
     /// <summary>
-    /// The methods that an invocation's receiver reaches, as Roslyn filters them: a type's static methods, a value's
-    /// instance and extension methods, and both for a name that is a value and its type alike, as <c>Color Color</c>.
-    /// Without a method group, a delegate's invoke method. The receiver's type is what access is checked through.
+    /// The methods that an invocation's receiver reaches (<see cref="OfReceiver"/>); without a method group, a
+    /// delegate's invoke method. The receiver's type is what access is checked through.
     /// </summary>
     private static (IEnumerable<ISymbol>, ITypeSymbol?) Invoked(
         SemanticModel model,
@@ -89,9 +88,29 @@ internal static class SignatureCandidates
                 : ([], null);
         }
         IEnumerable<IMethodSymbol> methods = group.OfType<IMethodSymbol>();
-        ExpressionSyntax? receiver = ReceiverOf(invocation.Expression);
-        if (receiver is null)
+        if (ReceiverOf(invocation.Expression) is not { } receiver)
             return (methods, null);
+        return (
+            OfReceiver(model, receiver, methods, cancellationToken),
+            // Through "base", access is the base type's own: its protected members are reachable.
+            receiver is BaseExpressionSyntax
+                ? null
+                : model.GetTypeInfo(receiver, cancellationToken).Type
+        );
+    }
+
+    /// <summary>
+    /// The methods of <paramref name="methods"/> that <paramref name="receiver"/> reaches, as Roslyn filters them: a
+    /// type's static methods, a value's instance and extension methods, and both for a name that is a value and its
+    /// type alike, as <c>Color Color</c>.
+    /// </summary>
+    public static IEnumerable<IMethodSymbol> OfReceiver(
+        SemanticModel model,
+        ExpressionSyntax receiver,
+        IEnumerable<IMethodSymbol> methods,
+        CancellationToken cancellationToken
+    )
+    {
         SymbolInfo info = model.GetSymbolInfo(receiver, cancellationToken);
         bool isType = (info.Symbol ?? info.CandidateSymbols.FirstOrDefault()) is ITypeSymbol;
         ITypeSymbol? type = model.GetTypeInfo(receiver, cancellationToken).Type;
@@ -104,13 +123,7 @@ internal static class SignatureCandidates
                         .LookupNamespacesAndTypes(receiver.SpanStart, name: name)
                         .Any(t => SymbolEqualityComparer.Default.Equals(t, type))
             );
-        return (
-            methods.Where(method => isBoth || method.IsStatic == isType),
-            // Through "base", access is the base type's own: its protected members are reachable.
-            receiver is BaseExpressionSyntax
-                ? null
-                : type
-        );
+        return methods.Where(method => isBoth || method.IsStatic == isType);
     }
 
     /// <summary>

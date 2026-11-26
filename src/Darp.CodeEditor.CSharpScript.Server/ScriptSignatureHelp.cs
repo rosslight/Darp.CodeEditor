@@ -183,6 +183,7 @@ internal static class ScriptSignatureHelp
         ExpressionSyntax? left = simpleName.Parent switch
         {
             MemberAccessExpressionSyntax access when access.Name == simpleName => access.Expression,
+            MemberBindingExpressionSyntax binding => SignatureCandidates.ReceiverOf(binding),
             QualifiedNameSyntax qualified when qualified.Right == simpleName => qualified.Left,
             _ => null,
         };
@@ -197,12 +198,19 @@ internal static class ScriptSignatureHelp
                 name.ValueText,
                 includeReducedExtensionMethods: leftSymbol is not INamespaceOrTypeSymbol && leftType is not null
             );
+        // A receiver's methods are those it can call, as in a call.
+        IEnumerable<IMethodSymbol> methods = found.OfType<IMethodSymbol>();
+        if (left is not null)
+            methods = SignatureCandidates.OfReceiver(model, left, methods, cancellationToken);
         List<ISymbol> candidates =
         [
-            .. found.Where(symbol =>
-                symbol is INamedTypeSymbol { Arity: > 0 } or IMethodSymbol { Arity: > 0 }
-                && SignatureCandidates.IsBrowsable(symbol)
-            ),
+            .. found
+                .OfType<INamedTypeSymbol>()
+                .Concat<ISymbol>(methods)
+                .Where(symbol =>
+                    symbol is INamedTypeSymbol { Arity: > 0 } or IMethodSymbol { Arity: > 0 }
+                    && SignatureCandidates.IsBrowsable(symbol)
+                ),
         ];
         if (candidates.Count == 0)
             return null;

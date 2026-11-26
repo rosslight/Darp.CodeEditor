@@ -649,7 +649,7 @@ app's script environments.
   to `Add`, with the one that overload resolution selects for the arguments so far, taking missing arguments as
   `default`, so that an unfinished call selects too. An attribute's settable fields and properties follow its
   constructor's parameters. A generic name's type argument list, also half written, shows its type parameters and
-  constraints; a `<` after a name that no generic type or method has, as in `a < b`, shows nothing. The innermost
+  constraints, of the methods that its receiver can call, as a call's; a `<` after a name that no generic type or method has, as in `a < b`, shows nothing. The innermost
   arguments around the caret win, and brackets with nothing to show, as an array's, leave the call around them. The
   candidates are those that Roslyn shows: a type's static methods, a value's instance and extension methods, accessible
   through the receiver's type, without members marked `[EditorBrowsable(Never)]` in a referenced assembly or an
