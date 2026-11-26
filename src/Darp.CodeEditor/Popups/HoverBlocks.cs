@@ -140,6 +140,15 @@ internal static class HoverBlocks
     }
 
     /// <summary>
+    /// <paramref name="code"/>, whose lines end at <c>\r\n</c>, <c>\n</c> or <c>\r</c> as everywhere in the library, as
+    /// a code block in the colors of <paramref name="grammar"/>'s tokens, as <see cref="Highlight(IEnumerable{string},
+    /// TextMateGrammar?, CancellationToken)"/> colors its lines.
+    /// </summary>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    public static HoverCode Highlight(string code, TextMateGrammar? grammar, CancellationToken cancellationToken) =>
+        Highlight(code.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'), grammar, cancellationToken);
+
+    /// <summary>
     /// A code block in the colors of <paramref name="grammar"/>'s tokens, line by line, with neighbors of one color in
     /// one run; a line that runs out of time keeps the editor's foreground, and the next starts from the start of the
     /// grammar. Tokenizing stops between lines once <paramref name="cancellationToken"/> is cancelled, as the hover's

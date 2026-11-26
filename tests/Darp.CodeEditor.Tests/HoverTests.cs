@@ -52,18 +52,48 @@ public sealed class HoverTests(UiFixture ui)
             parts[1].ShouldBeOfType<PopupLine>();
             TextOf(parts[2]).ShouldBe("key is a word in json.");
             ((TextBlock)parts[2]).Inlines.ShouldNotBeNull().OfType<Run>().First().FontWeight.ShouldBe(FontWeight.Bold);
-            var code = (TextBlock)parts[3].GetVisualDescendants().Prepend(parts[3]).OfType<Border>().First().Child!;
+            var code = (TextBlock)parts[3];
             TextOf(code).ShouldBe("  \"key\": 1");
             code.FontFamily.ShouldBe(editor.FontFamily);
-            ((Border)parts[3])
-                .Background.ShouldBeOfType<Avalonia.Media.Immutable.ImmutableSolidColorBrush>()
-                .Color.ShouldBe(Colors.White);
             // A code block starts from the start of the grammar: the key is a string out of an object.
             Run[] runs = [.. code.Inlines.ShouldNotBeNull().OfType<Run>()];
             runs.ShouldContain(run => run.Text == "\"key\"" && (run.Foreground as ISolidColorBrush)!.Color == s_string);
             runs.ShouldContain(run => run.Text == "1" && (run.Foreground as ISolidColorBrush)!.Color == s_number);
             Rect bounds = BoundsInWindow(popup);
             new Rect(window.Window.ClientSize).Contains(bounds).ShouldBeTrue(bounds.ToString());
+        });
+
+    [Fact]
+    public Task The_code_that_opens_a_part_has_a_line_below_it_and_code_among_the_docs_has_none() =>
+        _ui.Run(() =>
+        {
+            var look = new CodeLook(new FontFamily("DejaVu Sans Mono"), 14, PopupColors.Default);
+
+            PopupStack panel = HoverView.Create(
+                [Code("signature"), Text("docs"), Code("example"), Text("more docs"), new HoverRule(), Code("alone")],
+                look
+            );
+            // As the server's hover joins the diagnostics.
+            HoverView.Append(panel, [new HoverRule(), Code("server"), Code("more code")], look, selectable: false);
+
+            panel
+                .Children.Select(part => part is PopupLine ? "line" : TextOf(part))
+                .ShouldBe([
+                    "signature",
+                    "line",
+                    "docs",
+                    "example",
+                    "more docs",
+                    "line",
+                    "alone",
+                    "line",
+                    "server",
+                    "line",
+                    "more code",
+                ]);
+
+            static HoverCode Code(string text) => new([new CodeRun(text, null)]);
+            static HoverParagraph Text(string text) => new([new HoverSpan(text)]);
         });
 
     [Fact]
@@ -109,11 +139,11 @@ public sealed class HoverTests(UiFixture ui)
 
             PopupFrame popup = await HoverAsync(window, 1, "some is a word in", time);
 
-            // In Light+'s black text, on its white background.
+            // In Light+'s black text.
             TextBlock code = popup
                 .GetVisualDescendants()
                 .OfType<TextBlock>()
-                .First(text => text.GetVisualParent() is Border);
+                .First(text => TextOf(text) == "some plain words");
             code.Inlines.ShouldNotBeNull().OfType<Run>().Single().IsSet(TextElement.ForegroundProperty).ShouldBeFalse();
             window.RenderAndCountPixels(Colors.Black, BoundsInWindow(code)).ShouldBeGreaterThan(0);
         });
@@ -164,12 +194,15 @@ public sealed class HoverTests(UiFixture ui)
             PopupFrame popup = await WaitForPopupAsync(window, "is a word in");
             window.Window.ActualThemeVariant.ShouldBe(ThemeVariant.Light);
             popup.ActualThemeVariant.ShouldBe(ThemeVariant.Dark);
-            // Dark+'s hover background, as VS Code defaults it, and the code in Dark+'s background, in the frame's pixels.
+            // Dark+'s hover background, as VS Code defaults it, behind the code too, in the frame's pixels: not Dark+'s
+            // text area's, which is close to it.
             Color background = popup.Background.ShouldBeAssignableTo<ISolidColorBrush>()!.Color;
             background.ShouldBe(Color.Parse("#252526"));
-            Rect bounds = BoundsInWindow(popup);
-            window.RenderAndCountPixels(background, bounds).ShouldBeGreaterThan(100);
-            window.RenderAndCountPixels(Color.Parse("#1E1E1E"), bounds).ShouldBeGreaterThan(100);
+            Rect code = BoundsInWindow(
+                popup.GetVisualDescendants().OfType<TextBlock>().First(t => TextOf(t) == "  \"key\": 1")
+            );
+            window.RenderAndCountPixels(background, code, tolerance: 1).ShouldBeGreaterThan(100);
+            window.RenderAndCountPixels(Color.Parse("#1E1E1E"), code, tolerance: 1).ShouldBe(0);
         });
 
     [Fact]

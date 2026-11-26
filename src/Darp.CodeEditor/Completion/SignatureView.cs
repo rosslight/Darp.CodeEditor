@@ -42,7 +42,7 @@ internal static class SignatureView
         if (documentation.Count == 0)
             return card;
         card.Children.Add(new PopupLine { Background = look.Colors.HoverBorder });
-        PopupStack docs = HoverView.Create(documentation, look, look.Colors.HoverBorder);
+        PopupStack docs = HoverView.Create(documentation, look);
         docs.Margin = new Thickness(0, 6, 0, 2);
         card.Children.Add(docs);
         return card;

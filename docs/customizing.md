@@ -35,8 +35,10 @@ To use your own colors in every editor, override the `CodeEditorColorTheme` reso
 </ResourceDictionary.ThemeDictionaries>
 ```
 
-Completion, hover and signature help use the color theme, and your app's styles don't reach them. The search bar and
-the scroll bars use your app's theme. A missing or invalid theme file falls back to Light+ or Dark+, and the error goes
+Completion, hover and signature help use the color theme, and your app's styles don't reach them. The hover,
+completion's details and signature help share one look: code in the theme's token colors on the popup's background, a
+line, then the docs, in the theme's hover colors (`editorHoverWidget.*`). The search bar and the scroll bars use your
+app's theme. A missing or invalid theme file falls back to Light+ or Dark+, and the error goes
 to Avalonia's log.
 
 ## Keys

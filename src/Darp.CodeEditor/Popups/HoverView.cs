@@ -12,9 +12,12 @@ using Avalonia.Media.TextFormatting;
 namespace Darp.CodeEditor.Popups;
 
 /// <summary>
-/// The controls that show a hover's blocks: text in the popup's look, links in <c>textLink.foreground</c>, code spans on
-/// <c>textCodeBlock.background</c>, and code blocks in the editor's font, colors and background. A hover's text is
-/// selectable.
+/// The controls that show the blocks of every popup of code and docs, so that they look alike: the hover, with or
+/// without problems, completion's details and signature help's card. Code sits on the popup's background in the
+/// editor's font, its tokens in the editor's colors; the code that opens a part, as a signature, has a line below it,
+/// between it and the docs; the docs are text in the popup's own, muted color, with links in
+/// <c>textLink.foreground</c> and code spans on <c>textCodeBlock.background</c>. Lines are in <c>editorHoverWidget.border</c>, the border of these popups
+/// (<see cref="PopupFrame.PaintDocs"/>). A hover's text is selectable.
 /// </summary>
 internal static class HoverView
 {
@@ -26,31 +29,25 @@ internal static class HoverView
 
     /// <param name="blocks">The blocks.</param>
     /// <param name="code">How code looks.</param>
-    /// <param name="rule">The color of the line between parts.</param>
     /// <param name="selectable">Whether the user can select and copy the text, as in a hover.</param>
-    public static PopupStack Create(
-        IReadOnlyList<HoverBlock> blocks,
-        CodeLook code,
-        IBrush rule,
-        bool selectable = false
-    )
+    public static PopupStack Create(IReadOnlyList<HoverBlock> blocks, CodeLook code, bool selectable = false)
     {
         var panel = new PopupStack { Spacing = 6 };
-        Append(panel, blocks, code, rule, selectable);
+        Append(panel, blocks, code, selectable);
         return panel;
     }
 
-    /// <summary>Adds blocks below those that show, which keep their selection and scroll position.</summary>
-    public static void Append(
-        PopupStack panel,
-        IReadOnlyList<HoverBlock> blocks,
-        CodeLook code,
-        IBrush rule,
-        bool selectable
-    )
+    /// <summary>
+    /// Adds blocks below those that show, which keep their selection and scroll position. The blocks start a part where
+    /// nothing shows yet.
+    /// </summary>
+    public static void Append(PopupStack panel, IReadOnlyList<HoverBlock> blocks, CodeLook code, bool selectable)
     {
-        foreach (HoverBlock block in blocks)
+        IBrush rule = code.Colors.HoverBorder;
+        bool opensPart = panel.Children.Count == 0;
+        for (int i = 0; i < blocks.Count; i++)
         {
+            HoverBlock block = blocks[i];
             panel.Children.Add(
                 block switch
                 {
@@ -60,6 +57,10 @@ internal static class HoverView
                     _ => throw new UnreachableException(),
                 }
             );
+            // The code that opens a part, as a signature, stands apart from the docs below it.
+            if (opensPart && block is HoverCode && i + 1 < blocks.Count && blocks[i + 1] is not HoverRule)
+                panel.Children.Add(new PopupLine { Background = rule });
+            opensPart = block is HoverRule;
         }
     }
 
@@ -127,7 +128,7 @@ internal static class HoverView
     private static IBrush Dimmed(IBrush brush) =>
         brush is ISolidColorBrush solid ? new ImmutableSolidColorBrush(solid.Color, solid.Opacity * 0.6) : brush;
 
-    private static Control Code(HoverCode block, CodeLook look, bool selectable)
+    private static TextBlock Code(HoverCode block, CodeLook look, bool selectable)
     {
         var inlines = new InlineCollection();
         foreach (CodeRun run in block.Runs)
@@ -142,14 +143,9 @@ internal static class HoverView
         code.Inlines = inlines;
         code.FontFamily = look.FontFamily;
         code.FontSize = look.FontSize;
-        code.Foreground = look.Foreground;
+        code.Foreground = look.Colors.CodeForeground;
         code.TextWrapping = TextWrapping.Wrap;
-        return new PopupBox
-        {
-            Background = look.Background,
-            Padding = new Thickness(6, 4),
-            Child = code,
-        };
+        return code;
     }
 
     /// <summary>
@@ -199,15 +195,8 @@ internal static class HoverView
     private static async void Open(TopLevel topLevel, Uri uri) => await topLevel.Launcher.LaunchUriAsync(uri);
 }
 
-/// <summary>How code looks in a popup: as in the editor.</summary>
+/// <summary>How code looks in a popup: in the editor's font.</summary>
 /// <param name="FontFamily">The editor's font.</param>
 /// <param name="FontSize">The editor's font size.</param>
 /// <param name="Colors">The popups' colors.</param>
-internal sealed record CodeLook(FontFamily FontFamily, double FontSize, PopupColors Colors)
-{
-    /// <summary>The text area's background.</summary>
-    public IBrush Background => Colors.CodeBackground;
-
-    /// <summary>The text area's foreground.</summary>
-    public IBrush Foreground => Colors.CodeForeground;
-}
+internal sealed record CodeLook(FontFamily FontFamily, double FontSize, PopupColors Colors);

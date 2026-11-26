@@ -1,6 +1,5 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using AvaloniaEdit.Rendering;
 using Darp.CodeEditor.Editing;
 using Darp.CodeEditor.LanguageClient;
@@ -11,8 +10,8 @@ namespace Darp.CodeEditor.Completion;
 /// <summary>
 /// What completion shows, as VS Code's suggest widget: the list below the word, or above it with its bottom at the
 /// line, its labels lined up with the word; and the selected item's details in a popup of their own beside it, as
-/// <see cref="PopupPlacement.Beside"/> places them. Both are in the color theme's suggest colors, and neither takes the
-/// keyboard focus. Their edges away from the word resize them: the list to whole rows, and both keep the size the user
+/// <see cref="PopupPlacement.Beside"/> places them. The list is in the color theme's suggest colors, the details look as
+/// every popup of code and docs does (<see cref="HoverView"/>), and neither takes the keyboard focus. Their edges away from the word resize them: the list to whole rows, and both keep the size the user
 /// gave them while the editor shows the document. Rows are as high as the text view's lines, and labels and code take
 /// the editor's font.
 /// </summary>
@@ -36,10 +35,7 @@ internal sealed class CompletionView
     private readonly CodeEditor _editor;
     private readonly TextView _textView;
     private readonly CompletionListBox _list = new();
-    private readonly PopupScrollViewer _details = new()
-    {
-        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-    };
+    private readonly PopupScrollViewer _details = new();
     private readonly EditorPopup _listPopup;
     private readonly EditorPopup _detailsPopup;
     private double _width = DefaultWidth;
@@ -64,15 +60,7 @@ internal sealed class CompletionView
         {
             Inset = Border + CompletionListBox.LabelInset,
         };
-        _detailsPopup = new EditorPopup(
-            editor,
-            new PopupFrame
-            {
-                Name = "CompletionDetails",
-                Child = _details,
-                Padding = new Thickness(6, 4, 2, 4),
-            }
-        )
+        _detailsPopup = new EditorPopup(editor, new PopupFrame { Name = "CompletionDetails", Child = _details })
         {
             IsResizable = true,
         };
@@ -215,7 +203,7 @@ internal sealed class CompletionView
     private void Paint()
     {
         _listPopup.Frame.Paint(Colors.SuggestBackground, Colors.SuggestBorder, Colors.SuggestForeground, Colors);
-        _detailsPopup.Frame.Paint(Colors.SuggestBackground, Colors.SuggestBorder, Colors.SuggestForeground, Colors);
+        _detailsPopup.Frame.PaintDocs(Colors);
     }
 }
 

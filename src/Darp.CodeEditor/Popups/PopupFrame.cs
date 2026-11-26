@@ -81,6 +81,13 @@ internal sealed class PopupFrame : Border
     public event Action<Size, Edges>? Resized;
 
     /// <summary>
+    /// Paints a popup of code and docs, as each is painted, in the color theme's hover colors: the hover, completion's
+    /// details and signature help's card.
+    /// </summary>
+    public void PaintDocs(PopupColors colors) =>
+        Paint(colors.HoverBackground, colors.HoverBorder, colors.HoverForeground, colors);
+
+    /// <summary>
     /// Paints the frame, gives its text <paramref name="foreground"/>, and gives the scroll bars inside it their colors,
     /// which their theme reads as resources.
     /// </summary>

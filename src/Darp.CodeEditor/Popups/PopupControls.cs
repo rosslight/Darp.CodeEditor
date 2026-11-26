@@ -32,7 +32,7 @@ internal sealed class PopupStack : StackPanel;
 /// <summary>A row of a popup, docked.</summary>
 internal sealed class PopupDock : DockPanel;
 
-/// <summary>A box around a part of a popup, such as code on a background of its own.</summary>
+/// <summary>A box around a part of a popup, such as the column of signature help's card.</summary>
 internal sealed class PopupBox : Border;
 
 /// <summary>A line between a popup's parts.</summary>
@@ -101,8 +101,9 @@ internal sealed class PopupButton : Control
 }
 
 /// <summary>
-/// Scrolls a popup's content up and down. Its bar takes a gutter of its own while the content is taller than the view,
-/// so that it never covers the text, and the content wraps to the width left.
+/// Scrolls a popup's content up and down, inside the padding of every popup of code and docs. Its bar takes a gutter of
+/// its own at the popup's edge while the content is taller than the view, so that it never covers the text, and the
+/// content wraps to the width left.
 /// </summary>
 internal sealed class PopupScrollViewer : ScrollViewer;
 

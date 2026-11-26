@@ -219,9 +219,13 @@ otherwise (#114).
   `list.hoverBackground`, `scrollbarSlider.*`, `widget.shadow`, `focusBorder`, `textLink.foreground`,
   `textCodeBlock.background`, `problems*Icon.foreground`), with VS Code's defaults for the keys a theme leaves
   out. An app's styles for flyouts, tooltips, lists, scroll bars, text blocks and panels don't reach them, under
-  Fluent, Simple or any other theme. Their prose takes the app's font; code keeps the editor's colors, background and
-  font. Signature help's signature, plain text without token colors, takes the editor's font in the hover's colors, as
-  VS Code's parameter hints.
+  Fluent, Simple or any other theme. Their prose takes the app's font. Completion's list is in `editorSuggestWidget.*`.
+  Every popup of code and docs, the hover with or without problems, completion's details and signature help's card,
+  has one look, the card's: the hover's colors (`editorHoverWidget.background`, `.border` and `.foreground`) and 8 by
+  4 pixels of padding; code highlighted with the document's grammar, in the editor's font and token colors, on the
+  popup's background; a line in `editorHoverWidget.border` between the code that opens a part, as a signature, and
+  the docs below it; and the docs as text in the muted `editorHoverWidget.foreground`. Signature help's signature,
+  plain text without token colors, takes the editor's font, as VS Code's parameter hints.
 - **The search bar and the text's scroll bars** are the app's controls, in its theme.
 - **Popups stay inside the window**, as in the prototype (#19).
 
@@ -414,9 +418,9 @@ How the client talks to a server, where the protocol leaves a choice:
   with `$/cancelRequest`, stops reading the answer between lines and paragraphs and highlighting its code between lines,
   and drops what they would show. The popup is placed again when the window or the text it is next to moves, as when the
   window narrows.
-- **The hover's look:** text in the editor's popup, in the color theme's hover colors, and links in
-  `textLink.foreground`; code blocks in the editor's font, colors and background, highlighted with the document's
-  grammar; inline code as a small span in the editor's font family on `textCodeBlock.background`, at the size of the
+- **The hover's look:** that of every popup of code and docs (section 2), with links in `textLink.foreground`;
+  code blocks highlighted with the document's grammar on the popup's background, the one that opens a part, as a
+  symbol's signature, with a line below it before the docs; inline code as a small span in the editor's font family on `textCodeBlock.background`, at the size of the
   text around it, so that it fits its line. While the keyboard is in the popup, its border takes `focusBorder`.
 - **The hover's size:** it is as large as its content, up to two thirds of the editor's width and a quarter of its
   height, or 750 by 250 pixels where that is more, and scrolls beyond. A hover shows at most 2,000 characters on 50 lines, in 250 runs of one style or color, the
@@ -523,8 +527,8 @@ How the client talks to a server, where the protocol leaves a choice:
     an item's `editor.action.triggerSuggest` command asks for completion again, such as for a property's value. No other
     command of an item runs.
   - **Resolving:** the selected item is resolved when it is selected, and the resolve of an item that is no longer
-    selected is cancelled. Its detail, as code highlighted with the document's grammar, and its documentation show
-    beside the list, as much of both as a hover shows: they share one budget of the hover's size, cut before anything
+    selected is cancelled. Its detail, as code highlighted with the document's grammar, and below a line its
+    documentation show beside the list, in the look of every popup of code and docs (section 2), as much of both as a hover shows: they share one budget of the hover's size, cut before anything
     reads them. The details toggle hides them, and the selected row then shows the detail. An item's `labelDetails`
     show on every row, as in VS Code: their `detail` dimmed right after the label, such as a method's parameters, and
     their `description` dimmed at the row's right, such as a type's namespace, in place of the detail, where what the
@@ -1131,9 +1135,10 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   a frame with 10,000 errors over all of the text allocates under 1 MB more than one with one such error, where
   reading them for each line in view took 8.4 MB;
 - hover: the diagnostics' messages, with their codes, above the server's Markdown, whose code block is highlighted with
-  the document's grammar in the editor's font, colors and background; in the editor's popup, in the window's overlay
-  layer, inside a window narrower than the popup. An editor in a dark `ThemeVariantScope` of a light window shows a
-  dark popup, in its pixels. Inline code shows in the editor's font on the theme's code background, and code without a
+  the document's grammar in the editor's font and colors; in the editor's popup, in the window's overlay layer, inside
+  a window narrower than the popup. An editor in a dark `ThemeVariantScope` of a light window shows a dark popup, its
+  code on the popup's background and not the text area's, in its pixels. The code that opens a part, also the server's
+  below the diagnostics, has a line below it when more follows in its part, and code among the docs has none. Inline code shows in the editor's font on the theme's code background, and code without a
   color of its own in the editor's foreground, in the pixels. The popup stays while the pointer is over its word or
   over the popup. Moved onto other text, it stays until the pointer has rested there for 300 ms, so that a
   diagonal move can reach it, and then that text's hover takes its place. It closes at once when the pointer leaves both the text and the popup, and on typing, Escape,
@@ -1249,6 +1254,9 @@ NativeAOT, in headless windows rendered with Skia, against the fake server:
   the next signature's documentation is longer than the room; the card is as wide as a short signature, and a
   signature wider than a hover wraps at the hover's width, and a card that kept its place stays inside a window that
   narrowed past it;
+- completion's details look as the hover does: the detail in its token colors on Light+'s hover background, with
+  none of the text area's white behind it in the pixels, then a line in the popup's border, then the docs in the
+  hover's muted foreground;
 - the client advertises exactly what it implements, snippets and label details included;
 - an item's label details show right after its label and at the right of every row, in place of the selected item's
   detail, and typing matches only the label;

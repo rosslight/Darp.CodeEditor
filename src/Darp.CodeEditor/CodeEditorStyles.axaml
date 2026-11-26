@@ -37,8 +37,13 @@
                 </Setter>
             </ControlTheme>
 
-            <!-- The popups' scrolling: its colors are resources that PopupFrame.Paint sets on the frame. -->
+            <!--
+              The scrolling of the popups of code and docs, and their padding: its colors are resources that
+              PopupFrame.Paint sets on the frame.
+            -->
             <ControlTheme x:Key="{x:Type popups:PopupScrollViewer}" TargetType="popups:PopupScrollViewer">
+                <Setter Property="Padding" Value="8,4" />
+                <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
                 <Setter Property="Template">
                     <ControlTemplate>
                         <popups:PopupDock>

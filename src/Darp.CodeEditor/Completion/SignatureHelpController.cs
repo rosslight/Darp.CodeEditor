@@ -1,7 +1,6 @@
 using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Logging;
@@ -20,8 +19,8 @@ namespace Darp.CodeEditor.Completion;
 
 /// <summary>
 /// Signature help in one editor's view of a document: a card with one signature of the call around the caret at a time
-/// (<see cref="SignatureView"/>), its parameter at the caret in bold, and its documentation, in the editor's popup in the
-/// color theme's hover colors, above the caret's line, so that completion's list below it shows too. It is as wide as
+/// (<see cref="SignatureView"/>), its parameter at the caret in bold, and its documentation, in the editor's popup in
+/// the color theme's hover colors, above the caret's line, so that completion's list below it shows too. It is as wide as
 /// its content, up to a hover's width, where its text wraps. While the call has several signatures, a column at its left
 /// says which one shows, as <c>2/5</c>, between buttons that choose the one before and after, as Up and Down do.
 /// </summary>
@@ -56,10 +55,7 @@ internal sealed class SignatureHelpController : IEditorFeature
     private readonly CodeDocument _document;
     private readonly BackgroundTextMateHighlighter _highlighter;
     private readonly CaretMoves _caretMoves;
-    private readonly PopupScrollViewer _content = new()
-    {
-        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-    };
+    private readonly PopupScrollViewer _content = new();
     private readonly PopupButton _previous = new(up: true) { HorizontalAlignment = HorizontalAlignment.Center };
     private readonly PopupText _counter = new() { HorizontalAlignment = HorizontalAlignment.Center };
     private readonly PopupButton _next = new(up: false) { HorizontalAlignment = HorizontalAlignment.Center };
@@ -110,7 +106,6 @@ internal sealed class SignatureHelpController : IEditorFeature
         DockPanel.SetDock(_column, Dock.Left);
         _previous.Clicked += () => Cycle(forward: false);
         _next.Clicked += () => Cycle(forward: true);
-        _content.Padding = new Thickness(8, 4);
         _frame = new PopupFrame
         {
             Name = "SignatureHelp",
@@ -388,7 +383,7 @@ internal sealed class SignatureHelpController : IEditorFeature
 
     private void Paint()
     {
-        _frame.Paint(_colors.HoverBackground, _colors.HoverBorder, _colors.HoverForeground, _colors);
+        _frame.PaintDocs(_colors);
         _column.BorderBrush = _colors.HoverBorder;
         _previous.Paint(_colors.HoverForeground, _colors.ListHoverBackground);
         _next.Paint(_colors.HoverForeground, _colors.ListHoverBackground);
