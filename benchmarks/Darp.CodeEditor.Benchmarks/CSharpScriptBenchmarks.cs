@@ -53,7 +53,12 @@ public class CSharpScriptBenchmarks
     }
 
     [IterationSetup(
-        Targets = [nameof(CompletionOfAMemberList), nameof(CompletionWithoutAReceiver), nameof(ColorsOfTheVisibleLines)]
+        Targets = [
+            nameof(CompletionOfAMemberList),
+            nameof(CompletionWithoutAReceiver),
+            nameof(CompletionOfATypedName),
+            nameof(ColorsOfTheVisibleLines),
+        ]
     )]
     public void Edit() =>
         Document.Replace(
@@ -76,6 +81,17 @@ public class CSharpScriptBenchmarks
     public int CompletionWithoutAReceiver()
     {
         int items = Complete(new TextRange(_wordCaret, 0));
+        return items >= 500 ? items : throw new InvalidOperationException($"The list has {items} items.");
+    }
+
+    /// <summary>
+    /// As typing the first letters of a name asks, with the best of the types and extension methods from namespaces
+    /// that the script does not import that match them.
+    /// </summary>
+    [Benchmark]
+    public int CompletionOfATypedName()
+    {
+        int items = Complete(new TextRange(_wordCaret, 2));
         return items >= 500 ? items : throw new InvalidOperationException($"The list has {items} items.");
     }
 
