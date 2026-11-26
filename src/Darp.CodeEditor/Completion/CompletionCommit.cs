@@ -30,8 +30,8 @@ internal sealed class CompletionCommit : IDisposable
     /// <summary>Whether the view ended: a command still posted no longer runs.</summary>
     private bool _disposed;
 
-    /// <summary>Cancels the resolve of the item committed last, whose additional edits are still to come.</summary>
-    private CancellationTokenSource? _lateEdits;
+    /// <summary>Cancel the resolves of the committed items whose additional edits are still to come, one per commit.</summary>
+    private readonly HashSet<CancellationTokenSource> _lateEdits = [];
 
     /// <param name="textArea">The text area of the view.</param>
     /// <param name="document">The view's document.</param>
@@ -101,8 +101,7 @@ internal sealed class CompletionCommit : IDisposable
         // Undoing the commit drops the additional edits still to come, as they would go in without the item.
         if (late is not null)
         {
-            _lateEdits?.Cancel();
-            _lateEdits = late.Cancellation;
+            _lateEdits.Add(late.Cancellation);
             marks.Add(new LateEditsMark(late.Cancellation));
         }
         Apply(step, continued: false, edits, marks);
@@ -126,7 +125,8 @@ internal sealed class CompletionCommit : IDisposable
     public void Dispose()
     {
         _disposed = true;
-        _lateEdits?.Cancel();
+        foreach (CancellationTokenSource lateEdits in _lateEdits)
+            lateEdits.Cancel();
     }
 
     /// <summary>
@@ -153,8 +153,7 @@ internal sealed class CompletionCommit : IDisposable
         }
         finally
         {
-            if (_lateEdits == late.Cancellation)
-                _lateEdits = null;
+            _lateEdits.Remove(late.Cancellation);
         }
     }
 

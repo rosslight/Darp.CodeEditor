@@ -526,7 +526,7 @@ How the client talks to a server, where the protocol leaves a choice:
     reads them. The details toggle hides them, and the selected row then shows the detail. A row shows at most 256
     characters of a label, with "…". Additional edits that the resolve brings only after the item was committed join
     the commit's undo step while it is the last one, and take a step of their own once the user typed on; undoing the
-    commit drops them. Items resolve only in the process that sent them, while the document stays open there as it was.
+    commit drops them. Each commit gets its own, also when another commit follows before they come. Items resolve only in the process that sent them, while the document stays open there as it was.
   - **Ending:** Escape, the caret leaving the line or moving back past the word, a selection, any caret move that is
     not the keyboard's, such as a click, an undo or code, the editor becoming read-only, the list's line scrolling out
     of view, the text losing the keyboard focus, a server that starts or stops serving the document, new colors,
