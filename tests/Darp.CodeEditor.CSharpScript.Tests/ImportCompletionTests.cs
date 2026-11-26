@@ -68,8 +68,12 @@ public sealed class ImportCompletionTests(ScriptServerFixture fixture)
         using var types = await _fixture.OpenAsync("var unmarked = new UnmarkedTy|");
         (await types.CompleteAsync()).Items.ShouldNotContain(item => item.Label == "UnmarkedType");
 
+        // A marked assembly has an extension method of this name in that namespace too, for another receiver.
         using var extensions = await _fixture.OpenAsync("var text = Greeting.Repeat|");
         (await extensions.CompleteAsync()).Items.ShouldNotContain(item => item.Label == "Repeated");
+
+        using var marked = await _fixture.OpenAsync("var number = 1;\nvar same = number.Repeat|");
+        (await marked.CompleteAsync()).Items.ShouldContain(item => item.Label == "Repeated");
     }
 
     [Fact]

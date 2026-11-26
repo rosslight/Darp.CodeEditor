@@ -200,6 +200,7 @@ internal sealed class ScriptCompletions
                     imports,
                     typed,
                     compilation,
+                    await ReceiverAsync(list.Span, cancellationToken).ConfigureAwait(false),
                     cancellationToken
                 );
                 foreach (int index in best)
@@ -280,6 +281,26 @@ internal sealed class ScriptCompletions
             ?.FindToken(Math.Max(0, offset - 1), findInsideTrivia: true)
             .Parent?.FirstAncestorOrSelf<DocumentationCommentTriviaSyntax>()
             is not null;
+    }
+
+    /// <summary>
+    /// The type of the receiver whose member the word at <paramref name="word"/> is, as an extension method takes it:
+    /// a nullable value's value after <c>?.</c>. Null without a receiver.
+    /// </summary>
+    private async Task<ITypeSymbol?> ReceiverAsync(TextSpan word, CancellationToken cancellationToken)
+    {
+        if (await _script.Document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false) is not { } model)
+            return null;
+        SyntaxNode root = await model.SyntaxTree.GetRootAsync(cancellationToken).ConfigureAwait(false);
+        SyntaxNode? access = root.FindToken(word.Start).GetPreviousToken().Parent;
+        if (SignatureCandidates.ReceiverOf(access) is not { } receiver)
+            return null;
+        ITypeSymbol? type = model.GetTypeInfo(receiver, cancellationToken).Type;
+        return
+            access is MemberBindingExpressionSyntax
+            && type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable
+            ? nullable.TypeArguments[0]
+            : type;
     }
 
     /// <summary>Whether a colon follows <paramref name="offset"/>, past white space.</summary>

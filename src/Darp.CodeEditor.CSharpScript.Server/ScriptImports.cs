@@ -34,6 +34,7 @@ internal static class ScriptImports
     /// <param name="candidates">The indices of the items that <see cref="MayBe"/> are imports.</param>
     /// <param name="typed">The text from the items' word's start up to the caret; not empty.</param>
     /// <param name="compilation">The script's compilation.</param>
+    /// <param name="receiver">The type of the receiver whose member the word is; null for none.</param>
     /// <param name="cancellationToken">Stops the ranking.</param>
     /// <returns>The indices, and whether more match.</returns>
     public static (IReadOnlyList<int> Best, bool More) Best(
@@ -41,6 +42,7 @@ internal static class ScriptImports
         IReadOnlyList<int> candidates,
         string typed,
         Compilation compilation,
+        ITypeSymbol? receiver,
         CancellationToken cancellationToken
     )
     {
@@ -61,7 +63,7 @@ internal static class ScriptImports
         foreach (RankedCompletion match in (t_matcher ??= new CompletionMatcher()).Rank(texts, cancellationToken))
         {
             int index = candidates[match.Index];
-            if (!IsNameable(items[index], compilation.GlobalNamespace, namespaces))
+            if (!IsNameable(items[index], compilation, receiver, namespaces))
                 continue;
             if (best.Count == MaxItems)
                 return (best, true);
@@ -73,22 +75,31 @@ internal static class ScriptImports
     /// <summary>
     /// Whether <paramref name="item"/> is a type or an extension method that the script may name, in the namespace that
     /// its description names. The compilation's global namespace merges only the assemblies that scripts may name: the
-    /// ones under the private alias are not in it.
+    /// ones under the private alias are not in it. Roslyn's item does not say which method it is, so an extension
+    /// method's counts when one of its name there that the script may call applies to <paramref name="receiver"/>.
     /// </summary>
     private static bool IsNameable(
         CompletionItem item,
-        INamespaceSymbol global,
+        Compilation compilation,
+        ITypeSymbol? receiver,
         Dictionary<string, INamespaceSymbol?> namespaces
     )
     {
         if (!namespaces.TryGetValue(item.InlineDescription, out INamespaceSymbol? found))
-            namespaces[item.InlineDescription] = found = Namespace(global, item.InlineDescription);
+            namespaces[item.InlineDescription] = found = Namespace(compilation.GlobalNamespace, item.InlineDescription);
         if (found is null)
             return false;
         if (item.Tags.Contains(WellKnownTags.ExtensionMethod))
-            return found
-                .GetTypeMembers()
-                .Any(type => type.MightContainExtensionMethods && !type.GetMembers(item.DisplayText).IsEmpty);
+            return receiver is not null
+                && found
+                    .GetTypeMembers()
+                    .Where(type => type.MightContainExtensionMethods)
+                    .SelectMany(type => type.GetMembers(item.DisplayText))
+                    .Any(member =>
+                        member is IMethodSymbol { IsExtensionMethod: true } method
+                        && compilation.IsSymbolAccessibleWithin(method, compilation.Assembly)
+                        && method.ReduceExtensionMethod(receiver) is not null
+                    );
         // An attribute's item leaves out the "Attribute" of its name.
         return !found.GetTypeMembers(item.DisplayText).IsEmpty
             || !found.GetTypeMembers(item.DisplayText + "Attribute").IsEmpty;

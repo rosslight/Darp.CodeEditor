@@ -89,14 +89,7 @@ internal static class SignatureCandidates
                 : ([], null);
         }
         IEnumerable<IMethodSymbol> methods = group.OfType<IMethodSymbol>();
-        ExpressionSyntax? receiver = invocation.Expression switch
-        {
-            MemberAccessExpressionSyntax access => access.Expression,
-            MemberBindingExpressionSyntax => invocation
-                .FirstAncestorOrSelf<ConditionalAccessExpressionSyntax>()
-                ?.Expression,
-            _ => null,
-        };
+        ExpressionSyntax? receiver = ReceiverOf(invocation.Expression);
         if (receiver is null)
             return (methods, null);
         SymbolInfo info = model.GetSymbolInfo(receiver, cancellationToken);
@@ -119,6 +112,20 @@ internal static class SignatureCandidates
                 : type
         );
     }
+
+    /// <summary>
+    /// The receiver of a member access, <c>a</c> in <c>a.b</c>, or of a member binding, <c>a</c> in <c>a?.b</c>; null for
+    /// anything else.
+    /// </summary>
+    public static ExpressionSyntax? ReceiverOf(SyntaxNode? access) =>
+        access switch
+        {
+            MemberAccessExpressionSyntax memberAccess => memberAccess.Expression,
+            MemberBindingExpressionSyntax binding => binding
+                .FirstAncestorOrSelf<ConditionalAccessExpressionSyntax>()
+                ?.Expression,
+            _ => null,
+        };
 
     private static IEnumerable<ISymbol> Constructors(ITypeSymbol? type) =>
         type is INamedTypeSymbol named ? named.InstanceConstructors : [];
