@@ -1252,6 +1252,13 @@ server process:
   receiver's type, and hidden overloads; constructor initializers, attributes, indexers, type argument lists and
   collection initializer entries, with a comparison's `<` quiet; a signature's summary and its parameters'
   descriptions, also inherited;
+- Roslyn's commit characters, none right after `.` nor where a lambda's parameter may be named; `:` opening a format's
+  list and nothing after a named argument; a named argument's colon, left out where one follows; a documentation
+  comment's tags, `<see cref=""/>` with the caret between its quotes; types and extension methods from namespaces the
+  script does not import, with their `using` after a leading comment or among the usings, none from a dependency under
+  the private alias and none before a name is typed; obsolete members; one error per rejected directive, none of them
+  suggested; `static` and `readonly` in semantic colors; occurrences by symbol, with reads and writes through members,
+  deconstructions and `out`;
 - once by hand, not in CI: the same 45 tests from a NativeAOT client, with the server and the marked assemblies put next
   to it, and the sample's script document on a Linux desktop, in completion, its details, signature help, hover,
   squiggles and semantic colors;
