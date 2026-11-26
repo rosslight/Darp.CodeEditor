@@ -2033,6 +2033,48 @@ public sealed class CompletionTests(UiFixture ui)
             await Wait.UntilAsync(() => DetailTexts(window).Contains("class System.Console"));
         });
 
+    [Fact]
+    public Task Label_details_show_after_the_label_and_on_the_right_of_every_row_and_typing_matches_only_the_label() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument answer = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [
+                      { "label": "Join", "labelDetails": { "detail": "(string separator)", "description": "System.String" } },
+                      { "label": "JsonNode", "detail": "class System.Text.Json.Nodes.JsonNode" },
+                      { "label": "JsonSerializer", "detail": "class System.Text.Json.JsonSerializer",
+                        "labelDetails": { "description": "System.Text.Json" } } ] }
+                    """
+                )
+            );
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "J");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await OpenAsync(window, 1);
+            // Without the details beside the list, the selected row shows the detail of an item without label details.
+            window.Press(Key.Space, KeyModifiers.Control);
+            await Wait.UntilAsync(() => Details(window) is null);
+
+            Row(window, "Join").Label.Inlines?.Text.ShouldBe("Join(string separator)");
+            Row(window, "Join").Right.Text.ShouldBe("System.String");
+            Row(window, "JsonNode").Right.IsVisible.ShouldBeFalse();
+            Row(window, "JsonSerializer").Right.Text.ShouldBe("System.Text.Json");
+            window.Press(Key.Down);
+            await Wait.UntilAsync(() => Row(window, "JsonNode").Right.Text == "class System.Text.Json.Nodes.JsonNode");
+            window.Press(Key.Down);
+            await Wait.UntilAsync(() => !Row(window, "JsonNode").Right.IsVisible);
+            Row(window, "JsonSerializer").Right.Text.ShouldBe("System.Text.Json");
+
+            // "Js" is in "Join(string", not in "Join".
+            window.Type("s");
+
+            await WaitForLabelsAsync(window, ["JsonNode", "JsonSerializer"]);
+        });
+
     /// <summary>Makes the fake server answer completion with <paramref name="result"/>, until the document is disposed.</summary>
     /// <summary>
     /// Starts the server, and waits until <paramref name="document"/> is open in it: editors ask only then, once the

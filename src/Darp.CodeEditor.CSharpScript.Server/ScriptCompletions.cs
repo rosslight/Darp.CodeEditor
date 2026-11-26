@@ -147,6 +147,11 @@ internal sealed class ScriptCompletions
         // only a key commits it then, so that "#r " stays as typed.
         var commit = new CommitRules(list, typed, onlyByKey: list.ItemsList.Any(IsUnsupportedDirective));
         FrozenSet<string> variables = await ScriptVariablesAsync(cancellationToken).ConfigureAwait(false);
+        ITypeSymbol? receiver = await ReceiverAsync(list.Span, cancellationToken).ConfigureAwait(false);
+        CompletionTypes? types = await _script.Document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false)
+            is { } model
+            ? new CompletionTypes(model, list.Span.Start, receiver)
+            : null;
         var items = new List<LspCompletionItem>(list.ItemsList.Count);
         var imports = new List<int>();
         bool? inDocumentation = null;
@@ -201,7 +206,10 @@ internal sealed class ScriptCompletions
                         span = TextSpan.FromBounds(span.Start, end);
                 }
             }
-            LspCompletionItem lsp = ToLsp(item, index, span, newText, filterText, isSnippet, Group(item, variables));
+            char group = Group(item, variables);
+            // Variables and members show their type; named arguments don't.
+            string? type = group is VariableGroup or MemberGroup or ObjectGroup ? types?.Of(item) : null;
+            LspCompletionItem lsp = ToLsp(item, index, span, newText, filterText, isSnippet, group, type);
             items.Add(
                 colonCommits
                     ? lsp
@@ -230,7 +238,7 @@ internal sealed class ScriptCompletions
                     item => FilterText(item, list.Span),
                     items.Count,
                     compilation,
-                    await ReceiverAsync(list.Span, cancellationToken).ConfigureAwait(false),
+                    receiver,
                     cancellationToken
                 );
                 foreach (int index in best)
@@ -247,7 +255,8 @@ internal sealed class ScriptCompletions
                             item.DisplayText,
                             FilterText(item, list.Span),
                             isSnippet: false,
-                            ImportGroup
+                            ImportGroup,
+                            type: null
                         )
                     );
                 }
@@ -263,7 +272,8 @@ internal sealed class ScriptCompletions
             string newText,
             string filterText,
             bool isSnippet,
-            char group
+            char group,
+            string? type
         )
         {
             if (last.Range is null || last.Span != span)
@@ -279,7 +289,8 @@ internal sealed class ScriptCompletions
                 item.Rules.MatchPriority == MatchPriority.Preselect ? true : null,
                 Tags: item.Tags.Contains(DeprecatedTag) ? s_deprecated : null,
                 CommitCharacters: commit.Of(item),
-                InsertTextFormat: isSnippet ? Snippets.Format : null
+                InsertTextFormat: isSnippet ? Snippets.Format : null,
+                LabelDetails: type is null ? null : new LspCompletionItemLabelDetails(Description: type)
             );
         }
     }
@@ -474,23 +485,31 @@ internal sealed class ScriptCompletions
             {
                 // A named argument is the item of a parameter that puts in its name and a colon.
                 case WellKnownTags.Parameter when item.DisplayTextSuffix == ":":
-                    return '1';
+                    return NamedArgumentGroup;
                 case WellKnownTags.Local or WellKnownTags.Parameter or WellKnownTags.RangeVariable:
-                    return '0';
+                    return VariableGroup;
                 case WellKnownTags.Field:
-                    return variables.Contains(item.DisplayText) ? '0' : '2';
+                    return variables.Contains(item.DisplayText) ? VariableGroup : MemberGroup;
                 case WellKnownTags.Method:
-                    return s_objectMethods.Contains(item.DisplayText) ? '3' : '2';
+                    return s_objectMethods.Contains(item.DisplayText) ? ObjectGroup : MemberGroup;
                 case WellKnownTags.Property
                 or WellKnownTags.ExtensionMethod
                 or WellKnownTags.Event
                 or WellKnownTags.Constant
                 or WellKnownTags.EnumMember:
-                    return '2';
+                    return MemberGroup;
             }
         }
-        return '4';
+        return OtherGroup;
     }
+
+    /// <summary>The groups of <see cref="Group"/>, in their order.</summary>
+    private const char VariableGroup = '0';
+
+    private const char NamedArgumentGroup = '1';
+    private const char MemberGroup = '2';
+    private const char ObjectGroup = '3';
+    private const char OtherGroup = '4';
 
     /// <summary>The group of a type from a namespace that the script does not import (<see cref="Group"/>).</summary>
     private const char ImportGroup = '5';

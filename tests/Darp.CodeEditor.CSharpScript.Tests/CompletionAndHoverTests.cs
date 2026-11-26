@@ -125,6 +125,40 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
         CompletionItem[] items = [.. list.Items.OrderBy(item => item.SortKey)];
         items.Take(3).Select(item => item.Label).ShouldBe(["zebra", "name:", "value:"]);
         items[3].Kind.ShouldBeOneOf([PropertyKind, MethodKind]);
+        // A named argument shows no type.
+        items[1].LabelDetails.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Variables_and_members_show_their_type_and_methods_their_return_type()
+    {
+        using var script = await _fixture.OpenAsync(
+            "var zebra = 1;\nforeach (var apple in new[] { \"a\" })\n{\n    |\n}"
+        );
+        CompletionList list = await script.CompleteAsync();
+        string? TypeOf(string label) => list.Items.First(item => item.Label == label).LabelDetails?.Description;
+        // A var of a reference type is nullable, as its hover says.
+        TypeOf("apple").ShouldBe("string?");
+        TypeOf("zebra").ShouldBe("int");
+        TypeOf("Greeting").ShouldBe("string");
+        TypeOf("Add").ShouldBe("int");
+        TypeOf("Write").ShouldBe("void");
+        TypeOf("Repeat").ShouldBe("string?");
+        TypeOf("Pick<>").ShouldBe("T");
+        TypeOf("@class").ShouldBe("int");
+        // As .NET declares object's.
+        TypeOf("ToString").ShouldBe("string?");
+        TypeOf("Task").ShouldBeNull();
+        TypeOf("await").ShouldBeNull();
+
+        // After a dot, the receiver's members, also extension methods.
+        using var access = await _fixture.OpenAsync("using System.Linq;\nGreeting.|");
+        CompletionList members = await access.CompleteAsync();
+        string? MemberTypeOf(string label) =>
+            members.Items.First(item => item.Label == label).LabelDetails?.Description;
+        MemberTypeOf("Length").ShouldBe("int");
+        MemberTypeOf("ToUpper").ShouldBe("string");
+        MemberTypeOf("Count<>").ShouldBe("int");
     }
 
     [Fact]

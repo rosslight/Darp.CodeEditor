@@ -18,6 +18,8 @@ public sealed class ImportCompletionTests(ScriptServerFixture fixture)
         list.IsIncomplete.ShouldBeFalse();
         CompletionItem item = list.Items.Single(i => i.Label == "JsonSerializerOptions");
         item.Edit.NewText.ShouldBe("JsonSerializerOptions");
+        // A type shows no type, and no namespace either.
+        item.LabelDetails.ShouldBeNull();
 
         CompletionItem resolved = (
             await list.ResolveAsync(item, TestContext.Current.CancellationToken)

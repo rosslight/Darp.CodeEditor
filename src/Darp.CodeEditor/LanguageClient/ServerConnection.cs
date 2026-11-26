@@ -909,6 +909,7 @@ internal sealed class ServerConnection
                         {
                             ["properties"] = new JsonArray("detail", "documentation", "additionalTextEdits"),
                         },
+                        ["labelDetailsSupport"] = true,
                     },
                     ["completionItemKind"] = new JsonObject
                     {
