@@ -1,4 +1,5 @@
 using Darp.CodeEditor.LanguageClient;
+using Darp.CodeEditor.Lsp;
 
 namespace Darp.CodeEditor.CSharpScript.Tests;
 
@@ -39,6 +40,26 @@ public sealed class ImportCompletionTests(ScriptServerFixture fixture)
         ).ShouldNotBeNull();
         Apply(script, resolved.AdditionalEdits.ShouldNotBeNull())
             .ShouldBe("using System.Net.Http.Json;\nusing System.Text;\n" + code);
+    }
+
+    [Fact]
+    public async Task An_item_of_a_list_that_a_newer_list_replaces_still_resolves_its_using()
+    {
+        using var script = await _fixture.OpenAsync("var builder = new Str|");
+        CompletionList first = await script.CompleteAsync();
+        CompletionItem item = first.Items.Single(i => i.Label == "StringBuilder");
+        // The user typed on, and the editor asked again: until it switches lists, it still commits from the first.
+        script.Document.Replace(new TextRange(script.Caret, 0), "i");
+        script.Caret++;
+        await script.CompleteAsync(new CompletionTrigger(CompletionTriggerKind.TriggerForIncompleteCompletions));
+
+        CompletionItem resolved = (
+            await first.ResolveAsync(item, TestContext.Current.CancellationToken)
+        ).ShouldNotBeNull();
+        CompletionEdit edit = resolved.AdditionalEdits.ShouldNotBeNull().ShouldHaveSingleItem();
+        edit.Range.ShouldBe(new TextRange(0, 0));
+        // In Roslyn's line breaks: the editor puts in the document's.
+        edit.NewText.ReplaceLineEndings("\n").ShouldBe("using System.Text;\n\n");
     }
 
     [Fact]

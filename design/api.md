@@ -619,7 +619,8 @@ app's script environments.
   comment. A tag there goes in as Roslyn writes it, also over the `<`, with the caret where Roslyn puts it, such as
   between the quotes of `<see cref=""/>`; other edits beyond the item's word, such as an override's, are left out.
   Each item has its edit at once; its signature and XML docs come with resolve, also after the user typed on, from the
-  version the list was asked for. An escaped word such as `@ev` completes identifiers, not keywords, over its `@`, and
+  version the list was asked for. The last four lists of a script that the client did not cancel resolve their items,
+  so that the list that shows still resolves while a newer one is asked for. An escaped word such as `@ev` completes identifiers, not keywords, over its `@`, and
   there is no list after a lone `@`. An obsolete member's item is tagged deprecated, so it shows struck through. A
   named argument's item, `amount:`, puts in its colon, unless one follows already.
 - **Imports:** a list also has the types and extension methods from namespaces that the script does not import, such

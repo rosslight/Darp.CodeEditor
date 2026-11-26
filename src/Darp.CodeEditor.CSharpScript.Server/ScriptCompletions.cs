@@ -38,6 +38,7 @@ internal sealed class ScriptCompletions
 
     private readonly ScriptSnapshot _script;
     private readonly Task<Answer?> _answer;
+    private readonly CancellationToken _cancellationToken;
 
     /// <summary>Starts asking for the list that <paramref name="parameters"/> ask for.</summary>
     public ScriptCompletions(
@@ -49,6 +50,7 @@ internal sealed class ScriptCompletions
     {
         Id = id;
         _script = script;
+        _cancellationToken = cancellationToken;
         int offset = script.Lines.ToOffset(parameters.Position);
         _answer = Task.Run(
             () => AnswerAsync(offset, Trigger(parameters.Context), cancellationToken),
@@ -63,6 +65,9 @@ internal sealed class ScriptCompletions
     /// <summary>The answer.</summary>
     public Task<LspCompletionList?> Items { get; }
 
+    /// <summary>Whether the client cancelled the request: its answer never reaches the client.</summary>
+    public bool IsCancelled => _cancellationToken.IsCancellationRequested;
+
     /// <summary>
     /// <paramref name="item"/> with its signature and documentation, and for a type or extension method from a namespace
     /// that the script does not import, the <c>using</c> that it adds.
@@ -76,8 +81,8 @@ internal sealed class ScriptCompletions
         if (await _answer.ConfigureAwait(false) is not { } answer || index >= answer.List.ItemsList.Count)
             return item;
         CompletionItem roslynItem = answer.List.ItemsList[index];
-        if (answer.Imports.Contains(index))
-            item = item with { AdditionalTextEdits = await ImportAsync(answer.Service, roslynItem, cancellationToken) };
+        if (answer.Imports.TryGetValue(index, out CompletionItem? import))
+            item = item with { AdditionalTextEdits = await ImportAsync(answer.Service, import, cancellationToken) };
         CompletionDescription? description = await answer
             .Service.GetDescriptionAsync(_script.Document, roslynItem, cancellationToken)
             .ConfigureAwait(false);
@@ -120,7 +125,12 @@ internal sealed class ScriptCompletions
             .ConfigureAwait(false);
         // An empty list has no span of its own to take the typed text from.
         if (list.ItemsList.Count == 0)
-            return new Answer(service, list, new LspCompletionList(IsIncomplete: false, []), FrozenSet<int>.Empty);
+            return new Answer(
+                service,
+                list,
+                new LspCompletionList(IsIncomplete: false, []),
+                FrozenDictionary<int, CompletionItem>.Empty
+            );
         string typed = _script.Text.ToString(TextSpan.FromBounds(list.Span.Start, offset));
         // Without the directives that scripts can't use, another can match what was typed, as "region" matches "#r":
         // only a key commits it then, so that "#r " stays as typed.
@@ -174,7 +184,7 @@ internal sealed class ScriptCompletions
             items.Add(ToLsp(item, index, span, newText, filterText, isSnippet));
         }
         bool asksAgain = commit.AsksAgain;
-        IReadOnlyList<int> sent = [];
+        var sent = new Dictionary<int, CompletionItem>();
         if (imports.Count > 0)
         {
             // Without a typed name, the thousands of them would all be sent; typing one asks again.
@@ -185,16 +195,25 @@ internal sealed class ScriptCompletions
                 { } compilation
             )
             {
-                (sent, bool more) = ScriptImports.Best(list.ItemsList, imports, typed, compilation, cancellationToken);
-                foreach (int index in sent)
+                (IReadOnlyList<int> best, bool more) = ScriptImports.Best(
+                    list.ItemsList,
+                    imports,
+                    typed,
+                    compilation,
+                    cancellationToken
+                );
+                foreach (int index in best)
                 {
                     CompletionItem item = list.ItemsList[index];
-                    items.Add(ToLsp(item, index, item.Span, item.DisplayText, item.FilterText, isSnippet: false));
+                    // Roslyn's lists share these items, and each list moves them to its span: a copy keeps this one's,
+                    // which resolve needs.
+                    sent[index] = item.AddProperty(nameof(ScriptCompletions), "");
+                    items.Add(ToLsp(item, index, list.Span, item.DisplayText, item.FilterText, isSnippet: false));
                 }
                 asksAgain |= more;
             }
         }
-        return new Answer(service, list, new LspCompletionList(asksAgain, items), sent.ToFrozenSet());
+        return new Answer(service, list, new LspCompletionList(asksAgain, items), sent.ToFrozenDictionary());
 
         LspCompletionItem ToLsp(
             CompletionItem item,
@@ -276,12 +295,14 @@ internal sealed class ScriptCompletions
     /// <param name="Service">The service that answered, which resolves the items.</param>
     /// <param name="List">Roslyn's list, whose items the client's carry the index of.</param>
     /// <param name="Items">The list that the client gets.</param>
-    /// <param name="Imports">The indices of the items from namespaces that the script does not import.</param>
+    /// <param name="Imports">
+    /// The items sent from namespaces that the script does not import, by their index, each a copy of this list's own.
+    /// </param>
     private sealed record Answer(
         CompletionService Service,
         CompletionList List,
         LspCompletionList Items,
-        FrozenSet<int> Imports
+        FrozenDictionary<int, CompletionItem> Imports
     );
 
     /// <summary>The protocol's snippets, as the client reads them: plain text, with <c>$0</c> where the caret goes.</summary>

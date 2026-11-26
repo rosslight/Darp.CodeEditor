@@ -148,7 +148,8 @@ internal sealed class ScriptServer
         LspCompletionItem item = Read(json, LspJsonContext.Default.LspCompletionItem);
         Task<LspCompletionItem?> resolved =
             item.Data is JsonArray { Count: 2 } data
-            && _scripts.Values.Select(script => script.Completions).FirstOrDefault(c => c?.Id == (int?)data[0])
+            && (int?)data[0] is { } id
+            && _scripts.Values.Select(script => script.Completions(id)).FirstOrDefault(list => list is not null)
                 is { } list
             && (int?)data[1] is { } index
                 ? Task.Run(() => list.ResolveAsync(item, index, cancellationToken), cancellationToken)

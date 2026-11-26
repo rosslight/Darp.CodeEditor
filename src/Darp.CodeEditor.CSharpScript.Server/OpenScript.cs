@@ -8,6 +8,15 @@ namespace Darp.CodeEditor.CSharpScript.Server;
 /// <param name="snapshot">Its first version.</param>
 internal sealed class OpenScript(string uri, ScriptContext context, ScriptSnapshot snapshot)
 {
+    /// <summary>
+    /// How many lists the script keeps for resolving: the one that the client shows, the one it asked for meanwhile,
+    /// and room for those whose answer crossed their cancellation.
+    /// </summary>
+    private const int MaxCompletions = 4;
+
+    /// <summary>The lists whose items the client may still commit, oldest first; none of them cancelled.</summary>
+    private readonly List<ScriptCompletions> _completions = [];
+
     private CancellationTokenSource _diagnostics = new();
 
     public string Uri { get; } = uri;
@@ -18,12 +27,22 @@ internal sealed class OpenScript(string uri, ScriptContext context, ScriptSnapsh
     /// <summary>The latest version.</summary>
     public ScriptSnapshot Snapshot { get; set; } = snapshot;
 
-    /// <summary>The completion list answered last, which the client resolves items of.</summary>
-    public ScriptCompletions? Completions { get; private set; }
+    /// <summary>
+    /// Starts a completion request. Its list resolves items from now on, beside the latest lists before it that the
+    /// client did not cancel: it shows one of them until the new answer comes, and may commit from it meanwhile.
+    /// </summary>
+    public ScriptCompletions Complete(CompletionParams parameters, int id, CancellationToken cancellationToken)
+    {
+        var list = new ScriptCompletions(id, Snapshot, parameters, cancellationToken);
+        _completions.RemoveAll(kept => kept.IsCancelled);
+        if (_completions.Count == MaxCompletions)
+            _completions.RemoveAt(0);
+        _completions.Add(list);
+        return list;
+    }
 
-    /// <summary>Starts a completion request, which from now on is the list that items resolve in.</summary>
-    public ScriptCompletions Complete(CompletionParams parameters, int id, CancellationToken cancellationToken) =>
-        Completions = new ScriptCompletions(id, Snapshot, parameters, cancellationToken);
+    /// <summary>The list with <paramref name="id"/>, while the script keeps it; null otherwise.</summary>
+    public ScriptCompletions? Completions(int id) => _completions.Find(list => list.Id == id);
 
     /// <summary>Cancels the diagnostics under way and returns the token of the next ones.</summary>
     public CancellationToken RestartDiagnostics()
