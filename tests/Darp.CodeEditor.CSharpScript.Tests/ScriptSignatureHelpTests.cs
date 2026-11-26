@@ -253,6 +253,28 @@ public sealed class ScriptSignatureHelpTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task An_attribute_shows_only_the_members_that_its_named_arguments_may_set()
+    {
+        using var script = await _fixture.OpenAsync(
+            """
+            class Base : Attribute { public int Hidden { get; set; } public int Inherited; }
+            class A : Base
+            {
+                public new int Hidden => 1;
+                public int WriteOnly { set { } }
+                internal int Internal { get; set; }
+                public int Both { get; private set; }
+                public int Settable { get; set; }
+                public int Field;
+            }
+            [A(|)] class C { }
+            """
+        );
+        SignatureHelpInfo help = (await script.SignatureHelpAsync()).ShouldNotBeNull();
+        Active(help).Label.ShouldBe("A(Properties: Field = int, Inherited = int, Settable = int)");
+    }
+
+    [Fact]
     public async Task An_indexer_shows_its_parameters()
     {
         using var script = await _fixture.OpenAsync("var numbers = new Dictionary<string, int>();\nvar n = numbers[|");

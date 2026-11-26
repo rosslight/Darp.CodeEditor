@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -198,30 +199,41 @@ internal static class SignatureCandidates
         return (model.LookupSymbols(position, type, WellKnownMemberNames.Indexer), type);
     }
 
-    /// <summary>The fields and properties that an attribute's named arguments can set, by name.</summary>
-    public static List<ISymbol> Settable(INamedTypeSymbol attribute, SemanticModel model, int position)
+    /// <summary>
+    /// The fields and properties that an attribute's named arguments can set, by name, as the compiler allows: public
+    /// instance fields that are neither read-only nor constant, and public instance properties whose first declaration
+    /// has a public getter and setter. A member hides those of its name in the base types.
+    /// </summary>
+    public static List<ISymbol> Settable(INamedTypeSymbol attribute)
     {
         var settable = new List<ISymbol>();
+        var hidden = new HashSet<string>();
         for (INamedTypeSymbol? type = attribute; type is not null; type = type.BaseType)
         {
+            ImmutableArray<ISymbol> members = type.GetMembers();
             settable.AddRange(
-                type.GetMembers()
-                    .Where(member =>
-                        member switch
-                        {
-                            IFieldSymbol field => !field.IsStatic && !field.IsReadOnly && !field.IsConst,
-                            IPropertySymbol property => !property.IsStatic
-                                && !property.IsIndexer
-                                && property.SetMethod is { } setter
-                                && model.IsAccessible(position, setter),
-                            _ => false,
-                        }
-                        && model.IsAccessible(position, member)
-                        && IsBrowsable(member)
-                    )
+                members.Where(member => !hidden.Contains(member.Name) && IsSettable(member) && IsBrowsable(member))
             );
+            hidden.UnionWith(members.Select(member => member.Name));
         }
-        return [.. settable.DistinctBy(member => member.Name).OrderBy(member => member.Name, StringComparer.Ordinal)];
+        return [.. settable.OrderBy(member => member.Name, StringComparer.Ordinal)];
+    }
+
+    private static bool IsSettable(ISymbol member)
+    {
+        if (member.DeclaredAccessibility != Accessibility.Public || member.IsStatic)
+            return false;
+        if (member is IFieldSymbol field)
+            return !field.IsReadOnly && !field.IsConst;
+        if (member is not IPropertySymbol { IsIndexer: false } property)
+            return false;
+        while (property.OverriddenProperty is { } overridden)
+            property = overridden;
+        return property
+            is {
+                GetMethod.DeclaredAccessibility: Accessibility.Public,
+                SetMethod.DeclaredAccessibility: Accessibility.Public,
+            };
     }
 
     /// <summary>The type whose code is at <paramref name="position"/>, which access is checked within.</summary>
