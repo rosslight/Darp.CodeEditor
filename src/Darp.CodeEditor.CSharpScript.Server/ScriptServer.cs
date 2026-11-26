@@ -22,7 +22,7 @@ internal sealed class ScriptServer
             "documentHighlightProvider": true,
             "completionProvider": {
               "resolveProvider": true,
-              "triggerCharacters": ["."],
+              "triggerCharacters": [".", ":"],
               "allCommitCharacters": {{JsonSerializer.Serialize(ScriptCompletions.CommitCharacters)}}
             },
             "signatureHelpProvider": { "triggerCharacters": ["(", ",", "[", "<", "{"], "retriggerCharacters": [")", "]", ">", "}"] },

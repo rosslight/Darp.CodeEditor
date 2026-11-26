@@ -610,8 +610,9 @@ app's script environments.
 - **Diagnostics:** the compiler's errors and warnings. `#r`, `#load` and `#line` are one error each, in place of what
   the compiler says about them, and completion does not suggest them. Each diagnostic names `csharp` as its source, and
   a compiler diagnostic's code links to the page that its descriptor names.
-- **Completion:** Roslyn's list, with keywords and kinds, on `.` and whenever the client asks; a trigger character
-  reaches Roslyn as typed, so that it answers only where the character means something. Each item has its edit at
+- **Completion:** Roslyn's list, with keywords and kinds, on `.`, on `:` and whenever the client asks. A trigger
+  character reaches Roslyn as typed, so that it answers only where the character means something: `:` opens a list in
+  a format, such as `$"{DateTime.Now:yyyy}"`, and nowhere else, as after a named argument. Each item has its edit at
   once; its signature and XML docs come with resolve, also after the user typed on, from the version the list was asked
   for. An escaped word such as `@ev` completes identifiers, not keywords, over its `@`, and there is no list after a lone `@`.
   An obsolete member's item is tagged deprecated, so it shows struck through.

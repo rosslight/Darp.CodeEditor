@@ -113,6 +113,18 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task A_colon_opens_a_list_only_in_a_format()
+    {
+        var colon = new CompletionTrigger(CompletionTriggerKind.TriggerCharacter, ':');
+        using var format = await _fixture.OpenAsync("var now = $\"{DateTime.Now:|}\";");
+        format.Document.Features.ShouldNotBeNull().Completion.ShouldNotBeNull().TriggerCharacters.ShouldContain(':');
+        (await format.CompleteAsync(colon)).Items.ShouldContain(item => item.Label == "d");
+
+        using var argument = await _fixture.OpenAsync("var sum = Add(left:|");
+        (await argument.CompleteAsync(colon)).Items.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task A_member_list_completes_the_type_of_the_receiver()
     {
         using var script = await _fixture.OpenAsync("Greeting.|");
