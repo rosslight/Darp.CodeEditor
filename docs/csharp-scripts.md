@@ -61,8 +61,9 @@ its documents, which editors show like any other:
 --8<-- "csharp-scripts.cs:edit"
 ```
 
-Completion, hover, signature help, diagnostics and semantic colors follow the environment. Dispose documents when the
-user closes them, and the server when the app exits.
+Completion, hover, signature help, diagnostics and semantic colors follow the environment. They show the XML docs of
+.NET's members and of the marked references. Dispose documents when the user closes them, and the server when the app
+exits.
 
 ## Run a script
 
@@ -113,6 +114,9 @@ the runner and the marked references. The helpers run on that runtime, so a Nati
 ```sh
 dotnet publish -c Release -r linux-x64 -p:PublishAot=true
 ```
+
+The runtime comes with .NET's XML docs, 31 MB, which a build reads from the SDK instead. To leave them out, set
+`PublishCSharpScriptFrameworkDocs` to `false`: scripts then show docs for the marked references only.
 
 ## Rules
 

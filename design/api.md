@@ -48,6 +48,7 @@ if (compilation.Succeeded)
 - **The project file.**
   - `CSharpScriptReference="true"` on a package or project reference: scripts may use its assemblies. Publishing puts them in `helpers/script-api/` next to the app, NativeAOT apps included, with their XML docs, which hover and completion show. A marked package without assemblies of its own, such as `Microsoft.Data.Sqlite`, stands for the packages it depends on directly.
   - `PublishReadyToRun=true` and a runtime identifier: publishing needs them to compile the C# helpers with ReadyToRun and to ship their .NET runtime (prototype #48), also in a NativeAOT app. Without them it fails at once and says so.
+  - `PublishCSharpScriptFrameworkDocs=false`: publishing leaves out .NET's XML docs, 31 MB, which it otherwise puts next to the helpers' runtime. Scripts then show docs for the marked references only.
 - **StreamJsonRpc and PolyType** (#89), for the script API:
   - its attributes: `[JsonRpcContract]` and `[GenerateShape]` on the two interfaces of a session's bridge, `[GenerateShape]` on the data they exchange, and `[assembly: ExportRpcContractProxies]` (section 7 has the checklist);
   - the `IShapeable<T>` constraints on `CSharpScriptSession.StartAsync` and on a run's input. With them, NativeAOT apps call the bridge and copy the input without reflection, and the compiler rejects types without a shape;
@@ -669,8 +670,8 @@ app's script environments.
   directory, never from `PATH`, and reads .NET's XML docs in the folder of the reference assemblies that the build
   resolved, which `helpers/script-framework-docs.txt` names, copying nothing. `dotnet publish` compiles it with
   ReadyToRun for the app's platform, gives it an app host that looks only in `helpers/dotnet/`, and puts one .NET
-  runtime there from the runtime pack, also for a self-contained or NativeAOT app. A published server reads .NET's XML
-  docs next to that runtime's assemblies. These files join after the app's own publish, so its trimming, NativeAOT and
+  runtime there from the runtime pack, also for a self-contained or NativeAOT app, with the reference pack's XML docs
+  next to the runtime's assemblies. These files join after the app's own publish, so its trimming, NativeAOT and
   single-file steps never see them, and a republish replaces them.
 
 ## 7. Sessions
@@ -1292,7 +1293,8 @@ blocking:
   references that need 13.0.1 and 13.0.3 of one package and load one, and a multi-targeted library in its `net10.0`
   build. An incompatible pair fails with NuGet's NU1107, a reference that needs ASP.NET Core fails by name, and a
   republish without a reference leaves none of its files;
-- .NET's XML docs: a development build names the SDK's reference pack;
+- .NET's XML docs: a development build names the SDK's reference pack, a JIT and a NativeAOT publish put the docs next
+  to the helpers' runtime, and a republish with `PublishCSharpScriptFrameworkDocs=false` leaves none;
 - the server's assemblies have ReadyToRun code, and it starts with `DOTNET_ROOT` pointing nowhere. A published app with
   ReadyToRun, ten new processes on a machine with other work (load about 4): "C# ready" on 5,000 lines took 845 to
   899 ms, median 862 ms, within the budget of 1.5 s.
