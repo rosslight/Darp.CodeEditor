@@ -194,7 +194,12 @@ internal static class ScriptSignatureHelp
             _ => null,
         };
         ISymbol? leftSymbol = left is null ? null : model.GetSymbolInfo(left, cancellationToken).Symbol;
-        ITypeSymbol? leftType = left is null ? null : model.GetTypeInfo(left, cancellationToken).Type;
+        // After "?", a nullable value's members are its value's.
+        ITypeSymbol? leftType =
+            simpleName.Parent is MemberBindingExpressionSyntax memberBinding
+                ? SignatureCandidates.ReceiverTypeOf(model, memberBinding, cancellationToken)
+            : left is null ? null
+            : model.GetTypeInfo(left, cancellationToken).Type;
         INamespaceOrTypeSymbol? container = leftSymbol as INamespaceOrTypeSymbol ?? leftType;
         IEnumerable<ISymbol> found = SyntaxFacts.IsInNamespaceOrTypeContext(simpleName)
             ? model.LookupNamespacesAndTypes(position, container, name.ValueText)

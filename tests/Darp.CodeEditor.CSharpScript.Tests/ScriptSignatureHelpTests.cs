@@ -352,6 +352,14 @@ public sealed class ScriptSignatureHelpTests(ScriptServerFixture fixture)
             .ShouldNotBeNull()
             .Signatures.ShouldHaveSingleItem()
             .Label.ShouldContain("Holder.Pick<T>(T value)");
+
+        // After "?." a nullable value's methods are its value's.
+        using var nullable = await _fixture.OpenAsync(
+            "struct V { public T Pick<T>(T x) => x; }\nV? v = new();\nv?.Pick<|int>(1);"
+        );
+        SignatureHelpInfo help = (await nullable.SignatureHelpAsync()).ShouldNotBeNull();
+        Active(help).Label.ShouldContain("V.Pick<T>(T x)");
+        ActiveParameter(Active(help)).ShouldBe("T");
     }
 
     [Fact]
