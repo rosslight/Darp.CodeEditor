@@ -9,12 +9,15 @@ namespace Darp.CodeEditor.CSharpScript.Server;
 internal sealed class OpenScript(string uri, ScriptContext context, ScriptSnapshot snapshot)
 {
     /// <summary>
-    /// How many lists the script keeps for resolving: the one that the client shows, the one it asked for meanwhile,
-    /// and room for those whose answer crossed their cancellation.
+    /// How many answered lists the script keeps for resolving: the one that the client shows, the one it asked for
+    /// meanwhile, and room for those whose answer crossed their cancellation.
     /// </summary>
     private const int MaxCompletions = 4;
 
-    /// <summary>The lists whose items the client may still commit, oldest first; none of them cancelled.</summary>
+    /// <summary>
+    /// The lists whose items the client may still commit, oldest first: those under way, and the last
+    /// <see cref="MaxCompletions"/> answered; none of them cancelled or failed.
+    /// </summary>
     private readonly List<ScriptCompletions> _completions = [];
 
     private CancellationTokenSource _diagnostics = new();
@@ -29,14 +32,17 @@ internal sealed class OpenScript(string uri, ScriptContext context, ScriptSnapsh
 
     /// <summary>
     /// Starts a completion request. Its list resolves items from now on, beside the latest lists before it that the
-    /// client did not cancel: it shows one of them until the new answer comes, and may commit from it meanwhile.
+    /// client did not cancel: it shows one of them until the new answer comes, and may commit from it meanwhile. A
+    /// list takes room among those kept only once it is answered, so that one that is cancelled or fails pushes none
+    /// out.
     /// </summary>
     public ScriptCompletions Complete(CompletionParams parameters, int id, CancellationToken cancellationToken)
     {
         var list = new ScriptCompletions(id, Snapshot, parameters, cancellationToken);
-        _completions.RemoveAll(kept => kept.IsCancelled);
-        if (_completions.Count == MaxCompletions)
-            _completions.RemoveAt(0);
+        _completions.RemoveAll(kept => kept.IsDropped);
+        List<ScriptCompletions> answered = [.. _completions.Where(kept => kept.IsAnswered)];
+        foreach (ScriptCompletions oldest in answered.Take(answered.Count - MaxCompletions))
+            _completions.Remove(oldest);
         _completions.Add(list);
         return list;
     }

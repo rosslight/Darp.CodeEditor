@@ -619,17 +619,18 @@ app's script environments.
   that `#r ` stays as typed rather than committing `region`. Each diagnostic names `csharp` as its source, and a
   compiler diagnostic's code links to the page that its descriptor names.
 - **Completion:** Roslyn's list, with keywords and kinds, on `.`, `:` and `<`, and whenever the client asks. A trigger
-  character reaches Roslyn as typed, so that it answers only where the character means something: `:` opens a list in
-  a format, such as `$"{DateTime.Now:yyyy}"`, and nowhere else, as after a named argument, and `<` in a documentation
+  character reaches Roslyn as typed, so that it answers only where the character means something: `:` opens a list in a
+  format, such as `$"{DateTime.Now:yyyy}"`, and nowhere else, as after a named argument, and `<` in a documentation
   comment. A tag there goes in as Roslyn writes it, also over the `<`, with the caret where Roslyn puts it, such as
-  between the quotes of `<see cref=""/>`; other edits beyond the item's word, such as an override's, are left out.
-  Each item has its edit at once; its signature and XML docs come with resolve, also after the user typed on, from the
-  version the list was asked for. The last four lists of a script that the client did not cancel resolve their items,
-  so that the list that shows still resolves while a newer one is asked for. An escaped word such as `@ev` completes identifiers, not keywords, over its `@`, and
-  there is no list after a lone `@`. An obsolete member's item is tagged deprecated, so it shows struck through. A
-  named argument's item, `amount:`, puts in its colon, and goes over one that follows past white space on its line, so
-  that one colon stays, also when it is typed; a colon after a line break or a comment stays where it is, after the
-  name alone, and the item has no `:` among its commit characters.
+  between the quotes of `<see cref=""/>`; other edits beyond the item's word, such as an override's, are left out. Each
+  item has its edit at once; its signature and XML docs come with resolve, also after the user typed on, from the
+  version the list was asked for. The lists of a script still under way and its last four answered ones that the client
+  did not cancel resolve their items, so that the list that shows still resolves while a newer one is asked for; a
+  request that is cancelled or fails pushes none out. An escaped word such as `@ev` completes identifiers, not keywords,
+  over its `@`, and there is no list after a lone `@`. An obsolete member's item is tagged deprecated, so it shows
+  struck through. A named argument's item, `amount:`, puts in its colon, and goes over one that follows past white space
+  on its line, so that one colon stays, also when it is typed; a colon after a line break or a comment stays where it
+  is, after the name alone, and the item has no `:` among its commit characters.
 - **Imports:** a list also has the types and extension methods from namespaces that the script does not import, such
   as `JsonSerializer` and `GetFromJsonAsync`, from .NET's assemblies and the marked ones, not from what those depend
   on. Only the best 100 that match the typed name come, as the client ranks them, also with a typo in a list that it

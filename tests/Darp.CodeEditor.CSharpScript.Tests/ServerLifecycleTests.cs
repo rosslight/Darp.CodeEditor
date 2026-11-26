@@ -84,6 +84,40 @@ public sealed class ServerLifecycleTests
     }
 
     [Fact]
+    public async Task A_cancelled_request_keeps_the_four_lists_before_it_resolving()
+    {
+        await using var server = RawServer.Start();
+        await server.InitializeAsync();
+        string request = RawServer.Position("untitled:a", 0, "var builder = new Str".Length);
+        await server.WriteAsync([RawServer.Open("untitled:a", "var builder = new Str")]);
+        // The item of the first of four lists that reached the client.
+        string first = "";
+        for (int id = 10; id < 14; id++)
+        {
+            await server.WriteAsync([RawServer.Request(id, "textDocument/completion", request)]);
+            JsonElement items = (await server.ReadUntilAsync(m => IsAnswerTo(m, id)))[^1]
+                .GetProperty("result")
+                .GetProperty("items");
+            if (id == 10)
+                first = items
+                    .EnumerateArray()
+                    .Single(i => i.GetProperty("label").ValueEquals("StringBuilder"))
+                    .GetRawText();
+        }
+
+        await server.WriteAsync([
+            RawServer.Request(14, "textDocument/completion", request),
+            """{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":14}}""",
+        ]);
+        await server.ReadUntilAsync(m => IsAnswerTo(m, 14));
+
+        await server.WriteAsync([RawServer.Request(15, "completionItem/resolve", first)]);
+        JsonElement resolved = (await server.ReadUntilAsync(m => IsAnswerTo(m, 15)))[^1].GetProperty("result");
+        resolved.TryGetProperty("additionalTextEdits", out JsonElement edits).ShouldBeTrue();
+        edits.GetArrayLength().ShouldBe(1);
+    }
+
+    [Fact]
     public async Task Without_the_folder_of_dotnet_docs_hover_answers_without_them()
     {
         string missing = Path.Combine(AppContext.BaseDirectory, "missing-dotnet-docs");

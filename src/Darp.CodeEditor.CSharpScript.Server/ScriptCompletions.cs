@@ -66,8 +66,13 @@ internal sealed class ScriptCompletions
     /// <summary>The answer.</summary>
     public Task<LspCompletionList?> Items { get; }
 
-    /// <summary>Whether the client cancelled the request: its answer never reaches the client.</summary>
-    public bool IsCancelled => _cancellationToken.IsCancellationRequested;
+    /// <summary>
+    /// Whether the answer never reaches the client: the client cancelled the request, or the answer failed.
+    /// </summary>
+    public bool IsDropped => _cancellationToken.IsCancellationRequested || Items.IsFaulted || Items.IsCanceled;
+
+    /// <summary>Whether the answer is ready for the client.</summary>
+    public bool IsAnswered => Items.IsCompletedSuccessfully && !IsDropped;
 
     /// <summary>
     /// <paramref name="item"/> with its signature and documentation, and for a type or extension method from a namespace
