@@ -21,8 +21,7 @@ namespace Darp.CodeEditor.Popups;
 /// </remarks>
 internal sealed class HoverPopup
 {
-    // VS Code's: the least of the hover's most width and height, which grow with the editor, and its least width.
-    private const double MinMaxWidth = 750;
+    // VS Code's: the least of the hover's most height, which grows with the editor, and its least width.
     private const double MinMaxHeight = 250;
     private const double MinResizedWidth = 150;
 
@@ -80,7 +79,7 @@ internal sealed class HoverPopup
     {
         if (!_resized)
         {
-            _frame.MaxWidth = Math.Max(MinMaxWidth, Math.Floor(_editor.Bounds.Width * 0.66));
+            _frame.MaxWidth = PopupFrame.MaxTextWidth(_editor.Bounds.Width);
             _frame.MaxHeight = Math.Max(MinMaxHeight, Math.Floor(_editor.Bounds.Height / 4));
         }
         _shown = HoverView.Create(blocks, look, look.Colors.HoverBorder, selectable: true);

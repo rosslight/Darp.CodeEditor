@@ -70,6 +70,44 @@ public sealed class SignatureHelpTests(UiFixture ui)
         });
 
     [Fact]
+    public Task A_long_signature_shows_on_one_line_within_the_window_and_its_documentation_wraps_as_a_hovers() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "call");
+            using var window = new EditorWindow(new CodeEditor { Document = document }, width: 1200);
+            double hover = PopupFrame.MaxTextWidth(window.Editor.Bounds.Width);
+            // Wider than a hover, narrower than the window.
+            var words = new List<string> { "first" };
+            while (words.Sum(word => word.Length + 2) * window.TextView.WideSpaceWidth < hover + 100)
+                words.Add("parameter" + words.Count);
+            string label = $"call({string.Join(", ", words)})";
+            string documentation = string.Join(' ', Enumerable.Repeat("word", 300));
+            var signatures = new JsonArray(
+                new JsonObject
+                {
+                    ["label"] = label,
+                    ["documentation"] = documentation,
+                    ["parameters"] = new JsonArray(new JsonObject { ["label"] = "first" }),
+                }
+            );
+            using CodeDocument command = server.CreateDocument(
+                FakeServer.Commands,
+                $"signatures {signatures.ToJsonString()}"
+            );
+            await fake.WaitForAsync("set signatures");
+            window.Editor.Selection = new TextSelection(4);
+
+            window.Type("(");
+
+            PopupFrame popup = await WaitForSignatureAsync(window, "first", documentation);
+            Signature(popup).Inlines?.Text.ShouldBe(label);
+            Signature(popup).Bounds.Height.ShouldBeLessThan(2 * window.TextView.DefaultLineHeight);
+            Text(popup, documentation).Bounds.Width.ShouldBeLessThanOrEqualTo(hover);
+        });
+
+    [Fact]
     public Task A_retrigger_character_moves_the_active_parameter_at_once() =>
         _ui.Run(async () =>
         {
@@ -215,6 +253,76 @@ public sealed class SignatureHelpTests(UiFixture ui)
             window.Press(Key.Down);
             CompletionTests.List(window).ShouldNotBeNull().SelectedIndex.ShouldBe(1);
             ActiveSignature(Popup(window).ShouldNotBeNull()).ShouldBe("call(first, second, third)");
+        });
+
+    [Fact]
+    public Task Several_signatures_show_which_one_is_active_between_buttons_that_choose_the_one_before_and_after() =>
+        _ui.Run(async () =>
+        {
+            var time = new ManualTime();
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "call");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await CompletionTests.StartServingAsync(server, document);
+            await OpenAsync(window, document, time);
+            PopupFrame popup = Popup(window).ShouldNotBeNull();
+            Texts(popup).ShouldContain("1/2");
+
+            window.Click(CompletionTests.BoundsInWindow(Buttons(popup)[1]).Center, MouseButton.Left);
+
+            popup = await WaitForSignatureAsync(window, "first", "Calls with three.");
+            ActiveSignature(popup).ShouldBe("call(first, second, third)");
+            Texts(popup).ShouldContain("2/2");
+            // The editor keeps the keyboard and the text.
+            window.Editor.IsKeyboardFocusWithin.ShouldBeTrue();
+            document.Text.ShouldBe("call(");
+
+            window.Click(CompletionTests.BoundsInWindow(Buttons(popup)[0]).Center, MouseButton.Left);
+
+            popup = await WaitForSignatureAsync(window, "first", "Calls with two.");
+            Texts(popup).ShouldContain("1/2");
+
+            // One signature: nothing to choose among.
+            var one = new JsonArray(
+                new JsonObject
+                {
+                    ["label"] = "call(first)",
+                    ["documentation"] = "Calls with one.",
+                    ["parameters"] = new JsonArray(new JsonObject { ["label"] = "first" }),
+                }
+            );
+            using CodeDocument command = server.CreateDocument(FakeServer.Commands, $"signatures {one.ToJsonString()}");
+            await fake.WaitForAsync("set signatures");
+            window.Press(Key.Space, EditorWindow.Command | KeyModifiers.Shift);
+            popup = await WaitForSignatureAsync(window, "first", "Calls with one.");
+            Buttons(popup).ShouldBeEmpty();
+            Texts(popup).ShouldNotContain("1/1");
+        });
+
+    [Fact]
+    public Task The_documentation_shows_right_below_the_active_signature() =>
+        _ui.Run(async () =>
+        {
+            var time = new ManualTime();
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options with { TimeProvider = time });
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "call");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            await CompletionTests.StartServingAsync(server, document);
+            await OpenAsync(window, document, time);
+            PopupFrame popup = Popup(window).ShouldNotBeNull();
+            Rect two = CompletionTests.BoundsInWindow(Text(popup, "call(first, second)"));
+            Rect three = CompletionTests.BoundsInWindow(Text(popup, "call(first, second, third)"));
+            Rect documentation = CompletionTests.BoundsInWindow(Text(popup, "Calls with two."));
+            documentation.Top.ShouldBeGreaterThan(two.Bottom);
+            documentation.Bottom.ShouldBeLessThan(three.Top);
+
+            window.Press(Key.Down);
+
+            popup = await WaitForSignatureAsync(window, "first", "Calls with three.");
+            three = CompletionTests.BoundsInWindow(Text(popup, "call(first, second, third)"));
+            CompletionTests.BoundsInWindow(Text(popup, "Calls with three.")).Top.ShouldBeGreaterThan(three.Bottom);
         });
 
     [Fact]
@@ -446,8 +554,23 @@ public sealed class SignatureHelpTests(UiFixture ui)
 
     private static IEnumerable<Run> Runs(PopupFrame popup) => Signature(popup).Inlines?.OfType<Run>() ?? [];
 
+    /// <summary>The text block that shows <paramref name="text"/>.</summary>
+    private static TextBlock Text(PopupFrame popup, string text) =>
+        popup.GetVisualDescendants().OfType<TextBlock>().First(t => (t.Inlines?.Text ?? t.Text) == text);
+
+    /// <summary>The buttons that show: the one that chooses the signature before, then the one after.</summary>
+    private static IReadOnlyList<PopupButton> Buttons(PopupFrame popup) =>
+        [.. popup.GetVisualDescendants().OfType<PopupButton>().Where(button => button.IsEffectivelyVisible)];
+
+    /// <summary>The texts that show.</summary>
     private static IReadOnlyList<string> Texts(PopupFrame popup) =>
-        [.. popup.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Inlines?.Text ?? t.Text ?? "")];
+        [
+            .. popup
+                .GetVisualDescendants()
+                .OfType<TextBlock>()
+                .Where(t => t.IsEffectivelyVisible)
+                .Select(t => t.Inlines?.Text ?? t.Text ?? ""),
+        ];
 
     /// <summary>The label of the signature marked active, on a background of its own; null when none is marked.</summary>
     private static string? ActiveSignature(PopupFrame popup) =>

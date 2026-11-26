@@ -196,7 +196,7 @@ public sealed class PopupLookTests(UiFixture ui)
             var frame = new PopupFrame
             {
                 Name = "Hover",
-                MaxWidth = PopupFrame.MaxTextWidth,
+                MaxWidth = PopupFrame.MaxTextWidth(editor.Bounds.Width),
                 Child = new PopupScrollViewer
                 {
                     Content = text,

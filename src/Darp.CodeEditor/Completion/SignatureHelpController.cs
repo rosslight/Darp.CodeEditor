@@ -1,6 +1,8 @@
+using System.Globalization;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Layout;
 using Avalonia.Logging;
 using Avalonia.Threading;
 using AvaloniaEdit.Document;
@@ -19,7 +21,10 @@ namespace Darp.CodeEditor.Completion;
 /// <summary>
 /// Signature help in one editor's view of a document: every signature of the call around the caret
 /// (<see cref="SignatureView"/>), with the parameter at the caret in bold and its documentation, in the editor's popup in
-/// the color theme's hover colors, above the caret's line, so that completion's list below it shows too.
+/// the color theme's hover colors, above the caret's line, so that completion's list below it shows too. It is as wide
+/// as its longest signature, within the window, and its documentation as a hover's text. While several signatures
+/// show, a bar above them says which one is active, as <c>2/5</c>, between buttons that choose the one before and
+/// after, as Up and Down do.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -52,6 +57,10 @@ internal sealed class SignatureHelpController : IEditorFeature
     {
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
     };
+    private readonly PopupButton _previous = new(up: true);
+    private readonly PopupText _counter = new() { VerticalAlignment = VerticalAlignment.Center };
+    private readonly PopupButton _next = new(up: false);
+    private readonly PopupStack _bar;
     private readonly PopupFrame _frame;
     private readonly EditorPopup _popup;
     private PopupColors _colors = PopupColors.Default;
@@ -83,11 +92,20 @@ internal sealed class SignatureHelpController : IEditorFeature
         _buffer = textArea.Document;
         _document = document;
         _highlighter = highlighter;
+        _bar = new PopupStack
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 4,
+            Margin = new Avalonia.Thickness(0, 0, 0, 4),
+            Children = { _previous, _counter, _next },
+        };
+        DockPanel.SetDock(_bar, Dock.Top);
+        _previous.Clicked += () => Cycle(forward: false);
+        _next.Clicked += () => Cycle(forward: true);
         _frame = new PopupFrame
         {
             Name = "SignatureHelp",
-            Child = _content,
-            MaxWidth = PopupFrame.MaxTextWidth,
+            Child = new PopupDock { Children = { _bar, _content } },
             Padding = new Avalonia.Thickness(8, 4),
         };
         Paint();
@@ -328,7 +346,24 @@ internal sealed class SignatureHelpController : IEditorFeature
             if (_reading != reading)
                 return;
             var look = new CodeLook(_editor.FontFamily, _editor.FontSize, _colors);
-            _content.Content = SignatureView.Create(help, labels, blocks, look, _colors, out Control active);
+            _content.Content = SignatureView.Create(
+                help,
+                labels,
+                blocks,
+                PopupFrame.MaxTextWidth(_editor.Bounds.Width),
+                look,
+                _colors,
+                out Control active
+            );
+            _bar.IsVisible = help.Signatures.Count > 1;
+            // As wide for each signature, in the editor's font, so that the button after it stays under the pointer.
+            string count = help.Signatures.Count.ToString(CultureInfo.InvariantCulture);
+            string number = (help.ActiveSignature + 1).ToString(CultureInfo.InvariantCulture).PadLeft(count.Length);
+            (_counter.Text, _counter.FontFamily, _counter.FontSize) = (
+                $"{number}/{count}",
+                look.FontFamily,
+                look.FontSize
+            );
             _popup.Show(
                 _textView,
                 () =>
@@ -349,8 +384,12 @@ internal sealed class SignatureHelpController : IEditorFeature
         }
     }
 
-    private void Paint() =>
+    private void Paint()
+    {
         _frame.Paint(_colors.HoverBackground, _colors.HoverBorder, _colors.HoverForeground, _colors);
+        _previous.Paint(_colors.HoverForeground, _colors.ListHoverBackground);
+        _next.Paint(_colors.HoverForeground, _colors.ListHoverBackground);
+    }
 
     private void OnClosingChange(object? sender, EventArgs e) => Close();
 }

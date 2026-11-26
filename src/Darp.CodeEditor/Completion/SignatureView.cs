@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Darp.CodeEditor.LanguageClient;
 using Darp.CodeEditor.Popups;
@@ -8,10 +9,11 @@ using Darp.CodeEditor.Popups;
 namespace Darp.CodeEditor.Completion;
 
 /// <summary>
-/// What signature help shows: every signature of the call at once, in the editor's font, the active one on
-/// <c>list.inactiveSelectionBackground</c> while there are more. The active parameter is bold in
-/// <c>editorHoverWidget.highlightForeground</c>. Below the signatures, the active parameter's and signature's
-/// documentation.
+/// What signature help shows: every signature of the call at once, in the editor's font on the editor's background, the
+/// active one on <c>list.inactiveSelectionBackground</c> while there are more, with its active parameter bold in
+/// <c>editorHoverWidget.highlightForeground</c>. Right below the active signature, the active parameter's and the
+/// signature's documentation, so that it stays in view with the signature it is about. Signatures take the width they
+/// need, as code is read line by line; the documentation wraps as a hover's text does.
 /// </summary>
 internal static class SignatureView
 {
@@ -21,49 +23,66 @@ internal static class SignatureView
     /// show.
     /// </param>
     /// <param name="documentation">The documentation of the active parameter and signature.</param>
+    /// <param name="documentationWidth">The most width of the documentation.</param>
     /// <param name="look">How code looks.</param>
     /// <param name="colors">The popups' colors.</param>
-    /// <param name="active">The active signature's row, to scroll into view.</param>
+    /// <param name="active">The active signature's row with its documentation, to scroll into view.</param>
     public static Control Create(
         SignatureHelpInfo help,
         IReadOnlyList<string?> labels,
         IReadOnlyList<HoverBlock> documentation,
+        double documentationWidth,
         CodeLook look,
         PopupColors colors,
         out Control active
     )
     {
-        var signatures = new PopupStack { Spacing = 2 };
-        active = signatures;
+        var rows = new PopupStack();
+        active = rows;
         for (int i = 0; i < help.Signatures.Count; i++)
         {
             if (labels[i] is not { } label)
                 continue;
             bool isActive = i == help.ActiveSignature;
-            var row = new PopupBox
+            // On the text's background, as its colors are chosen for it.
+            Control row = new PopupBox
             {
-                Background = isActive && help.Signatures.Count > 1 ? colors.ListInactiveSelectionBackground : null,
-                Padding = new Thickness(6, 2),
-                CornerRadius = new CornerRadius(2),
-                Child = new PopupText
+                Background = look.Background,
+                Padding = new Thickness(0, 1),
+                Child = new PopupBox
                 {
-                    Inlines = Label(help.Signatures[i], label, colors.HoverHighlight),
-                    FontFamily = look.FontFamily,
-                    FontSize = look.FontSize,
-                    Foreground = look.Foreground,
-                    TextWrapping = TextWrapping.Wrap,
+                    Background = isActive && help.Signatures.Count > 1 ? colors.ListInactiveSelectionBackground : null,
+                    Padding = new Thickness(6, 2),
+                    CornerRadius = new CornerRadius(2),
+                    Child = new PopupText
+                    {
+                        Inlines = Label(help.Signatures[i], label, colors.HoverHighlight),
+                        FontFamily = look.FontFamily,
+                        FontSize = look.FontSize,
+                        Foreground = look.Foreground,
+                        TextWrapping = TextWrapping.Wrap,
+                    },
                 },
             };
             if (isActive)
+            {
+                if (documentation.Count > 0)
+                {
+                    PopupStack docs = HoverView.Create(documentation, look, colors.HoverBorder);
+                    docs.Margin = new Thickness(0, 6);
+                    // The text wraps as a hover's does; the lines between its parts span the popup.
+                    foreach (Control block in docs.Children.Where(block => block is not PopupLine))
+                    {
+                        block.MaxWidth = documentationWidth;
+                        block.HorizontalAlignment = HorizontalAlignment.Left;
+                    }
+                    row = new PopupStack { Children = { row, docs } };
+                }
                 active = row;
-            signatures.Children.Add(row);
+            }
+            rows.Children.Add(row);
         }
-        // On the text's background, as its colors are chosen for it.
-        var code = new PopupDock { Background = look.Background, Children = { signatures } };
-        var panel = new PopupStack { Spacing = 6, Children = { code } };
-        if (documentation.Count > 0)
-            panel.Children.Add(HoverView.Create(documentation, look, colors.HoverBorder));
-        return panel;
+        return rows;
     }
 
     /// <summary><paramref name="label"/>, what shows of the signature's, with its active parameter in bold.</summary>

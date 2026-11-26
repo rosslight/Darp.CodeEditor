@@ -33,8 +33,11 @@ internal enum Edges
 /// </remarks>
 internal sealed class PopupFrame : Border
 {
-    /// <summary>The most width of a popup of text, before it wraps.</summary>
-    public const double MaxTextWidth = 320;
+    /// <summary>
+    /// The most width of a popup of text beside an editor <paramref name="editorWidth"/> wide, before it wraps: VS Code's
+    /// hover's, two thirds of the editor, or 750 pixels where that is more.
+    /// </summary>
+    public static double MaxTextWidth(double editorWidth) => Math.Max(750, Math.Floor(editorWidth * 0.66));
 
     /// <summary>The corners' radius, as VS Code's widgets.</summary>
     private const double Radius = 3;
