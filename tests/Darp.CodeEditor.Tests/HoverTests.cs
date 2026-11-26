@@ -104,10 +104,9 @@ public sealed class HoverTests(UiFixture ui)
             var look = new CodeLook(new FontFamily("DejaVu Sans Mono"), 14, PopupColors.Default);
             const string detail = "enum Microsoft.VisualBasic.FileIO.RecycleOption";
             PopupStack panel = HoverView.Create([new HoverCode([new CodeRun(detail, null)])], look, selectable: true);
-            // Narrower than the name, which Unicode's rules keep whole after the space.
             var window = new Window
             {
-                Width = 300,
+                Width = 800,
                 Height = 200,
                 Content = panel,
             };
@@ -116,6 +115,10 @@ public sealed class HoverTests(UiFixture ui)
             {
                 window.UpdateLayout();
                 var code = (SelectableTextBlock)panel.Children.Single();
+                // Narrower than the name, which Unicode's rules keep whole after the space, in whatever font the
+                // system has.
+                panel.Width = code.DesiredSize.Width * 0.8;
+                window.UpdateLayout();
 
                 code.TextLayout.TextLines.Count.ShouldBe(2);
                 code.TextLayout.TextLines[0].Length.ShouldBeGreaterThan("enum ".Length);
