@@ -575,7 +575,8 @@ How the client talks to a server, where the protocol leaves a choice:
   the active signature, then the active signature's, so that it scrolls into view with it, all of it as much as a hover
   shows, the active signature first. The popup is as wide as its longest signature, within the window, so that each
   keeps to one line; the documentation's text wraps at a hover's width, two thirds of the editor or 750 pixels where
-  that is more. While several show, a bar above them, which does not scroll, gives the active one's number and the
+  that is more, and while several signatures show, at their longest's, so that choosing another leaves the popup as
+  wide and its buttons where they are. While several show, a bar above them, which does not scroll, gives the active one's number and the
   count, as `2/5`, between buttons that choose the one before and after; a click on them leaves the keyboard in the
   editor. Up and Down, once completion's list is closed, and Alt+Up and Alt+Down, ahead of moving lines, choose the
   active one too, around the ends. It ends on Escape, after completion's list, on a click or drag that moves the caret,

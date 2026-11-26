@@ -301,6 +301,52 @@ public sealed class SignatureHelpTests(UiFixture ui)
         });
 
     [Fact]
+    public Task Choosing_another_signature_leaves_the_buttons_under_the_pointer_also_with_a_long_documentation() =>
+        _ui.Run(async () =>
+        {
+            var fake = new FakeServer();
+            await using var server = new LanguageServer(fake.Options);
+            string documentation = string.Join(' ', Enumerable.Repeat("word", 300));
+            var signatures = new JsonArray(
+                new JsonObject
+                {
+                    ["label"] = "call(first)",
+                    ["parameters"] = new JsonArray(new JsonObject { ["label"] = "first" }),
+                },
+                new JsonObject
+                {
+                    ["label"] = "call(first, second)",
+                    ["documentation"] = documentation,
+                    ["parameters"] = new JsonArray(
+                        new JsonObject { ["label"] = "first" },
+                        new JsonObject { ["label"] = "second" }
+                    ),
+                }
+            );
+            using CodeDocument command = server.CreateDocument(
+                FakeServer.Commands,
+                $"signatures {signatures.ToJsonString()}"
+            );
+            await fake.WaitForAsync("set signatures");
+            using CodeDocument document = server.CreateDocument(CodeLanguage.PlainText, "");
+            using var window = new EditorWindow(new CodeEditor { Document = document });
+            // Near the window's right edge: a popup as wide as the documentation would move left to stay inside.
+            document.Text = new string(' ', (int)(500 / window.TextView.WideSpaceWidth)) + "call";
+            window.Editor.Selection = new TextSelection(document.Text.Length);
+            window.Type("(");
+            PopupFrame popup = await WaitForCountAsync(window, "1/2");
+            Point next = CompletionTests.BoundsInWindow(Buttons(popup)[1]).Center;
+
+            window.Click(next, MouseButton.Left);
+
+            popup = await WaitForCountAsync(window, "2/2");
+            Texts(popup).ShouldContain(documentation);
+            CompletionTests.BoundsInWindow(Buttons(popup)[1]).Center.ShouldBe(next);
+            window.Click(next, MouseButton.Left);
+            await WaitForCountAsync(window, "1/2");
+        });
+
+    [Fact]
     public Task The_documentation_shows_right_below_the_active_signature() =>
         _ui.Run(async () =>
         {
@@ -541,6 +587,19 @@ public sealed class SignatureHelpTests(UiFixture ui)
             return popup is not null
                 && Texts(popup).Contains(documentation)
                 && Runs(popup).Any(run => run.Text == active && run.FontWeight == FontWeight.Bold);
+        });
+        return popup ?? throw new InvalidOperationException();
+    }
+
+    /// <summary>Waits for the popup whose count of the signatures reads <paramref name="count"/>.</summary>
+    private static async Task<PopupFrame> WaitForCountAsync(EditorWindow window, string count)
+    {
+        PopupFrame? popup = null;
+        await Wait.UntilAsync(() =>
+        {
+            window.Render();
+            popup = Popup(window);
+            return popup is not null && Texts(popup).Contains(count);
         });
         return popup ?? throw new InvalidOperationException();
     }

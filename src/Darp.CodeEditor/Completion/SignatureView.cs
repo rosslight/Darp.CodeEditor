@@ -13,7 +13,8 @@ namespace Darp.CodeEditor.Completion;
 /// active one on <c>list.inactiveSelectionBackground</c> while there are more, with its active parameter bold in
 /// <c>editorHoverWidget.highlightForeground</c>. Right below the active signature, the active parameter's and the
 /// signature's documentation, so that it stays in view with the signature it is about. Signatures take the width they
-/// need, as code is read line by line; the documentation wraps as a hover's text does.
+/// need, as code is read line by line; the documentation wraps as a hover's text does, and while several signatures
+/// show, within the widest of them, so that choosing another leaves the popup as wide, and its buttons where they are.
 /// </summary>
 internal static class SignatureView
 {
@@ -39,6 +40,7 @@ internal static class SignatureView
     {
         var rows = new PopupStack();
         active = rows;
+        Control? activeRow = null;
         for (int i = 0; i < help.Signatures.Count; i++)
         {
             if (labels[i] is not { } label)
@@ -65,23 +67,33 @@ internal static class SignatureView
                 },
             };
             if (isActive)
-            {
-                if (documentation.Count > 0)
-                {
-                    PopupStack docs = HoverView.Create(documentation, look, colors.HoverBorder);
-                    docs.Margin = new Thickness(0, 6);
-                    // The text wraps as a hover's does; the lines between its parts span the popup.
-                    foreach (Control block in docs.Children.Where(block => block is not PopupLine))
-                    {
-                        block.MaxWidth = documentationWidth;
-                        block.HorizontalAlignment = HorizontalAlignment.Left;
-                    }
-                    row = new PopupStack { Children = { row, docs } };
-                }
-                active = row;
-            }
+                activeRow = row;
             rows.Children.Add(row);
         }
+        if (activeRow is null)
+            return rows;
+        active = activeRow;
+        if (documentation.Count == 0)
+            return rows;
+        double width = documentationWidth;
+        if (help.Signatures.Count > 1)
+        {
+            foreach (Control row in rows.Children)
+                row.Measure(Size.Infinity);
+            width = Math.Min(width, rows.Children.Max(row => row.DesiredSize.Width));
+        }
+        PopupStack docs = HoverView.Create(documentation, look, colors.HoverBorder);
+        docs.Margin = new Thickness(0, 6);
+        // The text wraps; the lines between its parts span the popup.
+        foreach (Control block in docs.Children.Where(block => block is not PopupLine))
+        {
+            block.MaxWidth = width;
+            block.HorizontalAlignment = HorizontalAlignment.Left;
+        }
+        int at = rows.Children.IndexOf(activeRow);
+        rows.Children.RemoveAt(at);
+        active = new PopupStack { Children = { activeRow, docs } };
+        rows.Children.Insert(at, active);
         return rows;
     }
 
