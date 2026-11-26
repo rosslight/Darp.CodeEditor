@@ -191,9 +191,13 @@ public sealed class CompletionBehaviorTests(UiFixture ui)
 
             window.Type("nit");
 
-            await WaitForLabelsAsync(window, ["print"]);
-            window.Render();
-            RowRuns(window, "print").ShouldBe([("print", true)]);
+            // The list shows "print" alone from "prn" on: its highlights tell that the whole text was filtered.
+            await Wait.UntilAsync(() =>
+            {
+                window.Render();
+                return Labels(window).SequenceEqual(["print"])
+                    && RowRuns(window, "print").SequenceEqual([("print", true)]);
+            });
             window.Press(Key.Escape);
             await OpenAsync(window, 5);
             Labels(window).ShouldBe(["print"]);
