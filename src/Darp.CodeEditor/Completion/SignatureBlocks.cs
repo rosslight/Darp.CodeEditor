@@ -58,7 +58,26 @@ internal static class SignatureBlocks
         // The parameter's offsets are the whole label's: a cut one ends before its "…".
         int kept = label == signature.Label ? label.Length : label.Length - 1;
         ParameterInfo parameter = signature.Parameters[signature.ActiveParameter];
-        return (Math.Min(parameter.Start, kept), Math.Min(parameter.Start + parameter.Length, kept));
+        return (
+            InCode(label, Math.Min(parameter.Start, kept)),
+            InCode(label, Math.Min(parameter.Start + parameter.Length, kept))
+        );
+    }
+
+    /// <summary>
+    /// <paramref name="offset"/> in <paramref name="label"/> as an offset in its highlighted code, whose lines end at
+    /// <c>\n</c> alone (<see cref="HoverBlocks.Highlight(string, TextMateGrammar?, CancellationToken)"/>): one less
+    /// for each <c>\r\n</c> before it.
+    /// </summary>
+    private static int InCode(string label, int offset)
+    {
+        int pairs = 0;
+        for (int i = 0; i + 1 < offset; i++)
+        {
+            if (label[i] == '\r' && label[i + 1] == '\n')
+                pairs++;
+        }
+        return offset - pairs;
     }
 
     /// <summary>

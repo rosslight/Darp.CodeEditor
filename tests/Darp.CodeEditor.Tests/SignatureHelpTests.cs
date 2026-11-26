@@ -6,6 +6,7 @@ using Avalonia.Controls.Documents;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.VisualTree;
+using Darp.CodeEditor.Completion;
 using Darp.CodeEditor.LanguageClient;
 using Darp.CodeEditor.Popups;
 
@@ -163,6 +164,27 @@ public sealed class SignatureHelpTests(UiFixture ui)
             // The signature as code, in the editor's font.
             Signature(popup).FontFamily.ShouldBe(editor.FontFamily);
             Runs(popup).ShouldContain(run => run.Text == "first" && run.FontWeight == FontWeight.Bold);
+        });
+
+    [Fact]
+    public Task A_label_over_lines_ending_in_CRLF_marks_the_parameter_that_its_offsets_name() =>
+        _ui.Run(() =>
+        {
+            const string label = "call(int first,\r\n  string second)";
+            int start = label.IndexOf("string second", StringComparison.Ordinal);
+            var signature = new SignatureInfo(
+                label,
+                null,
+                [
+                    new ParameterInfo(5, "int first".Length, null),
+                    new ParameterInfo(start, "string second".Length, null),
+                ],
+                ActiveParameter: 1
+            );
+
+            var code = (HoverCode)SignatureBlocks.Of(signature, null, Brushes.Blue, CancellationToken.None)[0];
+
+            string.Concat(code.Runs.Where(run => run.Bold).Select(run => run.Text)).ShouldBe("string second");
         });
 
     [Fact]
