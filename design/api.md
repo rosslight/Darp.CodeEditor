@@ -223,7 +223,8 @@ otherwise (#114).
   Every popup of code and docs, the hover with or without problems, completion's details and signature help's card,
   has one look, the card's: the hover's colors (`editorHoverWidget.background`, `.border` and `.foreground`) and 8 by
   4 pixels of padding; code highlighted with the document's grammar, in the editor's font and token colors, on the
-  popup's background, filling each line and breaking at any character, as VS Code's completion details; a line in `editorHoverWidget.border` between the code that opens a part, as a signature, and
+  popup's background, filling each line and breaking at any character, as VS Code's completion details, though still
+  after a hyphen or a slash, where Unicode's rules break; a line in `editorHoverWidget.border` between the code that opens a part, as a signature, and
   the docs below it; and the docs as text in the muted `editorHoverWidget.foreground`. Signature help's active
   parameter is bold in `editorHoverWidget.highlightForeground`, over its tokens' colors.
 - **The search bar and the text's scroll bars** are the app's controls, in its theme.
@@ -650,12 +651,17 @@ app's script environments.
   arguments, then members, as the globals', then the methods that every object has, such as `ToString`, then the rest,
   as types and keywords, and the types from namespaces that the script does not import last. A variable, field or
   property names its type, and a method its return type, as its `labelDetails.description`, which shows at the right
-  of its row, as in Rider: `int`, `string?`, `void`. Types, keywords and named arguments name none. Each item's sort text is
+  of its row, as in Rider: `int`, `string?`, `void`. Types, keywords, named arguments and a query's range variables
+  name none. An item's symbols are those of its name among what its word can name: an object initializer's members,
+  the members that a receiver reaches, a type its static ones and a value its instance and extension ones, and what is
+  in scope otherwise; a generic method's item, `Pick<>`, names its generic methods, and of overloads the first names
+  the type. Its group follows them too: a field of the script's class is a script's variable, and a method of
+  `object`'s or an override of one is one that every object has. Each item's sort text is
   its group before Roslyn's, so that the groups order the list before anything is typed and items that match the typed
   text as well, which the client orders by sort text.
 - **Imports:** a list also has the types and extension methods from namespaces that the script does not import, such
   as `JsonSerializer` and `GetFromJsonAsync`, from .NET's assemblies and the marked ones, not from what those depend
-  on. Only the best 100 that match the typed name come, as the client ranks them, also with a typo in a list that it
+  on. An extension method names its return type as the receiver calls it. Only the best 100 that match the typed name come, as the client ranks them, also with a typo in a list that it
   matches so, and after an escaped name's `@`; with more, or before a name is typed, the list is incomplete, so that
   typing on asks again. Resolving such an item adds its `using` where Roslyn puts it among the script's usings, after
   a leading comment, as an additional edit in the version that the list was asked for.
@@ -1153,7 +1159,7 @@ linux-x64, with `dotnet test` and as NativeAOT, in headless windows rendered wit
   code on the popup's background and not the text area's, in its pixels. The code that opens a part, also the server's
   below the diagnostics, has a line below it when more follows in its part, and code among the docs has none. Inline code shows in the editor's font on the theme's code background, and code without a
   color of its own in the editor's foreground, in the pixels. Code fills each line, breaking at any character, and
-  copies with its spaces. The popup stays while the pointer is over its word or
+  copies as written, also its own no-break spaces. The popup stays while the pointer is over its word or
   over the popup. Moved onto other text, it stays until the pointer has rested there for 300 ms, so that a
   diagonal move can reach it, and then that text's hover takes its place. It closes at once when the pointer leaves both the text and the popup, and on typing, Escape,
   scrolling and focus loss. A click into it holds it, its selection copies, the hover key puts the keyboard into it where the arrows and

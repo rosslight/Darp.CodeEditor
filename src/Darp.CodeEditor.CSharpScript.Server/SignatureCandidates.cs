@@ -108,16 +108,17 @@ internal static class SignatureCandidates
     }
 
     /// <summary>
-    /// The methods of <paramref name="methods"/> that <paramref name="receiver"/> reaches, as Roslyn filters them: a
-    /// type's static methods, a value's instance and extension methods, and both for a name that is a value and its
+    /// The members of <paramref name="methods"/> that <paramref name="receiver"/> reaches, as Roslyn filters them: a
+    /// type's static members, a value's instance and extension members, and both for a name that is a value and its
     /// type alike, as <c>Color Color</c>.
     /// </summary>
-    public static IEnumerable<IMethodSymbol> OfReceiver(
+    public static IEnumerable<T> OfReceiver<T>(
         SemanticModel model,
         ExpressionSyntax receiver,
-        IEnumerable<IMethodSymbol> methods,
+        IEnumerable<T> methods,
         CancellationToken cancellationToken
     )
+        where T : ISymbol
     {
         SymbolInfo info = model.GetSymbolInfo(receiver, cancellationToken);
         bool isType = (info.Symbol ?? info.CandidateSymbols.FirstOrDefault()) is ITypeSymbol;
@@ -172,7 +173,7 @@ internal static class SignatureCandidates
     /// The type that an object or collection initializer initializes: a new object's, or a member's that is
     /// initialized in place, as <c>Names = { "a" }</c>.
     /// </summary>
-    private static ITypeSymbol? InitializedType(
+    public static ITypeSymbol? InitializedType(
         SemanticModel model,
         InitializerExpressionSyntax initializer,
         CancellationToken cancellationToken

@@ -130,6 +130,62 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task A_method_shows_the_return_type_of_an_overload_that_its_receiver_reaches()
+    {
+        using var script = await _fixture.OpenAsync(
+            """
+            class C
+            {
+                public string Get() => "";
+                public static int Get(int x) => x;
+                public int Make() => 0;
+                public T Make<T>() => default!;
+            }
+            C.|
+            """
+        );
+        CompletionList statics = await script.CompleteAsync();
+        statics.Items.Single(item => item.Label == "Get").LabelDetails.ShouldNotBeNull().Description.ShouldBe("int");
+
+        using var instance = await _fixture.OpenAsync(script.Document.Text.Replace("C.", "new C().") + "|");
+        CompletionList members = await instance.CompleteAsync();
+        members.Items.Single(item => item.Label == "Get").LabelDetails.ShouldNotBeNull().Description.ShouldBe("string");
+        members.Items.Single(item => item.Label == "Make").LabelDetails.ShouldNotBeNull().Description.ShouldBe("int");
+        members.Items.Single(item => item.Label == "Make<>").LabelDetails.ShouldNotBeNull().Description.ShouldBe("T");
+    }
+
+    [Fact]
+    public async Task An_object_initializer_shows_the_types_of_the_initialized_members()
+    {
+        using var script = await _fixture.OpenAsync(
+            "class C { public int Greeting { get; set; } }\nvar c = new C { Gre| };"
+        );
+        CompletionList list = await script.CompleteAsync();
+        list.Items.Single(item => item.Label == "Greeting").LabelDetails.ShouldNotBeNull().Description.ShouldBe("int");
+    }
+
+    [Fact]
+    public async Task Groups_follow_the_symbols_not_the_names()
+    {
+        // An escaped name is a script's variable.
+        using var escaped = await _fixture.OpenAsync("int @object = 1;\n|");
+        CompletionItem[] items = [.. (await escaped.CompleteAsync()).Items.OrderBy(item => item.SortKey)];
+        items[0].Label.ShouldBe("@object");
+
+        // A type's field of a script variable's name is a member.
+        using var field = await _fixture.OpenAsync(
+            "class C { public int Apple; public int Zebra; }\nvar Zebra = 2;\nnew C().|"
+        );
+        items = [.. (await field.CompleteAsync()).Items.OrderBy(item => item.SortKey)];
+        items.Take(2).Select(item => item.Label).ShouldBe(["Apple", "Zebra"]);
+
+        // A static method of object's names is the type's own.
+        using var statics = await _fixture.OpenAsync("class C { public static string ToString(int x) => \"\"; }\nC.|");
+        items = [.. (await statics.CompleteAsync()).Items.OrderBy(item => item.SortKey)];
+        items.Select(item => item.Label).ShouldBe(["ToString", "Equals", "ReferenceEquals"]);
+    }
+
+    [Fact]
     public async Task Variables_and_members_show_their_type_and_methods_their_return_type()
     {
         using var script = await _fixture.OpenAsync(

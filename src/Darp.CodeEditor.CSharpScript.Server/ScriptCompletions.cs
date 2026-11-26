@@ -37,15 +37,6 @@ internal sealed class ScriptCompletions
     /// </summary>
     private static readonly FrozenSet<string> s_unsupportedDirectives = FrozenSet.Create("r", "load", "line");
 
-    /// <summary>The methods that every object has, which <see cref="Group"/> puts after a type's own.</summary>
-    private static readonly FrozenSet<string> s_objectMethods = FrozenSet.Create(
-        nameof(Equals),
-        nameof(GetHashCode),
-        nameof(GetType),
-        nameof(ReferenceEquals),
-        nameof(ToString)
-    );
-
     private readonly ScriptSnapshot _script;
     private readonly Task<Answer?> _answer;
     private readonly CancellationToken _cancellationToken;
@@ -146,11 +137,11 @@ internal sealed class ScriptCompletions
         // Without the directives that scripts can't use, another can match what was typed, as "region" matches "#r":
         // only a key commits it then, so that "#r " stays as typed.
         var commit = new CommitRules(list, typed, onlyByKey: list.ItemsList.Any(IsUnsupportedDirective));
-        FrozenSet<string> variables = await ScriptVariablesAsync(cancellationToken).ConfigureAwait(false);
-        ITypeSymbol? receiver = await ReceiverAsync(list.Span, cancellationToken).ConfigureAwait(false);
-        CompletionTypes? types = await _script.Document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false)
+        CompletionSymbols? symbols = await _script
+            .Document.GetSemanticModelAsync(cancellationToken)
+            .ConfigureAwait(false)
             is { } model
-            ? new CompletionTypes(model, list.Span.Start, receiver)
+            ? CompletionSymbols.At(model, list.Span.Start, cancellationToken)
             : null;
         var items = new List<LspCompletionItem>(list.ItemsList.Count);
         var imports = new List<int>();
@@ -206,9 +197,9 @@ internal sealed class ScriptCompletions
                         span = TextSpan.FromBounds(span.Start, end);
                 }
             }
-            char group = Group(item, variables);
+            char group = Group(item, symbols);
             // Variables and members show their type; named arguments don't.
-            string? type = group is VariableGroup or MemberGroup or ObjectGroup ? types?.Of(item) : null;
+            string? type = group is VariableGroup or MemberGroup or ObjectGroup ? symbols?.TypeOf(item) : null;
             LspCompletionItem lsp = ToLsp(item, index, span, newText, filterText, isSnippet, group, type);
             items.Add(
                 colonCommits
@@ -231,17 +222,17 @@ internal sealed class ScriptCompletions
                 { } compilation
             )
             {
-                (IReadOnlyList<int> best, bool more) = ScriptImports.Best(
+                (IReadOnlyList<(int Index, ITypeSymbol? Returns)> best, bool more) = ScriptImports.Best(
                     list.ItemsList,
                     imports,
                     typed,
                     item => FilterText(item, list.Span),
                     items.Count,
                     compilation,
-                    receiver,
+                    await ReceiverAsync(list.Span, cancellationToken).ConfigureAwait(false),
                     cancellationToken
                 );
-                foreach (int index in best)
+                foreach ((int index, ITypeSymbol? returns) in best)
                 {
                     CompletionItem item = list.ItemsList[index];
                     // Roslyn's lists share these items, and each list moves them to its span: a copy keeps this one's,
@@ -256,7 +247,7 @@ internal sealed class ScriptCompletions
                             FilterText(item, list.Span),
                             isSnippet: false,
                             ImportGroup,
-                            type: null
+                            returns is null ? null : CompletionSymbols.Display(returns)
                         )
                     );
                 }
@@ -476,8 +467,8 @@ internal sealed class ScriptCompletions
     /// (<see cref="ImportGroup"/>).
     /// </summary>
     /// <param name="item">The item.</param>
-    /// <param name="variables">The names of the script's variables.</param>
-    private static char Group(CompletionItem item, FrozenSet<string> variables)
+    /// <param name="symbols">The symbols that the list's items name; null for none.</param>
+    private static char Group(CompletionItem item, CompletionSymbols? symbols)
     {
         foreach (string tag in item.Tags)
         {
@@ -489,9 +480,9 @@ internal sealed class ScriptCompletions
                 case WellKnownTags.Local or WellKnownTags.Parameter or WellKnownTags.RangeVariable:
                     return VariableGroup;
                 case WellKnownTags.Field:
-                    return variables.Contains(item.DisplayText) ? VariableGroup : MemberGroup;
+                    return symbols?.IsScriptVariable(item) == true ? VariableGroup : MemberGroup;
                 case WellKnownTags.Method:
-                    return s_objectMethods.Contains(item.DisplayText) ? ObjectGroup : MemberGroup;
+                    return symbols?.IsObjectMethod(item) == true ? ObjectGroup : MemberGroup;
                 case WellKnownTags.Property
                 or WellKnownTags.ExtensionMethod
                 or WellKnownTags.Event
@@ -513,16 +504,6 @@ internal sealed class ScriptCompletions
 
     /// <summary>The group of a type from a namespace that the script does not import (<see cref="Group"/>).</summary>
     private const char ImportGroup = '5';
-
-    /// <summary>
-    /// The names of the script's variables. Roslyn makes those of a script's top level fields of its class, which
-    /// Roslyn's items tag as fields.
-    /// </summary>
-    private async Task<FrozenSet<string>> ScriptVariablesAsync(CancellationToken cancellationToken) =>
-        await _script.Document.Project.GetCompilationAsync(cancellationToken).ConfigureAwait(false)
-            is { ScriptClass: { } scriptClass }
-            ? scriptClass.GetMembers().OfType<IFieldSymbol>().Select(field => field.Name).ToFrozenSet()
-            : FrozenSet<string>.Empty;
 
     /// <summary>The protocol's <c>CompletionItemKind</c> of Roslyn's first tag that names a kind.</summary>
     private static int Kind(CompletionItem item)

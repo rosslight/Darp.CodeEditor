@@ -36,6 +36,8 @@ public sealed class ImportCompletionTests(ScriptServerFixture fixture)
         using var script = await _fixture.OpenAsync("using System.Text;\n" + code + "|");
         CompletionList list = await script.CompleteAsync();
         CompletionItem item = list.Items.First(i => i.Label.StartsWith("GetFromJsonAsync", StringComparison.Ordinal));
+        // Its return type, as the receiver calls it.
+        item.LabelDetails.ShouldNotBeNull().Description.ShouldNotBeNull().ShouldStartWith("Task<");
 
         CompletionItem resolved = (
             await list.ResolveAsync(item, TestContext.Current.CancellationToken)

@@ -42,8 +42,11 @@ internal static class ScriptImports
     /// <param name="compilation">The script's compilation.</param>
     /// <param name="receiver">The type of the receiver whose member the word is; null for none.</param>
     /// <param name="cancellationToken">Stops the ranking.</param>
-    /// <returns>The indices, and whether more match.</returns>
-    public static (IReadOnlyList<int> Best, bool More) Best(
+    /// <returns>
+    /// The indices, each with an extension method's return type, as the receiver calls it, and null for a type; and
+    /// whether more match.
+    /// </returns>
+    public static (IReadOnlyList<(int Index, ITypeSymbol? Returns)> Best, bool More) Best(
         IReadOnlyList<CompletionItem> items,
         IReadOnlyList<int> candidates,
         string typed,
@@ -68,17 +71,17 @@ internal static class ScriptImports
             );
         }
         var namespaces = new Dictionary<string, INamespaceSymbol?>();
-        var best = new List<int>(MaxItems);
+        var best = new List<(int Index, ITypeSymbol? Returns)>(MaxItems);
         bool graceful = others + MaxItems <= CompletionMatcher.MaxGracefulItems;
         t_matcher ??= new CompletionMatcher();
         foreach (RankedCompletion match in t_matcher.Rank(texts, graceful, cancellationToken))
         {
             int index = candidates[match.Index];
-            if (!IsNameable(items[index], compilation, receiver, namespaces))
+            if (!IsNameable(items[index], compilation, receiver, namespaces, out ITypeSymbol? returns))
                 continue;
             if (best.Count == MaxItems)
                 return (best, true);
-            best.Add(index);
+            best.Add((index, returns));
         }
         return (best, false);
     }
@@ -87,30 +90,40 @@ internal static class ScriptImports
     /// Whether <paramref name="item"/> is a type or an extension method that the script may name, in the namespace that
     /// its description names. The compilation's global namespace merges only the assemblies that scripts may name: the
     /// ones under the private alias are not in it. Roslyn's item does not say which method it is, so an extension
-    /// method's counts when one of its name there that the script may call applies to <paramref name="receiver"/>.
+    /// method's counts when one of its name there that the script may call applies to <paramref name="receiver"/>, and
+    /// the first such one gives <paramref name="returns"/>.
     /// </summary>
     private static bool IsNameable(
         CompletionItem item,
         Compilation compilation,
         ITypeSymbol? receiver,
-        Dictionary<string, INamespaceSymbol?> namespaces
+        Dictionary<string, INamespaceSymbol?> namespaces,
+        out ITypeSymbol? returns
     )
     {
+        returns = null;
         if (!namespaces.TryGetValue(item.InlineDescription, out INamespaceSymbol? found))
             namespaces[item.InlineDescription] = found = Namespace(compilation.GlobalNamespace, item.InlineDescription);
         if (found is null)
             return false;
         if (item.Tags.Contains(WellKnownTags.ExtensionMethod))
-            return receiver is not null
-                && found
-                    .GetTypeMembers()
-                    .Where(type => type.MightContainExtensionMethods)
-                    .SelectMany(type => type.GetMembers(item.DisplayText))
-                    .Any(member =>
-                        member is IMethodSymbol { IsExtensionMethod: true } method
-                        && compilation.IsSymbolAccessibleWithin(method, compilation.Assembly)
-                        && method.ReduceExtensionMethod(receiver) is not null
-                    );
+        {
+            if (receiver is null)
+                return false;
+            returns = found
+                .GetTypeMembers()
+                .Where(type => type.MightContainExtensionMethods)
+                .SelectMany(type => type.GetMembers(item.DisplayText))
+                .Select(member =>
+                    member is IMethodSymbol { IsExtensionMethod: true } method
+                    && compilation.IsSymbolAccessibleWithin(method, compilation.Assembly)
+                        ? method.ReduceExtensionMethod(receiver)
+                        : null
+                )
+                .FirstOrDefault(reduced => reduced is not null)
+                ?.ReturnType;
+            return returns is not null;
+        }
         // An attribute's item leaves out the "Attribute" of its name.
         return !found.GetTypeMembers(item.DisplayText).IsEmpty
             || !found.GetTypeMembers(item.DisplayText + "Attribute").IsEmpty;
