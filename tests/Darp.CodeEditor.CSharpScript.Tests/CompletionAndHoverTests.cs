@@ -36,6 +36,16 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task Dotnet_members_hover_with_their_xml_docs()
+    {
+        // At runtime string is in System.Private.CoreLib, and its docs are in the reference pack's System.Runtime.xml.
+        using var script = await _fixture.OpenAsync("var text = string.Con|cat(\"a\", \"b\");");
+        string hover = HoverText((await script.HoverAsync()).ShouldNotBeNull());
+        hover.ShouldContain("string.Concat(");
+        hover.ShouldContain("Concatenates two specified instances of");
+    }
+
+    [Fact]
     public async Task Inherited_globals_members_complete_and_hover()
     {
         using var script = await _fixture.OpenAsync("var value = InheritedValue|;");

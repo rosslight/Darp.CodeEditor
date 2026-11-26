@@ -49,11 +49,6 @@ internal sealed class ScriptContext
         .Where(path => Path.GetDirectoryName(path) == Path.GetDirectoryName(typeof(object).Assembly.Location))
         .ToArray();
 
-    private static readonly ImmutableArray<MetadataReference> s_framework =
-    [
-        .. s_frameworkPaths.Select(path => MetadataReference.CreateFromFile(path)),
-    ];
-
     private static readonly AdhocWorkspace s_workspace = new();
 
     private readonly CSharpParseOptions _parseOptions;
@@ -63,10 +58,10 @@ internal sealed class ScriptContext
     private readonly string? _error;
 
     /// <summary>
-    /// Loads <paramref name="environment"/>. What can't be loaded, as a file that changed since the app checked it,
-    /// becomes an error on each of its documents rather than the end of the server.
+    /// Loads <paramref name="environment"/> on <paramref name="framework"/>. What can't be loaded, as a file that changed
+    /// since the app checked it, becomes an error on each of its documents rather than the end of the server.
     /// </summary>
-    public ScriptContext(ScriptEnvironmentData environment)
+    public ScriptContext(ScriptEnvironmentData environment, ImmutableArray<MetadataReference> framework)
     {
         if (!LanguageVersionFacts.TryParse(environment.LanguageVersion, out LanguageVersion version))
             _error = $"'{environment.LanguageVersion}' is not a C# language version.";
@@ -81,15 +76,22 @@ internal sealed class ScriptContext
         );
         try
         {
-            _references = [.. s_framework, .. LoadReferences(environment)];
+            _references = [.. framework, .. LoadReferences(environment)];
             _globals = LoadGlobals(environment);
         }
         // Whatever is wrong with the app's files is the script's error to show.
         catch (Exception e)
         {
-            _references = _references.IsDefault ? s_framework : _references;
+            _references = _references.IsDefault ? framework : _references;
             _error = $"The script environment could not be loaded: {e.Message}";
         }
+    }
+
+    /// <summary>.NET's assemblies, with their XML docs from <paramref name="docs"/>, for every environment.</summary>
+    public static ImmutableArray<MetadataReference> Framework(string docs)
+    {
+        var provider = new FrameworkDocs(docs, s_frameworkPaths);
+        return [.. s_frameworkPaths.Select(path => MetadataReference.CreateFromFile(path, documentation: provider))];
     }
 
     /// <summary>A new script in this environment, in a solution of its own.</summary>

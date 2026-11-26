@@ -1,8 +1,10 @@
+using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization.Metadata;
 using Darp.CodeEditor.CSharpScript.Protocol;
 using Darp.CodeEditor.Lsp;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 
 namespace Darp.CodeEditor.CSharpScript.Server;
@@ -45,10 +47,17 @@ internal sealed class ScriptServer
     /// <summary>The loaded environments, by their JSON: environments with equal settings share one.</summary>
     private readonly Dictionary<string, ScriptContext> _contexts = [];
 
+    /// <summary>.NET's assemblies with their XML docs, which every environment references.</summary>
+    private readonly ImmutableArray<MetadataReference> _framework;
+
     private int _lastCompletionList;
 
-    public ScriptServer(Stream input, Stream output) =>
+    /// <summary>A server for the client on <paramref name="input"/> and <paramref name="output"/>, with .NET's XML docs from the folder <paramref name="frameworkDocs"/>.</summary>
+    public ScriptServer(Stream input, Stream output, string frameworkDocs)
+    {
+        _framework = ScriptContext.Framework(frameworkDocs);
         _rpc = new JsonRpcConnection(input, output, HandleRequest, HandleNotification, startRequestsInOrder: true);
+    }
 
     /// <summary>Serves until the input ends.</summary>
     /// <returns>The process's exit code.</returns>
@@ -217,7 +226,7 @@ internal sealed class ScriptServer
     {
         string key = JsonSerializer.Serialize(environment, ScriptProtocolJson.Default.ScriptEnvironmentData);
         if (!_contexts.TryGetValue(key, out ScriptContext? context))
-            _contexts[key] = context = new ScriptContext(environment);
+            _contexts[key] = context = new ScriptContext(environment, _framework);
         return context;
     }
 

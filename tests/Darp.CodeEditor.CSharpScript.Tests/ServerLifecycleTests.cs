@@ -84,6 +84,22 @@ public sealed class ServerLifecycleTests
     }
 
     [Fact]
+    public async Task Without_the_folder_of_dotnet_docs_hover_answers_without_them()
+    {
+        string missing = Path.Combine(AppContext.BaseDirectory, "missing-dotnet-docs");
+        await using var server = RawServer.Start(ScriptAppFiles.ServerCommand(frameworkDocs: missing));
+        await server.InitializeAsync();
+        await server.WriteAsync([
+            RawServer.Open("untitled:a", "var text = string.Concat(\"a\", \"b\");"),
+            RawServer.Request(2, "textDocument/hover", RawServer.Position("untitled:a", 0, 20)),
+        ]);
+        JsonElement answer = (await server.ReadUntilAsync(m => IsAnswerTo(m, 2)))[^1];
+        string hover = answer.GetProperty("result").GetProperty("contents").GetProperty("value").GetString() ?? "";
+        hover.ShouldContain("string.Concat(");
+        hover.ShouldNotContain("Concatenates");
+    }
+
+    [Fact]
     public void The_server_runs_on_the_host_of_the_installed_runtime_only()
     {
         string root = Directory.CreateTempSubdirectory("script-host").FullName;
@@ -125,10 +141,12 @@ public sealed class ServerLifecycleTests
             _frames = new PipeFrames(process.Output);
         }
 
-        public static RawServer Start()
+        public static RawServer Start() => Start(ScriptAppFiles.ServerCommand());
+
+        public static RawServer Start((string FileName, string[] Arguments) command)
         {
             Assert.SkipUnless(ScriptServerFixture.HasServer, "This app has no C# script server next to it.");
-            (string fileName, string[] arguments) = ScriptAppFiles.ServerCommand();
+            (string fileName, string[] arguments) = command;
             var startInfo = new ProcessStartInfo(fileName);
             foreach (string argument in arguments)
                 startInfo.ArgumentList.Add(argument);

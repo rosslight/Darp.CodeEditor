@@ -37,6 +37,9 @@ expect_failure() {
 echo "=== Development launch"
 dotnet build Consumer -c Debug
 "Consumer/bin/Debug/net10.0/Consumer$extension"
+# The server reads .NET's XML docs where the build found .NET's reference assemblies.
+docs=$(tr -d '\r' <Consumer/bin/Debug/net10.0/helpers/script-framework-docs.txt)
+[[ -f $docs/System.Runtime.xml ]] || { echo "The build named '$docs' for .NET's XML docs." >&2; exit 1; }
 
 echo "=== JIT"
 dotnet publish Consumer -c Release -r "$rid" --self-contained false -o out/jit

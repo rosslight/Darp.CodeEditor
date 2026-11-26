@@ -308,6 +308,16 @@ public sealed class ScriptSignatureHelpTests(ScriptServerFixture fixture)
     }
 
     [Fact]
+    public async Task A_dotnet_method_shows_its_xml_docs()
+    {
+        using var script = await _fixture.OpenAsync("var text = string.Concat(\"a\", |");
+        SignatureInfo signature = Active((await script.SignatureHelpAsync()).ShouldNotBeNull());
+        signature.Label.ShouldContain("Concat(string? str0, string? str1)");
+        signature.Documentation.ShouldNotBeNull().Text.ShouldBe("Concatenates two specified instances of string.");
+        signature.Parameters[1].Documentation.ShouldNotBeNull().Text.ShouldBe("The second string to concatenate.");
+    }
+
+    [Fact]
     public async Task Docs_that_inherit_come_from_the_member_they_implement()
     {
         using var script = await _fixture.OpenAsync(

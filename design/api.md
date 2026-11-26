@@ -636,6 +636,11 @@ app's script environments.
 - **Occurrences** (`textDocument/documentHighlight`) are those of the symbol at the caret, by its identity, so a local
   and a top-level variable of the same name stay apart. Its declarations are text, as in Roslyn's own server; an
   assignment, an increment or decrement, an `out` or `ref` argument and a deconstruction write it, and the rest read it.
+- **XML docs** of the marked assemblies are next to them. .NET's are the reference pack's English files, which don't
+  match the runtime's assemblies one to one: `string` is in `System.Private.CoreLib`, and its docs in
+  `System.Runtime.xml`. A member's file is the one named after a runtime assembly that defines or forwards its type.
+  The server reads which types those are with the first request for docs, and a file when one of its members is first
+  asked for. Without the files, scripts work as before, without .NET's docs.
 - **Signature help** on `(`, `[`, `<`, `{` and `,`, and again on `)`, `]`, `>` and `}`: the overloads of a call, a
   constructor, a `this(` or `base(` initializer, an attribute, an indexer and a collection initializer's entry, which go
   to `Add`, with the one that overload resolution selects for the arguments so far, taking missing arguments as
@@ -661,10 +666,12 @@ app's script environments.
 - **Where it runs.** `dotnet build` puts the server in `helpers/csharp-server/` next to the app, as portable IL, with the
   lists of the marked assemblies and of .NET's in `helpers/`, and the marked assemblies' XML docs next to them. In
   development it runs on the `dotnet` host of the installation whose runtime runs the app, found from that runtime's
-  directory, never from `PATH`. `dotnet publish` compiles it with ReadyToRun for the app's platform, gives it an app host
-  that looks only in `helpers/dotnet/`, and puts one .NET runtime there from the runtime pack, also for a self-contained
-  or NativeAOT app. These files join after the app's own publish, so its trimming, NativeAOT and single-file steps never
-  see them, and a republish replaces them.
+  directory, never from `PATH`, and reads .NET's XML docs in the folder of the reference assemblies that the build
+  resolved, which `helpers/script-framework-docs.txt` names, copying nothing. `dotnet publish` compiles it with
+  ReadyToRun for the app's platform, gives it an app host that looks only in `helpers/dotnet/`, and puts one .NET
+  runtime there from the runtime pack, also for a self-contained or NativeAOT app. A published server reads .NET's XML
+  docs next to that runtime's assemblies. These files join after the app's own publish, so its trimming, NativeAOT and
+  single-file steps never see them, and a republish replaces them.
 
 ## 7. Sessions
 
@@ -1259,6 +1266,8 @@ server process:
   the private alias and none before a name is typed; obsolete members; one error per rejected directive, none of them
   suggested; `static` and `readonly` in semantic colors; occurrences by symbol, with reads and writes through members,
   deconstructions and `out`;
+- .NET's XML docs in hover and signature help, for `string.Concat`, from the SDK's reference pack, and a missing folder
+  of docs leaving hover without them;
 - once by hand, not in CI: the same 45 tests from a NativeAOT client, with the server and the marked assemblies put next
   to it, and the sample's script document on a Linux desktop, in completion, its details, signature help, hover,
   squiggles and semantic colors;
@@ -1283,6 +1292,7 @@ blocking:
   references that need 13.0.1 and 13.0.3 of one package and load one, and a multi-targeted library in its `net10.0`
   build. An incompatible pair fails with NuGet's NU1107, a reference that needs ASP.NET Core fails by name, and a
   republish without a reference leaves none of its files;
+- .NET's XML docs: a development build names the SDK's reference pack;
 - the server's assemblies have ReadyToRun code, and it starts with `DOTNET_ROOT` pointing nowhere. A published app with
   ReadyToRun, ten new processes on a machine with other work (load about 4): "C# ready" on 5,000 lines took 845 to
   899 ms, median 862 ms, within the budget of 1.5 s.
