@@ -177,10 +177,19 @@ internal sealed class ScriptCompletions
             bool isSnippet = caret >= 0 && caret < newText.Length;
             if (isSnippet)
                 newText = Snippets.Escape(newText[..caret]) + "$0" + Snippets.Escape(newText[caret..]);
-            // Roslyn puts in a named argument's name alone, for the colon to be typed. Committed by a key, the colon goes
-            // in too, unless one follows already; typed, it commits the item and goes in once.
-            if (item.DisplayTextSuffix == ":" && newText == item.DisplayText && !ColonFollows(span.End))
-                newText = label;
+            // Roslyn puts in a named argument's name alone, for the colon to be typed. The item puts in the colon too,
+            // and goes over one that follows on the line, so that one stays, also when it is typed: the typed colon
+            // commits the item and goes in once. A colon on a later line stays where it is, after the name alone.
+            if (item.DisplayTextSuffix == ":" && newText == item.DisplayText)
+            {
+                (int Offset, bool OnLaterLine)? colon = ColonAfter(span.End);
+                if (colon is not { OnLaterLine: true })
+                {
+                    newText = label;
+                    if (colon is { Offset: var end })
+                        span = TextSpan.FromBounds(span.Start, end + 1);
+                }
+            }
             items.Add(ToLsp(item, index, span, newText, filterText, isSnippet));
         }
         bool asksAgain = commit.AsksAgain;
@@ -303,13 +312,17 @@ internal sealed class ScriptCompletions
             : type;
     }
 
-    /// <summary>Whether a colon follows <paramref name="offset"/>, past white space.</summary>
-    private bool ColonFollows(int offset)
+    /// <summary>
+    /// The colon that follows <paramref name="offset"/>, past white space, and whether a line ends before it; null for
+    /// none.
+    /// </summary>
+    private (int Offset, bool OnLaterLine)? ColonAfter(int offset)
     {
         SourceText text = _script.Text;
+        bool onLaterLine = false;
         while (offset < text.Length && char.IsWhiteSpace(text[offset]))
-            offset++;
-        return offset < text.Length && text[offset] == ':';
+            onLaterLine |= text[offset++] is '\n' or '\r';
+        return offset < text.Length && text[offset] == ':' ? (offset, onLaterLine) : null;
     }
 
     /// <summary>Roslyn's list, as the client gets it.</summary>

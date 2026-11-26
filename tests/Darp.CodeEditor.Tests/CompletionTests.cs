@@ -716,6 +716,32 @@ public sealed class CompletionTests(UiFixture ui)
             await OpenAsync(window, 10);
             window.Press(Key.Enter);
             document.Text.ShouldBe("Report(amount:");
+
+            // With a colon after the word, the item's edit goes over it, so that one stays.
+            using CodeDocument followed = await SetCompletionAsync(
+                server,
+                fake,
+                Parse(
+                    """
+                    { "items": [ { "label": "amount:", "filterText": "amount", "commitCharacters": [":"],
+                      "textEdit": { "range": { "start": { "line": 0, "character": 7 }, "end": { "line": 0, "character": 12 } },
+                                    "newText": "amount:" } } ] }
+                    """
+                )
+            );
+            const string spaced = "Report(amo : 3)";
+            document.Text = spaced;
+            await OpenAsync(window, 10);
+            window.Type(":");
+            document.Text.ShouldBe("Report(amount: 3)");
+            window.Editor.Selection.Caret.ShouldBe(14);
+            document.Undo();
+            document.Text.ShouldBe(spaced);
+
+            await OpenAsync(window, 10);
+            window.Press(Key.Enter);
+            document.Text.ShouldBe("Report(amount: 3)");
+            window.Editor.Selection.Caret.ShouldBe(14);
         });
 
     [Fact]

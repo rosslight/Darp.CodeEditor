@@ -129,7 +129,7 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
     }
 
     [Fact]
-    public async Task A_named_argument_puts_in_its_colon_unless_one_follows()
+    public async Task A_named_argument_puts_in_its_colon_and_over_one_that_follows()
     {
         using var script = await _fixture.OpenAsync("var sum = Add(le|");
         CompletionItem left = (await script.CompleteAsync()).Items.Single(item => item.Label == "left:");
@@ -137,8 +137,21 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
         // Typed, the colon commits it, and goes in once.
         left.CommitCharacters.ShouldContain(':');
 
-        using var followed = await _fixture.OpenAsync("var sum = Add(le| : 1, right: 2);");
-        (await followed.CompleteAsync()).Items.Single(item => item.Label == "left:").Edit.NewText.ShouldBe("left");
+        // One colon stays, also when it is typed.
+        const string text = "var sum = Add(le : 1, right: 2);";
+        using var followed = await _fixture.OpenAsync(text.Insert(text.IndexOf(" :", StringComparison.Ordinal), "|"));
+        left = (await followed.CompleteAsync()).Items.Single(item => item.Label == "left:");
+        left.Edit.ShouldBe(
+            new CompletionEdit(
+                TextRange.FromBounds(text.IndexOf("le", StringComparison.Ordinal), text.IndexOf(':') + 1),
+                "left:"
+            )
+        );
+        left.CommitCharacters.ShouldContain(':');
+
+        // On a later line, the colon stays where it is.
+        using var below = await _fixture.OpenAsync("var sum = Add(le|\n: 1, right: 2);");
+        (await below.CompleteAsync()).Items.Single(item => item.Label == "left:").Edit.NewText.ShouldBe("left");
     }
 
     [Fact]
