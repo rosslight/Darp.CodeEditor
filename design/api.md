@@ -652,8 +652,9 @@ app's script environments.
   as types and keywords, and the types from namespaces that the script does not import last. A variable, field or
   property names its type, and a method its return type, as its `labelDetails.description`, which shows at the right
   of its row, as in Rider: `int`, `string?`, `void`. Types, keywords, named arguments and a query's range variables
-  name none. An item's symbols are those of its name among what its word can name: an object initializer's members,
-  the members that a receiver reaches, a type its static ones and a value its instance and extension ones, and what is
+  name none. An item's symbols are those of its name among what its word can name: the members of an object
+  initializer's or a `with` expression's type, a collection initializer's values and then its members, the members
+  that `base` or a receiver reaches, a type its static ones and a value its instance and extension ones, and what is
   in scope otherwise; a generic method's item, `Pick<>`, names its generic methods, and of overloads the first names
   the type. Its group follows them too: a field of the script's class is a script's variable, and a method of
   `object`'s or an override of one is one that every object has. Each item's sort text is
@@ -661,7 +662,7 @@ app's script environments.
   text as well, which the client orders by sort text.
 - **Imports:** a list also has the types and extension methods from namespaces that the script does not import, such
   as `JsonSerializer` and `GetFromJsonAsync`, from .NET's assemblies and the marked ones, not from what those depend
-  on. An extension method names its return type as the receiver calls it. Only the best 100 that match the typed name come, as the client ranks them, also with a typo in a list that it
+  on. An extension method names its return type as the receiver calls it, a generic one's item its generic overloads'. Only the best 100 that match the typed name come, as the client ranks them, also with a typo in a list that it
   matches so, and after an escaped name's `@`; with more, or before a name is typed, the list is incomplete, so that
   typing on asks again. Resolving such an item adds its `using` where Roslyn puts it among the script's usings, after
   a leading comment, as an additional edit in the version that the list was asked for.

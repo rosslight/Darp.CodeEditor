@@ -37,16 +37,19 @@ internal sealed class CompletionSymbols
     /// <summary>What the word that starts at <paramref name="position"/> can name.</summary>
     public static CompletionSymbols At(SemanticModel model, int position, CancellationToken cancellationToken)
     {
-        SyntaxToken before = model.SyntaxTree.GetRoot(cancellationToken).FindToken(position).GetPreviousToken();
-        // A member's name in an object initializer, after its "{" or a ",".
+        SyntaxToken before = SignatureCandidates.TokenBefore(model.SyntaxTree.GetRoot(cancellationToken), position);
+        // An entry of an initializer, after its "{" or a ",".
         if (
             before.Kind() is SyntaxKind.OpenBraceToken or SyntaxKind.CommaToken
             && before.Parent is InitializerExpressionSyntax initializer
-            && MembersOf(model, initializer, position, cancellationToken) is { } members
+            && Entries(model, initializer, position, cancellationToken) is { } entries
         )
         {
-            return new(members);
+            return new(entries);
         }
+        // Through "base", its protected members are reachable too.
+        if (before.Parent is MemberAccessExpressionSyntax { Expression: BaseExpressionSyntax })
+            return new(model.LookupBaseMembers(position));
         if (SignatureCandidates.ReceiverOf(before.Parent) is { } receiver)
         {
             return new(
@@ -64,25 +67,31 @@ internal sealed class CompletionSymbols
     }
 
     /// <summary>
-    /// The members that an entry of <paramref name="initializer"/> names: those of an object initializer's type, also of
-    /// one that Roslyn parses as a collection initializer until its first <c>=</c>, as <c>new C { Na</c>, for a type
-    /// that is no collection; null for a collection's entries, which are values.
+    /// What an entry of <paramref name="initializer"/> names: the members of an object initializer's type, or of a
+    /// <c>with</c> expression's, also of one that Roslyn parses as a collection initializer until its first <c>=</c>, as
+    /// <c>new C { Na</c>, for a type that is no collection; and for a collection's entries, values in scope and then its
+    /// members. Null for any other initializer.
     /// </summary>
-    private static IEnumerable<ISymbol>? MembersOf(
+    private static IEnumerable<ISymbol>? Entries(
         SemanticModel model,
         InitializerExpressionSyntax initializer,
         int position,
         CancellationToken cancellationToken
     )
     {
-        bool isObject = initializer.IsKind(SyntaxKind.ObjectInitializerExpression);
+        bool isObject =
+            initializer.Kind() is SyntaxKind.ObjectInitializerExpression or SyntaxKind.WithInitializerExpression;
         if (!isObject && !initializer.IsKind(SyntaxKind.CollectionInitializerExpression))
             return null;
-        if (SignatureCandidates.InitializedType(model, initializer, cancellationToken) is not { } type)
-            return isObject ? [] : null;
-        if (!isObject && IsCollection(type))
-            return null;
-        return model.LookupSymbols(position, type).Where(symbol => !symbol.IsStatic);
+        ITypeSymbol? type = initializer.Parent is WithExpressionSyntax with
+            ? model.GetTypeInfo(with.Expression, cancellationToken).Type
+            : SignatureCandidates.InitializedType(model, initializer, cancellationToken);
+        IEnumerable<ISymbol> members = type is null
+            ? []
+            : model.LookupSymbols(position, type).Where(symbol => !symbol.IsStatic);
+        return isObject || (type is not null && !IsCollection(type))
+            ? members
+            : model.LookupSymbols(position).Concat(members);
     }
 
     private static bool IsCollection(ITypeSymbol type) =>

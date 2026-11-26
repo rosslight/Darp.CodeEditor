@@ -154,14 +154,18 @@ public sealed class CompletionAndHoverTests(ScriptServerFixture fixture)
         members.Items.Single(item => item.Label == "Make<>").LabelDetails.ShouldNotBeNull().Description.ShouldBe("T");
     }
 
-    [Fact]
-    public async Task An_object_initializer_shows_the_types_of_the_initialized_members()
+    [Theory]
+    [InlineData("class C { public int Greeting { get; set; } }\nvar c = new C { Gre| };", "Greeting")]
+    [InlineData("class C { public int Greeting { get; set; } }\nvar c = new C { | };", "Greeting")]
+    [InlineData("record R(int Greeting);\nvar r = new R(1) with { Gre| };", "Greeting")]
+    [InlineData("var list = new System.Collections.Generic.List<int> { Cap| };", "Capacity")]
+    [InlineData("class B { protected int Greeting; }\nclass D : B { void M() { base.Gre| } }", "Greeting")]
+    public async Task An_initializer_and_base_show_the_types_of_their_members(string text, string label)
     {
-        using var script = await _fixture.OpenAsync(
-            "class C { public int Greeting { get; set; } }\nvar c = new C { Gre| };"
-        );
+        // The globals have a string Greeting of their own.
+        using var script = await _fixture.OpenAsync(text);
         CompletionList list = await script.CompleteAsync();
-        list.Items.Single(item => item.Label == "Greeting").LabelDetails.ShouldNotBeNull().Description.ShouldBe("int");
+        list.Items.Single(item => item.Label == label).LabelDetails.ShouldNotBeNull().Description.ShouldBe("int");
     }
 
     [Fact]

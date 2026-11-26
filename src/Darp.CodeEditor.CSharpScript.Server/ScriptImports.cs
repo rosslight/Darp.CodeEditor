@@ -110,19 +110,28 @@ internal static class ScriptImports
         {
             if (receiver is null)
                 return false;
-            returns = found
-                .GetTypeMembers()
-                .Where(type => type.MightContainExtensionMethods)
-                .SelectMany(type => type.GetMembers(item.DisplayText))
-                .Select(member =>
-                    member is IMethodSymbol { IsExtensionMethod: true } method
-                    && compilation.IsSymbolAccessibleWithin(method, compilation.Assembly)
-                        ? method.ReduceExtensionMethod(receiver)
-                        : null
-                )
-                .FirstOrDefault(reduced => reduced is not null)
-                ?.ReturnType;
-            return returns is not null;
+            IMethodSymbol[] applying =
+            [
+                .. found
+                    .GetTypeMembers()
+                    .Where(type => type.MightContainExtensionMethods)
+                    .SelectMany(type => type.GetMembers(item.DisplayText))
+                    .Select(member =>
+                        member is IMethodSymbol { IsExtensionMethod: true } method
+                        && compilation.IsSymbolAccessibleWithin(method, compilation.Assembly)
+                            ? method.ReduceExtensionMethod(receiver)
+                            : null
+                    )
+                    .OfType<IMethodSymbol>(),
+            ];
+            if (applying.Length == 0)
+                return false;
+            // A generic method's item, "GetFromJsonAsync<>", is its generic overloads', as in scope.
+            bool generic = item.DisplayTextSuffix == "<>";
+            returns = (
+                Array.Find(applying, method => (method.ReducedFrom ?? method).Arity > 0 == generic) ?? applying[0]
+            ).ReturnType;
+            return true;
         }
         // An attribute's item leaves out the "Attribute" of its name.
         return !found.GetTypeMembers(item.DisplayText).IsEmpty

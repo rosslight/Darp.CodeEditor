@@ -345,7 +345,7 @@ internal sealed class ScriptCompletions
         if (await _script.Document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false) is not { } model)
             return null;
         SyntaxNode root = await model.SyntaxTree.GetRootAsync(cancellationToken).ConfigureAwait(false);
-        SyntaxNode? access = root.FindToken(word.Start).GetPreviousToken().Parent;
+        SyntaxNode? access = SignatureCandidates.TokenBefore(root, word.Start).Parent;
         return SignatureCandidates.ReceiverTypeOf(model, access, cancellationToken);
     }
 

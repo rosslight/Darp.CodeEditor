@@ -136,6 +136,15 @@ internal static class SignatureCandidates
     }
 
     /// <summary>
+    /// The token before the word that starts at <paramref name="position"/>, also past white space between them.
+    /// </summary>
+    public static SyntaxToken TokenBefore(SyntaxNode root, int position)
+    {
+        SyntaxToken token = root.FindToken(position);
+        return position <= token.SpanStart ? token.GetPreviousToken() : token;
+    }
+
+    /// <summary>
     /// The receiver of a member access, <c>a</c> in <c>a.b</c>, or of a binding, <c>a</c> in <c>a?.b</c> or
     /// <c>a?[b]</c>; null for anything else.
     /// </summary>
