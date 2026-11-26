@@ -972,9 +972,13 @@ public sealed class ScriptSessionTests
             """
         );
         await using var session = await Start();
-        CSharpScriptRun run = await session.StartScriptAsync(script, Token);
 
-        await Should.ThrowAsync<ConnectionLostException>(() => Wait.ForAsync(run.Completion));
+        // The crash can come before the runner confirms the start, which then fails as any call does.
+        await Should.ThrowAsync<ConnectionLostException>(async () =>
+        {
+            CSharpScriptRun run = await session.StartScriptAsync(script, Token);
+            await Wait.ForAsync(run.Completion);
+        });
 
         session.Exited.IsCompletedSuccessfully.ShouldBeTrue();
         CSharpScriptSessionExit exit = await session.Exited;
